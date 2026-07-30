@@ -71,6 +71,18 @@ Result constructor terms remain solver-local. Namespace, nominal-type, field,
 variant, and callable IDs are generated from the same declaration rows as their
 names, ownership, documentation, and representation metadata.
 
+Catalog-declared capabilities are executable contracts rather than labels.
+`MemoryReadable` GC records derive their naturally aligned field layout from
+catalog field declarations through the same semantic-`TypeId` layout engine as
+source records. `Equatable` catalog records similarly receive generated
+structural equality helpers whose dependencies close over nested declared
+fields. Catalog validation rejects readable or equatable declarations whose
+representation and fields cannot satisfy those contracts. A test-only ordinary
+record, with no intrinsic implementation, passes through name resolution,
+checking, memory layout, equality, hover, completion, and Wasm GC generation;
+this guards the promise that future ordinary types do not need compiler-wide
+type matches.
+
 Source annotations, cast targets, and integer suffixes use the separate,
 inference-free `ast::TypeRef`; parser-owned array references and checker-owned
 inferred array layouts are distinct as well. Expressions have no checker-owned
@@ -242,9 +254,10 @@ Expression-backed state fields form transactional watchers. A fresh snapshot
 is committed only when every field's `T!` succeeds; actions see the committed
 `current` and prior `old` objects. `process.read(address)` infers its
 `MemoryReadable` type from the field, annotation, or later usage. This includes
-fixed-width primitives and named records containing only readable fields.
-Record fields use declaration order and natural alignment; one host read obtains
-the complete layout before the compiler recursively constructs its GC value.
+fixed-width primitives and both source- and catalog-declared records containing
+only readable fields. Record fields use declaration order and natural
+alignment; one host read obtains the complete layout before the compiler
+recursively constructs its GC value.
 Immediate process operations return `T!`: fixed-layout reads, pointer following,
 relative-address decoding, and managed-string decoding. They can be handled
 synchronously with `else` or `?`; `retry expression` polls any of them across

@@ -192,6 +192,17 @@ pub(super) fn encode<'a>(
     }
 
     let mut equality = EqualityFunctions::default();
+    for record in StandardLibrary::new().types().iter().filter(|record| {
+        reachability.requires_standard_record_equality(record.id)
+            && matches!(
+                record.representation,
+                RuntimeRepresentation::GcStruct { .. }
+            )
+    }) {
+        let record_type = gc.val_type(Type::Standard(record.id));
+        let function = declare(vec![record_type, record_type], vec![ValType::I32]);
+        equality.standard_records.insert(record.id, function);
+    }
     for record in &program.records {
         if reachability.requires_record_equality(record.id)
             && equality_capabilities.record(record.id).is_ok()

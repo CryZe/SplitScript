@@ -6,7 +6,9 @@ use crate::{
         RecordId, ResultTypeId,
     },
     semantic::{ResolvedCall, SemanticModel},
-    stdlib::StdlibTypeId,
+    stdlib::{
+        DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibTypeId,
+    },
     types::{TypeId, TypeKind},
     wasm_ir::{self, BodyOwner, FallbackBranch, Terminator},
 };
@@ -16,6 +18,7 @@ pub(super) struct Reachability {
     functions: BTreeSet<FunctionId>,
     expressions: BTreeSet<ExprId>,
     equality_records: BTreeSet<RecordId>,
+    equality_standard_records: BTreeSet<StdlibTypeId>,
     equality_enums: BTreeSet<EnumId>,
     equality_options: BTreeSet<OptionTypeId>,
     equality_results: BTreeSet<ResultTypeId>,
@@ -208,6 +211,10 @@ impl Reachability {
         self.equality_records.contains(&record)
     }
 
+    pub fn requires_standard_record_equality(&self, record: StdlibTypeId) -> bool {
+        self.equality_standard_records.contains(&record)
+    }
+
     pub fn requires_enum_equality(&self, enumeration: EnumId) -> bool {
         self.equality_enums.contains(&enumeration)
     }
@@ -316,7 +323,25 @@ impl Reachability {
             }
             match semantics.types().kind(ty) {
                 TypeKind::Standard(StdlibTypeId::String) => self.string_equality = true,
-                TypeKind::Builtin(_) | TypeKind::Standard(_) => {}
+                TypeKind::Standard(standard) => {
+                    let library = StandardLibrary::new();
+                    let declaration = library.type_decl(*standard);
+                    if library.type_has_capability(*standard, StdlibCapabilityId::Equatable)
+                        && matches!(
+                            declaration.representation,
+                            RuntimeRepresentation::GcStruct { .. }
+                        )
+                        && self.equality_standard_records.insert(*standard)
+                    {
+                        pending.extend(library.fields_of(*standard).map(|field| match field.ty {
+                            DeclaredTypeRef::Core(core) => semantics.types().id_for_core(core),
+                            DeclaredTypeRef::Standard(standard) => {
+                                semantics.types().id_for_standard(standard)
+                            }
+                        }));
+                    }
+                }
+                TypeKind::Builtin(_) => {}
                 TypeKind::Record(record) if self.equality_records.insert(*record) => {
                     let declaration = program
                         .records

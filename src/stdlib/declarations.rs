@@ -14,6 +14,7 @@ use super::StdlibItemId;
 
 macro_rules! declare_standard_types {
     ($(
+        $(#[$attribute:meta])*
         $id:ident => {
             name: $name:literal,
             kind: $kind:ident,
@@ -26,11 +27,11 @@ macro_rules! declare_standard_types {
     ),* $(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub enum StdlibTypeId {
-            $($id),*
+            $($(#[$attribute])* $id),*
         }
 
         pub(super) const TYPES: &[StdlibType] = &[
-            $(StdlibType {
+            $($(#[$attribute])* StdlibType {
                 id: StdlibTypeId::$id,
                 name: $name,
                 kind: StdlibTypeKind::$kind,
@@ -145,6 +146,21 @@ declare_standard_types! {
         value_usage: ORDINARY_LOCAL_VALUE,
         summary: "Describes a Unity runtime field.",
         details: "A field exposes its byte offset and metadata index.",
+    },
+    // Architecture fixture proving that ordinary records need no
+    // type-specific compiler or tooling path.
+    #[cfg(test)]
+    CatalogRecordProbe => {
+        name: "CatalogRecordProbe",
+        kind: Struct,
+        capabilities: &[
+            StdlibCapabilityId::Equatable,
+            StdlibCapabilityId::MemoryReadable,
+        ],
+        representation: RuntimeRepresentation::GcStruct { nullable: true },
+        value_usage: ORDINARY_LOCAL_VALUE,
+        summary: "Exercises the generic standard-library record pipeline.",
+        details: "This declaration exists only in tests and deliberately has no intrinsic implementation.",
     },
 }
 
@@ -551,14 +567,14 @@ pub(super) const CORE_TYPES: &[CoreType] = &[
 ];
 
 macro_rules! declare_standard_fields {
-    ($(field!($id:ident, $owner:ident, $name:literal, $ty:expr, $visibility:ident, $summary:literal)),* $(,)?) => {
+    ($($(#[$attribute:meta])* field!($id:ident, $owner:ident, $name:literal, $ty:expr, $visibility:ident, $summary:literal)),* $(,)?) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub enum StdlibFieldId {
-            $($id),*
+            $($(#[$attribute])* $id),*
         }
 
         pub(super) const FIELDS: &[StdlibField] = &[
-            $(StdlibField {
+            $($(#[$attribute])* StdlibField {
                 id: StdlibFieldId::$id,
                 owner: StdlibTypeId::$owner,
                 name: $name,
@@ -682,6 +698,15 @@ declare_standard_fields! {
         DeclaredTypeRef::Core(CoreTypeId::U32),
         Public,
         "Returns the metadata field index."
+    ),
+    #[cfg(test)]
+    field!(
+        CatalogRecordProbeValue,
+        CatalogRecordProbe,
+        "value",
+        DeclaredTypeRef::Core(CoreTypeId::U32),
+        Public,
+        "Returns the probe value."
     ),
 }
 
@@ -903,6 +928,31 @@ pub(super) fn validate() -> Vec<String> {
         }
     }
 
+    for ty in TYPES.iter().filter(|ty| {
+        ty.capabilities
+            .contains(&StdlibCapabilityId::MemoryReadable)
+    }) {
+        let mut visiting = HashSet::new();
+        if let Err(reason) = validate_standard_memory_layout(ty.id, &mut visiting) {
+            errors.push(format!(
+                "standard type `{}` declares MemoryReadable but {reason}",
+                ty.name
+            ));
+        }
+    }
+    for ty in TYPES
+        .iter()
+        .filter(|ty| ty.capabilities.contains(&StdlibCapabilityId::Equatable))
+    {
+        let mut visiting = HashSet::new();
+        if let Err(reason) = validate_standard_equality(ty.id, &mut visiting) {
+            errors.push(format!(
+                "standard type `{}` declares Equatable but {reason}",
+                ty.name
+            ));
+        }
+    }
+
     let mut variant_ids = HashSet::new();
     let mut variant_names = HashSet::new();
     for variant in VARIANTS {
@@ -927,6 +977,127 @@ pub(super) fn validate() -> Vec<String> {
     errors
 }
 
+fn validate_standard_memory_layout(
+    ty: StdlibTypeId,
+    visiting: &mut HashSet<StdlibTypeId>,
+) -> Result<(), String> {
+    let declaration = TYPES
+        .iter()
+        .find(|declaration| declaration.id == ty)
+        .expect("validated standard type references have declarations");
+    if !declaration
+        .capabilities
+        .contains(&StdlibCapabilityId::MemoryReadable)
+    {
+        return Err(format!(
+            "referenced type `{}` is not MemoryReadable",
+            declaration.name
+        ));
+    }
+    if !visiting.insert(ty) {
+        return Err("its process-memory representation is recursive".to_owned());
+    }
+    let result = match declaration.representation {
+        RuntimeRepresentation::Scalar { storage } => CORE_TYPES
+            .iter()
+            .find(|core| core.id == storage)
+            .and_then(|core| core.memory_layout)
+            .map(|_| ())
+            .ok_or_else(|| "its scalar storage has no fixed memory layout".to_owned()),
+        RuntimeRepresentation::GcStruct { .. } => {
+            let fields = FIELDS
+                .iter()
+                .filter(|field| field.owner == ty)
+                .collect::<Vec<_>>();
+            if fields.is_empty() {
+                Err("it has no readable fields".to_owned())
+            } else {
+                fields.into_iter().try_for_each(|field| match field.ty {
+                    DeclaredTypeRef::Core(core) => CORE_TYPES
+                        .iter()
+                        .find(|declaration| declaration.id == core)
+                        .and_then(|declaration| declaration.memory_layout)
+                        .map(|_| ())
+                        .ok_or_else(|| {
+                            format!("field `{}` has no fixed memory layout", field.name)
+                        }),
+                    DeclaredTypeRef::Standard(standard) => {
+                        validate_standard_memory_layout(standard, visiting).map_err(|reason| {
+                            format!("field `{}` is not readable because {reason}", field.name)
+                        })
+                    }
+                })
+            }
+        }
+        RuntimeRepresentation::GcArray { .. } | RuntimeRepresentation::Enum { .. } => {
+            Err("its runtime representation has no fixed process-memory layout".to_owned())
+        }
+    };
+    visiting.remove(&ty);
+    result
+}
+
+fn validate_standard_equality(
+    ty: StdlibTypeId,
+    visiting: &mut HashSet<StdlibTypeId>,
+) -> Result<(), String> {
+    let declaration = TYPES
+        .iter()
+        .find(|declaration| declaration.id == ty)
+        .expect("validated standard type references have declarations");
+    if !declaration
+        .capabilities
+        .contains(&StdlibCapabilityId::Equatable)
+    {
+        return Err(format!(
+            "referenced type `{}` is not Equatable",
+            declaration.name
+        ));
+    }
+    if !visiting.insert(ty) {
+        return Err("its equality representation is recursive".to_owned());
+    }
+    let result = match declaration.representation {
+        RuntimeRepresentation::Scalar { storage } => CORE_TYPES
+            .iter()
+            .find(|core| core.id == storage)
+            .filter(|core| core.capabilities.contains(&StdlibCapabilityId::Equatable))
+            .map(|_| ())
+            .ok_or_else(|| "its scalar storage is not Equatable".to_owned()),
+        RuntimeRepresentation::GcStruct { .. } => FIELDS
+            .iter()
+            .filter(|field| field.owner == ty)
+            .try_for_each(|field| match field.ty {
+                DeclaredTypeRef::Core(core) => CORE_TYPES
+                    .iter()
+                    .find(|declaration| declaration.id == core)
+                    .filter(|declaration| {
+                        declaration
+                            .capabilities
+                            .contains(&StdlibCapabilityId::Equatable)
+                    })
+                    .map(|_| ())
+                    .ok_or_else(|| format!("field `{}` is not Equatable", field.name)),
+                DeclaredTypeRef::Standard(standard) => {
+                    validate_standard_equality(standard, visiting).map_err(|reason| {
+                        format!("field `{}` is not Equatable because {reason}", field.name)
+                    })
+                }
+            }),
+        RuntimeRepresentation::Enum { .. } => Ok(()),
+        RuntimeRepresentation::GcArray { .. } if declaration.kind == StdlibTypeKind::Intrinsic => {
+            // Intrinsic aggregate equality has a deliberately scoped backend
+            // implementation, as String does today.
+            Ok(())
+        }
+        RuntimeRepresentation::GcArray { .. } => {
+            Err("its GC-array equality has no intrinsic implementation".to_owned())
+        }
+    };
+    visiting.remove(&ty);
+    result
+}
+
 fn validate_documentation<Id>(
     errors: &mut Vec<String>,
     kind: &str,
@@ -938,5 +1109,126 @@ fn validate_documentation<Id>(
     }
     if documentation.details.trim().is_empty() {
         errors.push(format!("{kind} `{name}` has no documentation details"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use wasmparser::{Validator, WasmFeatures};
+
+    use crate::{
+        completion::CompletionKind,
+        database::{CompilerDatabase, DefinitionTarget},
+        memory::{MemoryFieldId, MemoryTypeLayout},
+        stdlib::{StandardLibrary, StdlibSymbolId},
+    };
+
+    use super::{StdlibFieldId, StdlibTypeId};
+
+    #[test]
+    fn ordinary_catalog_record_flows_through_compiler_and_tooling_generically() {
+        let source = r#"
+            state "probe.exe" {}
+
+            whileAttached {
+                let probe: CatalogRecordProbe = process.read(0x100) else return
+                if probe == probe {
+                    print(probe.value as String)
+                }
+            }
+        "#;
+        let library = StandardLibrary::new();
+        let record = library
+            .type_by_name("CatalogRecordProbe")
+            .expect("the test record should resolve by its sole catalog name");
+        assert_eq!(record.id, StdlibTypeId::CatalogRecordProbe);
+        let field = library
+            .public_field(record.id, "value")
+            .expect("the test record's declared field should be discoverable");
+        assert_eq!(field.id, StdlibFieldId::CatalogRecordProbeValue);
+        assert_eq!(library.validate(), Vec::<String>::new());
+
+        let mut database = CompilerDatabase::new(source);
+        let checked = database
+            .check()
+            .expect("catalog names and fields should type-check without special cases");
+        let ty = checked
+            .semantics()
+            .types()
+            .id_for_standard(StdlibTypeId::CatalogRecordProbe);
+        let MemoryTypeLayout::Record(memory) = checked
+            .memory_layouts()
+            .layout(ty, checked.semantics())
+            .expect("the declared capability should produce a generic memory layout")
+        else {
+            panic!("the catalog fixture should have a record memory layout")
+        };
+        assert_eq!((memory.size, memory.alignment), (4, 4));
+        assert_eq!(
+            memory.fields[0].field,
+            MemoryFieldId::Standard(StdlibFieldId::CatalogRecordProbeValue)
+        );
+
+        let type_offset = source.find("CatalogRecordProbe").unwrap();
+        assert_eq!(
+            database.definition_at(type_offset).unwrap(),
+            Some(DefinitionTarget::StandardLibrarySymbol(
+                StdlibSymbolId::Type(StdlibTypeId::CatalogRecordProbe)
+            ))
+        );
+        let type_hover = database
+            .hover(type_offset)
+            .unwrap()
+            .expect("catalog type documentation should power hover");
+        assert!(
+            type_hover
+                .markdown
+                .contains("Exercises the generic standard-library record pipeline")
+        );
+        let type_completion = database
+            .completions(type_offset + "CatalogRecord".len())
+            .unwrap();
+        assert!(type_completion.items.iter().any(|item| {
+            item.label == "CatalogRecordProbe"
+                && item.kind == CompletionKind::Struct
+                && item.documentation.as_deref().is_some_and(|documentation| {
+                    documentation.contains("generic standard-library record pipeline")
+                })
+        }));
+
+        let field_offset = source.find("probe.value").unwrap() + "probe.".len();
+        assert_eq!(
+            database.definition_at(field_offset).unwrap(),
+            Some(DefinitionTarget::StandardLibrarySymbol(
+                StdlibSymbolId::Field(StdlibFieldId::CatalogRecordProbeValue)
+            ))
+        );
+        let hover = database
+            .hover(field_offset)
+            .unwrap()
+            .expect("catalog field documentation should power hover");
+        assert!(hover.markdown.contains("CatalogRecordProbe.value: u32"));
+        assert!(hover.markdown.contains("Returns the probe value"));
+
+        let completion_offset = field_offset + "va".len();
+        let completion = database.completions(completion_offset).unwrap();
+        let value = completion
+            .items
+            .iter()
+            .find(|item| item.label == "value")
+            .expect("catalog fields should power receiver completion");
+        assert_eq!(value.kind, CompletionKind::Property);
+        assert!(
+            value
+                .documentation
+                .as_deref()
+                .is_some_and(|documentation| documentation.contains("Returns the probe value"))
+        );
+
+        let wasm = crate::compile(source)
+            .expect("generic process-memory and field lowering should compile the catalog record");
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&wasm)
+            .expect("the catalog representation should produce a valid Wasm GC record");
     }
 }

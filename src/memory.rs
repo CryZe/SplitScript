@@ -9,20 +9,28 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     ast::{RecordDecl, RecordFieldId, RecordId},
     semantic::SemanticModel,
-    stdlib::StandardLibrary,
+    stdlib::{
+        DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibFieldId,
+    },
     types::{BuiltinType, TypeId, TypeKind},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryFieldId {
+    Source(RecordFieldId),
+    Standard(StdlibFieldId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MemoryFieldLayout {
-    pub field: RecordFieldId,
+    pub field: MemoryFieldId,
     pub ty: TypeId,
     pub offset: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordMemoryLayout {
-    pub record: RecordId,
+    pub ty: TypeId,
     pub size: u32,
     pub alignment: u32,
     pub fields: Vec<MemoryFieldLayout>,
@@ -52,16 +60,34 @@ impl MemoryTypeLayout<'_> {
 
 #[derive(Debug, Clone, Default)]
 pub struct MemoryLayouts {
-    records: HashMap<RecordId, Result<RecordMemoryLayout, String>>,
+    records: HashMap<TypeId, Result<RecordMemoryLayout, String>>,
+    source_records: HashMap<RecordId, TypeId>,
 }
 
 impl MemoryLayouts {
     pub fn build(records: &[RecordDecl], semantics: &SemanticModel) -> Self {
         let mut layouts = Self::default();
         for record in records {
+            let ty = semantics.types().id_for_record(record.id);
+            layouts.source_records.insert(record.id, ty);
             let mut visiting = HashSet::new();
-            let result = layouts.build_record(record.id, records, semantics, &mut visiting);
-            layouts.records.entry(record.id).or_insert(result);
+            let _ = layouts.build_record(ty, records, semantics, &mut visiting);
+        }
+        let library = StandardLibrary::new();
+        for standard in library.types().iter().filter(|standard| {
+            library.type_has_capability(standard.id, StdlibCapabilityId::MemoryReadable)
+                && matches!(
+                    standard.representation,
+                    RuntimeRepresentation::GcStruct { .. }
+                )
+        }) {
+            let mut visiting = HashSet::new();
+            let _ = layouts.build_record(
+                semantics.types().id_for_standard(standard.id),
+                records,
+                semantics,
+                &mut visiting,
+            );
         }
         layouts
     }
@@ -77,18 +103,51 @@ impl MemoryLayouts {
                 .ok_or_else(|| format!("type `{builtin}` is not MemoryReadable")),
             TypeKind::Record(record) => self
                 .records
-                .get(record)
+                .get(&semantics.types().id_for_record(*record))
                 .expect("every declared record has a memory-layout result")
                 .as_ref()
                 .map(MemoryTypeLayout::Record)
                 .map_err(Clone::clone),
+            TypeKind::Standard(standard) => {
+                let library = StandardLibrary::new();
+                let declaration = library.type_decl(*standard);
+                if !library.type_has_capability(*standard, StdlibCapabilityId::MemoryReadable) {
+                    return Err(format!("type `{}` is not MemoryReadable", declaration.name));
+                }
+                match declaration.representation {
+                    RuntimeRepresentation::Scalar { storage } => library
+                        .core_type(storage)
+                        .memory_layout
+                        .map(|layout| MemoryTypeLayout::Scalar {
+                            size: layout.size,
+                            alignment: layout.alignment,
+                        })
+                        .ok_or_else(|| {
+                            format!("type `{}` is not MemoryReadable", declaration.name)
+                        }),
+                    RuntimeRepresentation::GcStruct { .. } => self
+                        .records
+                        .get(&ty)
+                        .expect("every readable standard record has a memory-layout result")
+                        .as_ref()
+                        .map(MemoryTypeLayout::Record)
+                        .map_err(Clone::clone),
+                    RuntimeRepresentation::GcArray { .. } | RuntimeRepresentation::Enum { .. } => {
+                        Err(format!("type `{}` is not MemoryReadable", declaration.name))
+                    }
+                }
+            }
             kind => Err(format!("type `{kind:?}` is not MemoryReadable")),
         }
     }
 
     pub fn record(&self, record: RecordId) -> Result<&RecordMemoryLayout, &str> {
-        self.records
+        let ty = self
+            .source_records
             .get(&record)
+            .expect("every declared record has a semantic type");
+        self.records
+            .get(ty)
             .expect("every declared record has a memory-layout result")
             .as_ref()
             .map_err(String::as_str)
@@ -96,82 +155,155 @@ impl MemoryLayouts {
 
     fn build_record(
         &mut self,
-        record: RecordId,
+        ty: TypeId,
         records: &[RecordDecl],
         semantics: &SemanticModel,
-        visiting: &mut HashSet<RecordId>,
+        visiting: &mut HashSet<TypeId>,
     ) -> Result<RecordMemoryLayout, String> {
-        if let Some(layout) = self.records.get(&record) {
+        if let Some(layout) = self.records.get(&ty) {
             return layout.clone();
         }
-        if !visiting.insert(record) {
+        if !visiting.insert(ty) {
             return Err("recursive records do not have a finite process-memory layout".to_owned());
         }
 
-        let declaration = records
-            .iter()
-            .find(|declaration| declaration.id == record)
-            .expect("record IDs refer to declarations");
-        if declaration.fields.is_empty() {
-            let error = format!("record `{}` has no readable fields", declaration.name);
-            self.records.insert(record, Err(error.clone()));
-            visiting.remove(&record);
-            return Err(error);
-        }
-
-        let mut offset = 0;
-        let mut alignment = 1;
-        let mut fields = Vec::with_capacity(declaration.fields.len());
-        for field in &declaration.fields {
-            let ty = semantics
-                .record_field_type(field.id)
-                .expect("checked record fields have semantic types");
-            let (field_size, field_alignment) = match semantics.types().kind(ty) {
-                TypeKind::Builtin(builtin) => scalar_layout(*builtin).ok_or_else(|| {
-                    format!(
-                        "record `{}.{}` is not MemoryReadable because `{builtin}` has no fixed process-memory layout",
-                        declaration.name, field.name
+        let result = (|| {
+            let (name, declared_fields) = match semantics.types().kind(ty) {
+                TypeKind::Record(record) => {
+                    let declaration = records
+                        .iter()
+                        .find(|declaration| declaration.id == *record)
+                        .expect("record IDs refer to declarations");
+                    (
+                        declaration.name.clone(),
+                        declaration
+                            .fields
+                            .iter()
+                            .map(|field| {
+                                (
+                                    MemoryFieldId::Source(field.id),
+                                    field.name.clone(),
+                                    semantics
+                                        .record_field_type(field.id)
+                                        .expect("checked record fields have semantic types"),
+                                )
+                            })
+                            .collect::<Vec<_>>(),
                     )
-                })?,
-                TypeKind::Record(nested) => {
-                    let nested = self
-                        .build_record(*nested, records, semantics, visiting)
-                        .map_err(|error| {
-                            format!(
-                                "record `{}.{}` is not MemoryReadable: {error}",
-                                declaration.name, field.name
-                            )
-                        })?;
-                    (nested.size, nested.alignment)
                 }
-                kind => {
+                TypeKind::Standard(standard) => {
+                    let library = StandardLibrary::new();
+                    let declaration = library.type_decl(*standard);
+                    if !library.type_has_capability(*standard, StdlibCapabilityId::MemoryReadable)
+                        || !matches!(
+                            declaration.representation,
+                            RuntimeRepresentation::GcStruct { .. }
+                        )
+                    {
+                        return Err(format!("type `{}` is not MemoryReadable", declaration.name));
+                    }
+                    (
+                        declaration.name.to_owned(),
+                        library
+                            .fields_of(*standard)
+                            .map(|field| {
+                                (
+                                    MemoryFieldId::Standard(field.id),
+                                    field.name.to_owned(),
+                                    declared_type_id(field.ty, semantics),
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                }
+                kind => return Err(format!("type `{kind:?}` is not a record")),
+            };
+            if declared_fields.is_empty() {
+                return Err(format!("record `{name}` has no readable fields"));
+            }
+
+            let mut offset = 0;
+            let mut alignment = 1;
+            let mut fields = Vec::with_capacity(declared_fields.len());
+            for (field, field_name, field_ty) in declared_fields {
+                let (field_size, field_alignment) = self
+                    .fixed_layout(field_ty, records, semantics, visiting)
+                    .map_err(|error| {
+                        format!("record `{name}.{field_name}` is not MemoryReadable: {error}")
+                    })?;
+                offset = align_up(offset, field_alignment);
+                fields.push(MemoryFieldLayout {
+                    field,
+                    ty: field_ty,
+                    offset,
+                });
+                offset = offset
+                    .checked_add(field_size)
+                    .ok_or_else(|| format!("record `{name}` is too large"))?;
+                alignment = alignment.max(field_alignment);
+            }
+            Ok(RecordMemoryLayout {
+                ty,
+                size: align_up(offset, alignment),
+                alignment,
+                fields,
+            })
+        })();
+        visiting.remove(&ty);
+        self.records.insert(ty, result.clone());
+        result
+    }
+
+    fn fixed_layout(
+        &mut self,
+        ty: TypeId,
+        records: &[RecordDecl],
+        semantics: &SemanticModel,
+        visiting: &mut HashSet<TypeId>,
+    ) -> Result<(u32, u32), String> {
+        match semantics.types().kind(ty) {
+            TypeKind::Builtin(builtin) => scalar_layout(*builtin)
+                .ok_or_else(|| format!("`{builtin}` has no fixed process-memory layout")),
+            TypeKind::Record(_) => self
+                .build_record(ty, records, semantics, visiting)
+                .map(|layout| (layout.size, layout.alignment)),
+            TypeKind::Standard(standard) => {
+                let library = StandardLibrary::new();
+                let declaration = library.type_decl(*standard);
+                if !library.type_has_capability(*standard, StdlibCapabilityId::MemoryReadable) {
                     return Err(format!(
-                        "record `{}.{}` is not MemoryReadable because `{kind:?}` has no fixed process-memory layout",
-                        declaration.name, field.name
+                        "`{}` has no fixed process-memory layout",
+                        declaration.name
                     ));
                 }
-            };
-            offset = align_up(offset, field_alignment);
-            fields.push(MemoryFieldLayout {
-                field: field.id,
-                ty,
-                offset,
-            });
-            offset = offset
-                .checked_add(field_size)
-                .ok_or_else(|| format!("record `{}` is too large", declaration.name))?;
-            alignment = alignment.max(field_alignment);
+                match declaration.representation {
+                    RuntimeRepresentation::Scalar { storage } => library
+                        .core_type(storage)
+                        .memory_layout
+                        .map(|layout| (layout.size, layout.alignment))
+                        .ok_or_else(|| {
+                            format!("`{}` has no fixed process-memory layout", declaration.name)
+                        }),
+                    RuntimeRepresentation::GcStruct { .. } => self
+                        .build_record(ty, records, semantics, visiting)
+                        .map(|layout| (layout.size, layout.alignment)),
+                    RuntimeRepresentation::GcArray { .. } | RuntimeRepresentation::Enum { .. } => {
+                        Err(format!(
+                            "`{}` has no fixed process-memory layout",
+                            declaration.name
+                        ))
+                    }
+                }
+            }
+            kind => Err(format!("`{kind:?}` has no fixed process-memory layout")),
         }
-        let size = align_up(offset, alignment);
-        let layout = RecordMemoryLayout {
-            record,
-            size,
-            alignment,
-            fields,
-        };
-        visiting.remove(&record);
-        self.records.insert(record, Ok(layout.clone()));
-        Ok(layout)
+    }
+}
+
+fn declared_type_id(ty: DeclaredTypeRef, semantics: &SemanticModel) -> TypeId {
+    match ty {
+        DeclaredTypeRef::Core(core) => semantics.types().id_for_core(core),
+        DeclaredTypeRef::Standard(standard) => semantics.types().id_for_standard(standard),
     }
 }
 

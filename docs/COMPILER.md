@@ -236,8 +236,9 @@ body, keeping host lifecycle policy out of the section orchestrator.
 
 [`src/codegen/runtime_helpers.rs`](../src/codegen/runtime_helpers.rs) owns the
 generated helper library: host/GC String conversion and formatting, structural
-String/record/enum/Option/Result equality, signature scanning, address
-following, relative reads, managed UTF-16 decoding, and Unity/IL2CPP discovery. A single interface
+String/source-record/catalog-record/enum/Option/Result equality, signature
+scanning, address following, relative reads, managed UTF-16 decoding, and
+Unity/IL2CPP discovery. A single interface
 receives resolved function indices plus discovered String/u64 array layouts and
 returns ordered core and equality body plans. The orchestrator inserts settings
 bodies between those groups to preserve its already-planned function-index
@@ -290,8 +291,9 @@ resolved user-function and user-method calls add bodies transitively, including
 recursive call cycles. Function planning/body emission and static-data/helper/
 import analysis all consume the same result. Dead functions therefore cannot
 retain their strings, signature literals, generated helpers, or host imports.
-Reachable equality operands additionally close over nested record fields, enum
-payloads, and Option/Result values; Result errors retain String equality. Thus
+Reachable equality operands additionally close over nested source or catalog
+record fields, enum payloads, and Option/Result values; Result errors retain
+String equality. Thus
 structural-equality signatures/bodies and the String equality helper are emitted
 only when a live comparison can call them. The same analysis
 collects GC-type roots from state and poll storage, globals, settings, emitted

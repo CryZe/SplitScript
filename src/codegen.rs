@@ -368,6 +368,7 @@ struct MatchLayout {
 
 #[derive(Default)]
 struct EqualityFunctions {
+    standard_records: HashMap<StdlibTypeId, u32>,
     records: HashMap<RecordId, u32>,
     enums: HashMap<EnumId, u32>,
     options: HashMap<OptionTypeId, u32>,
@@ -871,7 +872,7 @@ fn emit_memory_value(
                 );
             }
             function.instruction(&Instruction::StructNew(
-                gc.index(Type::Record(layout.record)),
+                gc.index(semantic_type(layout.ty, semantics)),
             ));
         }
     }

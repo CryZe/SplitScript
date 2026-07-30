@@ -96,6 +96,16 @@ pub(super) fn compile(
     let string_equality = stdlib
         .optional_helper(GeneratedHelper::StringEquality)
         .unwrap_or(0);
+    for record in StandardLibrary::new().types() {
+        if equality_functions.standard_records.contains_key(&record.id) {
+            equality.push(compile_standard_record_equality(
+                record.id,
+                equality_functions,
+                string_equality,
+                gc,
+            ));
+        }
+    }
     for record in records {
         if equality_functions.records.contains_key(&record.id) {
             equality.push(compile_record_equality(
@@ -613,6 +623,34 @@ fn compile_record_equality(
     function
 }
 
+fn compile_standard_record_equality(
+    record: StdlibTypeId,
+    equality_functions: &EqualityFunctions,
+    string_eq: u32,
+    gc: &GcLayout,
+) -> Function {
+    let mut function = Function::new([]);
+    let ty = Type::Standard(record);
+    let type_index = gc.index(ty);
+
+    function.instruction(&Instruction::I32Const(1));
+    for (field_index, field) in StandardLibrary::new().fields_of(record).enumerate() {
+        let field_ty = Type::from_declared(field.ty);
+        function
+            .instruction(&Instruction::LocalGet(0))
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(&mut function, type_index, field_index as u32, field_ty);
+        function
+            .instruction(&Instruction::LocalGet(1))
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(&mut function, type_index, field_index as u32, field_ty);
+        emit_value_equality(&mut function, field_ty, equality_functions, string_eq);
+        function.instruction(&Instruction::I32And);
+    }
+    function.instruction(&Instruction::End);
+    function
+}
+
 fn compile_enum_equality(
     enumeration: &EnumDecl,
     semantics: &SemanticModel,
@@ -781,6 +819,27 @@ pub(super) fn emit_value_equality(
 ) {
     let instruction = match ty {
         Type::Standard(StdlibTypeId::String) => Instruction::Call(string_eq),
+        Type::Standard(standard) => {
+            match StandardLibrary::new().type_decl(standard).representation {
+                RuntimeRepresentation::Scalar { storage } => {
+                    emit_value_equality(
+                        function,
+                        Type::from_declared(DeclaredTypeRef::Core(storage)),
+                        equality_functions,
+                        string_eq,
+                    );
+                    return;
+                }
+                RuntimeRepresentation::GcStruct { .. } => {
+                    Instruction::Call(equality_functions.standard_records[&standard])
+                }
+                RuntimeRepresentation::GcArray { .. } | RuntimeRepresentation::Enum { .. } => {
+                    unreachable!(
+                        "catalog validation rejected unsupported equality for `{standard:?}`"
+                    )
+                }
+            }
+        }
         Type::Record(record) => Instruction::Call(equality_functions.records[&record]),
         Type::Enum(enumeration) => Instruction::Call(equality_functions.enums[&enumeration]),
         Type::Option(option) => Instruction::Call(equality_functions.options[&option]),

@@ -152,16 +152,22 @@ invariant:
   indices, numeric field indices, special member tables, and duplicate
   language/tooling documentation after each vertical slice. Do not retain
   compatibility aliases; the language is not yet in production.
-- [ ] After modules and generic library functions exist, allow ordinary
-  standard-library declarations and bodies to be authored in SplitScript and
-  compiled into the same validated symbol graph. Keep host boundaries,
-  representation primitives, and suspension/control flow as scoped
-  intrinsics.
-- [ ] Finish with full compiler, formatter, generated-documentation, LSP,
+- [x] Finish with full compiler, formatter, generated-documentation, LSP,
   extension, example-autosplitter, Wasm validation, and runtime regression
   coverage. Add a test proving that a new ordinary catalog record with fields
   becomes resolvable, documentable, completable, and code-generatable without
   adding a concrete-type match elsewhere.
+  - [x] A test-only `CatalogRecordProbe` declaration exercises nominal
+    resolution, semantic `TypeId` identity, public fields, go-to-definition,
+    hover documentation, completion, derived process-memory layout,
+    structural equality helpers, and valid Wasm GC generation. Its ID is not
+    referenced by production compiler or tooling code.
+  - [x] Run the full Rust suite, formatter check, VS Code TypeScript check,
+    release compilation of both example autosplitters, and Wasm validation.
+    The existing Node 24 Lunistice harness still reaches its previously
+    characterized null-dereference in the unchanged attachment runtime; the
+    generated module validates and this refactor does not alter that runtime
+    path.
 
 ## Completed foundation — Conditional state expressions
 
@@ -360,10 +366,13 @@ introducing the following boundaries.
   normal library API after this point should require one catalog declaration
   plus either a source body or one deliberately scoped backend intrinsic—not
   edits across parser, checker, code generator, documentation, and LSP code.
-- [ ] Keep most future library functionality in SplitScript source once modules
-  and generic functions exist. Reserve compiler intrinsics for representation
+- [ ] Once modules and generic library functions exist, allow ordinary
+  standard-library declarations and bodies to be authored in SplitScript and
+  compiled into the same validated symbol graph. Keep most future library
+  functionality there; reserve compiler intrinsics for representation
   primitives, host boundaries, and suspension/control-flow operations that
-  cannot be ordinary source code.
+  cannot be ordinary source code. This is deliberately sequenced after those
+  language features rather than blocking the catalog/type-model foundation.
 
 ### ABI, lowering, and code-generation boundaries
 

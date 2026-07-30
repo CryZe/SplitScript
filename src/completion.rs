@@ -255,10 +255,10 @@ fn add_root_standard_library(builder: &mut CompletionBuilder) {
     for ty in library.types() {
         builder.add(CompletionItem {
             label: ty.name.to_owned(),
-            kind: if ty.kind == crate::stdlib::StdlibTypeKind::Enum {
-                CompletionKind::Enum
-            } else {
-                CompletionKind::Type
+            kind: match ty.kind {
+                crate::stdlib::StdlibTypeKind::Intrinsic => CompletionKind::Type,
+                crate::stdlib::StdlibTypeKind::Struct => CompletionKind::Struct,
+                crate::stdlib::StdlibTypeKind::Enum => CompletionKind::Enum,
             },
             detail: Some("standard-library type".to_owned()),
             documentation: Some(render_documentation(&ty.documentation)),

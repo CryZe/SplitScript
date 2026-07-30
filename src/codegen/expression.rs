@@ -1553,11 +1553,7 @@ fn emit_binary(
     if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
         && matches!(
             operand_type,
-            Type::Standard(StdlibTypeId::String)
-                | Type::Record(_)
-                | Type::Enum(_)
-                | Type::Option(_)
-                | Type::Result(_)
+            Type::Standard(_) | Type::Record(_) | Type::Enum(_) | Type::Option(_) | Type::Result(_)
         )
     {
         compile_expr(function, left, context);

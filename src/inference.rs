@@ -6,7 +6,7 @@
 use std::{collections::HashMap, fmt, ops::BitOr};
 
 use crate::{
-    ast::{ArrayTypeId, EnumId, OptionTypeId, RecordId, ResultTypeId, TypeRef},
+    ast::{ArrayTypeId, OptionTypeId, ResultTypeId, TypeRef},
     stdlib::{CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
     types::{TypeId, TypeKind, TypeStore},
 };
@@ -27,8 +27,6 @@ pub(crate) enum Type {
     F32,
     F64,
     Known(TypeId),
-    Record(RecordId),
-    Enum(EnumId),
     Array(ArrayTypeId),
     Option(OptionTypeId),
     Result(ResultTypeId),
@@ -106,8 +104,6 @@ impl Type {
                 TypeKind::Enum(enumeration) => TypeRef::Enum(*enumeration),
                 kind => unreachable!("unsupported known inference type `{kind:?}`"),
             },
-            Self::Record(id) => TypeRef::Record(id),
-            Self::Enum(id) => TypeRef::Enum(id),
             Self::Array(id) => TypeRef::Array(id),
             Self::Option(id) => TypeRef::Option(id),
             Self::Result(id) => TypeRef::Result(id),
@@ -140,8 +136,12 @@ impl From<TypeRef> for Type {
             TypeRef::Standard(standard) => {
                 unreachable!("standard type {standard:?} must be interned before inference")
             }
-            TypeRef::Record(id) => Self::Record(id),
-            TypeRef::Enum(id) => Self::Enum(id),
+            TypeRef::Record(id) => {
+                unreachable!("source record {id} must be interned before inference")
+            }
+            TypeRef::Enum(id) => {
+                unreachable!("source enum {id} must be interned before inference")
+            }
             TypeRef::Array(id) => Self::Array(id),
             TypeRef::Option(id) => Self::Option(id),
             TypeRef::Result(id) => Self::Result(id),
@@ -166,8 +166,6 @@ impl fmt::Display for Type {
             Self::F32 => "f32",
             Self::F64 => "f64",
             Self::Known(id) => return write!(formatter, "type#{}", id.index()),
-            Self::Record(id) => return write!(formatter, "record#{id}"),
-            Self::Enum(id) => return write!(formatter, "enum#{id}"),
             Self::Array(id) => return write!(formatter, "Array#{id}"),
             Self::Option(id) => return write!(formatter, "Option#{id}"),
             Self::Result(id) => return write!(formatter, "Result#{id}"),
@@ -776,13 +774,7 @@ pub(crate) fn type_may_have_capability(
             }
             TypeKind::Array { .. } => false,
         },
-        Type::Record(_) => matches!(
-            capability,
-            StdlibCapabilityId::Equatable | StdlibCapabilityId::MemoryReadable
-        ),
-        Type::Enum(_) | Type::Option(_) | Type::Result(_) => {
-            capability == StdlibCapabilityId::Equatable
-        }
+        Type::Option(_) | Type::Result(_) => capability == StdlibCapabilityId::Equatable,
         Type::Array(_) | Type::Variable(_) => false,
         _ => unreachable!("core types were handled above"),
     }

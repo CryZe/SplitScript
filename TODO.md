@@ -78,8 +78,13 @@ invariant:
     Checked publication preserves that identity directly; no library type has
     a dedicated inference or semantic variant or a post-inference conversion
     table.
-  - [ ] Replace the remaining parallel core/source/constructed inference term
-    variants with known semantic `TypeId` values plus inference variables.
+  - [x] Represent source record and enum inference types with the same known
+    semantic `TypeId` values used by checked programs; nominal inference no
+    longer has separate standard/source variants.
+  - [ ] Replace the remaining parallel core and unresolved constructed
+    inference term variants with known semantic `TypeId` values plus inference
+    variables (and the minimum temporary constructor terms needed while their
+    element/value types are still unresolved).
 - [x] Introduce well-known type/variant handles for genuine language and ABI
   contracts such as string literals, interpolation, `gameTime`, signature
   literals, and timer-state conversion. A well-known handle references the

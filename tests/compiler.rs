@@ -2670,6 +2670,20 @@ fn source_record_and_enum_annotations_resolve_after_parsing() {
     let point_parameter = checked.syntax().functions[0].params[0].id;
     let location_parameter = checked.syntax().functions[1].params[0].id;
     assert_eq!(
+        checked.semantics().value_type(point_parameter).unwrap(),
+        checked
+            .semantics()
+            .types()
+            .id_for_record(checked.syntax().records[0].id),
+    );
+    assert_eq!(
+        checked.semantics().value_type(location_parameter).unwrap(),
+        checked
+            .semantics()
+            .types()
+            .id_for_enum(checked.syntax().enums[0].id),
+    );
+    assert_eq!(
         checked
             .semantics()
             .types()

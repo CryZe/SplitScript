@@ -208,6 +208,14 @@ impl TypeStore {
         self.interned[&TypeKind::Standard(standard)]
     }
 
+    pub fn id_for_record(&self, record: RecordId) -> TypeId {
+        self.interned[&TypeKind::Record(record)]
+    }
+
+    pub fn id_for_enum(&self, enumeration: EnumId) -> TypeId {
+        self.interned[&TypeKind::Enum(enumeration)]
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (TypeId, &TypeKind)> {
         self.kinds
             .iter()
@@ -244,8 +252,6 @@ impl TypeStore {
             Type::F32 => TypeKind::Builtin(BuiltinType::F32),
             Type::F64 => TypeKind::Builtin(BuiltinType::F64),
             Type::Known(_) => unreachable!("known types return before semantic interning"),
-            Type::Record(id) => TypeKind::Record(id),
-            Type::Enum(id) => TypeKind::Enum(id),
             Type::Array(id) => {
                 let element = arrays
                     .iter()
@@ -292,6 +298,8 @@ impl TypeStore {
     ) -> TypeId {
         match ty {
             crate::ast::TypeRef::Standard(standard) => self.id_for_standard(standard),
+            crate::ast::TypeRef::Record(record) => self.id_for_record(record),
+            crate::ast::TypeRef::Enum(enumeration) => self.id_for_enum(enumeration),
             crate::ast::TypeRef::Named(name) => {
                 unreachable!("unresolved nominal type name {name} reached semantic interning")
             }

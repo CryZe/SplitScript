@@ -21,7 +21,7 @@ use crate::{
         Availability, CallCandidate, DeclaredTypeRef, ItemKind, ParameterRule, StandardLibrary,
         StdlibItem, StdlibItemId, StdlibTypeId, TypeConstraint, TypeRef as CatalogTypeRef,
     },
-    types::TypeStore,
+    types::{TypeKind, TypeStore},
     visit::{self, Visitor},
 };
 
@@ -105,9 +105,9 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             let ty = if let Some(standard) = StandardLibrary::new().type_by_name(name) {
                 Type::Known(semantic_types.id_for_standard(standard.id))
             } else if let Some(record) = records.iter().find(|record| record.name == *name) {
-                Type::Record(record.id)
+                Type::Known(semantic_types.id_for_record(record.id))
             } else if let Some(enumeration) = enums.iter().find(|item| item.name == *name) {
-                Type::Enum(enumeration.id)
+                Type::Known(semantic_types.id_for_enum(enumeration.id))
             } else {
                 unreachable!("the parser only interns known nominal type names")
             };
@@ -452,12 +452,9 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             if unsupported_standard
                 || matches!(
                     ty,
-                    Type::Void
-                        | Type::Record(_)
-                        | Type::Array(_)
-                        | Type::Option(_)
-                        | Type::Result(_)
+                    Type::Void | Type::Array(_) | Type::Option(_) | Type::Result(_)
                 )
+                || checker.source_record_id(ty).is_some()
             {
                 let ty = checker.type_name(ty);
                 checker.error(
@@ -721,6 +718,30 @@ impl Checker {
 
     fn standard_type_id(&self, ty: Type) -> Option<StdlibTypeId> {
         self.inference.standard_type(ty)
+    }
+
+    fn record_type(&self, record: crate::ast::RecordId) -> Type {
+        Type::Known(self.inference.type_store().id_for_record(record))
+    }
+
+    fn source_record_id(&self, ty: Type) -> Option<crate::ast::RecordId> {
+        let Type::Known(id) = ty else {
+            return None;
+        };
+        match self.inference.type_store().kind(id) {
+            TypeKind::Record(record) => Some(*record),
+            _ => None,
+        }
+    }
+
+    fn source_enum_id(&self, ty: Type) -> Option<crate::ast::EnumId> {
+        let Type::Known(id) = ty else {
+            return None;
+        };
+        match self.inference.type_store().kind(id) {
+            TypeKind::Enum(enumeration) => Some(*enumeration),
+            _ => None,
+        }
     }
 
     fn declared_type(&self, ty: DeclaredTypeRef) -> Type {
@@ -1152,7 +1173,7 @@ impl Checker {
                         );
                     }
                 }
-                self.expect_expression(expr.id, Type::Record(*record), expected, expr.span)?
+                self.expect_expression(expr.id, self.record_type(*record), expected, expr.span)?
             }
             ExprKind::Enum {
                 enumeration,
@@ -1394,7 +1415,7 @@ impl Checker {
 
                 if !has_unguarded_wildcard {
                     match self.shallow_type(value_type) {
-                        ty @ (Type::Enum(_) | Type::Known(_)) => {
+                        ty @ Type::Known(_) => {
                             if let Some((enum_key, declaration)) = self.enum_info_for_type(ty) {
                                 for variant in &declaration.variants {
                                     let key = format!("enum:{enum_key}:{}", variant.name);
@@ -2338,14 +2359,13 @@ impl Checker {
             return Some(resolved);
         }
         match ty {
-            Type::Record(_) => self.error(format!("unknown record field `{field}`"), span),
-            Type::Known(id) => self.error(
-                format!(
-                    "{} has no field `{field}`",
-                    self.inference.known_type_name(id)
-                ),
-                span,
-            ),
+            Type::Known(_) if self.source_record_id(ty).is_some() => {
+                self.error(format!("unknown record field `{field}`"), span)
+            }
+            Type::Known(id) => {
+                let name = self.type_name(Type::Known(id));
+                self.error(format!("{name} has no field `{field}`"), span)
+            }
             _ => {
                 let ty = self.type_name(ty);
                 self.error(format!("`{field}` cannot be accessed on `{ty}`"), span);
@@ -2363,8 +2383,8 @@ impl Checker {
                 ResolvedMember::StandardField(field.id),
             ));
         }
-        match ty {
-            Type::Record(record_id) => self
+        match self.source_record_id(ty) {
+            Some(record_id) => self
                 .records
                 .iter()
                 .find(|record| record.id == record_id)
@@ -2375,7 +2395,7 @@ impl Checker {
                         ResolvedMember::RecordField(field.id),
                     )
                 }),
-            _ => None,
+            None => None,
         }
     }
 
@@ -2512,23 +2532,17 @@ impl Checker {
             .iter()
             .filter(|ty| StandardLibrary::new().public_fields(ty.id).next().is_some())
             .map(|ty| self.standard_type(ty.id))
-            .chain(self.records.iter().map(|record| Type::Record(record.id)))
+            .chain(
+                self.records
+                    .iter()
+                    .map(|record| self.record_type(record.id)),
+            )
             .collect()
     }
 
     fn type_name(&mut self, ty: Type) -> String {
         let ty = self.shallow_type(ty);
         match ty {
-            Type::Record(record) => self
-                .records
-                .iter()
-                .find(|candidate| candidate.id == record)
-                .map_or_else(|| ty.to_string(), |record| record.name.clone()),
-            Type::Enum(enumeration) => self
-                .enums
-                .iter()
-                .find(|candidate| candidate.id == enumeration)
-                .map_or_else(|| ty.to_string(), |enumeration| enumeration.name.clone()),
             Type::Array(array) => {
                 let element = self.inference.array_element(array);
                 format!("Array<{}>", self.type_name(element))
@@ -2542,7 +2556,19 @@ impl Checker {
                 format!("{}!", self.type_name(value))
             }
             Type::Variable(_) => "an inferred type".to_owned(),
-            Type::Known(id) => self.inference.known_type_name(id),
+            Type::Known(id) => match self.inference.type_store().kind(id) {
+                TypeKind::Record(record) => self
+                    .records
+                    .iter()
+                    .find(|candidate| candidate.id == *record)
+                    .map_or_else(|| ty.to_string(), |record| record.name.clone()),
+                TypeKind::Enum(enumeration) => self
+                    .enums
+                    .iter()
+                    .find(|candidate| candidate.id == *enumeration)
+                    .map_or_else(|| ty.to_string(), |enumeration| enumeration.name.clone()),
+                _ => self.inference.known_type_name(id),
+            },
             _ => ty.to_string(),
         }
     }
@@ -2733,7 +2759,7 @@ impl Checker {
 
     fn enum_type(&self, enumeration: EnumTypeId) -> Type {
         match enumeration {
-            EnumTypeId::Source(id) => Type::Enum(id),
+            EnumTypeId::Source(id) => Type::Known(self.inference.type_store().id_for_enum(id)),
             EnumTypeId::Standard(id) => self.standard_type(id),
         }
     }
@@ -2776,9 +2802,9 @@ impl Checker {
     }
 
     fn enum_info_for_type(&self, ty: Type) -> Option<(EnumTypeId, EnumInfo)> {
-        let enumeration = match ty {
-            Type::Enum(id) => EnumTypeId::Source(id),
-            Type::Known(_) => EnumTypeId::Standard(self.standard_type_id(ty)?),
+        let enumeration = match (ty, self.source_enum_id(ty)) {
+            (Type::Known(_), Some(id)) => EnumTypeId::Source(id),
+            (Type::Known(_), None) => EnumTypeId::Standard(self.standard_type_id(ty)?),
             _ => return None,
         };
         self.enum_info(enumeration)
@@ -2805,6 +2831,8 @@ fn syntax_type(ty: TypeRef, named_types: &HashMap<TypeNameId, Type>, types: &Typ
     match ty {
         TypeRef::Named(id) => named_types[&id],
         TypeRef::Standard(standard) => Type::Known(types.id_for_standard(standard)),
+        TypeRef::Record(record) => Type::Known(types.id_for_record(record)),
+        TypeRef::Enum(enumeration) => Type::Known(types.id_for_enum(enumeration)),
         ty => Type::from(ty),
     }
 }

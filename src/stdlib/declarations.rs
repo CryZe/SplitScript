@@ -10,176 +10,11 @@ use std::{collections::HashSet, fmt};
 
 use crate::catalog::Documentation;
 
-use super::StdlibItemId;
-
-macro_rules! declare_standard_types {
-    ($(
-        $(#[$attribute:meta])*
-        $id:ident => {
-            name: $name:literal,
-            kind: $kind:ident,
-            capabilities: $capabilities:expr,
-            representation: $representation:expr,
-            value_usage: $value_usage:expr,
-            summary: $summary:literal,
-            details: $details:literal $(,)?
-        }
-    ),* $(,)?) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        pub enum StdlibTypeId {
-            $($(#[$attribute])* $id),*
-        }
-
-        pub(super) const TYPES: &[StdlibType] = &[
-            $($(#[$attribute])* StdlibType {
-                id: StdlibTypeId::$id,
-                name: $name,
-                kind: StdlibTypeKind::$kind,
-                capabilities: $capabilities,
-                representation: $representation,
-                value_usage: $value_usage,
-                documentation: documentation($summary, $details),
-            }),*
-        ];
-    };
-}
-
-declare_standard_types! {
-    String => {
-        name: "String",
-        kind: Intrinsic,
-        capabilities: EQUATABLE_INTERPOLATABLE,
-        representation: RuntimeRepresentation::GcArray {
-            element: CoreTypeId::U8,
-            mutable: true,
-            nullable: true,
-        },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        summary: "Stores immutable UTF-8 text.",
-        details: "String literals, interpolation, process decoders, and timer variables use garbage-collected strings.",
-    },
-    Signature => {
-        name: "Signature",
-        kind: Intrinsic,
-        capabilities: &[],
-        representation: RuntimeRepresentation::Scalar {
-            storage: CoreTypeId::I64,
-        },
-        value_usage: ValueUsage {
-            record_field: false,
-            enum_payload: false,
-            state_field: false,
-            local_variable: false,
-            global_variable: false,
-        },
-        summary: "Stores a compiled process-memory signature.",
-        details: "Signature values are created by signature literals and consumed by scanning operations.",
-    },
-    Duration => {
-        name: "Duration",
-        kind: Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: false },
-        value_usage: ValueUsage {
-            record_field: true,
-            enum_payload: false,
-            state_field: false,
-            local_variable: false,
-            global_variable: false,
-        },
-        summary: "Represents a precise span of time.",
-        details: "Durations carry whole seconds and nanoseconds and are used for LiveSplit game time.",
-    },
-    Module => {
-        name: "Module",
-        kind: Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: true },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        summary: "Describes a module loaded in the attached process.",
-        details: "A module exposes its base address and mapped size for bounded memory discovery.",
-    },
-    TimerState => {
-        name: "TimerState",
-        kind: Enum,
-        capabilities: EQUATABLE,
-        representation: RuntimeRepresentation::Enum { nullable: true },
-        value_usage: ValueUsage {
-            global_variable: true,
-            ..ORDINARY_LOCAL_VALUE
-        },
-        summary: "Describes the current LiveSplit timer state.",
-        details: "Timer state is an exhaustive enum returned by timer.state().",
-    },
-    UnityModule => {
-        name: "UnityModule",
-        kind: Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: true },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        summary: "Describes an attached Unity IL2CPP runtime.",
-        details: "The runtime stores resolved metadata roots, its version, and pointer size.",
-    },
-    UnityImage => {
-        name: "UnityImage",
-        kind: Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: true },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        summary: "Describes a Unity assembly image.",
-        details: "An image retains its owning Unity runtime for subsequent class lookup.",
-    },
-    UnityClass => {
-        name: "UnityClass",
-        kind: Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: true },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        summary: "Describes a Unity runtime class.",
-        details: "A class retains its owning Unity runtime for field and static-data discovery.",
-    },
-    UnityField => {
-        name: "UnityField",
-        kind: Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: true },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        summary: "Describes a Unity runtime field.",
-        details: "A field exposes its byte offset and metadata index.",
-    },
-    // Architecture fixture proving that ordinary records need no
-    // type-specific compiler or tooling path.
-    #[cfg(test)]
-    CatalogRecordProbe => {
-        name: "CatalogRecordProbe",
-        kind: Struct,
-        capabilities: &[
-            StdlibCapabilityId::Equatable,
-            StdlibCapabilityId::MemoryReadable,
-        ],
-        representation: RuntimeRepresentation::GcStruct { nullable: true },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        summary: "Exercises the generic standard-library record pipeline.",
-        details: "This declaration exists only in tests and deliberately has no intrinsic implementation.",
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum StdlibCapabilityId {
-    Numeric,
-    Integer,
-    Signed,
-    Float,
-    Equatable,
-    StringCast,
-    Interpolatable,
-    MemoryReadable,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum StdlibTypeConstructorId {
-    Array,
-}
+use super::catalog::{FIELDS, NAMESPACES, TYPES, VARIANTS};
+use super::{
+    StdlibCapabilityId, StdlibFieldId, StdlibItemId, StdlibNamespaceId, StdlibTypeConstructorId,
+    StdlibTypeId, StdlibVariantId,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StdlibOwner {
@@ -194,6 +29,8 @@ pub enum StdlibOwner {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StdlibSymbolId {
     Namespace(StdlibNamespaceId),
+    Capability(StdlibCapabilityId),
+    TypeConstructor(StdlibTypeConstructorId),
     Type(StdlibTypeId),
     Field(StdlibFieldId),
     Variant(StdlibVariantId),
@@ -305,7 +142,7 @@ pub struct ValueUsage {
     pub global_variable: bool,
 }
 
-const ORDINARY_LOCAL_VALUE: ValueUsage = ValueUsage {
+pub(super) const ORDINARY_LOCAL_VALUE: ValueUsage = ValueUsage {
     record_field: true,
     enum_payload: true,
     state_field: true,
@@ -318,6 +155,20 @@ pub struct StdlibNamespace {
     pub id: StdlibNamespaceId,
     pub name: &'static str,
     pub path: &'static [&'static str],
+    pub documentation: Documentation<StdlibSymbolId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StdlibCapability {
+    pub id: StdlibCapabilityId,
+    pub name: &'static str,
+    pub documentation: Documentation<StdlibSymbolId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StdlibTypeConstructor {
+    pub id: StdlibTypeConstructorId,
+    pub name: &'static str,
     pub documentation: Documentation<StdlibSymbolId>,
 }
 
@@ -350,75 +201,11 @@ pub struct StdlibVariant {
     pub documentation: Documentation<StdlibSymbolId>,
 }
 
-const fn documentation(
-    summary: &'static str,
-    details: &'static str,
-) -> Documentation<StdlibSymbolId> {
-    Documentation {
-        summary,
-        details,
-        examples: &[],
-        related: &[],
-    }
-}
-
-macro_rules! declare_standard_namespaces {
-    ($(
-        $id:ident => {
-            name: $name:literal,
-            path: $path:expr,
-            summary: $summary:literal,
-            details: $details:literal $(,)?
-        }
-    ),* $(,)?) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        pub enum StdlibNamespaceId {
-            $($id),*
-        }
-
-        pub(super) const NAMESPACES: &[StdlibNamespace] = &[
-            $(StdlibNamespace {
-                id: StdlibNamespaceId::$id,
-                name: $name,
-                path: $path,
-                documentation: documentation($summary, $details),
-            }),*
-        ];
-    };
-}
-
-declare_standard_namespaces! {
-    Process => {
-        name: "process",
-        path: &["process"],
-        summary: "Accesses the attached game process.",
-        details: "Process operations discover modules, read memory, follow pointers, and scan signatures.",
-    },
-    ProcessRead => {
-        name: "read",
-        path: &["process", "read"],
-        summary: "Reads typed values from process memory.",
-        details: "The expected type or an explicit suffix selects the process-memory layout.",
-    },
-    Timer => {
-        name: "timer",
-        path: &["timer"],
-        summary: "Reads information from the LiveSplit timer.",
-        details: "Timer operations expose runtime state used by autosplitter decisions.",
-    },
-    Unity => {
-        name: "Unity",
-        path: &["Unity"],
-        summary: "Discovers and inspects Unity runtimes.",
-        details: "Unity operations attach to IL2CPP metadata and produce typed images, classes, and fields.",
-    },
-}
-
-const EQUATABLE_INTERPOLATABLE: &[StdlibCapabilityId] = &[
+pub(super) const EQUATABLE_INTERPOLATABLE: &[StdlibCapabilityId] = &[
     StdlibCapabilityId::Equatable,
     StdlibCapabilityId::Interpolatable,
 ];
-const EQUATABLE: &[StdlibCapabilityId] = &[StdlibCapabilityId::Equatable];
+pub(super) const EQUATABLE: &[StdlibCapabilityId] = &[StdlibCapabilityId::Equatable];
 
 const BOOL_CAPABILITIES: &[StdlibCapabilityId] = &[
     StdlibCapabilityId::Equatable,
@@ -565,201 +352,6 @@ pub(super) const CORE_TYPES: &[CoreType] = &[
         }),
     },
 ];
-
-macro_rules! declare_standard_fields {
-    ($($(#[$attribute:meta])* field!($id:ident, $owner:ident, $name:literal, $ty:expr, $visibility:ident, $summary:literal)),* $(,)?) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        pub enum StdlibFieldId {
-            $($(#[$attribute])* $id),*
-        }
-
-        pub(super) const FIELDS: &[StdlibField] = &[
-            $($(#[$attribute])* StdlibField {
-                id: StdlibFieldId::$id,
-                owner: StdlibTypeId::$owner,
-                name: $name,
-                ty: $ty,
-                visibility: FieldVisibility::$visibility,
-                documentation: documentation($summary, $summary),
-            }),*
-        ];
-    };
-}
-
-declare_standard_fields! {
-    field!(
-        DurationSeconds,
-        Duration,
-        "seconds",
-        DeclaredTypeRef::Core(CoreTypeId::I64),
-        RuntimePrivate,
-        "Stores the whole-second component."
-    ),
-    field!(
-        DurationNanoseconds,
-        Duration,
-        "nanoseconds",
-        DeclaredTypeRef::Core(CoreTypeId::I32),
-        RuntimePrivate,
-        "Stores the fractional nanosecond component."
-    ),
-    field!(
-        ModuleAddress,
-        Module,
-        "address",
-        DeclaredTypeRef::Core(CoreTypeId::Address),
-        Public,
-        "Returns the module base address."
-    ),
-    field!(
-        ModuleSize,
-        Module,
-        "size",
-        DeclaredTypeRef::Core(CoreTypeId::U64),
-        Public,
-        "Returns the mapped module size."
-    ),
-    field!(
-        UnityModuleAssemblies,
-        UnityModule,
-        "assemblies",
-        DeclaredTypeRef::Core(CoreTypeId::Address),
-        Public,
-        "Returns the IL2CPP assemblies metadata address."
-    ),
-    field!(
-        UnityModuleTypeInfoTable,
-        UnityModule,
-        "typeInfoTable",
-        DeclaredTypeRef::Core(CoreTypeId::Address),
-        Public,
-        "Returns the IL2CPP type-information table address."
-    ),
-    field!(
-        UnityModuleVersion,
-        UnityModule,
-        "version",
-        DeclaredTypeRef::Core(CoreTypeId::U32),
-        Public,
-        "Returns the detected Unity metadata version."
-    ),
-    field!(
-        UnityModulePointerSize,
-        UnityModule,
-        "pointerSize",
-        DeclaredTypeRef::Core(CoreTypeId::U32),
-        Public,
-        "Returns the attached process pointer size."
-    ),
-    field!(
-        UnityImageAddress,
-        UnityImage,
-        "address",
-        DeclaredTypeRef::Core(CoreTypeId::Address),
-        Public,
-        "Returns the Unity image address."
-    ),
-    field!(
-        UnityImageModule,
-        UnityImage,
-        "module",
-        DeclaredTypeRef::Standard(StdlibTypeId::UnityModule),
-        RuntimePrivate,
-        "Retains the owning Unity runtime."
-    ),
-    field!(
-        UnityClassAddress,
-        UnityClass,
-        "address",
-        DeclaredTypeRef::Core(CoreTypeId::Address),
-        Public,
-        "Returns the Unity class address."
-    ),
-    field!(
-        UnityClassModule,
-        UnityClass,
-        "module",
-        DeclaredTypeRef::Standard(StdlibTypeId::UnityModule),
-        RuntimePrivate,
-        "Retains the owning Unity runtime."
-    ),
-    field!(
-        UnityFieldOffset,
-        UnityField,
-        "offset",
-        DeclaredTypeRef::Core(CoreTypeId::U32),
-        Public,
-        "Returns the instance-field byte offset."
-    ),
-    field!(
-        UnityFieldIndex,
-        UnityField,
-        "index",
-        DeclaredTypeRef::Core(CoreTypeId::U32),
-        Public,
-        "Returns the metadata field index."
-    ),
-    #[cfg(test)]
-    field!(
-        CatalogRecordProbeValue,
-        CatalogRecordProbe,
-        "value",
-        DeclaredTypeRef::Core(CoreTypeId::U32),
-        Public,
-        "Returns the probe value."
-    ),
-}
-
-macro_rules! declare_standard_variants {
-    ($(variant!($id:ident, $owner:ident, $name:literal, $summary:literal)),* $(,)?) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        pub enum StdlibVariantId {
-            $($id),*
-        }
-
-        pub(super) const VARIANTS: &[StdlibVariant] = &[
-            $(StdlibVariant {
-                id: StdlibVariantId::$id,
-                owner: StdlibTypeId::$owner,
-                name: $name,
-                documentation: documentation($summary, $summary),
-            }),*
-        ];
-    };
-}
-
-declare_standard_variants! {
-    variant!(
-        TimerStateNotRunning,
-        TimerState,
-        "NotRunning",
-        "The timer has not started."
-    ),
-    variant!(
-        TimerStateRunning,
-        TimerState,
-        "Running",
-        "The timer is running."
-    ),
-    variant!(
-        TimerStatePaused,
-        TimerState,
-        "Paused",
-        "The timer is paused."
-    ),
-    variant!(
-        TimerStateEnded,
-        TimerState,
-        "Ended",
-        "The timer has ended."
-    ),
-    variant!(
-        TimerStateUnknown,
-        TimerState,
-        "Unknown",
-        "The host returned an unknown timer state."
-    ),
-}
 
 pub(super) fn validate() -> Vec<String> {
     let mut errors = Vec::new();

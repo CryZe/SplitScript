@@ -415,6 +415,14 @@ fn render_stdlib_symbol_hover(symbol: StdlibSymbolId) -> String {
             let declaration = library.namespace(id);
             (declaration.name.to_owned(), &declaration.documentation)
         }
+        StdlibSymbolId::Capability(id) => {
+            let declaration = library.capability(id);
+            (declaration.name.to_owned(), &declaration.documentation)
+        }
+        StdlibSymbolId::TypeConstructor(id) => {
+            let declaration = library.type_constructor(id);
+            (declaration.name.to_owned(), &declaration.documentation)
+        }
         StdlibSymbolId::Type(id) => {
             let declaration = library.type_decl(id);
             (declaration.name.to_owned(), &declaration.documentation)

@@ -27,6 +27,70 @@ invariant:
 > implementation, but must not require parser, inference, checker,
 > documentation, LSP, or physical-layout declarations.
 
+### Hierarchical standard-library authoring model
+
+The compiler and tooling now consume one normalized symbol graph, but the Rust
+source that creates that graph is still fragmented: types, namespaces, fields,
+variants, callable items, owner links, qualified names, and intrinsic IDs live
+in parallel blocks. The architectural goal is not complete until the authoring
+model mirrors the API hierarchy as cleanly as the consumer model does.
+
+- [x] As the immediate migration, replace the parallel `declare_standard_types!`,
+  `declare_standard_namespaces!`, `declare_standard_fields!`,
+  `declare_standard_variants!`, and `declare_standard_items!` inputs with one
+  hierarchical declarative Rust macro. This is an authoring adapter for the
+  normalized symbol graph, not the intended permanent source format.
+- [x] Make each nominal type declaration contain its documentation,
+  capabilities, value-usage policy, runtime representation, public and
+  runtime-private fields, enum variants, associated functions, and instance
+  methods. Opening `Module`, `Duration`, or `UnityClass` must reveal its whole
+  public and physical API in one place.
+- [x] Give root functions, namespaces, nested namespaces, core-type extension
+  methods, capabilities, and type constructors equally explicit owner blocks.
+  `process.read`, numeric methods, address methods, and array methods must not
+  remain a flat exceptional list.
+- [x] Derive owners and qualified names from declaration nesting. A member
+  declaration must not repeat `StdlibOwner::Type(...)`, `Module.scan`, and
+  `Module` independently.
+- [x] Generate `StdlibNamespaceId`, `StdlibTypeId`, `StdlibFieldId`,
+  `StdlibVariantId`, `StdlibItemId`, `IntrinsicId`, and the flattened
+  `NAMESPACES`/`TYPES`/`FIELDS`/`VARIANTS`/`ITEMS` tables from the hierarchical
+  source. Generated flat tables remain an internal compatibility layer for
+  generic consumers, not an authoring surface.
+- [x] Keep intrinsic implementation bodies deliberately separate, but bind
+  their generated intrinsic key alongside the owning function or method.
+  Validation must prove that every declared intrinsic has exactly one backend
+  implementation and that no implementation is orphaned.
+- [x] Migrate every existing declaration, including the test-only ordinary
+  catalog record, then delete the retired macros, duplicated owner/name data,
+  and manual intrinsic-ID list.
+- [x] Add architecture tests showing that representative types with fields,
+  variants, associated functions, and methods are declared in owner blocks yet
+  remain resolvable, documentable, completable, and code-generatable through
+  the normalized graph.
+- [ ] Long term, define the standard library in SplitScript source and make its
+  loader produce the same normalized symbol graph as the interim Rust macro.
+  Add the prerequisite language features deliberately: modules/namespaces,
+  generic declarations and capability bounds, declaration-only intrinsic and
+  host functions, effect metadata, private runtime fields, attached
+  documentation, and ordinary reusable library bodies.
+- [ ] Compile bundled standard-library sources in an explicit privileged mode,
+  never as ordinary project code. Only that mode may declare intrinsic or host
+  bindings, representation hooks, runtime-private fields, trusted effects, and
+  other low-level implementation details. User files must be unable to enable
+  the mode, import its private surface, shadow the bundled library, or call raw
+  intrinsic entry points.
+- [ ] Keep a small Rust intrinsic/host registry as the trust boundary. Loading
+  the SplitScript standard library must resolve every privileged declaration
+  against that registry and verify its signature, effects, availability,
+  suspension/cancellation behavior, and representation contract. Reject
+  unknown, duplicate, orphaned, or understated bindings before compiling user
+  code.
+- [ ] Once the SplitScript source loader covers the complete library, delete
+  the interim Rust declaration macro. Rust should retain only core primitive
+  definitions, backend-neutral representation primitives, the host ABI
+  catalog, and deliberately scoped intrinsic lowering implementations.
+
 ### Library declaration graph
 
 - [x] Extend `StandardLibrary` from a callable catalog into a complete,
@@ -162,7 +226,7 @@ invariant:
     hover documentation, completion, derived process-memory layout,
     structural equality helpers, and valid Wasm GC generation. Its ID is not
     referenced by production compiler or tooling code.
-  - [x] Run the full Rust suite, formatter check, VS Code TypeScript check,
+  - [x] Re-run the full Rust suite, formatter check, VS Code TypeScript check,
     release compilation of both example autosplitters, and Wasm validation.
     The existing Node 24 Lunistice harness still reaches its previously
     characterized null-dereference in the unchanged attachment runtime; the
@@ -371,8 +435,9 @@ introducing the following boundaries.
   compiled into the same validated symbol graph. Keep most future library
   functionality there; reserve compiler intrinsics for representation
   primitives, host boundaries, and suspension/control-flow operations that
-  cannot be ordinary source code. This is deliberately sequenced after those
-  language features rather than blocking the catalog/type-model foundation.
+  cannot be ordinary source code. The interim hierarchical Rust declaration
+  macro must feed the same graph so this later source migration replaces only
+  the producer, not every compiler and tooling consumer.
 
 ### ABI, lowering, and code-generation boundaries
 

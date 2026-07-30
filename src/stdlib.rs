@@ -4,16 +4,22 @@
 //! here. Type checking resolves calls to stable item IDs. Backends only receive
 //! stable intrinsic IDs and concrete inferred type arguments.
 
+mod catalog;
 mod declarations;
+
+pub use catalog::{
+    IntrinsicId, StdlibCapabilityId, StdlibFieldId, StdlibItemId, StdlibNamespaceId,
+    StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
+};
 
 pub use declarations::{
     CoreType, CoreTypeId, DeclaredTypeRef, FieldVisibility, RuntimeRepresentation,
-    ScalarMemoryLayout, StdlibCapabilityId, StdlibField, StdlibFieldId, StdlibNamespace,
-    StdlibNamespaceId, StdlibOwner, StdlibSymbolId, StdlibType, StdlibTypeConstructorId,
-    StdlibTypeId, StdlibTypeKind, StdlibVariant, StdlibVariantId, ValueUsage,
+    ScalarMemoryLayout, StdlibCapability, StdlibField, StdlibNamespace, StdlibOwner,
+    StdlibSymbolId, StdlibType, StdlibTypeConstructor, StdlibTypeKind, StdlibVariant, ValueUsage,
 };
 
-use declarations::{CORE_TYPES, FIELDS, NAMESPACES, TYPES, VARIANTS};
+use catalog::{CAPABILITIES, FIELDS, ITEMS, NAMESPACES, TYPE_CONSTRUCTORS, TYPES, VARIANTS};
+use declarations::CORE_TYPES;
 
 use std::collections::HashSet;
 
@@ -21,42 +27,6 @@ use crate::{
     catalog::{Documentation, Example},
     types::{BuiltinType, TypeKind},
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum IntrinsicId {
-    NumericMin,
-    NumericMax,
-    NumericClamp,
-    Print,
-    StringLength,
-    StringConcat,
-    TimerSetVariable,
-    TimerState,
-    RuntimeSetTickRate,
-    NextTick,
-    ProcessModule,
-    ProcessRead,
-    ProcessFollow,
-    ProcessScan,
-    ProcessReadRelative32,
-    ProcessReadManagedString,
-    UnityIl2Cpp,
-    DurationFromFrames,
-    DurationFromParts,
-    DurationSaturatingSecondsF32,
-    AddressOffset,
-    AddressAdd,
-    ModuleScan,
-    UnityModuleImage,
-    UnityImageClass,
-    UnityClassField,
-    UnityClassFieldAny,
-    UnityClassStaticTable,
-    UnityClassStaticInstance,
-    ArrayLength,
-    ArrayGet,
-    ArraySet,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Implementation {
@@ -618,637 +588,6 @@ doc_example!(
     ARRAY_EXAMPLE
 );
 
-macro_rules! function_item {
-    (@id $id:ident, $owner:expr, $name:literal, $qualified:literal, $params:expr, $result:expr,
-     $effects:expr, $availability:expr, $summary:literal, $details:literal, $examples:expr) => {
-        StdlibItem {
-            id: StdlibItemId::$id,
-            owner: $owner,
-            name: $name,
-            qualified_name: $qualified,
-            kind: ItemKind::Function,
-            signature: Signature {
-                type_parameters: &[],
-                parameters: $params,
-                result: $result,
-            },
-            effects: $effects,
-            availability: $availability,
-            deprecation: None,
-            documentation: Documentation {
-                summary: $summary,
-                details: $details,
-                examples: $examples,
-                related: &[],
-            },
-            implementation: Implementation::Intrinsic(IntrinsicId::$id),
-        }
-    };
-    (@id $id:ident, intrinsic $intrinsic:ident, $owner:expr, $name:literal, $qualified:literal, $params:expr,
-     $result:expr, $effects:expr, $availability:expr, $summary:literal, $details:literal,
-     $examples:expr) => {
-        StdlibItem {
-            id: StdlibItemId::$id,
-            owner: $owner,
-            name: $name,
-            qualified_name: $qualified,
-            kind: ItemKind::Function,
-            signature: Signature {
-                type_parameters: &[],
-                parameters: $params,
-                result: $result,
-            },
-            effects: $effects,
-            availability: $availability,
-            deprecation: None,
-            documentation: Documentation {
-                summary: $summary,
-                details: $details,
-                examples: $examples,
-                related: &[],
-            },
-            implementation: Implementation::Intrinsic(IntrinsicId::$intrinsic),
-        }
-    };
-}
-
-macro_rules! method_item {
-    (@id $id:ident, $owner:expr, $qualified:literal, $receiver:expr, $name:literal, $types:expr,
-     $params:expr, $result:expr, $effects:expr, $availability:expr,
-     $summary:literal, $details:literal, $examples:expr) => {
-        StdlibItem {
-            id: StdlibItemId::$id,
-            owner: $owner,
-            name: $name,
-            qualified_name: $qualified,
-            kind: ItemKind::Method {
-                receiver: $receiver,
-            },
-            signature: Signature {
-                type_parameters: $types,
-                parameters: $params,
-                result: $result,
-            },
-            effects: $effects,
-            availability: $availability,
-            deprecation: None,
-            documentation: Documentation {
-                summary: $summary,
-                details: $details,
-                examples: $examples,
-                related: &[],
-            },
-            implementation: Implementation::Intrinsic(IntrinsicId::$id),
-        }
-    };
-}
-
-macro_rules! typed_function_item {
-    (@id $id:ident, $owner:expr, $name:literal, $qualified:literal, $type_parameter:literal,
-     $types:expr, $params:expr, $result:expr, $effects:expr, $availability:expr,
-     $summary:literal, $details:literal, $examples:expr) => {
-        StdlibItem {
-            id: StdlibItemId::$id,
-            owner: $owner,
-            name: $name,
-            qualified_name: $qualified,
-            kind: ItemKind::TypedFunction {
-                type_parameter: $type_parameter,
-            },
-            signature: Signature {
-                type_parameters: $types,
-                parameters: $params,
-                result: $result,
-            },
-            effects: $effects,
-            availability: $availability,
-            deprecation: None,
-            documentation: Documentation {
-                summary: $summary,
-                details: $details,
-                examples: $examples,
-                related: &[],
-            },
-            implementation: Implementation::Intrinsic(IntrinsicId::$id),
-        }
-    };
-}
-
-macro_rules! declare_standard_items {
-    ($($id:ident => $factory:ident!($($arguments:tt)*)),* $(,)?) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        pub enum StdlibItemId {
-            $($id),*
-        }
-
-        const ITEMS: &[StdlibItem] = &[
-            $($factory!(@id $id, $($arguments)*)),*
-        ];
-    };
-}
-
-declare_standard_items! {
-    NumericMin => method_item!(
-        StdlibOwner::Capability(StdlibCapabilityId::Numeric),
-        "Numeric.min",
-        T_REF,
-        "min",
-        NUMERIC_PARAMETER,
-        &[parameter(
-            "other",
-            T_REF,
-            "The other value to compare with the receiver."
-        )],
-        T_REF,
-        PURE,
-        Availability::Everywhere,
-        "Returns the smaller of two numeric values.",
-        "Both values have the same inferred numeric type and are evaluated once.",
-        NUMERIC_MIN_EXAMPLE
-    ),
-    NumericMax => method_item!(
-        StdlibOwner::Capability(StdlibCapabilityId::Numeric),
-        "Numeric.max",
-        T_REF,
-        "max",
-        NUMERIC_PARAMETER,
-        &[parameter(
-            "other",
-            T_REF,
-            "The other value to compare with the receiver."
-        )],
-        T_REF,
-        PURE,
-        Availability::Everywhere,
-        "Returns the larger of two numeric values.",
-        "Both values have the same inferred numeric type and are evaluated once.",
-        NUMERIC_MAX_EXAMPLE
-    ),
-    NumericClamp => method_item!(
-        StdlibOwner::Capability(StdlibCapabilityId::Numeric),
-        "Numeric.clamp",
-        T_REF,
-        "clamp",
-        NUMERIC_PARAMETER,
-        &[
-            parameter("minimum", T_REF, "The inclusive lower bound."),
-            parameter("maximum", T_REF, "The inclusive upper bound.")
-        ],
-        T_REF,
-        PURE,
-        Availability::Everywhere,
-        "Restricts a numeric value to an inclusive range.",
-        "The receiver and bounds have one inferred numeric type and are evaluated once.",
-        NUMERIC_CLAMP_EXAMPLE
-    ),
-    Print => function_item!(
-        StdlibOwner::Root,
-        "print",
-        "print",
-        &[parameter(
-            "message",
-            STRING,
-            "The message to write to the runtime log."
-        )],
-        VOID,
-        RUNTIME_WRITE,
-        Availability::Everywhere,
-        "Prints a diagnostic message.",
-        "The message is forwarded to the autosplitting runtime.",
-        PRINT_EXAMPLE
-    ),
-    SetVariable => function_item!(
-        intrinsic TimerSetVariable,
-        StdlibOwner::Root,
-        "setVariable",
-        "setVariable",
-        &[
-            parameter("name", STRING, "The variable name."),
-            parameter("value", STRING, "The displayed value.")
-        ],
-        VOID,
-        TIMER_WRITE,
-        Availability::Everywhere,
-        "Sets a LiveSplit custom variable.",
-        "The value is visible to layouts that display autosplitter variables.",
-        SET_VARIABLE_EXAMPLE
-    ),
-    SetTickRate => function_item!(
-        intrinsic RuntimeSetTickRate,
-        StdlibOwner::Root,
-        "setTickRate",
-        "setTickRate",
-        &[parameter("hz", F64, "The requested updates per second.")],
-        VOID,
-        RUNTIME_WRITE,
-        Availability::Everywhere,
-        "Changes the autosplitter tick rate.",
-        "The runtime applies the requested polling frequency.",
-        SET_TICK_RATE_EXAMPLE
-    ),
-    NextTick => function_item!(
-        StdlibOwner::Root,
-        "nextTick",
-        "nextTick",
-        &[],
-        VOID,
-        NEXT_TICK,
-        Availability::OnAttach,
-        "Continues attachment on the next runtime update.",
-        "Always suspends once. The continuation resumes on the following attached-process tick and is cancelled if that process closes first.",
-        NEXT_TICK_DOC_EXAMPLE
-    ),
-    StringLength => function_item!(
-        StdlibOwner::Type(StdlibTypeId::String),
-        "length",
-        "String.length",
-        &[parameter(
-            "value",
-            STRING,
-            "The string whose UTF-8 byte length is returned."
-        )],
-        U32,
-        PURE,
-        Availability::Everywhere,
-        "Returns a string's UTF-8 byte length.",
-        "The result counts UTF-8 bytes in the current string representation.",
-        STRING_LENGTH_EXAMPLE
-    ),
-    StringConcat => function_item!(
-        StdlibOwner::Type(StdlibTypeId::String),
-        "concat",
-        "String.concat",
-        &[parameter(
-            "values",
-            STRING_ARRAY,
-            "The strings to concatenate in order."
-        )],
-        STRING,
-        ALLOCATES,
-        Availability::Everywhere,
-        "Concatenates an array of strings.",
-        "A new WebAssembly GC string is allocated.",
-        STRING_CONCAT_EXAMPLE
-    ),
-    TimerState => function_item!(
-        StdlibOwner::Namespace(StdlibNamespaceId::Timer),
-        "state",
-        "timer.state",
-        &[],
-        TIMER_STATE,
-        TIMER_READ,
-        Availability::Everywhere,
-        "Returns the current timer state.",
-        "Host states are converted to NotRunning, Running, Paused, Ended, or Unknown at the ABI boundary.",
-        TIMER_STATE_EXAMPLE
-    ),
-    ProcessModule => function_item!(
-        StdlibOwner::Namespace(StdlibNamespaceId::Process),
-        "module",
-        "process.module",
-        &[literal_parameter(
-            "name",
-            STRING,
-            ParameterRule::StringLiteral,
-            "The exact module name."
-        )],
-        MODULE,
-        PROCESS_SUSPEND,
-        Availability::OnAttach,
-        "Waits for a process module.",
-        "Suspends attachment until both module address and size are available.",
-        PROCESS_MODULE_EXAMPLE
-    ),
-    ProcessRead => typed_function_item!(
-        StdlibOwner::Namespace(StdlibNamespaceId::Process),
-        "read",
-        "process.read",
-        "T",
-        MEMORY_PARAMETER,
-        &[parameter("address", ADDRESS, "The target address to read.")],
-        T_RESULT,
-        PROCESS,
-        Availability::Everywhere,
-        "Reads a fixed-layout value from process memory.",
-        "The expected MemoryReadable type selects a fixed-size primitive or record layout. A synchronous read returns T!; retry polls until a value is available and yields T. Use a suffix such as process.read.i32 when context cannot determine a primitive type.",
-        PROCESS_READ_EXAMPLE
-    ),
-    ProcessFollow => function_item!(
-        StdlibOwner::Namespace(StdlibNamespaceId::Process),
-        "follow",
-        "process.follow",
-        &[
-            parameter("base", ADDRESS, "The initial address."),
-            parameter("offsets", U64_ARRAY, "Pointer offsets to follow.")
-        ],
-        ADDRESS_RESULT,
-        PROCESS,
-        Availability::Everywhere,
-        "Follows a pointer path.",
-        "Each intermediate address is read as a 64-bit target pointer. A failed or null pointer read returns an error; use retry in onAttach to wait for success.",
-        PROCESS_FOLLOW_EXAMPLE
-    ),
-    ProcessScan => function_item!(
-        StdlibOwner::Namespace(StdlibNamespaceId::Process),
-        "scan",
-        "process.scan",
-        &[
-            parameter("address", ADDRESS, "The beginning of the range."),
-            parameter("size", U64, "The number of bytes to scan."),
-            literal_parameter(
-                "signature",
-                SIGNATURE,
-                ParameterRule::SignatureLiteral,
-                "The compile-time signature pattern."
-            )
-        ],
-        ADDRESS,
-        PROCESS_SUSPEND,
-        Availability::OnAttach,
-        "Scans a process-memory range.",
-        "Suspends until the signature is found in the requested range.",
-        PROCESS_SCAN_EXAMPLE
-    ),
-    ProcessReadRelative32 => function_item!(
-        StdlibOwner::Namespace(StdlibNamespaceId::Process),
-        "readRelative32",
-        "process.readRelative32",
-        &[parameter(
-            "address",
-            ADDRESS,
-            "The address of a signed relative displacement."
-        )],
-        ADDRESS_RESULT,
-        PROCESS,
-        Availability::Everywhere,
-        "Resolves a 32-bit relative address.",
-        "Reads a signed displacement and adds it to the address following the displacement. A failed or null target returns an error; use retry in onAttach to wait for success.",
-        PROCESS_RELATIVE_EXAMPLE
-    ),
-    ProcessReadManagedString => function_item!(
-        StdlibOwner::Namespace(StdlibNamespaceId::ProcessRead),
-        "managedString",
-        "process.read.managedString",
-        &[
-            parameter("address", ADDRESS, "The managed string object address."),
-            parameter(
-                "maxUtf16Units",
-                U32,
-                "The maximum UTF-16 code units to decode."
-            )
-        ],
-        STRING_RESULT,
-        PROCESS,
-        Availability::Everywhere,
-        "Reads a Unity managed string.",
-        "The bounded UTF-16 payload is decoded into an immutable SplitScript string. Memory-access failure returns an error; malformed surrogate sequences decode as the replacement character.",
-        MANAGED_STRING_EXAMPLE
-    ),
-    UnityIl2Cpp => function_item!(
-        StdlibOwner::Namespace(StdlibNamespaceId::Unity),
-        "il2cpp",
-        "Unity.il2cpp",
-        &[parameter(
-            "version",
-            U32,
-            "The Unity metadata layout version."
-        )],
-        UNITY_MODULE,
-        PROCESS_SUSPEND,
-        Availability::OnAttach,
-        "Discovers an IL2CPP runtime.",
-        "Suspends until GameAssembly and the IL2CPP metadata structures are available.",
-        UNITY_IL2CPP_EXAMPLE
-    ),
-    DurationFromFrames => function_item!(
-        StdlibOwner::Type(StdlibTypeId::Duration),
-        "fromFrames",
-        "Duration.fromFrames",
-        &[
-            parameter("frames", I64, "The elapsed frame count."),
-            parameter("framesPerSecond", I64, "The frame rate.")
-        ],
-        DURATION,
-        PURE,
-        Availability::Everywhere,
-        "Constructs a duration from frames.",
-        "The conversion preserves whole seconds and nanoseconds.",
-        DURATION_FRAMES_EXAMPLE
-    ),
-    DurationFromParts => function_item!(
-        StdlibOwner::Type(StdlibTypeId::Duration),
-        "fromParts",
-        "Duration.fromParts",
-        &[
-            parameter("seconds", I64, "Whole seconds."),
-            parameter("nanoseconds", I32, "The fractional nanoseconds.")
-        ],
-        DURATION,
-        PURE,
-        Availability::Everywhere,
-        "Constructs a duration from seconds and nanoseconds.",
-        "The two components become the runtime duration representation.",
-        DURATION_PARTS_EXAMPLE
-    ),
-    DurationFromSeconds => function_item!(
-        intrinsic DurationSaturatingSecondsF32,
-        StdlibOwner::Type(StdlibTypeId::Duration),
-        "fromSeconds",
-        "Duration.fromSeconds",
-        &[parameter("seconds", F32, "Floating-point seconds.")],
-        DURATION,
-        PURE,
-        Availability::Everywhere,
-        "Constructs a duration from floating-point seconds.",
-        "Finite values are converted to the runtime duration representation; values outside its range are safely clamped.",
-        DURATION_SECONDS_EXAMPLE
-    ),
-    AddressOffset => method_item!(
-        StdlibOwner::Core(CoreTypeId::Address),
-        "address.offset",
-        ADDRESS,
-        "offset",
-        &[],
-        &[parameter("offset", U32, "The unsigned field offset.")],
-        ADDRESS,
-        PURE,
-        Availability::Everywhere,
-        "Adds a field offset to an address.",
-        "The offset is widened to the target address width.",
-        ADDRESS_OFFSET_EXAMPLE
-    ),
-    AddressAdd => method_item!(
-        StdlibOwner::Core(CoreTypeId::Address),
-        "address.add",
-        ADDRESS,
-        "add",
-        &[],
-        &[parameter("offset", U64, "The full-width address offset.")],
-        ADDRESS,
-        PURE,
-        Availability::Everywhere,
-        "Adds a full-width offset to an address.",
-        "This is useful for offsets that are already represented as u64.",
-        ADDRESS_ADD_EXAMPLE
-    ),
-    ModuleScan => method_item!(
-        StdlibOwner::Type(StdlibTypeId::Module),
-        "Module.scan",
-        MODULE,
-        "scan",
-        &[],
-        &[literal_parameter(
-            "signature",
-            SIGNATURE,
-            ParameterRule::SignatureLiteral,
-            "The compile-time signature pattern."
-        )],
-        ADDRESS,
-        PROCESS_SUSPEND,
-        Availability::OnAttach,
-        "Scans a module for a signature.",
-        "The module's address and size define the scanned range.",
-        MODULE_SCAN_EXAMPLE
-    ),
-    UnityModuleImage => method_item!(
-        StdlibOwner::Type(StdlibTypeId::UnityModule),
-        "UnityModule.image",
-        UNITY_MODULE,
-        "image",
-        &[],
-        &[parameter("name", STRING, "The managed assembly name.")],
-        UNITY_IMAGE,
-        PROCESS_SUSPEND,
-        Availability::OnAttach,
-        "Finds an IL2CPP image.",
-        "Suspends until the named image is discoverable.",
-        UNITY_IMAGE_EXAMPLE
-    ),
-    UnityImageClass => method_item!(
-        StdlibOwner::Type(StdlibTypeId::UnityImage),
-        "UnityImage.class",
-        UNITY_IMAGE,
-        "class",
-        &[],
-        &[parameter("name", STRING, "The managed class name.")],
-        UNITY_CLASS,
-        PROCESS_SUSPEND,
-        Availability::OnAttach,
-        "Finds a class in an IL2CPP image.",
-        "Suspends until the named class is discoverable.",
-        UNITY_CLASS_EXAMPLE
-    ),
-    UnityClassField => method_item!(
-        StdlibOwner::Type(StdlibTypeId::UnityClass),
-        "UnityClass.field",
-        UNITY_CLASS,
-        "field",
-        &[],
-        &[parameter("name", STRING, "The managed field name.")],
-        U32,
-        PROCESS_SUSPEND,
-        Availability::OnAttach,
-        "Finds a managed field offset.",
-        "Searches the class hierarchy and recognizes backing fields.",
-        UNITY_FIELD_EXAMPLE
-    ),
-    UnityClassFieldAny => method_item!(
-        StdlibOwner::Type(StdlibTypeId::UnityClass),
-        "UnityClass.fieldAny",
-        UNITY_CLASS,
-        "fieldAny",
-        &[],
-        &[parameter(
-            "names",
-            STRING_ARRAY,
-            "Candidate field names in priority order."
-        )],
-        UNITY_FIELD,
-        PROCESS_SUSPEND,
-        Availability::OnAttach,
-        "Finds the first matching field.",
-        "Returns both the field offset and selected candidate index.",
-        UNITY_FIELD_ANY_EXAMPLE
-    ),
-    UnityClassStaticTable => method_item!(
-        StdlibOwner::Type(StdlibTypeId::UnityClass),
-        "UnityClass.staticTable",
-        UNITY_CLASS,
-        "staticTable",
-        &[],
-        &[],
-        ADDRESS,
-        PROCESS_SUSPEND,
-        Availability::OnAttach,
-        "Finds a class's static-field table.",
-        "Suspends until the static storage pointer is non-null.",
-        UNITY_STATIC_TABLE_EXAMPLE
-    ),
-    UnityClassStaticInstance => method_item!(
-        StdlibOwner::Type(StdlibTypeId::UnityClass),
-        "UnityClass.staticInstance",
-        UNITY_CLASS,
-        "staticInstance",
-        &[],
-        &[parameter(
-            "names",
-            STRING_ARRAY,
-            "Candidate singleton field names."
-        )],
-        ADDRESS,
-        PROCESS_SUSPEND,
-        Availability::OnAttach,
-        "Finds a static singleton instance.",
-        "Combines field discovery, static-table lookup, and a non-null pointer read.",
-        UNITY_STATIC_INSTANCE_EXAMPLE
-    ),
-    ArrayLength => method_item!(
-        StdlibOwner::TypeConstructor(StdlibTypeConstructorId::Array),
-        "Array.length",
-        T_ARRAY,
-        "length",
-        UNCONSTRAINED_T,
-        &[],
-        U32,
-        PURE,
-        Availability::Everywhere,
-        "Returns the number of array elements.",
-        "The result is the WebAssembly GC array length.",
-        ARRAY_LENGTH_EXAMPLE
-    ),
-    ArrayGet => method_item!(
-        StdlibOwner::TypeConstructor(StdlibTypeConstructorId::Array),
-        "Array.get",
-        T_ARRAY,
-        "get",
-        UNCONSTRAINED_T,
-        &[parameter("index", U32, "The zero-based element index.")],
-        T_REF,
-        PURE,
-        Availability::Everywhere,
-        "Returns an array element.",
-        "Indexing uses WebAssembly's bounds checks.",
-        ARRAY_GET_EXAMPLE
-    ),
-    ArraySet => method_item!(
-        StdlibOwner::TypeConstructor(StdlibTypeConstructorId::Array),
-        "Array.set",
-        T_ARRAY,
-        "set",
-        UNCONSTRAINED_T,
-        &[
-            parameter("index", U32, "The zero-based element index."),
-            parameter("value", T_REF, "The new element value.")
-        ],
-        VOID,
-        MUTATES_VALUE,
-        Availability::Everywhere,
-        "Updates an array element.",
-        "The array is evaluated once and updated in place.",
-        ARRAY_SET_EXAMPLE
-    ),
-}
-
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StandardLibrary;
 
@@ -1270,6 +609,28 @@ impl StandardLibrary {
 
     pub fn core_type_has_capability(self, ty: CoreTypeId, capability: StdlibCapabilityId) -> bool {
         self.core_type(ty).capabilities.contains(&capability)
+    }
+
+    pub fn capabilities(self) -> &'static [StdlibCapability] {
+        CAPABILITIES
+    }
+
+    pub fn capability(self, id: StdlibCapabilityId) -> &'static StdlibCapability {
+        CAPABILITIES
+            .iter()
+            .find(|capability| capability.id == id)
+            .expect("every standard-library capability ID must have a declaration")
+    }
+
+    pub fn type_constructors(self) -> &'static [StdlibTypeConstructor] {
+        TYPE_CONSTRUCTORS
+    }
+
+    pub fn type_constructor(self, id: StdlibTypeConstructorId) -> &'static StdlibTypeConstructor {
+        TYPE_CONSTRUCTORS
+            .iter()
+            .find(|constructor| constructor.id == id)
+            .expect("every standard-library type-constructor ID must have a declaration")
     }
 
     pub fn namespaces(self) -> &'static [StdlibNamespace] {
@@ -1530,13 +891,33 @@ impl StandardLibrary {
 
     pub fn validate(self) -> Vec<String> {
         let mut errors = declarations::validate();
+        validate_named_declarations(
+            "capability",
+            CAPABILITIES,
+            |value| (value.id, value.name, value.documentation),
+            &mut errors,
+        );
+        validate_named_declarations(
+            "type constructor",
+            TYPE_CONSTRUCTORS,
+            |value| (value.id, value.name, value.documentation),
+            &mut errors,
+        );
         let mut ids = HashSet::new();
+        let mut intrinsics = HashSet::new();
         let mut qualified_names = HashSet::new();
         let mut call_shapes = HashSet::new();
         let mut example_sources = HashSet::new();
         for item in ITEMS {
             if !ids.insert(item.id) {
                 errors.push(format!("duplicate standard-library ID `{:?}`", item.id));
+            }
+            let Implementation::Intrinsic(intrinsic) = item.implementation;
+            if !intrinsics.insert(intrinsic) {
+                errors.push(format!(
+                    "intrinsic `{:?}` is bound by more than one standard-library item",
+                    intrinsic
+                ));
             }
             if !qualified_names.insert(item.qualified_name) {
                 errors.push(format!(
@@ -1712,6 +1093,30 @@ fn catalog_method_accepts(item: &StdlibItem, receiver: &TypeKind) -> bool {
                     semantic_type_may_have_capability(receiver, constraint.capability())
                 })
             }),
+    }
+}
+
+fn validate_named_declarations<T, I>(
+    kind: &str,
+    values: &[T],
+    project: impl Fn(&T) -> (I, &'static str, Documentation<StdlibSymbolId>),
+    errors: &mut Vec<String>,
+) where
+    I: Copy + std::fmt::Debug + Eq + std::hash::Hash,
+{
+    let mut ids = HashSet::new();
+    let mut names = HashSet::new();
+    for value in values {
+        let (id, name, documentation) = project(value);
+        if !ids.insert(id) {
+            errors.push(format!("duplicate {kind} ID `{:?}`", id));
+        }
+        if !names.insert(name) {
+            errors.push(format!("duplicate {kind} name `{name}`"));
+        }
+        if documentation.summary.trim().is_empty() || documentation.details.trim().is_empty() {
+            errors.push(format!("{kind} `{name}` has incomplete documentation"));
+        }
     }
 }
 

@@ -175,6 +175,28 @@ IDs remain distinct, but both use the shared `catalog::Documentation` and
 integrity, and the compiler test suite parses, checks, and lowers every embedded
 example before editor or generated-documentation clients can expose it.
 
+The public standard library is authored hierarchically in
+[`src/stdlib/catalog.rs`](../src/stdlib/catalog.rs). Each namespace, nominal
+type, capability, and type constructor owns its fields, variants, associated
+functions, and methods. The declaration macro derives owners, qualified names,
+stable symbol IDs, intrinsic IDs, and the flat normalized tables consumed by
+the compiler and tooling. Those tables are a compatibility view, not a second
+authoring surface. Architecture tests reject reintroduction of the retired
+parallel type, field, variant, and item registries.
+
+That Rust macro is intentionally an interim producer for the normalized graph.
+The long-term producer will load bundled standard-library modules written in
+SplitScript once the language can express modules, generics and capability
+bounds, private runtime representation, effect declarations, and reusable
+library bodies. Such modules are trusted compiler inputs, not ordinary project
+files: only a compiler-created privileged loading path may declare intrinsic
+or host bindings, representation hooks, runtime-private fields, or trusted
+effects. There is no source directive, CLI switch, import, or shadowable module
+name that can grant this authority to user code. A small Rust registry remains
+the trust boundary and must validate every privileged binding's signature,
+effects, availability, suspension and cancellation behavior, and physical
+representation before any user program is checked.
+
 The lower-level host boundary has a separate `AbiCatalog`. It is intentionally
 not an LSP or public standard-library input. Each host import records its stable
 ID, module and field name, Wasm parameters/results, memory or handle ownership,

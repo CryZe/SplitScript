@@ -73,11 +73,11 @@ impl Type {
     }
 
     pub(crate) fn is_integer(self) -> bool {
-        type_has_capability(self, StdlibCapabilityId::Integer)
+        type_may_have_capability(self, StdlibCapabilityId::Integer)
     }
 
     pub(crate) fn is_numeric(self) -> bool {
-        type_has_capability(self, StdlibCapabilityId::Numeric)
+        type_may_have_capability(self, StdlibCapabilityId::Numeric)
     }
 
     pub(crate) fn to_ref(self) -> TypeRef {
@@ -701,11 +701,14 @@ fn type_meets_requirements(ty: Type, requirements: Requirements) -> bool {
     ]
     .into_iter()
     .all(|(requirement, capability)| {
-        !requirements.intersects(requirement) || type_has_capability(ty, capability)
+        !requirements.intersects(requirement) || type_may_have_capability(ty, capability)
     })
 }
 
-pub(crate) fn type_has_capability(ty: Type, capability: StdlibCapabilityId) -> bool {
+/// Conservative pre-semantic admissibility check. Derived capabilities are
+/// proven recursively by `CapabilityAnalysis` once inference produces a
+/// semantic TypeId.
+pub(crate) fn type_may_have_capability(ty: Type, capability: StdlibCapabilityId) -> bool {
     let library = StandardLibrary::new();
     if let Some(core) = ty.core() {
         return library.core_type_has_capability(core, capability);

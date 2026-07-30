@@ -5,6 +5,7 @@
 
 pub mod abi;
 pub mod ast;
+pub mod capabilities;
 pub mod catalog;
 pub mod codegen;
 pub mod completion;
@@ -142,8 +143,7 @@ pub struct CheckedProgram {
     syntax: ast::Program,
     hir: hir::TypedProgram,
     semantics: semantic::SemanticModel,
-    memory_layouts: memory::MemoryLayouts,
-    equality: equality::EqualityCapabilities,
+    capabilities: capabilities::CapabilityAnalysis,
     effects: effects::OperationAnalysis,
     enum_types: Vec<ast::EnumDecl>,
     array_types: Vec<ast::ArrayTypeDecl>,
@@ -219,11 +219,15 @@ impl CheckedProgram {
     }
 
     pub fn memory_layouts(&self) -> &memory::MemoryLayouts {
-        &self.memory_layouts
+        self.capabilities.memory()
     }
 
     pub fn equality(&self) -> &equality::EqualityCapabilities {
-        &self.equality
+        self.capabilities.equality()
+    }
+
+    pub fn capabilities(&self) -> &capabilities::CapabilityAnalysis {
+        &self.capabilities
     }
 
     pub fn effects(&self) -> &effects::OperationAnalysis {
@@ -284,8 +288,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
     let output = typeck::check(&syntax)?;
     let typed_hir = hir::TypedProgram::build(hir, &syntax, &output.semantics);
     let effects = effects::OperationAnalysis::infer(&typed_hir);
-    let memory_layouts = memory::MemoryLayouts::build(&syntax.records, &output.semantics);
-    let equality = equality::EqualityCapabilities::build(
+    let capabilities = capabilities::CapabilityAnalysis::build(
         &syntax.records,
         &output.enum_types,
         &output.semantics,
@@ -321,18 +324,38 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
             let operand = typed_hir
                 .expression(left)
                 .expect("binary operands belong to typed HIR");
-            if let Err(error) = equality.require(operand.ty, &output.semantics) {
+            if let Err(error) = capabilities.require(
+                operand.ty,
+                stdlib::StdlibCapabilityId::Equatable,
+                &output.semantics,
+            ) {
                 semantic_errors.push(Diagnostic::semantic(error, expression.span));
             }
         }
         if let Some(semantic::ResolvedCall::StandardLibrary {
-            item: stdlib::StdlibItemId::ProcessRead,
+            item,
             type_arguments,
             ..
         }) = typed_hir.call(expression.id)
-            && let Err(error) = memory_layouts.layout(type_arguments[0], &output.semantics)
         {
-            semantic_errors.push(Diagnostic::semantic(error, expression.span));
+            let item = stdlib::StandardLibrary::new().item(*item);
+            for (parameter, argument) in item.signature.type_parameters.iter().zip(type_arguments) {
+                for constraint in parameter.constraints {
+                    if let Err(error) =
+                        capabilities.require(*argument, constraint.capability(), &output.semantics)
+                    {
+                        semantic_errors.push(Diagnostic::semantic(
+                            format!(
+                                "`{:?}` does not satisfy {} for `{}`: {error}",
+                                output.semantics.types().kind(*argument),
+                                constraint.name(),
+                                item.qualified_name,
+                            ),
+                            expression.span,
+                        ));
+                    }
+                }
+            }
         }
     }
     if let Some(state) = &syntax.state {
@@ -342,7 +365,11 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
                     .semantics
                     .value_type(field.id)
                     .expect("checked state fields have semantic types");
-                if let Err(error) = memory_layouts.layout(ty, &output.semantics) {
+                if let Err(error) = capabilities.require(
+                    ty,
+                    stdlib::StdlibCapabilityId::MemoryReadable,
+                    &output.semantics,
+                ) {
                     semantic_errors.push(Diagnostic::semantic(error, field.span));
                 }
             }
@@ -356,8 +383,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         syntax,
         hir: typed_hir,
         semantics: output.semantics,
-        memory_layouts,
-        equality,
+        capabilities,
         effects,
         enum_types: output.enum_types,
         array_types: output.array_types,
@@ -423,8 +449,8 @@ pub fn codegen_with_options(checked: &CheckedProgram, options: CompilerOptions) 
             options: &checked.option_types,
             results: &checked.result_types,
         },
-        &checked.memory_layouts,
-        &checked.equality,
+        checked.capabilities.memory(),
+        checked.capabilities.equality(),
     )
 }
 

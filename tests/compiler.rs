@@ -2678,6 +2678,71 @@ fn source_record_and_enum_annotations_resolve_after_parsing() {
 }
 
 #[test]
+fn semantic_capabilities_query_declared_and_derived_types_by_type_id() {
+    let checked = splitscript::check(
+        splitscript::parse(
+            r#"
+            state "game.exe" {}
+            record Pair {
+                left: i32
+                right: i32
+            }
+            enum MaybePair {
+                Pair(Pair)
+                Empty
+            }
+            fn keep(value: MaybePair) -> MaybePair { return value }
+        "#,
+        )
+        .expect("the capability fixture should parse"),
+    )
+    .expect("the capability fixture should type-check");
+    let types = checked.semantics().types();
+    let pair = types
+        .iter()
+        .find_map(|(id, kind)| {
+            matches!(kind, TypeKind::Record(record) if *record == checked.syntax().records[0].id)
+                .then_some(id)
+        })
+        .expect("the source record should have a semantic type");
+    let maybe_pair = types
+        .iter()
+        .find_map(|(id, kind)| {
+            matches!(kind, TypeKind::Enum(enumeration) if *enumeration == checked.syntax().enums[0].id)
+                .then_some(id)
+        })
+        .expect("the source enum should have a semantic type");
+    let string = types.id_for_standard(StdlibTypeId::String);
+    let capabilities = checked.capabilities();
+
+    assert!(capabilities.has(
+        pair,
+        splitscript::stdlib::StdlibCapabilityId::Equatable,
+        checked.semantics(),
+    ));
+    assert!(capabilities.has(
+        pair,
+        splitscript::stdlib::StdlibCapabilityId::MemoryReadable,
+        checked.semantics(),
+    ));
+    assert!(capabilities.has(
+        maybe_pair,
+        splitscript::stdlib::StdlibCapabilityId::Equatable,
+        checked.semantics(),
+    ));
+    assert!(!capabilities.has(
+        maybe_pair,
+        splitscript::stdlib::StdlibCapabilityId::MemoryReadable,
+        checked.semantics(),
+    ));
+    assert!(capabilities.has(
+        string,
+        splitscript::stdlib::StdlibCapabilityId::Interpolatable,
+        checked.semantics(),
+    ));
+}
+
+#[test]
 fn semantic_type_ids_intern_constructed_generic_arguments() {
     let source = r#"
         state "game.exe" {}

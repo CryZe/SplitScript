@@ -84,7 +84,7 @@ invariant:
   literals, and timer-state conversion. A well-known handle references the
   catalog declaration; it does not redeclare its name, fields, variants,
   capabilities, nullability, or representation.
-- [ ] Generalize equality, process-memory layout, interpolation/string
+- [x] Generalize equality, process-memory layout, interpolation/string
   conversion, and future traits into capability queries over semantic
   `TypeId`. Derive record/enum capabilities from their members where
   appropriate rather than matching concrete library types.
@@ -92,9 +92,11 @@ invariant:
     make inference constraints, callable applicability, casts,
     interpolation, memory-read eligibility, and equality query them instead
     of maintaining concrete-type lists.
-  - [ ] Replace the remaining provisional inference rules for source records,
-    enums, and wrappers with one recursive semantic-`TypeId` capability query;
-    publish precise failure reasons for diagnostics and backend planning.
+  - [x] Treat inference checks for source records, enums, and wrappers as
+    conservative admissibility only, then prove them through one recursive
+    semantic-`TypeId` capability query. Preserve precise equality failures and
+    process-memory layouts as capability evidence for diagnostics and backend
+    planning; validate catalog type-parameter constraints generically.
 
 ### Generic members, layouts, and tooling
 

@@ -145,6 +145,13 @@ impl TypeConstraint {
             Self::MemoryReadable => "MemoryReadable",
         }
     }
+
+    pub const fn capability(self) -> StdlibCapabilityId {
+        match self {
+            Self::Numeric => StdlibCapabilityId::Numeric,
+            Self::MemoryReadable => StdlibCapabilityId::MemoryReadable,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1731,23 +1738,16 @@ fn catalog_method_accepts(item: &StdlibItem, receiver: &TypeKind) -> bool {
             .iter()
             .find(|parameter| parameter.name == name)
             .is_none_or(|parameter| {
-                parameter
-                    .constraints
-                    .iter()
-                    .all(|constraint| match constraint {
-                        TypeConstraint::Numeric => {
-                            semantic_type_has_capability(receiver, StdlibCapabilityId::Numeric)
-                        }
-                        TypeConstraint::MemoryReadable => semantic_type_has_capability(
-                            receiver,
-                            StdlibCapabilityId::MemoryReadable,
-                        ),
-                    })
+                parameter.constraints.iter().all(|constraint| {
+                    semantic_type_may_have_capability(receiver, constraint.capability())
+                })
             }),
     }
 }
 
-fn semantic_type_has_capability(ty: &TypeKind, capability: StdlibCapabilityId) -> bool {
+// Candidate discovery has only a TypeKind, not the declarations required to
+// prove recursive capabilities. CapabilityAnalysis performs final validation.
+fn semantic_type_may_have_capability(ty: &TypeKind, capability: StdlibCapabilityId) -> bool {
     let library = StandardLibrary::new();
     match ty {
         TypeKind::Builtin(builtin) => library.core_type_has_capability(builtin.core(), capability),

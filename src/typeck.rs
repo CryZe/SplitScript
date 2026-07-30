@@ -10,7 +10,7 @@ use crate::{
     },
     inference::{
         ArrayLayout, InferenceContext, InferenceError, OptionLayout, Requirements, ResultLayout,
-        Type, fits_unsigned_literal, type_has_capability,
+        Type, fits_unsigned_literal, type_may_have_capability,
     },
     semantic::{
         PendingResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue,
@@ -19,8 +19,7 @@ use crate::{
     signature::parse_signature,
     stdlib::{
         Availability, CallCandidate, DeclaredTypeRef, ItemKind, ParameterRule, StandardLibrary,
-        StdlibCapabilityId, StdlibItem, StdlibItemId, StdlibTypeId, TypeConstraint,
-        TypeRef as CatalogTypeRef,
+        StdlibItem, StdlibItemId, StdlibTypeId, TypeConstraint, TypeRef as CatalogTypeRef,
     },
     visit::{self, Visitor},
 };
@@ -2075,13 +2074,7 @@ impl Checker {
                 .is_none_or(|parameter| {
                     parameter.constraints.iter().all(|constraint| {
                         matches!(receiver, Type::Variable(_))
-                            || match constraint {
-                                TypeConstraint::Numeric => receiver.is_numeric(),
-                                TypeConstraint::MemoryReadable => type_has_capability(
-                                    receiver,
-                                    StdlibCapabilityId::MemoryReadable,
-                                ),
-                            }
+                            || type_may_have_capability(receiver, constraint.capability())
                     })
                 }),
         }

@@ -10,7 +10,7 @@ use crate::{
     },
     inference::{
         ArrayLayout, InferenceContext, InferenceError, OptionLayout, Requirements, ResultLayout,
-        Type, fits_unsigned_literal, type_may_have_capability,
+        Type, type_may_have_capability,
     },
     semantic::{
         PendingResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue,
@@ -138,6 +138,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             value: syntax_type(result.value, &named_types, &semantic_types),
         })
         .collect::<Vec<_>>();
+    let void_type = Type::Known(semantic_types.id_for_core(crate::stdlib::CoreTypeId::Void));
     let inference = InferenceContext::new(
         semantic_types,
         records.len() as u32 + enums.len() as u32,
@@ -164,7 +165,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         named_types,
         inference,
         scopes: Vec::new(),
-        return_ty: Type::Void,
+        return_ty: void_type,
         current_action: ActionKind::WhileAttached,
         current_callable: "top level".to_owned(),
         in_function: false,
@@ -385,7 +386,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         } else if contains_value_return(&function.body) {
             checker.fresh_inference(Requirements::NONE, None)
         } else {
-            Type::Void
+            checker.core_type(crate::stdlib::CoreTypeId::Void)
         };
         checker
             .semantics
@@ -450,10 +451,8 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
                     .global_variable
             });
             if unsupported_standard
-                || matches!(
-                    ty,
-                    Type::Void | Type::Array(_) | Type::Option(_) | Type::Result(_)
-                )
+                || ty == checker.core_type(crate::stdlib::CoreTypeId::Void)
+                || matches!(ty, Type::Array(_) | Type::Option(_) | Type::Result(_))
                 || checker.source_record_id(ty).is_some()
             {
                 let ty = checker.type_name(ty);
@@ -559,11 +558,14 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             }
         }
         checker.block(&function.body, false);
-        if signature.result != Type::Void && !definitely_returns(&function.body) {
+        if signature.result != checker.core_type(crate::stdlib::CoreTypeId::Void)
+            && !definitely_returns(&function.body)
+        {
+            let result = checker.type_name(signature.result);
             checker.error(
                 format!(
                     "function `{}` must return `{}` on every path",
-                    function.name, signature.result
+                    function.name, result
                 ),
                 function.body.span,
             );
@@ -716,6 +718,10 @@ impl Checker {
         self.inference.known_standard(standard)
     }
 
+    fn core_type(&self, core: crate::stdlib::CoreTypeId) -> Type {
+        self.inference.known_core(core)
+    }
+
     fn standard_type_id(&self, ty: Type) -> Option<StdlibTypeId> {
         self.inference.standard_type(ty)
     }
@@ -820,7 +826,10 @@ impl Checker {
                 else_block,
                 ..
             } => {
-                self.expr(condition, Some(Type::Bool));
+                self.expr(
+                    condition,
+                    Some(self.core_type(crate::stdlib::CoreTypeId::Bool)),
+                );
                 self.block(then_block, true);
                 if let Some(else_block) = else_block {
                     self.block(else_block, true);
@@ -829,7 +838,10 @@ impl Checker {
             Stmt::While {
                 condition, body, ..
             } => {
-                self.expr(condition, Some(Type::Bool));
+                self.expr(
+                    condition,
+                    Some(self.core_type(crate::stdlib::CoreTypeId::Bool)),
+                );
                 self.loop_depth += 1;
                 self.block(body, true);
                 self.loop_depth -= 1;
@@ -924,7 +936,7 @@ impl Checker {
                             binding.span,
                         );
                     }
-                    if ty == Type::Void {
+                    if ty == self.core_type(crate::stdlib::CoreTypeId::Void) {
                         self.error("a suspended binding needs a value", binding.span);
                     } else {
                         self.semantics.resolve_value_type(binding.id, ty);
@@ -947,16 +959,17 @@ impl Checker {
     }
 
     fn check_return(&mut self, value: Option<&Expr>, span: Span) {
-        match (self.return_ty, value) {
-            (Type::Void, None) => {}
-            (Type::Void, Some(value)) => {
+        let returns_void = self.return_ty == self.core_type(crate::stdlib::CoreTypeId::Void);
+        match (returns_void, self.return_ty, value) {
+            (true, _, None) => {}
+            (true, _, Some(value)) => {
                 self.expr(value, None);
                 self.error(
                     format!("{} cannot return a value", self.current_callable),
                     span,
                 );
             }
-            (expected, Some(value)) => {
+            (false, expected, Some(value)) => {
                 self.allowing_null = !self.in_function
                     && matches!(
                         self.current_action,
@@ -965,7 +978,7 @@ impl Checker {
                 self.expr(value, Some(expected));
                 self.allowing_null = false;
             }
-            (_, None)
+            (false, _, None)
                 if !self.in_function
                     && matches!(
                         self.current_action,
@@ -975,7 +988,7 @@ impl Checker {
                             | ActionKind::IsLoading
                             | ActionKind::GameTime
                     ) => {}
-            (expected, None) => {
+            (false, expected, None) => {
                 let expected = self.type_name(expected);
                 self.error(
                     format!("expected a return value of type `{expected}`"),
@@ -1005,7 +1018,7 @@ impl Checker {
                     .value_usage
                     .local_variable
             });
-            if ty == Type::Void || unsupported_standard {
+            if ty == self.core_type(crate::stdlib::CoreTypeId::Void) || unsupported_standard {
                 let ty = self.type_name(ty);
                 self.error(
                     format!("local variables cannot currently store `{ty}`"),
@@ -1047,13 +1060,16 @@ impl Checker {
                     return None;
                 }
             },
-            ExprKind::Bool(_) => {
-                self.expect_expression(expr.id, Type::Bool, expected, expr.span)?
-            }
+            ExprKind::Bool(_) => self.expect_expression(
+                expr.id,
+                self.core_type(crate::stdlib::CoreTypeId::Bool),
+                expected,
+                expr.span,
+            )?,
             ExprKind::Int { value, suffix } => {
                 let ty = if let Some(suffix) = suffix {
-                    let suffix = Type::from(*suffix);
-                    if !fits_unsigned_literal(*value, suffix) {
+                    let suffix = self.syntax_type(*suffix);
+                    if !self.inference.fits_unsigned_literal(*value, suffix) {
                         self.error(
                             format!("integer literal does not fit in `{suffix}`"),
                             expr.span,
@@ -1278,7 +1294,11 @@ impl Checker {
                             format!("enum:{enumeration}:{variant}")
                         }
                         MatchPattern::Bool(value) => {
-                            self.unify(value_type, Type::Bool, arm.span);
+                            self.unify(
+                                value_type,
+                                self.core_type(crate::stdlib::CoreTypeId::Bool),
+                                arm.span,
+                            );
                             format!("bool:{value}")
                         }
                         MatchPattern::Int { value, suffix } => {
@@ -1288,13 +1308,16 @@ impl Checker {
                                         "integer match patterns require an integer type",
                                         arm.span,
                                     );
-                                } else if !fits_unsigned_literal(*value, (*suffix).into()) {
+                                } else if !self
+                                    .inference
+                                    .fits_unsigned_literal(*value, self.syntax_type(*suffix))
+                                {
                                     self.error(
                                         format!("integer literal does not fit in `{suffix}`"),
                                         arm.span,
                                     );
                                 }
-                                (*suffix).into()
+                                self.syntax_type(*suffix)
                             } else {
                                 self.fresh_inference(REQUIRE_INTEGER, Some(*value))
                             };
@@ -1393,7 +1416,7 @@ impl Checker {
                         MatchPattern::Wildcard => "wildcard".to_owned(),
                     };
                     if let Some(guard) = &arm.guard {
-                        self.expr(guard, Some(Type::Bool));
+                        self.expr(guard, Some(self.core_type(crate::stdlib::CoreTypeId::Bool)));
                     }
                     let arm_type = self.expr(&arm.value, result_type);
                     self.scopes.pop();
@@ -1415,23 +1438,7 @@ impl Checker {
 
                 if !has_unguarded_wildcard {
                     match self.shallow_type(value_type) {
-                        ty @ Type::Known(_) => {
-                            if let Some((enum_key, declaration)) = self.enum_info_for_type(ty) {
-                                for variant in &declaration.variants {
-                                    let key = format!("enum:{enum_key}:{}", variant.name);
-                                    if !unguarded_patterns.contains(&key) {
-                                        self.error(
-                                            format!(
-                                                "non-exhaustive match: missing `{}`",
-                                                variant.name
-                                            ),
-                                            expr.span,
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        Type::Bool => {
+                        ty if ty == self.core_type(crate::stdlib::CoreTypeId::Bool) => {
                             for value in [false, true] {
                                 if !unguarded_patterns.contains(&format!("bool:{value}")) {
                                     self.error(
@@ -1465,8 +1472,27 @@ impl Checker {
                                 }
                             }
                         }
-                        ty if ty.is_integer() => {
+                        ty if self.inference.is_integer(ty) => {
                             self.error("non-exhaustive integer match: add a `_` arm", expr.span)
+                        }
+                        ty @ Type::Known(_) => {
+                            if let Some((enum_key, declaration)) = self.enum_info_for_type(ty) {
+                                for variant in &declaration.variants {
+                                    let key = format!("enum:{enum_key}:{}", variant.name);
+                                    if !unguarded_patterns.contains(&key) {
+                                        self.error(
+                                            format!(
+                                                "non-exhaustive match: missing `{}`",
+                                                variant.name
+                                            ),
+                                            expr.span,
+                                        );
+                                    }
+                                }
+                            } else {
+                                let ty = self.type_name(ty);
+                                self.error(format!("type `{ty}` cannot be matched"), value.span);
+                            }
                         }
                         Type::Variable(_) => self.error(
                             "match patterns do not determine the matched value's type",
@@ -1489,7 +1515,10 @@ impl Checker {
                 then_expr,
                 else_expr,
             } => {
-                self.expr(condition, Some(Type::Bool));
+                self.expr(
+                    condition,
+                    Some(self.core_type(crate::stdlib::CoreTypeId::Bool)),
+                );
                 let result_type =
                     expected.unwrap_or_else(|| self.fresh_inference(Requirements::NONE, None));
                 self.expr(then_expr, Some(result_type));
@@ -1580,8 +1609,9 @@ impl Checker {
             }
             ExprKind::Unary { op, expr: inner } => match op {
                 UnaryOp::Not => {
-                    self.expr(inner, Some(Type::Bool));
-                    self.expect_expression(expr.id, Type::Bool, expected, expr.span)?
+                    let bool_type = self.core_type(crate::stdlib::CoreTypeId::Bool);
+                    self.expr(inner, Some(bool_type));
+                    self.expect_expression(expr.id, bool_type, expected, expr.span)?
                 }
                 UnaryOp::Neg => {
                     let operand_hint = expected.map(|ty| self.expected_value_type(ty));
@@ -1596,13 +1626,14 @@ impl Checker {
             } => {
                 let source = self.expr(inner, None)?;
                 let target = self.syntax_type(*target);
-                if target.is_numeric() {
+                if self.inference.is_numeric(target) {
                     self.require(source, REQUIRE_NUMERIC, expr.span)?;
                 } else if target == self.standard_type(StdlibTypeId::String) {
                     self.require(source, REQUIRE_STRING_CAST, expr.span)?;
                 } else {
+                    let target_name = self.type_name(target);
                     self.error(
-                        format!("`as` cannot convert a value to `{target}`"),
+                        format!("`as` cannot convert a value to `{target_name}`"),
                         expr.span,
                     );
                     return None;
@@ -1632,9 +1663,10 @@ impl Checker {
         span: Span,
     ) -> Option<Type> {
         if matches!(op, BinaryOp::Or | BinaryOp::And) {
-            self.expr(left, Some(Type::Bool));
-            self.expr(right, Some(Type::Bool));
-            return self.expect_expression(expression, Type::Bool, expected, span);
+            let bool_type = self.core_type(crate::stdlib::CoreTypeId::Bool);
+            self.expr(left, Some(bool_type));
+            self.expr(right, Some(bool_type));
+            return self.expect_expression(expression, bool_type, expected, span);
         }
 
         let result_is_bool = matches!(
@@ -1653,7 +1685,7 @@ impl Checker {
         self.require_binary_operand(op, operand_ty, span)?;
 
         let result = if result_is_bool {
-            Type::Bool
+            self.core_type(crate::stdlib::CoreTypeId::Bool)
         } else {
             operand_ty
         };
@@ -2036,7 +2068,7 @@ impl Checker {
                 .type_arguments
                 .iter()
                 .find(|(name, _)| *name == parameter.name)
-                .map(|(_, ty)| ty.legacy())
+                .map(|(_, ty)| self.inference.known_builtin(*ty))
                 .unwrap_or_else(|| self.fresh_inference(requirements, None));
             if requirements != Requirements::NONE {
                 self.require(ty, requirements, span)?;
@@ -2569,7 +2601,6 @@ impl Checker {
                     .map_or_else(|| ty.to_string(), |enumeration| enumeration.name.clone()),
                 _ => self.inference.known_type_name(id),
             },
-            _ => ty.to_string(),
         }
     }
 
@@ -2822,18 +2853,24 @@ impl Checker {
 
 fn inference_type_for_declared(types: &TypeStore, ty: DeclaredTypeRef) -> Type {
     match ty {
-        DeclaredTypeRef::Core(core) => Type::from_core(core),
+        DeclaredTypeRef::Core(core) => Type::Known(types.id_for_core(core)),
         DeclaredTypeRef::Standard(standard) => Type::Known(types.id_for_standard(standard)),
     }
 }
 
 fn syntax_type(ty: TypeRef, named_types: &HashMap<TypeNameId, Type>, types: &TypeStore) -> Type {
+    if let Some(core) = ty.core_type() {
+        return Type::Known(types.id_for_core(core));
+    }
     match ty {
         TypeRef::Named(id) => named_types[&id],
         TypeRef::Standard(standard) => Type::Known(types.id_for_standard(standard)),
         TypeRef::Record(record) => Type::Known(types.id_for_record(record)),
         TypeRef::Enum(enumeration) => Type::Known(types.id_for_enum(enumeration)),
-        ty => Type::from(ty),
+        TypeRef::Array(id) => Type::Array(id),
+        TypeRef::Option(id) => Type::Option(id),
+        TypeRef::Result(id) => Type::Result(id),
+        _ => unreachable!("core and nominal syntax types were handled before constructors"),
     }
 }
 

@@ -88,21 +88,21 @@ impl BuiltinType {
         StandardLibrary::new().core_type_has_capability(self.core(), StdlibCapabilityId::Numeric)
     }
 
-    pub(crate) const fn legacy(self) -> Type {
+    pub(crate) const fn syntax(self) -> crate::ast::TypeRef {
         match self {
-            Self::Void => Type::Void,
-            Self::Bool => Type::Bool,
-            Self::I8 => Type::I8,
-            Self::U8 => Type::U8,
-            Self::I16 => Type::I16,
-            Self::U16 => Type::U16,
-            Self::I32 => Type::I32,
-            Self::U32 => Type::U32,
-            Self::I64 => Type::I64,
-            Self::U64 => Type::U64,
-            Self::Address => Type::Address,
-            Self::F32 => Type::F32,
-            Self::F64 => Type::F64,
+            Self::Void => crate::ast::TypeRef::Void,
+            Self::Bool => crate::ast::TypeRef::Bool,
+            Self::I8 => crate::ast::TypeRef::I8,
+            Self::U8 => crate::ast::TypeRef::U8,
+            Self::I16 => crate::ast::TypeRef::I16,
+            Self::U16 => crate::ast::TypeRef::U16,
+            Self::I32 => crate::ast::TypeRef::I32,
+            Self::U32 => crate::ast::TypeRef::U32,
+            Self::I64 => crate::ast::TypeRef::I64,
+            Self::U64 => crate::ast::TypeRef::U64,
+            Self::Address => crate::ast::TypeRef::Address,
+            Self::F32 => crate::ast::TypeRef::F32,
+            Self::F64 => crate::ast::TypeRef::F64,
         }
     }
 }
@@ -204,6 +204,10 @@ impl TypeStore {
         self.interned[&TypeKind::Builtin(builtin)]
     }
 
+    pub fn id_for_core(&self, core: CoreTypeId) -> TypeId {
+        self.id_for_builtin(BuiltinType::from_core(core))
+    }
+
     pub fn id_for_standard(&self, standard: StdlibTypeId) -> TypeId {
         self.interned[&TypeKind::Standard(standard)]
     }
@@ -238,19 +242,6 @@ impl TypeStore {
             return id;
         }
         let kind = match ty {
-            Type::Void => TypeKind::Builtin(BuiltinType::Void),
-            Type::Bool => TypeKind::Builtin(BuiltinType::Bool),
-            Type::I8 => TypeKind::Builtin(BuiltinType::I8),
-            Type::U8 => TypeKind::Builtin(BuiltinType::U8),
-            Type::I16 => TypeKind::Builtin(BuiltinType::I16),
-            Type::U16 => TypeKind::Builtin(BuiltinType::U16),
-            Type::I32 => TypeKind::Builtin(BuiltinType::I32),
-            Type::U32 => TypeKind::Builtin(BuiltinType::U32),
-            Type::I64 => TypeKind::Builtin(BuiltinType::I64),
-            Type::U64 => TypeKind::Builtin(BuiltinType::U64),
-            Type::Address => TypeKind::Builtin(BuiltinType::Address),
-            Type::F32 => TypeKind::Builtin(BuiltinType::F32),
-            Type::F64 => TypeKind::Builtin(BuiltinType::F64),
             Type::Known(_) => unreachable!("known types return before semantic interning"),
             Type::Array(id) => {
                 let element = arrays
@@ -297,13 +288,34 @@ impl TypeStore {
         results: &[ResultTypeDecl],
     ) -> TypeId {
         match ty {
+            crate::ast::TypeRef::Void => self.id_for_builtin(BuiltinType::Void),
+            crate::ast::TypeRef::Bool => self.id_for_builtin(BuiltinType::Bool),
+            crate::ast::TypeRef::I8 => self.id_for_builtin(BuiltinType::I8),
+            crate::ast::TypeRef::U8 => self.id_for_builtin(BuiltinType::U8),
+            crate::ast::TypeRef::I16 => self.id_for_builtin(BuiltinType::I16),
+            crate::ast::TypeRef::U16 => self.id_for_builtin(BuiltinType::U16),
+            crate::ast::TypeRef::I32 => self.id_for_builtin(BuiltinType::I32),
+            crate::ast::TypeRef::U32 => self.id_for_builtin(BuiltinType::U32),
+            crate::ast::TypeRef::I64 => self.id_for_builtin(BuiltinType::I64),
+            crate::ast::TypeRef::U64 => self.id_for_builtin(BuiltinType::U64),
+            crate::ast::TypeRef::Address => self.id_for_builtin(BuiltinType::Address),
+            crate::ast::TypeRef::F32 => self.id_for_builtin(BuiltinType::F32),
+            crate::ast::TypeRef::F64 => self.id_for_builtin(BuiltinType::F64),
             crate::ast::TypeRef::Standard(standard) => self.id_for_standard(standard),
             crate::ast::TypeRef::Record(record) => self.id_for_record(record),
             crate::ast::TypeRef::Enum(enumeration) => self.id_for_enum(enumeration),
             crate::ast::TypeRef::Named(name) => {
                 unreachable!("unresolved nominal type name {name} reached semantic interning")
             }
-            ty => self.intern_inferred(ty.into(), arrays, options, results),
+            crate::ast::TypeRef::Array(id) => {
+                self.intern_inferred(Type::Array(id), arrays, options, results)
+            }
+            crate::ast::TypeRef::Option(id) => {
+                self.intern_inferred(Type::Option(id), arrays, options, results)
+            }
+            crate::ast::TypeRef::Result(id) => {
+                self.intern_inferred(Type::Result(id), arrays, options, results)
+            }
         }
     }
 

@@ -62,13 +62,14 @@ never needs to reconstruct this information from syntax. `TypeStore` has no
 parallel legacy type representation: Wasm storage/value selection lowers
 `TypeId` / `TypeKind` directly into backend-local physical categories.
 
-The semantic `TypeStore` is created before inference. Standard-library and
-source record/enum nominal types enter inference as their canonical `TypeId`
-and retain that exact identity through checked publication, rather than passing
-through parallel enums and post-inference conversion tables. Namespace,
-nominal-type, field, variant, and callable IDs are generated from the same
-declaration rows as their names, ownership, documentation, and representation
-metadata.
+The semantic `TypeStore` is created before inference. Core primitives,
+standard-library types, and source record/enum types enter inference as their
+canonical `TypeId` and retain that exact identity through checked publication,
+rather than passing through parallel enums and post-inference conversion
+tables. Only inference variables and temporarily unresolved array, Option, and
+Result constructor terms remain solver-local. Namespace, nominal-type, field,
+variant, and callable IDs are generated from the same declaration rows as their
+names, ownership, documentation, and representation metadata.
 
 Source annotations, cast targets, and integer suffixes use the separate,
 inference-free `ast::TypeRef`; parser-owned array references and checker-owned

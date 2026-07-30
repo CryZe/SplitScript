@@ -8,24 +8,11 @@ use std::{collections::HashMap, fmt, ops::BitOr};
 use crate::{
     ast::{ArrayTypeId, OptionTypeId, ResultTypeId, TypeRef},
     stdlib::{CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
-    types::{TypeId, TypeKind, TypeStore},
+    types::{BuiltinType, TypeId, TypeKind, TypeStore},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
-    Void,
-    Bool,
-    I8,
-    U8,
-    I16,
-    U16,
-    I32,
-    U32,
-    I64,
-    U64,
-    Address,
-    F32,
-    F64,
     Known(TypeId),
     Array(ArrayTypeId),
     Option(OptionTypeId),
@@ -34,71 +21,10 @@ pub(crate) enum Type {
 }
 
 impl Type {
-    pub(crate) fn from_core(core: CoreTypeId) -> Self {
-        match core {
-            CoreTypeId::Void => Self::Void,
-            CoreTypeId::Bool => Self::Bool,
-            CoreTypeId::I8 => Self::I8,
-            CoreTypeId::U8 => Self::U8,
-            CoreTypeId::I16 => Self::I16,
-            CoreTypeId::U16 => Self::U16,
-            CoreTypeId::I32 => Self::I32,
-            CoreTypeId::U32 => Self::U32,
-            CoreTypeId::I64 => Self::I64,
-            CoreTypeId::U64 => Self::U64,
-            CoreTypeId::Address => Self::Address,
-            CoreTypeId::F32 => Self::F32,
-            CoreTypeId::F64 => Self::F64,
-        }
-    }
-
-    pub(crate) fn core(self) -> Option<CoreTypeId> {
-        Some(match self {
-            Self::Void => CoreTypeId::Void,
-            Self::Bool => CoreTypeId::Bool,
-            Self::I8 => CoreTypeId::I8,
-            Self::U8 => CoreTypeId::U8,
-            Self::I16 => CoreTypeId::I16,
-            Self::U16 => CoreTypeId::U16,
-            Self::I32 => CoreTypeId::I32,
-            Self::U32 => CoreTypeId::U32,
-            Self::I64 => CoreTypeId::I64,
-            Self::U64 => CoreTypeId::U64,
-            Self::Address => CoreTypeId::Address,
-            Self::F32 => CoreTypeId::F32,
-            Self::F64 => CoreTypeId::F64,
-            _ => return None,
-        })
-    }
-
-    pub(crate) fn is_integer(self) -> bool {
-        self.core().is_some_and(|core| {
-            StandardLibrary::new().core_type_has_capability(core, StdlibCapabilityId::Integer)
-        })
-    }
-
-    pub(crate) fn is_numeric(self) -> bool {
-        self.core().is_some_and(|core| {
-            StandardLibrary::new().core_type_has_capability(core, StdlibCapabilityId::Numeric)
-        })
-    }
-
     pub(crate) fn to_ref(self, types: &TypeStore) -> TypeRef {
         match self {
-            Self::Void => TypeRef::Void,
-            Self::Bool => TypeRef::Bool,
-            Self::I8 => TypeRef::I8,
-            Self::U8 => TypeRef::U8,
-            Self::I16 => TypeRef::I16,
-            Self::U16 => TypeRef::U16,
-            Self::I32 => TypeRef::I32,
-            Self::U32 => TypeRef::U32,
-            Self::I64 => TypeRef::I64,
-            Self::U64 => TypeRef::U64,
-            Self::Address => TypeRef::Address,
-            Self::F32 => TypeRef::F32,
-            Self::F64 => TypeRef::F64,
             Self::Known(id) => match types.kind(id) {
+                TypeKind::Builtin(builtin) => builtin.syntax(),
                 TypeKind::Standard(standard) => TypeRef::Standard(*standard),
                 TypeKind::Record(record) => TypeRef::Record(*record),
                 TypeKind::Enum(enumeration) => TypeRef::Enum(*enumeration),
@@ -114,63 +40,15 @@ impl Type {
     }
 }
 
-impl From<TypeRef> for Type {
-    fn from(ty: TypeRef) -> Self {
-        match ty {
-            TypeRef::Void => Self::Void,
-            TypeRef::Bool => Self::Bool,
-            TypeRef::I8 => Self::I8,
-            TypeRef::U8 => Self::U8,
-            TypeRef::I16 => Self::I16,
-            TypeRef::U16 => Self::U16,
-            TypeRef::I32 => Self::I32,
-            TypeRef::U32 => Self::U32,
-            TypeRef::I64 => Self::I64,
-            TypeRef::U64 => Self::U64,
-            TypeRef::Address => Self::Address,
-            TypeRef::F32 => Self::F32,
-            TypeRef::F64 => Self::F64,
-            TypeRef::Named(id) => {
-                unreachable!("source nominal type name {id} must be resolved before inference")
-            }
-            TypeRef::Standard(standard) => {
-                unreachable!("standard type {standard:?} must be interned before inference")
-            }
-            TypeRef::Record(id) => {
-                unreachable!("source record {id} must be interned before inference")
-            }
-            TypeRef::Enum(id) => {
-                unreachable!("source enum {id} must be interned before inference")
-            }
-            TypeRef::Array(id) => Self::Array(id),
-            TypeRef::Option(id) => Self::Option(id),
-            TypeRef::Result(id) => Self::Result(id),
-        }
-    }
-}
-
 impl fmt::Display for Type {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Void => "void",
-            Self::Bool => "bool",
-            Self::I8 => "i8",
-            Self::U8 => "u8",
-            Self::I16 => "i16",
-            Self::U16 => "u16",
-            Self::I32 => "i32",
-            Self::U32 => "u32",
-            Self::I64 => "i64",
-            Self::U64 => "u64",
-            Self::Address => "address",
-            Self::F32 => "f32",
-            Self::F64 => "f64",
-            Self::Known(id) => return write!(formatter, "type#{}", id.index()),
-            Self::Array(id) => return write!(formatter, "Array#{id}"),
-            Self::Option(id) => return write!(formatter, "Option#{id}"),
-            Self::Result(id) => return write!(formatter, "Result#{id}"),
-            Self::Variable(id) => return write!(formatter, "?{id}"),
-        })
+        match self {
+            Self::Known(id) => write!(formatter, "type#{}", id.index()),
+            Self::Array(id) => write!(formatter, "Array#{id}"),
+            Self::Option(id) => write!(formatter, "Option#{id}"),
+            Self::Result(id) => write!(formatter, "Result#{id}"),
+            Self::Variable(id) => write!(formatter, "?{id}"),
+        }
     }
 }
 
@@ -280,6 +158,14 @@ impl InferenceContext {
         Type::Known(self.types.id_for_standard(standard))
     }
 
+    pub(crate) fn known_core(&self, core: CoreTypeId) -> Type {
+        Type::Known(self.types.id_for_core(core))
+    }
+
+    pub(crate) fn known_builtin(&self, builtin: BuiltinType) -> Type {
+        Type::Known(self.types.id_for_builtin(builtin))
+    }
+
     pub(crate) fn type_store(&self) -> &TypeStore {
         &self.types
     }
@@ -292,6 +178,26 @@ impl InferenceContext {
             TypeKind::Standard(standard) => Some(*standard),
             _ => None,
         }
+    }
+
+    pub(crate) fn type_may_have_capability(
+        &self,
+        ty: Type,
+        capability: StdlibCapabilityId,
+    ) -> bool {
+        type_may_have_capability(&self.types, ty, capability)
+    }
+
+    pub(crate) fn is_integer(&self, ty: Type) -> bool {
+        self.type_may_have_capability(ty, StdlibCapabilityId::Integer)
+    }
+
+    pub(crate) fn is_numeric(&self, ty: Type) -> bool {
+        self.type_may_have_capability(ty, StdlibCapabilityId::Numeric)
+    }
+
+    pub(crate) fn fits_unsigned_literal(&self, value: u64, ty: Type) -> bool {
+        fits_unsigned_literal(&self.types, value, ty)
     }
 
     pub(crate) fn known_type_name(&self, id: TypeId) -> String {
@@ -408,7 +314,7 @@ impl InferenceContext {
             }
             let requirements = self.variables[root as usize].requirements;
             let default = if requirements.intersects(Requirements::FLOAT) {
-                Some(Type::F64)
+                Some(self.known_builtin(BuiltinType::F64))
             } else if requirements.intersects(
                 Requirements::INTEGER
                     | Requirements::NUMERIC
@@ -416,7 +322,7 @@ impl InferenceContext {
                     | Requirements::STRING_CAST
                     | Requirements::INTERPOLATABLE,
             ) {
-                Some(Type::I32)
+                Some(self.known_builtin(BuiltinType::I32))
             } else {
                 None
             };
@@ -441,7 +347,8 @@ impl InferenceContext {
         for id in 0..self.variables.len() as u32 {
             let root = self.root(id);
             if root == id && self.variables[root as usize].binding.is_none() {
-                self.variables[root as usize].binding = Some(Type::I32);
+                self.variables[root as usize].binding =
+                    Some(Type::Known(self.types.id_for_builtin(BuiltinType::I32)));
             }
         }
     }
@@ -698,7 +605,7 @@ impl InferenceContext {
             return Err(InferenceError::UnsatisfiedConstraints(ty));
         }
         if let Some(literal) = inference.largest_literal
-            && !fits_unsigned_literal(literal, ty)
+            && !fits_unsigned_literal(&self.types, literal, ty)
         {
             return Err(InferenceError::IntegerLiteralOutOfRange(ty));
         }
@@ -706,17 +613,20 @@ impl InferenceContext {
     }
 }
 
-pub(crate) fn fits_unsigned_literal(value: u64, ty: Type) -> bool {
-    match ty {
-        Type::Bool => value <= 1,
-        Type::U8 => u8::try_from(value).is_ok(),
-        Type::I8 => value <= i8::MAX as u64,
-        Type::U16 => u16::try_from(value).is_ok(),
-        Type::I16 => value <= i16::MAX as u64,
-        Type::U32 => u32::try_from(value).is_ok(),
-        Type::I32 => value <= i32::MAX as u64,
-        Type::U64 | Type::Address => true,
-        Type::I64 => value <= i64::MAX as u64,
+fn fits_unsigned_literal(types: &TypeStore, value: u64, ty: Type) -> bool {
+    let Type::Known(id) = ty else {
+        return false;
+    };
+    match types.kind(id) {
+        TypeKind::Builtin(BuiltinType::Bool) => value <= 1,
+        TypeKind::Builtin(BuiltinType::U8) => u8::try_from(value).is_ok(),
+        TypeKind::Builtin(BuiltinType::I8) => value <= i8::MAX as u64,
+        TypeKind::Builtin(BuiltinType::U16) => u16::try_from(value).is_ok(),
+        TypeKind::Builtin(BuiltinType::I16) => value <= i16::MAX as u64,
+        TypeKind::Builtin(BuiltinType::U32) => u32::try_from(value).is_ok(),
+        TypeKind::Builtin(BuiltinType::I32) => value <= i32::MAX as u64,
+        TypeKind::Builtin(BuiltinType::U64 | BuiltinType::Address) => true,
+        TypeKind::Builtin(BuiltinType::I64) => value <= i64::MAX as u64,
         _ => false,
     }
 }
@@ -756,9 +666,6 @@ pub(crate) fn type_may_have_capability(
     capability: StdlibCapabilityId,
 ) -> bool {
     let library = StandardLibrary::new();
-    if let Some(core) = ty.core() {
-        return library.core_type_has_capability(core, capability);
-    }
     match ty {
         Type::Known(id) => match types.kind(id) {
             TypeKind::Builtin(builtin) => {
@@ -776,7 +683,6 @@ pub(crate) fn type_may_have_capability(
         },
         Type::Option(_) | Type::Result(_) => capability == StdlibCapabilityId::Equatable,
         Type::Array(_) | Type::Variable(_) => false,
-        _ => unreachable!("core types were handled above"),
     }
 }
 
@@ -797,7 +703,7 @@ fn requirements_are_possible(types: &TypeStore, requirements: Requirements) -> b
     library
         .core_types()
         .iter()
-        .map(|ty| Type::from_core(ty.id))
+        .map(|ty| Type::Known(types.id_for_core(ty.id)))
         .chain(
             library
                 .types()
@@ -821,9 +727,14 @@ mod tests {
         let value = inference.fresh(Requirements::INTEGER, Some(256));
         let alias = inference.fresh(Requirements::NONE, None);
         inference.unify(alias, value).unwrap();
-        assert!(inference.unify(alias, Type::U8).is_err());
-        inference.unify(alias, Type::U16).unwrap();
-        assert_eq!(inference.resolve(value), Type::U16);
+        assert!(
+            inference
+                .unify(alias, inference.known_builtin(BuiltinType::U8))
+                .is_err()
+        );
+        let u16_type = inference.known_builtin(BuiltinType::U16);
+        inference.unify(alias, u16_type).unwrap();
+        assert_eq!(inference.resolve(value), u16_type);
     }
 
     #[test]
@@ -832,6 +743,7 @@ mod tests {
         let value = inference.fresh(Requirements::SIGNED, None);
         inference.require(value, Requirements::NUMERIC).unwrap();
         assert!(inference.default_unbound().is_empty());
-        assert_eq!(inference.resolve(value), Type::I32);
+        let i32_type = inference.known_builtin(BuiltinType::I32);
+        assert_eq!(inference.resolve(value), i32_type);
     }
 }

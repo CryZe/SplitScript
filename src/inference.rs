@@ -7,7 +7,7 @@ use std::{collections::HashMap, fmt, ops::BitOr};
 
 use crate::{
     ast::{ArrayTypeId, EnumId, OptionTypeId, RecordId, ResultTypeId, TypeRef},
-    stdlib::{StandardLibrary, StdlibCapabilityId, StdlibTypeId},
+    stdlib::{CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -35,27 +35,49 @@ pub(crate) enum Type {
 }
 
 impl Type {
-    pub(crate) fn is_integer(self) -> bool {
-        matches!(
-            self,
-            Self::I8
-                | Self::U8
-                | Self::I16
-                | Self::U16
-                | Self::I32
-                | Self::U32
-                | Self::I64
-                | Self::U64
-                | Self::Address
-        )
+    pub(crate) fn from_core(core: CoreTypeId) -> Self {
+        match core {
+            CoreTypeId::Void => Self::Void,
+            CoreTypeId::Bool => Self::Bool,
+            CoreTypeId::I8 => Self::I8,
+            CoreTypeId::U8 => Self::U8,
+            CoreTypeId::I16 => Self::I16,
+            CoreTypeId::U16 => Self::U16,
+            CoreTypeId::I32 => Self::I32,
+            CoreTypeId::U32 => Self::U32,
+            CoreTypeId::I64 => Self::I64,
+            CoreTypeId::U64 => Self::U64,
+            CoreTypeId::Address => Self::Address,
+            CoreTypeId::F32 => Self::F32,
+            CoreTypeId::F64 => Self::F64,
+        }
     }
 
-    pub(crate) fn is_signed(self) -> bool {
-        matches!(self, Self::I8 | Self::I16 | Self::I32 | Self::I64)
+    pub(crate) fn core(self) -> Option<CoreTypeId> {
+        Some(match self {
+            Self::Void => CoreTypeId::Void,
+            Self::Bool => CoreTypeId::Bool,
+            Self::I8 => CoreTypeId::I8,
+            Self::U8 => CoreTypeId::U8,
+            Self::I16 => CoreTypeId::I16,
+            Self::U16 => CoreTypeId::U16,
+            Self::I32 => CoreTypeId::I32,
+            Self::U32 => CoreTypeId::U32,
+            Self::I64 => CoreTypeId::I64,
+            Self::U64 => CoreTypeId::U64,
+            Self::Address => CoreTypeId::Address,
+            Self::F32 => CoreTypeId::F32,
+            Self::F64 => CoreTypeId::F64,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn is_integer(self) -> bool {
+        type_has_capability(self, StdlibCapabilityId::Integer)
     }
 
     pub(crate) fn is_numeric(self) -> bool {
-        self.is_integer() || matches!(self, Self::F32 | Self::F64)
+        type_has_capability(self, StdlibCapabilityId::Numeric)
     }
 
     pub(crate) fn to_ref(self) -> TypeRef {
@@ -102,12 +124,9 @@ impl From<TypeRef> for Type {
             TypeRef::Address => Self::Address,
             TypeRef::F32 => Self::F32,
             TypeRef::F64 => Self::F64,
-            TypeRef::Named(name) => Self::Standard(
-                StandardLibrary::new()
-                    .type_by_name(name)
-                    .expect("parsed nominal standard type names remain resolvable")
-                    .id,
-            ),
+            TypeRef::Named(id) => {
+                unreachable!("source nominal type name {id} must be resolved before inference")
+            }
             TypeRef::Standard(standard) => Self::Standard(standard),
             TypeRef::Record(id) => Self::Record(id),
             TypeRef::Enum(id) => Self::Enum(id),
@@ -664,92 +683,45 @@ fn type_meets_requirements(ty: Type, requirements: Requirements) -> bool {
     if matches!(ty, Type::Variable(_)) {
         return true;
     }
-    if requirements.intersects(Requirements::EQUATABLE)
-        && !ty.is_numeric()
-        && !matches!(
-            ty,
-            Type::Bool | Type::Record(_) | Type::Enum(_) | Type::Option(_) | Type::Result(_)
-        )
-        && !standard_has_capability(ty, StdlibCapabilityId::Equatable)
-    {
-        return false;
-    }
-    if requirements.intersects(Requirements::NUMERIC) && !ty.is_numeric() {
-        return false;
-    }
-    if requirements.intersects(Requirements::INTEGER) && !ty.is_integer() {
-        return false;
-    }
-    if requirements.intersects(Requirements::SIGNED)
-        && !ty.is_signed()
-        && !matches!(ty, Type::F32 | Type::F64)
-    {
-        return false;
-    }
-    if requirements.intersects(Requirements::FLOAT) && !matches!(ty, Type::F32 | Type::F64) {
-        return false;
-    }
-    if requirements.intersects(Requirements::STRING_CAST)
-        && !matches!(
-            ty,
-            Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::I64
-                | Type::U64
-                | Type::Address
-        )
-    {
-        return false;
-    }
-    if requirements.intersects(Requirements::INTERPOLATABLE)
-        && !matches!(
-            ty,
-            Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::I64
-                | Type::U64
-                | Type::Address
-        )
-        && !standard_has_capability(ty, StdlibCapabilityId::Interpolatable)
-    {
-        return false;
-    }
-    if requirements.intersects(Requirements::MEMORY_READABLE)
-        && !matches!(
-            ty,
-            Type::Bool
-                | Type::I8
-                | Type::U8
-                | Type::I16
-                | Type::U16
-                | Type::I32
-                | Type::U32
-                | Type::I64
-                | Type::U64
-                | Type::Address
-                | Type::F32
-                | Type::F64
-                | Type::Record(_)
-        )
-    {
-        return false;
-    }
-    true
+    [
+        (Requirements::EQUATABLE, StdlibCapabilityId::Equatable),
+        (Requirements::NUMERIC, StdlibCapabilityId::Numeric),
+        (Requirements::INTEGER, StdlibCapabilityId::Integer),
+        (Requirements::SIGNED, StdlibCapabilityId::Signed),
+        (Requirements::FLOAT, StdlibCapabilityId::Float),
+        (Requirements::STRING_CAST, StdlibCapabilityId::StringCast),
+        (
+            Requirements::INTERPOLATABLE,
+            StdlibCapabilityId::Interpolatable,
+        ),
+        (
+            Requirements::MEMORY_READABLE,
+            StdlibCapabilityId::MemoryReadable,
+        ),
+    ]
+    .into_iter()
+    .all(|(requirement, capability)| {
+        !requirements.intersects(requirement) || type_has_capability(ty, capability)
+    })
 }
 
-fn standard_has_capability(ty: Type, capability: StdlibCapabilityId) -> bool {
-    let Type::Standard(standard) = ty else {
-        return false;
-    };
-    StandardLibrary::new().type_has_capability(standard, capability)
+pub(crate) fn type_has_capability(ty: Type, capability: StdlibCapabilityId) -> bool {
+    let library = StandardLibrary::new();
+    if let Some(core) = ty.core() {
+        return library.core_type_has_capability(core, capability);
+    }
+    match ty {
+        Type::Standard(standard) => library.type_has_capability(standard, capability),
+        Type::Record(_) => matches!(
+            capability,
+            StdlibCapabilityId::Equatable | StdlibCapabilityId::MemoryReadable
+        ),
+        Type::Enum(_) | Type::Option(_) | Type::Result(_) => {
+            capability == StdlibCapabilityId::Equatable
+        }
+        Type::Array(_) | Type::Variable(_) => false,
+        _ => unreachable!("core types were handled above"),
+    }
 }
 
 fn canonical_wrapper_type(
@@ -765,23 +737,13 @@ fn canonical_wrapper_type(
 }
 
 fn requirements_are_possible(requirements: Requirements) -> bool {
-    [
-        Type::Bool,
-        Type::I8,
-        Type::U8,
-        Type::I16,
-        Type::U16,
-        Type::I32,
-        Type::U32,
-        Type::I64,
-        Type::U64,
-        Type::Address,
-        Type::F32,
-        Type::F64,
-        Type::Standard(StdlibTypeId::String),
-    ]
-    .into_iter()
-    .any(|ty| type_meets_requirements(ty, requirements))
+    let library = StandardLibrary::new();
+    library
+        .core_types()
+        .iter()
+        .map(|ty| Type::from_core(ty.id))
+        .chain(library.types().iter().map(|ty| Type::Standard(ty.id)))
+        .any(|ty| type_meets_requirements(ty, requirements))
 }
 
 fn error(message: impl Into<String>) -> InferenceError {

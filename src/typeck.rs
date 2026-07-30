@@ -6,11 +6,11 @@ use crate::{
         ActionKind, ArrayTypeDecl, ArrayTypeId, BinaryOp, Block, EnumDecl, EnumTypeId, Expr,
         ExprId, ExprKind, FallbackBranch, FunctionId, InterpolatedPart, MatchPattern,
         OptionTypeDecl, Program, RecordDecl, ResultTypeDecl, SettingKind, Span, StateSource, Stmt,
-        SuspensionMode, TypeRef, UnaryOp, ValueId, VariableDecl,
+        SuspensionMode, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     inference::{
         ArrayLayout, InferenceContext, InferenceError, OptionLayout, Requirements, ResultLayout,
-        Type, fits_unsigned_literal,
+        Type, fits_unsigned_literal, type_has_capability,
     },
     semantic::{
         PendingResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue,
@@ -18,8 +18,8 @@ use crate::{
     },
     signature::parse_signature,
     stdlib::{
-        Availability, CallCandidate, CoreTypeId, DeclaredTypeRef, ItemKind, ParameterRule,
-        StandardLibrary, StdlibItem, StdlibItemId, StdlibTypeId, TypeConstraint,
+        Availability, CallCandidate, DeclaredTypeRef, ItemKind, ParameterRule, StandardLibrary,
+        StdlibCapabilityId, StdlibItem, StdlibItemId, StdlibTypeId, TypeConstraint,
         TypeRef as CatalogTypeRef,
     },
     visit::{self, Visitor},
@@ -95,17 +95,35 @@ pub fn check(program: &Program) -> Result<CheckOutput, Vec<Diagnostic>> {
 pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
     let records = program.records.clone();
     let enums = program.enums.clone();
+    let named_types = program
+        .type_names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let id = TypeNameId::from_index(index as u32);
+            let ty = if let Some(standard) = StandardLibrary::new().type_by_name(name) {
+                Type::Standard(standard.id)
+            } else if let Some(record) = records.iter().find(|record| record.name == *name) {
+                Type::Record(record.id)
+            } else if let Some(enumeration) = enums.iter().find(|item| item.name == *name) {
+                Type::Enum(enumeration.id)
+            } else {
+                unreachable!("the parser only interns known nominal type names")
+            };
+            (id, ty)
+        })
+        .collect::<HashMap<_, _>>();
     let array_types = program.array_types.iter().map(|array| ArrayLayout {
         id: array.id,
-        element: array.element.into(),
+        element: syntax_type(array.element, &named_types),
     });
     let option_types = program.option_types.iter().map(|option| OptionLayout {
         id: option.id,
-        value: option.value.into(),
+        value: syntax_type(option.value, &named_types),
     });
     let result_types = program.result_types.iter().map(|result| ResultLayout {
         id: result.id,
-        value: result.value.into(),
+        value: syntax_type(result.value, &named_types),
     });
     let inference = InferenceContext::new(
         records.len() as u32 + enums.len() as u32,
@@ -129,6 +147,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             .collect(),
         records,
         enums,
+        named_types,
         inference,
         scopes: Vec::new(),
         return_ty: Type::Void,
@@ -150,10 +169,20 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
     {
         let state = program.state.as_ref().unwrap();
         for field in &state.fields {
-            let ty = field
-                .annotation
-                .map(Type::from)
-                .unwrap_or_else(|| checker.fresh_inference(Requirements::NONE, None));
+            let ty = if let Some(annotation) = field.annotation {
+                checker.syntax_type(annotation)
+            } else {
+                checker.fresh_inference(Requirements::NONE, None)
+            };
+            if let Some(standard) = standard_type_for_inference(ty) {
+                let declaration = StandardLibrary::new().type_decl(standard);
+                if !declaration.value_usage.state_field {
+                    checker.error(
+                        format!("{} cannot be stored in a state field", declaration.name),
+                        field.span,
+                    );
+                }
+            }
             checker.semantics.resolve_value_type(field.id, ty);
             if checker
                 .state_fields
@@ -256,9 +285,10 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         }
         let mut fields = HashSet::new();
         for field in &record.fields {
+            let field_ty = checker.syntax_type(field.ty);
             checker
                 .semantics
-                .resolve_record_field_type(field.id, field.ty.into());
+                .resolve_record_field_type(field.id, field_ty);
             if !fields.insert(field.name.clone()) {
                 checker.error(
                     format!(
@@ -268,7 +298,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
                     field.span,
                 );
             }
-            if let Some(standard) = field.ty.standard_type() {
+            if let Some(standard) = standard_type_for_inference(field_ty) {
                 let declaration = StandardLibrary::new().type_decl(standard);
                 if !declaration.value_usage.record_field {
                     checker.error(
@@ -292,9 +322,10 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         }
         let mut variants = HashSet::new();
         for variant in &enumeration.variants {
+            let payload = variant.payload.map(|ty| checker.syntax_type(ty));
             checker
                 .semantics
-                .resolve_enum_variant_payload(variant.id, variant.payload.map(Type::from));
+                .resolve_enum_variant_payload(variant.id, payload);
             if !variants.insert(variant.name.clone()) {
                 checker.error(
                     format!(
@@ -304,7 +335,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
                     variant.span,
                 );
             }
-            if let Some(standard) = variant.payload.and_then(TypeRef::standard_type)
+            if let Some(standard) = payload.and_then(standard_type_for_inference)
                 && !StandardLibrary::new()
                     .type_decl(standard)
                     .value_usage
@@ -326,24 +357,22 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             .params
             .iter()
             .map(|parameter| {
-                let ty = parameter
-                    .annotation
-                    .map(Type::from)
-                    .unwrap_or_else(|| checker.fresh_inference(Requirements::NONE, None));
+                let ty = if let Some(annotation) = parameter.annotation {
+                    checker.syntax_type(annotation)
+                } else {
+                    checker.fresh_inference(Requirements::NONE, None)
+                };
                 checker.semantics.resolve_value_type(parameter.id, ty);
                 ty
             })
             .collect::<Vec<_>>();
-        let result = function
-            .return_annotation
-            .map(Type::from)
-            .unwrap_or_else(|| {
-                if contains_value_return(&function.body) {
-                    checker.fresh_inference(Requirements::NONE, None)
-                } else {
-                    Type::Void
-                }
-            });
+        let result = if let Some(annotation) = function.return_annotation {
+            checker.syntax_type(annotation)
+        } else if contains_value_return(&function.body) {
+            checker.fresh_inference(Requirements::NONE, None)
+        } else {
+            Type::Void
+        };
         checker
             .semantics
             .resolve_function_result(function.id, result);
@@ -356,7 +385,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             .function_signatures
             .insert(function.id, signature.clone());
         if let Some(receiver) = function.method_of {
-            let key = (receiver.into(), function.name.clone());
+            let key = (checker.syntax_type(receiver), function.name.clone());
             if checker.methods.insert(key, signature).is_some() {
                 checker.error(
                     format!("duplicate method `{}` for `{receiver}`", function.name),
@@ -396,7 +425,8 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         }
         let previous_debug_context = checker.debug_context;
         checker.debug_context = global.debug_only;
-        let inferred = checker.expr(&global.value, global.annotation.map(Type::from));
+        let expected = global.annotation.map(|ty| checker.syntax_type(ty));
+        let inferred = checker.expr(&global.value, expected);
         checker.debug_context = previous_debug_context;
         if let Some(ty) = inferred {
             let unsupported_standard = standard_type_for_inference(ty).is_some_and(|standard| {
@@ -640,6 +670,7 @@ struct Checker {
     debug_functions: HashSet<FunctionId>,
     records: Vec<RecordDecl>,
     enums: Vec<EnumDecl>,
+    named_types: HashMap<TypeNameId, Type>,
     inference: InferenceContext,
     scopes: Vec<HashMap<String, Binding>>,
     return_ty: Type,
@@ -659,6 +690,10 @@ struct Checker {
 }
 
 impl Checker {
+    fn syntax_type(&self, ty: TypeRef) -> Type {
+        syntax_type(ty, &self.named_types)
+    }
+
     fn block(&mut self, block: &Block, nested: bool) {
         if nested {
             self.scopes.push(HashMap::new());
@@ -817,7 +852,7 @@ impl Checker {
                     let expected = binding
                         .as_ref()
                         .and_then(|binding| binding.annotation)
-                        .map(Type::from);
+                        .map(|ty| self.syntax_type(ty));
                     expected.map_or(Some(result), |expected| {
                         self.unify(result, expected, value.span)
                     })
@@ -905,7 +940,8 @@ impl Checker {
                 variable.span,
             );
         }
-        if let Some(ty) = self.expr(&variable.value, variable.annotation.map(Type::from)) {
+        let expected = variable.annotation.map(|ty| self.syntax_type(ty));
+        if let Some(ty) = self.expr(&variable.value, expected) {
             let unsupported_standard = standard_type_for_inference(ty).is_some_and(|standard| {
                 !StandardLibrary::new()
                     .type_decl(standard)
@@ -1056,7 +1092,7 @@ impl Checker {
                     }
                     if let Some(field) = declaration.fields.iter().find(|field| field.name == *name)
                     {
-                        self.expr(value, Some(field.ty.into()));
+                        self.expr(value, Some(self.syntax_type(field.ty)));
                         resolved_fields.push(field.id);
                     } else {
                         self.expr(value, None);
@@ -1495,7 +1531,7 @@ impl Checker {
                 target,
             } => {
                 let source = self.expr(inner, None)?;
-                let target = Type::from(*target);
+                let target = self.syntax_type(*target);
                 if target.is_numeric() {
                     self.require(source, REQUIRE_NUMERIC, expr.span)?;
                 } else if target == Type::Standard(StdlibTypeId::String) {
@@ -2041,7 +2077,10 @@ impl Checker {
                         matches!(receiver, Type::Variable(_))
                             || match constraint {
                                 TypeConstraint::Numeric => receiver.is_numeric(),
-                                TypeConstraint::MemoryReadable => is_memory_readable(receiver),
+                                TypeConstraint::MemoryReadable => type_has_capability(
+                                    receiver,
+                                    StdlibCapabilityId::MemoryReadable,
+                                ),
                             }
                     })
                 }),
@@ -2278,7 +2317,12 @@ impl Checker {
                 .iter()
                 .find(|record| record.id == record_id)
                 .and_then(|record| record.fields.iter().find(|item| item.name == field))
-                .map(|field| (field.ty.into(), ResolvedMember::RecordField(field.id))),
+                .map(|field| {
+                    (
+                        self.syntax_type(field.ty),
+                        ResolvedMember::RecordField(field.id),
+                    )
+                }),
             _ => None,
         }
     }
@@ -2655,7 +2699,7 @@ impl Checker {
                         .map(|variant| EnumVariantInfo {
                             id: ResolvedEnumVariantId::Source(variant.id),
                             name: variant.name.clone(),
-                            payload: variant.payload.map(Type::from),
+                            payload: variant.payload.map(|ty| self.syntax_type(ty)),
                         })
                         .collect(),
                 }),
@@ -2706,22 +2750,15 @@ fn standard_type_for_inference(ty: Type) -> Option<StdlibTypeId> {
 
 fn inference_type_for_declared(ty: DeclaredTypeRef) -> Type {
     match ty {
-        DeclaredTypeRef::Core(core) => match core {
-            CoreTypeId::Void => Type::Void,
-            CoreTypeId::Bool => Type::Bool,
-            CoreTypeId::I8 => Type::I8,
-            CoreTypeId::U8 => Type::U8,
-            CoreTypeId::I16 => Type::I16,
-            CoreTypeId::U16 => Type::U16,
-            CoreTypeId::I32 => Type::I32,
-            CoreTypeId::U32 => Type::U32,
-            CoreTypeId::I64 => Type::I64,
-            CoreTypeId::U64 => Type::U64,
-            CoreTypeId::Address => Type::Address,
-            CoreTypeId::F32 => Type::F32,
-            CoreTypeId::F64 => Type::F64,
-        },
+        DeclaredTypeRef::Core(core) => Type::from_core(core),
         DeclaredTypeRef::Standard(standard) => Type::Standard(standard),
+    }
+}
+
+fn syntax_type(ty: TypeRef, named_types: &HashMap<TypeNameId, Type>) -> Type {
+    match ty {
+        TypeRef::Named(id) => named_types[&id],
+        ty => Type::from(ty),
     }
 }
 
@@ -2791,25 +2828,6 @@ fn is_constant(expr: &Expr) -> bool {
         ExprKind::Unary { expr, .. } => is_constant(expr),
         _ => false,
     }
-}
-
-fn is_memory_readable(ty: Type) -> bool {
-    matches!(
-        ty,
-        Type::Bool
-            | Type::I8
-            | Type::U8
-            | Type::I16
-            | Type::U16
-            | Type::I32
-            | Type::U32
-            | Type::I64
-            | Type::U64
-            | Type::Address
-            | Type::F32
-            | Type::F64
-            | Type::Record(_)
-    )
 }
 
 fn definitely_returns(block: &Block) -> bool {

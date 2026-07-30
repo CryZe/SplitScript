@@ -11,7 +11,7 @@ use crate::{
     ast::{EnumDecl, EnumId, RecordDecl, RecordId},
     semantic::SemanticModel,
     stdlib::{StandardLibrary, StdlibCapabilityId},
-    types::{BuiltinType, TypeId, TypeKind},
+    types::{TypeId, TypeKind},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -48,7 +48,12 @@ impl EqualityCapabilities {
 
     pub fn require(&self, ty: TypeId, semantics: &SemanticModel) -> Result<(), String> {
         match semantics.types().kind(ty) {
-            TypeKind::Builtin(builtin) if builtin_is_equatable(*builtin) => Ok(()),
+            TypeKind::Builtin(builtin)
+                if StandardLibrary::new()
+                    .core_type_has_capability(builtin.core(), StdlibCapabilityId::Equatable) =>
+            {
+                Ok(())
+            }
             TypeKind::Standard(standard)
                 if StandardLibrary::new()
                     .type_has_capability(*standard, StdlibCapabilityId::Equatable) =>
@@ -97,7 +102,12 @@ impl EqualityCapabilities {
             return Err("recursive values do not currently support structural equality".to_owned());
         }
         let result = match semantics.types().kind(ty) {
-            TypeKind::Builtin(builtin) if builtin_is_equatable(*builtin) => Ok(()),
+            TypeKind::Builtin(builtin)
+                if StandardLibrary::new()
+                    .core_type_has_capability(builtin.core(), StdlibCapabilityId::Equatable) =>
+            {
+                Ok(())
+            }
             TypeKind::Standard(standard)
                 if StandardLibrary::new()
                     .type_has_capability(*standard, StdlibCapabilityId::Equatable) =>
@@ -182,8 +192,4 @@ impl EqualityCapabilities {
         self.enums.insert(enumeration, Ok(()));
         Ok(())
     }
-}
-
-fn builtin_is_equatable(ty: BuiltinType) -> bool {
-    ty.is_numeric() || ty == BuiltinType::Bool
 }

@@ -20,51 +20,152 @@ pub enum StdlibNamespaceId {
     Unity,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum StdlibTypeId {
-    String,
-    Signature,
-    Duration,
-    Module,
-    TimerState,
-    UnityModule,
-    UnityImage,
-    UnityClass,
-    UnityField,
+macro_rules! declare_standard_types {
+    ($(
+        $id:ident => {
+            name: $name:literal,
+            kind: $kind:ident,
+            capabilities: $capabilities:expr,
+            representation: $representation:expr,
+            value_usage: $value_usage:expr,
+            summary: $summary:literal,
+            details: $details:literal $(,)?
+        }
+    ),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub enum StdlibTypeId {
+            $($id),*
+        }
+
+        pub(super) const TYPES: &[StdlibType] = &[
+            $(StdlibType {
+                id: StdlibTypeId::$id,
+                name: $name,
+                kind: StdlibTypeKind::$kind,
+                capabilities: $capabilities,
+                representation: $representation,
+                value_usage: $value_usage,
+                documentation: documentation($summary, $details),
+            }),*
+        ];
+    };
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum StdlibFieldId {
-    DurationSeconds,
-    DurationNanoseconds,
-    ModuleAddress,
-    ModuleSize,
-    UnityModuleAssemblies,
-    UnityModuleTypeInfoTable,
-    UnityModuleVersion,
-    UnityModulePointerSize,
-    UnityImageAddress,
-    UnityImageModule,
-    UnityClassAddress,
-    UnityClassModule,
-    UnityFieldOffset,
-    UnityFieldIndex,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum StdlibVariantId {
-    TimerStateNotRunning,
-    TimerStateRunning,
-    TimerStatePaused,
-    TimerStateEnded,
-    TimerStateUnknown,
+declare_standard_types! {
+    String => {
+        name: "String",
+        kind: Intrinsic,
+        capabilities: EQUATABLE_INTERPOLATABLE,
+        representation: RuntimeRepresentation::GcArray {
+            element: CoreTypeId::U8,
+            mutable: true,
+            nullable: true,
+        },
+        value_usage: ORDINARY_LOCAL_VALUE,
+        summary: "Stores immutable UTF-8 text.",
+        details: "String literals, interpolation, process decoders, and timer variables use garbage-collected strings.",
+    },
+    Signature => {
+        name: "Signature",
+        kind: Intrinsic,
+        capabilities: &[],
+        representation: RuntimeRepresentation::Scalar {
+            storage: CoreTypeId::I64,
+        },
+        value_usage: ValueUsage {
+            record_field: false,
+            enum_payload: false,
+            state_field: false,
+            local_variable: false,
+            global_variable: false,
+        },
+        summary: "Stores a compiled process-memory signature.",
+        details: "Signature values are created by signature literals and consumed by scanning operations.",
+    },
+    Duration => {
+        name: "Duration",
+        kind: Struct,
+        capabilities: &[],
+        representation: RuntimeRepresentation::GcStruct { nullable: false },
+        value_usage: ValueUsage {
+            record_field: true,
+            enum_payload: false,
+            state_field: false,
+            local_variable: false,
+            global_variable: false,
+        },
+        summary: "Represents a precise span of time.",
+        details: "Durations carry whole seconds and nanoseconds and are used for LiveSplit game time.",
+    },
+    Module => {
+        name: "Module",
+        kind: Struct,
+        capabilities: &[],
+        representation: RuntimeRepresentation::GcStruct { nullable: true },
+        value_usage: ORDINARY_LOCAL_VALUE,
+        summary: "Describes a module loaded in the attached process.",
+        details: "A module exposes its base address and mapped size for bounded memory discovery.",
+    },
+    TimerState => {
+        name: "TimerState",
+        kind: Enum,
+        capabilities: EQUATABLE,
+        representation: RuntimeRepresentation::Enum { nullable: true },
+        value_usage: ValueUsage {
+            global_variable: true,
+            ..ORDINARY_LOCAL_VALUE
+        },
+        summary: "Describes the current LiveSplit timer state.",
+        details: "Timer state is an exhaustive enum returned by timer.state().",
+    },
+    UnityModule => {
+        name: "UnityModule",
+        kind: Struct,
+        capabilities: &[],
+        representation: RuntimeRepresentation::GcStruct { nullable: true },
+        value_usage: ORDINARY_LOCAL_VALUE,
+        summary: "Describes an attached Unity IL2CPP runtime.",
+        details: "The runtime stores resolved metadata roots, its version, and pointer size.",
+    },
+    UnityImage => {
+        name: "UnityImage",
+        kind: Struct,
+        capabilities: &[],
+        representation: RuntimeRepresentation::GcStruct { nullable: true },
+        value_usage: ORDINARY_LOCAL_VALUE,
+        summary: "Describes a Unity assembly image.",
+        details: "An image retains its owning Unity runtime for subsequent class lookup.",
+    },
+    UnityClass => {
+        name: "UnityClass",
+        kind: Struct,
+        capabilities: &[],
+        representation: RuntimeRepresentation::GcStruct { nullable: true },
+        value_usage: ORDINARY_LOCAL_VALUE,
+        summary: "Describes a Unity runtime class.",
+        details: "A class retains its owning Unity runtime for field and static-data discovery.",
+    },
+    UnityField => {
+        name: "UnityField",
+        kind: Struct,
+        capabilities: &[],
+        representation: RuntimeRepresentation::GcStruct { nullable: true },
+        value_usage: ORDINARY_LOCAL_VALUE,
+        summary: "Describes a Unity runtime field.",
+        details: "A field exposes its byte offset and metadata index.",
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StdlibCapabilityId {
     Numeric,
+    Integer,
+    Signed,
+    Float,
     Equatable,
+    StringCast,
     Interpolatable,
+    MemoryReadable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -114,23 +215,29 @@ pub enum DeclaredTypeRef {
     Standard(StdlibTypeId),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoreType {
+    pub id: CoreTypeId,
+    pub name: &'static str,
+    pub capabilities: &'static [StdlibCapabilityId],
+    pub memory_layout: Option<ScalarMemoryLayout>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScalarMemoryLayout {
+    pub size: u32,
+    pub alignment: u32,
+}
+
 impl fmt::Display for CoreTypeId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Void => "void",
-            Self::Bool => "bool",
-            Self::I8 => "i8",
-            Self::U8 => "u8",
-            Self::I16 => "i16",
-            Self::U16 => "u16",
-            Self::I32 => "i32",
-            Self::U32 => "u32",
-            Self::I64 => "i64",
-            Self::U64 => "u64",
-            Self::Address => "address",
-            Self::F32 => "f32",
-            Self::F64 => "f64",
-        })
+        formatter.write_str(
+            CORE_TYPES
+                .iter()
+                .find(|declaration| declaration.id == *self)
+                .expect("every core type ID has a declaration")
+                .name,
+        )
     }
 }
 
@@ -292,152 +399,173 @@ const EQUATABLE_INTERPOLATABLE: &[StdlibCapabilityId] = &[
 ];
 const EQUATABLE: &[StdlibCapabilityId] = &[StdlibCapabilityId::Equatable];
 
-pub(super) const TYPES: &[StdlibType] = &[
-    StdlibType {
-        id: StdlibTypeId::String,
-        name: "String",
-        kind: StdlibTypeKind::Intrinsic,
-        capabilities: EQUATABLE_INTERPOLATABLE,
-        representation: RuntimeRepresentation::GcArray {
-            element: CoreTypeId::U8,
-            mutable: true,
-            nullable: true,
-        },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        documentation: documentation(
-            "Stores immutable UTF-8 text.",
-            "String literals, interpolation, process decoders, and timer variables use garbage-collected strings.",
-        ),
-    },
-    StdlibType {
-        id: StdlibTypeId::Signature,
-        name: "Signature",
-        kind: StdlibTypeKind::Intrinsic,
+const BOOL_CAPABILITIES: &[StdlibCapabilityId] = &[
+    StdlibCapabilityId::Equatable,
+    StdlibCapabilityId::MemoryReadable,
+];
+const SIGNED_INTEGER_CAPABILITIES: &[StdlibCapabilityId] = &[
+    StdlibCapabilityId::Numeric,
+    StdlibCapabilityId::Integer,
+    StdlibCapabilityId::Signed,
+    StdlibCapabilityId::Equatable,
+    StdlibCapabilityId::StringCast,
+    StdlibCapabilityId::Interpolatable,
+    StdlibCapabilityId::MemoryReadable,
+];
+const UNSIGNED_INTEGER_CAPABILITIES: &[StdlibCapabilityId] = &[
+    StdlibCapabilityId::Numeric,
+    StdlibCapabilityId::Integer,
+    StdlibCapabilityId::Equatable,
+    StdlibCapabilityId::StringCast,
+    StdlibCapabilityId::Interpolatable,
+    StdlibCapabilityId::MemoryReadable,
+];
+const FLOAT_CAPABILITIES: &[StdlibCapabilityId] = &[
+    StdlibCapabilityId::Numeric,
+    StdlibCapabilityId::Signed,
+    StdlibCapabilityId::Float,
+    StdlibCapabilityId::Equatable,
+    StdlibCapabilityId::MemoryReadable,
+];
+
+pub(super) const CORE_TYPES: &[CoreType] = &[
+    CoreType {
+        id: CoreTypeId::Void,
+        name: "void",
         capabilities: &[],
-        representation: RuntimeRepresentation::Scalar {
-            storage: CoreTypeId::I64,
-        },
-        value_usage: ValueUsage {
-            record_field: false,
-            enum_payload: false,
-            state_field: false,
-            local_variable: false,
-            global_variable: false,
-        },
-        documentation: documentation(
-            "Stores a compiled process-memory signature.",
-            "Signature values are created by signature literals and consumed by scanning operations.",
-        ),
+        memory_layout: None,
     },
-    StdlibType {
-        id: StdlibTypeId::Duration,
-        name: "Duration",
-        kind: StdlibTypeKind::Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: false },
-        value_usage: ValueUsage {
-            record_field: true,
-            enum_payload: false,
-            state_field: false,
-            local_variable: false,
-            global_variable: false,
-        },
-        documentation: documentation(
-            "Represents a precise span of time.",
-            "Durations carry whole seconds and nanoseconds and are used for LiveSplit game time.",
-        ),
+    CoreType {
+        id: CoreTypeId::Bool,
+        name: "bool",
+        capabilities: BOOL_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 1,
+            alignment: 1,
+        }),
     },
-    StdlibType {
-        id: StdlibTypeId::Module,
-        name: "Module",
-        kind: StdlibTypeKind::Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: true },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        documentation: documentation(
-            "Describes a module loaded in the attached process.",
-            "A module exposes its base address and mapped size for bounded memory discovery.",
-        ),
+    CoreType {
+        id: CoreTypeId::I8,
+        name: "i8",
+        capabilities: SIGNED_INTEGER_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 1,
+            alignment: 1,
+        }),
     },
-    StdlibType {
-        id: StdlibTypeId::TimerState,
-        name: "TimerState",
-        kind: StdlibTypeKind::Enum,
-        capabilities: EQUATABLE,
-        representation: RuntimeRepresentation::Enum { nullable: true },
-        value_usage: ValueUsage {
-            global_variable: true,
-            ..ORDINARY_LOCAL_VALUE
-        },
-        documentation: documentation(
-            "Describes the current LiveSplit timer state.",
-            "Timer state is an exhaustive enum returned by timer.state().",
-        ),
+    CoreType {
+        id: CoreTypeId::U8,
+        name: "u8",
+        capabilities: UNSIGNED_INTEGER_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 1,
+            alignment: 1,
+        }),
     },
-    StdlibType {
-        id: StdlibTypeId::UnityModule,
-        name: "UnityModule",
-        kind: StdlibTypeKind::Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: true },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        documentation: documentation(
-            "Describes an attached Unity IL2CPP runtime.",
-            "The runtime stores resolved metadata roots, its version, and pointer size.",
-        ),
+    CoreType {
+        id: CoreTypeId::I16,
+        name: "i16",
+        capabilities: SIGNED_INTEGER_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 2,
+            alignment: 2,
+        }),
     },
-    StdlibType {
-        id: StdlibTypeId::UnityImage,
-        name: "UnityImage",
-        kind: StdlibTypeKind::Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: true },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        documentation: documentation(
-            "Describes a Unity assembly image.",
-            "An image retains its owning Unity runtime for subsequent class lookup.",
-        ),
+    CoreType {
+        id: CoreTypeId::U16,
+        name: "u16",
+        capabilities: UNSIGNED_INTEGER_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 2,
+            alignment: 2,
+        }),
     },
-    StdlibType {
-        id: StdlibTypeId::UnityClass,
-        name: "UnityClass",
-        kind: StdlibTypeKind::Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: true },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        documentation: documentation(
-            "Describes a Unity runtime class.",
-            "A class retains its owning Unity runtime for field and static-data discovery.",
-        ),
+    CoreType {
+        id: CoreTypeId::I32,
+        name: "i32",
+        capabilities: SIGNED_INTEGER_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 4,
+            alignment: 4,
+        }),
     },
-    StdlibType {
-        id: StdlibTypeId::UnityField,
-        name: "UnityField",
-        kind: StdlibTypeKind::Struct,
-        capabilities: &[],
-        representation: RuntimeRepresentation::GcStruct { nullable: true },
-        value_usage: ORDINARY_LOCAL_VALUE,
-        documentation: documentation(
-            "Describes a Unity runtime field.",
-            "A field exposes its byte offset and metadata index.",
-        ),
+    CoreType {
+        id: CoreTypeId::U32,
+        name: "u32",
+        capabilities: UNSIGNED_INTEGER_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 4,
+            alignment: 4,
+        }),
+    },
+    CoreType {
+        id: CoreTypeId::I64,
+        name: "i64",
+        capabilities: SIGNED_INTEGER_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 8,
+            alignment: 8,
+        }),
+    },
+    CoreType {
+        id: CoreTypeId::U64,
+        name: "u64",
+        capabilities: UNSIGNED_INTEGER_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 8,
+            alignment: 8,
+        }),
+    },
+    CoreType {
+        id: CoreTypeId::Address,
+        name: "address",
+        capabilities: UNSIGNED_INTEGER_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 8,
+            alignment: 8,
+        }),
+    },
+    CoreType {
+        id: CoreTypeId::F32,
+        name: "f32",
+        capabilities: FLOAT_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 4,
+            alignment: 4,
+        }),
+    },
+    CoreType {
+        id: CoreTypeId::F64,
+        name: "f64",
+        capabilities: FLOAT_CAPABILITIES,
+        memory_layout: Some(ScalarMemoryLayout {
+            size: 8,
+            alignment: 8,
+        }),
     },
 ];
 
-macro_rules! field {
-    ($id:ident, $owner:ident, $name:literal, $ty:expr, $visibility:ident, $summary:literal) => {
-        StdlibField {
-            id: StdlibFieldId::$id,
-            owner: StdlibTypeId::$owner,
-            name: $name,
-            ty: $ty,
-            visibility: FieldVisibility::$visibility,
-            documentation: documentation($summary, $summary),
+macro_rules! declare_standard_fields {
+    ($(field!($id:ident, $owner:ident, $name:literal, $ty:expr, $visibility:ident, $summary:literal)),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub enum StdlibFieldId {
+            $($id),*
         }
+
+        pub(super) const FIELDS: &[StdlibField] = &[
+            $(StdlibField {
+                id: StdlibFieldId::$id,
+                owner: StdlibTypeId::$owner,
+                name: $name,
+                ty: $ty,
+                visibility: FieldVisibility::$visibility,
+                documentation: documentation($summary, $summary),
+            }),*
+        ];
     };
 }
 
-pub(super) const FIELDS: &[StdlibField] = &[
+declare_standard_fields! {
     field!(
         DurationSeconds,
         Duration,
@@ -550,37 +678,99 @@ pub(super) const FIELDS: &[StdlibField] = &[
         Public,
         "Returns the metadata field index."
     ),
-];
+}
 
-macro_rules! variant {
-    ($id:ident, $name:literal, $summary:literal) => {
-        StdlibVariant {
-            id: StdlibVariantId::$id,
-            owner: StdlibTypeId::TimerState,
-            name: $name,
-            documentation: documentation($summary, $summary),
+macro_rules! declare_standard_variants {
+    ($(variant!($id:ident, $owner:ident, $name:literal, $summary:literal)),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub enum StdlibVariantId {
+            $($id),*
         }
+
+        pub(super) const VARIANTS: &[StdlibVariant] = &[
+            $(StdlibVariant {
+                id: StdlibVariantId::$id,
+                owner: StdlibTypeId::$owner,
+                name: $name,
+                documentation: documentation($summary, $summary),
+            }),*
+        ];
     };
 }
 
-pub(super) const VARIANTS: &[StdlibVariant] = &[
+declare_standard_variants! {
     variant!(
         TimerStateNotRunning,
+        TimerState,
         "NotRunning",
         "The timer has not started."
     ),
-    variant!(TimerStateRunning, "Running", "The timer is running."),
-    variant!(TimerStatePaused, "Paused", "The timer is paused."),
-    variant!(TimerStateEnded, "Ended", "The timer has ended."),
+    variant!(
+        TimerStateRunning,
+        TimerState,
+        "Running",
+        "The timer is running."
+    ),
+    variant!(
+        TimerStatePaused,
+        TimerState,
+        "Paused",
+        "The timer is paused."
+    ),
+    variant!(
+        TimerStateEnded,
+        TimerState,
+        "Ended",
+        "The timer has ended."
+    ),
     variant!(
         TimerStateUnknown,
+        TimerState,
         "Unknown",
         "The host returned an unknown timer state."
     ),
-];
+}
 
 pub(super) fn validate() -> Vec<String> {
     let mut errors = Vec::new();
+    let mut core_type_ids = HashSet::new();
+    let mut core_type_names = HashSet::new();
+    for ty in CORE_TYPES {
+        if !core_type_ids.insert(ty.id) {
+            errors.push(format!("duplicate core type ID `{:?}`", ty.id));
+        }
+        if !core_type_names.insert(ty.name) {
+            errors.push(format!("duplicate core type name `{}`", ty.name));
+        }
+        let mut capabilities = HashSet::new();
+        for capability in ty.capabilities {
+            if !capabilities.insert(capability) {
+                errors.push(format!(
+                    "core type `{}` repeats capability `{:?}`",
+                    ty.name, capability
+                ));
+            }
+        }
+        let declared_readable = ty
+            .capabilities
+            .contains(&StdlibCapabilityId::MemoryReadable);
+        if declared_readable != ty.memory_layout.is_some() {
+            errors.push(format!(
+                "core type `{}` must declare MemoryReadable and a memory layout together",
+                ty.name
+            ));
+        }
+        if let Some(layout) = ty.memory_layout
+            && (layout.size == 0
+                || !layout.alignment.is_power_of_two()
+                || layout.size % layout.alignment != 0)
+        {
+            errors.push(format!(
+                "core type `{}` has invalid process-memory size/alignment",
+                ty.name
+            ));
+        }
+    }
     let mut namespace_ids = HashSet::new();
     let mut namespace_names = HashSet::new();
     let mut namespace_paths = HashSet::new();
@@ -633,6 +823,15 @@ pub(super) fn validate() -> Vec<String> {
         if !type_names.insert(ty.name) {
             errors.push(format!("duplicate standard type name `{}`", ty.name));
         }
+        let mut capabilities = HashSet::new();
+        for capability in ty.capabilities {
+            if !capabilities.insert(capability) {
+                errors.push(format!(
+                    "standard type `{}` repeats capability `{:?}`",
+                    ty.name, capability
+                ));
+            }
+        }
         validate_documentation(&mut errors, "type", ty.name, &ty.documentation);
         let has_fields = FIELDS.iter().any(|field| field.owner == ty.id);
         let has_variants = VARIANTS.iter().any(|variant| variant.owner == ty.id);
@@ -647,6 +846,19 @@ pub(super) fn validate() -> Vec<String> {
                 errors.push(format!("struct `{}` has no fields", ty.name));
             }
             StdlibTypeKind::Intrinsic | StdlibTypeKind::Struct | StdlibTypeKind::Enum => {}
+        }
+        let representation_core = match ty.representation {
+            RuntimeRepresentation::Scalar { storage } => Some(storage),
+            RuntimeRepresentation::GcArray { element, .. } => Some(element),
+            RuntimeRepresentation::GcStruct { .. } | RuntimeRepresentation::Enum { .. } => None,
+        };
+        if let Some(core) = representation_core
+            && !core_type_ids.contains(&core)
+        {
+            errors.push(format!(
+                "standard type `{}` has a representation using missing core type `{:?}`",
+                ty.name, core
+            ));
         }
     }
 
@@ -669,13 +881,20 @@ pub(super) fn validate() -> Vec<String> {
                 field.id, field.owner
             ));
         }
-        if let DeclaredTypeRef::Standard(referenced) = field.ty
-            && !type_ids.contains(&referenced)
-        {
-            errors.push(format!(
-                "field `{:?}` references missing type `{:?}`",
-                field.id, referenced
-            ));
+        match field.ty {
+            DeclaredTypeRef::Core(referenced) if !core_type_ids.contains(&referenced) => {
+                errors.push(format!(
+                    "field `{:?}` references missing core type `{:?}`",
+                    field.id, referenced
+                ));
+            }
+            DeclaredTypeRef::Standard(referenced) if !type_ids.contains(&referenced) => {
+                errors.push(format!(
+                    "field `{:?}` references missing type `{:?}`",
+                    field.id, referenced
+                ));
+            }
+            DeclaredTypeRef::Core(_) | DeclaredTypeRef::Standard(_) => {}
         }
     }
 

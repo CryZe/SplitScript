@@ -2066,6 +2066,22 @@ impl splitscript::hir::TypedVisitor for TypedExpressionCounter {
 fn standard_library_catalog_is_valid_documented_and_compilable() {
     let library = StandardLibrary::new();
     assert_eq!(library.validate(), Vec::<String>::new());
+    assert!(library.core_type_has_capability(
+        splitscript::stdlib::CoreTypeId::I32,
+        splitscript::stdlib::StdlibCapabilityId::MemoryReadable,
+    ));
+    assert!(library.core_type_has_capability(
+        splitscript::stdlib::CoreTypeId::F64,
+        splitscript::stdlib::StdlibCapabilityId::Float,
+    ));
+    assert!(!library.core_type_has_capability(
+        splitscript::stdlib::CoreTypeId::F64,
+        splitscript::stdlib::StdlibCapabilityId::StringCast,
+    ));
+    assert!(library.type_has_capability(
+        splitscript::stdlib::StdlibTypeId::String,
+        splitscript::stdlib::StdlibCapabilityId::Interpolatable,
+    ));
     assert_eq!(
         library.item_by_name("Numeric.clamp").map(|item| item.id),
         Some(StdlibItemId::NumericClamp)
@@ -2596,10 +2612,10 @@ fn source_standard_type_names_resolve_after_parsing() {
     )
     .unwrap();
     let function = &parsed.syntax().functions[0];
-    assert_eq!(
-        function.params[0].annotation,
-        Some(TypeRef::Named("Module"))
-    );
+    let Some(TypeRef::Named(name)) = function.params[0].annotation else {
+        panic!("source nominal annotations should retain a name identity");
+    };
+    assert_eq!(parsed.syntax().type_name(name), "Module");
 
     let checked = splitscript::check(parsed).unwrap();
     let parameter_type = checked
@@ -2609,6 +2625,55 @@ fn source_standard_type_names_resolve_after_parsing() {
     assert_eq!(
         checked.semantics().types().kind(parameter_type),
         &TypeKind::Standard(StdlibTypeId::Module)
+    );
+}
+
+#[test]
+fn source_record_and_enum_annotations_resolve_after_parsing() {
+    use splitscript::ast::TypeRef;
+
+    let parsed = splitscript::parse(
+        r#"
+            state "game.exe" {}
+            record Point {
+                x: i32
+            }
+            enum Location {
+                Known(Point)
+                Unknown
+            }
+            fn identity(point: Point) -> Point { return point }
+            fn keep(location: Location) -> Location { return location }
+        "#,
+    )
+    .unwrap();
+    for (function, expected_name) in parsed.syntax().functions.iter().zip(["Point", "Location"]) {
+        let Some(TypeRef::Named(parameter_name)) = function.params[0].annotation else {
+            panic!("source nominal parameters should retain name identities");
+        };
+        let Some(TypeRef::Named(result_name)) = function.return_annotation else {
+            panic!("source nominal results should retain name identities");
+        };
+        assert_eq!(parameter_name, result_name);
+        assert_eq!(parsed.syntax().type_name(parameter_name), expected_name);
+    }
+
+    let checked = splitscript::check(parsed).unwrap();
+    let point_parameter = checked.syntax().functions[0].params[0].id;
+    let location_parameter = checked.syntax().functions[1].params[0].id;
+    assert_eq!(
+        checked
+            .semantics()
+            .types()
+            .kind(checked.semantics().value_type(point_parameter).unwrap()),
+        &TypeKind::Record(checked.syntax().records[0].id)
+    );
+    assert_eq!(
+        checked
+            .semantics()
+            .types()
+            .kind(checked.semantics().value_type(location_parameter).unwrap()),
+        &TypeKind::Enum(checked.syntax().enums[0].id)
     );
 }
 

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::stdlib::{StandardLibrary, StdlibTypeId};
+use crate::stdlib::{CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Span {
@@ -232,6 +232,22 @@ impl SettingChoiceOptionId {
 
 display_stable_id!(PatternId, SettingChoiceOptionId);
 
+/// Stable identity for a nominal type name written in one source file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TypeNameId(u32);
+
+impl TypeNameId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    pub(crate) fn from_index(index: u32) -> Self {
+        Self(index)
+    }
+}
+
+display_stable_id!(TypeNameId);
+
 impl Span {
     pub fn join(self, other: Self) -> Self {
         Self {
@@ -243,6 +259,7 @@ impl Span {
 
 #[derive(Debug, Clone, Default)]
 pub struct Program {
+    pub type_names: Vec<String>,
     pub state: Option<StateDecl>,
     pub settings: Vec<SettingDecl>,
     pub globals: Vec<VariableDecl>,
@@ -253,6 +270,12 @@ pub struct Program {
     pub result_types: Vec<ResultTypeDecl>,
     pub functions: Vec<FunctionDecl>,
     pub actions: Vec<Action>,
+}
+
+impl Program {
+    pub fn type_name(&self, id: TypeNameId) -> &str {
+        &self.type_names[id.index()]
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -723,7 +746,7 @@ pub enum TypeRef {
     F64,
     /// A source-written nominal type name. Standard-library identity is
     /// resolved after parsing rather than embedded into syntax.
-    Named(&'static str),
+    Named(TypeNameId),
     Standard(StdlibTypeId),
     Record(RecordId),
     Enum(EnumId),
@@ -733,8 +756,28 @@ pub enum TypeRef {
 }
 
 impl TypeRef {
+    pub fn core_type(self) -> Option<CoreTypeId> {
+        Some(match self {
+            Self::Void => CoreTypeId::Void,
+            Self::Bool => CoreTypeId::Bool,
+            Self::I8 => CoreTypeId::I8,
+            Self::U8 => CoreTypeId::U8,
+            Self::I16 => CoreTypeId::I16,
+            Self::U16 => CoreTypeId::U16,
+            Self::I32 => CoreTypeId::I32,
+            Self::U32 => CoreTypeId::U32,
+            Self::I64 => CoreTypeId::I64,
+            Self::U64 => CoreTypeId::U64,
+            Self::Address => CoreTypeId::Address,
+            Self::F32 => CoreTypeId::F32,
+            Self::F64 => CoreTypeId::F64,
+            _ => return None,
+        })
+    }
+
     pub fn parse(name: &str) -> Option<Self> {
         Some(match name {
+            "void" => Self::Void,
             "bool" => Self::Bool,
             "i8" => Self::I8,
             "u8" => Self::U8,
@@ -747,29 +790,18 @@ impl TypeRef {
             "address" | "Address" => Self::Address,
             "f32" => Self::F32,
             "f64" => Self::F64,
-            "string" => Self::Named(StandardLibrary::new().type_decl(StdlibTypeId::String).name),
-            _ => Self::Named(StandardLibrary::new().type_by_name(name)?.name),
+            _ => return None,
         })
     }
 
     pub fn is_integer(self) -> bool {
-        matches!(
-            self,
-            Self::I8
-                | Self::U8
-                | Self::I16
-                | Self::U16
-                | Self::I32
-                | Self::U32
-                | Self::I64
-                | Self::U64
-                | Self::Address
-        )
+        self.core_type().is_some_and(|core| {
+            StandardLibrary::new().core_type_has_capability(core, StdlibCapabilityId::Integer)
+        })
     }
 
     pub fn standard_type(self) -> Option<StdlibTypeId> {
         match self {
-            Self::Named(name) => StandardLibrary::new().type_by_name(name).map(|ty| ty.id),
             Self::Standard(id) => Some(id),
             _ => None,
         }
@@ -792,7 +824,7 @@ impl fmt::Display for TypeRef {
             Self::Address => "address",
             Self::F32 => "f32",
             Self::F64 => "f64",
-            Self::Named(name) => name,
+            Self::Named(id) => return write!(f, "type-name#{id}"),
             Self::Standard(standard) => {
                 return f.write_str(StandardLibrary::new().type_decl(*standard).name);
             }

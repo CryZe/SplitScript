@@ -720,7 +720,9 @@ fn is_keyword(name: &str) -> bool {
 }
 
 fn is_builtin_type(name: &str) -> bool {
-    TypeRef::parse(name).is_some() || matches!(name, "void" | "Signature" | "Array")
+    TypeRef::parse(name).is_some()
+        || StandardLibrary::new().type_by_name(name).is_some()
+        || matches!(name, "void" | "Array")
 }
 
 fn is_namespace(name: &str) -> bool {

@@ -705,7 +705,7 @@ fn add_inferred_methods(builder: &mut CompletionBuilder, syntax: &Program, recei
     for function in &syntax.functions {
         if function
             .method_of
-            .is_some_and(|declared| syntax_receiver_matches(declared, receiver))
+            .is_some_and(|declared| syntax_receiver_matches(syntax, declared, receiver))
         {
             let parameters = function
                 .params
@@ -726,7 +726,7 @@ fn add_inferred_methods(builder: &mut CompletionBuilder, syntax: &Program, recei
     }
 }
 
-fn syntax_receiver_matches(declared: SyntaxTypeRef, receiver: &TypeKind) -> bool {
+fn syntax_receiver_matches(syntax: &Program, declared: SyntaxTypeRef, receiver: &TypeKind) -> bool {
     match (declared, receiver) {
         (SyntaxTypeRef::Record(expected), TypeKind::Record(actual)) => expected == *actual,
         (SyntaxTypeRef::Enum(expected), TypeKind::Enum(actual)) => expected == *actual,
@@ -734,8 +734,16 @@ fn syntax_receiver_matches(declared: SyntaxTypeRef, receiver: &TypeKind) -> bool
         (SyntaxTypeRef::Option(expected), TypeKind::Option { layout, .. }) => expected == *layout,
         (SyntaxTypeRef::Result(expected), TypeKind::Result { layout, .. }) => expected == *layout,
         (SyntaxTypeRef::Named(name), TypeKind::Standard(actual)) => StandardLibrary::new()
-            .type_by_name(name)
+            .type_by_name(syntax.type_name(name))
             .is_some_and(|expected| expected.id == *actual),
+        (SyntaxTypeRef::Named(name), TypeKind::Record(actual)) => syntax
+            .records
+            .iter()
+            .any(|record| record.name == syntax.type_name(name) && record.id == *actual),
+        (SyntaxTypeRef::Named(name), TypeKind::Enum(actual)) => syntax
+            .enums
+            .iter()
+            .any(|item| item.name == syntax.type_name(name) && item.id == *actual),
         (SyntaxTypeRef::Standard(expected), TypeKind::Standard(actual)) => expected == *actual,
         (syntax, TypeKind::Builtin(actual)) => syntax_builtin(syntax) == Some(*actual),
         _ => false,

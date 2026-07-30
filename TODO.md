@@ -44,6 +44,9 @@ invariant:
   declaration. Runtime metadata must be backend-neutral: scalar, GC struct,
   GC array, enum, compile-time-only, and derived record representations rather
   than `wasm_encoder` types or numeric heap/field indices.
+- [x] Generate standard type, field, and variant IDs together with their
+  declaration rows, so adding an ordinary symbol cannot leave a parallel ID
+  enum or inverse owner list out of sync.
 - [x] Add catalog validation for unique IDs and names, resolvable owners and
   type references, valid representation dependencies, field/variant identity,
   complete public documentation, capability consistency, and intrinsic
@@ -56,13 +59,16 @@ invariant:
   variables, arrays, `T?`, and `T!`. Model `String`, `Duration`, `Module`,
   `TimerState`, and the Unity family as declared nominal library types;
   represent `Signature` as a single declared compile-time intrinsic type.
-- [ ] Preserve unresolved nominal type paths in syntax and resolve them against
+- [x] Preserve unresolved nominal type paths in syntax and resolve them against
   one environment containing core, standard-library, and source declarations.
   The parser must not enumerate future standard-library type names.
   - [x] Keep source-written standard-library type names nominal in syntax and
     resolve them to catalog identities when entering inference/semantics.
-  - [ ] Apply the same name-resolution boundary to source record/enum names
-    and consolidate the remaining parser lookup paths into one environment.
+  - [x] Apply the same name-resolution boundary to source record/enum names:
+    source annotations now carry an interned nominal-name identity and resolve
+    alongside catalog names only when entering semantics.
+  - [x] Consolidate constructor, enum-pattern, choice-setting, and nominal-type
+    lookup into one declaration environment rather than parallel parser maps.
 - [ ] Simplify inference to known semantic `TypeId` values plus inference
   variables. Remove the parallel nominal variants and conversion tables in
   `ast::TypeRef`, `inference::Type`, and `BuiltinType` as their migrations
@@ -82,6 +88,13 @@ invariant:
   conversion, and future traits into capability queries over semantic
   `TypeId`. Derive record/enum capabilities from their members where
   appropriate rather than matching concrete library types.
+  - [x] Declare core and standard-type capabilities once in the catalog and
+    make inference constraints, callable applicability, casts,
+    interpolation, memory-read eligibility, and equality query them instead
+    of maintaining concrete-type lists.
+  - [ ] Replace the remaining provisional inference rules for source records,
+    enums, and wrappers with one recursive semantic-`TypeId` capability query;
+    publish precise failure reasons for diagnostics and backend planning.
 
 ### Generic members, layouts, and tooling
 

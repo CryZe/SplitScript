@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     ast::{RecordDecl, RecordFieldId, RecordId},
     semantic::SemanticModel,
+    stdlib::StandardLibrary,
     types::{BuiltinType, TypeId, TypeKind},
 };
 
@@ -175,14 +176,10 @@ impl MemoryLayouts {
 }
 
 fn scalar_layout(ty: BuiltinType) -> Option<(u32, u32)> {
-    let size = match ty {
-        BuiltinType::Bool | BuiltinType::I8 | BuiltinType::U8 => 1,
-        BuiltinType::I16 | BuiltinType::U16 => 2,
-        BuiltinType::I32 | BuiltinType::U32 | BuiltinType::F32 => 4,
-        BuiltinType::I64 | BuiltinType::U64 | BuiltinType::Address | BuiltinType::F64 => 8,
-        _ => return None,
-    };
-    Some((size, size))
+    StandardLibrary::new()
+        .core_type(ty.core())
+        .memory_layout
+        .map(|layout| (layout.size, layout.alignment))
 }
 
 fn align_up(value: u32, alignment: u32) -> u32 {

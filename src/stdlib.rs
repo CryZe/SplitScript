@@ -7,13 +7,13 @@
 mod declarations;
 
 pub use declarations::{
-    CoreTypeId, DeclaredTypeRef, FieldVisibility, RuntimeRepresentation, StdlibCapabilityId,
-    StdlibField, StdlibFieldId, StdlibNamespace, StdlibNamespaceId, StdlibOwner, StdlibSymbolId,
-    StdlibType, StdlibTypeConstructorId, StdlibTypeId, StdlibTypeKind, StdlibVariant,
-    StdlibVariantId, ValueUsage,
+    CoreType, CoreTypeId, DeclaredTypeRef, FieldVisibility, RuntimeRepresentation,
+    ScalarMemoryLayout, StdlibCapabilityId, StdlibField, StdlibFieldId, StdlibNamespace,
+    StdlibNamespaceId, StdlibOwner, StdlibSymbolId, StdlibType, StdlibTypeConstructorId,
+    StdlibTypeId, StdlibTypeKind, StdlibVariant, StdlibVariantId, ValueUsage,
 };
 
-use declarations::{FIELDS, NAMESPACES, TYPES, VARIANTS};
+use declarations::{CORE_TYPES, FIELDS, NAMESPACES, TYPES, VARIANTS};
 
 use std::collections::HashSet;
 
@@ -1280,6 +1280,21 @@ impl StandardLibrary {
         Self
     }
 
+    pub fn core_types(self) -> &'static [CoreType] {
+        CORE_TYPES
+    }
+
+    pub fn core_type(self, id: CoreTypeId) -> &'static CoreType {
+        CORE_TYPES
+            .iter()
+            .find(|ty| ty.id == id)
+            .expect("every core type ID must have a declaration")
+    }
+
+    pub fn core_type_has_capability(self, ty: CoreTypeId, capability: StdlibCapabilityId) -> bool {
+        self.core_type(ty).capabilities.contains(&capability)
+    }
+
     pub fn namespaces(self) -> &'static [StdlibNamespace] {
         NAMESPACES
     }
@@ -1720,51 +1735,42 @@ fn catalog_method_accepts(item: &StdlibItem, receiver: &TypeKind) -> bool {
                     .constraints
                     .iter()
                     .all(|constraint| match constraint {
-                        TypeConstraint::Numeric => matches!(
+                        TypeConstraint::Numeric => {
+                            semantic_type_has_capability(receiver, StdlibCapabilityId::Numeric)
+                        }
+                        TypeConstraint::MemoryReadable => semantic_type_has_capability(
                             receiver,
-                            TypeKind::Builtin(builtin) if builtin.is_numeric()
+                            StdlibCapabilityId::MemoryReadable,
                         ),
-                        TypeConstraint::MemoryReadable => is_semantic_memory_readable(receiver),
                     })
             }),
     }
 }
 
-fn is_semantic_memory_readable(ty: &TypeKind) -> bool {
-    matches!(
-        ty,
-        TypeKind::Record(_)
-            | TypeKind::Builtin(
-                BuiltinType::Bool
-                    | BuiltinType::I8
-                    | BuiltinType::U8
-                    | BuiltinType::I16
-                    | BuiltinType::U16
-                    | BuiltinType::I32
-                    | BuiltinType::U32
-                    | BuiltinType::I64
-                    | BuiltinType::U64
-                    | BuiltinType::Address
-                    | BuiltinType::F32
-                    | BuiltinType::F64
-            )
-    )
+fn semantic_type_has_capability(ty: &TypeKind, capability: StdlibCapabilityId) -> bool {
+    let library = StandardLibrary::new();
+    match ty {
+        TypeKind::Builtin(builtin) => library.core_type_has_capability(builtin.core(), capability),
+        TypeKind::Standard(standard) => library.type_has_capability(*standard, capability),
+        TypeKind::Record(_) => matches!(
+            capability,
+            StdlibCapabilityId::Equatable | StdlibCapabilityId::MemoryReadable
+        ),
+        TypeKind::Enum(_) | TypeKind::Option { .. } | TypeKind::Result { .. } => {
+            capability == StdlibCapabilityId::Equatable
+        }
+        TypeKind::Array { .. } => false,
+    }
 }
 
 fn memory_type(name: &str) -> Option<BuiltinType> {
-    Some(match name {
-        "bool" => BuiltinType::Bool,
-        "i8" => BuiltinType::I8,
-        "u8" => BuiltinType::U8,
-        "i16" => BuiltinType::I16,
-        "u16" => BuiltinType::U16,
-        "i32" => BuiltinType::I32,
-        "u32" => BuiltinType::U32,
-        "i64" => BuiltinType::I64,
-        "u64" => BuiltinType::U64,
-        "f32" => BuiltinType::F32,
-        "f64" => BuiltinType::F64,
-        "address" => BuiltinType::Address,
-        _ => return None,
-    })
+    let library = StandardLibrary::new();
+    library
+        .core_types()
+        .iter()
+        .find(|ty| {
+            ty.name == name
+                && library.core_type_has_capability(ty.id, StdlibCapabilityId::MemoryReadable)
+        })
+        .map(|ty| BuiltinType::from_core(ty.id))
 }

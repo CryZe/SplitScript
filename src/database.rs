@@ -1891,6 +1891,26 @@ fn named_type(
             .iter()
             .find(|result| result.id == id)
             .and_then(|result| named_type(syntax, result.value)),
+        SyntaxTypeRef::Named(id) => {
+            let name = syntax.type_name(id);
+            syntax
+                .records
+                .iter()
+                .find(|record| record.name == name)
+                .map(|record| (SourceDefinitionId::Record(record.id), record.name.as_str()))
+                .or_else(|| {
+                    syntax
+                        .enums
+                        .iter()
+                        .find(|enumeration| enumeration.name == name)
+                        .map(|enumeration| {
+                            (
+                                SourceDefinitionId::Enum(enumeration.id),
+                                enumeration.name.as_str(),
+                            )
+                        })
+                })
+        }
         SyntaxTypeRef::Void
         | SyntaxTypeRef::Bool
         | SyntaxTypeRef::I8
@@ -1904,7 +1924,6 @@ fn named_type(
         | SyntaxTypeRef::Address
         | SyntaxTypeRef::F32
         | SyntaxTypeRef::F64
-        | SyntaxTypeRef::Named(_)
         | SyntaxTypeRef::Standard(_) => None,
     }
 }

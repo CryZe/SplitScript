@@ -12,7 +12,7 @@ use crate::{
         ResultTypeId,
     },
     inference::Type,
-    stdlib::{CoreTypeId, StandardLibrary, StdlibTypeId},
+    stdlib::{CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
 };
 
 /// An interned type in one checked program.
@@ -44,6 +44,24 @@ pub enum BuiltinType {
 }
 
 impl BuiltinType {
+    pub const fn from_core(core: CoreTypeId) -> Self {
+        match core {
+            CoreTypeId::Void => Self::Void,
+            CoreTypeId::Bool => Self::Bool,
+            CoreTypeId::I8 => Self::I8,
+            CoreTypeId::U8 => Self::U8,
+            CoreTypeId::I16 => Self::I16,
+            CoreTypeId::U16 => Self::U16,
+            CoreTypeId::I32 => Self::I32,
+            CoreTypeId::U32 => Self::U32,
+            CoreTypeId::I64 => Self::I64,
+            CoreTypeId::U64 => Self::U64,
+            CoreTypeId::Address => Self::Address,
+            CoreTypeId::F32 => Self::F32,
+            CoreTypeId::F64 => Self::F64,
+        }
+    }
+
     pub const fn core(self) -> CoreTypeId {
         match self {
             Self::Void => CoreTypeId::Void,
@@ -63,22 +81,11 @@ impl BuiltinType {
     }
 
     pub fn is_integer(self) -> bool {
-        matches!(
-            self,
-            Self::I8
-                | Self::U8
-                | Self::I16
-                | Self::U16
-                | Self::I32
-                | Self::U32
-                | Self::I64
-                | Self::U64
-                | Self::Address
-        )
+        StandardLibrary::new().core_type_has_capability(self.core(), StdlibCapabilityId::Integer)
     }
 
     pub fn is_numeric(self) -> bool {
-        self.is_integer() || matches!(self, Self::F32 | Self::F64)
+        StandardLibrary::new().core_type_has_capability(self.core(), StdlibCapabilityId::Numeric)
     }
 
     pub(crate) const fn legacy(self) -> Type {
@@ -154,24 +161,11 @@ impl Default for TypeStore {
             kinds: Vec::new(),
             interned: HashMap::new(),
         };
-        for builtin in [
-            BuiltinType::Void,
-            BuiltinType::Bool,
-            BuiltinType::I8,
-            BuiltinType::U8,
-            BuiltinType::I16,
-            BuiltinType::U16,
-            BuiltinType::I32,
-            BuiltinType::U32,
-            BuiltinType::I64,
-            BuiltinType::U64,
-            BuiltinType::Address,
-            BuiltinType::F32,
-            BuiltinType::F64,
-        ] {
-            store.intern(TypeKind::Builtin(builtin));
+        let library = StandardLibrary::new();
+        for core in library.core_types() {
+            store.intern(TypeKind::Builtin(BuiltinType::from_core(core.id)));
         }
-        for standard in StandardLibrary::new().types() {
+        for standard in library.types() {
             store.intern(TypeKind::Standard(standard.id));
         }
         store

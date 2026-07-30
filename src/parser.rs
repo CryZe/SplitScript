@@ -9,8 +9,8 @@ use crate::{
         OptionTypeId, Parameter, PatternBinding, PatternId, PointerPath, Program, RecordDecl,
         RecordField, RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
         SettingChoiceOptionId, SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl,
-        StateField, StateSource, Stmt, SuspensionBinding, SuspensionMode, TypeRef, UnaryOp,
-        ValueId, VariableDecl,
+        StateField, StateSource, Stmt, SuspensionBinding, SuspensionMode, TypeNameId, TypeRef,
+        UnaryOp, ValueId, VariableDecl,
     },
     lexer::{Token, TokenKind},
     stdlib::{StandardLibrary, StdlibTypeKind},
@@ -32,24 +32,21 @@ pub struct ParseOutput {
 }
 
 pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
-    let ((record_names, enum_names), initial_diagnostics) = collect_named_types(&tokens);
-    let first_constructed_type_id = record_names.len() as u32
-        + enum_names
-            .values()
-            .filter(|enumeration| matches!(enumeration, EnumTypeId::Source(_)))
-            .count() as u32;
+    let (named_types, initial_diagnostics) = collect_named_types(&tokens);
+    let first_constructed_type_id = named_types.source_type_count() as u32;
     Parser {
         source,
         tokens,
         pos: 0,
-        record_names,
-        enum_names,
+        named_types,
         array_types: Vec::new(),
         array_type_ids: HashMap::new(),
         option_types: Vec::new(),
         option_type_ids: HashMap::new(),
         result_types: Vec::new(),
         result_type_ids: HashMap::new(),
+        type_names: Vec::new(),
+        type_name_ids: HashMap::new(),
         next_constructed_type_id: first_constructed_type_id,
         next_expression_id: 0,
         next_function_id: 0,
@@ -69,14 +66,15 @@ struct Parser<'a> {
     source: &'a str,
     tokens: Vec<Token>,
     pos: usize,
-    record_names: HashMap<String, RecordId>,
-    enum_names: HashMap<String, EnumTypeId>,
+    named_types: NamedTypeEnvironment,
     array_types: Vec<ArrayTypeDecl>,
     array_type_ids: HashMap<TypeRef, ArrayTypeId>,
     option_types: Vec<OptionTypeDecl>,
     option_type_ids: HashMap<TypeRef, OptionTypeId>,
     result_types: Vec<ResultTypeDecl>,
     result_type_ids: HashMap<TypeRef, ResultTypeId>,
+    type_names: Vec<String>,
+    type_name_ids: HashMap<String, TypeNameId>,
     next_constructed_type_id: u32,
     next_expression_id: u32,
     next_function_id: u32,
@@ -274,6 +272,7 @@ impl Parser<'_> {
         program.array_types = self.array_types;
         program.option_types = self.option_types;
         program.result_types = self.result_types;
+        program.type_names = self.type_names;
         ParseOutput {
             program,
             diagnostics: self.diagnostics,
@@ -284,7 +283,7 @@ impl Parser<'_> {
     fn enum_decl(&mut self) -> Result<EnumDecl, Diagnostic> {
         let start = self.expect_ident("enum")?.start;
         let (name, _) = self.expect_any_ident("expected an enum name")?;
-        let EnumTypeId::Source(id) = self.enum_names[&name] else {
+        let Some(EnumTypeId::Source(id)) = self.named_types.enumeration(&name) else {
             unreachable!("standard-library enum declarations are rejected during name collection")
         };
         self.expect(TokenKind::LBrace, "expected `{` after the enum name")?;
@@ -333,7 +332,9 @@ impl Parser<'_> {
     fn record_decl(&mut self) -> Result<RecordDecl, Diagnostic> {
         let start = self.expect_ident("record")?.start;
         let (name, _) = self.expect_any_ident("expected a record name")?;
-        let id = self.record_names[&name];
+        let Some(id) = self.named_types.record(&name) else {
+            unreachable!("record declarations are collected before parsing")
+        };
         self.expect(TokenKind::LBrace, "expected `{` after the record name")?;
         let body_depth = self.brace_depth_before(self.pos);
         let mut fields = Vec::new();
@@ -784,7 +785,8 @@ impl Parser<'_> {
                     "expected `=>` after the option description",
                 )?;
                 let (enum_name, enum_span) = self.expect_any_ident("expected an enum name")?;
-                let Some(&EnumTypeId::Source(enum_id)) = self.enum_names.get(&enum_name) else {
+                let Some(EnumTypeId::Source(enum_id)) = self.named_types.enumeration(&enum_name)
+                else {
                     return Err(Diagnostic::new(
                         format!("choice settings require a source enum, found `{enum_name}`"),
                         enum_span,
@@ -1643,7 +1645,7 @@ impl Parser<'_> {
                         self.new_expr(ExprKind::Signature(value), token.span.join(signature_span))
                     );
                 }
-                if let Some(&record) = self.record_names.get(&first)
+                if let Some(record) = self.named_types.record(&first)
                     && self.eat(&TokenKind::LBrace).is_some()
                 {
                     let body_depth = self.brace_depth_before(self.pos);
@@ -1694,7 +1696,7 @@ impl Parser<'_> {
                         false,
                     );
                     if let [enum_name, variant] = path.as_slice()
-                        && let Some(&enumeration) = self.enum_names.get(enum_name)
+                        && let Some(enumeration) = self.named_types.enumeration(enum_name)
                     {
                         if args.len() > 1 {
                             return Err(Diagnostic::new(
@@ -1722,7 +1724,7 @@ impl Parser<'_> {
                 } else {
                     let end = self.previous().span;
                     if let [enum_name, variant] = path.as_slice()
-                        && let Some(&enumeration) = self.enum_names.get(enum_name)
+                        && let Some(enumeration) = self.named_types.enumeration(enum_name)
                     {
                         return Ok(self.new_expr(
                             ExprKind::Enum {
@@ -2048,7 +2050,7 @@ impl Parser<'_> {
             TokenKind::Ident(enum_name) => {
                 self.bump();
                 if self.eat(&TokenKind::Dot).is_some() {
-                    let Some(&enumeration) = self.enum_names.get(&enum_name) else {
+                    let Some(enumeration) = self.named_types.enumeration(&enum_name) else {
                         return Err(Diagnostic::new(
                             format!("unknown enum `{enum_name}` in match pattern"),
                             pattern_start,
@@ -2347,19 +2349,22 @@ impl Parser<'_> {
         })
     }
 
-    fn resolve_type(&self, name: &str, span: Span) -> Result<TypeRef, Diagnostic> {
-        TypeRef::parse(name)
-            .or_else(|| self.record_names.get(name).copied().map(TypeRef::Record))
-            .or_else(|| {
-                self.enum_names
-                    .get(name)
-                    .copied()
-                    .map(|enumeration| match enumeration {
-                        EnumTypeId::Source(id) => TypeRef::Enum(id),
-                        EnumTypeId::Standard(id) => TypeRef::Standard(id),
-                    })
-            })
-            .ok_or_else(|| Diagnostic::new(format!("unknown type `{name}`"), span))
+    fn resolve_type(&mut self, name: &str, span: Span) -> Result<TypeRef, Diagnostic> {
+        if let Some(core) = self.named_types.core(name) {
+            return Ok(core);
+        }
+        if !self.named_types.contains(name) {
+            return Err(Diagnostic::new(format!("unknown type `{name}`"), span));
+        }
+        let id = if let Some(id) = self.type_name_ids.get(name).copied() {
+            id
+        } else {
+            let id = TypeNameId::from_index(self.type_names.len() as u32);
+            self.type_names.push(name.to_owned());
+            self.type_name_ids.insert(name.to_owned(), id);
+            id
+        };
+        Ok(TypeRef::Named(id))
     }
 
     fn parse_type(&mut self, message: &'static str) -> Result<(TypeRef, Span), Diagnostic> {
@@ -2941,46 +2946,158 @@ fn type_can_be_stored_in_state(ty: TypeRef) -> bool {
         })
 }
 
-type NamedTypes = (HashMap<String, RecordId>, HashMap<String, EnumTypeId>);
+#[derive(Clone, Copy)]
+enum NamedTypeDeclaration {
+    Core(TypeRef),
+    Record(RecordId),
+    Enum(EnumTypeId),
+    RecordAndEnum(RecordId, EnumTypeId),
+    Standard,
+}
 
-fn collect_named_types(tokens: &[Token]) -> (NamedTypes, Vec<Diagnostic>) {
+#[derive(Default)]
+struct NamedTypeEnvironment {
+    declarations: HashMap<String, NamedTypeDeclaration>,
+}
+
+impl NamedTypeEnvironment {
+    fn core(&self, name: &str) -> Option<TypeRef> {
+        match self.declarations.get(name) {
+            Some(NamedTypeDeclaration::Core(ty)) => Some(*ty),
+            _ => None,
+        }
+    }
+
+    fn contains(&self, name: &str) -> bool {
+        self.declarations.contains_key(name)
+    }
+
+    fn record(&self, name: &str) -> Option<RecordId> {
+        match self.declarations.get(name) {
+            Some(NamedTypeDeclaration::Record(id))
+            | Some(NamedTypeDeclaration::RecordAndEnum(id, _)) => Some(*id),
+            _ => None,
+        }
+    }
+
+    fn enumeration(&self, name: &str) -> Option<EnumTypeId> {
+        match self.declarations.get(name) {
+            Some(NamedTypeDeclaration::Enum(id))
+            | Some(NamedTypeDeclaration::RecordAndEnum(_, id)) => Some(*id),
+            _ => None,
+        }
+    }
+
+    fn source_type_count(&self) -> usize {
+        self.declarations
+            .values()
+            .map(|declaration| match declaration {
+                NamedTypeDeclaration::Record(_)
+                | NamedTypeDeclaration::Enum(EnumTypeId::Source(_)) => 1,
+                NamedTypeDeclaration::RecordAndEnum(_, EnumTypeId::Source(_)) => 2,
+                NamedTypeDeclaration::RecordAndEnum(_, EnumTypeId::Standard(_)) => 1,
+                NamedTypeDeclaration::Enum(EnumTypeId::Standard(_))
+                | NamedTypeDeclaration::Core(_)
+                | NamedTypeDeclaration::Standard => 0,
+            })
+            .sum()
+    }
+}
+
+fn collect_named_types(tokens: &[Token]) -> (NamedTypeEnvironment, Vec<Diagnostic>) {
     let mut diagnostics = Vec::new();
     let records = collect_top_level_names(tokens, "record", 0)
         .into_iter()
         .map(|(name, id)| (name, RecordId::from_index(id)))
         .collect::<HashMap<_, _>>();
-    let mut enums = collect_top_level_names(tokens, "enum", records.len() as u32)
+    let enums = collect_top_level_names(tokens, "enum", records.len() as u32)
         .into_iter()
         .map(|(name, id)| (name, EnumTypeId::Source(EnumId::from_index(id))))
         .collect::<HashMap<_, _>>();
-    for ty in StandardLibrary::new()
-        .types()
-        .iter()
-        .filter(|ty| ty.kind == StdlibTypeKind::Enum)
-    {
+    let mut environment = NamedTypeEnvironment::default();
+    for core in StandardLibrary::new().core_types() {
+        environment.declarations.insert(
+            core.name.to_owned(),
+            NamedTypeDeclaration::Core(
+                TypeRef::parse(core.name).expect("every declared core type has source syntax"),
+            ),
+        );
+    }
+    environment.declarations.insert(
+        "Address".to_owned(),
+        NamedTypeDeclaration::Core(TypeRef::Address),
+    );
+    for (name, id) in &records {
+        if environment.contains(name) {
+            diagnostics.push(Diagnostic::new(
+                format!("`{name}` is a core type and cannot be redeclared as a record"),
+                Span::default(),
+            ));
+        }
+        environment
+            .declarations
+            .insert(name.clone(), NamedTypeDeclaration::Record(*id));
+    }
+    for (name, id) in &enums {
+        if let Some(NamedTypeDeclaration::Record(record)) =
+            environment.declarations.get(name).copied()
+        {
+            diagnostics.push(Diagnostic::new(
+                format!("duplicate named type `{name}`"),
+                Span::default(),
+            ));
+            environment.declarations.insert(
+                name.clone(),
+                NamedTypeDeclaration::RecordAndEnum(record, *id),
+            );
+        } else {
+            if environment.contains(name) {
+                diagnostics.push(Diagnostic::new(
+                    format!("`{name}` is a core type and cannot be redeclared as an enum"),
+                    Span::default(),
+                ));
+            }
+            environment
+                .declarations
+                .insert(name.clone(), NamedTypeDeclaration::Enum(*id));
+        }
+    }
+    for ty in StandardLibrary::new().types() {
         if records.contains_key(ty.name) {
             diagnostics.push(Diagnostic::new(
                 format!(
-                    "`{}` is a standard-library enum and cannot be redeclared as a record",
+                    "`{}` is a standard-library type and cannot be redeclared as a record",
                     ty.name
                 ),
                 Span::default(),
             ));
         }
         if enums.contains_key(ty.name) {
+            let kind = if ty.kind == StdlibTypeKind::Enum {
+                "enum"
+            } else {
+                "type"
+            };
             diagnostics.push(Diagnostic::new(
                 format!(
-                    "`{}` is a standard-library enum and cannot be redeclared",
-                    ty.name
+                    "`{}` is a standard-library {kind} and cannot be redeclared as an enum",
+                    ty.name,
                 ),
                 Span::default(),
             ));
         }
-        enums
-            .entry(ty.name.to_owned())
-            .or_insert(EnumTypeId::Standard(ty.id));
+        if !environment.contains(ty.name) {
+            let declaration = if ty.kind == StdlibTypeKind::Enum {
+                NamedTypeDeclaration::Enum(EnumTypeId::Standard(ty.id))
+            } else {
+                NamedTypeDeclaration::Standard
+            };
+            environment
+                .declarations
+                .insert(ty.name.to_owned(), declaration);
+        }
     }
-    ((records, enums), diagnostics)
+    (environment, diagnostics)
 }
 
 fn collect_top_level_names(

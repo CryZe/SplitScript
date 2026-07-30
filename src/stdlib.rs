@@ -22,42 +22,6 @@ use crate::{
     types::{BuiltinType, TypeKind},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum StdlibItemId {
-    NumericMin,
-    NumericMax,
-    NumericClamp,
-    Print,
-    SetVariable,
-    SetTickRate,
-    NextTick,
-    StringLength,
-    StringConcat,
-    TimerState,
-    ProcessModule,
-    ProcessRead,
-    ProcessFollow,
-    ProcessScan,
-    ProcessReadRelative32,
-    ProcessReadManagedString,
-    UnityIl2Cpp,
-    DurationFromFrames,
-    DurationFromParts,
-    DurationFromSeconds,
-    AddressOffset,
-    AddressAdd,
-    ModuleScan,
-    UnityModuleImage,
-    UnityImageClass,
-    UnityClassField,
-    UnityClassFieldAny,
-    UnityClassStaticTable,
-    UnityClassStaticInstance,
-    ArrayLength,
-    ArrayGet,
-    ArraySet,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IntrinsicId {
     NumericMin,
@@ -655,7 +619,7 @@ doc_example!(
 );
 
 macro_rules! function_item {
-    ($id:ident, $owner:expr, $name:literal, $qualified:literal, $params:expr, $result:expr,
+    (@id $id:ident, $owner:expr, $name:literal, $qualified:literal, $params:expr, $result:expr,
      $effects:expr, $availability:expr, $summary:literal, $details:literal, $examples:expr) => {
         StdlibItem {
             id: StdlibItemId::$id,
@@ -680,7 +644,7 @@ macro_rules! function_item {
             implementation: Implementation::Intrinsic(IntrinsicId::$id),
         }
     };
-    ($id:ident => $intrinsic:ident, $owner:expr, $name:literal, $qualified:literal, $params:expr,
+    (@id $id:ident, intrinsic $intrinsic:ident, $owner:expr, $name:literal, $qualified:literal, $params:expr,
      $result:expr, $effects:expr, $availability:expr, $summary:literal, $details:literal,
      $examples:expr) => {
         StdlibItem {
@@ -709,7 +673,7 @@ macro_rules! function_item {
 }
 
 macro_rules! method_item {
-    ($id:ident, $owner:expr, $qualified:literal, $receiver:expr, $name:literal, $types:expr,
+    (@id $id:ident, $owner:expr, $qualified:literal, $receiver:expr, $name:literal, $types:expr,
      $params:expr, $result:expr, $effects:expr, $availability:expr,
      $summary:literal, $details:literal, $examples:expr) => {
         StdlibItem {
@@ -739,9 +703,52 @@ macro_rules! method_item {
     };
 }
 
-const ITEMS: &[StdlibItem] = &[
-    method_item!(
-        NumericMin,
+macro_rules! typed_function_item {
+    (@id $id:ident, $owner:expr, $name:literal, $qualified:literal, $type_parameter:literal,
+     $types:expr, $params:expr, $result:expr, $effects:expr, $availability:expr,
+     $summary:literal, $details:literal, $examples:expr) => {
+        StdlibItem {
+            id: StdlibItemId::$id,
+            owner: $owner,
+            name: $name,
+            qualified_name: $qualified,
+            kind: ItemKind::TypedFunction {
+                type_parameter: $type_parameter,
+            },
+            signature: Signature {
+                type_parameters: $types,
+                parameters: $params,
+                result: $result,
+            },
+            effects: $effects,
+            availability: $availability,
+            deprecation: None,
+            documentation: Documentation {
+                summary: $summary,
+                details: $details,
+                examples: $examples,
+                related: &[],
+            },
+            implementation: Implementation::Intrinsic(IntrinsicId::$id),
+        }
+    };
+}
+
+macro_rules! declare_standard_items {
+    ($($id:ident => $factory:ident!($($arguments:tt)*)),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub enum StdlibItemId {
+            $($id),*
+        }
+
+        const ITEMS: &[StdlibItem] = &[
+            $($factory!(@id $id, $($arguments)*)),*
+        ];
+    };
+}
+
+declare_standard_items! {
+    NumericMin => method_item!(
         StdlibOwner::Capability(StdlibCapabilityId::Numeric),
         "Numeric.min",
         T_REF,
@@ -759,8 +766,7 @@ const ITEMS: &[StdlibItem] = &[
         "Both values have the same inferred numeric type and are evaluated once.",
         NUMERIC_MIN_EXAMPLE
     ),
-    method_item!(
-        NumericMax,
+    NumericMax => method_item!(
         StdlibOwner::Capability(StdlibCapabilityId::Numeric),
         "Numeric.max",
         T_REF,
@@ -778,8 +784,7 @@ const ITEMS: &[StdlibItem] = &[
         "Both values have the same inferred numeric type and are evaluated once.",
         NUMERIC_MAX_EXAMPLE
     ),
-    method_item!(
-        NumericClamp,
+    NumericClamp => method_item!(
         StdlibOwner::Capability(StdlibCapabilityId::Numeric),
         "Numeric.clamp",
         T_REF,
@@ -796,8 +801,7 @@ const ITEMS: &[StdlibItem] = &[
         "The receiver and bounds have one inferred numeric type and are evaluated once.",
         NUMERIC_CLAMP_EXAMPLE
     ),
-    function_item!(
-        Print,
+    Print => function_item!(
         StdlibOwner::Root,
         "print",
         "print",
@@ -813,8 +817,8 @@ const ITEMS: &[StdlibItem] = &[
         "The message is forwarded to the autosplitting runtime.",
         PRINT_EXAMPLE
     ),
-    function_item!(
-        SetVariable => TimerSetVariable,
+    SetVariable => function_item!(
+        intrinsic TimerSetVariable,
         StdlibOwner::Root,
         "setVariable",
         "setVariable",
@@ -829,8 +833,8 @@ const ITEMS: &[StdlibItem] = &[
         "The value is visible to layouts that display autosplitter variables.",
         SET_VARIABLE_EXAMPLE
     ),
-    function_item!(
-        SetTickRate => RuntimeSetTickRate,
+    SetTickRate => function_item!(
+        intrinsic RuntimeSetTickRate,
         StdlibOwner::Root,
         "setTickRate",
         "setTickRate",
@@ -842,8 +846,7 @@ const ITEMS: &[StdlibItem] = &[
         "The runtime applies the requested polling frequency.",
         SET_TICK_RATE_EXAMPLE
     ),
-    function_item!(
-        NextTick,
+    NextTick => function_item!(
         StdlibOwner::Root,
         "nextTick",
         "nextTick",
@@ -855,8 +858,7 @@ const ITEMS: &[StdlibItem] = &[
         "Always suspends once. The continuation resumes on the following attached-process tick and is cancelled if that process closes first.",
         NEXT_TICK_DOC_EXAMPLE
     ),
-    function_item!(
-        StringLength,
+    StringLength => function_item!(
         StdlibOwner::Type(StdlibTypeId::String),
         "length",
         "String.length",
@@ -872,8 +874,7 @@ const ITEMS: &[StdlibItem] = &[
         "The result counts UTF-8 bytes in the current string representation.",
         STRING_LENGTH_EXAMPLE
     ),
-    function_item!(
-        StringConcat,
+    StringConcat => function_item!(
         StdlibOwner::Type(StdlibTypeId::String),
         "concat",
         "String.concat",
@@ -889,8 +890,7 @@ const ITEMS: &[StdlibItem] = &[
         "A new WebAssembly GC string is allocated.",
         STRING_CONCAT_EXAMPLE
     ),
-    function_item!(
-        TimerState,
+    TimerState => function_item!(
         StdlibOwner::Namespace(StdlibNamespaceId::Timer),
         "state",
         "timer.state",
@@ -902,8 +902,7 @@ const ITEMS: &[StdlibItem] = &[
         "Host states are converted to NotRunning, Running, Paused, Ended, or Unknown at the ABI boundary.",
         TIMER_STATE_EXAMPLE
     ),
-    function_item!(
-        ProcessModule,
+    ProcessModule => function_item!(
         StdlibOwner::Namespace(StdlibNamespaceId::Process),
         "module",
         "process.module",
@@ -920,32 +919,21 @@ const ITEMS: &[StdlibItem] = &[
         "Suspends attachment until both module address and size are available.",
         PROCESS_MODULE_EXAMPLE
     ),
-    StdlibItem {
-        id: StdlibItemId::ProcessRead,
-        owner: StdlibOwner::Namespace(StdlibNamespaceId::Process),
-        name: "read",
-        qualified_name: "process.read",
-        kind: ItemKind::TypedFunction {
-            type_parameter: "T",
-        },
-        signature: Signature {
-            type_parameters: MEMORY_PARAMETER,
-            parameters: &[parameter("address", ADDRESS, "The target address to read.")],
-            result: T_RESULT,
-        },
-        effects: PROCESS,
-        availability: Availability::Everywhere,
-        deprecation: None,
-        documentation: Documentation {
-            summary: "Reads a fixed-layout value from process memory.",
-            details: "The expected MemoryReadable type selects a fixed-size primitive or record layout. A synchronous read returns T!; retry polls until a value is available and yields T. Use a suffix such as process.read.i32 when context cannot determine a primitive type.",
-            examples: PROCESS_READ_EXAMPLE,
-            related: &[],
-        },
-        implementation: Implementation::Intrinsic(IntrinsicId::ProcessRead),
-    },
-    function_item!(
-        ProcessFollow,
+    ProcessRead => typed_function_item!(
+        StdlibOwner::Namespace(StdlibNamespaceId::Process),
+        "read",
+        "process.read",
+        "T",
+        MEMORY_PARAMETER,
+        &[parameter("address", ADDRESS, "The target address to read.")],
+        T_RESULT,
+        PROCESS,
+        Availability::Everywhere,
+        "Reads a fixed-layout value from process memory.",
+        "The expected MemoryReadable type selects a fixed-size primitive or record layout. A synchronous read returns T!; retry polls until a value is available and yields T. Use a suffix such as process.read.i32 when context cannot determine a primitive type.",
+        PROCESS_READ_EXAMPLE
+    ),
+    ProcessFollow => function_item!(
         StdlibOwner::Namespace(StdlibNamespaceId::Process),
         "follow",
         "process.follow",
@@ -960,8 +948,7 @@ const ITEMS: &[StdlibItem] = &[
         "Each intermediate address is read as a 64-bit target pointer. A failed or null pointer read returns an error; use retry in onAttach to wait for success.",
         PROCESS_FOLLOW_EXAMPLE
     ),
-    function_item!(
-        ProcessScan,
+    ProcessScan => function_item!(
         StdlibOwner::Namespace(StdlibNamespaceId::Process),
         "scan",
         "process.scan",
@@ -982,8 +969,7 @@ const ITEMS: &[StdlibItem] = &[
         "Suspends until the signature is found in the requested range.",
         PROCESS_SCAN_EXAMPLE
     ),
-    function_item!(
-        ProcessReadRelative32,
+    ProcessReadRelative32 => function_item!(
         StdlibOwner::Namespace(StdlibNamespaceId::Process),
         "readRelative32",
         "process.readRelative32",
@@ -999,8 +985,7 @@ const ITEMS: &[StdlibItem] = &[
         "Reads a signed displacement and adds it to the address following the displacement. A failed or null target returns an error; use retry in onAttach to wait for success.",
         PROCESS_RELATIVE_EXAMPLE
     ),
-    function_item!(
-        ProcessReadManagedString,
+    ProcessReadManagedString => function_item!(
         StdlibOwner::Namespace(StdlibNamespaceId::ProcessRead),
         "managedString",
         "process.read.managedString",
@@ -1019,8 +1004,7 @@ const ITEMS: &[StdlibItem] = &[
         "The bounded UTF-16 payload is decoded into an immutable SplitScript string. Memory-access failure returns an error; malformed surrogate sequences decode as the replacement character.",
         MANAGED_STRING_EXAMPLE
     ),
-    function_item!(
-        UnityIl2Cpp,
+    UnityIl2Cpp => function_item!(
         StdlibOwner::Namespace(StdlibNamespaceId::Unity),
         "il2cpp",
         "Unity.il2cpp",
@@ -1036,8 +1020,7 @@ const ITEMS: &[StdlibItem] = &[
         "Suspends until GameAssembly and the IL2CPP metadata structures are available.",
         UNITY_IL2CPP_EXAMPLE
     ),
-    function_item!(
-        DurationFromFrames,
+    DurationFromFrames => function_item!(
         StdlibOwner::Type(StdlibTypeId::Duration),
         "fromFrames",
         "Duration.fromFrames",
@@ -1052,8 +1035,7 @@ const ITEMS: &[StdlibItem] = &[
         "The conversion preserves whole seconds and nanoseconds.",
         DURATION_FRAMES_EXAMPLE
     ),
-    function_item!(
-        DurationFromParts,
+    DurationFromParts => function_item!(
         StdlibOwner::Type(StdlibTypeId::Duration),
         "fromParts",
         "Duration.fromParts",
@@ -1068,8 +1050,8 @@ const ITEMS: &[StdlibItem] = &[
         "The two components become the runtime duration representation.",
         DURATION_PARTS_EXAMPLE
     ),
-    function_item!(
-        DurationFromSeconds => DurationSaturatingSecondsF32,
+    DurationFromSeconds => function_item!(
+        intrinsic DurationSaturatingSecondsF32,
         StdlibOwner::Type(StdlibTypeId::Duration),
         "fromSeconds",
         "Duration.fromSeconds",
@@ -1081,8 +1063,7 @@ const ITEMS: &[StdlibItem] = &[
         "Finite values are converted to the runtime duration representation; values outside its range are safely clamped.",
         DURATION_SECONDS_EXAMPLE
     ),
-    method_item!(
-        AddressOffset,
+    AddressOffset => method_item!(
         StdlibOwner::Core(CoreTypeId::Address),
         "address.offset",
         ADDRESS,
@@ -1096,8 +1077,7 @@ const ITEMS: &[StdlibItem] = &[
         "The offset is widened to the target address width.",
         ADDRESS_OFFSET_EXAMPLE
     ),
-    method_item!(
-        AddressAdd,
+    AddressAdd => method_item!(
         StdlibOwner::Core(CoreTypeId::Address),
         "address.add",
         ADDRESS,
@@ -1111,8 +1091,7 @@ const ITEMS: &[StdlibItem] = &[
         "This is useful for offsets that are already represented as u64.",
         ADDRESS_ADD_EXAMPLE
     ),
-    method_item!(
-        ModuleScan,
+    ModuleScan => method_item!(
         StdlibOwner::Type(StdlibTypeId::Module),
         "Module.scan",
         MODULE,
@@ -1131,8 +1110,7 @@ const ITEMS: &[StdlibItem] = &[
         "The module's address and size define the scanned range.",
         MODULE_SCAN_EXAMPLE
     ),
-    method_item!(
-        UnityModuleImage,
+    UnityModuleImage => method_item!(
         StdlibOwner::Type(StdlibTypeId::UnityModule),
         "UnityModule.image",
         UNITY_MODULE,
@@ -1146,8 +1124,7 @@ const ITEMS: &[StdlibItem] = &[
         "Suspends until the named image is discoverable.",
         UNITY_IMAGE_EXAMPLE
     ),
-    method_item!(
-        UnityImageClass,
+    UnityImageClass => method_item!(
         StdlibOwner::Type(StdlibTypeId::UnityImage),
         "UnityImage.class",
         UNITY_IMAGE,
@@ -1161,8 +1138,7 @@ const ITEMS: &[StdlibItem] = &[
         "Suspends until the named class is discoverable.",
         UNITY_CLASS_EXAMPLE
     ),
-    method_item!(
-        UnityClassField,
+    UnityClassField => method_item!(
         StdlibOwner::Type(StdlibTypeId::UnityClass),
         "UnityClass.field",
         UNITY_CLASS,
@@ -1176,8 +1152,7 @@ const ITEMS: &[StdlibItem] = &[
         "Searches the class hierarchy and recognizes backing fields.",
         UNITY_FIELD_EXAMPLE
     ),
-    method_item!(
-        UnityClassFieldAny,
+    UnityClassFieldAny => method_item!(
         StdlibOwner::Type(StdlibTypeId::UnityClass),
         "UnityClass.fieldAny",
         UNITY_CLASS,
@@ -1195,8 +1170,7 @@ const ITEMS: &[StdlibItem] = &[
         "Returns both the field offset and selected candidate index.",
         UNITY_FIELD_ANY_EXAMPLE
     ),
-    method_item!(
-        UnityClassStaticTable,
+    UnityClassStaticTable => method_item!(
         StdlibOwner::Type(StdlibTypeId::UnityClass),
         "UnityClass.staticTable",
         UNITY_CLASS,
@@ -1210,8 +1184,7 @@ const ITEMS: &[StdlibItem] = &[
         "Suspends until the static storage pointer is non-null.",
         UNITY_STATIC_TABLE_EXAMPLE
     ),
-    method_item!(
-        UnityClassStaticInstance,
+    UnityClassStaticInstance => method_item!(
         StdlibOwner::Type(StdlibTypeId::UnityClass),
         "UnityClass.staticInstance",
         UNITY_CLASS,
@@ -1229,8 +1202,7 @@ const ITEMS: &[StdlibItem] = &[
         "Combines field discovery, static-table lookup, and a non-null pointer read.",
         UNITY_STATIC_INSTANCE_EXAMPLE
     ),
-    method_item!(
-        ArrayLength,
+    ArrayLength => method_item!(
         StdlibOwner::TypeConstructor(StdlibTypeConstructorId::Array),
         "Array.length",
         T_ARRAY,
@@ -1244,8 +1216,7 @@ const ITEMS: &[StdlibItem] = &[
         "The result is the WebAssembly GC array length.",
         ARRAY_LENGTH_EXAMPLE
     ),
-    method_item!(
-        ArrayGet,
+    ArrayGet => method_item!(
         StdlibOwner::TypeConstructor(StdlibTypeConstructorId::Array),
         "Array.get",
         T_ARRAY,
@@ -1259,8 +1230,7 @@ const ITEMS: &[StdlibItem] = &[
         "Indexing uses WebAssembly's bounds checks.",
         ARRAY_GET_EXAMPLE
     ),
-    method_item!(
-        ArraySet,
+    ArraySet => method_item!(
         StdlibOwner::TypeConstructor(StdlibTypeConstructorId::Array),
         "Array.set",
         T_ARRAY,
@@ -1277,7 +1247,7 @@ const ITEMS: &[StdlibItem] = &[
         "The array is evaluated once and updated in place.",
         ARRAY_SET_EXAMPLE
     ),
-];
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StandardLibrary;

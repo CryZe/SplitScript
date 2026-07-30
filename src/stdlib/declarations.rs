@@ -12,14 +12,6 @@ use crate::catalog::Documentation;
 
 use super::StdlibItemId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum StdlibNamespaceId {
-    Process,
-    ProcessRead,
-    Timer,
-    Unity,
-}
-
 macro_rules! declare_standard_types {
     ($(
         $id:ident => {
@@ -354,44 +346,57 @@ const fn documentation(
     }
 }
 
-pub(super) const NAMESPACES: &[StdlibNamespace] = &[
-    StdlibNamespace {
-        id: StdlibNamespaceId::Process,
+macro_rules! declare_standard_namespaces {
+    ($(
+        $id:ident => {
+            name: $name:literal,
+            path: $path:expr,
+            summary: $summary:literal,
+            details: $details:literal $(,)?
+        }
+    ),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub enum StdlibNamespaceId {
+            $($id),*
+        }
+
+        pub(super) const NAMESPACES: &[StdlibNamespace] = &[
+            $(StdlibNamespace {
+                id: StdlibNamespaceId::$id,
+                name: $name,
+                path: $path,
+                documentation: documentation($summary, $details),
+            }),*
+        ];
+    };
+}
+
+declare_standard_namespaces! {
+    Process => {
         name: "process",
         path: &["process"],
-        documentation: documentation(
-            "Accesses the attached game process.",
-            "Process operations discover modules, read memory, follow pointers, and scan signatures.",
-        ),
+        summary: "Accesses the attached game process.",
+        details: "Process operations discover modules, read memory, follow pointers, and scan signatures.",
     },
-    StdlibNamespace {
-        id: StdlibNamespaceId::ProcessRead,
+    ProcessRead => {
         name: "read",
         path: &["process", "read"],
-        documentation: documentation(
-            "Reads typed values from process memory.",
-            "The expected type or an explicit suffix selects the process-memory layout.",
-        ),
+        summary: "Reads typed values from process memory.",
+        details: "The expected type or an explicit suffix selects the process-memory layout.",
     },
-    StdlibNamespace {
-        id: StdlibNamespaceId::Timer,
+    Timer => {
         name: "timer",
         path: &["timer"],
-        documentation: documentation(
-            "Reads information from the LiveSplit timer.",
-            "Timer operations expose runtime state used by autosplitter decisions.",
-        ),
+        summary: "Reads information from the LiveSplit timer.",
+        details: "Timer operations expose runtime state used by autosplitter decisions.",
     },
-    StdlibNamespace {
-        id: StdlibNamespaceId::Unity,
+    Unity => {
         name: "Unity",
         path: &["Unity"],
-        documentation: documentation(
-            "Discovers and inspects Unity runtimes.",
-            "Unity operations attach to IL2CPP metadata and produce typed images, classes, and fields.",
-        ),
+        summary: "Discovers and inspects Unity runtimes.",
+        details: "Unity operations attach to IL2CPP metadata and produce typed images, classes, and fields.",
     },
-];
+}
 
 const EQUATABLE_INTERPOLATABLE: &[StdlibCapabilityId] = &[
     StdlibCapabilityId::Equatable,

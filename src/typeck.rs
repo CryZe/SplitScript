@@ -114,20 +114,32 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             (id, ty)
         })
         .collect::<HashMap<_, _>>();
-    let array_types = program.array_types.iter().map(|array| ArrayLayout {
-        id: array.id,
-        element: syntax_type(array.element, &named_types, &semantic_types),
-    });
-    let option_types = program.option_types.iter().map(|option| OptionLayout {
-        id: option.id,
-        value: syntax_type(option.value, &named_types, &semantic_types),
-    });
-    let result_types = program.result_types.iter().map(|result| ResultLayout {
-        id: result.id,
-        value: syntax_type(result.value, &named_types, &semantic_types),
-    });
+    let array_types = program
+        .array_types
+        .iter()
+        .map(|array| ArrayLayout {
+            id: array.id,
+            element: syntax_type(array.element, &named_types, &semantic_types),
+        })
+        .collect::<Vec<_>>();
+    let option_types = program
+        .option_types
+        .iter()
+        .map(|option| OptionLayout {
+            id: option.id,
+            value: syntax_type(option.value, &named_types, &semantic_types),
+        })
+        .collect::<Vec<_>>();
+    let result_types = program
+        .result_types
+        .iter()
+        .map(|result| ResultLayout {
+            id: result.id,
+            value: syntax_type(result.value, &named_types, &semantic_types),
+        })
+        .collect::<Vec<_>>();
     let inference = InferenceContext::new(
-        semantic_types.clone(),
+        semantic_types,
         records.len() as u32 + enums.len() as u32,
         array_types,
         option_types,
@@ -150,7 +162,6 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         records,
         enums,
         named_types,
-        semantic_types,
         inference,
         scopes: Vec::new(),
         return_ty: Type::Void,
@@ -177,7 +188,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             } else {
                 checker.fresh_inference(Requirements::NONE, None)
             };
-            if let Some(standard) = standard_type_for_inference(&checker.semantic_types, ty) {
+            if let Some(standard) = checker.standard_type_id(ty) {
                 let declaration = StandardLibrary::new().type_decl(standard);
                 if !declaration.value_usage.state_field {
                     checker.error(
@@ -301,7 +312,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
                     field.span,
                 );
             }
-            if let Some(standard) = standard_type_for_inference(&checker.semantic_types, field_ty) {
+            if let Some(standard) = checker.standard_type_id(field_ty) {
                 let declaration = StandardLibrary::new().type_decl(standard);
                 if !declaration.value_usage.record_field {
                     checker.error(
@@ -338,8 +349,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
                     variant.span,
                 );
             }
-            if let Some(standard) =
-                payload.and_then(|ty| standard_type_for_inference(&checker.semantic_types, ty))
+            if let Some(standard) = payload.and_then(|ty| checker.standard_type_id(ty))
                 && !StandardLibrary::new()
                     .type_decl(standard)
                     .value_usage
@@ -433,13 +443,12 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         let inferred = checker.expr(&global.value, expected);
         checker.debug_context = previous_debug_context;
         if let Some(ty) = inferred {
-            let unsupported_standard = standard_type_for_inference(&checker.semantic_types, ty)
-                .is_some_and(|standard| {
-                    !StandardLibrary::new()
-                        .type_decl(standard)
-                        .value_usage
-                        .global_variable
-                });
+            let unsupported_standard = checker.standard_type_id(ty).is_some_and(|standard| {
+                !StandardLibrary::new()
+                    .type_decl(standard)
+                    .value_usage
+                    .global_variable
+            });
             if unsupported_standard
                 || matches!(
                     ty,
@@ -609,7 +618,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         .iter()
         .map(|array| ArrayTypeDecl {
             id: array.id,
-            element: array.element.to_ref(&checker.semantic_types),
+            element: array.element.to_ref(checker.inference.type_store()),
         })
         .collect::<Vec<_>>();
     let option_types = checker
@@ -618,7 +627,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         .iter()
         .map(|option| OptionTypeDecl {
             id: option.id,
-            value: option.value.to_ref(&checker.semantic_types),
+            value: option.value.to_ref(checker.inference.type_store()),
         })
         .collect::<Vec<_>>();
     let result_types = checker
@@ -627,7 +636,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         .iter()
         .map(|result| ResultTypeDecl {
             id: result.id,
-            value: result.value.to_ref(&checker.semantic_types),
+            value: result.value.to_ref(checker.inference.type_store()),
         })
         .collect::<Vec<_>>();
     for array in &array_types {
@@ -637,7 +646,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             .resolve_array_element_type(array.id, element);
     }
     let semantics = std::mem::take(&mut checker.semantics);
-    let semantic_types = checker.semantic_types.clone();
+    let semantic_types = checker.inference.type_store().clone();
     let enum_types = checker.enums.clone();
     let diagnostics = std::mem::take(&mut checker.errors);
     RecoveringCheckOutput {
@@ -683,7 +692,6 @@ struct Checker {
     records: Vec<RecordDecl>,
     enums: Vec<EnumDecl>,
     named_types: HashMap<TypeNameId, Type>,
-    semantic_types: TypeStore,
     inference: InferenceContext,
     scopes: Vec<HashMap<String, Binding>>,
     return_ty: Type,
@@ -704,7 +712,7 @@ struct Checker {
 
 impl Checker {
     fn syntax_type(&self, ty: TypeRef) -> Type {
-        syntax_type(ty, &self.named_types, &self.semantic_types)
+        syntax_type(ty, &self.named_types, self.inference.type_store())
     }
 
     fn standard_type(&self, standard: StdlibTypeId) -> Type {
@@ -716,7 +724,7 @@ impl Checker {
     }
 
     fn declared_type(&self, ty: DeclaredTypeRef) -> Type {
-        inference_type_for_declared(&self.semantic_types, ty)
+        inference_type_for_declared(self.inference.type_store(), ty)
     }
 
     fn block(&mut self, block: &Block, nested: bool) {
@@ -2113,7 +2121,7 @@ impl Checker {
                     parameter.constraints.iter().all(|constraint| {
                         matches!(receiver, Type::Variable(_))
                             || type_may_have_capability(
-                                &self.semantic_types,
+                                self.inference.type_store(),
                                 receiver,
                                 constraint.capability(),
                             )
@@ -2783,16 +2791,6 @@ impl Checker {
 
     fn error(&mut self, message: impl Into<String>, span: Span) {
         self.errors.push(Diagnostic::type_error(message, span));
-    }
-}
-
-fn standard_type_for_inference(types: &TypeStore, ty: Type) -> Option<StdlibTypeId> {
-    let Type::Known(id) = ty else {
-        return None;
-    };
-    match types.kind(id) {
-        crate::types::TypeKind::Standard(standard) => Some(*standard),
-        _ => None,
     }
 }
 

@@ -30,8 +30,10 @@ Language-only constructs live in a sibling `LanguageCatalog`, rather than as
 fake standard-library functions. It gives keywords such as `await`, `retry`,
 and `as`; lifecycle actions; source-spellable built-in and constructed types;
 wrapper/literal syntax; snapshot roots; compiler-provided fields and
-`TimerState`; and the settings DSL stable IDs, compact source forms,
-documentation, and checked examples. Both catalogs
+the settings DSL stable IDs, compact source forms, documentation, and checked
+examples. Standard-library namespaces, nominal types (including
+`TimerState`), fields, variants, and callables remain exclusively in the
+standard-library catalog. Both catalogs
 share the generic documentation and example model in `catalog.rs`, so generated
 reference pages and LSP hover/completion can consume one metadata shape while
 preserving the semantic difference between syntax and callable APIs.
@@ -59,6 +61,13 @@ both its `ArrayTypeId` layout identity and element `TypeId`, so code generation
 never needs to reconstruct this information from syntax. `TypeStore` has no
 parallel legacy type representation: Wasm storage/value selection lowers
 `TypeId` / `TypeKind` directly into backend-local physical categories.
+
+The semantic `TypeStore` is created before inference. Standard-library nominal
+types enter inference as their canonical `TypeId` and retain that exact identity
+through checked publication, rather than passing through a parallel enum and a
+post-inference conversion table. Namespace, nominal-type, field, variant, and
+callable IDs are generated from the same declaration rows as their names,
+ownership, documentation, and representation metadata.
 
 Source annotations, cast targets, and integer suffixes use the separate,
 inference-free `ast::TypeRef`; parser-owned array references and checker-owned

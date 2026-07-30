@@ -1339,6 +1339,10 @@ impl TypedVisitor for LocalPlanner<'_> {
                         .ty;
                     self.push(ty, LocalPurpose::SuspensionScratch(value));
                 } else if let Some(intrinsic) = resolved_intrinsic(program, value) {
+                    let result_type = program
+                        .expression(value)
+                        .expect("awaited expression belongs to typed HIR")
+                        .ty;
                     let u64_type = self.semantics.types().id_for_builtin(BuiltinType::U64);
                     let scratch_types = match intrinsic {
                         IntrinsicId::ProcessModule => vec![u64_type, u64_type],
@@ -1349,26 +1353,10 @@ impl TypedVisitor for LocalPlanner<'_> {
                         | IntrinsicId::UnityClassStaticInstance
                         | IntrinsicId::UnityClassStaticTable
                         | IntrinsicId::ModuleScan => vec![u64_type],
-                        IntrinsicId::UnityIl2Cpp => vec![
-                            self.semantics
-                                .types()
-                                .id_for_standard(crate::stdlib::StdlibTypeId::UnityModule),
-                        ],
-                        IntrinsicId::UnityModuleImage => vec![
-                            self.semantics
-                                .types()
-                                .id_for_standard(crate::stdlib::StdlibTypeId::UnityImage),
-                        ],
-                        IntrinsicId::UnityImageClass => vec![
-                            self.semantics
-                                .types()
-                                .id_for_standard(crate::stdlib::StdlibTypeId::UnityClass),
-                        ],
-                        IntrinsicId::UnityClassFieldAny => vec![
-                            self.semantics
-                                .types()
-                                .id_for_standard(crate::stdlib::StdlibTypeId::UnityField),
-                        ],
+                        IntrinsicId::UnityIl2Cpp
+                        | IntrinsicId::UnityModuleImage
+                        | IntrinsicId::UnityImageClass
+                        | IntrinsicId::UnityClassFieldAny => vec![result_type],
                         IntrinsicId::NextTick | IntrinsicId::ProcessRead => Vec::new(),
                         _ => unreachable!("type checking only permits awaitable intrinsics"),
                     };

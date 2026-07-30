@@ -282,6 +282,10 @@ impl InferenceContext {
         Type::Known(self.types.id_for_standard(standard))
     }
 
+    pub(crate) fn type_store(&self) -> &TypeStore {
+        &self.types
+    }
+
     pub(crate) fn standard_type(&self, ty: Type) -> Option<StdlibTypeId> {
         let Type::Known(id) = ty else {
             return None;

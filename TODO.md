@@ -44,9 +44,9 @@ invariant:
   declaration. Runtime metadata must be backend-neutral: scalar, GC struct,
   GC array, enum, compile-time-only, and derived record representations rather
   than `wasm_encoder` types or numeric heap/field indices.
-- [x] Generate standard type, field, and variant IDs together with their
-  declaration rows, so adding an ordinary symbol cannot leave a parallel ID
-  enum or inverse owner list out of sync.
+- [x] Generate namespace, standard type, field, variant, and callable IDs
+  together with their declaration rows, so adding an ordinary symbol cannot
+  leave a parallel ID enum or inverse owner list out of sync.
 - [x] Add catalog validation for unique IDs and names, resolvable owners and
   type references, valid representation dependencies, field/variant identity,
   complete public documentation, capability consistency, and intrinsic

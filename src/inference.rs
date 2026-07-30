@@ -28,7 +28,9 @@ impl Type {
                 TypeKind::Standard(standard) => TypeRef::Standard(*standard),
                 TypeKind::Record(record) => TypeRef::Record(*record),
                 TypeKind::Enum(enumeration) => TypeRef::Enum(*enumeration),
-                kind => unreachable!("unsupported known inference type `{kind:?}`"),
+                TypeKind::Array { layout, .. } => TypeRef::Array(*layout),
+                TypeKind::Option { layout, .. } => TypeRef::Option(*layout),
+                TypeKind::Result { layout, .. } => TypeRef::Result(*layout),
             },
             Self::Array(id) => TypeRef::Array(id),
             Self::Option(id) => TypeRef::Option(id),
@@ -122,6 +124,7 @@ pub(crate) struct InferenceContext {
     results: Vec<ResultLayout>,
     canonical_options: HashMap<OptionTypeId, OptionTypeId>,
     canonical_results: HashMap<ResultTypeId, ResultTypeId>,
+    constructed_types: HashMap<Type, TypeId>,
     next_constructed_type_index: u32,
 }
 
@@ -150,6 +153,7 @@ impl InferenceContext {
             results,
             canonical_options: HashMap::new(),
             canonical_results: HashMap::new(),
+            constructed_types: HashMap::new(),
             next_constructed_type_index,
         }
     }
@@ -354,7 +358,7 @@ impl InferenceContext {
     }
 
     pub(crate) fn resolve(&mut self, ty: Type) -> Type {
-        match self.shallow(ty) {
+        let ty = match self.shallow(ty) {
             Type::Variable(variable) => {
                 panic!("unresolved type variable ?{variable} after inference")
             }
@@ -371,6 +375,31 @@ impl InferenceContext {
                     .unwrap_or(result),
             ),
             ty => ty,
+        };
+        self.constructed_types
+            .get(&ty)
+            .copied()
+            .map_or(ty, Type::Known)
+    }
+
+    pub(crate) fn intern_resolved_constructed_types(&mut self) {
+        let arrays = self
+            .arrays
+            .iter()
+            .map(|layout| Type::Array(layout.id))
+            .collect::<Vec<_>>();
+        let options = self
+            .options
+            .iter()
+            .map(|layout| Type::Option(layout.id))
+            .collect::<Vec<_>>();
+        let results = self
+            .results
+            .iter()
+            .map(|layout| Type::Result(layout.id))
+            .collect::<Vec<_>>();
+        for ty in arrays.into_iter().chain(options).chain(results) {
+            self.intern_resolved_type(ty);
         }
     }
 
@@ -538,6 +567,40 @@ impl InferenceContext {
 
     pub(crate) fn results(&self) -> &[ResultLayout] {
         &self.results
+    }
+
+    fn intern_resolved_type(&mut self, ty: Type) -> TypeId {
+        let ty = self.resolve(ty);
+        if let Type::Known(id) = ty {
+            return id;
+        }
+        if let Some(id) = self.constructed_types.get(&ty) {
+            return *id;
+        }
+        let kind = match ty {
+            Type::Array(layout) => {
+                let element = self.array_element(layout);
+                let element = self.intern_resolved_type(element);
+                TypeKind::Array { layout, element }
+            }
+            Type::Option(layout) => {
+                let value = self.option_value(layout);
+                let value = self.intern_resolved_type(value);
+                TypeKind::Option { layout, value }
+            }
+            Type::Result(layout) => {
+                let value = self.result_value(layout);
+                let value = self.intern_resolved_type(value);
+                TypeKind::Result { layout, value }
+            }
+            Type::Variable(variable) => {
+                unreachable!("unresolved type variable ?{variable} reached semantic interning")
+            }
+            Type::Known(_) => unreachable!("known types return before constructed interning"),
+        };
+        let id = self.types.intern(kind);
+        self.constructed_types.insert(ty, id);
+        id
     }
 
     fn root(&mut self, id: u32) -> u32 {
@@ -745,5 +808,69 @@ mod tests {
         assert!(inference.default_unbound().is_empty());
         let i32_type = inference.known_builtin(BuiltinType::I32);
         assert_eq!(inference.resolve(value), i32_type);
+    }
+
+    #[test]
+    fn interns_resolved_constructed_types_before_semantic_publication() {
+        let array = ArrayTypeId::from_index(0);
+        let option = OptionTypeId::from_index(1);
+        let result = ResultTypeId::from_index(2);
+        let types = TypeStore::default();
+        let u32_type = Type::Known(types.id_for_builtin(BuiltinType::U32));
+        let mut inference = InferenceContext::new(
+            types,
+            3,
+            [ArrayLayout {
+                id: array,
+                element: u32_type,
+            }],
+            [OptionLayout {
+                id: option,
+                value: Type::Array(array),
+            }],
+            [ResultLayout {
+                id: result,
+                value: Type::Option(option),
+            }],
+        );
+
+        inference.finalize_arrays();
+        inference.finalize_wrappers();
+        inference.intern_resolved_constructed_types();
+
+        let Type::Known(array_type) = inference.resolve(Type::Array(array)) else {
+            panic!("resolved array did not become a semantic TypeId")
+        };
+        let Type::Known(option_type) = inference.resolve(Type::Option(option)) else {
+            panic!("resolved option did not become a semantic TypeId")
+        };
+        let Type::Known(result_type) = inference.resolve(Type::Result(result)) else {
+            panic!("resolved result did not become a semantic TypeId")
+        };
+
+        assert_eq!(
+            inference.type_store().kind(array_type),
+            &TypeKind::Array {
+                layout: array,
+                element: match u32_type {
+                    Type::Known(id) => id,
+                    _ => unreachable!(),
+                },
+            }
+        );
+        assert_eq!(
+            inference.type_store().kind(option_type),
+            &TypeKind::Option {
+                layout: option,
+                value: array_type,
+            }
+        );
+        assert_eq!(
+            inference.type_store().kind(result_type),
+            &TypeKind::Result {
+                layout: result,
+                value: option_type,
+            }
+        );
     }
 }

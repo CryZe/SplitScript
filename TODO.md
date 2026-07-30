@@ -69,10 +69,11 @@ invariant:
     alongside catalog names only when entering semantics.
   - [x] Consolidate constructor, enum-pattern, choice-setting, and nominal-type
     lookup into one declaration environment rather than parallel parser maps.
-- [ ] Simplify inference to known semantic `TypeId` values plus inference
-  variables. Remove the parallel nominal variants and conversion tables in
-  `ast::TypeRef`, `inference::Type`, and `BuiltinType` as their migrations
-  complete.
+- [x] Simplify inference to known semantic `TypeId` values plus inference
+  variables and the minimum temporary constructor terms needed while a
+  constructed type's element/value remains unresolved. Remove the parallel
+  nominal variants and conversion tables in `ast::TypeRef`, `inference::Type`,
+  and `BuiltinType` as their migrations complete.
   - [x] Build one semantic `TypeStore` before inference and represent every
     standard-library nominal inference case as its canonical `Type::Known(TypeId)`.
     Checked publication preserves that identity directly; no library type has
@@ -83,7 +84,7 @@ invariant:
     longer has separate standard/source variants.
   - [x] Represent core primitives with their canonical semantic `TypeId` as
     well; inference no longer has parallel primitive or nominal variants.
-  - [ ] Intern resolved array, Option, and Result terms during inference while
+  - [x] Intern resolved array, Option, and Result terms during inference while
     retaining only the minimum temporary constructor terms needed while their
     element/value types are still unresolved.
 - [x] Introduce well-known type/variant handles for genuine language and ABI

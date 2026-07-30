@@ -611,6 +611,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
     }
     checker.finalize_array_types();
     checker.inference.finalize_wrappers();
+    checker.inference.intern_resolved_constructed_types();
     let array_types = checker
         .inference
         .arrays()

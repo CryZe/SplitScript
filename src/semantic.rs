@@ -10,7 +10,7 @@ use crate::{
     },
     inference::Type,
     stdlib::{StdlibFieldId, StdlibItemId, StdlibVariantId},
-    types::{TypeId, TypeStore},
+    types::{TypeId, TypeKind, TypeStore},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +40,28 @@ pub enum ResolvedCall {
     ResultSuccess {
         result: crate::ast::ResultTypeId,
     },
+}
+
+fn resolved_option_layout(ty: Type, types: &TypeStore) -> OptionTypeId {
+    match ty {
+        Type::Option(layout) => layout,
+        Type::Known(id) => match types.kind(id) {
+            TypeKind::Option { layout, .. } => *layout,
+            kind => unreachable!("Some/None resolved to non-Option type `{kind:?}`"),
+        },
+        ty => unreachable!("Some/None resolved to non-Option inference term `{ty}`"),
+    }
+}
+
+fn resolved_result_layout(ty: Type, types: &TypeStore) -> ResultTypeId {
+    match ty {
+        Type::Result(layout) => layout,
+        Type::Known(id) => match types.kind(id) {
+            TypeKind::Result { layout, .. } => *layout,
+            kind => unreachable!("result constructor resolved to non-Result type `{kind:?}`"),
+        },
+        ty => unreachable!("result constructor resolved to non-Result inference term `{ty}`"),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -539,21 +561,15 @@ impl SemanticBuilder {
                         receiver_members,
                     },
                     PendingResolvedCall::ResultError { result } => {
-                        let Type::Result(result) = resolve(Type::Result(result)) else {
-                            unreachable!("result constructors resolve to Result layouts")
-                        };
+                        let result = resolved_result_layout(resolve(Type::Result(result)), &types);
                         ResolvedCall::ResultError { result }
                     }
                     PendingResolvedCall::OptionSome { option } => {
-                        let Type::Option(option) = resolve(Type::Option(option)) else {
-                            unreachable!("Some constructors resolve to Option layouts")
-                        };
+                        let option = resolved_option_layout(resolve(Type::Option(option)), &types);
                         ResolvedCall::OptionSome { option }
                     }
                     PendingResolvedCall::ResultSuccess { result } => {
-                        let Type::Result(result) = resolve(Type::Result(result)) else {
-                            unreachable!("Ok constructors resolve to Result layouts")
-                        };
+                        let result = resolved_result_layout(resolve(Type::Result(result)), &types);
                         ResolvedCall::ResultSuccess { result }
                     }
                 };
@@ -660,27 +676,19 @@ impl SemanticBuilder {
             .map(|(pattern, wrapper)| {
                 let wrapper = match wrapper {
                     ResolvedWrapperPattern::OptionNone(option) => {
-                        let Type::Option(option) = resolve(Type::Option(option)) else {
-                            unreachable!()
-                        };
+                        let option = resolved_option_layout(resolve(Type::Option(option)), &types);
                         ResolvedWrapperPattern::OptionNone(option)
                     }
                     ResolvedWrapperPattern::OptionSome(option) => {
-                        let Type::Option(option) = resolve(Type::Option(option)) else {
-                            unreachable!()
-                        };
+                        let option = resolved_option_layout(resolve(Type::Option(option)), &types);
                         ResolvedWrapperPattern::OptionSome(option)
                     }
                     ResolvedWrapperPattern::ResultSuccess(result) => {
-                        let Type::Result(result) = resolve(Type::Result(result)) else {
-                            unreachable!()
-                        };
+                        let result = resolved_result_layout(resolve(Type::Result(result)), &types);
                         ResolvedWrapperPattern::ResultSuccess(result)
                     }
                     ResolvedWrapperPattern::ResultError(result) => {
-                        let Type::Result(result) = resolve(Type::Result(result)) else {
-                            unreachable!()
-                        };
+                        let result = resolved_result_layout(resolve(Type::Result(result)), &types);
                         ResolvedWrapperPattern::ResultError(result)
                     }
                 };

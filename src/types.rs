@@ -8,8 +8,8 @@ use std::{collections::HashMap, fmt};
 
 use crate::{
     ast::{
-        ArrayTypeDecl, ArrayTypeId, EnumId, OptionTypeDecl, OptionTypeId, RecordId, ResultTypeDecl,
-        ResultTypeId,
+        ArrayTypeDecl, ArrayTypeId, EnumDecl, EnumId, OptionTypeDecl, OptionTypeId, RecordDecl,
+        RecordId, ResultTypeDecl, ResultTypeId,
     },
     inference::Type,
     stdlib::{CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
@@ -173,6 +173,17 @@ impl Default for TypeStore {
 }
 
 impl TypeStore {
+    pub(crate) fn with_source_types(records: &[RecordDecl], enums: &[EnumDecl]) -> Self {
+        let mut store = Self::default();
+        for record in records {
+            store.intern(TypeKind::Record(record.id));
+        }
+        for enumeration in enums {
+            store.intern(TypeKind::Enum(enumeration.id));
+        }
+        store
+    }
+
     pub fn kind(&self, id: TypeId) -> &TypeKind {
         &self.kinds[id.index()]
     }
@@ -211,6 +222,13 @@ impl TypeStore {
         options: &[OptionTypeDecl],
         results: &[ResultTypeDecl],
     ) -> TypeId {
+        if let Type::Known(id) = ty {
+            debug_assert!(
+                self.get(id).is_some(),
+                "inference returned an unknown TypeId"
+            );
+            return id;
+        }
         let kind = match ty {
             Type::Void => TypeKind::Builtin(BuiltinType::Void),
             Type::Bool => TypeKind::Builtin(BuiltinType::Bool),
@@ -225,7 +243,7 @@ impl TypeStore {
             Type::Address => TypeKind::Builtin(BuiltinType::Address),
             Type::F32 => TypeKind::Builtin(BuiltinType::F32),
             Type::F64 => TypeKind::Builtin(BuiltinType::F64),
-            Type::Standard(standard) => TypeKind::Standard(standard),
+            Type::Known(_) => unreachable!("known types return before semantic interning"),
             Type::Record(id) => TypeKind::Record(id),
             Type::Enum(id) => TypeKind::Enum(id),
             Type::Array(id) => {
@@ -234,7 +252,7 @@ impl TypeStore {
                     .find(|array| array.id == id)
                     .unwrap_or_else(|| panic!("missing checked array type {id}"))
                     .element;
-                let element = self.intern_inferred(element.into(), arrays, options, results);
+                let element = self.intern_type_ref(element, arrays, options, results);
                 TypeKind::Array {
                     layout: id,
                     element,
@@ -246,7 +264,7 @@ impl TypeStore {
                     .find(|option| option.id == id)
                     .unwrap_or_else(|| panic!("missing checked option type {id}"))
                     .value;
-                let value = self.intern_inferred(value.into(), arrays, options, results);
+                let value = self.intern_type_ref(value, arrays, options, results);
                 TypeKind::Option { layout: id, value }
             }
             Type::Result(id) => {
@@ -255,7 +273,7 @@ impl TypeStore {
                     .find(|result| result.id == id)
                     .unwrap_or_else(|| panic!("missing checked result type {id}"))
                     .value;
-                let value = self.intern_inferred(value.into(), arrays, options, results);
+                let value = self.intern_type_ref(value, arrays, options, results);
                 TypeKind::Result { layout: id, value }
             }
             Type::Variable(_) => {
@@ -265,7 +283,23 @@ impl TypeStore {
         self.intern(kind)
     }
 
-    fn intern(&mut self, kind: TypeKind) -> TypeId {
+    fn intern_type_ref(
+        &mut self,
+        ty: crate::ast::TypeRef,
+        arrays: &[ArrayTypeDecl],
+        options: &[OptionTypeDecl],
+        results: &[ResultTypeDecl],
+    ) -> TypeId {
+        match ty {
+            crate::ast::TypeRef::Standard(standard) => self.id_for_standard(standard),
+            crate::ast::TypeRef::Named(name) => {
+                unreachable!("unresolved nominal type name {name} reached semantic interning")
+            }
+            ty => self.intern_inferred(ty.into(), arrays, options, results),
+        }
+    }
+
+    pub(crate) fn intern(&mut self, kind: TypeKind) -> TypeId {
         if let Some(id) = self.interned.get(&kind) {
             return *id;
         }

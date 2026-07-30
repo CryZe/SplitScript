@@ -459,6 +459,7 @@ impl SemanticBuilder {
 
     pub(crate) fn finish(
         self,
+        mut types: TypeStore,
         arrays: &[ArrayTypeDecl],
         options: &[OptionTypeDecl],
         results: &[ResultTypeDecl],
@@ -485,7 +486,6 @@ impl SemanticBuilder {
             assignments,
             value_conversions,
         } = self;
-        let mut types = TypeStore::default();
         // WebAssembly GC layouts are nominal. Keep every allocated constructed
         // layout queryable even when inference created it only as a boundary
         // and no source declaration ultimately names it.

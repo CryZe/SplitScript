@@ -2623,6 +2623,14 @@ fn source_standard_type_names_resolve_after_parsing() {
         .value_type(checked.syntax().functions[0].params[0].id)
         .unwrap();
     assert_eq!(
+        parameter_type,
+        checked
+            .semantics()
+            .types()
+            .id_for_standard(StdlibTypeId::Module),
+        "name resolution, inference, and published semantics must preserve one standard TypeId",
+    );
+    assert_eq!(
         checked.semantics().types().kind(parameter_type),
         &TypeKind::Standard(StdlibTypeId::Module)
     );

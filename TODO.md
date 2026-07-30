@@ -73,10 +73,11 @@ invariant:
   variables. Remove the parallel nominal variants and conversion tables in
   `ast::TypeRef`, `inference::Type`, and `BuiltinType` as their migrations
   complete.
-  - [x] Collapse every standard-library nominal inference case into
-    `Type::Standard(StdlibTypeId)` and every checked result into
-    `TypeKind::Standard(StdlibTypeId)`; no library type has a dedicated
-    inference or semantic variant.
+  - [x] Build one semantic `TypeStore` before inference and represent every
+    standard-library nominal inference case as its canonical `Type::Known(TypeId)`.
+    Checked publication preserves that identity directly; no library type has
+    a dedicated inference or semantic variant or a post-inference conversion
+    table.
   - [ ] Replace the remaining parallel core/source/constructed inference term
     variants with known semantic `TypeId` values plus inference variables.
 - [x] Introduce well-known type/variant handles for genuine language and ABI

@@ -21,6 +21,7 @@ use crate::{
         Availability, CallCandidate, DeclaredTypeRef, ItemKind, ParameterRule, StandardLibrary,
         StdlibItem, StdlibItemId, StdlibTypeId, TypeConstraint, TypeRef as CatalogTypeRef,
     },
+    types::TypeStore,
     visit::{self, Visitor},
 };
 
@@ -94,6 +95,7 @@ pub fn check(program: &Program) -> Result<CheckOutput, Vec<Diagnostic>> {
 pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
     let records = program.records.clone();
     let enums = program.enums.clone();
+    let semantic_types = TypeStore::with_source_types(&records, &enums);
     let named_types = program
         .type_names
         .iter()
@@ -101,7 +103,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         .map(|(index, name)| {
             let id = TypeNameId::from_index(index as u32);
             let ty = if let Some(standard) = StandardLibrary::new().type_by_name(name) {
-                Type::Standard(standard.id)
+                Type::Known(semantic_types.id_for_standard(standard.id))
             } else if let Some(record) = records.iter().find(|record| record.name == *name) {
                 Type::Record(record.id)
             } else if let Some(enumeration) = enums.iter().find(|item| item.name == *name) {
@@ -114,17 +116,18 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         .collect::<HashMap<_, _>>();
     let array_types = program.array_types.iter().map(|array| ArrayLayout {
         id: array.id,
-        element: syntax_type(array.element, &named_types),
+        element: syntax_type(array.element, &named_types, &semantic_types),
     });
     let option_types = program.option_types.iter().map(|option| OptionLayout {
         id: option.id,
-        value: syntax_type(option.value, &named_types),
+        value: syntax_type(option.value, &named_types, &semantic_types),
     });
     let result_types = program.result_types.iter().map(|result| ResultLayout {
         id: result.id,
-        value: syntax_type(result.value, &named_types),
+        value: syntax_type(result.value, &named_types, &semantic_types),
     });
     let inference = InferenceContext::new(
+        semantic_types.clone(),
         records.len() as u32 + enums.len() as u32,
         array_types,
         option_types,
@@ -147,6 +150,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         records,
         enums,
         named_types,
+        semantic_types,
         inference,
         scopes: Vec::new(),
         return_ty: Type::Void,
@@ -173,7 +177,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             } else {
                 checker.fresh_inference(Requirements::NONE, None)
             };
-            if let Some(standard) = standard_type_for_inference(ty) {
+            if let Some(standard) = standard_type_for_inference(&checker.semantic_types, ty) {
                 let declaration = StandardLibrary::new().type_decl(standard);
                 if !declaration.value_usage.state_field {
                     checker.error(
@@ -203,7 +207,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
     }
     for setting in &program.settings {
         if let Some(ty) = setting.value_type() {
-            let ty = Type::from(ty);
+            let ty = checker.syntax_type(ty);
             checker.semantics.resolve_value_type(setting.id, ty);
             if checker
                 .settings
@@ -297,7 +301,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
                     field.span,
                 );
             }
-            if let Some(standard) = standard_type_for_inference(field_ty) {
+            if let Some(standard) = standard_type_for_inference(&checker.semantic_types, field_ty) {
                 let declaration = StandardLibrary::new().type_decl(standard);
                 if !declaration.value_usage.record_field {
                     checker.error(
@@ -334,7 +338,8 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
                     variant.span,
                 );
             }
-            if let Some(standard) = payload.and_then(standard_type_for_inference)
+            if let Some(standard) =
+                payload.and_then(|ty| standard_type_for_inference(&checker.semantic_types, ty))
                 && !StandardLibrary::new()
                     .type_decl(standard)
                     .value_usage
@@ -428,12 +433,13 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         let inferred = checker.expr(&global.value, expected);
         checker.debug_context = previous_debug_context;
         if let Some(ty) = inferred {
-            let unsupported_standard = standard_type_for_inference(ty).is_some_and(|standard| {
-                !StandardLibrary::new()
-                    .type_decl(standard)
-                    .value_usage
-                    .global_variable
-            });
+            let unsupported_standard = standard_type_for_inference(&checker.semantic_types, ty)
+                .is_some_and(|standard| {
+                    !StandardLibrary::new()
+                        .type_decl(standard)
+                        .value_usage
+                        .global_variable
+                });
             if unsupported_standard
                 || matches!(
                     ty,
@@ -444,6 +450,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
                         | Type::Result(_)
                 )
             {
+                let ty = checker.type_name(ty);
                 checker.error(
                     format!("global variables cannot currently store `{ty}`"),
                     global.span,
@@ -569,7 +576,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
             );
             continue;
         }
-        checker.return_ty = action.kind.return_type().into();
+        checker.return_ty = checker.syntax_type(action.kind.return_type());
         checker.current_action = action.kind;
         checker.current_callable = format!("`{}` action", action.kind.name());
         checker.scopes.clear();
@@ -602,7 +609,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         .iter()
         .map(|array| ArrayTypeDecl {
             id: array.id,
-            element: array.element.to_ref(),
+            element: array.element.to_ref(&checker.semantic_types),
         })
         .collect::<Vec<_>>();
     let option_types = checker
@@ -611,7 +618,7 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         .iter()
         .map(|option| OptionTypeDecl {
             id: option.id,
-            value: option.value.to_ref(),
+            value: option.value.to_ref(&checker.semantic_types),
         })
         .collect::<Vec<_>>();
     let result_types = checker
@@ -620,22 +627,28 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
         .iter()
         .map(|result| ResultTypeDecl {
             id: result.id,
-            value: result.value.to_ref(),
+            value: result.value.to_ref(&checker.semantic_types),
         })
         .collect::<Vec<_>>();
     for array in &array_types {
+        let element = checker.syntax_type(array.element);
         checker
             .semantics
-            .resolve_array_element_type(array.id, array.element.into());
+            .resolve_array_element_type(array.id, element);
     }
     let semantics = std::mem::take(&mut checker.semantics);
+    let semantic_types = checker.semantic_types.clone();
     let enum_types = checker.enums.clone();
     let diagnostics = std::mem::take(&mut checker.errors);
     RecoveringCheckOutput {
         output: CheckOutput {
-            semantics: semantics.finish(&array_types, &option_types, &result_types, |ty| {
-                checker.resolved_type(ty)
-            }),
+            semantics: semantics.finish(
+                semantic_types,
+                &array_types,
+                &option_types,
+                &result_types,
+                |ty| checker.resolved_type(ty),
+            ),
             enum_types,
             array_types,
             option_types,
@@ -670,6 +683,7 @@ struct Checker {
     records: Vec<RecordDecl>,
     enums: Vec<EnumDecl>,
     named_types: HashMap<TypeNameId, Type>,
+    semantic_types: TypeStore,
     inference: InferenceContext,
     scopes: Vec<HashMap<String, Binding>>,
     return_ty: Type,
@@ -690,7 +704,19 @@ struct Checker {
 
 impl Checker {
     fn syntax_type(&self, ty: TypeRef) -> Type {
-        syntax_type(ty, &self.named_types)
+        syntax_type(ty, &self.named_types, &self.semantic_types)
+    }
+
+    fn standard_type(&self, standard: StdlibTypeId) -> Type {
+        self.inference.known_standard(standard)
+    }
+
+    fn standard_type_id(&self, ty: Type) -> Option<StdlibTypeId> {
+        self.inference.standard_type(ty)
+    }
+
+    fn declared_type(&self, ty: DeclaredTypeRef) -> Type {
+        inference_type_for_declared(&self.semantic_types, ty)
     }
 
     fn block(&mut self, block: &Block, nested: bool) {
@@ -797,7 +823,7 @@ impl Checker {
                         *span,
                     );
                 }
-                self.expr(error, Some(Type::Standard(StdlibTypeId::String)));
+                self.expr(error, Some(self.standard_type(StdlibTypeId::String)));
             }
             Stmt::Suspend {
                 mode,
@@ -920,10 +946,13 @@ impl Checker {
                             | ActionKind::IsLoading
                             | ActionKind::GameTime
                     ) => {}
-            (expected, None) => self.error(
-                format!("expected a return value of type `{expected}`"),
-                span,
-            ),
+            (expected, None) => {
+                let expected = self.type_name(expected);
+                self.error(
+                    format!("expected a return value of type `{expected}`"),
+                    span,
+                );
+            }
         }
     }
 
@@ -941,13 +970,14 @@ impl Checker {
         }
         let expected = variable.annotation.map(|ty| self.syntax_type(ty));
         if let Some(ty) = self.expr(&variable.value, expected) {
-            let unsupported_standard = standard_type_for_inference(ty).is_some_and(|standard| {
+            let unsupported_standard = self.standard_type_id(ty).is_some_and(|standard| {
                 !StandardLibrary::new()
                     .type_decl(standard)
                     .value_usage
                     .local_variable
             });
             if ty == Type::Void || unsupported_standard {
+                let ty = self.type_name(ty);
                 self.error(
                     format!("local variables cannot currently store `{ty}`"),
                     variable.span,
@@ -1013,12 +1043,12 @@ impl Checker {
             }
             ExprKind::String(_) => self.expect_expression(
                 expr.id,
-                Type::Standard(StdlibTypeId::String),
+                self.standard_type(StdlibTypeId::String),
                 expected,
                 expr.span,
             )?,
             ExprKind::InterpolatedString(parts) => {
-                self.array_type_id(Type::Standard(StdlibTypeId::String));
+                self.array_type_id(self.standard_type(StdlibTypeId::String));
                 for part in parts {
                     if let InterpolatedPart::Expr(value) = part {
                         let value_type = self.expr(value, None)?;
@@ -1027,7 +1057,7 @@ impl Checker {
                 }
                 self.expect_expression(
                     expr.id,
-                    Type::Standard(StdlibTypeId::String),
+                    self.standard_type(StdlibTypeId::String),
                     expected,
                     expr.span,
                 )?
@@ -1038,7 +1068,7 @@ impl Checker {
                 }
                 self.expect_expression(
                     expr.id,
-                    Type::Standard(StdlibTypeId::Signature),
+                    self.standard_type(StdlibTypeId::Signature),
                     expected,
                     expr.span,
                 )?
@@ -1252,6 +1282,7 @@ impl Checker {
                                     format!("option:{option}:none")
                                 }
                                 ty => {
+                                    let ty = self.type_name(ty);
                                     self.error(
                                     format!("a `None` pattern requires an optional value, found `{ty}`"),
                                     arm.span,
@@ -1273,6 +1304,7 @@ impl Checker {
                                 format!("option:{option}:some")
                             }
                             ty => {
+                                let ty = self.type_name(ty);
                                 self.error(
                                     format!(
                                         "a `Some(value)` pattern requires an optional value, found `{ty}`"
@@ -1314,7 +1346,7 @@ impl Checker {
                                 if let Some(binding) = binding {
                                     self.bind_pattern_value(
                                         binding,
-                                        Type::Standard(StdlibTypeId::String),
+                                        self.standard_type(StdlibTypeId::String),
                                     );
                                 }
                                 format!("result:{result}:error")
@@ -1354,7 +1386,7 @@ impl Checker {
 
                 if !has_unguarded_wildcard {
                     match self.shallow_type(value_type) {
-                        ty @ (Type::Enum(_) | Type::Standard(_)) => {
+                        ty @ (Type::Enum(_) | Type::Known(_)) => {
                             if let Some((enum_key, declaration)) = self.enum_info_for_type(ty) {
                                 for variant in &declaration.variants {
                                     let key = format!("enum:{enum_key}:{}", variant.name);
@@ -1411,7 +1443,10 @@ impl Checker {
                             "match patterns do not determine the matched value's type",
                             value.span,
                         ),
-                        ty => self.error(format!("type `{ty}` cannot be matched"), value.span),
+                        ty => {
+                            let ty = self.type_name(ty);
+                            self.error(format!("type `{ty}` cannot be matched"), value.span);
+                        }
                     }
                 }
                 let Some(result_type) = result_type else {
@@ -1438,6 +1473,7 @@ impl Checker {
                     Type::Option(option) => self.inference.option_value(option),
                     Type::Result(result) => self.inference.result_value(result),
                     ty => {
+                        let ty = self.type_name(ty);
                         self.error(
                             format!("`else` can only unwrap `T?` or `T!`, found `{ty}`"),
                             value.span,
@@ -1533,7 +1569,7 @@ impl Checker {
                 let target = self.syntax_type(*target);
                 if target.is_numeric() {
                     self.require(source, REQUIRE_NUMERIC, expr.span)?;
-                } else if target == Type::Standard(StdlibTypeId::String) {
+                } else if target == self.standard_type(StdlibTypeId::String) {
                     self.require(source, REQUIRE_STRING_CAST, expr.span)?;
                 } else {
                     self.error(
@@ -1700,7 +1736,7 @@ impl Checker {
                 self.error("`Err` expects one error message", span);
                 return None;
             }
-            self.expr(&args[0], Some(Type::Standard(StdlibTypeId::String)));
+            self.expr(&args[0], Some(self.standard_type(StdlibTypeId::String)));
             let result = match expected.map(|ty| self.shallow_type(ty)) {
                 Some(result @ Type::Result(_)) => result,
                 Some(Type::Variable(_)) | None => {
@@ -1800,8 +1836,9 @@ impl Checker {
                 );
                 return None;
             };
+            let receiver_name = self.type_name(receiver_type);
             (
-                format!("{receiver_type}.{method}"),
+                format!("{receiver_name}.{method}"),
                 signature.clone(),
                 signature.params.into_iter().skip(1).collect(),
                 PendingResolvedCall::UserMethod {
@@ -1925,6 +1962,7 @@ impl Checker {
         span: Span,
         suggestion: Option<&str>,
     ) {
+        let receiver = self.type_name(receiver);
         let Some(suggestion) = suggestion else {
             self.error(format!("type `{receiver}` has no method `{method}`"), span);
             return;
@@ -2053,11 +2091,11 @@ impl Checker {
             .expect("only method candidates are matched against receivers");
         match declared {
             CatalogTypeRef::Core(expected) => {
-                let expected = inference_type_for_declared(DeclaredTypeRef::Core(expected));
+                let expected = self.declared_type(DeclaredTypeRef::Core(expected));
                 matches!(receiver, Type::Variable(_)) || receiver == expected
             }
             CatalogTypeRef::Standard(standard) => {
-                matches!(receiver, Type::Variable(_)) || receiver == Type::Standard(standard)
+                matches!(receiver, Type::Variable(_)) || receiver == self.standard_type(standard)
             }
             CatalogTypeRef::Array(_) => {
                 matches!(receiver, Type::Variable(_) | Type::Array(_))
@@ -2074,7 +2112,11 @@ impl Checker {
                 .is_none_or(|parameter| {
                     parameter.constraints.iter().all(|constraint| {
                         matches!(receiver, Type::Variable(_))
-                            || type_may_have_capability(receiver, constraint.capability())
+                            || type_may_have_capability(
+                                &self.semantic_types,
+                                receiver,
+                                constraint.capability(),
+                            )
                     })
                 }),
         }
@@ -2106,8 +2148,8 @@ impl Checker {
         variables: &HashMap<&'static str, Type>,
     ) -> Type {
         match ty {
-            CatalogTypeRef::Core(core) => inference_type_for_declared(DeclaredTypeRef::Core(core)),
-            CatalogTypeRef::Standard(standard) => Type::Standard(standard),
+            CatalogTypeRef::Core(core) => self.declared_type(DeclaredTypeRef::Core(core)),
+            CatalogTypeRef::Standard(standard) => self.standard_type(standard),
             CatalogTypeRef::Variable(name) => variables[name],
             CatalogTypeRef::Array(element) => {
                 let element = self.catalog_type(*element, variables);
@@ -2289,18 +2331,27 @@ impl Checker {
         }
         match ty {
             Type::Record(_) => self.error(format!("unknown record field `{field}`"), span),
-            Type::Standard(_) => self.error(format!("{ty} has no field `{field}`"), span),
-            _ => self.error(format!("`{field}` cannot be accessed on `{ty}`"), span),
+            Type::Known(id) => self.error(
+                format!(
+                    "{} has no field `{field}`",
+                    self.inference.known_type_name(id)
+                ),
+                span,
+            ),
+            _ => {
+                let ty = self.type_name(ty);
+                self.error(format!("`{field}` cannot be accessed on `{ty}`"), span);
+            }
         }
         None
     }
 
     fn lookup_member(&self, ty: Type, field: &str) -> Option<(Type, ResolvedMember)> {
-        if let Some(owner) = standard_type_for_inference(ty)
+        if let Some(owner) = self.standard_type_id(ty)
             && let Some(field) = StandardLibrary::new().public_field(owner, field)
         {
             return Some((
-                inference_type_for_declared(field.ty),
+                self.declared_type(field.ty),
                 ResolvedMember::StandardField(field.id),
             ));
         }
@@ -2452,7 +2503,7 @@ impl Checker {
             .types()
             .iter()
             .filter(|ty| StandardLibrary::new().public_fields(ty.id).next().is_some())
-            .map(|ty| Type::Standard(ty.id))
+            .map(|ty| self.standard_type(ty.id))
             .chain(self.records.iter().map(|record| Type::Record(record.id)))
             .collect()
     }
@@ -2483,6 +2534,7 @@ impl Checker {
                 format!("{}!", self.type_name(value))
             }
             Type::Variable(_) => "an inferred type".to_owned(),
+            Type::Known(id) => self.inference.known_type_name(id),
             _ => ty.to_string(),
         }
     }
@@ -2674,7 +2726,7 @@ impl Checker {
     fn enum_type(&self, enumeration: EnumTypeId) -> Type {
         match enumeration {
             EnumTypeId::Source(id) => Type::Enum(id),
-            EnumTypeId::Standard(id) => Type::Standard(id),
+            EnumTypeId::Standard(id) => self.standard_type(id),
         }
     }
 
@@ -2718,7 +2770,7 @@ impl Checker {
     fn enum_info_for_type(&self, ty: Type) -> Option<(EnumTypeId, EnumInfo)> {
         let enumeration = match ty {
             Type::Enum(id) => EnumTypeId::Source(id),
-            Type::Standard(id) => EnumTypeId::Standard(id),
+            Type::Known(_) => EnumTypeId::Standard(self.standard_type_id(ty)?),
             _ => return None,
         };
         self.enum_info(enumeration)
@@ -2734,23 +2786,27 @@ impl Checker {
     }
 }
 
-fn standard_type_for_inference(ty: Type) -> Option<StdlibTypeId> {
-    let Type::Standard(standard) = ty else {
+fn standard_type_for_inference(types: &TypeStore, ty: Type) -> Option<StdlibTypeId> {
+    let Type::Known(id) = ty else {
         return None;
     };
-    Some(standard)
-}
-
-fn inference_type_for_declared(ty: DeclaredTypeRef) -> Type {
-    match ty {
-        DeclaredTypeRef::Core(core) => Type::from_core(core),
-        DeclaredTypeRef::Standard(standard) => Type::Standard(standard),
+    match types.kind(id) {
+        crate::types::TypeKind::Standard(standard) => Some(*standard),
+        _ => None,
     }
 }
 
-fn syntax_type(ty: TypeRef, named_types: &HashMap<TypeNameId, Type>) -> Type {
+fn inference_type_for_declared(types: &TypeStore, ty: DeclaredTypeRef) -> Type {
+    match ty {
+        DeclaredTypeRef::Core(core) => Type::from_core(core),
+        DeclaredTypeRef::Standard(standard) => Type::Known(types.id_for_standard(standard)),
+    }
+}
+
+fn syntax_type(ty: TypeRef, named_types: &HashMap<TypeNameId, Type>, types: &TypeStore) -> Type {
     match ty {
         TypeRef::Named(id) => named_types[&id],
+        TypeRef::Standard(standard) => Type::Known(types.id_for_standard(standard)),
         ty => Type::from(ty),
     }
 }

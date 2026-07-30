@@ -1,0 +1,1692 @@
+//! Structured Wasm-IR block, assignment, expression, and intrinsic emission.
+
+use super::*;
+
+#[derive(Clone, Copy)]
+pub(super) enum LocalStorage<'a> {
+    Wasm(&'a HashMap<ValueId, (u32, Type)>),
+    Hybrid {
+        wasm: &'a HashMap<ValueId, (u32, Type)>,
+        frame: &'a HashMap<ValueId, (u32, Type)>,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ExprContext<'a> {
+    pub abi: &'a Abi,
+    pub state: &'a crate::ast::StateDecl,
+    pub locals: LocalStorage<'a>,
+    pub globals: &'a HashMap<ValueId, u32>,
+    pub global_types: &'a HashMap<ValueId, Type>,
+    pub settings: &'a HashMap<ValueId, SettingStorage>,
+    pub stdlib: &'a Stdlib,
+    pub functions: &'a HashMap<FunctionId, u32>,
+    pub equality_functions: &'a EqualityFunctions,
+    pub records: &'a [RecordDecl],
+    pub enums: &'a [EnumDecl],
+    pub arrays: &'a [ArrayTypeDecl],
+    pub memory: &'a MemoryLayouts,
+    pub matches: &'a MatchLayout,
+    pub pattern_bindings: &'a HashMap<ValueId, (u32, Type)>,
+    pub semantics: &'a SemanticModel,
+    pub wasm_ir: &'a wasm_ir::Program,
+    pub gc: &'a GcLayout,
+    pub loop_control: Option<LoopControl>,
+}
+
+impl ExprContext<'_> {
+    fn nested_loop_control(&self, depth: u32) -> Self {
+        let mut nested = *self;
+        nested.loop_control = nested.loop_control.map(|control| control.nested(depth));
+        nested
+    }
+}
+
+pub(super) fn compile_block(
+    function: &mut Function,
+    block: &wasm_ir::Block,
+    context: &ExprContext<'_>,
+    action: Option<ActionKind>,
+) {
+    compile_block_with_loop(function, block, context, action, None);
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum LoopControl {
+    Branch {
+        break_depth: u32,
+        continue_depth: u32,
+    },
+    Async {
+        break_state: wasm_ir::AsyncStateId,
+        continue_state: wasm_ir::AsyncStateId,
+        dispatcher_depth: u32,
+    },
+}
+
+impl LoopControl {
+    pub(super) fn nested(self, depth: u32) -> Self {
+        match self {
+            Self::Branch {
+                break_depth,
+                continue_depth,
+            } => Self::Branch {
+                break_depth: break_depth + depth,
+                continue_depth: continue_depth + depth,
+            },
+            Self::Async {
+                break_state,
+                continue_state,
+                dispatcher_depth,
+            } => Self::Async {
+                break_state,
+                continue_state,
+                dispatcher_depth: dispatcher_depth + depth,
+            },
+        }
+    }
+
+    pub(super) fn emit_break(self, function: &mut Function) {
+        self.emit(function, true);
+    }
+
+    pub(super) fn emit_continue(self, function: &mut Function) {
+        self.emit(function, false);
+    }
+
+    fn emit(self, function: &mut Function, is_break: bool) {
+        match self {
+            Self::Branch {
+                break_depth,
+                continue_depth,
+            } => {
+                function.instruction(&Instruction::Br(if is_break {
+                    break_depth
+                } else {
+                    continue_depth
+                }));
+            }
+            Self::Async {
+                break_state,
+                continue_state,
+                dispatcher_depth,
+            } => {
+                let state = if is_break {
+                    break_state
+                } else {
+                    continue_state
+                };
+                emit_async_frame_ref(function);
+                function
+                    .instruction(&Instruction::I32Const(state.index() as i32))
+                    .instruction(&Instruction::StructSet {
+                        struct_type_index: ASYNC_FRAME_TYPE,
+                        field_index: 0,
+                    })
+                    .instruction(&Instruction::Br(dispatcher_depth));
+            }
+        }
+    }
+}
+
+fn compile_block_with_loop(
+    function: &mut Function,
+    block: &wasm_ir::Block,
+    context: &ExprContext<'_>,
+    action: Option<ActionKind>,
+    loop_control: Option<LoopControl>,
+) {
+    let expression_context = ExprContext {
+        loop_control,
+        ..*context
+    };
+    let context = &expression_context;
+    for statement in &block.statements {
+        match statement {
+            wasm_ir::Statement::Store { target, op, value } => {
+                compile_assignment(function, *target, *op, *value, context);
+            }
+            wasm_ir::Statement::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                compile_expr(function, *condition, context);
+                function.instruction(&Instruction::If(BlockType::Empty));
+                compile_block_with_loop(
+                    function,
+                    then_block,
+                    context,
+                    action,
+                    loop_control.map(|control| control.nested(1)),
+                );
+                function.instruction(&Instruction::Else);
+                compile_block_with_loop(
+                    function,
+                    else_block,
+                    context,
+                    action,
+                    loop_control.map(|control| control.nested(1)),
+                );
+                function.instruction(&Instruction::End);
+            }
+            wasm_ir::Statement::While { condition, body } => {
+                function
+                    .instruction(&Instruction::Block(BlockType::Empty))
+                    .instruction(&Instruction::Loop(BlockType::Empty));
+                compile_expr(function, *condition, context);
+                function
+                    .instruction(&Instruction::I32Eqz)
+                    .instruction(&Instruction::BrIf(1));
+                compile_block_with_loop(
+                    function,
+                    body,
+                    context,
+                    action,
+                    Some(LoopControl::Branch {
+                        break_depth: 1,
+                        continue_depth: 0,
+                    }),
+                );
+                function
+                    .instruction(&Instruction::Br(0))
+                    .instruction(&Instruction::End)
+                    .instruction(&Instruction::End);
+            }
+            wasm_ir::Statement::Evaluate {
+                expression,
+                discard_result,
+            } => {
+                compile_expr(function, *expression, context);
+                if *discard_result {
+                    function.instruction(&Instruction::Drop);
+                }
+            }
+        }
+    }
+    match &block.terminator {
+        wasm_ir::Terminator::Fallthrough => {}
+        wasm_ir::Terminator::Break => {
+            loop_control
+                .expect("checked break statements belong to loops")
+                .emit_break(function);
+        }
+        wasm_ir::Terminator::Continue => {
+            loop_control
+                .expect("checked continue statements belong to loops")
+                .emit_continue(function);
+        }
+        wasm_ir::Terminator::AsyncWhile { .. } => {
+            unreachable!("async loops are lowered by the async action compiler")
+        }
+        wasm_ir::Terminator::Return(value) => {
+            if let Some(value) = value {
+                compile_expr(function, *value, context);
+            } else if let Some(action) = action {
+                emit_action_default(function, action);
+            }
+            function.instruction(&Instruction::Return);
+        }
+        wasm_ir::Terminator::Throw { error, target } => {
+            let Type::Result(target_result) = semantic_type(*target, context.semantics) else {
+                unreachable!("throw targets are result values")
+            };
+            emit_failure_transfer(
+                function,
+                target_result,
+                result_value_type(target_result, context.semantics),
+                context.gc,
+                |function| compile_expr(function, *error, context),
+            );
+        }
+        wasm_ir::Terminator::Suspend { .. } => {
+            unreachable!("suspension is lowered by the async action compiler")
+        }
+    }
+}
+
+pub(super) fn compile_assignment(
+    function: &mut Function,
+    target: ValueId,
+    op: Option<BinaryOp>,
+    value: ExprId,
+    context: &ExprContext<'_>,
+) {
+    match context.locals {
+        LocalStorage::Hybrid { frame, .. } if frame.contains_key(&target) => {
+            let (field, ty) = frame[&target];
+            emit_async_frame_ref(function);
+            if let Some(op) = op {
+                emit_async_frame_ref(function);
+                emit_typed_struct_get(function, ASYNC_FRAME_TYPE, field, ty);
+                compile_expr(function, value, context);
+                emit_binary_instruction(function, op, ty);
+            } else {
+                compile_expr(function, value, context);
+            }
+            function.instruction(&Instruction::StructSet {
+                struct_type_index: ASYNC_FRAME_TYPE,
+                field_index: field,
+            });
+        }
+        LocalStorage::Hybrid { wasm, .. } if wasm.contains_key(&target) => {
+            let (local, ty) = wasm[&target];
+            if let Some(op) = op {
+                function.instruction(&Instruction::LocalGet(local));
+                compile_expr(function, value, context);
+                emit_binary_instruction(function, op, ty);
+            } else {
+                compile_expr(function, value, context);
+            }
+            function.instruction(&Instruction::LocalSet(local));
+        }
+        LocalStorage::Wasm(locals) if locals.contains_key(&target) => {
+            let (local, ty) = locals[&target];
+            if let Some(op) = op {
+                function.instruction(&Instruction::LocalGet(local));
+                compile_expr(function, value, context);
+                emit_binary_instruction(function, op, ty);
+            } else {
+                compile_expr(function, value, context);
+            }
+            function.instruction(&Instruction::LocalSet(local));
+        }
+        _ => {
+            let global = context.globals[&target];
+            if let Some(op) = op {
+                function.instruction(&Instruction::GlobalGet(global));
+                compile_expr(function, value, context);
+                emit_binary_instruction(function, op, context.global_types[&target]);
+            } else {
+                compile_expr(function, value, context);
+            }
+            function.instruction(&Instruction::GlobalSet(global));
+        }
+    }
+}
+
+fn resolved_receiver(
+    target: &ResolvedCall,
+    context: &ExprContext<'_>,
+) -> (ResolvedValue, Type, Vec<ResolvedMember>) {
+    let (receiver, receiver_type, receiver_members) = match target {
+        ResolvedCall::UserMethod {
+            receiver,
+            receiver_type,
+            receiver_members,
+            ..
+        } => (*receiver, *receiver_type, receiver_members.clone()),
+        ResolvedCall::StandardLibrary {
+            receiver: Some(receiver),
+            receiver_type: Some(receiver_type),
+            receiver_members,
+            ..
+        } => (*receiver, *receiver_type, receiver_members.clone()),
+        _ => unreachable!("only method calls have receivers"),
+    };
+    (
+        receiver,
+        semantic_type(receiver_type, context.semantics),
+        receiver_members,
+    )
+}
+
+pub(super) fn compile_receiver(
+    function: &mut Function,
+    target: &ResolvedCall,
+    context: &ExprContext<'_>,
+) -> Type {
+    let (receiver, receiver_type, receiver_members) = resolved_receiver(target, context);
+    let lowered_type = compile_resolved_path(function, receiver, &receiver_members, context);
+    debug_assert_eq!(lowered_type, receiver_type);
+    receiver_type
+}
+
+fn compile_resolved_path(
+    function: &mut Function,
+    value: ResolvedValue,
+    members: &[ResolvedMember],
+    context: &ExprContext<'_>,
+) -> Type {
+    let value_type = match value {
+        ResolvedValue::CurrentState(field) | ResolvedValue::OldState(field) => {
+            let snapshot = u32::from(matches!(value, ResolvedValue::OldState(_)));
+            function.instruction(&Instruction::LocalGet(snapshot));
+            let (index, field_type) = context
+                .state
+                .fields
+                .iter()
+                .enumerate()
+                .find_map(|(index, state_field)| {
+                    (state_field.id == field)
+                        .then_some((index as u32, value_type(state_field.id, context.semantics)))
+                })
+                .expect("resolved state field belongs to the checked state block");
+            emit_struct_get(function, index, field_type);
+            field_type
+        }
+        ResolvedValue::Setting(setting) | ResolvedValue::OldSetting(setting) => {
+            let storage = context.settings[&setting];
+            let current = matches!(value, ResolvedValue::Setting(_));
+            function.instruction(&Instruction::GlobalGet(if current {
+                storage.current
+            } else {
+                storage.old
+            }));
+            storage.ty
+        }
+        ResolvedValue::Variable(value) => {
+            if let Some(&(local, ty)) = context.pattern_bindings.get(&value) {
+                function.instruction(&Instruction::LocalGet(local));
+                ty
+            } else {
+                match context.locals {
+                    LocalStorage::Hybrid { frame, .. } if frame.contains_key(&value) => {
+                        let (field, ty) = frame[&value];
+                        emit_async_frame_ref(function);
+                        emit_typed_struct_get(function, ASYNC_FRAME_TYPE, field, ty);
+                        ty
+                    }
+                    LocalStorage::Hybrid { wasm, .. } if wasm.contains_key(&value) => {
+                        let (local, ty) = wasm[&value];
+                        function.instruction(&Instruction::LocalGet(local));
+                        ty
+                    }
+                    LocalStorage::Wasm(locals) if locals.contains_key(&value) => {
+                        let (local, ty) = locals[&value];
+                        function.instruction(&Instruction::LocalGet(local));
+                        ty
+                    }
+                    _ => {
+                        function.instruction(&Instruction::GlobalGet(context.globals[&value]));
+                        context.global_types[&value]
+                    }
+                }
+            }
+        }
+    };
+    emit_path_fields(function, members, value_type, context)
+}
+
+fn emit_path_fields(
+    function: &mut Function,
+    fields: &[ResolvedMember],
+    mut value_type: Type,
+    context: &ExprContext<'_>,
+) -> Type {
+    for field in fields {
+        let (struct_type_index, field_index, field_type) = match field {
+            ResolvedMember::BuiltinField(field) => match field {
+                BuiltinFieldId::ModuleAddress => (MODULE_TYPE, 0, Type::Address),
+                BuiltinFieldId::ModuleSize => (MODULE_TYPE, 1, Type::U64),
+                BuiltinFieldId::UnityModuleAssemblies => (UNITY_MODULE_TYPE, 0, Type::Address),
+                BuiltinFieldId::UnityModuleTypeInfoTable => (UNITY_MODULE_TYPE, 1, Type::Address),
+                BuiltinFieldId::UnityModuleVersion => (UNITY_MODULE_TYPE, 2, Type::U32),
+                BuiltinFieldId::UnityModulePointerSize => (UNITY_MODULE_TYPE, 3, Type::U32),
+                BuiltinFieldId::UnityImageAddress => (UNITY_IMAGE_TYPE, 0, Type::Address),
+                BuiltinFieldId::UnityClassAddress => (UNITY_CLASS_TYPE, 0, Type::Address),
+                BuiltinFieldId::UnityFieldOffset => (UNITY_FIELD_TYPE, 0, Type::U32),
+                BuiltinFieldId::UnityFieldIndex => (UNITY_FIELD_TYPE, 1, Type::U32),
+            },
+            ResolvedMember::RecordField(field) => {
+                let (record, field_index, field) = context
+                    .records
+                    .iter()
+                    .find_map(|record| {
+                        record
+                            .fields
+                            .iter()
+                            .enumerate()
+                            .find(|(_, candidate)| candidate.id == *field)
+                            .map(|(index, field)| (record, index as u32, field))
+                    })
+                    .expect("resolved record field belongs to a checked declaration");
+                debug_assert_eq!(value_type, Type::Record(record.id));
+                (
+                    context.gc.index(Type::Record(record.id)),
+                    field_index,
+                    record_field_type(field.id, context.semantics),
+                )
+            }
+        };
+        function.instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(function, struct_type_index, field_index, field_type);
+        value_type = field_type;
+    }
+    value_type
+}
+
+pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context: &ExprContext<'_>) {
+    let expression_ir = context
+        .wasm_ir
+        .expression(expression)
+        .expect("compiled expression belongs to Wasm IR");
+    let ty = semantic_type(expression_ir.ty, context.semantics);
+    if let Some(conversion) = expression_ir.conversion {
+        let source = semantic_type(conversion.source, context.semantics);
+        let target = semantic_type(conversion.target, context.semantics);
+        compile_expr_unconverted(function, expression_ir, source, context);
+        match (conversion.kind, target) {
+            (ValueConversionKind::LiftOption, Type::Option(option)) => {
+                function.instruction(&Instruction::StructNew(
+                    context.gc.index(Type::Option(option)),
+                ));
+            }
+            (ValueConversionKind::LiftResult, Type::Result(result)) => {
+                // The successful value is already on the stack. Tag 0 and a
+                // null error complete the monomorphized result struct.
+                function
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(STRING_TYPE)))
+                    .instruction(&Instruction::StructNew(
+                        context.gc.index(Type::Result(result)),
+                    ));
+            }
+            _ => unreachable!("typed wrapper conversions have matching target layouts"),
+        }
+        return;
+    }
+    compile_expr_unconverted(function, expression_ir, ty, context);
+}
+
+fn compile_expr_unconverted(
+    function: &mut Function,
+    expression_ir: &wasm_ir::Expression,
+    ty: Type,
+    context: &ExprContext<'_>,
+) {
+    let expression = expression_ir.id;
+    match &expression_ir.kind {
+        wasm_ir::ExpressionKind::None => match ty {
+            Type::Bool => {
+                function.instruction(&Instruction::I32Const(-1));
+            }
+            Type::Duration => {
+                function.instruction(&Instruction::RefNull(HeapType::Concrete(DURATION_TYPE)));
+            }
+            Type::Option(option) => {
+                function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                    context.gc.index(Type::Option(option)),
+                )));
+            }
+            _ => unreachable!("type checking only permits nullable action results"),
+        },
+        wasm_ir::ExpressionKind::Bool(value) => {
+            function.instruction(&Instruction::I32Const(*value as i32));
+        }
+        wasm_ir::ExpressionKind::Int(value) => emit_int(function, *value, ty),
+        wasm_ir::ExpressionKind::Float(value) => {
+            if ty == Type::F32 {
+                function.instruction(&Instruction::F32Const((*value as f32).into()));
+            } else {
+                function.instruction(&Instruction::F64Const((*value).into()));
+            }
+        }
+        wasm_ir::ExpressionKind::String(value) => emit_string_literal(function, value),
+        wasm_ir::ExpressionKind::InterpolatedString(parts) => {
+            for part in parts {
+                match part {
+                    wasm_ir::InterpolatedPart::Text(value) => emit_string_literal(function, value),
+                    wasm_ir::InterpolatedPart::Expression {
+                        expression,
+                        string_conversion_source: None,
+                    } => compile_expr(function, *expression, context),
+                    wasm_ir::InterpolatedPart::Expression {
+                        expression,
+                        string_conversion_source: Some(source),
+                    } => {
+                        debug_assert_eq!(
+                            semantic_type(*source, context.semantics),
+                            expression_type(*expression, context.wasm_ir, context.semantics)
+                        );
+                        emit_cast(function, *expression, Type::String, context);
+                    }
+                }
+            }
+            let strings = context
+                .arrays
+                .iter()
+                .find(|array| array_element_type(array.id, context.semantics) == Type::String)
+                .expect("interpolation creates its String array type");
+            function.instruction(&Instruction::ArrayNewFixed {
+                array_type_index: context.gc.index(Type::Array(strings.id)),
+                array_size: parts.len() as u32,
+            });
+            function.instruction(&Instruction::Call(
+                context.stdlib.helper(GeneratedHelper::ConcatStrings),
+            ));
+        }
+        wasm_ir::ExpressionKind::Signature(_) => {
+            unreachable!("signature literals are lowered by signature-consuming builtins")
+        }
+        wasm_ir::ExpressionKind::Array(elements) => {
+            let Type::Array(array_id) = ty else {
+                unreachable!();
+            };
+            for element in elements {
+                compile_expr(function, *element, context);
+            }
+            function.instruction(&Instruction::ArrayNewFixed {
+                array_type_index: context.gc.index(Type::Array(array_id)),
+                array_size: elements.len() as u32,
+            });
+        }
+        wasm_ir::ExpressionKind::Record { record, fields } => {
+            let declaration = context
+                .records
+                .iter()
+                .find(|declaration| declaration.id == *record)
+                .unwrap();
+            for declared_field in &declaration.fields {
+                let (_, value) = fields
+                    .iter()
+                    .find(|(field, _)| *field == declared_field.id)
+                    .expect("checked record literals initialize every declared field");
+                compile_expr(function, *value, context);
+            }
+            function.instruction(&Instruction::StructNew(
+                context.gc.index(Type::Record(*record)),
+            ));
+        }
+        wasm_ir::ExpressionKind::Enum {
+            enumeration,
+            variant,
+            payload,
+        } => {
+            let declaration = context
+                .enums
+                .iter()
+                .find(|declaration| declaration.id == *enumeration)
+                .unwrap();
+            let selected = declaration
+                .variants
+                .iter()
+                .position(|declared| declared.id == *variant)
+                .unwrap();
+            function.instruction(&Instruction::I32Const(selected as i32));
+            for (index, declared) in declaration.variants.iter().enumerate() {
+                if index == selected {
+                    if let Some(payload) = payload {
+                        compile_expr(function, *payload, context);
+                    } else {
+                        function.instruction(&Instruction::I32Const(0));
+                    }
+                } else if let Some(payload_type) =
+                    enum_variant_payload(declared.id, context.semantics)
+                {
+                    emit_default(function, payload_type, context.gc);
+                } else {
+                    function.instruction(&Instruction::I32Const(0));
+                }
+            }
+            function.instruction(&Instruction::StructNew(
+                context.gc.index(Type::Enum(*enumeration)),
+            ));
+        }
+        wasm_ir::ExpressionKind::Path { root, members } => {
+            let root = root.expect("lowerable paths have resolved value roots");
+            let lowered_type = compile_resolved_path(function, root, members, context);
+            debug_assert_eq!(lowered_type, ty);
+        }
+        wasm_ir::ExpressionKind::Member { receiver, members } => {
+            compile_expr(function, *receiver, context);
+            let receiver_type = expression_type(*receiver, context.wasm_ir, context.semantics);
+            let lowered_type = emit_path_fields(function, members, receiver_type, context);
+            debug_assert_eq!(lowered_type, ty);
+        }
+        wasm_ir::ExpressionKind::Unary { op, operand } => match op {
+            UnaryOp::Not => {
+                compile_expr(function, *operand, context);
+                function.instruction(&Instruction::I32Eqz);
+            }
+            UnaryOp::Neg => match ty {
+                Type::I8 | Type::I16 | Type::I32 => {
+                    function.instruction(&Instruction::I32Const(0));
+                    compile_expr(function, *operand, context);
+                    function.instruction(&Instruction::I32Sub);
+                }
+                Type::I64 => {
+                    function.instruction(&Instruction::I64Const(0));
+                    compile_expr(function, *operand, context);
+                    function.instruction(&Instruction::I64Sub);
+                }
+                Type::F32 => {
+                    compile_expr(function, *operand, context);
+                    function.instruction(&Instruction::F32Neg);
+                }
+                Type::F64 => {
+                    compile_expr(function, *operand, context);
+                    function.instruction(&Instruction::F64Neg);
+                }
+                _ => unreachable!(),
+            },
+        },
+        wasm_ir::ExpressionKind::Cast { value } => emit_cast(function, *value, ty, context),
+        wasm_ir::ExpressionKind::Binary { op, left, right } => {
+            emit_binary(function, *op, *left, *right, context)
+        }
+        wasm_ir::ExpressionKind::If {
+            condition,
+            then_expr,
+            else_expr,
+        } => {
+            compile_expr(function, *condition, context);
+            let block_type = if ty == Type::Void {
+                BlockType::Empty
+            } else {
+                BlockType::Result(context.gc.val_type(ty))
+            };
+            function.instruction(&Instruction::If(block_type));
+            let nested_context = context.nested_loop_control(1);
+            compile_expr(function, *then_expr, &nested_context);
+            function.instruction(&Instruction::Else);
+            compile_expr(function, *else_expr, &nested_context);
+            function.instruction(&Instruction::End);
+        }
+        wasm_ir::ExpressionKind::Fallback { value, fallback } => {
+            let input_local = context.matches.fallback_values[&expression];
+            let input_type = expression_type(*value, context.wasm_ir, context.semantics);
+            compile_expr(function, *value, context);
+            function.instruction(&Instruction::LocalSet(input_local));
+            let result = BlockType::Result(context.gc.val_type(ty));
+            match input_type {
+                Type::Option(option) => {
+                    function
+                        .instruction(&Instruction::LocalGet(input_local))
+                        .instruction(&Instruction::RefIsNull)
+                        .instruction(&Instruction::If(result));
+                    let nested_context = context.nested_loop_control(1);
+                    compile_fallback_branch(function, *fallback, &nested_context);
+                    function
+                        .instruction(&Instruction::Else)
+                        .instruction(&Instruction::LocalGet(input_local))
+                        .instruction(&Instruction::RefAsNonNull);
+                    emit_typed_struct_get(function, context.gc.index(Type::Option(option)), 0, ty);
+                    function.instruction(&Instruction::End);
+                }
+                Type::Result(result_type) => {
+                    function
+                        .instruction(&Instruction::LocalGet(input_local))
+                        .instruction(&Instruction::RefAsNonNull);
+                    emit_typed_struct_get(
+                        function,
+                        context.gc.index(Type::Result(result_type)),
+                        1,
+                        Type::I32,
+                    );
+                    function.instruction(&Instruction::If(result));
+                    let nested_context = context.nested_loop_control(1);
+                    compile_fallback_branch(function, *fallback, &nested_context);
+                    function
+                        .instruction(&Instruction::Else)
+                        .instruction(&Instruction::LocalGet(input_local))
+                        .instruction(&Instruction::RefAsNonNull);
+                    emit_typed_struct_get(
+                        function,
+                        context.gc.index(Type::Result(result_type)),
+                        0,
+                        ty,
+                    );
+                    function.instruction(&Instruction::End);
+                }
+                _ => unreachable!("typed fallback inputs are optional or result values"),
+            }
+        }
+        wasm_ir::ExpressionKind::Propagate { value, target } => {
+            let input_local = context.matches.fallback_values[&expression];
+            let Type::Result(input_result) =
+                expression_type(*value, context.wasm_ir, context.semantics)
+            else {
+                unreachable!("typed propagation inputs are result values")
+            };
+            let Type::Result(target_result) = semantic_type(*target, context.semantics) else {
+                unreachable!("propagation targets are result values")
+            };
+            compile_expr(function, *value, context);
+            function
+                .instruction(&Instruction::LocalSet(input_local))
+                .instruction(&Instruction::LocalGet(input_local))
+                .instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(
+                function,
+                context.gc.index(Type::Result(input_result)),
+                1,
+                Type::I32,
+            );
+            function.instruction(&Instruction::If(BlockType::Empty));
+            emit_failure_transfer(
+                function,
+                target_result,
+                result_value_type(target_result, context.semantics),
+                context.gc,
+                |function| {
+                    function
+                        .instruction(&Instruction::LocalGet(input_local))
+                        .instruction(&Instruction::RefAsNonNull);
+                    emit_typed_struct_get(
+                        function,
+                        context.gc.index(Type::Result(input_result)),
+                        2,
+                        Type::String,
+                    );
+                },
+            );
+            function
+                .instruction(&Instruction::End)
+                .instruction(&Instruction::LocalGet(input_local))
+                .instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(
+                function,
+                context.gc.index(Type::Result(input_result)),
+                0,
+                ty,
+            );
+        }
+        wasm_ir::ExpressionKind::Match { value, arms } => {
+            let value_local = context.matches.values[&expression];
+            let value_type = expression_type(*value, context.wasm_ir, context.semantics);
+            compile_expr(function, *value, context);
+            function.instruction(&Instruction::LocalSet(value_local));
+            let block_type = if ty == Type::Void {
+                BlockType::Empty
+            } else {
+                BlockType::Result(context.gc.val_type(ty))
+            };
+            for (arm_index, arm) in arms.iter().enumerate() {
+                let mut bindings = context.pattern_bindings.clone();
+                let enum_pattern = if let wasm_ir::LoweredPattern::Enum {
+                    enumeration,
+                    variant,
+                    binding,
+                } = &arm.pattern
+                {
+                    let declaration = context
+                        .enums
+                        .iter()
+                        .find(|declaration| declaration.id == *enumeration)
+                        .unwrap();
+                    let variant_index = declaration
+                        .variants
+                        .iter()
+                        .position(|declared| declared.id == *variant)
+                        .unwrap();
+                    Some((*enumeration, variant_index, *binding))
+                } else {
+                    None
+                };
+                let binding =
+                    match &arm.pattern {
+                        wasm_ir::LoweredPattern::Enum { .. } => {
+                            let (enumeration, variant_index, binding) = enum_pattern.unwrap();
+                            binding.map(|binding| {
+                                (
+                                    binding,
+                                    context.gc.index(Type::Enum(enumeration)),
+                                    variant_index as u32 + 1,
+                                )
+                            })
+                        }
+                        wasm_ir::LoweredPattern::OptionSome { option, binding } => binding
+                            .map(|binding| (binding, context.gc.index(Type::Option(*option)), 0)),
+                        wasm_ir::LoweredPattern::ResultSuccess { result, binding } => binding
+                            .map(|binding| (binding, context.gc.index(Type::Result(*result)), 0)),
+                        wasm_ir::LoweredPattern::ResultError { result, binding } => binding
+                            .map(|binding| (binding, context.gc.index(Type::Result(*result)), 2)),
+                        _ => None,
+                    };
+                let binding = binding.map(|(binding, struct_type, field_index)| {
+                    let (binding_local, payload_type) = context.matches.bindings[&arm.pattern_id];
+                    bindings.insert(binding, (binding_local, payload_type));
+                    (binding_local, payload_type, struct_type, field_index)
+                });
+                match &arm.pattern {
+                    wasm_ir::LoweredPattern::Enum { .. } => {
+                        let (enumeration, variant_index, _) = enum_pattern.unwrap();
+                        function
+                            .instruction(&Instruction::LocalGet(value_local))
+                            .instruction(&Instruction::RefAsNonNull);
+                        emit_typed_struct_get(
+                            function,
+                            context.gc.index(Type::Enum(enumeration)),
+                            0,
+                            Type::I32,
+                        );
+                        function
+                            .instruction(&Instruction::I32Const(variant_index as i32))
+                            .instruction(&Instruction::I32Eq);
+                    }
+                    wasm_ir::LoweredPattern::Bool(expected) => {
+                        function
+                            .instruction(&Instruction::LocalGet(value_local))
+                            .instruction(&Instruction::I32Const(*expected as i32))
+                            .instruction(&Instruction::I32Eq);
+                    }
+                    wasm_ir::LoweredPattern::Int(value) => {
+                        function.instruction(&Instruction::LocalGet(value_local));
+                        emit_int(function, *value, value_type);
+                        function.instruction(&if matches!(
+                            value_type,
+                            Type::I64 | Type::U64 | Type::Address
+                        ) {
+                            Instruction::I64Eq
+                        } else {
+                            Instruction::I32Eq
+                        });
+                    }
+                    wasm_ir::LoweredPattern::OptionNone(_) => {
+                        function
+                            .instruction(&Instruction::LocalGet(value_local))
+                            .instruction(&Instruction::RefIsNull);
+                    }
+                    wasm_ir::LoweredPattern::OptionSome { .. } => {
+                        function
+                            .instruction(&Instruction::LocalGet(value_local))
+                            .instruction(&Instruction::RefIsNull)
+                            .instruction(&Instruction::I32Eqz);
+                    }
+                    wasm_ir::LoweredPattern::ResultSuccess { result, .. }
+                    | wasm_ir::LoweredPattern::ResultError { result, .. } => {
+                        function
+                            .instruction(&Instruction::LocalGet(value_local))
+                            .instruction(&Instruction::RefAsNonNull);
+                        emit_typed_struct_get(
+                            function,
+                            context.gc.index(Type::Result(*result)),
+                            1,
+                            Type::I32,
+                        );
+                        function.instruction(&Instruction::I32Const(matches!(
+                            &arm.pattern,
+                            wasm_ir::LoweredPattern::ResultError { .. }
+                        )
+                            as i32));
+                        function.instruction(&Instruction::I32Eq);
+                    }
+                    wasm_ir::LoweredPattern::Wildcard => {
+                        function.instruction(&Instruction::I32Const(1));
+                    }
+                }
+                let arm_context = ExprContext {
+                    pattern_bindings: &bindings,
+                    loop_control: context
+                        .loop_control
+                        .map(|control| control.nested(arm_index as u32 + 1)),
+                    ..*context
+                };
+                if let Some((binding_local, payload_type, struct_type, field_index)) = binding {
+                    function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                    function
+                        .instruction(&Instruction::LocalGet(value_local))
+                        .instruction(&Instruction::RefAsNonNull);
+                    emit_typed_struct_get(function, struct_type, field_index, payload_type);
+                    function.instruction(&Instruction::LocalSet(binding_local));
+                    if let Some(guard) = arm.guard {
+                        compile_expr(function, guard, &arm_context);
+                    } else {
+                        function.instruction(&Instruction::I32Const(1));
+                    }
+                    function
+                        .instruction(&Instruction::Else)
+                        .instruction(&Instruction::I32Const(0))
+                        .instruction(&Instruction::End);
+                } else if let Some(guard) = arm.guard {
+                    function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                    compile_expr(function, guard, &arm_context);
+                    function
+                        .instruction(&Instruction::Else)
+                        .instruction(&Instruction::I32Const(0))
+                        .instruction(&Instruction::End);
+                }
+                function.instruction(&Instruction::If(block_type));
+                compile_expr(function, arm.value, &arm_context);
+                function.instruction(&Instruction::Else);
+            }
+            function.instruction(&Instruction::Unreachable);
+            for _ in arms {
+                function.instruction(&Instruction::End);
+            }
+        }
+        wasm_ir::ExpressionKind::Call { .. } => {}
+    }
+    let wasm_ir::ExpressionKind::Call {
+        target,
+        arguments: args,
+    } = &expression_ir.kind
+    else {
+        return;
+    };
+    if let Some(
+        intrinsic @ (IntrinsicId::NumericMin | IntrinsicId::NumericMax | IntrinsicId::NumericClamp),
+    ) = resolved_intrinsic(target)
+    {
+        let temps = &context.matches.intrinsic_temps[&expression];
+        let receiver_type = compile_receiver(function, target, context);
+        function.instruction(&Instruction::LocalSet(temps[0]));
+        for (argument, local) in args.iter().zip(&temps[1..]) {
+            compile_expr(function, *argument, context);
+            function.instruction(&Instruction::LocalSet(*local));
+        }
+        emit_numeric_method(function, intrinsic, receiver_type, temps);
+        return;
+    }
+    match resolved_intrinsic(target) {
+        None => match target {
+            ResolvedCall::UserMethod {
+                function: target_function,
+                ..
+            } => {
+                compile_receiver(function, target, context);
+                for argument in args {
+                    compile_expr(function, *argument, context);
+                }
+                function.instruction(&Instruction::Call(context.functions[target_function]));
+            }
+            ResolvedCall::UserFunction { function: target } => {
+                for argument in args {
+                    compile_expr(function, *argument, context);
+                }
+                function.instruction(&Instruction::Call(context.functions[target]));
+            }
+            ResolvedCall::StandardLibrary { .. } => {
+                unreachable!("standard-library implementations have intrinsic IDs")
+            }
+            ResolvedCall::ResultError { result } => {
+                emit_default(
+                    function,
+                    result_value_type(*result, context.semantics),
+                    context.gc,
+                );
+                function.instruction(&Instruction::I32Const(1));
+                compile_expr(function, args[0], context);
+                function.instruction(&Instruction::StructNew(
+                    context.gc.index(Type::Result(*result)),
+                ));
+            }
+            ResolvedCall::OptionSome { option } => {
+                compile_expr(function, args[0], context);
+                function.instruction(&Instruction::StructNew(
+                    context.gc.index(Type::Option(*option)),
+                ));
+            }
+            ResolvedCall::ResultSuccess { result } => {
+                compile_expr(function, args[0], context);
+                function
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(STRING_TYPE)))
+                    .instruction(&Instruction::StructNew(
+                        context.gc.index(Type::Result(*result)),
+                    ));
+            }
+        },
+        Some(builtin) => match builtin {
+            IntrinsicId::Print => {
+                compile_expr(function, args[0], context);
+                function.instruction(&Instruction::Call(
+                    context.stdlib.helper(GeneratedHelper::PrintString),
+                ));
+            }
+            IntrinsicId::StringLength => {
+                compile_expr(function, args[0], context);
+                function
+                    .instruction(&Instruction::RefAsNonNull)
+                    .instruction(&Instruction::ArrayLen);
+            }
+            IntrinsicId::StringConcat => {
+                compile_expr(function, args[0], context);
+                function.instruction(&Instruction::Call(
+                    context.stdlib.helper(GeneratedHelper::ConcatStrings),
+                ));
+            }
+            IntrinsicId::TimerSetVariable => {
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
+                function.instruction(&Instruction::Call(
+                    context.stdlib.helper(GeneratedHelper::TimerSetVariable),
+                ));
+            }
+            IntrinsicId::TimerState => {
+                let host_state = context.matches.intrinsic_temps[&expression][0];
+                let timer_state = context
+                    .enums
+                    .iter()
+                    .find(|enumeration| enumeration.name == crate::ast::TIMER_STATE_TYPE_NAME)
+                    .expect("checked programs contain the built-in TimerState enum");
+                function
+                    .instruction(&Instruction::Call(
+                        context.abi.function(AbiImportId::TimerGetState),
+                    ))
+                    .instruction(&Instruction::LocalTee(host_state))
+                    .instruction(&Instruction::I32Const(4))
+                    .instruction(&Instruction::I32LtU)
+                    .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+                    .instruction(&Instruction::LocalGet(host_state))
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::I32Const(4))
+                    .instruction(&Instruction::End);
+                for _ in &timer_state.variants {
+                    function.instruction(&Instruction::I32Const(0));
+                }
+                function.instruction(&Instruction::StructNew(
+                    context.gc.index(Type::Enum(timer_state.id)),
+                ));
+            }
+            IntrinsicId::RuntimeSetTickRate => {
+                compile_expr(function, args[0], context);
+                function.instruction(&Instruction::Call(
+                    context.abi.function(AbiImportId::RuntimeSetTickRate),
+                ));
+            }
+            IntrinsicId::NextTick | IntrinsicId::ProcessModule => {
+                unreachable!("suspending functions are lowered as awaits")
+            }
+            IntrinsicId::ProcessRead => {
+                let read_type = match target {
+                    ResolvedCall::StandardLibrary { type_arguments, .. } => type_arguments[0],
+                    _ => unreachable!("process.read must resolve to its standard-library item"),
+                };
+                let Type::Result(result_type) =
+                    expression_type(expression, context.wasm_ir, context.semantics)
+                else {
+                    unreachable!("synchronous process reads produce Result values")
+                };
+                emit_process_read_expr(function, args[0], read_type, result_type, context);
+            }
+            IntrinsicId::ProcessFollow => {
+                function.instruction(&Instruction::GlobalGet(PROCESS_GLOBAL));
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
+                function.instruction(&Instruction::Call(
+                    context.stdlib.helper(GeneratedHelper::FollowAddress),
+                ));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Address,
+                    Instruction::I64Eqz,
+                    "pointer path could not be followed",
+                    context,
+                );
+            }
+            IntrinsicId::ProcessScan => {
+                unreachable!("process.scan is lowered as an await")
+            }
+            IntrinsicId::ProcessReadRelative32 => {
+                function.instruction(&Instruction::GlobalGet(PROCESS_GLOBAL));
+                compile_expr(function, args[0], context);
+                function.instruction(&Instruction::Call(
+                    context.stdlib.helper(GeneratedHelper::ReadRelative32),
+                ));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Address,
+                    Instruction::I64Eqz,
+                    "relative address could not be read",
+                    context,
+                );
+            }
+            IntrinsicId::ProcessReadManagedString => {
+                function.instruction(&Instruction::GlobalGet(PROCESS_GLOBAL));
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
+                function.instruction(&Instruction::Call(
+                    context.stdlib.helper(GeneratedHelper::ReadManagedString),
+                ));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::String,
+                    Instruction::RefIsNull,
+                    "managed string could not be read",
+                    context,
+                );
+            }
+            IntrinsicId::UnityIl2Cpp => {
+                unreachable!("Unity.il2cpp is lowered as an await")
+            }
+            IntrinsicId::DurationFromParts => {
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
+                function.instruction(&Instruction::StructNew(DURATION_TYPE));
+            }
+            IntrinsicId::DurationFromFrames => {
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
+                function.instruction(&Instruction::I64DivS);
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
+                function
+                    .instruction(&Instruction::I64RemS)
+                    .instruction(&Instruction::I64Const(1_000_000_000))
+                    .instruction(&Instruction::I64Mul);
+                compile_expr(function, args[1], context);
+                function
+                    .instruction(&Instruction::I64DivS)
+                    .instruction(&Instruction::I32WrapI64)
+                    .instruction(&Instruction::StructNew(DURATION_TYPE));
+            }
+            IntrinsicId::DurationSaturatingSecondsF32 => {
+                compile_expr(function, args[0], context);
+                function.instruction(&Instruction::I64TruncSatF32S);
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[0], context);
+                function
+                    .instruction(&Instruction::I64TruncSatF32S)
+                    .instruction(&Instruction::F32ConvertI64S)
+                    .instruction(&Instruction::F32Sub)
+                    .instruction(&Instruction::F32Const(1_000_000_000.0.into()))
+                    .instruction(&Instruction::F32Mul)
+                    .instruction(&Instruction::I32TruncSatF32S)
+                    .instruction(&Instruction::StructNew(DURATION_TYPE));
+            }
+            IntrinsicId::NumericMin | IntrinsicId::NumericMax | IntrinsicId::NumericClamp => {
+                unreachable!("numeric intrinsics are lowered before ordinary calls")
+            }
+            IntrinsicId::AddressOffset | IntrinsicId::AddressAdd => {
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                if builtin == IntrinsicId::AddressOffset {
+                    function.instruction(&Instruction::I64ExtendI32U);
+                }
+                function.instruction(&Instruction::I64Add);
+            }
+            IntrinsicId::ArrayLength | IntrinsicId::ArrayGet | IntrinsicId::ArraySet => {
+                let receiver_type = compile_receiver(function, target, context);
+                let Type::Array(array_id) = receiver_type else {
+                    unreachable!();
+                };
+                function.instruction(&Instruction::RefAsNonNull);
+                for argument in args {
+                    compile_expr(function, *argument, context);
+                }
+                match builtin {
+                    IntrinsicId::ArrayLength => {
+                        function.instruction(&Instruction::ArrayLen);
+                    }
+                    IntrinsicId::ArrayGet => {
+                        let element = array_element_type(array_id, context.semantics);
+                        emit_array_get(function, context.gc.index(Type::Array(array_id)), element);
+                    }
+                    IntrinsicId::ArraySet => {
+                        function.instruction(&Instruction::ArraySet(
+                            context.gc.index(Type::Array(array_id)),
+                        ));
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            IntrinsicId::ModuleScan
+            | IntrinsicId::UnityModuleImage
+            | IntrinsicId::UnityImageClass
+            | IntrinsicId::UnityClassField
+            | IntrinsicId::UnityClassFieldAny
+            | IntrinsicId::UnityClassStaticTable
+            | IntrinsicId::UnityClassStaticInstance => {
+                unreachable!("suspending receiver methods are lowered by await")
+            }
+        },
+    }
+}
+
+fn compile_fallback_branch(
+    function: &mut Function,
+    fallback: wasm_ir::FallbackBranch,
+    context: &ExprContext<'_>,
+) {
+    match fallback {
+        wasm_ir::FallbackBranch::Value(value) => compile_expr(function, value, context),
+        wasm_ir::FallbackBranch::Return(value) => {
+            if let Some(value) = value {
+                compile_expr(function, value, context);
+            }
+            function.instruction(&Instruction::Return);
+        }
+        wasm_ir::FallbackBranch::Break => {
+            context
+                .loop_control
+                .expect("checked `else break` belongs to a loop")
+                .emit_break(function);
+        }
+        wasm_ir::FallbackBranch::Continue => {
+            context
+                .loop_control
+                .expect("checked `else continue` belongs to a loop")
+                .emit_continue(function);
+        }
+    }
+}
+
+fn emit_numeric_method(function: &mut Function, intrinsic: IntrinsicId, ty: Type, temps: &[u32]) {
+    if matches!(ty, Type::F32 | Type::F64) {
+        function
+            .instruction(&Instruction::LocalGet(temps[0]))
+            .instruction(&Instruction::LocalGet(temps[1]))
+            .instruction(&match (ty, intrinsic) {
+                (Type::F32, IntrinsicId::NumericMin) => Instruction::F32Min,
+                (Type::F32, IntrinsicId::NumericMax | IntrinsicId::NumericClamp) => {
+                    Instruction::F32Max
+                }
+                (Type::F64, IntrinsicId::NumericMin) => Instruction::F64Min,
+                (Type::F64, IntrinsicId::NumericMax | IntrinsicId::NumericClamp) => {
+                    Instruction::F64Max
+                }
+                _ => unreachable!(),
+            });
+        if intrinsic == IntrinsicId::NumericClamp {
+            function
+                .instruction(&Instruction::LocalGet(temps[2]))
+                .instruction(&match ty {
+                    Type::F32 => Instruction::F32Min,
+                    Type::F64 => Instruction::F64Min,
+                    _ => unreachable!(),
+                });
+        }
+        return;
+    }
+
+    let result = BlockType::Result(val_type(ty));
+    if intrinsic == IntrinsicId::NumericClamp {
+        function
+            .instruction(&Instruction::LocalGet(temps[0]))
+            .instruction(&Instruction::LocalGet(temps[1]))
+            .instruction(&compare(ty, ty.is_signed(), Compare::Gt))
+            .instruction(&Instruction::If(result))
+            .instruction(&Instruction::LocalGet(temps[0]))
+            .instruction(&Instruction::Else)
+            .instruction(&Instruction::LocalGet(temps[1]))
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::LocalSet(temps[3]))
+            .instruction(&Instruction::LocalGet(temps[3]))
+            .instruction(&Instruction::LocalGet(temps[2]))
+            .instruction(&compare(ty, ty.is_signed(), Compare::Lt))
+            .instruction(&Instruction::If(result))
+            .instruction(&Instruction::LocalGet(temps[3]))
+            .instruction(&Instruction::Else)
+            .instruction(&Instruction::LocalGet(temps[2]))
+            .instruction(&Instruction::End);
+        return;
+    }
+
+    function
+        .instruction(&Instruction::LocalGet(temps[0]))
+        .instruction(&Instruction::LocalGet(temps[1]))
+        .instruction(&compare(
+            ty,
+            ty.is_signed(),
+            if intrinsic == IntrinsicId::NumericMin {
+                Compare::Lt
+            } else {
+                Compare::Gt
+            },
+        ))
+        .instruction(&Instruction::If(result))
+        .instruction(&Instruction::LocalGet(temps[0]))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(temps[1]))
+        .instruction(&Instruction::End);
+}
+
+fn emit_process_read_expr(
+    function: &mut Function,
+    address: ExprId,
+    ty: TypeId,
+    result_type: ResultTypeId,
+    context: &ExprContext<'_>,
+) {
+    let physical_type = semantic_type(ty, context.semantics);
+    let size = context
+        .memory
+        .layout(ty, context.semantics)
+        .expect("checked process reads are MemoryReadable")
+        .size();
+    function.instruction(&Instruction::GlobalGet(PROCESS_GLOBAL));
+    compile_expr(function, address, context);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(size as i32))
+        .instruction(&Instruction::Call(
+            context.abi.function(AbiImportId::ProcessRead),
+        ))
+        .instruction(&Instruction::If(BlockType::Result(
+            context.gc.val_type(Type::Result(result_type)),
+        )));
+    emit_memory_value(
+        function,
+        ty,
+        0,
+        context.memory,
+        context.semantics,
+        context.gc,
+    );
+    emit_result_success(function, result_type, context.gc);
+    function.instruction(&Instruction::Else);
+    emit_result_error(
+        function,
+        result_type,
+        physical_type,
+        "process read failed",
+        context.gc,
+    );
+    function.instruction(&Instruction::End);
+}
+
+/// Converts a helper's zero/null failure sentinel into the language's real
+/// `T!` representation. The helper value is evaluated once and retained in a
+/// planned scratch local for the success branch.
+fn emit_sentinel_result(
+    function: &mut Function,
+    expression: ExprId,
+    value_type: Type,
+    failure_test: Instruction<'_>,
+    message: &str,
+    context: &ExprContext<'_>,
+) {
+    let Type::Result(result) = expression_type(expression, context.wasm_ir, context.semantics)
+    else {
+        unreachable!("fallible process helpers produce Result values")
+    };
+    let value_local = context.matches.intrinsic_temps[&expression][0];
+    function
+        .instruction(&Instruction::LocalTee(value_local))
+        .instruction(&failure_test)
+        .instruction(&Instruction::If(BlockType::Result(
+            context.gc.val_type(Type::Result(result)),
+        )));
+    emit_result_error(function, result, value_type, message, context.gc);
+    function
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(value_local));
+    emit_result_success(function, result, context.gc);
+    function.instruction(&Instruction::End);
+}
+
+fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context: &ExprContext<'_>) {
+    let source = expression_type(expression, context.wasm_ir, context.semantics);
+    compile_expr(function, expression, context);
+
+    if target == Type::String {
+        function
+            .instruction(&if matches!(source, Type::I8 | Type::I16 | Type::I32) {
+                Instruction::I64ExtendI32S
+            } else if matches!(source, Type::U8 | Type::U16 | Type::U32) {
+                Instruction::I64ExtendI32U
+            } else {
+                Instruction::Nop
+            })
+            .instruction(&Instruction::I32Const(source.is_signed() as i32))
+            .instruction(&Instruction::Call(
+                context.stdlib.helper(GeneratedHelper::FormatI64),
+            ));
+        return;
+    }
+
+    let source_i32 = matches!(
+        source,
+        Type::I8 | Type::U8 | Type::I16 | Type::U16 | Type::I32 | Type::U32
+    );
+    let source_i64 = matches!(source, Type::I64 | Type::U64 | Type::Address);
+    let target_i32 = matches!(
+        target,
+        Type::I8 | Type::U8 | Type::I16 | Type::U16 | Type::I32 | Type::U32
+    );
+    let target_i64 = matches!(target, Type::I64 | Type::U64 | Type::Address);
+
+    if source_i32 && target_i32 {
+        emit_narrow_i32(function, target);
+    } else if source_i32 && target_i64 {
+        function.instruction(&if source.is_signed() {
+            Instruction::I64ExtendI32S
+        } else {
+            Instruction::I64ExtendI32U
+        });
+    } else if source_i64 && target_i32 {
+        function.instruction(&Instruction::I32WrapI64);
+        emit_narrow_i32(function, target);
+    } else if source_i64 && target_i64 {
+        // All 64-bit integer and address casts have the same Wasm representation.
+    } else if source_i32 && matches!(target, Type::F32 | Type::F64) {
+        function.instruction(&match (target, source.is_signed()) {
+            (Type::F32, true) => Instruction::F32ConvertI32S,
+            (Type::F32, false) => Instruction::F32ConvertI32U,
+            (Type::F64, true) => Instruction::F64ConvertI32S,
+            (Type::F64, false) => Instruction::F64ConvertI32U,
+            _ => unreachable!(),
+        });
+    } else if source_i64 && matches!(target, Type::F32 | Type::F64) {
+        function.instruction(&match (target, source.is_signed()) {
+            (Type::F32, true) => Instruction::F32ConvertI64S,
+            (Type::F32, false) => Instruction::F32ConvertI64U,
+            (Type::F64, true) => Instruction::F64ConvertI64S,
+            (Type::F64, false) => Instruction::F64ConvertI64U,
+            _ => unreachable!(),
+        });
+    } else if matches!(source, Type::F32 | Type::F64) && target_i32 {
+        function.instruction(&match (source, target.is_signed()) {
+            (Type::F32, true) => Instruction::I32TruncSatF32S,
+            (Type::F32, false) => Instruction::I32TruncSatF32U,
+            (Type::F64, true) => Instruction::I32TruncSatF64S,
+            (Type::F64, false) => Instruction::I32TruncSatF64U,
+            _ => unreachable!(),
+        });
+        emit_narrow_i32(function, target);
+    } else if matches!(source, Type::F32 | Type::F64) && target_i64 {
+        function.instruction(&match (source, target.is_signed()) {
+            (Type::F32, true) => Instruction::I64TruncSatF32S,
+            (Type::F32, false) => Instruction::I64TruncSatF32U,
+            (Type::F64, true) => Instruction::I64TruncSatF64S,
+            (Type::F64, false) => Instruction::I64TruncSatF64U,
+            _ => unreachable!(),
+        });
+    } else if source == Type::F32 && target == Type::F64 {
+        function.instruction(&Instruction::F64PromoteF32);
+    } else if source == Type::F64 && target == Type::F32 {
+        function.instruction(&Instruction::F32DemoteF64);
+    } else if source != target {
+        unreachable!("type checking rejected unsupported cast `{source:?} as {target:?}`");
+    }
+}
+
+fn emit_narrow_i32(function: &mut Function, target: Type) {
+    match target {
+        Type::I8 => {
+            function.instruction(&Instruction::I32Extend8S);
+        }
+        Type::U8 => {
+            function
+                .instruction(&Instruction::I32Const(0xff))
+                .instruction(&Instruction::I32And);
+        }
+        Type::I16 => {
+            function.instruction(&Instruction::I32Extend16S);
+        }
+        Type::U16 => {
+            function
+                .instruction(&Instruction::I32Const(0xffff))
+                .instruction(&Instruction::I32And);
+        }
+        Type::I32 | Type::U32 => {}
+        _ => unreachable!(),
+    }
+}
+
+fn emit_binary(
+    function: &mut Function,
+    op: BinaryOp,
+    left: ExprId,
+    right: ExprId,
+    context: &ExprContext<'_>,
+) {
+    let operand_type = expression_type(left, context.wasm_ir, context.semantics);
+    if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
+        && matches!(
+            operand_type,
+            Type::String | Type::Record(_) | Type::Enum(_) | Type::Option(_) | Type::Result(_)
+        )
+    {
+        compile_expr(function, left, context);
+        compile_expr(function, right, context);
+        emit_value_equality(
+            function,
+            operand_type,
+            context.equality_functions,
+            context
+                .stdlib
+                .optional_helper(GeneratedHelper::StringEquality)
+                .unwrap_or(0),
+        );
+        if op == BinaryOp::Ne {
+            function.instruction(&Instruction::I32Eqz);
+        }
+        return;
+    }
+    if matches!(op, BinaryOp::Or | BinaryOp::And) {
+        compile_expr(function, left, context);
+        function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+        let nested_context = context.nested_loop_control(1);
+        if op == BinaryOp::Or {
+            function
+                .instruction(&Instruction::I32Const(1))
+                .instruction(&Instruction::Else);
+            compile_expr(function, right, &nested_context);
+        } else {
+            compile_expr(function, right, &nested_context);
+            function
+                .instruction(&Instruction::Else)
+                .instruction(&Instruction::I32Const(0));
+        }
+        function.instruction(&Instruction::End);
+        return;
+    }
+
+    compile_expr(function, left, context);
+    compile_expr(function, right, context);
+    emit_binary_instruction(function, op, operand_type);
+}
+
+fn emit_binary_instruction(function: &mut Function, op: BinaryOp, ty: Type) {
+    let signed = ty.is_signed();
+    let i64 = matches!(ty, Type::I64 | Type::U64 | Type::Address);
+    let instruction = match op {
+        BinaryOp::Eq => match ty {
+            Type::F32 => Instruction::F32Eq,
+            Type::F64 => Instruction::F64Eq,
+            _ if i64 => Instruction::I64Eq,
+            _ => Instruction::I32Eq,
+        },
+        BinaryOp::Ne => match ty {
+            Type::F32 => Instruction::F32Ne,
+            Type::F64 => Instruction::F64Ne,
+            _ if i64 => Instruction::I64Ne,
+            _ => Instruction::I32Ne,
+        },
+        BinaryOp::Lt => compare(ty, signed, Compare::Lt),
+        BinaryOp::Le => compare(ty, signed, Compare::Le),
+        BinaryOp::Gt => compare(ty, signed, Compare::Gt),
+        BinaryOp::Ge => compare(ty, signed, Compare::Ge),
+        BinaryOp::Add => match ty {
+            Type::F32 => Instruction::F32Add,
+            Type::F64 => Instruction::F64Add,
+            _ if i64 => Instruction::I64Add,
+            _ => Instruction::I32Add,
+        },
+        BinaryOp::Sub => match ty {
+            Type::F32 => Instruction::F32Sub,
+            Type::F64 => Instruction::F64Sub,
+            _ if i64 => Instruction::I64Sub,
+            _ => Instruction::I32Sub,
+        },
+        BinaryOp::Mul => match ty {
+            Type::F32 => Instruction::F32Mul,
+            Type::F64 => Instruction::F64Mul,
+            _ if i64 => Instruction::I64Mul,
+            _ => Instruction::I32Mul,
+        },
+        BinaryOp::Div => match ty {
+            Type::F32 => Instruction::F32Div,
+            Type::F64 => Instruction::F64Div,
+            _ if i64 && signed => Instruction::I64DivS,
+            _ if i64 => Instruction::I64DivU,
+            _ if signed => Instruction::I32DivS,
+            _ => Instruction::I32DivU,
+        },
+        BinaryOp::Rem => match ty {
+            Type::F32 | Type::F64 => unreachable!("float remainder is not a wasm instruction"),
+            _ if i64 && signed => Instruction::I64RemS,
+            _ if i64 => Instruction::I64RemU,
+            _ if signed => Instruction::I32RemS,
+            _ => Instruction::I32RemU,
+        },
+        BinaryOp::BitOr => {
+            if i64 {
+                Instruction::I64Or
+            } else {
+                Instruction::I32Or
+            }
+        }
+        BinaryOp::BitXor => {
+            if i64 {
+                Instruction::I64Xor
+            } else {
+                Instruction::I32Xor
+            }
+        }
+        BinaryOp::BitAnd => {
+            if i64 {
+                Instruction::I64And
+            } else {
+                Instruction::I32And
+            }
+        }
+        BinaryOp::Shl => {
+            if i64 {
+                Instruction::I64Shl
+            } else {
+                Instruction::I32Shl
+            }
+        }
+        BinaryOp::Shr => match (i64, signed) {
+            (true, true) => Instruction::I64ShrS,
+            (true, false) => Instruction::I64ShrU,
+            (false, true) => Instruction::I32ShrS,
+            (false, false) => Instruction::I32ShrU,
+        },
+        BinaryOp::Or | BinaryOp::And => unreachable!(),
+    };
+    function.instruction(&instruction);
+}
+
+enum Compare {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+fn compare(ty: Type, signed: bool, op: Compare) -> Instruction<'static> {
+    match (ty, signed, op) {
+        (Type::F32, _, Compare::Lt) => Instruction::F32Lt,
+        (Type::F32, _, Compare::Le) => Instruction::F32Le,
+        (Type::F32, _, Compare::Gt) => Instruction::F32Gt,
+        (Type::F32, _, Compare::Ge) => Instruction::F32Ge,
+        (Type::F64, _, Compare::Lt) => Instruction::F64Lt,
+        (Type::F64, _, Compare::Le) => Instruction::F64Le,
+        (Type::F64, _, Compare::Gt) => Instruction::F64Gt,
+        (Type::F64, _, Compare::Ge) => Instruction::F64Ge,
+        (Type::I64 | Type::U64 | Type::Address, true, Compare::Lt) => Instruction::I64LtS,
+        (Type::I64 | Type::U64 | Type::Address, true, Compare::Le) => Instruction::I64LeS,
+        (Type::I64 | Type::U64 | Type::Address, true, Compare::Gt) => Instruction::I64GtS,
+        (Type::I64 | Type::U64 | Type::Address, true, Compare::Ge) => Instruction::I64GeS,
+        (Type::I64 | Type::U64 | Type::Address, false, Compare::Lt) => Instruction::I64LtU,
+        (Type::I64 | Type::U64 | Type::Address, false, Compare::Le) => Instruction::I64LeU,
+        (Type::I64 | Type::U64 | Type::Address, false, Compare::Gt) => Instruction::I64GtU,
+        (Type::I64 | Type::U64 | Type::Address, false, Compare::Ge) => Instruction::I64GeU,
+        (_, true, Compare::Lt) => Instruction::I32LtS,
+        (_, true, Compare::Le) => Instruction::I32LeS,
+        (_, true, Compare::Gt) => Instruction::I32GtS,
+        (_, true, Compare::Ge) => Instruction::I32GeS,
+        (_, false, Compare::Lt) => Instruction::I32LtU,
+        (_, false, Compare::Le) => Instruction::I32LeU,
+        (_, false, Compare::Gt) => Instruction::I32GtU,
+        (_, false, Compare::Ge) => Instruction::I32GeU,
+    }
+}

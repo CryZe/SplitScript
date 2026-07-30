@@ -1,0 +1,1417 @@
+//! Canonical catalog for language syntax and domain-specific constructs.
+//!
+//! These items are deliberately separate from [`crate::stdlib`]: `retry`,
+//! lifecycle actions, and the settings DSL are syntax, not fake functions.
+//! Documentation generators and editor tooling can still consume the same
+//! metadata model through [`crate::catalog`].
+
+use std::collections::HashSet;
+
+use crate::{
+    ast::ActionKind,
+    catalog::{Documentation, Example},
+    semantic::BuiltinFieldId,
+    types::BuiltinType,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum TimerStateVariant {
+    NotRunning,
+    Running,
+    Paused,
+    Ended,
+    Unknown,
+}
+
+impl TimerStateVariant {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::NotRunning => "NotRunning",
+            Self::Running => "Running",
+            Self::Paused => "Paused",
+            Self::Ended => "Ended",
+            Self::Unknown => "Unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LanguageItemId {
+    Let,
+    Function,
+    Record,
+    Enum,
+    State,
+    Settings,
+    If,
+    Else,
+    While,
+    Break,
+    Continue,
+    Debug,
+    Match,
+    Return,
+    Throw,
+    Await,
+    Retry,
+    Propagate,
+    AsCast,
+    NoneConstructor,
+    SomeConstructor,
+    SuccessConstructor,
+    ErrorConstructor,
+    SelfValue,
+    SignatureLiteral,
+    TemplateString,
+    ArrayType,
+    OptionType,
+    ResultType,
+    BuiltinType(BuiltinType),
+    CurrentSnapshot,
+    OldSnapshot,
+    OldSettingsSnapshot,
+    BuiltinField(BuiltinFieldId),
+    TimerStateType,
+    TimerStateVariant(TimerStateVariant),
+    SettingDocumentation,
+    ChoiceSetting,
+    FileSetting,
+    OnDetached,
+    OnAttach,
+    WhileAttached,
+    Start,
+    Split,
+    Reset,
+    IsLoading,
+    GameTime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LanguageItemKind {
+    Keyword,
+    Declaration,
+    Syntax,
+    BuiltinType(BuiltinType),
+    SnapshotRoot,
+    BuiltinField(BuiltinFieldId),
+    CompilerType,
+    EnumVariant,
+    Action(ActionKind),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LanguageItem {
+    pub id: LanguageItemId,
+    pub name: &'static str,
+    pub kind: LanguageItemKind,
+    /// Compact source shape suitable for completion details and reference docs.
+    pub form: &'static str,
+    pub documentation: Documentation<LanguageItemId>,
+}
+
+const DECLARATIONS_SOURCE: &str = r#"state "game.exe" {}
+
+record Position {
+    x: f32
+    y: f32
+}
+
+enum Mode {
+    Menu
+    Playing
+}
+
+fn modeName(mode: Mode) {
+    return match mode {
+        Mode.Menu => "Menu",
+        Mode.Playing => "Playing"
+    }
+}
+
+fn Position.isOrigin() {
+    return self.x == 0.0 && self.y == 0.0
+}
+
+whileAttached {
+    let origin = Position { x: 0.0, y: 0.0 }
+    if origin.isOrigin() {
+        print(modeName(Mode.Playing))
+    }
+}"#;
+
+const STATE_SOURCE: &str = r#"state "game.exe" {
+    score = process.read.i32(0x1000)
+}
+
+split {
+    return current.score > old.score
+}"#;
+
+const SETTINGS_SOURCE: &str = include_str!("../examples/lso_desktop_settings.split");
+
+const CONTROL_FLOW_SOURCE: &str = r#"state "game.exe" {}
+
+enum Mode {
+    Menu
+    Playing
+}
+
+fn modeName(mode: Mode) {
+    return match mode {
+        Mode.Menu => "Menu",
+        Mode.Playing => "Playing"
+    }
+}
+
+whileAttached {
+    let mode = if timer.state() == TimerState.Running {
+        Mode.Playing
+    } else {
+        Mode.Menu
+    }
+    if mode == Mode.Playing {
+        print(modeName(mode))
+    }
+    debug print("development trace")
+
+    let repetitions = 0
+    while repetitions < 2 {
+        repetitions += 1
+        if repetitions == 1 {
+            continue
+        }
+        break
+    }
+}"#;
+
+const FAILURE_SOURCE: &str = r#"state "game.exe" {}
+
+fn readOrZero() {
+    return process.read.i32(0x1000) else 0
+}
+
+fn forwarded() -> i32! {
+    return process.read.i32(0x1000)?
+}
+
+fn unavailable() -> i32! {
+    throw "not available"
+}
+
+fn explicitError() -> i32! {
+    return Err("not available")
+}
+
+whileAttached {
+    print(readOrZero() as String)
+}"#;
+
+const ASYNC_SOURCE: &str = r#"state "game.exe" {}
+
+fn readMarker() {
+    return process.read.i32(0x3000)
+}
+
+onAttach {
+    let module = await process.module("GameAssembly.dll")
+    let marker = retry readMarker()
+    print(`ready {module.address}:{marker}`)
+}"#;
+
+const TYPES_AND_LITERALS_SOURCE: &str = r#"state "game.exe" {}
+
+fn maybe(value) -> i32? {
+    if value > 0 {
+        return value
+    }
+    return None
+}
+
+fn result() -> i32! {
+    return 42
+}
+
+onAttach {
+    let module = await process.module("GameAssembly.dll")
+    let marker = await module.scan(sig"48 8B ?? B?")
+    let optionalMarker = Some(marker)
+    let successfulValue = Ok(result() else 0)
+    let text = (successfulValue else 0) as String
+    print(`marker {optionalMarker else 0 as address}, value {text}`)
+}"#;
+
+const LIFECYCLE_SOURCE: &str = r#"state "game.exe" {}
+
+onDetached {}
+onAttach {}
+whileAttached {}
+start {}
+split {}
+reset {}
+isLoading {}
+gameTime {}
+"#;
+
+macro_rules! focused_example {
+    ($name:ident, $title:literal, $source:literal, $validation:expr) => {
+        const $name: &[Example] = &[Example::checked($title, $source, $validation)];
+    };
+}
+
+focused_example!(
+    LET_EXAMPLE,
+    "Infer a local type",
+    "let retryDelay = 30",
+    DECLARATIONS_SOURCE
+);
+focused_example!(
+    FUNCTION_EXAMPLE,
+    "Declare a helper",
+    "fn isBoss(level) {\n    return level == 7\n}",
+    DECLARATIONS_SOURCE
+);
+focused_example!(
+    RECORD_EXAMPLE,
+    "Group related values",
+    "record Position {\n    x: f32\n    y: f32\n}",
+    DECLARATIONS_SOURCE
+);
+focused_example!(
+    ENUM_EXAMPLE,
+    "Describe distinct states",
+    "enum Mode {\n    Menu\n    Playing\n}",
+    DECLARATIONS_SOURCE
+);
+focused_example!(
+    STATE_DECL_EXAMPLE,
+    "Read transactional state",
+    "state \"game.exe\" {\n    score = process.read.i32(0x1000)\n}",
+    STATE_SOURCE
+);
+focused_example!(
+    SETTINGS_DECL_EXAMPLE,
+    "Declare a toggle",
+    "settings {\n    \"Split bosses\" => splitBosses: true\n}",
+    SETTINGS_SOURCE
+);
+focused_example!(
+    IF_EXAMPLE,
+    "Choose a value",
+    "let label = if isBoss { \"Boss\" } else { \"Level\" }",
+    CONTROL_FLOW_SOURCE
+);
+focused_example!(
+    ELSE_EXAMPLE,
+    "Provide a read fallback",
+    "let health = process.read.i32(healthAddress) else 0",
+    FAILURE_SOURCE
+);
+focused_example!(
+    WHILE_EXAMPLE,
+    "Repeat while attached",
+    "while index < values.length() {\n    index += 1\n}",
+    CONTROL_FLOW_SOURCE
+);
+focused_example!(
+    BREAK_EXAMPLE,
+    "Exit a loop",
+    "while true {\n    if found { break }\n}",
+    CONTROL_FLOW_SOURCE
+);
+focused_example!(
+    CONTINUE_EXAMPLE,
+    "Skip an iteration",
+    "while index < count {\n    index += 1\n    if index == ignored { continue }\n    inspect(index)\n}",
+    CONTROL_FLOW_SOURCE
+);
+focused_example!(
+    DEBUG_EXAMPLE,
+    "Add development-only logging",
+    "debug print(`level: {current.level}`)",
+    CONTROL_FLOW_SOURCE
+);
+focused_example!(
+    MATCH_EXAMPLE,
+    "Handle every enum variant",
+    "let label = match mode {\n    Mode.Menu => \"Menu\",\n    Mode.Playing => \"Playing\"\n}",
+    CONTROL_FLOW_SOURCE
+);
+focused_example!(
+    RETURN_EXAMPLE,
+    "Return a value",
+    "fn double(value) {\n    return value * 2\n}",
+    FAILURE_SOURCE
+);
+focused_example!(
+    THROW_EXAMPLE,
+    "Return an error",
+    "fn requireAddress(value) -> address! {\n    if value == 0 { throw \"address is null\" }\n    return value\n}",
+    FAILURE_SOURCE
+);
+focused_example!(
+    AWAIT_EXAMPLE,
+    "Wait during attachment",
+    "let module = await process.module(\"GameAssembly.dll\")",
+    ASYNC_SOURCE
+);
+focused_example!(
+    RETRY_EXAMPLE,
+    "Poll until a read succeeds",
+    "let player = retry process.follow(module.address, [0x100, 0x20])",
+    ASYNC_SOURCE
+);
+focused_example!(
+    PROPAGATE_EXAMPLE,
+    "Forward a read error",
+    "let health = process.read.i32(healthAddress)?",
+    FAILURE_SOURCE
+);
+focused_example!(
+    CAST_EXAMPLE,
+    "Convert an integer",
+    "let label = level as String",
+    TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    NONE_EXAMPLE,
+    "Return no value",
+    "fn selectedLevel() -> i32? {\n    return None\n}",
+    TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    SOME_EXAMPLE,
+    "Construct an optional value",
+    "let selected: i32? = Some(7)",
+    TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    OK_EXAMPLE,
+    "Construct a successful result",
+    "let health: i32! = Ok(100)",
+    TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    ERR_EXAMPLE,
+    "Construct an error",
+    "let health: i32! = Err(\"health is unavailable\")",
+    FAILURE_SOURCE
+);
+focused_example!(
+    SELF_EXAMPLE,
+    "Use the method receiver",
+    "fn Position.isOrigin() {\n    return self.x == 0.0 && self.y == 0.0\n}",
+    DECLARATIONS_SOURCE
+);
+focused_example!(
+    SIGNATURE_EXAMPLE,
+    "Match machine code",
+    "let marker = await module.scan(sig\"48 8B ?? B?\")",
+    TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    TEMPLATE_EXAMPLE,
+    "Interpolate a value",
+    "let label = `Level {current.level}`",
+    TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    ARRAY_TYPE_EXAMPLE,
+    "Annotate an array",
+    "let offsets: Array<u64> = [0x100, 0x20]",
+    TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    OPTION_TYPE_EXAMPLE,
+    "Annotate an optional value",
+    "let selectedLevel: i32? = None",
+    TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    RESULT_TYPE_EXAMPLE,
+    "Return a fallible value",
+    "fn readHealth() -> i32! {\n    return process.read.i32(healthAddress)?\n}",
+    TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    SETTING_DOC_EXAMPLE,
+    "Add a tooltip",
+    "/// Splits when the boss is defeated.\n\"Split boss\" => splitBoss: true",
+    SETTINGS_SOURCE
+);
+focused_example!(
+    CHOICE_EXAMPLE,
+    "Choose an enum value",
+    "\"Character\" => character: choice {\n    \"Hana\" => Character.Hana default\n    \"Toree\" => Character.Toree\n}",
+    SETTINGS_SOURCE
+);
+focused_example!(
+    FILE_EXAMPLE,
+    "Choose a file",
+    "\"Layout\" => layout: file {\n    \"Layout files\" => \"*.lsl\"\n}",
+    SETTINGS_SOURCE
+);
+
+macro_rules! language_item {
+    ($id:ident, $name:expr, $kind:expr, $form:expr, $summary:expr, $details:expr, $examples:expr) => {
+        LanguageItem {
+            id: LanguageItemId::$id,
+            name: $name,
+            kind: $kind,
+            form: $form,
+            documentation: Documentation {
+                summary: $summary,
+                details: $details,
+                examples: $examples,
+                related: &[],
+            },
+        }
+    };
+}
+
+macro_rules! action_item {
+    ($id:ident, $action:ident, $name:literal, $summary:literal, $details:literal,
+     $example:literal) => {
+        language_item!(
+            $id,
+            $name,
+            LanguageItemKind::Action(ActionKind::$action),
+            concat!($name, " { ... }"),
+            $summary,
+            $details,
+            &[Example::checked(
+                concat!("Use ", $name),
+                $example,
+                LIFECYCLE_SOURCE,
+            )]
+        )
+    };
+}
+
+macro_rules! builtin_type_item {
+    ($ty:ident, $name:literal, $summary:literal, $details:literal, $example:literal) => {
+        LanguageItem {
+            id: LanguageItemId::BuiltinType(BuiltinType::$ty),
+            name: $name,
+            kind: LanguageItemKind::BuiltinType(BuiltinType::$ty),
+            form: $name,
+            documentation: Documentation {
+                summary: $summary,
+                details: $details,
+                examples: &[Example::checked(
+                    concat!("Use ", $name),
+                    $example,
+                    TYPES_AND_LITERALS_SOURCE,
+                )],
+                related: &[],
+            },
+        }
+    };
+}
+
+macro_rules! compiler_symbol_item {
+    ($id:expr, $name:literal, $kind:expr, $form:literal, $summary:literal, $details:literal,
+     $example:literal, $validation:expr) => {
+        LanguageItem {
+            id: $id,
+            name: $name,
+            kind: $kind,
+            form: $form,
+            documentation: Documentation {
+                summary: $summary,
+                details: $details,
+                examples: &[Example::checked(
+                    concat!("Use ", $name),
+                    $example,
+                    $validation,
+                )],
+                related: &[],
+            },
+        }
+    };
+}
+
+const ITEMS: &[LanguageItem] = &[
+    language_item!(
+        Let,
+        "let",
+        LanguageItemKind::Keyword,
+        "let name = expression",
+        "Declares an inferred variable.",
+        "Bindings are mutable and their types are inferred bidirectionally from their initializer and uses.",
+        LET_EXAMPLE
+    ),
+    language_item!(
+        Function,
+        "fn",
+        LanguageItemKind::Declaration,
+        "fn name(parameters) { ... }",
+        "Declares a function or method.",
+        "Parameter and result annotations are optional when constraints from the body and call sites determine them.",
+        FUNCTION_EXAMPLE
+    ),
+    language_item!(
+        Record,
+        "record",
+        LanguageItemKind::Declaration,
+        "record Name { field: Type }",
+        "Declares an immutable nominal record.",
+        "Records provide named fields, structural equality when their fields support it, and fixed process-memory layouts when every field is readable.",
+        RECORD_EXAMPLE
+    ),
+    language_item!(
+        Enum,
+        "enum",
+        LanguageItemKind::Declaration,
+        "enum Name { Variant Payload(Type) }",
+        "Declares a nominal sum type.",
+        "Enums support optional variant payloads, exhaustive match expressions, and structural equality when their payloads support it.",
+        ENUM_EXAMPLE
+    ),
+    language_item!(
+        State,
+        "state",
+        LanguageItemKind::Declaration,
+        "state process { field = expression }",
+        "Declares process attachment and transactional watched state.",
+        "Every state expression produces a Result. A tick commits a complete new snapshot only when all fields succeed.",
+        STATE_DECL_EXAMPLE
+    ),
+    language_item!(
+        Settings,
+        "settings",
+        LanguageItemKind::Declaration,
+        "settings { \"Group\" { \"Label\" => name: value } }",
+        "Declares live user settings.",
+        "Settings support nested headings, documentation-comment tooltips, booleans, choices, and file selectors. Current and previous values refresh every update.",
+        SETTINGS_DECL_EXAMPLE
+    ),
+    language_item!(
+        If,
+        "if",
+        LanguageItemKind::Keyword,
+        "if condition { ... } else { ... }",
+        "Branches as a statement or expression.",
+        "Expression-valued if requires an else branch and infers both branch values against one result type.",
+        IF_EXAMPLE
+    ),
+    language_item!(
+        Else,
+        "else",
+        LanguageItemKind::Keyword,
+        "value else fallback",
+        "Provides a branch or unwrap fallback.",
+        "After if, else selects the alternate branch. After a T? or T! expression, it unwraps success and evaluates a value fallback or transfers control with return, break, or continue on absence or error.",
+        ELSE_EXAMPLE
+    ),
+    language_item!(
+        While,
+        "while",
+        LanguageItemKind::Keyword,
+        "while condition { ... }",
+        "Repeats a block while its condition is true.",
+        "The condition must be Bool and is evaluated before every iteration. The loop body has its own lexical scope. In onAttach, await and retry resume through explicit loop-header and exit states without replaying completed iterations.",
+        WHILE_EXAMPLE
+    ),
+    language_item!(
+        Break,
+        "break",
+        LanguageItemKind::Keyword,
+        "break",
+        "Exits the nearest enclosing loop.",
+        "Break may be written as a statement or as the diverging branch in `value else break`. It may only appear inside a loop and always targets the innermost loop.",
+        BREAK_EXAMPLE
+    ),
+    language_item!(
+        Continue,
+        "continue",
+        LanguageItemKind::Keyword,
+        "continue",
+        "Starts the next iteration of the nearest enclosing loop.",
+        "Continue may be written as a statement or as the diverging branch in `value else continue`. It may only appear inside a loop; the condition is evaluated again before the next iteration.",
+        CONTINUE_EXAMPLE
+    ),
+    language_item!(
+        Debug,
+        "debug",
+        LanguageItemKind::Keyword,
+        "debug statement",
+        "Keeps a development-only statement in debug builds.",
+        "Debug statements, bindings, globals, and `debug fn` declarations are fully parsed and type-checked in every profile, then erased from release lowering before dependency and reachability discovery. Debug-only names may only be used from debug code. Terminating statements remain rejected.",
+        DEBUG_EXAMPLE
+    ),
+    language_item!(
+        Match,
+        "match",
+        LanguageItemKind::Keyword,
+        "match value { pattern => expression }",
+        "Exhaustively matches a value.",
+        "Match supports enum payloads, Option None/Some(value) patterns, Result Err(error)/Ok(value) patterns, literals, guards, and a wildcard. Enum and wrapper matches must cover every state; guarded arms do not establish coverage.",
+        MATCH_EXAMPLE
+    ),
+    language_item!(
+        Return,
+        "return",
+        LanguageItemKind::Keyword,
+        "return expression",
+        "Returns from the current function or action.",
+        "Functions infer their result from returns and call-site constraints. Lifecycle actions apply their domain default when control falls through.",
+        RETURN_EXAMPLE
+    ),
+    language_item!(
+        Throw,
+        "throw",
+        LanguageItemKind::Keyword,
+        "throw error",
+        "Transfers an error to the nearest Result boundary.",
+        "Without a future catch boundary, throw returns an error from a T! function. The error expression must be a String.",
+        THROW_EXAMPLE
+    ),
+    language_item!(
+        Await,
+        "await",
+        LanguageItemKind::Keyword,
+        "let value = await operation",
+        "Waits for an intrinsically suspending operation.",
+        "Await is available in onAttach. Its continuation is cancelled and reset when the attached process closes.",
+        AWAIT_EXAMPLE
+    ),
+    language_item!(
+        Retry,
+        "retry",
+        LanguageItemKind::Keyword,
+        "let value = retry resultExpression",
+        "Retries a Result expression until it succeeds.",
+        "The T! expression is evaluated once per attached update. An error stays pending; success yields T. User functions require no async annotation.",
+        RETRY_EXAMPLE
+    ),
+    language_item!(
+        Propagate,
+        "?",
+        LanguageItemKind::Syntax,
+        "resultExpression?",
+        "Propagates a Result error.",
+        "Postfix question mark unwraps success or transfers the original error to the nearest T! function or state-field assignment boundary.",
+        PROPAGATE_EXAMPLE
+    ),
+    language_item!(
+        AsCast,
+        "as",
+        LanguageItemKind::Keyword,
+        "expression as Type",
+        "Explicitly converts a value.",
+        "Casts are checked statically. String interpolation uses the same conversion capabilities as an explicit as String cast.",
+        CAST_EXAMPLE
+    ),
+    language_item!(
+        NoneConstructor,
+        "None",
+        LanguageItemKind::Syntax,
+        "None",
+        "Constructs an absent optional value.",
+        "None needs T? context and is also the domain default for lifecycle actions where absence means that the timer value should remain unchanged.",
+        NONE_EXAMPLE
+    ),
+    language_item!(
+        SomeConstructor,
+        "Some",
+        LanguageItemKind::Syntax,
+        "Some(value)",
+        "Explicitly constructs a present optional value.",
+        "Some infers T from its value and constructs T?. Plain T values still lift automatically whenever T? is expected.",
+        SOME_EXAMPLE
+    ),
+    language_item!(
+        SuccessConstructor,
+        "Ok",
+        LanguageItemKind::Syntax,
+        "Ok(value)",
+        "Explicitly constructs a successful result value.",
+        "Ok infers T from its value and constructs T!. Plain T values still lift automatically whenever T! is expected.",
+        OK_EXAMPLE
+    ),
+    language_item!(
+        ErrorConstructor,
+        "Err",
+        LanguageItemKind::Syntax,
+        "Err(message)",
+        "Constructs a Result error.",
+        "Err takes a String and obtains its successful T type from surrounding T! context.",
+        ERR_EXAMPLE
+    ),
+    language_item!(
+        SelfValue,
+        "self",
+        LanguageItemKind::Syntax,
+        "self",
+        "Refers to the current method receiver.",
+        "A function declared as fn Type.name receives an implicit, precisely typed self value.",
+        SELF_EXAMPLE
+    ),
+    language_item!(
+        SignatureLiteral,
+        "sig",
+        LanguageItemKind::Syntax,
+        "sig\"48 8B ?? B?\"",
+        "Constructs a checked signature literal.",
+        "Signatures are parsed at compile time and support full-byte and nibble wildcards.",
+        SIGNATURE_EXAMPLE
+    ),
+    language_item!(
+        TemplateString,
+        "template string",
+        LanguageItemKind::Syntax,
+        "`text {expression}`",
+        "Interpolates values into a String.",
+        "Backtick strings use braces without JavaScript's dollar marker. Non-String values use the same conversion rules as an as String cast.",
+        TEMPLATE_EXAMPLE
+    ),
+    language_item!(
+        ArrayType,
+        "Array<T>",
+        LanguageItemKind::Syntax,
+        "Array<Element>",
+        "Names a garbage-collected array type.",
+        "Arrays have one statically inferred element type and provide catalog-backed length, indexed read, and indexed write methods.",
+        ARRAY_TYPE_EXAMPLE
+    ),
+    language_item!(
+        OptionType,
+        "T?",
+        LanguageItemKind::Syntax,
+        "Type?",
+        "Names an optional type.",
+        "A T? contains either Some(T) or None. Plain values lift to Some, and match uses Some(value) plus None.",
+        OPTION_TYPE_EXAMPLE
+    ),
+    builtin_type_item!(
+        Bool,
+        "bool",
+        "Stores a boolean value.",
+        "Boolean values are true or false and are required by conditions and lifecycle decision blocks.",
+        "let isBoss = current.level == 7"
+    ),
+    builtin_type_item!(
+        I8,
+        "i8",
+        "Stores an 8-bit signed integer.",
+        "Fixed-width integers make process-memory layouts and numeric bounds explicit.",
+        "let direction: i8 = -1"
+    ),
+    builtin_type_item!(
+        U8,
+        "u8",
+        "Stores an 8-bit unsigned integer.",
+        "Fixed-width integers make process-memory layouts and numeric bounds explicit.",
+        "let flags: u8 = 0xff"
+    ),
+    builtin_type_item!(
+        I16,
+        "i16",
+        "Stores a 16-bit signed integer.",
+        "Fixed-width integers make process-memory layouts and numeric bounds explicit.",
+        "let temperature: i16 = -20"
+    ),
+    builtin_type_item!(
+        U16,
+        "u16",
+        "Stores a 16-bit unsigned integer.",
+        "Fixed-width integers make process-memory layouts and numeric bounds explicit.",
+        "let room: u16 = 12"
+    ),
+    builtin_type_item!(
+        I32,
+        "i32",
+        "Stores a 32-bit signed integer.",
+        "Unconstrained integer literals default to i32; process reads and surrounding uses can infer a different width.",
+        "let health: i32 = process.read(healthAddress) else 0"
+    ),
+    builtin_type_item!(
+        U32,
+        "u32",
+        "Stores a 32-bit unsigned integer.",
+        "Fixed-width integers make process-memory layouts and numeric bounds explicit.",
+        "let character: u32 = process.read(characterAddress) else 0"
+    ),
+    builtin_type_item!(
+        I64,
+        "i64",
+        "Stores a 64-bit signed integer.",
+        "Fixed-width integers make process-memory layouts and numeric bounds explicit.",
+        "let frameCount: i64 = 7200"
+    ),
+    builtin_type_item!(
+        U64,
+        "u64",
+        "Stores a 64-bit unsigned integer.",
+        "Fixed-width integers make process-memory layouts and numeric bounds explicit.",
+        "let sectionOffset: u64 = 0x1_0000"
+    ),
+    builtin_type_item!(
+        Address,
+        "address",
+        "Stores a process address.",
+        "Addresses use the target process pointer width and support checked address-oriented APIs without becoming ordinary untyped integers.",
+        "let player: address = retry process.follow(base, offsets)"
+    ),
+    builtin_type_item!(
+        F32,
+        "f32",
+        "Stores a 32-bit floating-point number.",
+        "Floating-point values are useful for game coordinates, timers, and duration conversion.",
+        "let elapsedSeconds: f32 = 12.5"
+    ),
+    builtin_type_item!(
+        F64,
+        "f64",
+        "Stores a 64-bit floating-point number.",
+        "Floating-point values are useful for game coordinates, timers, and duration conversion.",
+        "let tickRate: f64 = 60.0"
+    ),
+    builtin_type_item!(
+        String,
+        "String",
+        "Stores garbage-collected UTF-8 text.",
+        "Strings support content equality, interpolation, length, printing, and host-boundary text values.",
+        "let levelName: String = \"Shrine01\""
+    ),
+    builtin_type_item!(
+        Duration,
+        "Duration",
+        "Stores a timer duration.",
+        "Duration values are returned by gameTime and can be constructed through frame, component, or seconds-based standard-library functions.",
+        "let elapsed: Duration = Duration.fromSeconds(12.5)"
+    ),
+    builtin_type_item!(
+        Module,
+        "Module",
+        "Describes a loaded process module.",
+        "Module values expose their address and size and provide signature scanning operations while attached.",
+        "let gameAssembly: Module = await process.module(\"GameAssembly.dll\")"
+    ),
+    builtin_type_item!(
+        UnityModule,
+        "UnityModule",
+        "Describes attached Unity IL2CPP metadata.",
+        "UnityModule is produced by the Unity attachment API and provides image lookup plus runtime metadata fields.",
+        "let unity: UnityModule = await Unity.il2cpp(2020)"
+    ),
+    builtin_type_item!(
+        UnityImage,
+        "UnityImage",
+        "Describes a Unity assembly image.",
+        "UnityImage provides class lookup and its resolved runtime address.",
+        "let image: UnityImage = await unity.image(\"Assembly-CSharp\")"
+    ),
+    builtin_type_item!(
+        UnityClass,
+        "UnityClass",
+        "Describes a Unity runtime class.",
+        "UnityClass provides field lookup and static-data discovery operations.",
+        "let gameManager: UnityClass = await image.class(\"GameManager\")"
+    ),
+    builtin_type_item!(
+        UnityField,
+        "UnityField",
+        "Describes a Unity runtime field.",
+        "UnityField exposes the field offset and metadata index used for process-memory discovery.",
+        "let levelField: UnityField = await gameManager.fieldAny([\"level\", \"currentLevel\"])"
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::CurrentSnapshot,
+        "current",
+        LanguageItemKind::SnapshotRoot,
+        "current.stateField",
+        "Accesses the current committed state snapshot.",
+        "State fields refresh transactionally before whileAttached and timer-decision actions run.",
+        "let level = current.level",
+        STATE_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::OldSnapshot,
+        "old",
+        LanguageItemKind::SnapshotRoot,
+        "old.stateField",
+        "Accesses the previous committed state snapshot.",
+        "Old state retains the preceding successful snapshot, making change detection independent of failed process reads.",
+        "return current.level != old.level",
+        STATE_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::OldSettingsSnapshot,
+        "oldSettings",
+        LanguageItemKind::SnapshotRoot,
+        "oldSettings.settingName",
+        "Accesses the previous settings snapshot.",
+        "Settings are refreshed on every update; oldSettings retains the preceding values for change detection.",
+        "let changed = settings.enabled != oldSettings.enabled",
+        SETTINGS_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::BuiltinField(BuiltinFieldId::ModuleAddress),
+        "Module.address",
+        LanguageItemKind::BuiltinField(BuiltinFieldId::ModuleAddress),
+        "module.address",
+        "Returns a module's base process address.",
+        "The address uses the attached process pointer width and remains valid for that attachment.",
+        "let base = gameAssembly.address",
+        ASYNC_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::BuiltinField(BuiltinFieldId::ModuleSize),
+        "Module.size",
+        LanguageItemKind::BuiltinField(BuiltinFieldId::ModuleSize),
+        "module.size",
+        "Returns a module's mapped size in bytes.",
+        "The size can be used to bound scans and address calculations within the loaded module.",
+        "let end = gameAssembly.address.add(gameAssembly.size)",
+        ASYNC_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::BuiltinField(BuiltinFieldId::UnityModuleAssemblies),
+        "UnityModule.assemblies",
+        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityModuleAssemblies),
+        "unityModule.assemblies",
+        "Returns the IL2CPP assemblies metadata address.",
+        "This compiler-provided field exposes the resolved Unity metadata used by higher-level lookup operations.",
+        "let assemblies = unity.assemblies",
+        ASYNC_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::BuiltinField(BuiltinFieldId::UnityModuleTypeInfoTable),
+        "UnityModule.typeInfoTable",
+        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityModuleTypeInfoTable),
+        "unityModule.typeInfoTable",
+        "Returns the IL2CPP type-information table address.",
+        "The field is resolved while attaching to the Unity runtime and uses the attached process pointer width.",
+        "let typeInfo = unity.typeInfoTable",
+        ASYNC_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::BuiltinField(BuiltinFieldId::UnityModuleVersion),
+        "UnityModule.version",
+        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityModuleVersion),
+        "unityModule.version",
+        "Returns the detected Unity metadata version.",
+        "Unity lookup helpers use this version to interpret runtime metadata layouts consistently.",
+        "let metadataVersion = unity.version",
+        ASYNC_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::BuiltinField(BuiltinFieldId::UnityModulePointerSize),
+        "UnityModule.pointerSize",
+        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityModulePointerSize),
+        "unityModule.pointerSize",
+        "Returns the attached Unity process pointer size.",
+        "The value is expressed in bytes and describes addresses in the attached process.",
+        "let pointerSize = unity.pointerSize",
+        ASYNC_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::BuiltinField(BuiltinFieldId::UnityImageAddress),
+        "UnityImage.address",
+        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityImageAddress),
+        "image.address",
+        "Returns a Unity image's runtime address.",
+        "The image is resolved from IL2CPP metadata for the current process attachment.",
+        "let imageAddress = image.address",
+        ASYNC_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::BuiltinField(BuiltinFieldId::UnityClassAddress),
+        "UnityClass.address",
+        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityClassAddress),
+        "class.address",
+        "Returns a Unity class's runtime address.",
+        "The class is resolved from an assembly image and remains scoped to the current process attachment.",
+        "let classAddress = gameManager.address",
+        ASYNC_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::BuiltinField(BuiltinFieldId::UnityFieldOffset),
+        "UnityField.offset",
+        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityFieldOffset),
+        "field.offset",
+        "Returns a Unity instance field's byte offset.",
+        "Add this offset to an object address when constructing a typed process-memory path.",
+        "let levelAddress = instance.offset(levelField.offset)",
+        ASYNC_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::BuiltinField(BuiltinFieldId::UnityFieldIndex),
+        "UnityField.index",
+        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityFieldIndex),
+        "field.index",
+        "Returns a Unity field's metadata index.",
+        "The index identifies the field in resolved IL2CPP metadata and supports static-field discovery.",
+        "let selectedName = names.get(field.index)",
+        ASYNC_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::TimerStateType,
+        "TimerState",
+        LanguageItemKind::CompilerType,
+        "TimerState",
+        "Describes the current LiveSplit timer state.",
+        "TimerState is a compiler-provided exhaustive enum returned by timer.state().",
+        "let state: TimerState = timer.state()",
+        CONTROL_FLOW_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::TimerStateVariant(TimerStateVariant::NotRunning),
+        "TimerState.NotRunning",
+        LanguageItemKind::EnumVariant,
+        "TimerState.NotRunning",
+        "Indicates that the timer has not started.",
+        "This state is commonly used to detect the transition that starts a run.",
+        "return timer.state() == TimerState.NotRunning",
+        CONTROL_FLOW_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::TimerStateVariant(TimerStateVariant::Running),
+        "TimerState.Running",
+        LanguageItemKind::EnumVariant,
+        "TimerState.Running",
+        "Indicates that the timer is actively running.",
+        "Game time and split decisions can use this state when behavior depends on an active run.",
+        "let running = timer.state() == TimerState.Running",
+        CONTROL_FLOW_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::TimerStateVariant(TimerStateVariant::Paused),
+        "TimerState.Paused",
+        LanguageItemKind::EnumVariant,
+        "TimerState.Paused",
+        "Indicates that the timer is paused.",
+        "Paused is distinct from both a running timer and a timer that has not started.",
+        "let paused = timer.state() == TimerState.Paused",
+        CONTROL_FLOW_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::TimerStateVariant(TimerStateVariant::Ended),
+        "TimerState.Ended",
+        LanguageItemKind::EnumVariant,
+        "TimerState.Ended",
+        "Indicates that the run has ended.",
+        "The timer remains in this state after the final split until its state changes.",
+        "let finished = timer.state() == TimerState.Ended",
+        CONTROL_FLOW_SOURCE
+    ),
+    compiler_symbol_item!(
+        LanguageItemId::TimerStateVariant(TimerStateVariant::Unknown),
+        "TimerState.Unknown",
+        LanguageItemKind::EnumVariant,
+        "TimerState.Unknown",
+        "Indicates an unrecognized host timer state.",
+        "Unknown preserves exhaustiveness if a host reports a state that this compiler version does not otherwise model.",
+        "let unsupported = timer.state() == TimerState.Unknown",
+        CONTROL_FLOW_SOURCE
+    ),
+    language_item!(
+        ResultType,
+        "T!",
+        LanguageItemKind::Syntax,
+        "Type!",
+        "Names a fallible result type.",
+        "A T! contains either Ok(T) or a String error. Plain values lift to Ok, and match uses Ok(value) plus Err(error).",
+        RESULT_TYPE_EXAMPLE
+    ),
+    language_item!(
+        SettingDocumentation,
+        "///",
+        LanguageItemKind::Syntax,
+        "/// tooltip text",
+        "Documents a setting or heading.",
+        "Consecutive documentation-comment lines become one tooltip and may include blank documentation lines between paragraphs.",
+        SETTING_DOC_EXAMPLE
+    ),
+    language_item!(
+        ChoiceSetting,
+        "choice setting",
+        LanguageItemKind::Syntax,
+        "\"Label\" => name: choice { \"Option\" => Enum.Variant default }",
+        "Declares an enum-backed setting choice.",
+        "Exactly one option may carry default; every option maps to a variant of one inferred enum type.",
+        CHOICE_EXAMPLE
+    ),
+    language_item!(
+        FileSetting,
+        "file setting",
+        LanguageItemKind::Syntax,
+        "\"Label\" => name: file { \"Files\" => \"*.ext\" mime => \"type/*\" }",
+        "Declares a file-selection setting.",
+        "File settings support named glob filters, a wildcard fallback, and one or more MIME filters.",
+        FILE_EXAMPLE
+    ),
+    action_item!(
+        OnDetached,
+        OnDetached,
+        "onDetached",
+        "Runs once while no process is attached.",
+        "Process-dependent operations are rejected directly and through user-function call graphs.",
+        "onDetached {\n    setTickRate(1.0)\n}"
+    ),
+    action_item!(
+        OnAttach,
+        OnAttach,
+        "onAttach",
+        "Initializes one attached process.",
+        "This action is implicitly suspending and owns process-lifetime cancellation for await and retry continuations.",
+        "onAttach {\n    let module = await process.module(\"GameAssembly.dll\")\n}"
+    ),
+    action_item!(
+        WhileAttached,
+        WhileAttached,
+        "whileAttached",
+        "Runs on every initialized attached update.",
+        "State and settings snapshots have already refreshed transactionally when this action runs.",
+        "whileAttached {\n    setVariable(\"Level\", current.level as String)\n}"
+    ),
+    action_item!(
+        Start,
+        Start,
+        "start",
+        "Decides whether to start the timer.",
+        "Falling through returns false.",
+        "start {\n    return current.inGame && !old.inGame\n}"
+    ),
+    action_item!(
+        Split,
+        Split,
+        "split",
+        "Decides whether to advance the current split.",
+        "Falling through returns false.",
+        "split {\n    return current.level != old.level\n}"
+    ),
+    action_item!(
+        Reset,
+        Reset,
+        "reset",
+        "Decides whether to reset the timer.",
+        "Falling through returns false.",
+        "reset {\n    return current.newGame && !old.newGame\n}"
+    ),
+    action_item!(
+        IsLoading,
+        IsLoading,
+        "isLoading",
+        "Reports loading state when known.",
+        "Falling through returns None so the runtime leaves the current loading state unchanged.",
+        "isLoading {\n    return current.scene == \"Loading\"\n}"
+    ),
+    action_item!(
+        GameTime,
+        GameTime,
+        "gameTime",
+        "Reports the current game time when known.",
+        "Falling through returns None so the runtime leaves the current game time unchanged.",
+        "gameTime {\n    return Duration.fromSeconds(current.gameTime)\n}"
+    ),
+];
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LanguageCatalog;
+
+impl LanguageCatalog {
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub fn items(self) -> impl ExactSizeIterator<Item = &'static LanguageItem> {
+        ITEMS.iter()
+    }
+
+    pub fn item(self, id: LanguageItemId) -> &'static LanguageItem {
+        ITEMS
+            .iter()
+            .find(|item| item.id == id)
+            .expect("every language item ID must have a catalog entry")
+    }
+
+    pub fn item_by_name(self, name: &str) -> Option<&'static LanguageItem> {
+        ITEMS.iter().find(|item| item.name == name)
+    }
+
+    /// Resolves an exact source token or a short syntax spelling to its
+    /// canonical documentation item.
+    pub fn item_for_source_token(self, token: &str) -> Option<&'static LanguageItem> {
+        self.item_by_name(token).or_else(|| {
+            let id = match token {
+                "Address" => LanguageItemId::BuiltinType(BuiltinType::Address),
+                "string" => LanguageItemId::BuiltinType(BuiltinType::String),
+                "Array" => LanguageItemId::ArrayType,
+                "?" => LanguageItemId::OptionType,
+                "!" => LanguageItemId::ResultType,
+                "choice" | "default" => LanguageItemId::ChoiceSetting,
+                "file" | "mime" => LanguageItemId::FileSetting,
+                "///" => LanguageItemId::SettingDocumentation,
+                "`" => LanguageItemId::TemplateString,
+                _ => return None,
+            };
+            Some(self.item(id))
+        })
+    }
+
+    pub fn builtin_type(self, ty: BuiltinType) -> Option<&'static LanguageItem> {
+        ITEMS
+            .iter()
+            .find(|item| item.id == LanguageItemId::BuiltinType(ty))
+    }
+
+    pub fn builtin_field(self, field: BuiltinFieldId) -> &'static LanguageItem {
+        self.item(LanguageItemId::BuiltinField(field))
+    }
+
+    pub fn timer_state_variant(self, name: &str) -> Option<&'static LanguageItem> {
+        [
+            TimerStateVariant::NotRunning,
+            TimerStateVariant::Running,
+            TimerStateVariant::Paused,
+            TimerStateVariant::Ended,
+            TimerStateVariant::Unknown,
+        ]
+        .into_iter()
+        .find(|variant| variant.name() == name)
+        .map(|variant| self.item(LanguageItemId::TimerStateVariant(variant)))
+    }
+
+    pub fn action(self, action: ActionKind) -> &'static LanguageItem {
+        ITEMS
+            .iter()
+            .find(|item| item.kind == LanguageItemKind::Action(action))
+            .expect("every action kind must have a language catalog entry")
+    }
+
+    pub fn validate(self) -> Vec<String> {
+        let mut errors = Vec::new();
+        let mut ids = HashSet::new();
+        let mut names = HashSet::new();
+        let mut example_sources = HashSet::new();
+        for item in ITEMS {
+            if !ids.insert(item.id) {
+                errors.push(format!("duplicate language item ID `{:?}`", item.id));
+            }
+            if !names.insert(item.name) {
+                errors.push(format!("duplicate language item name `{}`", item.name));
+            }
+            if item.form.trim().is_empty() {
+                errors.push(format!("`{}` has no syntax form", item.name));
+            }
+            if item.documentation.summary.trim().is_empty() {
+                errors.push(format!("`{}` has no documentation summary", item.name));
+            }
+            if item.documentation.details.trim().is_empty() {
+                errors.push(format!("`{}` has no documentation details", item.name));
+            }
+            if item.documentation.examples.is_empty() {
+                errors.push(format!("`{}` has no examples", item.name));
+            }
+            for example in item.documentation.examples {
+                if example.title.trim().is_empty()
+                    || example.source.trim().is_empty()
+                    || example.validation_source().trim().is_empty()
+                {
+                    errors.push(format!("`{}` has an incomplete example", item.name));
+                }
+                if !example_sources.insert(example.source) {
+                    errors.push(format!(
+                        "`{}` reuses another symbol's visible example",
+                        item.name
+                    ));
+                }
+            }
+            for related in item.documentation.related {
+                if !ITEMS.iter().any(|candidate| candidate.id == *related) {
+                    errors.push(format!(
+                        "`{}` links to missing language item `{:?}`",
+                        item.name, related
+                    ));
+                }
+            }
+            if let LanguageItemKind::Action(action) = item.kind
+                && item.name != action.name()
+            {
+                errors.push(format!(
+                    "action catalog name `{}` does not match `{}`",
+                    item.name,
+                    action.name()
+                ));
+            }
+        }
+        for action in [
+            ActionKind::OnDetached,
+            ActionKind::OnAttach,
+            ActionKind::WhileAttached,
+            ActionKind::Start,
+            ActionKind::Split,
+            ActionKind::Reset,
+            ActionKind::IsLoading,
+            ActionKind::GameTime,
+        ] {
+            if !ITEMS
+                .iter()
+                .any(|item| item.kind == LanguageItemKind::Action(action))
+            {
+                errors.push(format!("missing action catalog entry `{}`", action.name()));
+            }
+        }
+        for builtin in [
+            BuiltinType::Bool,
+            BuiltinType::I8,
+            BuiltinType::U8,
+            BuiltinType::I16,
+            BuiltinType::U16,
+            BuiltinType::I32,
+            BuiltinType::U32,
+            BuiltinType::I64,
+            BuiltinType::U64,
+            BuiltinType::Address,
+            BuiltinType::F32,
+            BuiltinType::F64,
+            BuiltinType::String,
+            BuiltinType::Duration,
+            BuiltinType::Module,
+            BuiltinType::UnityModule,
+            BuiltinType::UnityImage,
+            BuiltinType::UnityClass,
+            BuiltinType::UnityField,
+        ] {
+            if self.builtin_type(builtin).is_none() {
+                errors.push(format!("missing built-in type catalog entry `{builtin}`"));
+            }
+        }
+        for field in [
+            BuiltinFieldId::ModuleAddress,
+            BuiltinFieldId::ModuleSize,
+            BuiltinFieldId::UnityModuleAssemblies,
+            BuiltinFieldId::UnityModuleTypeInfoTable,
+            BuiltinFieldId::UnityModuleVersion,
+            BuiltinFieldId::UnityModulePointerSize,
+            BuiltinFieldId::UnityImageAddress,
+            BuiltinFieldId::UnityClassAddress,
+            BuiltinFieldId::UnityFieldOffset,
+            BuiltinFieldId::UnityFieldIndex,
+        ] {
+            if !ITEMS
+                .iter()
+                .any(|item| item.id == LanguageItemId::BuiltinField(field))
+            {
+                errors.push(format!("missing built-in field catalog entry `{field:?}`"));
+            }
+        }
+        for variant in [
+            TimerStateVariant::NotRunning,
+            TimerStateVariant::Running,
+            TimerStateVariant::Paused,
+            TimerStateVariant::Ended,
+            TimerStateVariant::Unknown,
+        ] {
+            if self.timer_state_variant(variant.name()).is_none() {
+                errors.push(format!(
+                    "missing TimerState variant catalog entry `{}`",
+                    variant.name()
+                ));
+            }
+        }
+        errors
+    }
+}

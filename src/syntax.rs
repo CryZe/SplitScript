@@ -1,0 +1,138 @@
+//! Lossless source text and token/trivia access for formatter and editor tools.
+
+use crate::{
+    ast::Span,
+    lexer::{Lexed, Lexeme, Token, Trivia},
+};
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceDocument {
+    source: String,
+    lexemes: Vec<Lexeme>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryNodeKind {
+    Missing,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecoveryNode {
+    pub kind: RecoveryNodeKind,
+    pub span: Span,
+}
+
+impl SourceDocument {
+    pub(crate) fn new(source: &str, lexed: Lexed) -> Self {
+        Self {
+            source: source.to_owned(),
+            lexemes: lexed.into_lexemes(),
+        }
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn lexemes(&self) -> &[Lexeme] {
+        &self.lexemes
+    }
+
+    pub fn tokens(&self) -> impl Iterator<Item = &Token> {
+        self.lexemes.iter().filter_map(|lexeme| match lexeme {
+            Lexeme::Token(token) => Some(token),
+            Lexeme::Trivia(_) => None,
+        })
+    }
+
+    /// Returns the non-empty token containing `offset`.
+    ///
+    /// Spans are half-open, so an offset at the end of one token belongs to a
+    /// following token only when that token starts at the same byte. Trivia is
+    /// intentionally not skipped: an offset in whitespace or a comment has no
+    /// token.
+    pub fn token_at(&self, offset: usize) -> Option<&Token> {
+        self.lexemes.iter().find_map(|lexeme| match lexeme {
+            Lexeme::Token(token)
+                if token.span.start <= offset
+                    && offset < token.span.end
+                    && token.span.start != token.span.end =>
+            {
+                Some(token)
+            }
+            Lexeme::Token(_) | Lexeme::Trivia(_) => None,
+        })
+    }
+
+    pub fn trivia(&self) -> impl Iterator<Item = &Trivia> {
+        self.lexemes.iter().filter_map(|lexeme| match lexeme {
+            Lexeme::Trivia(trivia) => Some(trivia),
+            Lexeme::Token(_) => None,
+        })
+    }
+
+    pub fn text(&self, span: Span) -> &str {
+        &self.source[span.start..span.end]
+    }
+
+    /// Reconstructs the source from its non-empty token and trivia spans.
+    /// This is primarily a losslessness invariant for tooling tests.
+    pub fn reconstruct(&self) -> String {
+        let mut reconstructed = String::with_capacity(self.source.len());
+        for lexeme in &self.lexemes {
+            let span = lexeme.span();
+            if span.start != span.end {
+                reconstructed.push_str(self.text(span));
+            }
+        }
+        reconstructed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::{TokenKind, TriviaKind, lex_lossless};
+
+    #[test]
+    fn reconstructs_every_token_comment_and_whitespace_byte() {
+        let source = "  // heading\r\n/// setting help\r\nname /* middle */ = `a {1 + 2}`\n";
+        let document = SourceDocument::new(source, lex_lossless(source).unwrap());
+
+        assert_eq!(document.reconstruct(), source);
+        assert!(document.trivia().any(|trivia| {
+            trivia.kind == TriviaKind::LineComment && document.text(trivia.span) == "// heading"
+        }));
+        assert!(document.trivia().any(|trivia| {
+            trivia.kind == TriviaKind::BlockComment && document.text(trivia.span) == "/* middle */"
+        }));
+        assert!(document.tokens().any(|token| {
+            matches!(&token.kind, TokenKind::DocComment(text) if text == "setting help")
+                && document.text(token.span) == "/// setting help"
+        }));
+
+        let mut end = 0;
+        for lexeme in document.lexemes() {
+            let span = lexeme.span();
+            assert_eq!(span.start, end);
+            end = span.end;
+        }
+        assert_eq!(end, source.len());
+    }
+
+    #[test]
+    fn finds_only_the_token_directly_under_an_offset() {
+        let source = "alpha /* gap */ . beta";
+        let document = SourceDocument::new(source, lex_lossless(source).unwrap());
+
+        let alpha = document.token_at(2).unwrap();
+        assert!(matches!(&alpha.kind, TokenKind::Ident(name) if name == "alpha"));
+        assert_eq!(document.text(alpha.span), "alpha");
+
+        let dot = document.token_at(source.find('.').unwrap()).unwrap();
+        assert_eq!(dot.kind, TokenKind::Dot);
+        assert!(document.token_at(source.find("gap").unwrap()).is_none());
+        assert!(document.token_at(source.len()).is_none());
+    }
+}

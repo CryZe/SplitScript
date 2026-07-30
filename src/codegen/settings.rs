@@ -1,0 +1,513 @@
+//! Settings registration, refresh, decoding, and start-time initialization.
+
+use super::*;
+
+pub(super) fn compile_string_from_memory() -> Function {
+    let mut function = Function::new([(1, val_type(Type::String)), (1, ValType::I32)]);
+    let pointer = 0;
+    let length = 1;
+    let output = 2;
+    let index = 3;
+    function
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::ArrayNewDefault(STRING_TYPE))
+        .instruction(&Instruction::LocalSet(output))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(pointer))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Load8U(memarg()))
+        .instruction(&Instruction::ArraySet(STRING_TYPE))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::End);
+    function
+}
+
+pub(super) fn compile_refresh_settings(
+    program: &Program,
+    lowering: &LoweringContext<'_>,
+    strings: &StringPool,
+    settings: &HashMap<ValueId, SettingStorage>,
+    string_from_memory: u32,
+    string_eq: u32,
+) -> Function {
+    let semantics = lowering.semantics;
+    let abi = lowering.abi;
+    let enums = lowering.enums;
+    let mut function = Function::new([(2, ValType::I64), (1, val_type(Type::String))]);
+    let map = 0;
+    let value = 1;
+    let decoded = 2;
+    function
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::SettingsMapLoad),
+        ))
+        .instruction(&Instruction::LocalSet(map));
+
+    for setting in &program.settings {
+        let Some(storage) = settings.get(&setting.id).copied() else {
+            continue;
+        };
+        function
+            .instruction(&Instruction::GlobalGet(storage.current))
+            .instruction(&Instruction::GlobalSet(storage.old));
+        emit_setting_default(
+            &mut function,
+            setting,
+            storage.current,
+            enums,
+            semantics,
+            lowering.gc,
+        );
+
+        let (key_ptr, key_len) = strings.get(&setting.name);
+        function
+            .instruction(&Instruction::LocalGet(map))
+            .instruction(&Instruction::I32Const(key_ptr as i32))
+            .instruction(&Instruction::I32Const(key_len as i32))
+            .instruction(&Instruction::Call(
+                abi.function(AbiImportId::SettingsMapGet),
+            ))
+            .instruction(&Instruction::LocalTee(value))
+            .instruction(&Instruction::I64Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Else);
+        match &setting.kind {
+            SettingKind::Bool { .. } => {
+                function
+                    .instruction(&Instruction::LocalGet(value))
+                    .instruction(&Instruction::I32Const(SETTINGS_LENGTH_SCRATCH))
+                    .instruction(&Instruction::Call(
+                        abi.function(AbiImportId::SettingValueGetBool),
+                    ))
+                    .instruction(&Instruction::If(BlockType::Empty))
+                    .instruction(&Instruction::I32Const(SETTINGS_LENGTH_SCRATCH))
+                    .instruction(&Instruction::I32Load8U(memarg()))
+                    .instruction(&Instruction::GlobalSet(storage.current))
+                    .instruction(&Instruction::End);
+            }
+            SettingKind::Choice {
+                enumeration,
+                options,
+                ..
+            } => {
+                emit_load_setting_string(&mut function, abi, value, decoded, string_from_memory);
+                function.instruction(&Instruction::If(BlockType::Empty));
+                for option in options {
+                    function.instruction(&Instruction::LocalGet(decoded));
+                    emit_string_literal(&mut function, &option.variant);
+                    function
+                        .instruction(&Instruction::Call(string_eq))
+                        .instruction(&Instruction::If(BlockType::Empty));
+                    emit_enum_variant(
+                        &mut function,
+                        *enumeration,
+                        semantics
+                            .setting_choice_option(option.id)
+                            .expect("checked choice options have resolved variants"),
+                        enums,
+                        semantics,
+                        lowering.gc,
+                    );
+                    function
+                        .instruction(&Instruction::GlobalSet(storage.current))
+                        .instruction(&Instruction::End);
+                }
+                function.instruction(&Instruction::End);
+            }
+            SettingKind::File { .. } => {
+                emit_load_setting_string(&mut function, abi, value, decoded, string_from_memory);
+                function
+                    .instruction(&Instruction::If(BlockType::Empty))
+                    .instruction(&Instruction::LocalGet(decoded))
+                    .instruction(&Instruction::GlobalSet(storage.current))
+                    .instruction(&Instruction::End);
+            }
+            SettingKind::Title { .. } => unreachable!(),
+        }
+        function
+            .instruction(&Instruction::LocalGet(value))
+            .instruction(&Instruction::Call(
+                abi.function(AbiImportId::SettingValueFree),
+            ))
+            .instruction(&Instruction::End);
+    }
+    function
+        .instruction(&Instruction::LocalGet(map))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::SettingsMapFree),
+        ))
+        .instruction(&Instruction::End);
+    function
+}
+
+fn emit_load_setting_string(
+    function: &mut Function,
+    abi: &Abi,
+    value: u32,
+    decoded: u32,
+    string_from_memory: u32,
+) {
+    function
+        .instruction(&Instruction::I32Const(SETTINGS_LENGTH_SCRATCH))
+        .instruction(&Instruction::I32Const(SETTINGS_STRING_CAPACITY))
+        .instruction(&Instruction::I32Store(memarg()))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::I32Const(SETTINGS_STRING_SCRATCH))
+        .instruction(&Instruction::I32Const(SETTINGS_LENGTH_SCRATCH))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::SettingValueGetString),
+        ))
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(SETTINGS_STRING_SCRATCH))
+        .instruction(&Instruction::I32Const(SETTINGS_LENGTH_SCRATCH))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::Call(string_from_memory))
+        .instruction(&Instruction::LocalSet(decoded))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::End);
+}
+
+fn emit_setting_default(
+    function: &mut Function,
+    setting: &crate::ast::SettingDecl,
+    global: u32,
+    enums: &[EnumDecl],
+    semantics: &SemanticModel,
+    gc: &GcLayout,
+) {
+    match &setting.kind {
+        SettingKind::Bool { default } => {
+            function.instruction(&Instruction::I32Const(*default as i32));
+        }
+        SettingKind::Choice { enumeration, .. } => emit_enum_variant(
+            function,
+            *enumeration,
+            semantics
+                .setting_choice_default(setting.id)
+                .expect("checked choice settings have resolved defaults"),
+            enums,
+            semantics,
+            gc,
+        ),
+        SettingKind::File { .. } => emit_string_literal(function, ""),
+        SettingKind::Title { .. } => return,
+    }
+    function.instruction(&Instruction::GlobalSet(global));
+}
+
+fn emit_setting_registration(
+    function: &mut Function,
+    setting: &crate::ast::SettingDecl,
+    strings: &StringPool,
+    storage: Option<SettingStorage>,
+    lowering: &LoweringContext<'_>,
+) {
+    let abi = lowering.abi;
+    let enums = lowering.enums;
+    let semantics = lowering.semantics;
+    let gc = lowering.gc;
+    let (key_ptr, key_len) = strings.get(&setting.name);
+    let (description_ptr, description_len) = strings.get(&setting.description);
+    match &setting.kind {
+        SettingKind::Bool { default } => {
+            let storage = storage.unwrap();
+            function
+                .instruction(&Instruction::I32Const(key_ptr as i32))
+                .instruction(&Instruction::I32Const(key_len as i32))
+                .instruction(&Instruction::I32Const(description_ptr as i32))
+                .instruction(&Instruction::I32Const(description_len as i32))
+                .instruction(&Instruction::I32Const(*default as i32))
+                .instruction(&Instruction::Call(
+                    abi.function(AbiImportId::UserSettingsAddBool),
+                ))
+                .instruction(&Instruction::GlobalSet(storage.current))
+                .instruction(&Instruction::GlobalGet(storage.current))
+                .instruction(&Instruction::GlobalSet(storage.old));
+        }
+        SettingKind::Title { heading_level } => {
+            function
+                .instruction(&Instruction::I32Const(key_ptr as i32))
+                .instruction(&Instruction::I32Const(key_len as i32))
+                .instruction(&Instruction::I32Const(description_ptr as i32))
+                .instruction(&Instruction::I32Const(description_len as i32))
+                .instruction(&Instruction::I32Const(*heading_level as i32))
+                .instruction(&Instruction::Call(
+                    abi.function(AbiImportId::UserSettingsAddTitle),
+                ));
+        }
+        SettingKind::Choice {
+            enumeration,
+            default_variant,
+            options,
+        } => {
+            let storage = storage.unwrap();
+            emit_enum_variant(
+                function,
+                *enumeration,
+                semantics
+                    .setting_choice_default(setting.id)
+                    .expect("checked choice settings have resolved defaults"),
+                enums,
+                semantics,
+                gc,
+            );
+            function
+                .instruction(&Instruction::GlobalSet(storage.current))
+                .instruction(&Instruction::GlobalGet(storage.current))
+                .instruction(&Instruction::GlobalSet(storage.old));
+            let (default_ptr, default_len) = strings.get(default_variant);
+            function
+                .instruction(&Instruction::I32Const(key_ptr as i32))
+                .instruction(&Instruction::I32Const(key_len as i32))
+                .instruction(&Instruction::I32Const(description_ptr as i32))
+                .instruction(&Instruction::I32Const(description_len as i32))
+                .instruction(&Instruction::I32Const(default_ptr as i32))
+                .instruction(&Instruction::I32Const(default_len as i32))
+                .instruction(&Instruction::Call(
+                    abi.function(AbiImportId::UserSettingsAddChoice),
+                ));
+            for option in options {
+                let (option_ptr, option_len) = strings.get(&option.variant);
+                let (option_description_ptr, option_description_len) =
+                    strings.get(&option.description);
+                function
+                    .instruction(&Instruction::I32Const(key_ptr as i32))
+                    .instruction(&Instruction::I32Const(key_len as i32))
+                    .instruction(&Instruction::I32Const(option_ptr as i32))
+                    .instruction(&Instruction::I32Const(option_len as i32))
+                    .instruction(&Instruction::I32Const(option_description_ptr as i32))
+                    .instruction(&Instruction::I32Const(option_description_len as i32))
+                    .instruction(&Instruction::Call(
+                        abi.function(AbiImportId::UserSettingsAddChoiceOption),
+                    ))
+                    .instruction(&Instruction::Drop);
+            }
+        }
+        SettingKind::File { filters } => {
+            let storage = storage.unwrap();
+            emit_string_literal(function, "");
+            function
+                .instruction(&Instruction::GlobalSet(storage.current))
+                .instruction(&Instruction::GlobalGet(storage.current))
+                .instruction(&Instruction::GlobalSet(storage.old))
+                .instruction(&Instruction::I32Const(key_ptr as i32))
+                .instruction(&Instruction::I32Const(key_len as i32))
+                .instruction(&Instruction::I32Const(description_ptr as i32))
+                .instruction(&Instruction::I32Const(description_len as i32))
+                .instruction(&Instruction::Call(
+                    abi.function(AbiImportId::UserSettingsAddFileSelect),
+                ));
+            for filter in filters {
+                match filter {
+                    SettingFileFilter::Name {
+                        description,
+                        pattern,
+                    } => {
+                        let (description_ptr, description_len) = description
+                            .as_ref()
+                            .map_or((0, 0), |description| strings.get(description));
+                        let (pattern_ptr, pattern_len) = strings.get(pattern);
+                        function
+                            .instruction(&Instruction::I32Const(key_ptr as i32))
+                            .instruction(&Instruction::I32Const(key_len as i32))
+                            .instruction(&Instruction::I32Const(description_ptr as i32))
+                            .instruction(&Instruction::I32Const(description_len as i32))
+                            .instruction(&Instruction::I32Const(pattern_ptr as i32))
+                            .instruction(&Instruction::I32Const(pattern_len as i32))
+                            .instruction(&Instruction::Call(
+                                abi.function(AbiImportId::UserSettingsAddFileSelectNameFilter),
+                            ));
+                    }
+                    SettingFileFilter::Mime(mime) => {
+                        let (mime_ptr, mime_len) = strings.get(mime);
+                        function
+                            .instruction(&Instruction::I32Const(key_ptr as i32))
+                            .instruction(&Instruction::I32Const(key_len as i32))
+                            .instruction(&Instruction::I32Const(mime_ptr as i32))
+                            .instruction(&Instruction::I32Const(mime_len as i32))
+                            .instruction(&Instruction::Call(
+                                abi.function(AbiImportId::UserSettingsAddFileSelectMimeFilter),
+                            ));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(tooltip) = &setting.tooltip {
+        let (tooltip_ptr, tooltip_len) = strings.get(tooltip);
+        function
+            .instruction(&Instruction::I32Const(key_ptr as i32))
+            .instruction(&Instruction::I32Const(key_len as i32))
+            .instruction(&Instruction::I32Const(tooltip_ptr as i32))
+            .instruction(&Instruction::I32Const(tooltip_len as i32))
+            .instruction(&Instruction::Call(
+                abi.function(AbiImportId::UserSettingsSetTooltip),
+            ));
+    }
+}
+
+fn emit_enum_variant(
+    function: &mut Function,
+    enumeration: crate::ast::EnumId,
+    variant: crate::ast::EnumVariantId,
+    enums: &[EnumDecl],
+    semantics: &SemanticModel,
+    gc: &GcLayout,
+) {
+    let declaration = enums.iter().find(|item| item.id == enumeration).unwrap();
+    let selected = declaration
+        .variants
+        .iter()
+        .position(|item| item.id == variant)
+        .unwrap();
+    function.instruction(&Instruction::I32Const(selected as i32));
+    for declared in &declaration.variants {
+        if let Some(payload_type) = enum_variant_payload(declared.id, semantics) {
+            emit_default(function, payload_type, gc);
+        } else {
+            function.instruction(&Instruction::I32Const(0));
+        }
+    }
+    function.instruction(&Instruction::StructNew(gc.index(Type::Enum(enumeration))));
+}
+
+pub(super) fn compile_start(
+    program: &Program,
+    lowering: &LoweringContext<'_>,
+    strings: &StringPool,
+    settings: &HashMap<ValueId, SettingStorage>,
+    refresh_settings: Option<u32>,
+    has_async_frame: bool,
+) -> Function {
+    let semantics = lowering.semantics;
+    let mut function = Function::new([]);
+    for variable in program
+        .globals
+        .iter()
+        .filter(|variable| lowering.wasm_ir.contains_global(variable.id))
+    {
+        if let Type::Enum(enumeration) = value_type(variable.id, semantics) {
+            let wasm_ir::ExpressionKind::Enum { variant, .. } = &lowering
+                .wasm_ir
+                .expression(variable.value.id)
+                .expect("global enum initializer belongs to Wasm IR")
+                .kind
+            else {
+                unreachable!("checked enum globals use enum constructors")
+            };
+            emit_enum_variant(
+                &mut function,
+                enumeration,
+                *variant,
+                lowering.enums,
+                semantics,
+                lowering.gc,
+            );
+            function.instruction(&Instruction::GlobalSet(lowering.globals[&variable.id]));
+        }
+    }
+    emit_initial_state(&mut function, program, semantics, lowering.gc);
+    function.instruction(&Instruction::GlobalSet(CURRENT_GLOBAL));
+    emit_initial_state(&mut function, program, semantics, lowering.gc);
+    function.instruction(&Instruction::GlobalSet(OLD_GLOBAL));
+    if has_async_frame {
+        function
+            .instruction(&Instruction::StructNewDefault(ASYNC_FRAME_TYPE))
+            .instruction(&Instruction::GlobalSet(ASYNC_FRAME_GLOBAL));
+    }
+    for setting in &program.settings {
+        emit_setting_registration(
+            &mut function,
+            setting,
+            strings,
+            settings.get(&setting.id).copied(),
+            lowering,
+        );
+    }
+    if let Some(refresh_settings) = refresh_settings {
+        function.instruction(&Instruction::Call(refresh_settings));
+    }
+    function.instruction(&Instruction::End);
+    function
+}
+
+/// Constructs the source-language defaults for state instead of relying on
+/// Wasm's `struct.new_default`. In particular, a record is a non-null source
+/// value, so its default is a recursively defaulted record rather than a null
+/// GC reference that would trap when `old.record.field` is read on tick one.
+fn emit_initial_state(
+    function: &mut Function,
+    program: &Program,
+    semantics: &SemanticModel,
+    gc: &GcLayout,
+) {
+    let state = program.state.as_ref().expect("checked programs have state");
+    for field in &state.fields {
+        let ty = semantics
+            .value_type(field.id)
+            .expect("checked state fields have semantic types");
+        emit_source_default(
+            function,
+            ty,
+            &program.records,
+            semantics,
+            gc,
+            &mut Vec::new(),
+        );
+    }
+    function.instruction(&Instruction::StructNew(STATE_TYPE));
+}
+
+fn emit_source_default(
+    function: &mut Function,
+    ty: TypeId,
+    records: &[RecordDecl],
+    semantics: &SemanticModel,
+    gc: &GcLayout,
+    visiting: &mut Vec<RecordId>,
+) {
+    let TypeKind::Record(record) = semantics.types().kind(ty) else {
+        emit_default(function, semantic_type(ty, semantics), gc);
+        return;
+    };
+
+    if visiting.contains(record) {
+        // Recursive records cannot be constructed finitely. Other semantic
+        // passes reject them where a concrete default must be observed; keep
+        // code generation total for unreachable/default-only layouts.
+        emit_default(function, Type::Record(*record), gc);
+        return;
+    }
+
+    visiting.push(*record);
+    let declaration = records
+        .iter()
+        .find(|declaration| declaration.id == *record)
+        .expect("semantic record types belong to source declarations");
+    for field in &declaration.fields {
+        let field_type = semantics
+            .record_field_type(field.id)
+            .expect("checked record fields have semantic types");
+        emit_source_default(function, field_type, records, semantics, gc, visiting);
+    }
+    visiting.pop();
+    function.instruction(&Instruction::StructNew(gc.index(Type::Record(*record))));
+}

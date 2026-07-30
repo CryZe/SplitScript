@@ -1,0 +1,649 @@
+//! Declarative WebAssembly host ABI used by the generated runtime.
+//!
+//! This catalog is backend infrastructure. Source-level documentation and
+//! editor tooling should expose [`crate::stdlib`] instead.
+
+use std::collections::HashSet;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(usize)]
+pub enum AbiImportId {
+    TimerGetState,
+    TimerStart,
+    TimerSplit,
+    TimerReset,
+    TimerSetGameTime,
+    TimerPauseGameTime,
+    TimerResumeGameTime,
+    TimerSetVariable,
+    RuntimeSetTickRate,
+    ProcessAttach,
+    ProcessDetach,
+    ProcessIsOpen,
+    ProcessRead,
+    ProcessGetModuleAddress,
+    ProcessGetModuleSize,
+    RuntimePrintMessage,
+    UserSettingsAddBool,
+    UserSettingsAddTitle,
+    UserSettingsAddChoice,
+    UserSettingsAddChoiceOption,
+    UserSettingsAddFileSelect,
+    UserSettingsAddFileSelectNameFilter,
+    UserSettingsAddFileSelectMimeFilter,
+    UserSettingsSetTooltip,
+    SettingsMapLoad,
+    SettingsMapFree,
+    SettingsMapGet,
+    SettingValueFree,
+    SettingValueGetBool,
+    SettingValueGetString,
+}
+
+impl AbiImportId {
+    pub const COUNT: usize = 30;
+
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbiType {
+    I32,
+    I64,
+    F64,
+}
+
+impl AbiType {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::I32 => "i32",
+            Self::I64 => "i64",
+            Self::F64 => "f64",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbiOwnership {
+    Value,
+    BorrowedHandle,
+    OwnedHandle,
+    InputMemory,
+    OutputMemory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AbiValue {
+    pub name: &'static str,
+    pub ty: AbiType,
+    pub ownership: AbiOwnership,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AbiEffect {
+    ReadsTimer,
+    WritesTimer,
+    WritesRuntime,
+    ManagesProcess,
+    ReadsProcess,
+    RegistersSettings,
+    ReadsSettings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AbiImport {
+    pub id: AbiImportId,
+    pub module: &'static str,
+    pub name: &'static str,
+    pub parameters: &'static [AbiValue],
+    pub results: &'static [AbiValue],
+    pub effects: &'static [AbiEffect],
+    pub lifetime: &'static str,
+    pub summary: &'static str,
+}
+
+const fn value(name: &'static str, ty: AbiType) -> AbiValue {
+    AbiValue {
+        name,
+        ty,
+        ownership: AbiOwnership::Value,
+    }
+}
+
+const fn borrowed(name: &'static str, ty: AbiType) -> AbiValue {
+    AbiValue {
+        name,
+        ty,
+        ownership: AbiOwnership::BorrowedHandle,
+    }
+}
+
+const fn owned(name: &'static str, ty: AbiType) -> AbiValue {
+    AbiValue {
+        name,
+        ty,
+        ownership: AbiOwnership::OwnedHandle,
+    }
+}
+
+const fn input(name: &'static str) -> AbiValue {
+    AbiValue {
+        name,
+        ty: AbiType::I32,
+        ownership: AbiOwnership::InputMemory,
+    }
+}
+
+const fn output(name: &'static str) -> AbiValue {
+    AbiValue {
+        name,
+        ty: AbiType::I32,
+        ownership: AbiOwnership::OutputMemory,
+    }
+}
+
+const TIMER_READ: &[AbiEffect] = &[AbiEffect::ReadsTimer];
+const TIMER_WRITE: &[AbiEffect] = &[AbiEffect::WritesTimer];
+const RUNTIME_WRITE: &[AbiEffect] = &[AbiEffect::WritesRuntime];
+const PROCESS_MANAGEMENT: &[AbiEffect] = &[AbiEffect::ManagesProcess];
+const PROCESS_READ: &[AbiEffect] = &[AbiEffect::ReadsProcess];
+const SETTINGS_REGISTRATION: &[AbiEffect] = &[AbiEffect::RegistersSettings];
+const SETTINGS_READ: &[AbiEffect] = &[AbiEffect::ReadsSettings];
+
+macro_rules! import {
+    ($id:ident, $name:literal, $params:expr, $results:expr, $effects:expr, $lifetime:literal, $summary:literal) => {
+        AbiImport {
+            id: AbiImportId::$id,
+            module: "env",
+            name: $name,
+            parameters: $params,
+            results: $results,
+            effects: $effects,
+            lifetime: $lifetime,
+            summary: $summary,
+        }
+    };
+}
+
+const IMPORTS: &[AbiImport] = &[
+    import!(
+        TimerGetState,
+        "timer_get_state",
+        &[],
+        &[value("state", AbiType::I32)],
+        TIMER_READ,
+        "Returns a plain timer-state value.",
+        "Reads the current timer state."
+    ),
+    import!(
+        TimerStart,
+        "timer_start",
+        &[],
+        &[],
+        TIMER_WRITE,
+        "Retains no guest values.",
+        "Starts the timer."
+    ),
+    import!(
+        TimerSplit,
+        "timer_split",
+        &[],
+        &[],
+        TIMER_WRITE,
+        "Retains no guest values.",
+        "Advances the timer to the next split."
+    ),
+    import!(
+        TimerReset,
+        "timer_reset",
+        &[],
+        &[],
+        TIMER_WRITE,
+        "Retains no guest values.",
+        "Resets the timer."
+    ),
+    import!(
+        TimerSetGameTime,
+        "timer_set_game_time",
+        &[
+            value("seconds", AbiType::I64),
+            value("nanoseconds", AbiType::I32)
+        ],
+        &[],
+        TIMER_WRITE,
+        "Retains no guest values.",
+        "Sets the displayed game time."
+    ),
+    import!(
+        TimerPauseGameTime,
+        "timer_pause_game_time",
+        &[],
+        &[],
+        TIMER_WRITE,
+        "Retains no guest values.",
+        "Pauses automatic game-time progression."
+    ),
+    import!(
+        TimerResumeGameTime,
+        "timer_resume_game_time",
+        &[],
+        &[],
+        TIMER_WRITE,
+        "Retains no guest values.",
+        "Resumes automatic game-time progression."
+    ),
+    import!(
+        TimerSetVariable,
+        "timer_set_variable",
+        &[
+            input("name_pointer"),
+            value("name_length", AbiType::I32),
+            input("value_pointer"),
+            value("value_length", AbiType::I32)
+        ],
+        &[],
+        TIMER_WRITE,
+        "String byte ranges are borrowed for this call only.",
+        "Sets a LiveSplit custom variable."
+    ),
+    import!(
+        RuntimeSetTickRate,
+        "runtime_set_tick_rate",
+        &[value("ticks_per_second", AbiType::F64)],
+        &[],
+        RUNTIME_WRITE,
+        "Retains no guest values.",
+        "Changes the runtime update frequency."
+    ),
+    import!(
+        ProcessAttach,
+        "process_attach",
+        &[input("name_pointer"), value("name_length", AbiType::I32)],
+        &[owned("process", AbiType::I64)],
+        PROCESS_MANAGEMENT,
+        "The returned nonzero handle is owned by the guest until process_detach.",
+        "Attempts to attach to a named process."
+    ),
+    import!(
+        ProcessDetach,
+        "process_detach",
+        &[borrowed("process", AbiType::I64)],
+        &[],
+        PROCESS_MANAGEMENT,
+        "Consumes the guest's use of the process handle.",
+        "Detaches a process handle."
+    ),
+    import!(
+        ProcessIsOpen,
+        "process_is_open",
+        &[borrowed("process", AbiType::I64)],
+        &[value("is_open", AbiType::I32)],
+        PROCESS_MANAGEMENT,
+        "The process handle is borrowed for this call.",
+        "Tests whether an attached process remains open."
+    ),
+    import!(
+        ProcessRead,
+        "process_read",
+        &[
+            borrowed("process", AbiType::I64),
+            value("address", AbiType::I64),
+            output("output_pointer"),
+            value("length", AbiType::I32)
+        ],
+        &[value("success", AbiType::I32)],
+        PROCESS_READ,
+        "The process handle and output range are borrowed for this call only.",
+        "Copies target-process memory into guest memory."
+    ),
+    import!(
+        ProcessGetModuleAddress,
+        "process_get_module_address",
+        &[
+            borrowed("process", AbiType::I64),
+            input("name_pointer"),
+            value("name_length", AbiType::I32)
+        ],
+        &[value("address", AbiType::I64)],
+        PROCESS_READ,
+        "The handle and module-name bytes are borrowed for this call.",
+        "Finds a module base address."
+    ),
+    import!(
+        ProcessGetModuleSize,
+        "process_get_module_size",
+        &[
+            borrowed("process", AbiType::I64),
+            input("name_pointer"),
+            value("name_length", AbiType::I32)
+        ],
+        &[value("size", AbiType::I64)],
+        PROCESS_READ,
+        "The handle and module-name bytes are borrowed for this call.",
+        "Finds a module image size."
+    ),
+    import!(
+        RuntimePrintMessage,
+        "runtime_print_message",
+        &[
+            input("message_pointer"),
+            value("message_length", AbiType::I32)
+        ],
+        &[],
+        RUNTIME_WRITE,
+        "Message bytes are borrowed for this call only.",
+        "Writes a diagnostic message."
+    ),
+    import!(
+        UserSettingsAddBool,
+        "user_settings_add_bool",
+        &[
+            input("key_pointer"),
+            value("key_length", AbiType::I32),
+            input("description_pointer"),
+            value("description_length", AbiType::I32),
+            value("default", AbiType::I32)
+        ],
+        &[value("accepted", AbiType::I32)],
+        SETTINGS_REGISTRATION,
+        "String byte ranges are borrowed for this call only.",
+        "Registers a boolean user setting."
+    ),
+    import!(
+        UserSettingsAddTitle,
+        "user_settings_add_title",
+        &[
+            input("key_pointer"),
+            value("key_length", AbiType::I32),
+            input("description_pointer"),
+            value("description_length", AbiType::I32),
+            value("heading_level", AbiType::I32)
+        ],
+        &[],
+        SETTINGS_REGISTRATION,
+        "String byte ranges are borrowed for this call only.",
+        "Registers a settings heading."
+    ),
+    import!(
+        UserSettingsAddChoice,
+        "user_settings_add_choice",
+        &[
+            input("key_pointer"),
+            value("key_length", AbiType::I32),
+            input("description_pointer"),
+            value("description_length", AbiType::I32),
+            input("default_pointer"),
+            value("default_length", AbiType::I32)
+        ],
+        &[],
+        SETTINGS_REGISTRATION,
+        "String byte ranges are borrowed for this call only.",
+        "Registers an enum-backed choice setting."
+    ),
+    import!(
+        UserSettingsAddChoiceOption,
+        "user_settings_add_choice_option",
+        &[
+            input("key_pointer"),
+            value("key_length", AbiType::I32),
+            input("option_pointer"),
+            value("option_length", AbiType::I32),
+            input("description_pointer"),
+            value("description_length", AbiType::I32)
+        ],
+        &[value("accepted", AbiType::I32)],
+        SETTINGS_REGISTRATION,
+        "String byte ranges are borrowed for this call only.",
+        "Registers one choice option."
+    ),
+    import!(
+        UserSettingsAddFileSelect,
+        "user_settings_add_file_select",
+        &[
+            input("key_pointer"),
+            value("key_length", AbiType::I32),
+            input("description_pointer"),
+            value("description_length", AbiType::I32)
+        ],
+        &[],
+        SETTINGS_REGISTRATION,
+        "String byte ranges are borrowed for this call only.",
+        "Registers a file-selection setting."
+    ),
+    import!(
+        UserSettingsAddFileSelectNameFilter,
+        "user_settings_add_file_select_name_filter",
+        &[
+            input("key_pointer"),
+            value("key_length", AbiType::I32),
+            input("description_pointer"),
+            value("description_length", AbiType::I32),
+            input("pattern_pointer"),
+            value("pattern_length", AbiType::I32)
+        ],
+        &[],
+        SETTINGS_REGISTRATION,
+        "String byte ranges are borrowed for this call only.",
+        "Adds a named glob filter to a file setting."
+    ),
+    import!(
+        UserSettingsAddFileSelectMimeFilter,
+        "user_settings_add_file_select_mime_filter",
+        &[
+            input("key_pointer"),
+            value("key_length", AbiType::I32),
+            input("mime_pointer"),
+            value("mime_length", AbiType::I32)
+        ],
+        &[],
+        SETTINGS_REGISTRATION,
+        "String byte ranges are borrowed for this call only.",
+        "Adds a MIME filter to a file setting."
+    ),
+    import!(
+        UserSettingsSetTooltip,
+        "user_settings_set_tooltip",
+        &[
+            input("key_pointer"),
+            value("key_length", AbiType::I32),
+            input("tooltip_pointer"),
+            value("tooltip_length", AbiType::I32)
+        ],
+        &[],
+        SETTINGS_REGISTRATION,
+        "String byte ranges are borrowed for this call only.",
+        "Sets a setting or heading tooltip."
+    ),
+    import!(
+        SettingsMapLoad,
+        "settings_map_load",
+        &[],
+        &[owned("settings_map", AbiType::I64)],
+        SETTINGS_READ,
+        "The returned handle is owned by the guest until settings_map_free.",
+        "Loads the current settings snapshot."
+    ),
+    import!(
+        SettingsMapFree,
+        "settings_map_free",
+        &[borrowed("settings_map", AbiType::I64)],
+        &[],
+        SETTINGS_READ,
+        "Consumes the guest's use of the settings-map handle.",
+        "Frees a settings snapshot handle."
+    ),
+    import!(
+        SettingsMapGet,
+        "settings_map_get",
+        &[
+            borrowed("settings_map", AbiType::I64),
+            input("key_pointer"),
+            value("key_length", AbiType::I32)
+        ],
+        &[owned("setting_value", AbiType::I64)],
+        SETTINGS_READ,
+        "A nonzero returned handle is owned by the guest until setting_value_free.",
+        "Looks up one setting value."
+    ),
+    import!(
+        SettingValueFree,
+        "setting_value_free",
+        &[borrowed("setting_value", AbiType::I64)],
+        &[],
+        SETTINGS_READ,
+        "Consumes the guest's use of the setting-value handle.",
+        "Frees a setting value handle."
+    ),
+    import!(
+        SettingValueGetBool,
+        "setting_value_get_bool",
+        &[
+            borrowed("setting_value", AbiType::I64),
+            output("output_pointer")
+        ],
+        &[value("success", AbiType::I32)],
+        SETTINGS_READ,
+        "The handle and output location are borrowed for this call.",
+        "Decodes a boolean setting value."
+    ),
+    import!(
+        SettingValueGetString,
+        "setting_value_get_string",
+        &[
+            borrowed("setting_value", AbiType::I64),
+            output("output_pointer"),
+            value("capacity", AbiType::I32)
+        ],
+        &[value("length", AbiType::I32)],
+        SETTINGS_READ,
+        "The handle and output range are borrowed for this call.",
+        "Decodes a UTF-8 setting value."
+    ),
+];
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AbiCatalog;
+
+impl AbiCatalog {
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub fn imports(self) -> impl ExactSizeIterator<Item = &'static AbiImport> {
+        IMPORTS.iter()
+    }
+
+    pub fn import(self, id: AbiImportId) -> &'static AbiImport {
+        &IMPORTS[id.index()]
+    }
+
+    pub fn import_by_name(self, name: &str) -> Option<&'static AbiImport> {
+        IMPORTS.iter().find(|import| import.name == name)
+    }
+
+    pub fn render_signature(self, id: AbiImportId) -> String {
+        let import = self.import(id);
+        let mut rendered = "(".to_owned();
+        for (index, parameter) in import.parameters.iter().enumerate() {
+            if index != 0 {
+                rendered.push_str(", ");
+            }
+            rendered.push_str(parameter.ty.name());
+        }
+        rendered.push_str(") -> ");
+        match import.results {
+            [] => rendered.push_str("()"),
+            [result] => rendered.push_str(result.ty.name()),
+            results => {
+                rendered.push('(');
+                for (index, result) in results.iter().enumerate() {
+                    if index != 0 {
+                        rendered.push_str(", ");
+                    }
+                    rendered.push_str(result.ty.name());
+                }
+                rendered.push(')');
+            }
+        }
+        rendered
+    }
+
+    pub fn render_import_table(self) -> String {
+        let mut rendered = String::from("| Import | WebAssembly type |\n| --- | --- |\n");
+        for import in IMPORTS {
+            rendered.push_str("| `");
+            rendered.push_str(import.name);
+            rendered.push_str("` | `");
+            rendered.push_str(&self.render_signature(import.id));
+            rendered.push_str("` |\n");
+        }
+        rendered
+    }
+
+    pub fn validate(self) -> Vec<String> {
+        let mut errors = Vec::new();
+        let mut ids = HashSet::new();
+        let mut names = HashSet::new();
+        for (index, import) in IMPORTS.iter().enumerate() {
+            if import.id.index() != index {
+                errors.push(format!(
+                    "ABI import `{:?}` is out of stable order",
+                    import.id
+                ));
+            }
+            if !ids.insert(import.id) {
+                errors.push(format!("duplicate ABI import ID `{:?}`", import.id));
+            }
+            if !names.insert((import.module, import.name)) {
+                errors.push(format!(
+                    "duplicate ABI import `{}.{}`",
+                    import.module, import.name
+                ));
+            }
+            if import.module.trim().is_empty()
+                || import.name.trim().is_empty()
+                || import.summary.trim().is_empty()
+                || import.lifetime.trim().is_empty()
+            {
+                errors.push(format!(
+                    "ABI import `{:?}` has incomplete metadata",
+                    import.id
+                ));
+            }
+            let mut parameter_names = HashSet::new();
+            for parameter in import.parameters {
+                if !parameter_names.insert(parameter.name) {
+                    errors.push(format!(
+                        "ABI import `{}` has duplicate parameter `{}`",
+                        import.name, parameter.name
+                    ));
+                }
+            }
+            let mut result_names = HashSet::new();
+            for result in import.results {
+                if !result_names.insert(result.name) {
+                    errors.push(format!(
+                        "ABI import `{}` has duplicate result `{}`",
+                        import.name, result.name
+                    ));
+                }
+            }
+            if import.effects.is_empty() {
+                errors.push(format!(
+                    "ABI import `{}` has no declared effects",
+                    import.name
+                ));
+            }
+        }
+        if IMPORTS.len() != AbiImportId::COUNT {
+            errors.push(format!(
+                "ABI catalog has {} imports but {} IDs",
+                IMPORTS.len(),
+                AbiImportId::COUNT
+            ));
+        }
+        errors
+    }
+}

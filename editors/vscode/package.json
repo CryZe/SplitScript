@@ -1,0 +1,221 @@
+{
+  "name": "splitscript",
+  "displayName": "SplitScript",
+  "description": "Language support for statically typed LiveSplit autosplitters.",
+  "version": "0.1.0",
+  "publisher": "livesplit",
+  "license": "MIT OR Apache-2.0",
+  "engines": {
+    "vscode": "^1.125.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Formatters",
+    "Linters"
+  ],
+  "keywords": [
+    "LiveSplit",
+    "autosplitter",
+    "speedrunning",
+    "WebAssembly"
+  ],
+  "main": "./out/extension.js",
+  "files": [
+    "out/**",
+    "syntaxes/**",
+    "server/**",
+    "language-configuration.json",
+    "README.md"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "splitscript",
+        "aliases": [
+          "SplitScript",
+          "splitscript"
+        ],
+        "extensions": [
+          ".split"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "splitscript",
+        "scopeName": "source.splitscript",
+        "path": "./syntaxes/splitscript.tmLanguage.json"
+      }
+    ],
+    "semanticTokenTypes": [
+      {
+        "id": "setting",
+        "superType": "property",
+        "description": "An autosplitter setting value."
+      },
+      {
+        "id": "settingTitle",
+        "superType": "string",
+        "description": "A title in the settings hierarchy."
+      },
+      {
+        "id": "stateField",
+        "superType": "property",
+        "description": "A value read transactionally from the attached process."
+      },
+      {
+        "id": "lifecycle",
+        "superType": "function",
+        "description": "An autosplitter lifecycle or timer-event block."
+      },
+      {
+        "id": "signature",
+        "superType": "string",
+        "description": "A process signature literal."
+      },
+      {
+        "id": "debug",
+        "superType": "keyword",
+        "description": "The debug-only source modifier."
+      }
+    ],
+    "semanticTokenModifiers": [
+      {
+        "id": "debug",
+        "description": "Marks source that is erased from release builds."
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "splitscript",
+        "scopes": {
+          "setting": [
+            "variable.other.property.splitscript"
+          ],
+          "settingTitle": [
+            "string.quoted.double.splitscript"
+          ],
+          "stateField": [
+            "variable.other.property.splitscript"
+          ],
+          "lifecycle": [
+            "entity.name.function.splitscript"
+          ],
+          "signature": [
+            "string.quoted.signature.splitscript"
+          ],
+          "debug": [
+            "storage.modifier.splitscript"
+          ]
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "splitscript.restartLanguageServer",
+        "title": "SplitScript: Restart Language Server"
+      },
+      {
+        "command": "splitscript.buildRelease",
+        "title": "SplitScript: Build Release",
+        "shortTitle": "Build Release",
+        "icon": "$(package)"
+      },
+      {
+        "command": "splitscript.startDebugWatch",
+        "title": "SplitScript: Start Debug Watch",
+        "shortTitle": "Start Debug Watch",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "splitscript.stopDebugWatch",
+        "title": "SplitScript: Stop Debug Watch",
+        "shortTitle": "Stop Debug Watch",
+        "icon": "$(debug-stop)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "splitscript.buildRelease",
+          "when": "resourceLangId == splitscript",
+          "group": "navigation@1"
+        },
+        {
+          "command": "splitscript.startDebugWatch",
+          "when": "resourceLangId == splitscript && !splitScript.watchActive",
+          "group": "navigation@2"
+        },
+        {
+          "command": "splitscript.stopDebugWatch",
+          "when": "resourceLangId == splitscript && splitScript.watchActive",
+          "group": "navigation@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "splitscript.buildRelease",
+          "when": "resourceLangId == splitscript",
+          "group": "navigation@1"
+        },
+        {
+          "command": "splitscript.startDebugWatch",
+          "when": "resourceLangId == splitscript && !splitScript.watchActive",
+          "group": "navigation@2"
+        },
+        {
+          "command": "splitscript.stopDebugWatch",
+          "when": "resourceLangId == splitscript && splitScript.watchActive",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "SplitScript",
+      "properties": {
+        "splitScript.server.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "description": "Path to the splitls executable. Relative paths resolve from the first workspace folder. Empty uses the bundled, repository development, or PATH executable."
+        },
+        "splitScript.server.arguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine-overridable",
+          "description": "Additional command-line arguments passed to splitls."
+        },
+        "splitScript.compiler.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "description": "Path to the splitc executable. Relative paths resolve from the current file's workspace. Empty uses a bundled, server-adjacent, repository development, or PATH executable."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[splitscript]": {
+        "editor.formatOnSave": false,
+        "editor.semanticHighlighting.enabled": true
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc --watch -p ./",
+    "check": "tsc --noEmit -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "1.125.0",
+    "typescript": "7.0.2"
+  }
+}

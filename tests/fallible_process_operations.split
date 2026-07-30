@@ -1,0 +1,28 @@
+state "game.exe" {}
+
+fn addressState(value: address!) -> String {
+    return match value {
+        Ok(_) => "ok",
+        Err(_) => "error"
+    }
+}
+
+fn stringState(value: String!) -> String {
+    return match value {
+        Ok(_) => "ok",
+        Err(_) => "error"
+    }
+}
+
+whileAttached {
+    let followed = process.follow(0x1000, [0u64]) else 0 as address
+    let relative = process.readRelative32(0x3000) else 0 as address
+    let managed = process.read.managedString(0x5000, 16) else "missing"
+    let followFailure = addressState(process.follow(0x2000, [0u64]))
+    let relativeFailure = addressState(process.readRelative32(0x4000))
+    let stringFailure = stringState(process.read.managedString(0x6000, 16))
+    setVariable(
+        "Fallible Process Operations",
+        `{followed},{relative},{managed},{followFailure},{relativeFailure},{stringFailure}`
+    )
+}

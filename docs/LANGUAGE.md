@@ -1,0 +1,888 @@
+# SplitScript language design
+
+## Design center
+
+SplitScript combines familiar expression syntax with ASL's domain concepts
+rather than trying to be source-compatible with JavaScript, C#, or old ASL.
+
+| General scripting familiarity | Autosplitter-specific syntax |
+| --- | --- |
+| `let`, braces, property access | Direct `start`, `split`, `reset`, `isLoading`, `gameTime` blocks |
+| `==`, `!=`, `&&`, `||`, `if` | `state`, `settings`, `current`, `old` |
+| Inference by default, annotations when useful | Declarative pointer paths and automatic polling |
+| Familiar `await` expressions | Process-lifetime cancellation and tick-based retry |
+
+It is statically typed. There is no JavaScript-style numeric supertype and no
+implicit widening between integer widths. This is important when values come
+from process memory.
+
+## State and pointer paths
+
+```text
+state "game.exe" {
+    level: u16 at "game.exe", 0x1234, 0x20
+    score: u32 at 0x7ff612341000
+}
+```
+
+To attach to the first available edition of a game, provide an ordered process
+list. Each name is attempted once per tick until one attaches.
+
+```text
+state ["game.exe", "game-demo.exe"] {}
+```
+
+With a module name, the first offset is added to the module base. Every remaining
+offset follows a 64-bit pointer, adds the offset, and continues. Without a module
+name, the first value is an absolute address. The final read uses the declared
+width and signedness. A failed path produces that type's zero value for the
+current tick.
+
+State field annotations are optional and participate in whole-program
+inference. Expression-backed fields normally obtain their type directly from
+the right-hand side. A pointer-path field has no typed right-hand side, so its
+type must come from a `current`/`old` use or an explicit annotation. The
+compiler reports an ambiguity if neither provides enough information.
+
+Each tick, the compiler-generated runtime copies `current` to `old` before
+refreshing `current`. The fields form a WebAssembly GC struct, so the action code
+uses typed references rather than a linear-memory state layout.
+
+## Variables and inference
+
+```text
+fn consumeU64(value: u64) {}
+
+let tickCount = 0
+
+whileAttached {
+    consumeU64(tickCount) // the call infers tickCount as u64
+}
+
+split {
+    let changed = current.level != old.level; // inferred bool
+    return changed;
+}
+```
+
+There is one declaration form: `let`. The compiler assigns fresh type variables
+to unannotated values and unifies constraints from assignments, operators,
+arrays, function bodies, return values, and call sites. Information therefore
+flows in either direction: both `value == 0` and `0 == value` infer the literal
+from `value`. This applies equally to top-level persistent variables: their
+types may come from their initializer or from any later use. An annotation is
+only needed to constrain an otherwise ambiguous value or document an important
+boundary.
+
+Record member access participates in the same whole-program inference. The
+compiler can defer resolving a field path until a later call site supplies the
+parameter's nominal record type, so helpers do not need redundant annotations:
+
+```text
+fn levelTimeText(parts) {
+    return `{parts.minutes as u32}:{parts.seconds as u32}`
+}
+
+levelTimeText(current.levelTimeParts)
+```
+
+Several accessed fields can jointly identify a unique record even without a
+call-site constraint. If the remaining field set matches multiple nominal
+records, the compiler reports those candidates instead of guessing.
+
+Annotations and integer suffixes are constraints, not a routine requirement.
+Suffixes such as `1u8`, `10i64`, and `0xffu32` remain available when a literal is
+genuinely unconstrained or when an exact type should be documented. Remaining
+unconstrained integer and floating-point variables default to `i32` and `f64`.
+Mutable `let` bindings are monomorphic. User functions are also currently
+monomorphic per declaration; generalized polymorphic functions will require
+Wasm signature specialization.
+
+Assignments support `=`, the arithmetic compound forms `+=`, `-=`, `*=`, `/=`,
+and `%=`, plus `|=`, `&=`, `^=`, `<<=`, and `>>=` for integers. A compound
+assignment uses exactly the same operand typing and runtime operation as its
+ordinary binary operator while resolving the destination only once.
+
+Supported value types are:
+
+- `bool`
+- `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`
+- `address`, a nominal 64-bit target-process address
+- `f32`, `f64`
+- `String`, an immutable UTF-8 WebAssembly GC array
+- `T?`, an optional value containing either `Some(T)` or `None`
+- `T!`, a result containing either `T` or a standard string error
+- the built-in GC reference types `Duration` and `Module`
+- `Signature`, the compile-time-only type produced by `sig"..."`
+
+The usual arithmetic, comparison, logical, bitwise, and shift operators are
+supported. Because values are statically typed, `==` and `!=` are unambiguous;
+there are no coercing versus strict comparison variants.
+
+Operators use Rust's relative precedence. From tightest to loosest, the
+currently supported operators are unary operators, `as`, `*`/`/`/`%`, `+`/`-`,
+`<<`/`>>`, `&`, `^`, `|`, comparisons, `&&`, and `||`. In particular, bitwise
+operators bind more tightly than comparisons, so `level & 1 == 0` means
+`(level & 1) == 0`. Comparisons share one precedence level and cannot be
+chained without parentheses.
+
+Every integer and floating-point type provides type-directed `min`, `max`, and
+`clamp` methods. Arguments are inferred as the receiver's exact type and each
+receiver and argument is evaluated once. `clamp(lower, upper)` is equivalent to
+`value.max(lower).min(upper)` for correctly ordered bounds.
+
+```text
+let cappedStage = stage.min(7)
+let nonNegative = score.max(0)
+let normalized = amount.clamp(0.0, 1.0)
+```
+
+`if` conditions are expressions and do not require delimiter parentheses.
+Parentheses remain available for ordinary expression grouping. `else if`
+chains do not need a nested brace block.
+
+```text
+if level == 14 {
+    act = "X"
+} else if level & 1 == 0 {
+    act = "1"
+} else {
+    act = "2"
+}
+```
+
+`if` can also produce a value. An expression-valued `if` requires an `else`,
+and both branches are inferred bidirectionally from each other and from the
+surrounding expected type. Only the selected branch is evaluated.
+
+```text
+let label: String = if isDemo {
+    "Demo"
+} else if isDlc {
+    "DLC"
+} else {
+    "Base Game"
+}
+```
+
+`while` repeats a statement block as long as its `bool` condition remains true.
+The condition is evaluated before every iteration, and declarations in the body
+are scoped to that body.
+
+```text
+let index = 0
+let total = 0
+while index < 5 {
+    index += 1
+    total += index
+}
+```
+
+`break` exits the nearest enclosing loop. `continue` skips the rest of the
+current iteration and evaluates that loop's condition again. Both are
+statements, and nested `if` blocks do not change which loop they target.
+
+```text
+while index < values.length {
+    index += 1
+    if index == ignoredIndex {
+        continue
+    }
+    if total >= limit {
+        break
+    }
+}
+```
+
+Like `else return`, loop control can be used directly as a diverging fallback
+for an Option or Result. This works even when the fallback is nested inside an
+expression-valued `if`, match arm, or short-circuit expression:
+
+```text
+let entry = process.read(address) else continue
+let selected = if useFallback {
+    optionalValue else break
+} else {
+    defaultValue
+}
+```
+
+Inside `onAttach`, `await` and `retry` may suspend within a loop. The async
+lowering gives each suspending loop explicit header and exit states, so a
+resumed continuation can `break`, `continue`, or complete an iteration without
+replaying work from earlier iterations. Nested suspending loops target their
+nearest loop and preserve values live across each suspension.
+
+## Debug-only statements
+
+Prefix a statement with `debug` to retain it in debug builds and erase it from
+release builds:
+
+```text
+debug print(`level {current.level}`)
+debug if current.level == 7 {
+    print("testing the final split")
+}
+debug attempts += 1
+debug let inspectedLevel = current.level
+```
+
+Globals and functions can also be debug-only:
+
+```text
+debug let traceLimit = 10
+
+debug fn traceLevel(level: i32) {
+    debug let capped = level.min(traceLimit)
+    print(`level {capped}`)
+}
+
+whileAttached {
+    debug traceLevel(current.level)
+}
+```
+
+A debug function may call ordinary or other debug functions. Debug statements
+can declare locals with `debug let`, including values produced by `await` or
+`retry` in `onAttach`; later debug statements in the same scope can use them.
+An ordinary statement or ordinary function may not use a debug-only function,
+global, or local because that reference would remain after its declaration is
+erased. The compiler reports this at the reference site; wrapping the use in
+`debug` establishes the required context. Release Wasm IR contains neither the
+function body nor storage and initialization for a debug-only global.
+
+Debug-only code is still parsed, resolved, and type-checked in release builds,
+so a stale diagnostic path cannot silently rot. Erasure happens during semantic
+Wasm lowering, before reachability, string collection, import selection, and
+helper discovery. Consequently, a release module does not retain debug-only
+messages or logging imports.
+
+The statement form accepts bindings, expression statements, assignments, `if`,
+`while`, and `await` or `retry` statements. It rejects `return`, `throw`,
+`break`, and `continue` until profile-dependent termination rules are
+specified.
+
+Expression branches currently contain one expression rather than a sequence of
+statements with a trailing value. A state-field assignment is a failure
+boundary, so `?` can propagate a read error directly out of the selected branch:
+
+```text
+levelOrScene = if isDlcDemo {
+    LevelOrScene.Scene(process.read.managedString(
+        process.read(gameManager.offset(levelOrSceneOffset))?,
+        16
+    )?)
+} else {
+    LevelOrScene.Level(
+        process.read(gameManager.offset(levelOrSceneOffset))?
+    )
+}
+```
+
+## Optional and result values
+
+`T?` represents an optional value and `T!` represents an operation that can
+fail with the language's standard string error. `None` constructs an empty
+option and `Err(message)` constructs a failed result. A plain `T` is lifted
+automatically when `T?` or `T!` is expected. `Some(value)` and `Ok(value)` are
+available when the wrapper state should be explicit, but are never required.
+Because their payload supplies `T`, `Some(value)` and `Ok(value)` can infer a
+wrapper type without an annotation. `None` and `Err(message)` still need
+expected-type context because they contain no value from which to infer the
+missing `T`.
+
+Both wrappers support structural `==` and `!=` when `T` itself supports
+equality. Two empty Options are equal; an empty and present Option are not; two
+present Options compare their values. Results first compare whether they are
+successes or errors. Successes compare their values, errors compare their
+error strings by content, and a success never equals an error. This composes
+through records and enums that contain wrapper fields or payloads.
+
+Both wrappers can be matched exhaustively with explicit state patterns:
+
+```text
+fn describeOptional(value: i32?) -> String {
+    return match value {
+        None => "none",
+        Some(present) if present > 10 => "large",
+        Some(present) => present as String
+    }
+}
+
+fn describeResult(value: i32!) -> String {
+    return match value {
+        Err(error) => `error: {error}`,
+        Ok(success) => success as String
+    }
+}
+```
+
+The binding inside `Some` has type `T`; the binding inside `Ok` has type `T`;
+and the binding inside `Err(error)` has type `String`. `_` matches either state without
+binding a value. Exhaustiveness checks require both states unless `_` is
+present. A guard narrows when an arm applies but does not count as covering its
+state, so the guarded `Some` arm above still needs the following unguarded
+arm. Payload extraction and guard evaluation happen only after the pattern's
+wrapper state matches.
+
+Postfix `?` unwraps a `T!` or propagates its error to the nearest failure
+boundary. State-field assignments are implicit boundaries. A function returning
+`T!` is also a boundary, so differently typed failures can pass through without
+manually rebuilding `Err`:
+
+```text
+fn readMode(address: address) -> i32! {
+    let object = process.read(address)?
+    return process.read(object)?
+}
+```
+
+Actions such as `whileAttached` are not result boundaries, so an unhandled `?` there is
+a compile-time error. The propagation operation is represented explicitly in
+typed HIR with its target result type; it is not treated as a zero/default read.
+
+An explicit `throw error` statement transfers a `String` error through the same
+boundary mechanism. It is currently available in functions returning `T!`:
+
+```text
+fn requirePositive(value: i32) -> i32! {
+    if value < 0 {
+        throw "expected a positive value"
+    }
+    return value
+}
+```
+
+`throw` and the error arm of `?` lower to the same failure-transfer operation.
+Explicit nested `catch` boundaries are planned; until then, an action without a
+result boundary rejects `throw` just as it rejects `?`.
+
+```text
+let selected: String? = None
+let discovered: address! = module.address
+let failed: address! = Err("module was not found")
+```
+
+Use the low-precedence `else` operation to unwrap either type. A value fallback
+has the same type as the wrapped value:
+
+```text
+let displayName = selected else "Unknown"
+let address = discovered else 0 as address
+```
+
+The fallback can instead return from the current function or action. This is an
+explicit alternative to `?` and retains an ordinary `T!` return value rather
+than using a hidden failure channel:
+
+```text
+fn requireAddress(value: address!) -> address! {
+    let address = value else return Err("required address is unavailable")
+    return address
+}
+```
+
+`else` is looser than `||` and all other expression operators and associates
+to the right. Consequently, `optional else result else fallback` means
+`optional else (result else fallback)`. A bare `None` or `Err(...)` needs an
+annotation, argument type, return type, or other expected-type context to
+determine its contained `T`.
+
+## Casts
+
+Conversions use the Rust- and TypeScript-style `as` operator:
+
+```text
+let frame = rawFrame as u32
+let seconds = frame as f64 / 60.0
+let label = frame as String
+```
+
+`as` binds more tightly than arithmetic and comparisons and can be chained,
+as in `levelTime as u32 as String`. Numeric casts support every integer width,
+`address`, `f32`, and `f64`. Narrowing integer casts retain the low bits;
+float-to-integer casts saturate at the destination bounds and convert NaN to
+zero, matching Rust's cast behavior. Casting an integer or address to `String`
+formats its decimal value. Other reference and domain types are not castable.
+
+## Functions
+
+Function parameter and return annotations are optional. Their constraints are
+solved together with every function body and call site, including forward
+calls. A function with no value-returning `return` is inferred as returning
+nothing. Explicit annotations can still be added at API boundaries.
+
+```text
+fn isFinalLevel(level) {
+    return stage(level) == 7
+}
+
+fn stage(level) {
+    return (level / 2) + 1
+}
+```
+
+Functions are independent of a particular action snapshot. Values from
+`current` or `old` are passed explicitly, keeping helpers reusable and making
+their dependencies visible. Suspending functions will be added with the async
+standard-library layer; currently `await` remains specific to `onAttach`.
+
+## Records
+
+Records are immutable, named value shapes represented as WebAssembly GC
+structs. Declarations can refer to records declared later in the file. Record
+literals are checked for unknown, duplicate, missing, and incorrectly typed
+fields; their source order does not matter.
+
+```text
+record Digits {
+    minutes: f32
+    seconds: f32
+    hundredths: f32
+}
+
+fn isFresh(value: Digits) -> bool {
+    return value.minutes == 0.0 && value.seconds == 0.0
+}
+
+let digits = Digits {
+    seconds: 0.0,
+    hundredths: 0.0,
+    minutes: 0.0
+}
+```
+
+Records may contain other records and GC strings, pass through functions, and
+remain live in an `onAttach` continuation across `await`. Immutability keeps
+shared metadata bindings predictable; a new value is constructed when a
+snapshot needs to change.
+
+A record whose fields are all fixed-width primitive memory values or other
+readable records also implements the compiler-known `MemoryReadable`
+capability. Its process-memory layout follows declaration order with natural
+alignment: every field starts at the next multiple of its own alignment, and
+the final size is rounded up to the largest field alignment. For example,
+`{ tag: u8, count: u32, flags: u16 }` has offsets 0, 4, and 8, alignment 4,
+and size 12. Reads are currently little-endian. Explicit offsets, packing, and
+endianness controls are intentionally deferred until a real target needs them.
+
+## Pattern matching
+
+Enums model values that can have one of several shapes. Each variant may carry
+one typed payload; a record can be used when a variant needs multiple values.
+`match` destructures payloads and is checked for duplicate, foreign, unknown,
+and missing variants.
+
+```text
+enum LevelOrScene {
+    Level(i32)
+    Scene(String)
+}
+
+fn isFirst(value: LevelOrScene) -> bool {
+    return match value {
+        LevelOrScene.Level(level) => level == 0,
+        LevelOrScene.Scene(scene) => scene == "Shrine01"
+    }
+}
+```
+
+Integer and boolean values can be matched with literals. Arms may have an `if`
+guard, and `_` is the catch-all pattern. Patterns participate in inference, so
+the parameter types below are inferred as an integer and `bool` from their uses.
+
+```text
+fn characterName(character, dlcDemo) {
+    return match character {
+        3 if dlcDemo => "Accel",
+        3 => "Erika",
+        6 if dlcDemo => "Cres",
+        _ => "Unknown"
+    }
+}
+```
+
+An unguarded arm counts toward exhaustiveness; a guarded arm may still reject
+its pattern. Enum matches must cover every variant, boolean matches must cover
+`true` and `false`, and integer matches require an unguarded `_` arm. A wildcard
+can also make an enum or boolean match exhaustive.
+
+Enums are immutable GC values and can be nested in records, passed through
+functions, and retained across `await`. This directly models the original
+Lunistice autosplitter's base-game level number versus DLC-demo scene name.
+
+Enums support `==` and `!=`. Equality is structural: variants must match, and
+payload variants then compare their active payloads. Records are structural as
+well, comparing fields in declaration order. The capability is derived
+recursively, so an enum carrying numbers, strings, other equatable enums, or
+equatable records needs no declaration or implementation boilerplate. A
+comparison is rejected at compile time with the field or variant path when a
+contained type, such as an array, does not yet support equality.
+
+## Methods
+
+A function can belong to a type by qualifying its name. The receiver is
+available as the implicit, statically typed `self` parameter.
+
+```text
+fn LevelOrScene.isFirst() -> bool {
+    return match self {
+        LevelOrScene.Level(level) => level == 0,
+        LevelOrScene.Scene(scene) => scene == "Shrine01"
+    }
+}
+
+if game.location.isFirst() {
+    print("First level")
+}
+```
+
+Methods can have additional typed parameters and may be invoked through nested
+record paths. They use the same functions and Wasm call instructions as global
+helpers; method syntax only provides type-directed organization and an implicit
+receiver.
+
+## Arrays
+
+`Array<T>` is a mutable, fixed-length WebAssembly GC array. Each element type is
+monomorphized into a concrete GC array type. Non-empty literals infer their
+element type, while empty literals need an annotation or another expected type.
+
+```text
+let bytes: Array<u8> = [0x48, 0x00, 0x01]
+let inferred = [1, 2, 3] // Array<i32>
+let empty: Array<u16> = []
+
+bytes.set(1, 0x8b)
+let opcode = bytes.get(1)
+let count = bytes.length()
+```
+
+`length()` returns `u32`, `get(index)` returns `T`, and `set(index, value)`
+mutates the selected element. Wasm performs bounds checks. Arrays can contain
+records, enums, strings, and other arrays, and can themselves be stored in
+records or continuation frames. This is the standard buffer representation for
+process reads, signature patterns, UTF-16 units, and metadata collections.
+
+## Settings
+
+```text
+enum CaptureMode {
+    WindowTitle
+    ExecutableName
+    FullPath
+}
+
+settings {
+    /// Options used during normal operation.
+    "General" {
+        /// Can be changed while the splitter is running.
+        "Enable Auto Splitting"
+            => enableAutoSplitting: true
+
+        /// Chooses how the target application is identified.
+        "Capture Source"
+            => captureMode: choice {
+                "Window Title" => CaptureMode.WindowTitle
+                "Executable Name" => CaptureMode.ExecutableName default
+                "Full Path" => CaptureMode.FullPath
+            }
+
+        /// Files used by the autosplitter.
+        "Files" {
+            /// Accepts image and JSON layout files.
+            "Layout File" => layoutFile: file {
+                "Images" => "*.png *.jpg"
+                _ => "*.json"
+                mime => "image/*"
+            }
+        }
+    }
+}
+```
+
+Quoted blocks create settings titles. Nesting determines their heading level.
+Consecutive `///` documentation comments immediately before a title or setting
+become its tooltip. Lines in the same paragraph are joined with spaces; empty
+`///` lines preserve paragraph breaks. Ordinary `//` comments remain regular
+comments and do not become GUI text.
+
+A boolean setting infers its type from `true` or `false`. A `choice` is backed
+by a payloadless enum, so matching it is exhaustive and type checked. A `file`
+setting is a `String` and can declare named glob filters, an unnamed fallback
+filter, and MIME filters.
+
+Controls are registered during `_start`. At the beginning of every exported
+tick, including detached ticks, the compiler loads the current host settings
+map. User code sees the freshly decoded values through `settings`; the values
+from the preceding tick are available through `oldSettings` for change
+detection. Missing host entries use their declared defaults (or an empty string
+for a file setting). Misspelled settings and invalid choice variants are
+compile-time errors.
+
+The older compact boolean form remains accepted:
+
+```text
+settings {
+    splitBosses: bool = true, "Split after every boss"
+}
+```
+
+## Actions
+
+`onDetached` runs once when the runtime enters the detached state: once initially,
+then once immediately each time an attached process closes. Attachment retries
+do not rerun it. This makes detached-state policy explicit in the script:
+
+```text
+onDetached {
+    setTickRate(1.0)
+}
+```
+
+```text
+start {
+    return current.level == 1;
+}
+
+split {
+    return current.level != old.level;
+}
+
+reset {
+    return current.level == 0;
+}
+
+isLoading {
+    return current.loading;
+}
+
+gameTime {
+    return Duration.fromFrames(current.frames, 60);
+}
+```
+
+Every action may fall through or use a bare `return`; the runtime supplies its
+domain default:
+
+| Action | Fallthrough result | Runtime meaning |
+| --- | --- | --- |
+| `start`, `split`, `reset` | `false` | Do not perform the timer action |
+| `isLoading` | `None` | Leave the current game-time pause state unchanged |
+| `gameTime` | `None` | Do not set a new game time |
+
+`None` is an explicit return value only for `isLoading` and `gameTime`, where it
+represents a real third state. It is deliberately rejected in `start`, `split`,
+and `reset`; those blocks are simply boolean and default to `false`.
+`gameTime` otherwise returns a `Duration`, constructed with either
+`Duration.fromFrames(i64, i64)` or `Duration.fromParts(i64, i32)`.
+`Duration.fromSeconds(f32)` performs the safe game-time conversion used by
+Unity timers. `whileAttached` returns nothing and runs before timer actions on
+every attached tick. `onDetached` also returns nothing.
+
+## Discovered state and watchers
+
+An `at` field retains the compact static pointer-path syntax. A state field may
+instead use a typed expression, allowing `onAttach` to discover Unity roots and
+field offsets once and the state DSL to read them every tick:
+
+```text
+let manager = 0
+let pointsOffset = 0
+
+state "game.exe" {
+    points: i32 = process.read(manager.offset(pointsOffset))
+}
+```
+
+Every state expression produces a `T!`: a plain value is lifted automatically,
+while a process read already returns a result. State refreshes are atomic: the
+runtime unwraps all field results into a fresh GC snapshot and only then rotates
+`current` and `old`. If any field returns an error, the entire tick is skipped,
+matching ASR `Watcher` behavior and preventing partially updated values from
+triggering actions.
+
+## Structured async initialization
+
+`onAttach` is inherently suspending; it does not need an `async` modifier.
+
+```text
+onAttach {
+    let expectedVersion: u32 = 1
+    let gameAssembly = await process.module("GameAssembly.dll")
+    let marker = await gameAssembly.scan(sig"48 8B ?? B? 00")
+    if expectedVersion == 1 && marker != 0 {
+        print("Initialization finished")
+    }
+}
+```
+
+Suspending operations are polled once per runtime tick until they complete.
+State reads and timer actions remain gated while initialization is pending. If
+the process closes at any suspension point, the generated process-lifetime
+scope cancels the initializer, resets it, and starts fresh with the next
+attached process. This is the language-level counterpart to ASR's
+`until_closes`, without requiring scripts to manually write the outer
+attach/cancellation loops.
+
+`retry expression` is separate from `await`: it accepts any ordinary `T!`
+expression, evaluates it once per update, and yields the contained `T` when it
+succeeds. An error keeps the suspension pending. Because `retry` is control
+flow rather than a standard-library function, it works equally well through a
+user helper whose Result type and value type are inferred:
+
+```text
+fn readMarker() {
+    return process.read.i32(0x3000)
+}
+
+onAttach {
+    let marker = retry readMarker()
+    print(`marker {marker}`)
+}
+```
+
+`await nextTick()` is the basic scheduling primitive. It always suspends once
+and resumes on the following attached-process update. It is useful when a game
+needs one frame to publish metadata after another awaited discovery:
+
+```text
+let gameAssembly = await process.module("GameAssembly.dll")
+await nextTick()
+let marker = await gameAssembly.scan(sig"48 8B ?? ??")
+```
+
+Like every `onAttach` suspension, a pending next-tick continuation is discarded
+if the process closes.
+
+`onAttach` supports the same variables, assignments, expressions, calls, and
+conditional control flow as other action blocks, including suspensions nested
+in `if`, `else if`, and `else` branches. Locals that live across a suspension
+are stored in a compiler-generated WebAssembly GC continuation frame;
+values whose next use is preceded by another assignment stay ordinary Wasm
+locals. Each suspension has a dedicated poll state, so conditions and side effects
+before a pending operation are not replayed on the next tick. A successful poll
+continues through the selected branch and rejoins statements after it.
+
+`process.module(name)` produces a `Module` with `address: address` and
+`size: u64`. An awaited result is stored in the GC continuation frame only when
+a later suspension segment uses it. A signature literal is distinct from
+`String`: its nibbles are checked and converted to needle/mask bytes at compile
+time.
+
+```text
+let code = await process.module("GameAssembly.dll")
+let matchAddress = await code.scan(sig"48 8B ?? ?? B? 00")
+```
+
+`?` may replace either nibble, so `??` matches any byte and `B?` matches any
+byte whose high nibble is `B`. Module scans read overlapping 4 KiB chunks and
+therefore find patterns crossing page boundaries. A missing pattern suspends
+and retries on the next tick; process closure cancels the whole initializer.
+
+## Typed process memory
+
+`process.read(address)` infers its exact memory representation from an
+annotation, state-field usage, argument, fallback, or other surrounding type
+constraint. A synchronous read returns `T!`, so failure must be handled with
+`else`, propagated, or passed directly to a state field. Retrying the same call
+re-evaluates it on later ticks and yields `T` directly. `retry` responds to the
+Result state only; it does not invent a separate sentinel value for failure.
+
+```text
+let mode: i32 = retry process.read(object + 0x10)
+let elapsed: f32 = process.read(object + 0x18) else 0.0
+let next: address = retry process.read(object + 0x20)
+```
+
+Named `MemoryReadable` records use the same call. The runtime performs one host
+read for the complete naturally aligned record, then constructs its immutable
+WebAssembly GC value locally. Nested readable records are decoded recursively,
+so a state snapshot cannot observe a torn mixture of individually read fields.
+
+```text
+record LevelTimeParts {
+    minutes: f32
+    seconds: f32
+    hundredths: f32
+}
+
+state "game.exe" {
+    levelTimeParts: LevelTimeParts = process.read(timer.offset(levelTimeOffset))
+}
+```
+
+When no context determines the representation, add an annotation or use an
+explicit suffix such as `process.read.u8(address)`. The supported suffixes are
+`bool`, all fixed-width integer types, `f32`, `f64`, and `address`. Named records
+are selected with an annotation or other expected-type context. An ambiguous
+generic read produces a diagnostic showing both fixes. `address` is nominal
+rather than an alias for `u64`, preventing a module size or counter from being
+passed where a target pointer is required.
+
+`process.follow(base, offsets)` reads a non-null 64-bit pointer at every
+successive `current + offset` location. `process.readRelative32(location)`
+decodes the common x86-64 RIP-relative form as `location + 4 + i32(location)`.
+Both return `address!`. Use `else` or `?` for a one-shot attempt, or `retry` in
+`onAttach` to poll until they succeed.
+
+```text
+let object = retry process.follow(module.address, [0x10, 0x28])
+let target = retry process.readRelative32(instruction + 0x3)
+let found = await process.scan(target, 0x200, sig"48 8B ?? ??")
+```
+
+`print` is a regular typed builtin available in every action block and writes
+through the runtime debug-message API. Its argument is any `String` expression,
+not only a literal. Strings use content equality with `==` and `!=`, and
+`String.length(value)` returns their UTF-8 byte length. A message after the final await in
+`onAttach` therefore prints once per successful process attachment, while a
+message in `whileAttached` prints every attached tick.
+
+`process.read.managedString(address, maxLength)` reads a bounded IL2CPP managed
+string, decodes UTF-16 (including surrogate pairs), and returns a GC UTF-8
+`String!`. Memory-access failures are ordinary errors that can be handled with
+`else` or `?`, or polled with `retry` during attachment. The unit limit bounds
+decoding, and malformed surrogate sequences become the Unicode replacement
+character.
+
+JavaScript-inspired template strings use backticks and `{expression}`, without
+JavaScript's `$` marker. Existing strings are inserted directly. Every other
+interpolated value is converted by the same rules as `value as String`; integer
+widths and `address` are currently supported, while values without a String cast
+are compile-time errors. Template strings may contain multiple interpolations,
+nested expressions, and newlines. Literal braces are written as `\{` and `\}`.
+
+```text
+let level = `{stage}-{act}`
+let levelTime = `{minutes as u32}:{twoDigits(seconds as u32)}`
+```
+
+`String.concat` remains available as the lower-level collection operation.
+`setVariable(key, value)`, `timer.state()`, and `setTickRate(f64)` expose the
+corresponding ASR facilities without linear-memory pointers in source code.
+`timer.state()` returns `TimerState`, a
+compiler-provided enum with `NotRunning`, `Running`, `Paused`, `Ended`, and
+`Unknown`. Match it like any other enum; the raw host integer is not visible to
+source code.
+
+The generated loop follows this order:
+
+1. Attach to the configured process, or return and retry next tick.
+2. Detect a closed process, detach, and return.
+3. Rotate and refresh state.
+4. Run `whileAttached`.
+5. If the timer has not started, evaluate `start`.
+6. If it is running or paused, apply `isLoading`, then `gameTime`, then `reset`;
+   evaluate `split` only when reset did not trigger.
+
+## Why GC and linear memory both appear
+
+Long-lived language values use WebAssembly GC. Today, the Auto Splitting Runtime
+ABI represents host strings and process read buffers as `(pointer, length)` pairs
+in exported linear memory. SplitScript therefore keeps a small memory page for
+the host boundary and scratch reads. This is an ABI adapter, not the language's
+object model.
+
+Future arrays, strings, user records, closures, and generic collections can all
+be represented as GC values without changing the host ABI.

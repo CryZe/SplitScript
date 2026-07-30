@@ -1,0 +1,77 @@
+state "game.exe" {}
+
+fn triangular(limit: i32) -> i32 {
+    let index = 0
+    let total = 0
+    while index < limit {
+        index += 1
+        total += index
+    }
+    return total
+}
+
+fn nestedControlFlow() -> i32 {
+    let outer = 0
+    let score = 0
+    let missing: i32? = None
+    while outer < 4 {
+        outer += 1
+        let selected = if outer == 2 {
+            missing else continue
+        } else {
+            outer
+        }
+
+        let inner = 0
+        while inner < 5 {
+            inner += 1
+            let innerValue = match inner {
+                3 => missing else break,
+                _ => inner
+            }
+            score += selected * 10 + innerValue
+        }
+    }
+    return score
+}
+
+fn shortCircuitControl() -> i32 {
+    let index = 0
+    let total = 0
+    let missing: bool? = None
+    while index < 3 {
+        index += 1
+        if index == 2 && (missing else continue) {
+            total += 100
+        }
+        total += index
+    }
+    return total
+}
+
+fn resultControl() -> i32 {
+    let index = 0
+    let total = 0
+    let failure: i32! = Err("missing")
+    while index < 3 {
+        index += 1
+        let candidate: i32! = if index == 2 { failure } else { index }
+        total += candidate else continue
+    }
+    return total
+}
+
+onAttach {
+    let initializationPass = 0
+    while initializationPass < 3 {
+        initializationPass += 1
+        if initializationPass < 3 {
+            continue
+        }
+        break
+    }
+}
+
+whileAttached {
+    setVariable("While Loop", `{triangular(5)},{nestedControlFlow()},{shortCircuitControl()},{resultControl()}`)
+}

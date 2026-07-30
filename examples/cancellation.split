@@ -1,0 +1,20 @@
+state "game.exe" {}
+
+fn readMarker() {
+    return process.read.i32(0x3000)
+}
+
+onAttach {
+    let first = await process.module("First.dll")
+    if first.address != 0 {
+        print("entered branch")
+        let second = await process.module("Second.dll")
+        print(`ready {first.address}:{second.address}`)
+        print("before next tick")
+        await nextTick()
+        print("after next tick")
+        let marker = retry readMarker()
+        print(`marker {marker}`)
+    }
+    print("finished")
+}

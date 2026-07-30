@@ -1,0 +1,78 @@
+state ["Lunistice.exe", "Lunistice-Demo.exe"] {}
+
+enum LevelOrScene {
+    Level(i32)
+    Scene(String)
+}
+
+record Greeting {
+    version: u32
+    message: String
+    location: LevelOrScene
+    signature: Array<u8>
+}
+
+fn LevelOrScene.isFirst() {
+    return match self {
+        LevelOrScene.Level(level) => level == 0,
+        LevelOrScene.Scene(scene) => scene == "Shrine01"
+    }
+}
+
+fn greetingIsValid(greeting: Greeting) {
+    greeting.signature.set(1, 0x8b)
+    return greeting.version == 1
+        && String.length(greeting.message) == 30
+        && greeting.location.isFirst()
+        && greeting.signature.length() == 3
+        && greeting.signature.get(0) == 0x48
+        && greeting.signature.get(1) == 0x8b
+}
+
+onAttach {
+    let greeting = Greeting {
+        version: 1,
+        message: "Hello, world from SplitScript!",
+        location: LevelOrScene.Scene("Shrine01"),
+        signature: [0x48, 0x00, 0x01]
+    }
+    let gameAssembly = await process.module("GameAssembly.dll")
+    let marker = await gameAssembly.scan(sig"48 8B ?? 89")
+    let rangedMarker = await process.scan(
+        gameAssembly.address + 0xff0,
+        0x20,
+        sig"48 8B ?? 89"
+    )
+    let object = retry process.follow(gameAssembly.address, [0x100, 0x20])
+    let answer = retry process.read(object + 0x10)
+    let relative = retry process.readRelative32(gameAssembly.address + 0x400)
+    let unity = await Unity.il2cpp(2020)
+    let image = await unity.image("Assembly-CSharp")
+    let gameManager = await image.class("GameManager")
+    let gameManagerInstance = await gameManager.staticInstance(["Instance", "_instance"])
+    let managedScene = retry process.read.managedString(0x2800, 16)
+    let formatted = `{-42}:{7.9 as u32}`
+    setTickRate(120.0)
+    setVariable("Probe", formatted)
+
+    if (gameAssembly.address == 0x1000
+        && gameAssembly.size == 0x2000
+        && marker == 0x1ffe
+        && rangedMarker == marker
+        && object == 0x1300
+        && answer == 42
+        && relative == 0x1500
+        && unity.assemblies == 0x1800
+        && unity.typeInfoTable == 0x1900
+        && unity.version == 2020
+        && unity.pointerSize == 8
+        && image.address == 0x1b00
+        && gameManager.address == 0x1e00
+        && gameManagerInstance == 0x2700
+        && managedScene == "Shrine01 🦊"
+        && formatted == "-42:7"
+        && (process.read.u8(marker) else 0) == 0x48
+        && greetingIsValid(greeting)) {
+        print(greeting.message)
+    }
+}

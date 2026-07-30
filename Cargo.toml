@@ -1,0 +1,21 @@
+[package]
+name = "splitscript"
+version = "0.1.0"
+edition = "2024"
+description = "A statically typed autosplitter language targeting WebAssembly GC"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+serde_json = "1.0.151"
+wasm-encoder = "0.254.0"
+
+[dev-dependencies]
+wasmparser = "0.254.0"
+
+[[bin]]
+name = "splitc"
+path = "src/main.rs"
+
+[[bin]]
+name = "splitls"
+path = "src/bin/splitls.rs"

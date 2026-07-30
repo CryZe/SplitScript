@@ -1,0 +1,89 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build splitls",
+      "type": "process",
+      "command": "cargo",
+      "args": [
+        "build",
+        "--bin",
+        "splitls"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "compile SplitScript VS Code extension",
+      "type": "process",
+      "command": "npm",
+      "args": [
+        "run",
+        "compile"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/editors/vscode"
+      },
+      "problemMatcher": "$tsc"
+    },
+    {
+      "label": "build SplitScript extension",
+      "dependsOrder": "parallel",
+      "dependsOn": [
+        "build splitls",
+        "compile SplitScript VS Code extension"
+      ],
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "build release current SplitScript",
+      "type": "process",
+      "command": "cargo",
+      "args": [
+        "run",
+        "--quiet",
+        "--bin",
+        "splitc",
+        "--",
+        "${file}",
+        "-o",
+        "${fileDirname}/${fileBasenameNoExtension}.wasm",
+        "--profile",
+        "release"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "watch current SplitScript",
+      "type": "process",
+      "command": "cargo",
+      "args": [
+        "run",
+        "--quiet",
+        "--bin",
+        "splitc",
+        "--",
+        "watch",
+        "${file}",
+        "-o",
+        "${fileDirname}/${fileBasenameNoExtension}.wasm",
+        "--profile",
+        "debug"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": []
+    }
+  ]
+}

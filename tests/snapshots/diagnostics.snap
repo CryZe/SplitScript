@@ -1,0 +1,3 @@
+diagnostics.split:5:30: error[SS0003]: types do not match: `String` and `i32`
+diagnostics.split:6:30: error[SS0003]: type `bool` does not satisfy the inferred constraints
+diagnostics.split:7:27: error[SS0003]: unknown variable `unknown`

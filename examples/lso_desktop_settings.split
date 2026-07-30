@@ -1,0 +1,86 @@
+// Port of one-offs/lso-desktop-testing-asr. This intentionally exercises the
+// complete settings GUI rather than game-memory integration.
+state "explorer.exe" {}
+
+enum CaptureMode {
+    WindowTitle
+    ExecutableName
+    FullPath
+}
+
+settings {
+    /// Core options that apply to normal use.
+    "General" {
+        /// Turns the example split logic on or off without unloading
+        /// the auto splitter.
+        "Enable Auto Splitting" => enableAutoSplitting: true
+
+        /// Chooses how the target application should be identified.
+        "Capture Source" => captureMode: choice {
+            "Window Title" => CaptureMode.WindowTitle
+            "Executable Name" => CaptureMode.ExecutableName default
+            "Full Path" => CaptureMode.FullPath
+        }
+
+        /// File-based inputs used by the auto splitter.
+        "Paths" {
+            /// Select an image or text file to exercise file selection
+            /// and filter handling.
+            "Layout File" => layoutFile: file {
+                "Image files" => "*.png *.jpg *.jpeg *.webp"
+                "Text files" => "*.txt *.md"
+                _ => "*.json"
+                mime => "image/*"
+                mime => "text/plain"
+            }
+        }
+
+        /// Settings that demonstrate deeper title nesting and state tracking.
+        "Advanced" {
+            /// Tracks the value between updates so changes can be detected.
+            "Live Reload" => liveReload: true
+
+            /// Lower-level example settings for testing the GUI hierarchy.
+            "Diagnostics" {
+                /// Enables extra logging intended for debugging and validation.
+                "Verbose Logging" => verboseLogging: false
+            }
+        }
+    }
+}
+
+fn captureModeName(mode: CaptureMode) {
+    return match mode {
+        CaptureMode.WindowTitle => "Window Title",
+        CaptureMode.ExecutableName => "Executable Name",
+        CaptureMode.FullPath => "Full Path"
+    }
+}
+
+fn enabledName(value) {
+    return match value {
+        true => "enabled",
+        false => "disabled"
+    }
+}
+
+onAttach {
+    print("Hello, World!")
+}
+
+whileAttached {
+    setVariable("Auto Splitting", enabledName(settings.enableAutoSplitting))
+    setVariable("Capture Source", captureModeName(settings.captureMode))
+    setVariable("Layout File", settings.layoutFile)
+
+    if settings.liveReload != oldSettings.liveReload {
+        print(`Live Reload is now {enabledName(settings.liveReload)}`)
+    }
+    if settings.verboseLogging {
+        print("Verbose settings diagnostics tick")
+    }
+}
+
+split {
+    return settings.enableAutoSplitting && false
+}

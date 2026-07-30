@@ -1,0 +1,180 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "SplitScript",
+  "scopeName": "source.splitscript",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#declarations"
+    },
+    {
+      "include": "#language"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#operators"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.documentation.splitscript",
+          "match": "///.*$"
+        },
+        {
+          "name": "comment.line.double-slash.splitscript",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.splitscript",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.signature.splitscript",
+          "match": "\\bsig\"(?:\\\\.|[^\"\\\\])*\""
+        },
+        {
+          "name": "string.quoted.double.splitscript",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.splitscript",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.interpolated.splitscript",
+          "begin": "`",
+          "end": "`",
+          "patterns": [
+            {
+              "name": "constant.character.escape.splitscript",
+              "match": "\\\\."
+            },
+            {
+              "name": "meta.interpolation.splitscript",
+              "begin": "\\{",
+              "end": "\\}",
+              "patterns": [
+                {
+                  "include": "$self"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(record|enum)\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.splitscript"
+            },
+            "2": {
+              "name": "entity.name.type.splitscript"
+            }
+          }
+        },
+        {
+          "match": "\\b(fn)\\s+(?:([A-Za-z_$][A-Za-z0-9_$]*)\\.)?([A-Za-z_$][A-Za-z0-9_$]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.function.splitscript"
+            },
+            "2": {
+              "name": "entity.name.type.splitscript"
+            },
+            "3": {
+              "name": "entity.name.function.splitscript"
+            }
+          }
+        },
+        {
+          "match": "\\b(let)\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.variable.splitscript"
+            },
+            "2": {
+              "name": "variable.other.readwrite.splitscript"
+            }
+          }
+        },
+        {
+          "match": "=>\\s*([A-Za-z_$][A-Za-z0-9_$]*)",
+          "captures": {
+            "1": {
+              "name": "variable.other.property.splitscript"
+            }
+          }
+        }
+      ]
+    },
+    "language": {
+      "patterns": [
+        {
+          "name": "keyword.control.splitscript",
+          "match": "\\b(if|else|while|break|continue|match|return|throw|await|retry|as|debug)\\b"
+        },
+        {
+          "name": "keyword.declaration.splitscript",
+          "match": "\\b(state|settings|record|enum|fn|let)\\b"
+        },
+        {
+          "name": "keyword.other.lifecycle.splitscript",
+          "match": "\\b(onDetached|onAttach|whileAttached|start|split|reset|isLoading|gameTime)\\b"
+        },
+        {
+          "name": "storage.type.splitscript",
+          "match": "\\b(bool|i8|u8|i16|u16|i32|u32|i64|u64|address|Address|f32|f64|string|String|Duration|Signature|Array|TimerState)\\b"
+        },
+        {
+          "name": "constant.language.splitscript",
+          "match": "\\b(true|false|None|Some|Success|Err)\\b"
+        },
+        {
+          "name": "variable.language.splitscript",
+          "match": "\\b(self|current|old|settings|oldSettings)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.hex.splitscript",
+          "match": "\\b0[xX][0-9A-Fa-f_]+(?:i8|u8|i16|u16|i32|u32|i64|u64|address)?\\b"
+        },
+        {
+          "name": "constant.numeric.splitscript",
+          "match": "\\b[0-9][0-9_]*(?:\\.[0-9][0-9_]*)?(?:[eE][+-]?[0-9_]+)?(?:i8|u8|i16|u16|i32|u32|i64|u64|f32|f64|address)?\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.splitscript",
+          "match": "\\?\\?|&&|\\|\\||==|!=|<=|>=|<<|>>|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|=>|->|[+\\-*/%&|^!~<>=?]"
+        }
+      ]
+    }
+  }
+}

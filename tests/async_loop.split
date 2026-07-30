@@ -1,0 +1,48 @@
+state "game.exe" {}
+
+fn readMarker() {
+    return process.read.i32(0x3000)
+}
+
+onAttach {
+    let index = 0
+    let missing: i32? = None
+    while index < 5 {
+        index += 1
+        await nextTick()
+        if index == 2 {
+            continue
+        }
+        let value = if index == 4 {
+            missing else break
+        } else {
+            index
+        }
+        print(`value {value}`)
+    }
+
+    let retryIndex = 0
+    while retryIndex < 2 {
+        let marker = retry readMarker()
+        print(`retry {retryIndex}:{marker}`)
+        retryIndex += 1
+    }
+
+    let outer = 0
+    while outer < 2 {
+        outer += 1
+        let inner = 0
+        while inner < 3 {
+            inner += 1
+            await nextTick()
+            if inner == 2 {
+                continue
+            }
+            if inner == 3 {
+                break
+            }
+            print(`nested {outer}:{inner}`)
+        }
+    }
+    print("done")
+}

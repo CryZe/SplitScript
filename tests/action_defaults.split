@@ -1,0 +1,21 @@
+state "game.exe" {}
+
+let explicitNull = false
+
+whileAttached {
+    explicitNull = !explicitNull
+}
+
+start {}
+split {}
+reset {}
+isLoading {
+    if (explicitNull) {
+        return None
+    }
+}
+gameTime {
+    if (explicitNull) {
+        return None
+    }
+}

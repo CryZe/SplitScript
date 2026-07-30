@@ -1,0 +1,48 @@
+state "game.exe" {}
+
+fn describeOptional(value: i32?) -> String {
+    return match value {
+        Some(present) if present > 10 => "large",
+        Some(present) => present as String,
+        None => "none"
+    }
+}
+
+fn describeResult(value: i32!) -> String {
+    return match value {
+        Ok(success) => success as String,
+        Err(error) => `error {error}`
+    }
+}
+
+fn hasValue(value: i32?) -> bool {
+    return match value {
+        Some(_) => true,
+        None => false
+    }
+}
+
+fn succeeded(value: i32!) -> bool {
+    return match value {
+        Ok(_) => true,
+        Err(_) => false
+    }
+}
+
+whileAttached {
+    let none = describeOptional(None)
+    let present = describeOptional(Some(7))
+    let large = describeOptional(Some(12))
+    let failed = describeResult(Err("boom"))
+    let success = describeResult(Ok(9))
+    let inferredOptional = Some(3)
+    let inferredPresent = inferredOptional else 0
+    let inferredResult = Ok(4)
+    let inferredSuccess = inferredResult else 0
+    let states = if hasValue(inferredOptional) && succeeded(inferredResult) {
+        "true"
+    } else {
+        "false"
+    }
+    setVariable("Wrapper Match", `{none},{present},{large},{failed},{success},{inferredPresent},{inferredSuccess},{states}`)
+}

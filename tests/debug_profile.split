@@ -1,0 +1,40 @@
+state "game.exe" {}
+
+record DebugValue {
+    value: i32
+}
+
+debug let debugBase = 40
+
+debug fn debugMessage() {
+    print(`debug function {debugBase + 2}`)
+}
+
+debug fn DebugValue.trace() {
+    print(`debug method {self.value}`)
+}
+
+onAttach {
+    debug await nextTick()
+    debug let attachValue = debugBase + 1
+    debug print(`debug binding {attachValue}`)
+    debug debugMessage()
+}
+
+whileAttached {
+    let count = 0
+    let debugValue = DebugValue { value: 7 }
+    debug let debugCount = debugBase + 2
+    debug count += 1
+    debug if count == 1 {
+        print("debug conditional")
+    }
+    debug print("debug statement")
+    debug print(`debug local {debugCount}`)
+    debug debugMessage()
+    debug debugValue.trace()
+    debug while false {
+        print("debug loop")
+    }
+    setVariable("Profile Value", count as String)
+}

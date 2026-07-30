@@ -1,0 +1,59 @@
+use std::borrow::Cow;
+
+use wasm_encoder::{
+    CodeSection, CustomSection, ExportKind, ExportSection, FunctionSection, GlobalSection,
+    ImportSection, MemorySection, MemoryType, Module, TypeSection,
+};
+
+use super::data_plan::StaticData;
+
+pub(super) struct Sections {
+    pub types: TypeSection,
+    pub imports: ImportSection,
+    pub functions: FunctionSection,
+    pub globals: GlobalSection,
+    pub codes: CodeSection,
+}
+
+pub(super) fn finish(
+    sections: Sections,
+    data: &StaticData,
+    start_function: u32,
+    update_function: u32,
+) -> Vec<u8> {
+    let Sections {
+        types,
+        imports,
+        functions,
+        globals,
+        codes,
+    } = sections;
+    let mut memories = MemorySection::new();
+    memories.memory(MemoryType {
+        minimum: 1,
+        maximum: None,
+        memory64: false,
+        shared: false,
+        page_size_log2: None,
+    });
+    let mut exports = ExportSection::new();
+    exports.export("memory", ExportKind::Memory, 0);
+    exports.export("_start", ExportKind::Func, start_function);
+    exports.export("update", ExportKind::Func, update_function);
+    let data = data.encode();
+
+    let mut module = Module::new();
+    module.section(&types);
+    module.section(&imports);
+    module.section(&functions);
+    module.section(&memories);
+    module.section(&globals);
+    module.section(&exports);
+    module.section(&codes);
+    module.section(&data);
+    module.section(&CustomSection {
+        name: Cow::Borrowed("splitscript"),
+        data: Cow::Borrowed(b"version=0.1;target=wasm-gc;abi=livesplit-asr"),
+    });
+    module.finish()
+}

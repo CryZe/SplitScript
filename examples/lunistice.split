@@ -1,0 +1,258 @@
+// Lunistice's IL2CPP layout is discovered once per process lifetime. The
+// resulting roots and field offsets feed the expression-backed state block,
+// which rotates `current` and `old` snapshots automatically.
+enum LevelOrScene {
+    Level(i32)
+    Scene(String)
+}
+
+record LevelTimeParts {
+    minutes: f32
+    seconds: f32
+    hundredths: f32
+}
+
+fn bar() -> f32! {
+    return process.read(0x100)
+}
+
+state ["Lunistice.exe", "Lunistice-Demo.exe"] {
+    gameState = process.read(gameManagerInstance.offset(gameStateOffset))
+    points = process.read(gameManagerInstance.offset(pointsOffset))
+    deaths = process.read(gameManagerInstance.offset(deathsOffset))
+    levelOrScene = if isDlcDemo {
+        LevelOrScene.Scene(process.read.managedString(
+            process.read(gameManagerInstance.offset(levelOrSceneOffset))?,
+            16
+        )?)
+    } else {
+        LevelOrScene.Level(process.read(
+            gameManagerInstance.offset(levelOrSceneOffset)
+        )?)
+    }
+
+    levelTime = process.read(timerInstance.offset(levelTimeOffset))
+    levelTimeParts = process.read(timerInstance.offset(levelTimeVectorOffset))
+    timerStopped = process.read(timerInstance.offset(timerStoppedOffset))
+    character = process.read.u32(timerInstance.offset(characterOffset))
+}
+
+let gameManagerInstance = 0
+let timerInstance = 0
+let isDlcDemo = false
+
+let gameStateOffset = 0
+let pointsOffset = 0
+let deathsOffset = 0
+let levelOrSceneOffset = 0
+let levelTimeOffset = 0
+let levelTimeVectorOffset = 0
+let timerStoppedOffset = 0
+let characterOffset = 0
+
+let runTimeSeconds = 0.0
+let beyondFirstLevel = false
+let lastTimerState = TimerState.NotRunning
+
+fn isFirstLevel(levelOrScene) {
+    return match levelOrScene {
+        LevelOrScene.Level(level) => level == 0,
+        LevelOrScene.Scene(scene) => scene == "Shrine01"
+    }
+}
+
+fn isFinalBaseLevel(levelOrScene) {
+    return match levelOrScene {
+        LevelOrScene.Level(level) => level >= 13,
+        LevelOrScene.Scene(scene) => false
+    }
+}
+
+fn isBaseCredits(levelOrScene) {
+    return match levelOrScene {
+        LevelOrScene.Level(level) => level == 2,
+        LevelOrScene.Scene(scene) => false
+    }
+}
+
+fn twoDigits(value) {
+    if value < 10 {
+        return `0{value}`
+    }
+    return value as String
+}
+
+fn levelTimeText(parts) {
+    return `{parts.minutes as u32}:{twoDigits(parts.seconds as u32)}.{twoDigits(parts.hundredths as u32)}`
+}
+
+fn levelText(level) {
+    let uncappedStage = level / 2 + 1
+    let stage = uncappedStage.min(7)
+    let act = if level == 14 {
+        "X"
+    } else if level & 1 == 0 {
+        "1"
+    } else {
+        "2"
+    }
+    return `{stage}-{act}`
+}
+
+fn levelOrSceneVariable(levelOrScene) {
+    return match levelOrScene {
+        LevelOrScene.Level(level) => "Level",
+        LevelOrScene.Scene(scene) => "Scene"
+    }
+}
+
+fn levelOrSceneText(levelOrScene) {
+    return match levelOrScene {
+        LevelOrScene.Level(level) => levelText(level),
+        LevelOrScene.Scene(scene) => scene
+    }
+}
+
+fn characterName(character, dlcDemo) {
+    return match character {
+        0 => "Hana",
+        1 => "Toree",
+        2 => "Toukie",
+        3 if dlcDemo => "Accel",
+        3 => "Erika",
+        4 if dlcDemo => "Five",
+        4 => "Lea",
+        5 if !dlcDemo => "Null",
+        6 if dlcDemo => "Cres",
+        7 if dlcDemo => "BoxBuddy",
+        _ => "Unknown"
+    }
+}
+
+fn someFn() {
+    return process.read(0x100)
+}
+
+onDetached {
+    print("Hello, World :)")
+    setTickRate(1.0)
+}
+
+settings {
+    /// Tooltip
+    "General" {
+        "Another bool" => anotherBool: false,
+        "A bool" => aBoolss: true,
+    }
+}
+
+onAttach {
+    let value: u32 = someFn() else 0
+    if settings.aBoolss {
+        value += 1
+    }
+    let unity = await Unity.il2cpp(2020)
+    debug print("Found IL2CPP")
+
+    let image = await unity.image("Assembly-CSharp")
+    debug print("Found Assembly-CSharp")
+
+    let gameManagerClass = await image.class("GameManager")
+    let foundGameManager = await gameManagerClass.staticInstance(["Instance"])
+    let gameStateField = await gameManagerClass.fieldAny(["gameState", "GameState"])
+    let foundPointsOffset = await gameManagerClass.field("_points")
+    let foundDeathsOffset = await gameManagerClass.field("_deaths")
+    let levelOrSceneField = await gameManagerClass.fieldAny(["currentLevel", "_currentScene"])
+
+    gameManagerInstance = foundGameManager
+    gameStateOffset = gameStateField.offset
+    pointsOffset = foundPointsOffset
+    deathsOffset = foundDeathsOffset
+    levelOrSceneOffset = levelOrSceneField.offset
+    isDlcDemo = levelOrSceneField.index == 1
+
+    debug if isDlcDemo {
+        print("Found GameManager (DLC Demo)")
+    } else {
+        print("Found GameManager (Base Game)")
+    }
+
+    let timerClass = await image.class("Timer")
+    let foundTimer = await timerClass.staticInstance(["Instance", "_instance"])
+    let foundLevelTimeOffset = await timerClass.field("currentLevelTime")
+    let foundLevelTimeVectorOffset = await timerClass.field("currentLevelTimeVector")
+    let foundTimerStoppedOffset = await timerClass.field("timerStopped")
+    let foundCharacterOffset = await timerClass.field("character")
+
+    timerInstance = foundTimer
+    levelTimeOffset = foundLevelTimeOffset
+    levelTimeVectorOffset = foundLevelTimeVectorOffset
+    timerStoppedOffset = foundTimerStoppedOffset
+    characterOffset = foundCharacterOffset
+
+    debug print("Found Timer")
+
+    setTickRate(120.0)
+}
+
+whileAttached {
+    let timerState = timer.state()
+    let timerStarted = lastTimerState == TimerState.NotRunning
+        && timerState != TimerState.NotRunning
+    if timerStarted {
+        runTimeSeconds = 0.0
+        beyondFirstLevel = false
+    }
+    lastTimerState = timerState
+
+    setVariable("Points", current.points as String)
+    setVariable("Resets", current.deaths as String)
+    setVariable("Level Time", levelTimeText(current.levelTimeParts))
+    setVariable(levelOrSceneVariable(current.levelOrScene), levelOrSceneText(current.levelOrScene))
+    setVariable("Character", characterName(current.character, isDlcDemo))
+
+    if current.levelTime < old.levelTime && beyondFirstLevel {
+        runTimeSeconds += old.levelTime
+    }
+}
+
+start {
+    if old.timerStopped != current.timerStopped
+        && !current.timerStopped
+        && isFirstLevel(current.levelOrScene)
+    {
+        runTimeSeconds = 0.0
+        beyondFirstLevel = false
+        return true
+    }
+}
+
+reset {
+    if current.levelTime < old.levelTime && !beyondFirstLevel {
+        runTimeSeconds = 0.0
+        beyondFirstLevel = false
+        return true
+    }
+}
+
+split {
+    let enteredResults = old.gameState != 6 && current.gameState == 6
+    let creditsTransition = !isDlcDemo
+        && isFinalBaseLevel(old.levelOrScene)
+        && isBaseCredits(current.levelOrScene)
+
+    if enteredResults || creditsTransition {
+        beyondFirstLevel = true
+        return true
+    }
+}
+
+// ASR pauses game time once the run starts and supplies the accumulated game
+// time explicitly. Returning true keeps LiveSplit's game-time clock paused.
+isLoading {
+    return true
+}
+
+gameTime {
+    return Duration.fromSeconds(runTimeSeconds + current.levelTime)
+}

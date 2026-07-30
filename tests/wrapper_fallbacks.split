@@ -1,0 +1,34 @@
+state "game.exe" {}
+
+fn choose(value: i32?) -> i32 {
+    return value else 41
+}
+
+fn propagate(value: i32!) -> i32! {
+    let unwrapped = value else return Err("propagated")
+    return unwrapped + 1
+}
+
+fn propagateWithQuestion(value: i32!) -> i32! {
+    return value? + 2
+}
+
+fn throwFailure() -> i32! {
+    throw "explicit failure"
+}
+
+whileAttached {
+    let empty = choose(None)
+    let present = choose(3)
+    let failedInput: i32! = Err("failed")
+    let failed = failedInput else 13
+    let propagatedFailure = propagate(Err("failed")) else 17
+    let propagatedSuccess = propagate(5) else 19
+    let questionFailure = propagateWithQuestion(Err("failed")) else 23
+    let questionSuccess = propagateWithQuestion(5) else 29
+    let thrown = throwFailure() else 31
+    setVariable(
+        "Fallbacks",
+        `{empty},{present},{failed},{propagatedFailure},{propagatedSuccess},{questionFailure},{questionSuccess},{thrown}`
+    )
+}

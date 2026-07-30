@@ -1,6 +1,7 @@
 //! Structured Wasm-IR block, assignment, expression, and intrinsic emission.
 
 use super::*;
+use crate::stdlib::RuntimeRepresentation;
 
 #[derive(Clone, Copy)]
 pub(super) enum LocalStorage<'a> {
@@ -120,7 +121,7 @@ impl LoopControl {
                 function
                     .instruction(&Instruction::I32Const(state.index() as i32))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: 0,
                     })
                     .instruction(&Instruction::Br(dispatcher_depth));
@@ -258,14 +259,14 @@ pub(super) fn compile_assignment(
             emit_async_frame_ref(function);
             if let Some(op) = op {
                 emit_async_frame_ref(function);
-                emit_typed_struct_get(function, ASYNC_FRAME_TYPE, field, ty);
+                emit_typed_struct_get(function, async_frame_type_index(), field, ty);
                 compile_expr(function, value, context);
                 emit_binary_instruction(function, op, ty);
             } else {
                 compile_expr(function, value, context);
             }
             function.instruction(&Instruction::StructSet {
-                struct_type_index: ASYNC_FRAME_TYPE,
+                struct_type_index: async_frame_type_index(),
                 field_index: field,
             });
         }
@@ -384,7 +385,7 @@ fn compile_resolved_path(
                     LocalStorage::Hybrid { frame, .. } if frame.contains_key(&value) => {
                         let (field, ty) = frame[&value];
                         emit_async_frame_ref(function);
-                        emit_typed_struct_get(function, ASYNC_FRAME_TYPE, field, ty);
+                        emit_typed_struct_get(function, async_frame_type_index(), field, ty);
                         ty
                     }
                     LocalStorage::Hybrid { wasm, .. } if wasm.contains_key(&value) => {
@@ -416,18 +417,26 @@ fn emit_path_fields(
 ) -> Type {
     for field in fields {
         let (struct_type_index, field_index, field_type) = match field {
-            ResolvedMember::BuiltinField(field) => match field {
-                BuiltinFieldId::ModuleAddress => (MODULE_TYPE, 0, Type::Address),
-                BuiltinFieldId::ModuleSize => (MODULE_TYPE, 1, Type::U64),
-                BuiltinFieldId::UnityModuleAssemblies => (UNITY_MODULE_TYPE, 0, Type::Address),
-                BuiltinFieldId::UnityModuleTypeInfoTable => (UNITY_MODULE_TYPE, 1, Type::Address),
-                BuiltinFieldId::UnityModuleVersion => (UNITY_MODULE_TYPE, 2, Type::U32),
-                BuiltinFieldId::UnityModulePointerSize => (UNITY_MODULE_TYPE, 3, Type::U32),
-                BuiltinFieldId::UnityImageAddress => (UNITY_IMAGE_TYPE, 0, Type::Address),
-                BuiltinFieldId::UnityClassAddress => (UNITY_CLASS_TYPE, 0, Type::Address),
-                BuiltinFieldId::UnityFieldOffset => (UNITY_FIELD_TYPE, 0, Type::U32),
-                BuiltinFieldId::UnityFieldIndex => (UNITY_FIELD_TYPE, 1, Type::U32),
-            },
+            ResolvedMember::StandardField(field) => {
+                let library = StandardLibrary::new();
+                let declaration = library.field(*field);
+                let owner = library.type_decl(declaration.owner);
+                let RuntimeRepresentation::GcStruct { .. } = owner.representation else {
+                    unreachable!("resolved standard field belongs to a GC struct")
+                };
+                let field_index = library
+                    .fields_of(owner.id)
+                    .position(|candidate| candidate.id == *field)
+                    .expect("declared standard field has a runtime slot")
+                    as u32;
+                let owner_type = Type::from_standard(declaration.owner);
+                debug_assert_eq!(value_type, owner_type);
+                (
+                    context.gc.index(owner_type),
+                    field_index,
+                    Type::from_declared(declaration.ty),
+                )
+            }
             ResolvedMember::RecordField(field) => {
                 let (record, field_index, field) = context
                     .records
@@ -477,7 +486,9 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
                 // null error complete the monomorphized result struct.
                 function
                     .instruction(&Instruction::I32Const(0))
-                    .instruction(&Instruction::RefNull(HeapType::Concrete(STRING_TYPE)))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(
+                        standard_gc_type_index(StdlibTypeId::String),
+                    )))
                     .instruction(&Instruction::StructNew(
                         context.gc.index(Type::Result(result)),
                     ));
@@ -501,8 +512,10 @@ fn compile_expr_unconverted(
             Type::Bool => {
                 function.instruction(&Instruction::I32Const(-1));
             }
-            Type::Duration => {
-                function.instruction(&Instruction::RefNull(HeapType::Concrete(DURATION_TYPE)));
+            Type::Standard(StdlibTypeId::Duration) => {
+                function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                    standard_gc_type_index(StdlibTypeId::Duration),
+                )));
             }
             Type::Option(option) => {
                 function.instruction(&Instruction::RefNull(HeapType::Concrete(
@@ -539,14 +552,22 @@ fn compile_expr_unconverted(
                             semantic_type(*source, context.semantics),
                             expression_type(*expression, context.wasm_ir, context.semantics)
                         );
-                        emit_cast(function, *expression, Type::String, context);
+                        emit_cast(
+                            function,
+                            *expression,
+                            Type::Standard(StdlibTypeId::String),
+                            context,
+                        );
                     }
                 }
             }
             let strings = context
                 .arrays
                 .iter()
-                .find(|array| array_element_type(array.id, context.semantics) == Type::String)
+                .find(|array| {
+                    array_element_type(array.id, context.semantics)
+                        == Type::Standard(StdlibTypeId::String)
+                })
                 .expect("interpolation creates its String array type");
             function.instruction(&Instruction::ArrayNewFixed {
                 array_type_index: context.gc.index(Type::Array(strings.id)),
@@ -593,35 +614,39 @@ fn compile_expr_unconverted(
             variant,
             payload,
         } => {
-            let declaration = context
-                .enums
-                .iter()
-                .find(|declaration| declaration.id == *enumeration)
-                .unwrap();
-            let selected = declaration
-                .variants
-                .iter()
-                .position(|declared| declared.id == *variant)
-                .unwrap();
+            let selected = enum_variant_index(*enumeration, *variant, context.enums);
             function.instruction(&Instruction::I32Const(selected as i32));
-            for (index, declared) in declaration.variants.iter().enumerate() {
-                if index == selected {
-                    if let Some(payload) = payload {
-                        compile_expr(function, *payload, context);
-                    } else {
+            match enumeration {
+                EnumTypeId::Source(enumeration) => {
+                    let declaration = context
+                        .enums
+                        .iter()
+                        .find(|declaration| declaration.id == *enumeration)
+                        .unwrap();
+                    for (index, declared) in declaration.variants.iter().enumerate() {
+                        if index == selected {
+                            if let Some(payload) = payload {
+                                compile_expr(function, *payload, context);
+                            } else {
+                                function.instruction(&Instruction::I32Const(0));
+                            }
+                        } else if let Some(payload_type) =
+                            enum_variant_payload(declared.id, context.semantics)
+                        {
+                            emit_default(function, payload_type, context.gc);
+                        } else {
+                            function.instruction(&Instruction::I32Const(0));
+                        }
+                    }
+                }
+                EnumTypeId::Standard(enumeration) => {
+                    debug_assert!(payload.is_none());
+                    for _ in StandardLibrary::new().variants_of(*enumeration) {
                         function.instruction(&Instruction::I32Const(0));
                     }
-                } else if let Some(payload_type) =
-                    enum_variant_payload(declared.id, context.semantics)
-                {
-                    emit_default(function, payload_type, context.gc);
-                } else {
-                    function.instruction(&Instruction::I32Const(0));
                 }
             }
-            function.instruction(&Instruction::StructNew(
-                context.gc.index(Type::Enum(*enumeration)),
-            ));
+            function.instruction(&Instruction::StructNew(context.gc.index(ty)));
         }
         wasm_ir::ExpressionKind::Path { root, members } => {
             let root = root.expect("lowerable paths have resolved value roots");
@@ -767,7 +792,7 @@ fn compile_expr_unconverted(
                         function,
                         context.gc.index(Type::Result(input_result)),
                         2,
-                        Type::String,
+                        Type::Standard(StdlibTypeId::String),
                     );
                 },
             );
@@ -800,16 +825,7 @@ fn compile_expr_unconverted(
                     binding,
                 } = &arm.pattern
                 {
-                    let declaration = context
-                        .enums
-                        .iter()
-                        .find(|declaration| declaration.id == *enumeration)
-                        .unwrap();
-                    let variant_index = declaration
-                        .variants
-                        .iter()
-                        .position(|declared| declared.id == *variant)
-                        .unwrap();
+                    let variant_index = enum_variant_index(*enumeration, *variant, context.enums);
                     Some((*enumeration, variant_index, *binding))
                 } else {
                     None
@@ -817,11 +833,11 @@ fn compile_expr_unconverted(
                 let binding =
                     match &arm.pattern {
                         wasm_ir::LoweredPattern::Enum { .. } => {
-                            let (enumeration, variant_index, binding) = enum_pattern.unwrap();
+                            let (_, variant_index, binding) = enum_pattern.unwrap();
                             binding.map(|binding| {
                                 (
                                     binding,
-                                    context.gc.index(Type::Enum(enumeration)),
+                                    context.gc.index(value_type),
                                     variant_index as u32 + 1,
                                 )
                             })
@@ -841,16 +857,11 @@ fn compile_expr_unconverted(
                 });
                 match &arm.pattern {
                     wasm_ir::LoweredPattern::Enum { .. } => {
-                        let (enumeration, variant_index, _) = enum_pattern.unwrap();
+                        let (_, variant_index, _) = enum_pattern.unwrap();
                         function
                             .instruction(&Instruction::LocalGet(value_local))
                             .instruction(&Instruction::RefAsNonNull);
-                        emit_typed_struct_get(
-                            function,
-                            context.gc.index(Type::Enum(enumeration)),
-                            0,
-                            Type::I32,
-                        );
+                        emit_typed_struct_get(function, context.gc.index(value_type), 0, Type::I32);
                         function
                             .instruction(&Instruction::I32Const(variant_index as i32))
                             .instruction(&Instruction::I32Eq);
@@ -1012,7 +1023,9 @@ fn compile_expr_unconverted(
                 compile_expr(function, args[0], context);
                 function
                     .instruction(&Instruction::I32Const(0))
-                    .instruction(&Instruction::RefNull(HeapType::Concrete(STRING_TYPE)))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(
+                        standard_gc_type_index(StdlibTypeId::String),
+                    )))
                     .instruction(&Instruction::StructNew(
                         context.gc.index(Type::Result(*result)),
                     ));
@@ -1046,11 +1059,10 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::TimerState => {
                 let host_state = context.matches.intrinsic_temps[&expression][0];
-                let timer_state = context
-                    .enums
-                    .iter()
-                    .find(|enumeration| enumeration.name == crate::ast::TIMER_STATE_TYPE_NAME)
-                    .expect("checked programs contain the built-in TimerState enum");
+                let Type::Standard(StdlibTypeId::TimerState) = ty else {
+                    unreachable!("timer.state returns the declared standard enum")
+                };
+                let timer_state = StandardLibrary::new().type_decl(StdlibTypeId::TimerState);
                 function
                     .instruction(&Instruction::Call(
                         context.abi.function(AbiImportId::TimerGetState),
@@ -1063,11 +1075,11 @@ fn compile_expr_unconverted(
                     .instruction(&Instruction::Else)
                     .instruction(&Instruction::I32Const(4))
                     .instruction(&Instruction::End);
-                for _ in &timer_state.variants {
+                for _ in StandardLibrary::new().variants_of(timer_state.id) {
                     function.instruction(&Instruction::I32Const(0));
                 }
                 function.instruction(&Instruction::StructNew(
-                    context.gc.index(Type::Enum(timer_state.id)),
+                    context.gc.index(Type::Standard(StdlibTypeId::TimerState)),
                 ));
             }
             IntrinsicId::RuntimeSetTickRate => {
@@ -1135,7 +1147,7 @@ fn compile_expr_unconverted(
                 emit_sentinel_result(
                     function,
                     expression,
-                    Type::String,
+                    Type::Standard(StdlibTypeId::String),
                     Instruction::RefIsNull,
                     "managed string could not be read",
                     context,
@@ -1147,7 +1159,9 @@ fn compile_expr_unconverted(
             IntrinsicId::DurationFromParts => {
                 compile_expr(function, args[0], context);
                 compile_expr(function, args[1], context);
-                function.instruction(&Instruction::StructNew(DURATION_TYPE));
+                function.instruction(&Instruction::StructNew(standard_gc_type_index(
+                    StdlibTypeId::Duration,
+                )));
             }
             IntrinsicId::DurationFromFrames => {
                 compile_expr(function, args[0], context);
@@ -1163,7 +1177,9 @@ fn compile_expr_unconverted(
                 function
                     .instruction(&Instruction::I64DivS)
                     .instruction(&Instruction::I32WrapI64)
-                    .instruction(&Instruction::StructNew(DURATION_TYPE));
+                    .instruction(&Instruction::StructNew(standard_gc_type_index(
+                        StdlibTypeId::Duration,
+                    )));
             }
             IntrinsicId::DurationSaturatingSecondsF32 => {
                 compile_expr(function, args[0], context);
@@ -1177,7 +1193,9 @@ fn compile_expr_unconverted(
                     .instruction(&Instruction::F32Const(1_000_000_000.0.into()))
                     .instruction(&Instruction::F32Mul)
                     .instruction(&Instruction::I32TruncSatF32S)
-                    .instruction(&Instruction::StructNew(DURATION_TYPE));
+                    .instruction(&Instruction::StructNew(standard_gc_type_index(
+                        StdlibTypeId::Duration,
+                    )));
             }
             IntrinsicId::NumericMin | IntrinsicId::NumericMax | IntrinsicId::NumericClamp => {
                 unreachable!("numeric intrinsics are lowered before ordinary calls")
@@ -1404,7 +1422,7 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
     let source = expression_type(expression, context.wasm_ir, context.semantics);
     compile_expr(function, expression, context);
 
-    if target == Type::String {
+    if target == Type::Standard(StdlibTypeId::String) {
         function
             .instruction(&if matches!(source, Type::I8 | Type::I16 | Type::I32) {
                 Instruction::I64ExtendI32S
@@ -1518,9 +1536,28 @@ fn emit_binary(
 ) {
     let operand_type = expression_type(left, context.wasm_ir, context.semantics);
     if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
+        && matches!(operand_type, Type::Standard(_))
+        && operand_type.is_enum()
+    {
+        for expression in [left, right] {
+            compile_expr(function, expression, context);
+            function.instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(function, context.gc.index(operand_type), 0, Type::I32);
+        }
+        function.instruction(&Instruction::I32Eq);
+        if op == BinaryOp::Ne {
+            function.instruction(&Instruction::I32Eqz);
+        }
+        return;
+    }
+    if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
         && matches!(
             operand_type,
-            Type::String | Type::Record(_) | Type::Enum(_) | Type::Option(_) | Type::Result(_)
+            Type::Standard(StdlibTypeId::String)
+                | Type::Record(_)
+                | Type::Enum(_)
+                | Type::Option(_)
+                | Type::Result(_)
         )
     {
         compile_expr(function, left, context);

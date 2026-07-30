@@ -5,17 +5,17 @@ use std::{cmp::Reverse, collections::HashMap, fmt, sync::Arc};
 use crate::{
     CheckedProgram, Diagnostic, LoweredProgram, ParsedProgram, RecoveredCheck, RecoveredParse,
     ast::{
-        AssignmentId, EnumId, EnumVariantId, ExprId, ExprKind, FunctionId, MatchPattern,
-        RecordFieldId, RecordId, Span, Stmt, TypeRef as SyntaxTypeRef, ValueId,
+        AssignmentId, EnumId, EnumTypeId, EnumVariantId, ExprId, ExprKind, FunctionId,
+        MatchPattern, RecordFieldId, RecordId, Span, Stmt, TypeRef as SyntaxTypeRef, ValueId,
     },
     highlight::SemanticHighlightIndex,
     hir::{
         Declaration, ExpressionResolution, ResolvedAssignment, TypedExpression, TypedExpressionKind,
     },
-    language::{LanguageCatalog, LanguageItemId, LanguageItemKind},
+    language::{LanguageCatalog, LanguageItemId},
     lexer::{Token, TokenKind},
-    semantic::{ResolvedCall, ResolvedMember, ResolvedValue, SemanticModel},
-    stdlib::{ItemKind as StdlibItemKind, StandardLibrary, StdlibItemId},
+    semantic::{ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue, SemanticModel},
+    stdlib::{StandardLibrary, StdlibItemId, StdlibOwner, StdlibSymbolId},
     syntax::SourceDocument,
     types::{TypeId, TypeKind},
     visit::{self, Visitor},
@@ -87,6 +87,7 @@ pub struct RenameTarget {
 pub enum DefinitionTarget {
     Source(SourceDefinition),
     StandardLibrary(StdlibItemId),
+    StandardLibrarySymbol(StdlibSymbolId),
     Language(LanguageItemId),
 }
 
@@ -808,9 +809,12 @@ impl CompilerDatabase {
                     span,
                 })
             }
-            Some(DefinitionTarget::StandardLibrary(_) | DefinitionTarget::Language(_)) | None => {
-                None
-            }
+            Some(
+                DefinitionTarget::StandardLibrary(_)
+                | DefinitionTarget::StandardLibrarySymbol(_)
+                | DefinitionTarget::Language(_),
+            )
+            | None => None,
         })
     }
 
@@ -870,6 +874,13 @@ impl CompilerDatabase {
         let Some(token) = self.token_at(offset)? else {
             return Ok(None);
         };
+        if let TokenKind::Ident(name) = &token.kind
+            && let Some(ty) = StandardLibrary::new().type_by_name(name)
+        {
+            return Ok(Some(DefinitionTarget::StandardLibrarySymbol(
+                StdlibSymbolId::Type(ty.id),
+            )));
+        }
         let language = LanguageCatalog::new();
         let item = match &token.kind {
             TokenKind::Ident(name) => language.item_for_source_token(name),
@@ -931,22 +942,14 @@ fn is_source_identifier(name: &str) -> bool {
 }
 
 fn is_reserved_source_identifier(name: &str) -> bool {
-    let language_reserved = LanguageCatalog::new()
-        .item_for_source_token(name)
-        .is_some_and(|item| {
-            !matches!(
-                item.kind,
-                LanguageItemKind::BuiltinField(_) | LanguageItemKind::EnumVariant
-            )
-        });
-    let standard_library_reserved = StandardLibrary::new().items().iter().any(|item| {
-        let path = match item.kind {
-            StdlibItemKind::Function { path } => path,
-            StdlibItemKind::TypedFunction { prefix, .. } => prefix,
-            StdlibItemKind::Method { .. } => return false,
-        };
-        path.first().is_some_and(|segment| *segment == name)
-    });
+    let language_reserved = LanguageCatalog::new().item_for_source_token(name).is_some();
+    let standard_library = StandardLibrary::new();
+    let standard_library_reserved = standard_library.namespace_by_name(name).is_some()
+        || standard_library.type_by_name(name).is_some()
+        || standard_library
+            .items()
+            .iter()
+            .any(|item| item.owner == StdlibOwner::Root && item.name == name);
     language_reserved || standard_library_reserved
 }
 
@@ -1002,11 +1005,8 @@ fn expression_segments(
             enumeration,
             variant,
             ..
-        } => checked
-            .enum_types()
-            .iter()
-            .find(|candidate| candidate.id == *enumeration)
-            .map(|enumeration| vec![enumeration.name.clone(), variant.clone()])
+        } => enum_type_name(*enumeration, checked.enum_types())
+            .map(|enumeration| vec![enumeration, variant.clone()])
             .unwrap_or_default(),
         _ => return Vec::new(),
     };
@@ -1040,10 +1040,8 @@ fn syntax_expression_segments(
             enumeration,
             variant,
             ..
-        } => enum_types
-            .iter()
-            .find(|candidate| candidate.id == *enumeration)
-            .map(|enumeration| vec![enumeration.name.clone(), variant.clone()])
+        } => enum_type_name(*enumeration, enum_types)
+            .map(|enumeration| vec![enumeration, variant.clone()])
             .unwrap_or_default(),
         _ => return Vec::new(),
     };
@@ -1062,6 +1060,16 @@ fn syntax_expression_segments(
             })
         })
         .collect()
+}
+
+fn enum_type_name(enumeration: EnumTypeId, enum_types: &[crate::ast::EnumDecl]) -> Option<String> {
+    match enumeration {
+        EnumTypeId::Source(id) => enum_types
+            .iter()
+            .find(|candidate| candidate.id == id)
+            .map(|declaration| declaration.name.clone()),
+        EnumTypeId::Standard(id) => Some(StandardLibrary::new().type_decl(id).name.to_owned()),
+    }
 }
 
 fn syntax_expression_resolution(
@@ -1199,15 +1207,15 @@ fn definition_for_resolution(
         }
         ExpressionResolution::EnumConstructor { variant } => {
             if segment + 1 == analysis.segments.len() {
-                definitions
-                    .get(SourceDefinitionId::EnumVariant(*variant))
-                    .cloned()
-                    .map(DefinitionTarget::Source)
-                    .or_else(|| {
-                        LanguageCatalog::new()
-                            .timer_state_variant(&analysis.segments[segment].name)
-                            .map(|item| DefinitionTarget::Language(item.id))
-                    })
+                match variant {
+                    ResolvedEnumVariantId::Source(variant) => definitions
+                        .get(SourceDefinitionId::EnumVariant(*variant))
+                        .cloned()
+                        .map(DefinitionTarget::Source),
+                    ResolvedEnumVariantId::Standard(variant) => Some(
+                        DefinitionTarget::StandardLibrarySymbol(StdlibSymbolId::Variant(*variant)),
+                    ),
+                }
             } else {
                 definitions
                     .enums
@@ -1221,8 +1229,12 @@ fn definition_for_resolution(
                     .cloned()
                     .map(DefinitionTarget::Source)
                     .or_else(|| {
-                        (analysis.segments[segment].name == "TimerState")
-                            .then_some(DefinitionTarget::Language(LanguageItemId::TimerStateType))
+                        StandardLibrary::new()
+                            .type_by_name(&analysis.segments[segment].name)
+                            .filter(|ty| StandardLibrary::new().variants_of(ty.id).next().is_some())
+                            .map(|ty| {
+                                DefinitionTarget::StandardLibrarySymbol(StdlibSymbolId::Type(ty.id))
+                            })
                     })
             }
         }
@@ -1276,7 +1288,12 @@ fn source_definition_for_resolution(
             }
         }
         ExpressionResolution::EnumConstructor { variant } => {
-            (segment + 1 == segment_count).then_some(SourceDefinitionId::EnumVariant(*variant))
+            (segment + 1 == segment_count).then(|| match variant {
+                ResolvedEnumVariantId::Source(variant) => {
+                    Some(SourceDefinitionId::EnumVariant(*variant))
+                }
+                ResolvedEnumVariantId::Standard(_) => None,
+            })?
         }
         ExpressionResolution::RecordLiteral { .. } => None,
     }
@@ -1285,7 +1302,7 @@ fn source_definition_for_resolution(
 fn source_definition_for_member(member: &ResolvedMember) -> Option<SourceDefinitionId> {
     match member {
         ResolvedMember::RecordField(field) => Some(SourceDefinitionId::RecordField(*field)),
-        ResolvedMember::BuiltinField(_) => None,
+        ResolvedMember::StandardField(_) => None,
     }
 }
 
@@ -1298,8 +1315,8 @@ fn definition_for_member(
             .get(SourceDefinitionId::RecordField(*field))
             .cloned()
             .map(DefinitionTarget::Source),
-        ResolvedMember::BuiltinField(field) => Some(DefinitionTarget::Language(
-            LanguageItemId::BuiltinField(*field),
+        ResolvedMember::StandardField(field) => Some(DefinitionTarget::StandardLibrarySymbol(
+            StdlibSymbolId::Field(*field),
         )),
     }
 }
@@ -1323,7 +1340,7 @@ fn source_definition_for_value_path(
     let member = segment.checked_sub(root_segment + 1)?;
     match members.get(member)? {
         ResolvedMember::RecordField(field) => Some(SourceDefinitionId::RecordField(*field)),
-        ResolvedMember::BuiltinField(_) => None,
+        ResolvedMember::StandardField(_) => None,
     }
 }
 
@@ -1363,8 +1380,8 @@ fn definition_for_value_path(
             .get(SourceDefinitionId::RecordField(*field))
             .cloned()
             .map(DefinitionTarget::Source),
-        ResolvedMember::BuiltinField(field) => Some(DefinitionTarget::Language(
-            LanguageItemId::BuiltinField(*field),
+        ResolvedMember::StandardField(field) => Some(DefinitionTarget::StandardLibrarySymbol(
+            StdlibSymbolId::Field(*field),
         )),
     }
 }
@@ -1694,10 +1711,11 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                 start: arm.span.start,
                 end: pattern_end,
             };
-            if let Some(enumeration_definition) = self
-                .index
-                .get(SourceDefinitionId::Enum(*enumeration))
-                .cloned()
+            if let EnumTypeId::Source(enumeration) = enumeration
+                && let Some(enumeration_definition) = self
+                    .index
+                    .get(SourceDefinitionId::Enum(*enumeration))
+                    .cloned()
                 && let Some(span) = self.tokens_in(pattern_span).iter().find_map(|token| {
                     matches!(&token.kind, TokenKind::Ident(spelling) if spelling == &enumeration_definition.name)
                         .then_some(token.span)
@@ -1709,10 +1727,11 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                 visit::walk_match_arm(self, arm);
                 return;
             };
-            if let Some(variant_definition) = self
-                .index
-                .get(SourceDefinitionId::EnumVariant(variant_id))
-                .cloned()
+            if let ResolvedEnumVariantId::Source(variant_id) = variant_id
+                && let Some(variant_definition) = self
+                    .index
+                    .get(SourceDefinitionId::EnumVariant(variant_id))
+                    .cloned()
                 && let Some(span) = self.tokens_in(pattern_span).iter().find_map(|token| {
                     matches!(&token.kind, TokenKind::Ident(spelling) if spelling == &variant_definition.name)
                         .then_some(token.span)
@@ -1810,10 +1829,13 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             ExprKind::Enum { enumeration, .. } => {
                 let segments =
                     syntax_expression_segments(self.document, &self.syntax.enums, expression);
-                if let Some(identifier) = segments.first() {
+                if let EnumTypeId::Source(enumeration) = enumeration
+                    && let Some(identifier) = segments.first()
+                {
                     self.add_reference(SourceDefinitionId::Enum(*enumeration), identifier.span);
                 }
-                if let Some(variant) = self.semantics.enum_variant(expression.id)
+                if let Some(ResolvedEnumVariantId::Source(variant)) =
+                    self.semantics.enum_variant(expression.id)
                     && let Some(identifier) = segments.get(1)
                 {
                     self.add_reference(SourceDefinitionId::EnumVariant(variant), identifier.span);
@@ -1882,14 +1904,8 @@ fn named_type(
         | SyntaxTypeRef::Address
         | SyntaxTypeRef::F32
         | SyntaxTypeRef::F64
-        | SyntaxTypeRef::String
-        | SyntaxTypeRef::Signature
-        | SyntaxTypeRef::Duration
-        | SyntaxTypeRef::Module
-        | SyntaxTypeRef::UnityModule
-        | SyntaxTypeRef::UnityImage
-        | SyntaxTypeRef::UnityClass
-        | SyntaxTypeRef::UnityField => None,
+        | SyntaxTypeRef::Named(_)
+        | SyntaxTypeRef::Standard(_) => None,
     }
 }
 

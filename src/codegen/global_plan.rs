@@ -49,12 +49,12 @@ pub(super) fn encode(
         GlobalType {
             val_type: ValType::Ref(RefType {
                 nullable: true,
-                heap_type: HeapType::Concrete(ASYNC_FRAME_TYPE),
+                heap_type: HeapType::Concrete(async_frame_type_index()),
             }),
             mutable: true,
             shared: false,
         },
-        &ConstExpr::ref_null(HeapType::Concrete(ASYNC_FRAME_TYPE)),
+        &ConstExpr::ref_null(HeapType::Concrete(async_frame_type_index())),
     );
     section.global(
         GlobalType {
@@ -79,10 +79,10 @@ pub(super) fn encode(
             mutable: variable.mutable,
             shared: false,
         };
-        if let Type::Enum(enumeration) = ty {
+        if ty.is_enum() {
             section.global(
                 global_type,
-                &ConstExpr::ref_null(HeapType::Concrete(gc.index(Type::Enum(enumeration)))),
+                &ConstExpr::ref_null(HeapType::Concrete(gc.index(ty))),
             );
         } else {
             section.global(global_type, &constant(variable.value.id, typed_hir, ty));
@@ -120,13 +120,15 @@ fn emit_setting_global(section: &mut GlobalSection, ty: Type, gc: &GcLayout) {
     };
     match ty {
         Type::Bool => section.global(global_type, &ConstExpr::i32_const(0)),
-        Type::String => section.global(
+        Type::Standard(StdlibTypeId::String) => section.global(
             global_type,
-            &ConstExpr::ref_null(HeapType::Concrete(STRING_TYPE)),
+            &ConstExpr::ref_null(HeapType::Concrete(standard_gc_type_index(
+                StdlibTypeId::String,
+            ))),
         ),
-        Type::Enum(id) => section.global(
+        ty if ty.is_enum() => section.global(
             global_type,
-            &ConstExpr::ref_null(HeapType::Concrete(gc.index(Type::Enum(id)))),
+            &ConstExpr::ref_null(HeapType::Concrete(gc.index(ty))),
         ),
         _ => unreachable!(),
     };

@@ -9,7 +9,7 @@ use crate::{
         SettingChoiceOptionId, ValueId,
     },
     inference::Type,
-    stdlib::StdlibItemId,
+    stdlib::{StdlibFieldId, StdlibItemId, StdlibVariantId},
     types::{TypeId, TypeStore},
 };
 
@@ -68,40 +68,14 @@ pub enum ResolvedValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResolvedMember {
     RecordField(RecordFieldId),
-    BuiltinField(BuiltinFieldId),
+    StandardField(StdlibFieldId),
 }
 
-/// Stable identities for fields exposed by compiler-provided value types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum BuiltinFieldId {
-    ModuleAddress,
-    ModuleSize,
-    UnityModuleAssemblies,
-    UnityModuleTypeInfoTable,
-    UnityModuleVersion,
-    UnityModulePointerSize,
-    UnityImageAddress,
-    UnityClassAddress,
-    UnityFieldOffset,
-    UnityFieldIndex,
-}
-
-impl BuiltinFieldId {
-    /// The value type that owns this compiler-provided field.
-    pub const fn receiver_type(self) -> crate::types::BuiltinType {
-        use crate::types::BuiltinType;
-
-        match self {
-            Self::ModuleAddress | Self::ModuleSize => BuiltinType::Module,
-            Self::UnityModuleAssemblies
-            | Self::UnityModuleTypeInfoTable
-            | Self::UnityModuleVersion
-            | Self::UnityModulePointerSize => BuiltinType::UnityModule,
-            Self::UnityImageAddress => BuiltinType::UnityImage,
-            Self::UnityClassAddress => BuiltinType::UnityClass,
-            Self::UnityFieldOffset | Self::UnityFieldIndex => BuiltinType::UnityField,
-        }
-    }
+/// Stable identity of an enum variant selected by checked source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResolvedEnumVariantId {
+    Source(EnumVariantId),
+    Standard(StdlibVariantId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,8 +101,8 @@ pub struct SemanticModel {
     propagation_targets: HashMap<ExprId, TypeId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
     record_literal_fields: HashMap<ExprId, Vec<RecordFieldId>>,
-    enum_variants: HashMap<ExprId, EnumVariantId>,
-    pattern_variants: HashMap<PatternId, EnumVariantId>,
+    enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
+    pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
     wrapper_patterns: HashMap<PatternId, ResolvedWrapperPattern>,
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
@@ -228,11 +202,11 @@ impl SemanticModel {
             .map(Vec::as_slice)
     }
 
-    pub fn enum_variant(&self, expression: ExprId) -> Option<EnumVariantId> {
+    pub fn enum_variant(&self, expression: ExprId) -> Option<ResolvedEnumVariantId> {
         self.enum_variants.get(&expression).copied()
     }
 
-    pub fn pattern_variant(&self, pattern: PatternId) -> Option<EnumVariantId> {
+    pub fn pattern_variant(&self, pattern: PatternId) -> Option<ResolvedEnumVariantId> {
         self.pattern_variants.get(&pattern).copied()
     }
 
@@ -319,8 +293,8 @@ pub(crate) struct SemanticBuilder {
     propagation_targets: HashMap<ExprId, Type>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
     record_literal_fields: HashMap<ExprId, Vec<RecordFieldId>>,
-    enum_variants: HashMap<ExprId, EnumVariantId>,
-    pattern_variants: HashMap<PatternId, EnumVariantId>,
+    enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
+    pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
     wrapper_patterns: HashMap<PatternId, ResolvedWrapperPattern>,
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
@@ -404,12 +378,20 @@ impl SemanticBuilder {
         debug_assert!(previous.is_none(), "record expression IDs must be unique");
     }
 
-    pub(crate) fn resolve_enum_variant(&mut self, expression: ExprId, variant: EnumVariantId) {
+    pub(crate) fn resolve_enum_variant(
+        &mut self,
+        expression: ExprId,
+        variant: ResolvedEnumVariantId,
+    ) {
         let previous = self.enum_variants.insert(expression, variant);
         debug_assert!(previous.is_none(), "enum expression IDs must be unique");
     }
 
-    pub(crate) fn resolve_pattern_variant(&mut self, pattern: PatternId, variant: EnumVariantId) {
+    pub(crate) fn resolve_pattern_variant(
+        &mut self,
+        pattern: PatternId,
+        variant: ResolvedEnumVariantId,
+    ) {
         let previous = self.pattern_variants.insert(pattern, variant);
         debug_assert!(previous.is_none(), "pattern IDs must be unique");
     }

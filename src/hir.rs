@@ -8,16 +8,17 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{
-        ActionKind, AssignmentId, BinaryOp, Block, EnumId, EnumVariantId, Expr, ExprId, ExprKind,
-        FallbackBranch, FunctionId, InterpolatedPart, MatchArm, MatchPattern, PatternId,
+        ActionKind, AssignmentId, BinaryOp, Block, EnumId, EnumTypeId, EnumVariantId, Expr, ExprId,
+        ExprKind, FallbackBranch, FunctionId, InterpolatedPart, MatchArm, MatchPattern, PatternId,
         Program as SyntaxProgram, RecordFieldId, RecordId, SettingChoiceOptionId, SettingKind,
         Span, Stmt, SuspensionMode, TypeRef, UnaryOp, ValueId,
     },
     semantic::{
-        ResolvedCall, ResolvedMember, ResolvedValue, ResolvedWrapperPattern, SemanticModel,
-        ValueConversion,
+        ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue, ResolvedWrapperPattern,
+        SemanticModel, ValueConversion,
     },
-    types::{BuiltinType, TypeId, TypeKind},
+    stdlib::StdlibTypeId,
+    types::{TypeId, TypeKind},
     visit::{self, Visitor as SyntaxVisitor},
 };
 
@@ -136,7 +137,7 @@ pub enum ExpressionResolution {
         fields: Vec<RecordFieldId>,
     },
     EnumConstructor {
-        variant: EnumVariantId,
+        variant: ResolvedEnumVariantId,
     },
 }
 
@@ -186,7 +187,7 @@ pub enum TypedExpressionKind {
         fields: Vec<(String, ExprId)>,
     },
     Enum {
-        enumeration: EnumId,
+        enumeration: EnumTypeId,
         variant: String,
         payload: Option<ExprId>,
     },
@@ -261,7 +262,7 @@ pub struct ResolvedAssignment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedPattern {
     pub id: PatternId,
-    pub variant: Option<EnumVariantId>,
+    pub variant: Option<ResolvedEnumVariantId>,
     pub wrapper: Option<ResolvedWrapperPattern>,
     pub span: Span,
 }
@@ -482,7 +483,7 @@ impl TypedProgram {
         }
     }
 
-    pub fn enum_variant(&self, id: ExprId) -> Option<EnumVariantId> {
+    pub fn enum_variant(&self, id: ExprId) -> Option<ResolvedEnumVariantId> {
         match &self.expression(id)?.resolution {
             Some(ExpressionResolution::EnumConstructor { variant }) => Some(*variant),
             _ => None,
@@ -867,7 +868,7 @@ fn lower_expression_kind(expression: &Expr, semantics: &SemanticModel) -> TypedE
                             .expect("interpolation operands have resolved types");
                         let conversion = (!matches!(
                             semantics.types().kind(source),
-                            TypeKind::Builtin(BuiltinType::String)
+                            TypeKind::Standard(StdlibTypeId::String)
                         ))
                         .then_some(ImplicitConversion::ToString { source });
                         TypedInterpolatedPart::Expression {

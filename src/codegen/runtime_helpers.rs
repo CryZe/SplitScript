@@ -185,7 +185,9 @@ fn compile_print_string(abi: &Abi) -> Function {
         .instruction(&Instruction::LocalGet(string))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::ArrayGetU(STRING_TYPE))
+        .instruction(&Instruction::ArrayGetU(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::I32Store8(memarg()))
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::I32Const(1))
@@ -292,7 +294,9 @@ fn emit_gc_string_copy_to_memory(
         .instruction(&Instruction::LocalGet(string))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::ArrayGetU(STRING_TYPE))
+        .instruction(&Instruction::ArrayGetU(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::I32Store8(memarg()))
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::I32Const(1))
@@ -307,7 +311,7 @@ fn compile_format_i64() -> Function {
     let mut function = Function::new([
         (2, ValType::I64),
         (3, ValType::I32),
-        (1, val_type(Type::String)),
+        (1, val_type(Type::Standard(StdlibTypeId::String))),
     ]);
     let input = 0;
     let signed = 1;
@@ -357,7 +361,9 @@ fn compile_format_i64() -> Function {
         .instruction(&Instruction::LocalGet(digits))
         .instruction(&Instruction::LocalGet(negative))
         .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::ArrayNewDefault(STRING_TYPE))
+        .instruction(&Instruction::ArrayNewDefault(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::LocalSet(output))
         .instruction(&Instruction::LocalGet(digits))
         .instruction(&Instruction::LocalGet(negative))
@@ -384,7 +390,9 @@ fn compile_format_i64() -> Function {
         .instruction(&Instruction::I32WrapI64)
         .instruction(&Instruction::I32Const(b'0' as i32))
         .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::ArraySet(STRING_TYPE))
+        .instruction(&Instruction::ArraySet(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::LocalGet(remaining))
         .instruction(&Instruction::I64Const(10))
         .instruction(&Instruction::I64DivU)
@@ -398,7 +406,9 @@ fn compile_format_i64() -> Function {
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::I32Const(b'-' as i32))
-        .instruction(&Instruction::ArraySet(STRING_TYPE))
+        .instruction(&Instruction::ArraySet(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(output))
         .instruction(&Instruction::End);
@@ -408,8 +418,8 @@ fn compile_format_i64() -> Function {
 fn compile_concat_strings(strings_array: u32) -> Function {
     let mut function = Function::new([
         (5, ValType::I32),
-        (1, val_type(Type::String)),
-        (1, val_type(Type::String)),
+        (1, val_type(Type::Standard(StdlibTypeId::String))),
+        (1, val_type(Type::Standard(StdlibTypeId::String))),
     ]);
     let strings = 0;
     let string_index = 1;
@@ -432,7 +442,11 @@ fn compile_concat_strings(strings_array: u32) -> Function {
         .instruction(&Instruction::LocalGet(strings))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(string_index));
-    emit_array_get(&mut function, strings_array, Type::String);
+    emit_array_get(
+        &mut function,
+        strings_array,
+        Type::Standard(StdlibTypeId::String),
+    );
     function
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
@@ -447,7 +461,9 @@ fn compile_concat_strings(strings_array: u32) -> Function {
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(total_len))
-        .instruction(&Instruction::ArrayNewDefault(STRING_TYPE))
+        .instruction(&Instruction::ArrayNewDefault(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::LocalSet(output))
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::LocalSet(string_index))
@@ -462,7 +478,11 @@ fn compile_concat_strings(strings_array: u32) -> Function {
         .instruction(&Instruction::LocalGet(strings))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(string_index));
-    emit_array_get(&mut function, strings_array, Type::String);
+    emit_array_get(
+        &mut function,
+        strings_array,
+        Type::Standard(StdlibTypeId::String),
+    );
     function
         .instruction(&Instruction::LocalSet(current))
         .instruction(&Instruction::I32Const(0))
@@ -481,8 +501,12 @@ fn compile_concat_strings(strings_array: u32) -> Function {
         .instruction(&Instruction::LocalGet(current))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(byte_index))
-        .instruction(&Instruction::ArrayGetU(STRING_TYPE))
-        .instruction(&Instruction::ArraySet(STRING_TYPE))
+        .instruction(&Instruction::ArrayGetU(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
+        .instruction(&Instruction::ArraySet(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::LocalGet(byte_index))
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::I32Add)
@@ -535,11 +559,15 @@ fn compile_string_eq() -> Function {
         .instruction(&Instruction::LocalGet(left))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::ArrayGetU(STRING_TYPE))
+        .instruction(&Instruction::ArrayGetU(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::LocalGet(right))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::ArrayGetU(STRING_TYPE))
+        .instruction(&Instruction::ArrayGetU(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::I32Ne)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(0))
@@ -709,12 +737,27 @@ fn compile_result_equality(
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(0))
         .instruction(&Instruction::RefAsNonNull);
-    emit_typed_struct_get(&mut function, type_index, 2, Type::String);
+    emit_typed_struct_get(
+        &mut function,
+        type_index,
+        2,
+        Type::Standard(StdlibTypeId::String),
+    );
     function
         .instruction(&Instruction::LocalGet(1))
         .instruction(&Instruction::RefAsNonNull);
-    emit_typed_struct_get(&mut function, type_index, 2, Type::String);
-    emit_value_equality(&mut function, Type::String, equality_functions, string_eq);
+    emit_typed_struct_get(
+        &mut function,
+        type_index,
+        2,
+        Type::Standard(StdlibTypeId::String),
+    );
+    emit_value_equality(
+        &mut function,
+        Type::Standard(StdlibTypeId::String),
+        equality_functions,
+        string_eq,
+    );
     function
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
@@ -737,7 +780,7 @@ pub(super) fn emit_value_equality(
     string_eq: u32,
 ) {
     let instruction = match ty {
-        Type::String => Instruction::Call(string_eq),
+        Type::Standard(StdlibTypeId::String) => Instruction::Call(string_eq),
         Type::Record(record) => Instruction::Call(equality_functions.records[&record]),
         Type::Enum(enumeration) => Instruction::Call(equality_functions.enums[&enumeration]),
         Type::Option(option) => Instruction::Call(equality_functions.options[&option]),
@@ -997,7 +1040,10 @@ fn compile_read_relative32(abi: &Abi) -> Function {
 }
 
 fn compile_read_managed_string(abi: &Abi) -> Function {
-    let mut function = Function::new([(7, ValType::I32), (1, val_type(Type::String))]);
+    let mut function = Function::new([
+        (7, ValType::I32),
+        (1, val_type(Type::Standard(StdlibTypeId::String))),
+    ]);
     let process = 0;
     let address = 1;
     let max_units = 2;
@@ -1158,7 +1204,9 @@ fn compile_read_managed_string(abi: &Abi) -> Function {
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(byte_len))
-        .instruction(&Instruction::ArrayNewDefault(STRING_TYPE))
+        .instruction(&Instruction::ArrayNewDefault(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::LocalSet(output))
         .instruction(&Instruction::Block(BlockType::Empty))
         .instruction(&Instruction::Loop(BlockType::Empty))
@@ -1173,7 +1221,9 @@ fn compile_read_managed_string(abi: &Abi) -> Function {
         .instruction(&Instruction::LocalGet(output_index))
         .instruction(&Instruction::I32Add)
         .instruction(&Instruction::I32Load8U(memarg()))
-        .instruction(&Instruction::ArraySet(STRING_TYPE))
+        .instruction(&Instruction::ArraySet(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::LocalGet(output_index))
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::I32Add)
@@ -1189,7 +1239,7 @@ fn compile_read_managed_string(abi: &Abi) -> Function {
 fn emit_empty_string_return(function: &mut Function) {
     function
         .instruction(&Instruction::ArrayNewFixed {
-            array_type_index: STRING_TYPE,
+            array_type_index: standard_gc_type_index(StdlibTypeId::String),
             array_size: 0,
         })
         .instruction(&Instruction::Return);
@@ -1197,7 +1247,9 @@ fn emit_empty_string_return(function: &mut Function) {
 
 fn emit_null_string_return(function: &mut Function) {
     function
-        .instruction(&Instruction::RefNull(HeapType::Concrete(STRING_TYPE)))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            standard_gc_type_index(StdlibTypeId::String),
+        )))
         .instruction(&Instruction::Return);
 }
 
@@ -1560,7 +1612,9 @@ fn compile_unity_attach(
         .instruction(&Instruction::LocalGet(type_info))
         .instruction(&Instruction::LocalGet(version))
         .instruction(&Instruction::I32Const(8))
-        .instruction(&Instruction::StructNew(UNITY_MODULE_TYPE))
+        .instruction(&Instruction::StructNew(standard_gc_type_index(
+            StdlibTypeId::UnityModule,
+        )))
         .instruction(&Instruction::End);
     function
 }
@@ -1585,7 +1639,9 @@ fn emit_static_scan_call(
 
 fn emit_unity_attach_failure(function: &mut Function) {
     function
-        .instruction(&Instruction::RefNull(HeapType::Concrete(UNITY_MODULE_TYPE)))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            standard_gc_type_index(StdlibTypeId::UnityModule),
+        )))
         .instruction(&Instruction::Return);
 }
 
@@ -1651,7 +1707,9 @@ fn compile_c_string_eq(abi: &Abi) -> Function {
         .instruction(&Instruction::LocalGet(start))
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::I32Add)
-        .instruction(&Instruction::ArrayGetU(STRING_TYPE))
+        .instruction(&Instruction::ArrayGetU(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::I32Ne)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(0))
@@ -1742,7 +1800,9 @@ fn compile_backing_field_eq(abi: &Abi) -> Function {
         .instruction(&Instruction::LocalGet(expected))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::ArrayGetU(STRING_TYPE))
+        .instruction(&Instruction::ArrayGetU(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::I32Ne)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::I32Const(0))
@@ -1776,15 +1836,17 @@ fn compile_unity_get_image(abi: &Abi, c_string_eq: u32) -> Function {
         .instruction(&Instruction::LocalGet(module))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_MODULE_TYPE,
-            field_index: 0,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityModule),
+            field_index: standard_field_index(StdlibFieldId::UnityModuleAssemblies),
         })
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::I32Const(16))
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::RefNull(HeapType::Concrete(UNITY_IMAGE_TYPE)))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            standard_gc_type_index(StdlibTypeId::UnityImage),
+        )))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::I32Const(0))
@@ -1858,7 +1920,9 @@ fn compile_unity_get_image(abi: &Abi, c_string_eq: u32) -> Function {
         .instruction(&Instruction::BrIf(0))
         .instruction(&Instruction::LocalGet(image))
         .instruction(&Instruction::LocalGet(module))
-        .instruction(&Instruction::StructNew(UNITY_IMAGE_TYPE))
+        .instruction(&Instruction::StructNew(standard_gc_type_index(
+            StdlibTypeId::UnityImage,
+        )))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(index))
@@ -1868,7 +1932,9 @@ fn compile_unity_get_image(abi: &Abi, c_string_eq: u32) -> Function {
         .instruction(&Instruction::Br(0))
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
-        .instruction(&Instruction::RefNull(HeapType::Concrete(UNITY_IMAGE_TYPE)))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            standard_gc_type_index(StdlibTypeId::UnityImage),
+        )))
         .instruction(&Instruction::End);
     function
 }
@@ -1903,7 +1969,9 @@ fn compile_unity_get_class(abi: &Abi, c_string_eq: u32) -> Function {
         .instruction(&Instruction::LocalGet(expected_name))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(scan_index))
-        .instruction(&Instruction::ArrayGetU(STRING_TYPE))
+        .instruction(&Instruction::ArrayGetU(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::I32Const(b'.' as i32))
         .instruction(&Instruction::I32Eq)
         .instruction(&Instruction::If(BlockType::Empty))
@@ -1926,8 +1994,8 @@ fn compile_unity_get_class(abi: &Abi, c_string_eq: u32) -> Function {
         .instruction(&Instruction::LocalGet(image_value))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_IMAGE_TYPE,
-            field_index: 0,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityImage),
+            field_index: standard_field_index(StdlibFieldId::UnityImageAddress),
         })
         .instruction(&Instruction::I64Const(0x18))
         .instruction(&Instruction::I64Add)
@@ -1955,8 +2023,8 @@ fn compile_unity_get_class(abi: &Abi, c_string_eq: u32) -> Function {
         .instruction(&Instruction::LocalGet(image_value))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_IMAGE_TYPE,
-            field_index: 0,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityImage),
+            field_index: standard_field_index(StdlibFieldId::UnityImageAddress),
         })
         .instruction(&Instruction::I64Const(0x28))
         .instruction(&Instruction::I64Add)
@@ -1993,13 +2061,13 @@ fn compile_unity_get_class(abi: &Abi, c_string_eq: u32) -> Function {
         .instruction(&Instruction::LocalGet(image_value))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_IMAGE_TYPE,
-            field_index: 1,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityImage),
+            field_index: standard_field_index(StdlibFieldId::UnityImageModule),
         })
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_MODULE_TYPE,
-            field_index: 1,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityModule),
+            field_index: standard_field_index(StdlibFieldId::UnityModuleTypeInfoTable),
         })
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::I32Const(8))
@@ -2104,10 +2172,12 @@ fn compile_unity_get_class(abi: &Abi, c_string_eq: u32) -> Function {
         .instruction(&Instruction::LocalGet(image_value))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_IMAGE_TYPE,
-            field_index: 1,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityImage),
+            field_index: standard_field_index(StdlibFieldId::UnityImageModule),
         })
-        .instruction(&Instruction::StructNew(UNITY_CLASS_TYPE))
+        .instruction(&Instruction::StructNew(standard_gc_type_index(
+            StdlibTypeId::UnityClass,
+        )))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(index))
@@ -2117,14 +2187,18 @@ fn compile_unity_get_class(abi: &Abi, c_string_eq: u32) -> Function {
         .instruction(&Instruction::Br(0))
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
-        .instruction(&Instruction::RefNull(HeapType::Concrete(UNITY_CLASS_TYPE)))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            standard_gc_type_index(StdlibTypeId::UnityClass),
+        )))
         .instruction(&Instruction::End);
     function
 }
 
 fn emit_unity_class_failure(function: &mut Function) {
     function
-        .instruction(&Instruction::RefNull(HeapType::Concrete(UNITY_CLASS_TYPE)))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            standard_gc_type_index(StdlibTypeId::UnityClass),
+        )))
         .instruction(&Instruction::Return);
 }
 
@@ -2148,20 +2222,20 @@ fn compile_unity_get_field_offset(abi: &Abi, c_string_eq: u32, backing_field_eq:
         .instruction(&Instruction::LocalGet(class_value))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_CLASS_TYPE,
-            field_index: 0,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityClass),
+            field_index: standard_field_index(StdlibFieldId::UnityClassAddress),
         })
         .instruction(&Instruction::LocalSet(current))
         .instruction(&Instruction::LocalGet(class_value))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_CLASS_TYPE,
-            field_index: 1,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityClass),
+            field_index: standard_field_index(StdlibFieldId::UnityClassModule),
         })
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_MODULE_TYPE,
-            field_index: 2,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityModule),
+            field_index: standard_field_index(StdlibFieldId::UnityModuleVersion),
         })
         .instruction(&Instruction::I32Const(2022))
         .instruction(&Instruction::I32Eq)
@@ -2171,13 +2245,13 @@ fn compile_unity_get_field_offset(abi: &Abi, c_string_eq: u32, backing_field_eq:
         .instruction(&Instruction::LocalGet(class_value))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_CLASS_TYPE,
-            field_index: 1,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityClass),
+            field_index: standard_field_index(StdlibFieldId::UnityClassModule),
         })
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_MODULE_TYPE,
-            field_index: 2,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityModule),
+            field_index: standard_field_index(StdlibFieldId::UnityModuleVersion),
         })
         .instruction(&Instruction::I32Const(2020))
         .instruction(&Instruction::I32Eq)
@@ -2187,13 +2261,13 @@ fn compile_unity_get_field_offset(abi: &Abi, c_string_eq: u32, backing_field_eq:
         .instruction(&Instruction::LocalGet(class_value))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_CLASS_TYPE,
-            field_index: 1,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityClass),
+            field_index: standard_field_index(StdlibFieldId::UnityClassModule),
         })
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_MODULE_TYPE,
-            field_index: 2,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityModule),
+            field_index: standard_field_index(StdlibFieldId::UnityModuleVersion),
         })
         .instruction(&Instruction::I32Const(2019))
         .instruction(&Instruction::I32Eq)
@@ -2382,7 +2456,11 @@ fn compile_unity_get_field_any(unity_get_field_offset: u32, names_array: u32) ->
         .instruction(&Instruction::LocalGet(names))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(index));
-    emit_array_get(&mut function, names_array, Type::String);
+    emit_array_get(
+        &mut function,
+        names_array,
+        Type::Standard(StdlibTypeId::String),
+    );
     function
         .instruction(&Instruction::Call(unity_get_field_offset))
         .instruction(&Instruction::LocalTee(encoded))
@@ -2394,7 +2472,9 @@ fn compile_unity_get_field_any(unity_get_field_offset: u32, names_array: u32) ->
         .instruction(&Instruction::I64Sub)
         .instruction(&Instruction::I32WrapI64)
         .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::StructNew(UNITY_FIELD_TYPE))
+        .instruction(&Instruction::StructNew(standard_gc_type_index(
+            StdlibTypeId::UnityField,
+        )))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(index))
@@ -2404,13 +2484,18 @@ fn compile_unity_get_field_any(unity_get_field_offset: u32, names_array: u32) ->
         .instruction(&Instruction::Br(0))
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
-        .instruction(&Instruction::RefNull(HeapType::Concrete(UNITY_FIELD_TYPE)))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            standard_gc_type_index(StdlibTypeId::UnityField),
+        )))
         .instruction(&Instruction::End);
     function
 }
 
 fn compile_unity_get_static_instance(abi: &Abi, unity_get_field_any: u32) -> Function {
-    let mut function = Function::new([(1, val_type(Type::UnityField)), (1, ValType::I64)]);
+    let mut function = Function::new([
+        (1, val_type(Type::Standard(StdlibTypeId::UnityField))),
+        (1, ValType::I64),
+    ]);
     let process = 0;
     let class_value = 1;
     let names = 2;
@@ -2431,8 +2516,8 @@ fn compile_unity_get_static_instance(abi: &Abi, unity_get_field_any: u32) -> Fun
         .instruction(&Instruction::LocalGet(class_value))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_CLASS_TYPE,
-            field_index: 0,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityClass),
+            field_index: standard_field_index(StdlibFieldId::UnityClassAddress),
         })
         .instruction(&Instruction::I64Const(0xb8))
         .instruction(&Instruction::I64Add)
@@ -2457,8 +2542,8 @@ fn compile_unity_get_static_instance(abi: &Abi, unity_get_field_any: u32) -> Fun
         .instruction(&Instruction::LocalGet(field))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
-            struct_type_index: UNITY_FIELD_TYPE,
-            field_index: 0,
+            struct_type_index: standard_gc_type_index(StdlibTypeId::UnityField),
+            field_index: standard_field_index(StdlibFieldId::UnityFieldOffset),
         })
         .instruction(&Instruction::I64ExtendI32U)
         .instruction(&Instruction::I64Add)

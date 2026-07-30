@@ -8,18 +8,22 @@ use wasm_encoder::{
 
 use crate::abi::AbiImportId;
 use crate::ast::{
-    Action, ActionKind, ArrayTypeDecl, ArrayTypeId, BinaryOp, EnumDecl, EnumId, EnumVariantId,
-    ExprId, FunctionDecl, FunctionId, OptionTypeDecl, OptionTypeId, Program, RecordDecl,
-    RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingFileFilter, SettingKind,
-    StateField, StateSource, SuspensionMode, UnaryOp, ValueId,
+    Action, ActionKind, ArrayTypeDecl, ArrayTypeId, BinaryOp, EnumDecl, EnumId, EnumTypeId,
+    EnumVariantId, ExprId, FunctionDecl, FunctionId, OptionTypeDecl, OptionTypeId, Program,
+    RecordDecl, RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingFileFilter,
+    SettingKind, StateField, StateSource, SuspensionMode, UnaryOp, ValueId,
 };
 use crate::equality::EqualityCapabilities;
 use crate::hir::{TypedExpressionKind, TypedProgram};
 use crate::memory::{MemoryLayouts, MemoryTypeLayout};
 use crate::semantic::{
-    BuiltinFieldId, ResolvedCall, ResolvedMember, ResolvedValue, SemanticModel, ValueConversionKind,
+    ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue, SemanticModel,
+    ValueConversionKind,
 };
-use crate::stdlib::{Implementation, IntrinsicId, StandardLibrary};
+use crate::stdlib::{
+    CoreTypeId, DeclaredTypeRef, Implementation, IntrinsicId, RuntimeRepresentation,
+    StandardLibrary, StdlibFieldId, StdlibTypeId,
+};
 use crate::types::{BuiltinType, TypeId, TypeKind};
 use crate::wasm_ir::{self, BodyOwner, LocalPurpose};
 
@@ -57,15 +61,86 @@ use self::settings::{compile_refresh_settings, compile_start, compile_string_fro
 use self::update::compile_update;
 
 const STATE_TYPE: u32 = 0;
-const DURATION_TYPE: u32 = 1;
-const STRING_TYPE: u32 = 2;
-const MODULE_TYPE: u32 = 3;
-const UNITY_MODULE_TYPE: u32 = 4;
-const UNITY_IMAGE_TYPE: u32 = 5;
-const UNITY_CLASS_TYPE: u32 = 6;
-const UNITY_FIELD_TYPE: u32 = 7;
-const ASYNC_FRAME_TYPE: u32 = 8;
-const RECORD_TYPE_BASE: u32 = 9;
+
+fn standard_gc_type_index(ty: StdlibTypeId) -> u32 {
+    StandardLibrary::new()
+        .types()
+        .iter()
+        .filter(|declaration| {
+            matches!(
+                declaration.representation,
+                RuntimeRepresentation::GcArray { .. }
+                    | RuntimeRepresentation::GcStruct { .. }
+                    | RuntimeRepresentation::Enum { .. }
+            )
+        })
+        .position(|declaration| declaration.id == ty)
+        .map(|position| STATE_TYPE + 1 + position as u32)
+        .unwrap_or_else(|| panic!("standard type `{ty:?}` has no static GC layout"))
+}
+
+fn standard_gc_type_count() -> u32 {
+    StandardLibrary::new()
+        .types()
+        .iter()
+        .filter(|declaration| {
+            matches!(
+                declaration.representation,
+                RuntimeRepresentation::GcArray { .. }
+                    | RuntimeRepresentation::GcStruct { .. }
+                    | RuntimeRepresentation::Enum { .. }
+            )
+        })
+        .count() as u32
+}
+
+fn standard_field_index(field: StdlibFieldId) -> u32 {
+    let library = StandardLibrary::new();
+    let declaration = library.field(field);
+    let owner = library.type_decl(declaration.owner);
+    let RuntimeRepresentation::GcStruct { .. } = owner.representation else {
+        panic!("standard field `{field:?}` is not stored in a GC struct")
+    };
+    library
+        .fields_of(owner.id)
+        .position(|candidate| candidate.id == field)
+        .map(|index| index as u32)
+        .expect("every standard field belongs to its owner's declared slots")
+}
+
+fn enum_variant_index(
+    enumeration: EnumTypeId,
+    variant: ResolvedEnumVariantId,
+    enums: &[EnumDecl],
+) -> usize {
+    match (enumeration, variant) {
+        (EnumTypeId::Source(enumeration), ResolvedEnumVariantId::Source(variant)) => enums
+            .iter()
+            .find(|declaration| declaration.id == enumeration)
+            .and_then(|declaration| {
+                declaration
+                    .variants
+                    .iter()
+                    .position(|declared| declared.id == variant)
+            })
+            .expect("checked source enum variants belong to their declaration"),
+        (EnumTypeId::Standard(enumeration), ResolvedEnumVariantId::Standard(variant)) => {
+            StandardLibrary::new()
+                .variants_of(enumeration)
+                .position(|declared| declared.id == variant)
+                .expect("checked standard enum variants belong to their declaration")
+        }
+        _ => unreachable!("checked enum and variant identities have the same owner"),
+    }
+}
+
+fn async_frame_type_index() -> u32 {
+    STATE_TYPE + 1 + standard_gc_type_count()
+}
+
+fn dynamic_gc_type_base() -> u32 {
+    async_frame_type_index() + 1
+}
 
 /// Physical value categories used while encoding WebAssembly. These are
 /// derived from semantic `TypeId` values and are independent of inference.
@@ -84,14 +159,7 @@ enum Type {
     Address,
     F32,
     F64,
-    String,
-    Signature,
-    Duration,
-    Module,
-    UnityModule,
-    UnityImage,
-    UnityClass,
-    UnityField,
+    Standard(StdlibTypeId),
     Record(RecordId),
     Enum(EnumId),
     Array(ArrayTypeId),
@@ -116,7 +184,7 @@ impl GcLayout {
     ) -> Self {
         let mut dynamic = HashMap::new();
         let mut ordered = Vec::new();
-        let mut next = RECORD_TYPE_BASE;
+        let mut next = dynamic_gc_type_base();
         for record in program
             .records
             .iter()
@@ -170,13 +238,7 @@ impl GcLayout {
 
     fn index(&self, ty: Type) -> u32 {
         match ty {
-            Type::Duration => DURATION_TYPE,
-            Type::String => STRING_TYPE,
-            Type::Module => MODULE_TYPE,
-            Type::UnityModule => UNITY_MODULE_TYPE,
-            Type::UnityImage => UNITY_IMAGE_TYPE,
-            Type::UnityClass => UNITY_CLASS_TYPE,
-            Type::UnityField => UNITY_FIELD_TYPE,
+            Type::Standard(standard) => standard_gc_type_index(standard),
             Type::Record(_)
             | Type::Enum(_)
             | Type::Array(_)
@@ -195,22 +257,28 @@ impl GcLayout {
             Type::Bool | Type::I8 | Type::U8 | Type::I16 | Type::U16 | Type::I32 | Type::U32 => {
                 ValType::I32
             }
-            Type::I64 | Type::U64 | Type::Address | Type::Signature => ValType::I64,
+            Type::I64 | Type::U64 | Type::Address => ValType::I64,
             Type::F32 => ValType::F32,
             Type::F64 => ValType::F64,
-            Type::String
-            | Type::Duration
-            | Type::Module
-            | Type::UnityModule
-            | Type::UnityImage
-            | Type::UnityClass
-            | Type::UnityField
-            | Type::Record(_)
+            Type::Standard(standard) => {
+                match StandardLibrary::new().type_decl(standard).representation {
+                    RuntimeRepresentation::Scalar { storage } => {
+                        self.val_type(Type::from_declared(DeclaredTypeRef::Core(storage)))
+                    }
+                    RuntimeRepresentation::GcArray { nullable, .. }
+                    | RuntimeRepresentation::GcStruct { nullable, .. }
+                    | RuntimeRepresentation::Enum { nullable } => ValType::Ref(RefType {
+                        nullable,
+                        heap_type: HeapType::Concrete(self.index(ty)),
+                    }),
+                }
+            }
+            Type::Record(_)
             | Type::Enum(_)
             | Type::Array(_)
             | Type::Option(_)
             | Type::Result(_) => ValType::Ref(RefType {
-                nullable: ty != Type::Duration,
+                nullable: true,
                 heap_type: HeapType::Concrete(self.index(ty)),
             }),
         }
@@ -226,8 +294,45 @@ impl GcLayout {
 }
 
 impl Type {
+    fn from_standard(ty: StdlibTypeId) -> Self {
+        Self::Standard(ty)
+    }
+
+    fn from_declared(ty: DeclaredTypeRef) -> Self {
+        match ty {
+            DeclaredTypeRef::Core(core) => match core {
+                CoreTypeId::Void => Self::Void,
+                CoreTypeId::Bool => Self::Bool,
+                CoreTypeId::I8 => Self::I8,
+                CoreTypeId::U8 => Self::U8,
+                CoreTypeId::I16 => Self::I16,
+                CoreTypeId::U16 => Self::U16,
+                CoreTypeId::I32 => Self::I32,
+                CoreTypeId::U32 => Self::U32,
+                CoreTypeId::I64 => Self::I64,
+                CoreTypeId::U64 => Self::U64,
+                CoreTypeId::Address => Self::Address,
+                CoreTypeId::F32 => Self::F32,
+                CoreTypeId::F64 => Self::F64,
+            },
+            DeclaredTypeRef::Standard(standard) => Self::from_standard(standard),
+        }
+    }
+
     fn is_signed(self) -> bool {
         matches!(self, Self::I8 | Self::I16 | Self::I32 | Self::I64)
+    }
+
+    fn is_enum(self) -> bool {
+        matches!(self, Self::Enum(_))
+            || matches!(
+                self,
+                Self::Standard(standard)
+                    if matches!(
+                        StandardLibrary::new().type_decl(standard).representation,
+                        RuntimeRepresentation::Enum { .. }
+                    )
+            )
     }
 }
 
@@ -605,15 +710,8 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
             BuiltinType::Address => Type::Address,
             BuiltinType::F32 => Type::F32,
             BuiltinType::F64 => Type::F64,
-            BuiltinType::String => Type::String,
-            BuiltinType::Signature => Type::Signature,
-            BuiltinType::Duration => Type::Duration,
-            BuiltinType::Module => Type::Module,
-            BuiltinType::UnityModule => Type::UnityModule,
-            BuiltinType::UnityImage => Type::UnityImage,
-            BuiltinType::UnityClass => Type::UnityClass,
-            BuiltinType::UnityField => Type::UnityField,
         },
+        TypeKind::Standard(standard) => Type::Standard(*standard),
         TypeKind::Record(record) => Type::Record(*record),
         TypeKind::Enum(enumeration) => Type::Enum(*enumeration),
         TypeKind::Array { layout, .. } => Type::Array(*layout),
@@ -808,7 +906,9 @@ fn emit_default(function: &mut Function, ty: Type, gc: &GcLayout) {
 fn emit_result_success(function: &mut Function, result: ResultTypeId, gc: &GcLayout) {
     function
         .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::RefNull(HeapType::Concrete(STRING_TYPE)))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            standard_gc_type_index(StdlibTypeId::String),
+        )))
         .instruction(&Instruction::StructNew(gc.index(Type::Result(result))));
 }
 
@@ -858,7 +958,7 @@ fn emit_string_literal(function: &mut Function, value: &str) {
         function.instruction(&Instruction::I32Const(byte as i32));
     }
     function.instruction(&Instruction::ArrayNewFixed {
-        array_type_index: STRING_TYPE,
+        array_type_index: standard_gc_type_index(StdlibTypeId::String),
         array_size: value.len() as u32,
     });
 }
@@ -923,34 +1023,18 @@ fn val_type(ty: Type) -> ValType {
         Type::I64 | Type::U64 | Type::Address => ValType::I64,
         Type::F32 => ValType::F32,
         Type::F64 => ValType::F64,
-        Type::String => ValType::Ref(RefType {
-            nullable: true,
-            heap_type: HeapType::Concrete(STRING_TYPE),
-        }),
-        Type::Duration => ValType::Ref(RefType {
-            nullable: false,
-            heap_type: HeapType::Concrete(DURATION_TYPE),
-        }),
-        Type::Module => ValType::Ref(RefType {
-            nullable: true,
-            heap_type: HeapType::Concrete(MODULE_TYPE),
-        }),
-        Type::UnityModule => ValType::Ref(RefType {
-            nullable: true,
-            heap_type: HeapType::Concrete(UNITY_MODULE_TYPE),
-        }),
-        Type::UnityImage => ValType::Ref(RefType {
-            nullable: true,
-            heap_type: HeapType::Concrete(UNITY_IMAGE_TYPE),
-        }),
-        Type::UnityClass => ValType::Ref(RefType {
-            nullable: true,
-            heap_type: HeapType::Concrete(UNITY_CLASS_TYPE),
-        }),
-        Type::UnityField => ValType::Ref(RefType {
-            nullable: true,
-            heap_type: HeapType::Concrete(UNITY_FIELD_TYPE),
-        }),
+        Type::Standard(standard) => match StandardLibrary::new().type_decl(standard).representation
+        {
+            RuntimeRepresentation::Scalar { storage } => {
+                val_type(Type::from_declared(DeclaredTypeRef::Core(storage)))
+            }
+            RuntimeRepresentation::GcArray { nullable, .. }
+            | RuntimeRepresentation::GcStruct { nullable, .. }
+            | RuntimeRepresentation::Enum { nullable } => ValType::Ref(RefType {
+                nullable,
+                heap_type: HeapType::Concrete(standard_gc_type_index(standard)),
+            }),
+        },
         Type::Record(_) | Type::Enum(_) | Type::Array(_) | Type::Option(_) | Type::Result(_) => {
             unreachable!("dynamic GC types require a GcLayout lookup")
         }
@@ -962,7 +1046,7 @@ fn action_result_val_type(action: ActionKind) -> ValType {
     if action == ActionKind::GameTime {
         ValType::Ref(RefType {
             nullable: true,
-            heap_type: HeapType::Concrete(DURATION_TYPE),
+            heap_type: HeapType::Concrete(standard_gc_type_index(StdlibTypeId::Duration)),
         })
     } else {
         ValType::I32

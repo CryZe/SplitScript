@@ -4,8 +4,8 @@ use crate::{
     abi::AbiImportId,
     ast::{ActionKind, Program, SettingFileFilter, SettingKind, StateSource},
     semantic::{ResolvedCall, SemanticModel},
-    stdlib::{Implementation, IntrinsicId, StandardLibrary, StdlibItemId},
-    types::{BuiltinType, TypeKind},
+    stdlib::{Implementation, IntrinsicId, StandardLibrary, StdlibItemId, StdlibTypeId},
+    types::TypeKind,
     wasm_ir,
 };
 
@@ -133,7 +133,7 @@ impl BackendDependencies {
                 wasm_ir::ExpressionKind::Cast { .. }
                     if matches!(
                         semantics.types().kind(expression.ty),
-                        TypeKind::Builtin(BuiltinType::String)
+                        TypeKind::Standard(StdlibTypeId::String)
                     ) =>
                 {
                     dependencies.require(GeneratedHelper::FormatI64);

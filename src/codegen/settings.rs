@@ -3,14 +3,19 @@
 use super::*;
 
 pub(super) fn compile_string_from_memory() -> Function {
-    let mut function = Function::new([(1, val_type(Type::String)), (1, ValType::I32)]);
+    let mut function = Function::new([
+        (1, val_type(Type::Standard(StdlibTypeId::String))),
+        (1, ValType::I32),
+    ]);
     let pointer = 0;
     let length = 1;
     let output = 2;
     let index = 3;
     function
         .instruction(&Instruction::LocalGet(length))
-        .instruction(&Instruction::ArrayNewDefault(STRING_TYPE))
+        .instruction(&Instruction::ArrayNewDefault(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::LocalSet(output))
         .instruction(&Instruction::Block(BlockType::Empty))
         .instruction(&Instruction::Loop(BlockType::Empty))
@@ -25,7 +30,9 @@ pub(super) fn compile_string_from_memory() -> Function {
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::I32Add)
         .instruction(&Instruction::I32Load8U(memarg()))
-        .instruction(&Instruction::ArraySet(STRING_TYPE))
+        .instruction(&Instruction::ArraySet(standard_gc_type_index(
+            StdlibTypeId::String,
+        )))
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::I32Add)
@@ -49,7 +56,10 @@ pub(super) fn compile_refresh_settings(
     let semantics = lowering.semantics;
     let abi = lowering.abi;
     let enums = lowering.enums;
-    let mut function = Function::new([(2, ValType::I64), (1, val_type(Type::String))]);
+    let mut function = Function::new([
+        (2, ValType::I64),
+        (1, val_type(Type::Standard(StdlibTypeId::String))),
+    ]);
     let map = 0;
     let value = 1;
     let decoded = 2;
@@ -413,6 +423,9 @@ pub(super) fn compile_start(
             else {
                 unreachable!("checked enum globals use enum constructors")
             };
+            let ResolvedEnumVariantId::Source(variant) = variant else {
+                unreachable!("choice settings use source enum variants")
+            };
             emit_enum_variant(
                 &mut function,
                 enumeration,
@@ -430,7 +443,7 @@ pub(super) fn compile_start(
     function.instruction(&Instruction::GlobalSet(OLD_GLOBAL));
     if has_async_frame {
         function
-            .instruction(&Instruction::StructNewDefault(ASYNC_FRAME_TYPE))
+            .instruction(&Instruction::StructNewDefault(async_frame_type_index()))
             .instruction(&Instruction::GlobalSet(ASYNC_FRAME_GLOBAL));
     }
     for setting in &program.settings {

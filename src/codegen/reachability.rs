@@ -6,7 +6,8 @@ use crate::{
         RecordId, ResultTypeId,
     },
     semantic::{ResolvedCall, SemanticModel},
-    types::{BuiltinType, TypeId, TypeKind},
+    stdlib::StdlibTypeId,
+    types::{TypeId, TypeKind},
     wasm_ir::{self, BodyOwner, FallbackBranch, Terminator},
 };
 
@@ -153,7 +154,7 @@ impl Reachability {
             };
             matches!(
                 semantics.types().kind(*element),
-                TypeKind::Builtin(BuiltinType::String)
+                TypeKind::Standard(StdlibTypeId::String)
             )
             .then_some(ty)
         });
@@ -257,7 +258,7 @@ impl Reachability {
                 continue;
             }
             match semantics.types().kind(ty) {
-                TypeKind::Builtin(_) => {}
+                TypeKind::Builtin(_) | TypeKind::Standard(_) => {}
                 TypeKind::Record(record) => {
                     self.gc_records.insert(*record);
                     let declaration = program
@@ -314,8 +315,8 @@ impl Reachability {
                 continue;
             }
             match semantics.types().kind(ty) {
-                TypeKind::Builtin(BuiltinType::String) => self.string_equality = true,
-                TypeKind::Builtin(_) => {}
+                TypeKind::Standard(StdlibTypeId::String) => self.string_equality = true,
+                TypeKind::Builtin(_) | TypeKind::Standard(_) => {}
                 TypeKind::Record(record) if self.equality_records.insert(*record) => {
                     let declaration = program
                         .records

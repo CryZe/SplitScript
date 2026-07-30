@@ -443,9 +443,12 @@ impl LanguageServer {
             Some(DefinitionTarget::Source(definition)) => {
                 location_json(&uri, &source, definition.span)
             }
-            Some(DefinitionTarget::StandardLibrary(_) | DefinitionTarget::Language(_)) | None => {
-                Value::Null
-            }
+            Some(
+                DefinitionTarget::StandardLibrary(_)
+                | DefinitionTarget::StandardLibrarySymbol(_)
+                | DefinitionTarget::Language(_),
+            )
+            | None => Value::Null,
         };
         response(id, location)
     }

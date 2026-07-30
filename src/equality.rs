@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     ast::{EnumDecl, EnumId, RecordDecl, RecordId},
     semantic::SemanticModel,
+    stdlib::{StandardLibrary, StdlibCapabilityId},
     types::{BuiltinType, TypeId, TypeKind},
 };
 
@@ -48,6 +49,12 @@ impl EqualityCapabilities {
     pub fn require(&self, ty: TypeId, semantics: &SemanticModel) -> Result<(), String> {
         match semantics.types().kind(ty) {
             TypeKind::Builtin(builtin) if builtin_is_equatable(*builtin) => Ok(()),
+            TypeKind::Standard(standard)
+                if StandardLibrary::new()
+                    .type_has_capability(*standard, StdlibCapabilityId::Equatable) =>
+            {
+                Ok(())
+            }
             TypeKind::Record(record) => self.record(*record).map_err(str::to_owned),
             TypeKind::Enum(enumeration) => self.enumeration(*enumeration).map_err(str::to_owned),
             TypeKind::Option { value, .. } => self
@@ -91,6 +98,12 @@ impl EqualityCapabilities {
         }
         let result = match semantics.types().kind(ty) {
             TypeKind::Builtin(builtin) if builtin_is_equatable(*builtin) => Ok(()),
+            TypeKind::Standard(standard)
+                if StandardLibrary::new()
+                    .type_has_capability(*standard, StdlibCapabilityId::Equatable) =>
+            {
+                Ok(())
+            }
             TypeKind::Record(record) => {
                 self.check_record(*record, records, enums, semantics, visiting)
             }
@@ -172,5 +185,5 @@ impl EqualityCapabilities {
 }
 
 fn builtin_is_equatable(ty: BuiltinType) -> bool {
-    ty.is_numeric() || matches!(ty, BuiltinType::Bool | BuiltinType::String)
+    ty.is_numeric() || ty == BuiltinType::Bool
 }

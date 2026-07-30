@@ -230,8 +230,8 @@ impl CheckedProgram {
         &self.effects
     }
 
-    /// Enum layouts visible to semantic analysis, including compiler-provided
-    /// nominal types such as `TimerState` after all source declarations.
+    /// Source enum layouts visible to semantic analysis. Standard-library
+    /// enums retain their catalog identities and are not synthesized here.
     pub fn enum_types(&self) -> &[ast::EnumDecl] {
         &self.enum_types
     }

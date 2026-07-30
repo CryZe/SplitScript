@@ -1,25 +1,6 @@
 use std::fmt;
 
-pub const TIMER_STATE_TYPE_NAME: &str = "TimerState";
-pub const TIMER_STATE_VARIANTS: [&str; 5] = ["NotRunning", "Running", "Paused", "Ended", "Unknown"];
-
-pub(crate) fn timer_state_enum(id: EnumId, first_variant: u32) -> EnumDecl {
-    EnumDecl {
-        id,
-        name: TIMER_STATE_TYPE_NAME.to_owned(),
-        variants: TIMER_STATE_VARIANTS
-            .into_iter()
-            .enumerate()
-            .map(|(offset, name)| EnumVariant {
-                id: EnumVariantId::from_index(first_variant + offset as u32),
-                name: name.to_owned(),
-                payload: None,
-                span: Span::default(),
-            })
-            .collect(),
-        span: Span::default(),
-    }
-}
+use crate::stdlib::{StandardLibrary, StdlibTypeId};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Span {
@@ -108,6 +89,24 @@ impl EnumId {
 
     pub(crate) fn from_index(index: u32) -> Self {
         Self(index)
+    }
+}
+
+/// Identity of an enum referenced by source syntax. Source enums use their
+/// per-program declaration ID, while standard-library enums retain their
+/// catalog identity without synthesizing an AST declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum EnumTypeId {
+    Source(EnumId),
+    Standard(StdlibTypeId),
+}
+
+impl fmt::Display for EnumTypeId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Source(id) => id.fmt(formatter),
+            Self::Standard(id) => StandardLibrary::new().type_decl(*id).name.fmt(formatter),
+        }
     }
 }
 
@@ -369,7 +368,7 @@ impl SettingDecl {
         match &self.kind {
             SettingKind::Bool { .. } => Some(TypeRef::Bool),
             SettingKind::Choice { enumeration, .. } => Some(TypeRef::Enum(*enumeration)),
-            SettingKind::File { .. } => Some(TypeRef::String),
+            SettingKind::File { .. } => Some(TypeRef::Standard(StdlibTypeId::String)),
             SettingKind::Title { .. } => None,
         }
     }
@@ -465,7 +464,7 @@ impl ActionKind {
         match self {
             Self::OnDetached | Self::OnAttach | Self::WhileAttached => TypeRef::Void,
             Self::Start | Self::Split | Self::Reset | Self::IsLoading => TypeRef::Bool,
-            Self::GameTime => TypeRef::Duration,
+            Self::GameTime => TypeRef::Standard(StdlibTypeId::Duration),
         }
     }
 }
@@ -578,7 +577,7 @@ pub enum ExprKind {
         fields: Vec<(String, Expr)>,
     },
     Enum {
-        enumeration: EnumId,
+        enumeration: EnumTypeId,
         variant: String,
         payload: Option<Box<Expr>>,
     },
@@ -661,7 +660,7 @@ pub struct PatternBinding {
 #[derive(Debug, Clone)]
 pub enum MatchPattern {
     Enum {
-        enumeration: EnumId,
+        enumeration: EnumTypeId,
         variant: String,
         binding: Option<PatternBinding>,
     },
@@ -722,14 +721,10 @@ pub enum TypeRef {
     Address,
     F32,
     F64,
-    String,
-    Signature,
-    Duration,
-    Module,
-    UnityModule,
-    UnityImage,
-    UnityClass,
-    UnityField,
+    /// A source-written nominal type name. Standard-library identity is
+    /// resolved after parsing rather than embedded into syntax.
+    Named(&'static str),
+    Standard(StdlibTypeId),
     Record(RecordId),
     Enum(EnumId),
     Array(ArrayTypeId),
@@ -752,14 +747,8 @@ impl TypeRef {
             "address" | "Address" => Self::Address,
             "f32" => Self::F32,
             "f64" => Self::F64,
-            "String" | "string" => Self::String,
-            "Duration" => Self::Duration,
-            "Module" => Self::Module,
-            "UnityModule" => Self::UnityModule,
-            "UnityImage" => Self::UnityImage,
-            "UnityClass" => Self::UnityClass,
-            "UnityField" => Self::UnityField,
-            _ => return None,
+            "string" => Self::Named(StandardLibrary::new().type_decl(StdlibTypeId::String).name),
+            _ => Self::Named(StandardLibrary::new().type_by_name(name)?.name),
         })
     }
 
@@ -776,6 +765,14 @@ impl TypeRef {
                 | Self::U64
                 | Self::Address
         )
+    }
+
+    pub fn standard_type(self) -> Option<StdlibTypeId> {
+        match self {
+            Self::Named(name) => StandardLibrary::new().type_by_name(name).map(|ty| ty.id),
+            Self::Standard(id) => Some(id),
+            _ => None,
+        }
     }
 }
 
@@ -795,14 +792,10 @@ impl fmt::Display for TypeRef {
             Self::Address => "address",
             Self::F32 => "f32",
             Self::F64 => "f64",
-            Self::String => "String",
-            Self::Signature => "Signature",
-            Self::Duration => "Duration",
-            Self::Module => "Module",
-            Self::UnityModule => "UnityModule",
-            Self::UnityImage => "UnityImage",
-            Self::UnityClass => "UnityClass",
-            Self::UnityField => "UnityField",
+            Self::Named(name) => name,
+            Self::Standard(standard) => {
+                return f.write_str(StandardLibrary::new().type_decl(*standard).name);
+            }
             Self::Record(id) => return write!(f, "record#{id}"),
             Self::Enum(id) => return write!(f, "enum#{id}"),
             Self::Array(id) => return write!(f, "Array#{id}"),

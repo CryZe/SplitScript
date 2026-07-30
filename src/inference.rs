@@ -5,7 +5,10 @@
 
 use std::{collections::HashMap, fmt, ops::BitOr};
 
-use crate::ast::{ArrayTypeId, EnumId, OptionTypeId, RecordId, ResultTypeId, TypeRef};
+use crate::{
+    ast::{ArrayTypeId, EnumId, OptionTypeId, RecordId, ResultTypeId, TypeRef},
+    stdlib::{StandardLibrary, StdlibCapabilityId, StdlibTypeId},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Type {
@@ -22,14 +25,7 @@ pub(crate) enum Type {
     Address,
     F32,
     F64,
-    String,
-    Signature,
-    Duration,
-    Module,
-    UnityModule,
-    UnityImage,
-    UnityClass,
-    UnityField,
+    Standard(StdlibTypeId),
     Record(RecordId),
     Enum(EnumId),
     Array(ArrayTypeId),
@@ -77,14 +73,7 @@ impl Type {
             Self::Address => TypeRef::Address,
             Self::F32 => TypeRef::F32,
             Self::F64 => TypeRef::F64,
-            Self::String => TypeRef::String,
-            Self::Signature => TypeRef::Signature,
-            Self::Duration => TypeRef::Duration,
-            Self::Module => TypeRef::Module,
-            Self::UnityModule => TypeRef::UnityModule,
-            Self::UnityImage => TypeRef::UnityImage,
-            Self::UnityClass => TypeRef::UnityClass,
-            Self::UnityField => TypeRef::UnityField,
+            Self::Standard(standard) => TypeRef::Standard(standard),
             Self::Record(id) => TypeRef::Record(id),
             Self::Enum(id) => TypeRef::Enum(id),
             Self::Array(id) => TypeRef::Array(id),
@@ -113,14 +102,13 @@ impl From<TypeRef> for Type {
             TypeRef::Address => Self::Address,
             TypeRef::F32 => Self::F32,
             TypeRef::F64 => Self::F64,
-            TypeRef::String => Self::String,
-            TypeRef::Signature => Self::Signature,
-            TypeRef::Duration => Self::Duration,
-            TypeRef::Module => Self::Module,
-            TypeRef::UnityModule => Self::UnityModule,
-            TypeRef::UnityImage => Self::UnityImage,
-            TypeRef::UnityClass => Self::UnityClass,
-            TypeRef::UnityField => Self::UnityField,
+            TypeRef::Named(name) => Self::Standard(
+                StandardLibrary::new()
+                    .type_by_name(name)
+                    .expect("parsed nominal standard type names remain resolvable")
+                    .id,
+            ),
+            TypeRef::Standard(standard) => Self::Standard(standard),
             TypeRef::Record(id) => Self::Record(id),
             TypeRef::Enum(id) => Self::Enum(id),
             TypeRef::Array(id) => Self::Array(id),
@@ -146,14 +134,9 @@ impl fmt::Display for Type {
             Self::Address => "address",
             Self::F32 => "f32",
             Self::F64 => "f64",
-            Self::String => "String",
-            Self::Signature => "Signature",
-            Self::Duration => "Duration",
-            Self::Module => "Module",
-            Self::UnityModule => "UnityModule",
-            Self::UnityImage => "UnityImage",
-            Self::UnityClass => "UnityClass",
-            Self::UnityField => "UnityField",
+            Self::Standard(standard) => {
+                return formatter.write_str(StandardLibrary::new().type_decl(*standard).name);
+            }
             Self::Record(id) => return write!(formatter, "record#{id}"),
             Self::Enum(id) => return write!(formatter, "enum#{id}"),
             Self::Array(id) => return write!(formatter, "Array#{id}"),
@@ -685,13 +668,9 @@ fn type_meets_requirements(ty: Type, requirements: Requirements) -> bool {
         && !ty.is_numeric()
         && !matches!(
             ty,
-            Type::Bool
-                | Type::String
-                | Type::Record(_)
-                | Type::Enum(_)
-                | Type::Option(_)
-                | Type::Result(_)
+            Type::Bool | Type::Record(_) | Type::Enum(_) | Type::Option(_) | Type::Result(_)
         )
+        && !standard_has_capability(ty, StdlibCapabilityId::Equatable)
     {
         return false;
     }
@@ -729,8 +708,7 @@ fn type_meets_requirements(ty: Type, requirements: Requirements) -> bool {
     if requirements.intersects(Requirements::INTERPOLATABLE)
         && !matches!(
             ty,
-            Type::String
-                | Type::I8
+            Type::I8
                 | Type::U8
                 | Type::I16
                 | Type::U16
@@ -740,6 +718,7 @@ fn type_meets_requirements(ty: Type, requirements: Requirements) -> bool {
                 | Type::U64
                 | Type::Address
         )
+        && !standard_has_capability(ty, StdlibCapabilityId::Interpolatable)
     {
         return false;
     }
@@ -764,6 +743,13 @@ fn type_meets_requirements(ty: Type, requirements: Requirements) -> bool {
         return false;
     }
     true
+}
+
+fn standard_has_capability(ty: Type, capability: StdlibCapabilityId) -> bool {
+    let Type::Standard(standard) = ty else {
+        return false;
+    };
+    StandardLibrary::new().type_has_capability(standard, capability)
 }
 
 fn canonical_wrapper_type(
@@ -792,7 +778,7 @@ fn requirements_are_possible(requirements: Requirements) -> bool {
         Type::Address,
         Type::F32,
         Type::F64,
-        Type::String,
+        Type::Standard(StdlibTypeId::String),
     ]
     .into_iter()
     .any(|ty| type_meets_requirements(ty, requirements))

@@ -13,15 +13,11 @@ Priority meanings:
 
 ## P0 — Unify the standard-library declaration and type model
 
-Do this before any further substantial standard-library expansion. The current
-`StandardLibrary` catalog is the single source of truth for callables, but not
-for namespaces, nominal types, fields, enum variants, capabilities, or runtime
-representations. Types such as `Module`, `Duration`, `TimerState`,
-`UnityModule`, `UnityImage`, `UnityClass`, and `UnityField` are consequently
-redeclared across syntax types, inference types, semantic built-ins, member
-resolution, Wasm physical types, GC layouts, documentation, and editor
-tooling. Adding another ordinary library type must not require edits throughout
-the compiler.
+Do this before any further substantial standard-library expansion. This work
+turns `StandardLibrary` from the former callable-only catalog into the source
+of truth for namespaces, nominal types, fields, enum variants, capabilities,
+and runtime representations. The remaining unchecked items finish unifying
+source type resolution, inference, and derived capabilities around that graph.
 
 Preserve the current language and generated behavior while establishing this
 invariant:
@@ -33,29 +29,29 @@ invariant:
 
 ### Library declaration graph
 
-- [ ] Extend `StandardLibrary` from a callable catalog into a complete,
+- [x] Extend `StandardLibrary` from a callable catalog into a complete,
   backend-independent symbol graph with stable IDs for namespaces, nominal
   types, fields, runtime-private slots, enum variants, callables, capabilities,
   and intrinsic implementations.
-- [ ] Give every callable an explicit owner—root, namespace, nominal type, or
+- [x] Give every callable an explicit owner—root, namespace, nominal type, or
   capability—instead of deriving namespaces from string path prefixes.
   Declare `process`, `timer`, and `Unity` as namespaces; keep `Duration` and
   the Unity value types as nominal types with associated or instance members.
-- [ ] Replace catalog `Builtin(BuiltinType)` and `Named("...")` references with
+- [x] Replace catalog `Builtin(BuiltinType)` and `Named("...")` references with
   stable core-type, standard-type, type-parameter, and constructed-type
   identities. Names are lookup/display data, never semantic identity.
-- [ ] Describe public fields and runtime-private storage in the owning type
+- [x] Describe public fields and runtime-private storage in the owning type
   declaration. Runtime metadata must be backend-neutral: scalar, GC struct,
   GC array, enum, compile-time-only, and derived record representations rather
   than `wasm_encoder` types or numeric heap/field indices.
-- [ ] Add catalog validation for unique IDs and names, resolvable owners and
+- [x] Add catalog validation for unique IDs and names, resolvable owners and
   type references, valid representation dependencies, field/variant identity,
   complete public documentation, capability consistency, and intrinsic
   signature/implementation agreement.
 
 ### One semantic type universe
 
-- [ ] Restrict compiler-core types to genuine language primitives and
+- [x] Restrict compiler-core types to genuine language primitives and
   constructors: `void`, `bool`, fixed-width numbers, `address`, inference
   variables, arrays, `T?`, and `T!`. Model `String`, `Duration`, `Module`,
   `TimerState`, and the Unity family as declared nominal library types;
@@ -63,11 +59,21 @@ invariant:
 - [ ] Preserve unresolved nominal type paths in syntax and resolve them against
   one environment containing core, standard-library, and source declarations.
   The parser must not enumerate future standard-library type names.
+  - [x] Keep source-written standard-library type names nominal in syntax and
+    resolve them to catalog identities when entering inference/semantics.
+  - [ ] Apply the same name-resolution boundary to source record/enum names
+    and consolidate the remaining parser lookup paths into one environment.
 - [ ] Simplify inference to known semantic `TypeId` values plus inference
   variables. Remove the parallel nominal variants and conversion tables in
   `ast::TypeRef`, `inference::Type`, and `BuiltinType` as their migrations
   complete.
-- [ ] Introduce well-known type/variant handles for genuine language and ABI
+  - [x] Collapse every standard-library nominal inference case into
+    `Type::Standard(StdlibTypeId)` and every checked result into
+    `TypeKind::Standard(StdlibTypeId)`; no library type has a dedicated
+    inference or semantic variant.
+  - [ ] Replace the remaining parallel core/source/constructed inference term
+    variants with known semantic `TypeId` values plus inference variables.
+- [x] Introduce well-known type/variant handles for genuine language and ABI
   contracts such as string literals, interpolation, `gameTime`, signature
   literals, and timer-state conversion. A well-known handle references the
   catalog declaration; it does not redeclare its name, fields, variants,
@@ -79,47 +85,47 @@ invariant:
 
 ### Generic members, layouts, and tooling
 
-- [ ] Resolve standard and source fields through one declaration query and one
+- [x] Resolve standard and source fields through one declaration query and one
   stable member identity. Remove `BuiltinFieldId` and the type checker’s
   `Module`/Unity field-name tables.
-- [ ] Make completion, hover, signature help, go-to-definition, semantic
+- [x] Make completion, hover, signature help, go-to-definition, semantic
   highlighting, rename reservation, and generated documentation traverse the
   same symbol graph. Remove standard types and fields from `LanguageCatalog`;
   that catalog should contain only keywords, syntax, lifecycle/actions, and
   other genuinely language-defined concepts.
-- [ ] Plan reachable Wasm GC layouts from semantic type declarations. Backend
+- [x] Plan reachable Wasm GC layouts from semantic type declarations. Backend
   code must query type and field layout IDs rather than use fixed constants
   such as `UNITY_IMAGE_TYPE` or numeric field indices.
-- [ ] Make intrinsic lowering request its actual temporary values and query
+- [x] Make intrinsic lowering request its actual temporary values and query
   declared representations. Remove unconditional Unity scratch locals and
   helper signatures that reconstruct library types independently.
-- [ ] Keep exact-type branching only inside behavior that is intrinsically
+- [x] Keep exact-type branching only inside behavior that is intrinsically
   type-specific. Such code may reference stable standard type/field/variant
   IDs, but it must not restate their source names, semantic shapes, storage
   layout, or documentation.
 
 ### Vertical migration and removal order
 
-- [ ] Establish catalog declarations and adapters without changing source
+- [x] Establish catalog declarations and adapters without changing source
   syntax or runtime behavior; add characterization tests for compiler queries,
   docs/LSP results, GC layouts, and generated Wasm before deleting old paths.
-- [ ] Migrate explicit `process`, `timer`, and `Unity` namespaces and switch all
+- [x] Migrate explicit `process`, `timer`, and `Unity` namespaces and switch all
   editor/documentation discovery away from inferred callable path prefixes and
   hard-coded namespace lists.
-- [ ] Migrate `TimerState` first as the enum/variant proving case. Remove its
+- [x] Migrate `TimerState` first as the enum/variant proving case. Remove its
   synthetic AST enum, checker injection, name-based backend lookup, and
   duplicate `LanguageCatalog` entries.
-- [ ] Migrate `Module` as the field and nominal-GC-record proving case. Its
+- [x] Migrate `Module` as the field and nominal-GC-record proving case. Its
   `address` and `size` members and physical slots must come from one
   declaration.
-- [ ] Migrate `UnityModule`, `UnityImage`, `UnityClass`, and `UnityField`
+- [x] Migrate `UnityModule`, `UnityImage`, `UnityClass`, and `UnityField`
   together, including public fields, runtime-private ownership references,
   methods, async temporaries, generated helpers, and GC layout planning.
-- [ ] Migrate `Duration`, then `String`, then `Signature`, accounting for their
+- [x] Migrate `Duration`, then `String`, then `Signature`, accounting for their
   lifecycle/ABI contracts, non-nullability, literal/interpolation behavior,
   array representation, and compile-time-only behavior without duplicating
   their declarations.
-- [ ] Delete the retired standard-type variants, conversion matches, fixed GC
+- [x] Delete the retired standard-type variants, conversion matches, fixed GC
   indices, numeric field indices, special member tables, and duplicate
   language/tooling documentation after each vertical slice. Do not retain
   compatibility aliases; the language is not yet in production.
@@ -917,9 +923,9 @@ and standard-library work.
     wrapper constructors and patterns, keywords, lifecycle names, setting
     documentation, and choice/file DSL tokens to stable `LanguageCatalog`
     items. Choice option enum/variant labels navigate to their source.
-  - [x] Catalog and navigate snapshot roots, built-in value fields, and the
-    synthetic `TimerState` type and variants. Their semantic IDs resolve to
-    `LanguageCatalog` entries rather than editor-specific special cases.
+  - [x] Catalog and navigate snapshot roots, standard-library value fields,
+    and the `TimerState` type and variants. Their semantic IDs resolve to the
+    `StandardLibrary` symbol graph rather than editor-specific special cases.
   - [x] Preserve useful semantic facts when other expressions fail type
     checking so navigation and hover remain available in unaffected regions.
     The recovering checker publishes its diagnostics alongside a partial

@@ -14,15 +14,15 @@ bodies:
     let v4 = e12
     evaluate e15
 expressions:
-  e0: Event = enum 1.Idle payload=None resolve=EnumConstructor { variant: EnumVariantId(0) } convert=LiftResult Event -> Event!
+  e0: Event = enum 1.Idle payload=None resolve=EnumConstructor { variant: Source(EnumVariantId(0)) } convert=LiftResult Event -> Event!
   e1: Event = path event resolve=ValuePath { root: Some(Variable(ValueId(1))), members: [] }
   e2: i32? = path point.x resolve=ValuePath { root: Some(Variable(ValueId(2))), members: [RecordField(RecordFieldId(0))] } convert=LiftOption i32 -> i32?
   e3: i32? = None
-  e4: i32? = match e1 arms=[p0 Enum { enumeration: EnumId(1), variant: "Moved", binding: Some(PatternBinding { id: ValueId(2), name: "point" }) } guard=None value=e2, p1 Enum { enumeration: EnumId(1), variant: "Idle", binding: None } guard=None value=e3]
+  e4: i32? = match e1 arms=[p0 Enum { enumeration: Source(EnumId(1)), variant: "Moved", binding: Some(PatternBinding { id: ValueId(2), name: "point" }) } guard=None value=e2, p1 Enum { enumeration: Source(EnumId(1)), variant: "Idle", binding: None } guard=None value=e3]
   e5: i32 = int 3 suffix=None
   e6: i32 = int 4 suffix=None
   e7: Point = record 0 fields=[("x", ExprId(5)), ("y", ExprId(6))] resolve=RecordLiteral { fields: [RecordFieldId(0), RecordFieldId(1)] }
-  e8: Event = enum 1.Moved payload=Some(ExprId(7)) resolve=EnumConstructor { variant: EnumVariantId(1) }
+  e8: Event = enum 1.Moved payload=Some(ExprId(7)) resolve=EnumConstructor { variant: Source(EnumVariantId(1)) }
   e9: Event = path next resolve=ValuePath { root: Some(Variable(ValueId(3))), members: [] }
   e10: i32? = call pointX args=[ExprId(9)] resolve=Call(UserFunction { function: FunctionId(0) })
   e11: i32 = int 0 suffix=None

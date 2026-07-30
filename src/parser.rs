@@ -4,15 +4,16 @@ use crate::{
     Diagnostic,
     ast::{
         Action, ActionKind, ArrayTypeDecl, ArrayTypeId, AssignmentId, BinaryOp, Block, EnumDecl,
-        EnumId, EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, FallbackBranch, FunctionDecl,
-        FunctionId, InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId,
-        Parameter, PatternBinding, PatternId, PointerPath, Program, RecordDecl, RecordField,
-        RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
+        EnumId, EnumTypeId, EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, FallbackBranch,
+        FunctionDecl, FunctionId, InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl,
+        OptionTypeId, Parameter, PatternBinding, PatternId, PointerPath, Program, RecordDecl,
+        RecordField, RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
         SettingChoiceOptionId, SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl,
-        StateField, StateSource, Stmt, SuspensionBinding, SuspensionMode, TIMER_STATE_TYPE_NAME,
-        TypeRef, UnaryOp, ValueId, VariableDecl,
+        StateField, StateSource, Stmt, SuspensionBinding, SuspensionMode, TypeRef, UnaryOp,
+        ValueId, VariableDecl,
     },
     lexer::{Token, TokenKind},
+    stdlib::{StandardLibrary, StdlibTypeKind},
     syntax::{RecoveryNode, RecoveryNodeKind},
 };
 
@@ -32,7 +33,11 @@ pub struct ParseOutput {
 
 pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
     let ((record_names, enum_names), initial_diagnostics) = collect_named_types(&tokens);
-    let first_constructed_type_id = record_names.len() as u32 + enum_names.len() as u32;
+    let first_constructed_type_id = record_names.len() as u32
+        + enum_names
+            .values()
+            .filter(|enumeration| matches!(enumeration, EnumTypeId::Source(_)))
+            .count() as u32;
     Parser {
         source,
         tokens,
@@ -65,7 +70,7 @@ struct Parser<'a> {
     tokens: Vec<Token>,
     pos: usize,
     record_names: HashMap<String, RecordId>,
-    enum_names: HashMap<String, EnumId>,
+    enum_names: HashMap<String, EnumTypeId>,
     array_types: Vec<ArrayTypeDecl>,
     array_type_ids: HashMap<TypeRef, ArrayTypeId>,
     option_types: Vec<OptionTypeDecl>,
@@ -279,7 +284,9 @@ impl Parser<'_> {
     fn enum_decl(&mut self) -> Result<EnumDecl, Diagnostic> {
         let start = self.expect_ident("enum")?.start;
         let (name, _) = self.expect_any_ident("expected an enum name")?;
-        let id = self.enum_names[&name];
+        let EnumTypeId::Source(id) = self.enum_names[&name] else {
+            unreachable!("standard-library enum declarations are rejected during name collection")
+        };
         self.expect(TokenKind::LBrace, "expected `{` after the enum name")?;
         let body_depth = self.brace_depth_before(self.pos);
         let mut variants = Vec::new();
@@ -498,7 +505,7 @@ impl Parser<'_> {
                 let (name, field_start) = self.expect_any_ident("expected a state field name")?;
                 let annotation = if self.eat(&TokenKind::Colon).is_some() {
                     let (ty, type_span) = self.parse_type("expected a state field type")?;
-                    if matches!(ty, TypeRef::Void | TypeRef::Duration) {
+                    if !type_can_be_stored_in_state(ty) {
                         return Err(Diagnostic::new(
                             format!("`{ty}` cannot be stored in state"),
                             type_span,
@@ -777,9 +784,9 @@ impl Parser<'_> {
                     "expected `=>` after the option description",
                 )?;
                 let (enum_name, enum_span) = self.expect_any_ident("expected an enum name")?;
-                let Some(&enum_id) = self.enum_names.get(&enum_name) else {
+                let Some(&EnumTypeId::Source(enum_id)) = self.enum_names.get(&enum_name) else {
                     return Err(Diagnostic::new(
-                        format!("unknown enum `{enum_name}`"),
+                        format!("choice settings require a source enum, found `{enum_name}`"),
                         enum_span,
                     ));
                 };
@@ -933,7 +940,7 @@ impl Parser<'_> {
                         type_span,
                     ));
                 };
-                if matches!(ty, TypeRef::Void | TypeRef::Duration) {
+                if !type_can_be_stored_in_state(ty) {
                     return Err(Diagnostic::new(
                         format!("`{ty}` cannot be read from process memory"),
                         type_span,
@@ -2343,7 +2350,15 @@ impl Parser<'_> {
     fn resolve_type(&self, name: &str, span: Span) -> Result<TypeRef, Diagnostic> {
         TypeRef::parse(name)
             .or_else(|| self.record_names.get(name).copied().map(TypeRef::Record))
-            .or_else(|| self.enum_names.get(name).copied().map(TypeRef::Enum))
+            .or_else(|| {
+                self.enum_names
+                    .get(name)
+                    .copied()
+                    .map(|enumeration| match enumeration {
+                        EnumTypeId::Source(id) => TypeRef::Enum(id),
+                        EnumTypeId::Standard(id) => TypeRef::Standard(id),
+                    })
+            })
             .ok_or_else(|| Diagnostic::new(format!("unknown type `{name}`"), span))
     }
 
@@ -2916,7 +2931,17 @@ fn assignment_operator(token: &TokenKind) -> Option<Option<BinaryOp>> {
     })
 }
 
-type NamedTypes = (HashMap<String, RecordId>, HashMap<String, EnumId>);
+fn type_can_be_stored_in_state(ty: TypeRef) -> bool {
+    ty != TypeRef::Void
+        && ty.standard_type().is_none_or(|standard| {
+            StandardLibrary::new()
+                .type_decl(standard)
+                .value_usage
+                .state_field
+        })
+}
+
+type NamedTypes = (HashMap<String, RecordId>, HashMap<String, EnumTypeId>);
 
 fn collect_named_types(tokens: &[Token]) -> (NamedTypes, Vec<Diagnostic>) {
     let mut diagnostics = Vec::new();
@@ -2924,24 +2949,37 @@ fn collect_named_types(tokens: &[Token]) -> (NamedTypes, Vec<Diagnostic>) {
         .into_iter()
         .map(|(name, id)| (name, RecordId::from_index(id)))
         .collect::<HashMap<_, _>>();
-    if records.contains_key(TIMER_STATE_TYPE_NAME) {
-        diagnostics.push(Diagnostic::new(
-            "`TimerState` is a compiler-provided enum and cannot be redeclared as a record",
-            Span::default(),
-        ));
-    }
     let mut enums = collect_top_level_names(tokens, "enum", records.len() as u32)
         .into_iter()
-        .map(|(name, id)| (name, EnumId::from_index(id)))
+        .map(|(name, id)| (name, EnumTypeId::Source(EnumId::from_index(id))))
         .collect::<HashMap<_, _>>();
-    if enums.contains_key(TIMER_STATE_TYPE_NAME) {
-        diagnostics.push(Diagnostic::new(
-            "`TimerState` is a compiler-provided enum and cannot be redeclared",
-            Span::default(),
-        ));
+    for ty in StandardLibrary::new()
+        .types()
+        .iter()
+        .filter(|ty| ty.kind == StdlibTypeKind::Enum)
+    {
+        if records.contains_key(ty.name) {
+            diagnostics.push(Diagnostic::new(
+                format!(
+                    "`{}` is a standard-library enum and cannot be redeclared as a record",
+                    ty.name
+                ),
+                Span::default(),
+            ));
+        }
+        if enums.contains_key(ty.name) {
+            diagnostics.push(Diagnostic::new(
+                format!(
+                    "`{}` is a standard-library enum and cannot be redeclared",
+                    ty.name
+                ),
+                Span::default(),
+            ));
+        }
+        enums
+            .entry(ty.name.to_owned())
+            .or_insert(EnumTypeId::Standard(ty.id));
     }
-    let timer_state = EnumId::from_index(records.len() as u32 + enums.len() as u32);
-    enums.insert(TIMER_STATE_TYPE_NAME.to_owned(), timer_state);
     ((records, enums), diagnostics)
 }
 

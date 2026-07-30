@@ -10,30 +10,8 @@ use std::collections::HashSet;
 use crate::{
     ast::ActionKind,
     catalog::{Documentation, Example},
-    semantic::BuiltinFieldId,
     types::BuiltinType,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum TimerStateVariant {
-    NotRunning,
-    Running,
-    Paused,
-    Ended,
-    Unknown,
-}
-
-impl TimerStateVariant {
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::NotRunning => "NotRunning",
-            Self::Running => "Running",
-            Self::Paused => "Paused",
-            Self::Ended => "Ended",
-            Self::Unknown => "Unknown",
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LanguageItemId {
@@ -70,9 +48,6 @@ pub enum LanguageItemId {
     CurrentSnapshot,
     OldSnapshot,
     OldSettingsSnapshot,
-    BuiltinField(BuiltinFieldId),
-    TimerStateType,
-    TimerStateVariant(TimerStateVariant),
     SettingDocumentation,
     ChoiceSetting,
     FileSetting,
@@ -93,9 +68,6 @@ pub enum LanguageItemKind {
     Syntax,
     BuiltinType(BuiltinType),
     SnapshotRoot,
-    BuiltinField(BuiltinFieldId),
-    CompilerType,
-    EnumVariant,
     Action(ActionKind),
 }
 
@@ -867,55 +839,6 @@ const ITEMS: &[LanguageItem] = &[
         "Floating-point values are useful for game coordinates, timers, and duration conversion.",
         "let tickRate: f64 = 60.0"
     ),
-    builtin_type_item!(
-        String,
-        "String",
-        "Stores garbage-collected UTF-8 text.",
-        "Strings support content equality, interpolation, length, printing, and host-boundary text values.",
-        "let levelName: String = \"Shrine01\""
-    ),
-    builtin_type_item!(
-        Duration,
-        "Duration",
-        "Stores a timer duration.",
-        "Duration values are returned by gameTime and can be constructed through frame, component, or seconds-based standard-library functions.",
-        "let elapsed: Duration = Duration.fromSeconds(12.5)"
-    ),
-    builtin_type_item!(
-        Module,
-        "Module",
-        "Describes a loaded process module.",
-        "Module values expose their address and size and provide signature scanning operations while attached.",
-        "let gameAssembly: Module = await process.module(\"GameAssembly.dll\")"
-    ),
-    builtin_type_item!(
-        UnityModule,
-        "UnityModule",
-        "Describes attached Unity IL2CPP metadata.",
-        "UnityModule is produced by the Unity attachment API and provides image lookup plus runtime metadata fields.",
-        "let unity: UnityModule = await Unity.il2cpp(2020)"
-    ),
-    builtin_type_item!(
-        UnityImage,
-        "UnityImage",
-        "Describes a Unity assembly image.",
-        "UnityImage provides class lookup and its resolved runtime address.",
-        "let image: UnityImage = await unity.image(\"Assembly-CSharp\")"
-    ),
-    builtin_type_item!(
-        UnityClass,
-        "UnityClass",
-        "Describes a Unity runtime class.",
-        "UnityClass provides field lookup and static-data discovery operations.",
-        "let gameManager: UnityClass = await image.class(\"GameManager\")"
-    ),
-    builtin_type_item!(
-        UnityField,
-        "UnityField",
-        "Describes a Unity runtime field.",
-        "UnityField exposes the field offset and metadata index used for process-memory discovery.",
-        "let levelField: UnityField = await gameManager.fieldAny([\"level\", \"currentLevel\"])"
-    ),
     compiler_symbol_item!(
         LanguageItemId::CurrentSnapshot,
         "current",
@@ -945,166 +868,6 @@ const ITEMS: &[LanguageItem] = &[
         "Settings are refreshed on every update; oldSettings retains the preceding values for change detection.",
         "let changed = settings.enabled != oldSettings.enabled",
         SETTINGS_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::BuiltinField(BuiltinFieldId::ModuleAddress),
-        "Module.address",
-        LanguageItemKind::BuiltinField(BuiltinFieldId::ModuleAddress),
-        "module.address",
-        "Returns a module's base process address.",
-        "The address uses the attached process pointer width and remains valid for that attachment.",
-        "let base = gameAssembly.address",
-        ASYNC_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::BuiltinField(BuiltinFieldId::ModuleSize),
-        "Module.size",
-        LanguageItemKind::BuiltinField(BuiltinFieldId::ModuleSize),
-        "module.size",
-        "Returns a module's mapped size in bytes.",
-        "The size can be used to bound scans and address calculations within the loaded module.",
-        "let end = gameAssembly.address.add(gameAssembly.size)",
-        ASYNC_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::BuiltinField(BuiltinFieldId::UnityModuleAssemblies),
-        "UnityModule.assemblies",
-        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityModuleAssemblies),
-        "unityModule.assemblies",
-        "Returns the IL2CPP assemblies metadata address.",
-        "This compiler-provided field exposes the resolved Unity metadata used by higher-level lookup operations.",
-        "let assemblies = unity.assemblies",
-        ASYNC_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::BuiltinField(BuiltinFieldId::UnityModuleTypeInfoTable),
-        "UnityModule.typeInfoTable",
-        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityModuleTypeInfoTable),
-        "unityModule.typeInfoTable",
-        "Returns the IL2CPP type-information table address.",
-        "The field is resolved while attaching to the Unity runtime and uses the attached process pointer width.",
-        "let typeInfo = unity.typeInfoTable",
-        ASYNC_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::BuiltinField(BuiltinFieldId::UnityModuleVersion),
-        "UnityModule.version",
-        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityModuleVersion),
-        "unityModule.version",
-        "Returns the detected Unity metadata version.",
-        "Unity lookup helpers use this version to interpret runtime metadata layouts consistently.",
-        "let metadataVersion = unity.version",
-        ASYNC_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::BuiltinField(BuiltinFieldId::UnityModulePointerSize),
-        "UnityModule.pointerSize",
-        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityModulePointerSize),
-        "unityModule.pointerSize",
-        "Returns the attached Unity process pointer size.",
-        "The value is expressed in bytes and describes addresses in the attached process.",
-        "let pointerSize = unity.pointerSize",
-        ASYNC_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::BuiltinField(BuiltinFieldId::UnityImageAddress),
-        "UnityImage.address",
-        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityImageAddress),
-        "image.address",
-        "Returns a Unity image's runtime address.",
-        "The image is resolved from IL2CPP metadata for the current process attachment.",
-        "let imageAddress = image.address",
-        ASYNC_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::BuiltinField(BuiltinFieldId::UnityClassAddress),
-        "UnityClass.address",
-        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityClassAddress),
-        "class.address",
-        "Returns a Unity class's runtime address.",
-        "The class is resolved from an assembly image and remains scoped to the current process attachment.",
-        "let classAddress = gameManager.address",
-        ASYNC_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::BuiltinField(BuiltinFieldId::UnityFieldOffset),
-        "UnityField.offset",
-        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityFieldOffset),
-        "field.offset",
-        "Returns a Unity instance field's byte offset.",
-        "Add this offset to an object address when constructing a typed process-memory path.",
-        "let levelAddress = instance.offset(levelField.offset)",
-        ASYNC_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::BuiltinField(BuiltinFieldId::UnityFieldIndex),
-        "UnityField.index",
-        LanguageItemKind::BuiltinField(BuiltinFieldId::UnityFieldIndex),
-        "field.index",
-        "Returns a Unity field's metadata index.",
-        "The index identifies the field in resolved IL2CPP metadata and supports static-field discovery.",
-        "let selectedName = names.get(field.index)",
-        ASYNC_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::TimerStateType,
-        "TimerState",
-        LanguageItemKind::CompilerType,
-        "TimerState",
-        "Describes the current LiveSplit timer state.",
-        "TimerState is a compiler-provided exhaustive enum returned by timer.state().",
-        "let state: TimerState = timer.state()",
-        CONTROL_FLOW_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::TimerStateVariant(TimerStateVariant::NotRunning),
-        "TimerState.NotRunning",
-        LanguageItemKind::EnumVariant,
-        "TimerState.NotRunning",
-        "Indicates that the timer has not started.",
-        "This state is commonly used to detect the transition that starts a run.",
-        "return timer.state() == TimerState.NotRunning",
-        CONTROL_FLOW_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::TimerStateVariant(TimerStateVariant::Running),
-        "TimerState.Running",
-        LanguageItemKind::EnumVariant,
-        "TimerState.Running",
-        "Indicates that the timer is actively running.",
-        "Game time and split decisions can use this state when behavior depends on an active run.",
-        "let running = timer.state() == TimerState.Running",
-        CONTROL_FLOW_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::TimerStateVariant(TimerStateVariant::Paused),
-        "TimerState.Paused",
-        LanguageItemKind::EnumVariant,
-        "TimerState.Paused",
-        "Indicates that the timer is paused.",
-        "Paused is distinct from both a running timer and a timer that has not started.",
-        "let paused = timer.state() == TimerState.Paused",
-        CONTROL_FLOW_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::TimerStateVariant(TimerStateVariant::Ended),
-        "TimerState.Ended",
-        LanguageItemKind::EnumVariant,
-        "TimerState.Ended",
-        "Indicates that the run has ended.",
-        "The timer remains in this state after the final split until its state changes.",
-        "let finished = timer.state() == TimerState.Ended",
-        CONTROL_FLOW_SOURCE
-    ),
-    compiler_symbol_item!(
-        LanguageItemId::TimerStateVariant(TimerStateVariant::Unknown),
-        "TimerState.Unknown",
-        LanguageItemKind::EnumVariant,
-        "TimerState.Unknown",
-        "Indicates an unrecognized host timer state.",
-        "Unknown preserves exhaustiveness if a host reports a state that this compiler version does not otherwise model.",
-        "let unsupported = timer.state() == TimerState.Unknown",
-        CONTROL_FLOW_SOURCE
     ),
     language_item!(
         ResultType,
@@ -1237,7 +1000,6 @@ impl LanguageCatalog {
         self.item_by_name(token).or_else(|| {
             let id = match token {
                 "Address" => LanguageItemId::BuiltinType(BuiltinType::Address),
-                "string" => LanguageItemId::BuiltinType(BuiltinType::String),
                 "Array" => LanguageItemId::ArrayType,
                 "?" => LanguageItemId::OptionType,
                 "!" => LanguageItemId::ResultType,
@@ -1255,23 +1017,6 @@ impl LanguageCatalog {
         ITEMS
             .iter()
             .find(|item| item.id == LanguageItemId::BuiltinType(ty))
-    }
-
-    pub fn builtin_field(self, field: BuiltinFieldId) -> &'static LanguageItem {
-        self.item(LanguageItemId::BuiltinField(field))
-    }
-
-    pub fn timer_state_variant(self, name: &str) -> Option<&'static LanguageItem> {
-        [
-            TimerStateVariant::NotRunning,
-            TimerStateVariant::Running,
-            TimerStateVariant::Paused,
-            TimerStateVariant::Ended,
-            TimerStateVariant::Unknown,
-        ]
-        .into_iter()
-        .find(|variant| variant.name() == name)
-        .map(|variant| self.item(LanguageItemId::TimerStateVariant(variant)))
     }
 
     pub fn action(self, action: ActionKind) -> &'static LanguageItem {
@@ -1367,49 +1112,9 @@ impl LanguageCatalog {
             BuiltinType::Address,
             BuiltinType::F32,
             BuiltinType::F64,
-            BuiltinType::String,
-            BuiltinType::Duration,
-            BuiltinType::Module,
-            BuiltinType::UnityModule,
-            BuiltinType::UnityImage,
-            BuiltinType::UnityClass,
-            BuiltinType::UnityField,
         ] {
             if self.builtin_type(builtin).is_none() {
                 errors.push(format!("missing built-in type catalog entry `{builtin}`"));
-            }
-        }
-        for field in [
-            BuiltinFieldId::ModuleAddress,
-            BuiltinFieldId::ModuleSize,
-            BuiltinFieldId::UnityModuleAssemblies,
-            BuiltinFieldId::UnityModuleTypeInfoTable,
-            BuiltinFieldId::UnityModuleVersion,
-            BuiltinFieldId::UnityModulePointerSize,
-            BuiltinFieldId::UnityImageAddress,
-            BuiltinFieldId::UnityClassAddress,
-            BuiltinFieldId::UnityFieldOffset,
-            BuiltinFieldId::UnityFieldIndex,
-        ] {
-            if !ITEMS
-                .iter()
-                .any(|item| item.id == LanguageItemId::BuiltinField(field))
-            {
-                errors.push(format!("missing built-in field catalog entry `{field:?}`"));
-            }
-        }
-        for variant in [
-            TimerStateVariant::NotRunning,
-            TimerStateVariant::Running,
-            TimerStateVariant::Paused,
-            TimerStateVariant::Ended,
-            TimerStateVariant::Unknown,
-        ] {
-            if self.timer_state_variant(variant.name()).is_none() {
-                errors.push(format!(
-                    "missing TimerState variant catalog entry `{}`",
-                    variant.name()
-                ));
             }
         }
         errors

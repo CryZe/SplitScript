@@ -60,13 +60,13 @@ pub(super) fn encode<'a>(
         function_index
     };
 
-    let string_values = arrays
-        .iter()
-        .find(|array| array_element_type(array.id, semantics) == Type::String);
+    let string_values = arrays.iter().find(|array| {
+        array_element_type(array.id, semantics) == Type::Standard(StdlibTypeId::String)
+    });
     let u64_offsets = arrays
         .iter()
         .find(|array| array_element_type(array.id, semantics) == Type::U64);
-    let string_ref = gc.val_type(Type::String);
+    let string_ref = gc.val_type(Type::Standard(StdlibTypeId::String));
     let mut helper_functions = HashMap::new();
     for helper in dependencies
         .core_helpers()
@@ -119,36 +119,48 @@ pub(super) fn encode<'a>(
             ),
             GeneratedHelper::UnityAttach => (
                 vec![ValType::I64, ValType::I32],
-                vec![gc.val_type(Type::UnityModule)],
+                vec![gc.val_type(Type::Standard(StdlibTypeId::UnityModule))],
             ),
             GeneratedHelper::UnityGetImage => (
-                vec![ValType::I64, gc.val_type(Type::UnityModule), string_ref],
-                vec![gc.val_type(Type::UnityImage)],
+                vec![
+                    ValType::I64,
+                    gc.val_type(Type::Standard(StdlibTypeId::UnityModule)),
+                    string_ref,
+                ],
+                vec![gc.val_type(Type::Standard(StdlibTypeId::UnityImage))],
             ),
             GeneratedHelper::UnityGetClass => (
-                vec![ValType::I64, gc.val_type(Type::UnityImage), string_ref],
-                vec![gc.val_type(Type::UnityClass)],
+                vec![
+                    ValType::I64,
+                    gc.val_type(Type::Standard(StdlibTypeId::UnityImage)),
+                    string_ref,
+                ],
+                vec![gc.val_type(Type::Standard(StdlibTypeId::UnityClass))],
             ),
             GeneratedHelper::UnityGetFieldOffset => (
-                vec![ValType::I64, gc.val_type(Type::UnityClass), string_ref],
+                vec![
+                    ValType::I64,
+                    gc.val_type(Type::Standard(StdlibTypeId::UnityClass)),
+                    string_ref,
+                ],
                 vec![ValType::I64],
             ),
             GeneratedHelper::UnityGetFieldAny => (
                 vec![
                     ValType::I64,
-                    gc.val_type(Type::UnityClass),
+                    gc.val_type(Type::Standard(StdlibTypeId::UnityClass)),
                     gc.val_type(Type::Array(
                         string_values
                             .expect("field alternatives have a String array layout")
                             .id,
                     )),
                 ],
-                vec![gc.val_type(Type::UnityField)],
+                vec![gc.val_type(Type::Standard(StdlibTypeId::UnityField))],
             ),
             GeneratedHelper::UnityGetStaticInstance => (
                 vec![
                     ValType::I64,
-                    gc.val_type(Type::UnityClass),
+                    gc.val_type(Type::Standard(StdlibTypeId::UnityClass)),
                     gc.val_type(Type::Array(
                         string_values
                             .expect("static instances have a String array layout")

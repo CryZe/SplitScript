@@ -28,18 +28,6 @@ pub(super) fn compile_async_attach(
         runtime.lowering.semantics,
         true,
     );
-    let module_address_local = 1 + local_types.len() as u32;
-    local_types.push(Type::U64);
-    let module_size_local = 1 + local_types.len() as u32;
-    local_types.push(Type::U64);
-    let unity_module_local = 1 + local_types.len() as u32;
-    local_types.push(Type::UnityModule);
-    let unity_image_local = 1 + local_types.len() as u32;
-    local_types.push(Type::UnityImage);
-    let unity_class_local = 1 + local_types.len() as u32;
-    local_types.push(Type::UnityClass);
-    let unity_field_local = 1 + local_types.len() as u32;
-    local_types.push(Type::UnityField);
     let mut function = Function::new(
         local_types
             .into_iter()
@@ -86,7 +74,7 @@ pub(super) fn compile_async_attach(
         emit_async_frame_ref(&mut function);
         function
             .instruction(&Instruction::StructGet {
-                struct_type_index: ASYNC_FRAME_TYPE,
+                struct_type_index: async_frame_type_index(),
                 field_index: 0,
             })
             .instruction(&Instruction::I32Const(pc as i32))
@@ -106,12 +94,6 @@ pub(super) fn compile_async_attach(
                 runtime,
                 layout,
                 &context,
-                module_address_local,
-                module_size_local,
-                unity_module_local,
-                unity_image_local,
-                unity_class_local,
-                unity_field_local,
             ),
             AsyncState::LoopHeader {
                 condition,
@@ -136,12 +118,6 @@ pub(super) fn compile_async_attach(
                     runtime,
                     layout,
                     &context,
-                    module_address_local,
-                    module_size_local,
-                    unity_module_local,
-                    unity_image_local,
-                    unity_class_local,
-                    unity_field_local,
                 );
                 function.instruction(&Instruction::Else);
                 set_async_state(&mut function, exit_state);
@@ -171,12 +147,6 @@ pub(super) fn compile_async_attach(
                     runtime.signatures,
                     layout,
                     &context,
-                    module_address_local,
-                    module_size_local,
-                    unity_module_local,
-                    unity_image_local,
-                    unity_class_local,
-                    unity_field_local,
                 );
                 set_async_state(&mut function, resume_state);
                 function.instruction(&Instruction::Br(1));
@@ -207,12 +177,6 @@ fn compile_suspension_poll(
     signatures: &SignaturePool,
     layout: &AsyncFrameLayout,
     context: &ExprContext<'_>,
-    module_address_local: u32,
-    module_size_local: u32,
-    unity_module_local: u32,
-    unity_image_local: u32,
-    unity_class_local: u32,
-    unity_field_local: u32,
 ) {
     if mode == SuspensionMode::Retry {
         compile_retry_poll(function, binding, value, layout, context);
@@ -229,6 +193,19 @@ fn compile_suspension_poll(
     else {
         unreachable!();
     };
+    let scratch = context
+        .matches
+        .intrinsic_temps
+        .get(&value)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let primary_scratch = scratch.first().copied().unwrap_or(u32::MAX);
+    let module_address_local = primary_scratch;
+    let module_size_local = scratch.get(1).copied().unwrap_or(u32::MAX);
+    let unity_module_local = primary_scratch;
+    let unity_image_local = primary_scratch;
+    let unity_class_local = primary_scratch;
+    let unity_field_local = primary_scratch;
     match resolved_intrinsic(target) {
         Some(IntrinsicId::NextTick) => {}
         Some(IntrinsicId::ProcessModule) => {
@@ -272,9 +249,11 @@ fn compile_suspension_poll(
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::LocalGet(module_size_local))
-                    .instruction(&Instruction::StructNew(MODULE_TYPE))
+                    .instruction(&Instruction::StructNew(standard_gc_type_index(
+                        StdlibTypeId::Module,
+                    )))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -325,7 +304,7 @@ fn compile_suspension_poll(
                     context.gc,
                 );
                 function.instruction(&Instruction::StructSet {
-                    struct_type_index: ASYNC_FRAME_TYPE,
+                    struct_type_index: async_frame_type_index(),
                     field_index: field,
                 });
             }
@@ -349,7 +328,7 @@ fn compile_suspension_poll(
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -385,7 +364,7 @@ fn compile_suspension_poll(
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -408,7 +387,7 @@ fn compile_suspension_poll(
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -431,7 +410,7 @@ fn compile_suspension_poll(
                 function
                     .instruction(&Instruction::LocalGet(unity_module_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -455,7 +434,7 @@ fn compile_suspension_poll(
                 function
                     .instruction(&Instruction::LocalGet(unity_image_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -479,7 +458,7 @@ fn compile_suspension_poll(
                 function
                     .instruction(&Instruction::LocalGet(unity_class_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -503,7 +482,7 @@ fn compile_suspension_poll(
                 function
                     .instruction(&Instruction::LocalGet(unity_field_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -530,7 +509,7 @@ fn compile_suspension_poll(
                     .instruction(&Instruction::I64Sub)
                     .instruction(&Instruction::I32WrapI64)
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -556,7 +535,7 @@ fn compile_suspension_poll(
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -567,8 +546,8 @@ fn compile_suspension_poll(
             function
                 .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
-                    struct_type_index: UNITY_CLASS_TYPE,
-                    field_index: 0,
+                    struct_type_index: standard_gc_type_index(StdlibTypeId::UnityClass),
+                    field_index: standard_field_index(StdlibFieldId::UnityClassAddress),
                 })
                 .instruction(&Instruction::I64Const(0xb8))
                 .instruction(&Instruction::I64Add)
@@ -593,7 +572,7 @@ fn compile_suspension_poll(
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -613,15 +592,15 @@ fn compile_suspension_poll(
             function
                 .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
-                    struct_type_index: MODULE_TYPE,
-                    field_index: 0,
+                    struct_type_index: standard_gc_type_index(StdlibTypeId::Module),
+                    field_index: standard_field_index(StdlibFieldId::ModuleAddress),
                 });
             compile_receiver(function, target, context);
             function
                 .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
-                    struct_type_index: MODULE_TYPE,
-                    field_index: 1,
+                    struct_type_index: standard_gc_type_index(StdlibTypeId::Module),
+                    field_index: standard_field_index(StdlibFieldId::ModuleSize),
                 })
                 .instruction(&Instruction::I32Const(entry.needle as i32))
                 .instruction(&Instruction::I32Const(entry.mask as i32))
@@ -640,7 +619,7 @@ fn compile_suspension_poll(
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: ASYNC_FRAME_TYPE,
+                        struct_type_index: async_frame_type_index(),
                         field_index: field,
                     });
             }
@@ -699,7 +678,7 @@ fn compile_retry_poll(
             stored_type,
         );
         function.instruction(&Instruction::StructSet {
-            struct_type_index: ASYNC_FRAME_TYPE,
+            struct_type_index: async_frame_type_index(),
             field_index: field,
         });
     }
@@ -824,7 +803,7 @@ fn set_async_state(function: &mut Function, state: wasm_ir::AsyncStateId) {
     function
         .instruction(&Instruction::I32Const(state.index() as i32))
         .instruction(&Instruction::StructSet {
-            struct_type_index: ASYNC_FRAME_TYPE,
+            struct_type_index: async_frame_type_index(),
             field_index: 0,
         });
 }
@@ -839,12 +818,6 @@ fn compile_async_flow(
     runtime: &RuntimeContext<'_>,
     layout: &AsyncFrameLayout,
     context: &ExprContext<'_>,
-    module_address_local: u32,
-    module_size_local: u32,
-    unity_module_local: u32,
-    unity_image_local: u32,
-    unity_class_local: u32,
-    unity_field_local: u32,
 ) {
     let expression_context = ExprContext {
         loop_control,
@@ -872,12 +845,6 @@ fn compile_async_flow(
                     runtime,
                     layout,
                     context,
-                    module_address_local,
-                    module_size_local,
-                    unity_module_local,
-                    unity_image_local,
-                    unity_class_local,
-                    unity_field_local,
                 );
                 function.instruction(&Instruction::Else);
                 compile_async_flow(
@@ -889,12 +856,6 @@ fn compile_async_flow(
                     runtime,
                     layout,
                     context,
-                    module_address_local,
-                    module_size_local,
-                    unity_module_local,
-                    unity_image_local,
-                    unity_class_local,
-                    unity_field_local,
                 );
                 function.instruction(&Instruction::End);
             }
@@ -918,12 +879,6 @@ fn compile_async_flow(
                     runtime,
                     layout,
                     context,
-                    module_address_local,
-                    module_size_local,
-                    unity_module_local,
-                    unity_image_local,
-                    unity_class_local,
-                    unity_field_local,
                 );
                 function
                     .instruction(&Instruction::Br(0))
@@ -996,12 +951,6 @@ fn compile_async_flow(
                     runtime.signatures,
                     layout,
                     context,
-                    module_address_local,
-                    module_size_local,
-                    unity_module_local,
-                    unity_image_local,
-                    unity_class_local,
-                    unity_field_local,
                 );
             }
             set_async_state(function, *resume_state);

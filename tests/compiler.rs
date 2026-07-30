@@ -3,9 +3,10 @@ use wasmparser::{Parser, Payload, TypeRef, Validator, WasmFeatures};
 use splitscript::{
     abi::{AbiCatalog, AbiEffect, AbiImportId, AbiOwnership},
     language::{LanguageCatalog, LanguageItemId, LanguageItemKind},
-    semantic::{BuiltinFieldId, ResolvedCall, ResolvedMember, ResolvedValue},
+    semantic::{ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue},
     stdlib::{
-        Availability, CancellationKind, Effect, StandardLibrary, StdlibItemId, SuspensionKind,
+        Availability, CancellationKind, Effect, StandardLibrary, StdlibFieldId, StdlibItemId,
+        StdlibTypeId, StdlibVariantId, SuspensionKind,
     },
     types::{BuiltinType, TypeKind},
 };
@@ -2141,14 +2142,16 @@ fn language_catalog_is_valid_documented_and_compilable() {
         Some(LanguageItemId::ChoiceSetting)
     );
     assert_eq!(
-        language.builtin_field(BuiltinFieldId::ModuleAddress).id,
-        LanguageItemId::BuiltinField(BuiltinFieldId::ModuleAddress)
+        StandardLibrary::new()
+            .field(StdlibFieldId::ModuleAddress)
+            .name,
+        "address"
     );
     assert_eq!(
-        language.timer_state_variant("Running").map(|item| item.id),
-        Some(LanguageItemId::TimerStateVariant(
-            splitscript::language::TimerStateVariant::Running
-        ))
+        StandardLibrary::new()
+            .variant(StdlibVariantId::TimerStateRunning)
+            .name,
+        "Running"
     );
 
     for action in [
@@ -2268,21 +2271,23 @@ fn compiler_database_resolves_language_catalog_syntax() {
     let module_field = source.find("module.address").unwrap() + "module.".len();
     assert_eq!(
         database.definition_at(module_field).unwrap(),
-        Some(DefinitionTarget::Language(LanguageItemId::BuiltinField(
-            BuiltinFieldId::ModuleAddress
-        )))
+        Some(DefinitionTarget::StandardLibrarySymbol(
+            splitscript::stdlib::StdlibSymbolId::Field(StdlibFieldId::ModuleAddress)
+        ))
     );
     let timer_state = source.find("TimerState.Running").unwrap();
     assert_eq!(
         database.definition_at(timer_state).unwrap(),
-        Some(DefinitionTarget::Language(LanguageItemId::TimerStateType))
+        Some(DefinitionTarget::StandardLibrarySymbol(
+            splitscript::stdlib::StdlibSymbolId::Type(StdlibTypeId::TimerState)
+        ))
     );
     assert_eq!(
         database
             .definition_at(timer_state + "TimerState.".len())
             .unwrap(),
-        Some(DefinitionTarget::Language(
-            LanguageItemId::TimerStateVariant(splitscript::language::TimerStateVariant::Running)
+        Some(DefinitionTarget::StandardLibrarySymbol(
+            splitscript::stdlib::StdlibSymbolId::Variant(StdlibVariantId::TimerStateRunning)
         ))
     );
 
@@ -2451,6 +2456,12 @@ fn inferred_declaration_types_are_semantic_and_syntax_annotations_stay_optional(
             .expect("every value declaration should have a semantic type");
         assert_eq!(semantics.types().kind(ty), &TypeKind::Builtin(expected));
     };
+    let assert_standard = |value, expected| {
+        let ty = semantics
+            .value_type(value)
+            .expect("every value declaration should have a semantic type");
+        assert_eq!(semantics.types().kind(ty), &TypeKind::Standard(expected));
+    };
 
     let global = &syntax.globals[0];
     assert_eq!(global.annotation, None);
@@ -2481,7 +2492,7 @@ fn inferred_declaration_types_are_semantic_and_syntax_annotations_stay_optional(
         panic!("expected an awaited module binding");
     };
     assert_eq!(module.annotation, None);
-    assert_builtin(module.id, BuiltinType::Module);
+    assert_standard(module.id, StdlibTypeId::Module);
 
     let splitscript::ast::Stmt::Variable(copy) = &statements[1] else {
         panic!("expected the inferred function-call binding");
@@ -2574,6 +2585,34 @@ fn parsed_type_references_are_inference_free_syntax() {
 }
 
 #[test]
+fn source_standard_type_names_resolve_after_parsing() {
+    use splitscript::ast::TypeRef;
+
+    let parsed = splitscript::parse(
+        r#"
+            state "game.exe" {}
+            fn base(module: Module) -> address { return module.address }
+        "#,
+    )
+    .unwrap();
+    let function = &parsed.syntax().functions[0];
+    assert_eq!(
+        function.params[0].annotation,
+        Some(TypeRef::Named("Module"))
+    );
+
+    let checked = splitscript::check(parsed).unwrap();
+    let parameter_type = checked
+        .semantics()
+        .value_type(checked.syntax().functions[0].params[0].id)
+        .unwrap();
+    assert_eq!(
+        checked.semantics().types().kind(parameter_type),
+        &TypeKind::Standard(StdlibTypeId::Module)
+    );
+}
+
+#[test]
 fn semantic_type_ids_intern_constructed_generic_arguments() {
     let source = r#"
         state "game.exe" {}
@@ -2656,7 +2695,7 @@ fn option_and_result_annotations_are_distinct_interned_semantic_types() {
     };
     assert_eq!(
         semantics.types().kind(*attempt_value),
-        &TypeKind::Builtin(BuiltinType::String)
+        &TypeKind::Standard(StdlibTypeId::String)
     );
     let splitscript::ast::TypeRef::Result(parsed_attempt_layout) =
         function.params[1].annotation.unwrap()
@@ -3660,7 +3699,7 @@ fn declared_record_enum_and_array_layouts_are_semantic_facts() {
     };
     assert_eq!(
         semantics.types().kind(*names_element),
-        &TypeKind::Builtin(BuiltinType::String)
+        &TypeKind::Standard(StdlibTypeId::String)
     );
 
     let splitscript::ast::TypeRef::Array(names_array) = inventory.fields[0].ty else {
@@ -3700,6 +3739,37 @@ fn declared_record_enum_and_array_layouts_are_semantic_facts() {
 #[test]
 fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
     let library = StandardLibrary::new();
+    let process_namespace = library
+        .namespace_by_name("process")
+        .expect("process should be an explicit namespace declaration");
+    assert_eq!(
+        process_namespace.id,
+        splitscript::stdlib::StdlibNamespaceId::Process
+    );
+    assert!(
+        process_namespace
+            .documentation
+            .summary
+            .contains("attached game process")
+    );
+    let unity_image = library
+        .type_by_name("UnityImage")
+        .expect("UnityImage should be a nominal library declaration");
+    assert_eq!(
+        unity_image.id,
+        splitscript::stdlib::StdlibTypeId::UnityImage
+    );
+    assert_eq!(
+        library
+            .public_field(unity_image.id, "address")
+            .expect("UnityImage.address should be declared")
+            .ty,
+        splitscript::stdlib::DeclaredTypeRef::Core(splitscript::stdlib::CoreTypeId::Address)
+    );
+    assert!(
+        library.public_field(unity_image.id, "module").is_none(),
+        "runtime ownership slots must not leak into the public member surface"
+    );
     let read_path = ["process", "read", "u16"].map(str::to_owned);
     let read = library
         .resolve_path(&read_path)
@@ -4947,14 +5017,18 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
     };
     assert_eq!(
         checked.semantics().pattern_variant(arms[0].pattern_id),
-        Some(checked.syntax().enums[0].variants[0].id)
+        Some(ResolvedEnumVariantId::Source(
+            checked.syntax().enums[0].variants[0].id,
+        ))
     );
     assert_eq!(
         checked
             .typed_hir()
             .pattern(arms[0].pattern_id)
             .and_then(|pattern| pattern.variant),
-        Some(checked.syntax().enums[0].variants[0].id)
+        Some(ResolvedEnumVariantId::Source(
+            checked.syntax().enums[0].variants[0].id,
+        ))
     );
     let Some(ResolvedCall::UserMethod {
         function, receiver, ..
@@ -4993,8 +5067,14 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
     else {
         panic!("enum patterns should retain their resolved identities")
     };
-    assert_eq!(enumeration, checked.syntax().enums[0].id);
-    assert_eq!(variant, checked.syntax().enums[0].variants[0].id);
+    assert_eq!(
+        enumeration,
+        splitscript::ast::EnumTypeId::Source(checked.syntax().enums[0].id)
+    );
+    assert_eq!(
+        variant,
+        ResolvedEnumVariantId::Source(checked.syntax().enums[0].variants[0].id)
+    );
     assert_eq!(lowered_binding, Some(binding.id));
 
     let splitscript::ast::Stmt::Variable(result) = &checked.syntax().actions[0].body.statements[0]
@@ -5006,11 +5086,15 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
     };
     assert_eq!(
         checked.semantics().enum_variant(args[0].id),
-        Some(checked.syntax().enums[0].variants[0].id)
+        Some(ResolvedEnumVariantId::Source(
+            checked.syntax().enums[0].variants[0].id,
+        ))
     );
     assert_eq!(
         checked.typed_hir().enum_variant(args[0].id),
-        Some(checked.syntax().enums[0].variants[0].id)
+        Some(ResolvedEnumVariantId::Source(
+            checked.syntax().enums[0].variants[0].id,
+        ))
     );
 
     Validator::new_with_features(WasmFeatures::all())
@@ -5019,7 +5103,7 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
 }
 
 #[test]
-fn member_paths_resolve_record_and_builtin_fields_to_stable_ids() {
+fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
     let source = r#"
         state "game.exe" {}
 
@@ -5103,7 +5187,7 @@ fn member_paths_resolve_record_and_builtin_fields_to_stable_ids() {
     };
     assert_eq!(
         checked.semantics().path_members(address.value.id),
-        Some([ResolvedMember::BuiltinField(BuiltinFieldId::ModuleAddress,)].as_slice())
+        Some([ResolvedMember::StandardField(StdlibFieldId::ModuleAddress,)].as_slice())
     );
 
     Validator::new_with_features(WasmFeatures::all())
@@ -5586,16 +5670,19 @@ fn timer_state_is_a_compiler_provided_exhaustive_enum() {
             .all(|enumeration| enumeration.name != "TimerState"),
         "compiler-provided declarations must not be injected into source syntax"
     );
-    let timer_state = checked
-        .enum_types()
-        .iter()
-        .find(|enumeration| enumeration.name == "TimerState")
-        .expect("TimerState should be present in every parsed program");
-    assert_eq!(
-        timer_state
-            .variants
+    assert!(
+        checked
+            .enum_types()
             .iter()
-            .map(|variant| variant.name.as_str())
+            .all(|enumeration| enumeration.name != "TimerState"),
+        "standard-library enums must not be materialized as source enum layouts"
+    );
+    let library = StandardLibrary::new();
+    let timer_state = library.type_decl(StdlibTypeId::TimerState);
+    assert_eq!(
+        library
+            .variants_of(timer_state.id)
+            .map(|variant| variant.name)
             .collect::<Vec<_>>(),
         ["NotRunning", "Running", "Paused", "Ended", "Unknown"]
     );
@@ -5614,7 +5701,7 @@ fn timer_state_is_a_compiler_provided_exhaustive_enum() {
         .expect("timer.state should resolve through the standard-library catalog");
     assert_eq!(
         checked.semantics().types().kind(timer_state_call.ty),
-        &TypeKind::Enum(timer_state.id)
+        &TypeKind::Standard(StdlibTypeId::TimerState)
     );
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
@@ -5642,8 +5729,8 @@ fn timer_state_is_a_compiler_provided_exhaustive_enum() {
         state "game.exe" {}
     "#;
     let error = splitscript::parse(redeclared)
-        .expect_err("compiler-provided nominal types cannot be redeclared");
-    assert!(error[0].message.contains("compiler-provided enum"));
+        .expect_err("standard-library nominal types cannot be redeclared");
+    assert!(error[0].message.contains("standard-library enum"));
 }
 
 #[test]
@@ -6047,6 +6134,59 @@ fn on_attach_preserves_locals_across_awaits() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("GC continuation frame should validate");
+}
+
+#[test]
+fn awaited_intrinsics_plan_only_their_required_scratch_locals() {
+    use splitscript::{
+        ast::ActionKind,
+        wasm_ir::{BodyOwner, LocalPurpose},
+    };
+
+    let next_tick = splitscript::check(
+        splitscript::parse(
+            r#"
+                state "game.exe" {}
+                onAttach { await nextTick() }
+            "#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let next_tick_ir = splitscript::lower_wasm(&next_tick);
+    let next_tick_body = next_tick_ir
+        .body(BodyOwner::Action(ActionKind::OnAttach))
+        .unwrap();
+    assert!(
+        next_tick_body
+            .locals
+            .iter()
+            .all(|local| !matches!(local.purpose, LocalPurpose::IntrinsicScratch { .. }))
+    );
+
+    let module = splitscript::check(
+        splitscript::parse(
+            r#"
+                state "game.exe" {}
+                onAttach { let module = await process.module("game.exe") }
+            "#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let module_ir = splitscript::lower_wasm(&module);
+    let module_body = module_ir
+        .body(BodyOwner::Action(ActionKind::OnAttach))
+        .unwrap();
+    let scratch = module_body
+        .locals
+        .iter()
+        .filter(|local| matches!(local.purpose, LocalPurpose::IntrinsicScratch { .. }))
+        .collect::<Vec<_>>();
+    assert_eq!(scratch.len(), 2);
+    assert!(scratch.iter().all(|local| {
+        module.semantics().types().kind(local.ty) == &TypeKind::Builtin(BuiltinType::U64)
+    }));
 }
 
 #[test]
@@ -7099,6 +7239,7 @@ fn snapshot_type_name(
 ) -> String {
     match checked.semantics().types().kind(ty) {
         TypeKind::Builtin(builtin) => builtin.to_string(),
+        TypeKind::Standard(standard) => StandardLibrary::new().type_decl(*standard).name.to_owned(),
         TypeKind::Record(id) => checked
             .syntax()
             .records

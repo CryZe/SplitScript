@@ -307,7 +307,9 @@ pub(super) fn emit_action_default(function: &mut Function, action: ActionKind) {
             function.instruction(&Instruction::I32Const(-1));
         }
         ActionKind::GameTime => {
-            function.instruction(&Instruction::RefNull(HeapType::Concrete(DURATION_TYPE)));
+            function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                standard_gc_type_index(StdlibTypeId::Duration),
+            )));
         }
         ActionKind::OnDetached | ActionKind::OnAttach | ActionKind::WhileAttached => {}
     }

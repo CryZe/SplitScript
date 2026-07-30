@@ -20,7 +20,7 @@ pub(super) fn compile_update(
             1,
             ValType::Ref(RefType {
                 nullable: true,
-                heap_type: HeapType::Concrete(DURATION_TYPE),
+                heap_type: HeapType::Concrete(standard_gc_type_index(StdlibTypeId::Duration)),
             }),
         ));
     }
@@ -237,14 +237,14 @@ pub(super) fn compile_update(
             .instruction(&Instruction::LocalGet(duration_local))
             .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
-                struct_type_index: DURATION_TYPE,
-                field_index: 0,
+                struct_type_index: standard_gc_type_index(StdlibTypeId::Duration),
+                field_index: standard_field_index(StdlibFieldId::DurationSeconds),
             })
             .instruction(&Instruction::LocalGet(duration_local))
             .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
-                struct_type_index: DURATION_TYPE,
-                field_index: 1,
+                struct_type_index: standard_gc_type_index(StdlibTypeId::Duration),
+                field_index: standard_field_index(StdlibFieldId::DurationNanoseconds),
             })
             .instruction(&Instruction::Call(
                 abi.function(AbiImportId::TimerSetGameTime),
@@ -281,7 +281,7 @@ fn emit_cancel_region(function: &mut Function, region: wasm_ir::CancellationRegi
             function
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::GlobalSet(ATTACH_READY_GLOBAL))
-                .instruction(&Instruction::StructNewDefault(ASYNC_FRAME_TYPE))
+                .instruction(&Instruction::StructNewDefault(async_frame_type_index()))
                 .instruction(&Instruction::GlobalSet(ASYNC_FRAME_GLOBAL));
         }
     }

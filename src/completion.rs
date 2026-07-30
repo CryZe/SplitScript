@@ -10,8 +10,8 @@ use crate::{
     catalog::Documentation,
     database::{CompilerDatabase, SemanticQueryResult},
     documentation::StandardLibraryDocumentation,
-    language::{LanguageCatalog, LanguageItem, LanguageItemKind, TimerStateVariant},
-    stdlib::{ItemKind, StandardLibrary, StdlibItem},
+    language::{LanguageCatalog, LanguageItem, LanguageItemKind},
+    stdlib::{ItemKind, StandardLibrary, StdlibItem, StdlibNamespace},
     types::{BuiltinType, TypeKind},
 };
 
@@ -164,26 +164,6 @@ fn complete_member(source: &str, syntax: &Program, context: MemberContext) -> Co
                 }
             }
         }
-        ["TimerState"] => {
-            for variant in [
-                TimerStateVariant::NotRunning,
-                TimerStateVariant::Running,
-                TimerStateVariant::Paused,
-                TimerStateVariant::Ended,
-                TimerStateVariant::Unknown,
-            ] {
-                let item = LanguageCatalog::new()
-                    .timer_state_variant(variant.name())
-                    .expect("every timer state variant is cataloged");
-                builder.add(catalog_language_completion(
-                    variant.name(),
-                    CompletionKind::EnumMember,
-                    item,
-                    variant.name().to_owned(),
-                    false,
-                ));
-            }
-        }
         [name] => {
             if let Some(enumeration) = syntax.enums.iter().find(|item| item.name == *name) {
                 for variant in &enumeration.variants {
@@ -222,9 +202,7 @@ fn language_completion(item: &LanguageItem) -> Option<CompletionItem> {
             format!("{} {{\n    $0\n}}", item.name),
             true,
         ),
-        LanguageItemKind::BuiltinType(_) | LanguageItemKind::CompilerType => {
-            (CompletionKind::Type, item.name.to_owned(), false)
-        }
+        LanguageItemKind::BuiltinType(_) => (CompletionKind::Type, item.name.to_owned(), false),
         LanguageItemKind::SnapshotRoot => (CompletionKind::Variable, item.name.to_owned(), false),
         LanguageItemKind::Keyword | LanguageItemKind::Declaration => {
             (CompletionKind::Keyword, item.name.to_owned(), false)
@@ -237,9 +215,7 @@ fn language_completion(item: &LanguageItem) -> Option<CompletionItem> {
             };
             (CompletionKind::Keyword, insert, snippet)
         }
-        LanguageItemKind::Syntax
-        | LanguageItemKind::BuiltinField(_)
-        | LanguageItemKind::EnumVariant => return None,
+        LanguageItemKind::Syntax => return None,
     };
     Some(catalog_language_completion(
         item.name,
@@ -268,33 +244,70 @@ fn catalog_language_completion(
 }
 
 fn add_root_standard_library(builder: &mut CompletionBuilder) {
-    for item in StandardLibrary::new().items() {
-        let path = match item.kind {
-            ItemKind::Function { path } => path,
-            ItemKind::TypedFunction { prefix, .. } => prefix,
-            ItemKind::Method { .. } => continue,
+    let library = StandardLibrary::new();
+    for namespace in library
+        .namespaces()
+        .iter()
+        .filter(|namespace| namespace.path.len() == 1)
+    {
+        builder.add(stdlib_namespace_completion(namespace));
+    }
+    for ty in library.types() {
+        builder.add(CompletionItem {
+            label: ty.name.to_owned(),
+            kind: if ty.kind == crate::stdlib::StdlibTypeKind::Enum {
+                CompletionKind::Enum
+            } else {
+                CompletionKind::Type
+            },
+            detail: Some("standard-library type".to_owned()),
+            documentation: Some(render_documentation(&ty.documentation)),
+            insert_text: ty.name.to_owned(),
+            is_snippet: false,
+        });
+    }
+    for item in library.items() {
+        let Some(path) = library.item_path(item) else {
+            continue;
         };
         if path.len() == 1 {
-            builder.add(stdlib_completion(path[0], item, CompletionKind::Function));
-        } else {
-            builder.add(simple_completion(
-                path[0],
-                CompletionKind::Namespace,
-                "standard-library namespace",
-            ));
+            builder.add(stdlib_completion(item.name, item, CompletionKind::Function));
         }
+    }
+}
+
+fn stdlib_namespace_completion(namespace: &StdlibNamespace) -> CompletionItem {
+    CompletionItem {
+        label: namespace.name.to_owned(),
+        kind: CompletionKind::Namespace,
+        detail: Some("standard-library namespace".to_owned()),
+        documentation: Some(render_documentation(&namespace.documentation)),
+        insert_text: namespace.name.to_owned(),
+        is_snippet: false,
     }
 }
 
 fn add_standard_library_path_members(builder: &mut CompletionBuilder, prefix: &[&str]) {
     let library = StandardLibrary::new();
+
+    if let [type_name] = prefix
+        && let Some(ty) = library.type_by_name(type_name)
+    {
+        for variant in library.variants_of(ty.id) {
+            builder.add(CompletionItem {
+                label: variant.name.to_owned(),
+                kind: CompletionKind::EnumMember,
+                detail: Some(format!("{}.{}", ty.name, variant.name)),
+                documentation: Some(render_documentation(&variant.documentation)),
+                insert_text: variant.name.to_owned(),
+                is_snippet: false,
+            });
+        }
+    }
+
     for item in library.items() {
-        let path = match item.kind {
-            ItemKind::Function { path } => path,
-            ItemKind::TypedFunction {
-                prefix: declared, ..
-            } => declared,
-            ItemKind::Method { .. } => continue,
+        let Some(path) = library.item_path(item) else {
+            continue;
         };
         if path.len() <= prefix.len() || path[..prefix.len()] != *prefix {
             continue;
@@ -302,23 +315,23 @@ fn add_standard_library_path_members(builder: &mut CompletionBuilder, prefix: &[
         let label = path[prefix.len()];
         if path.len() == prefix.len() + 1 {
             builder.add(stdlib_completion(label, item, CompletionKind::Function));
-        } else {
-            builder.add(simple_completion(
-                label,
-                CompletionKind::Namespace,
-                "standard-library namespace",
-            ));
         }
     }
 
+    for namespace in library.namespaces().iter().filter(|namespace| {
+        namespace.path.len() == prefix.len() + 1 && namespace.path[..prefix.len()] == *prefix
+    }) {
+        builder.add(stdlib_namespace_completion(namespace));
+    }
+
     for item in library.items() {
-        let ItemKind::TypedFunction {
-            prefix: declared, ..
-        } = item.kind
-        else {
+        if !matches!(item.kind, ItemKind::TypedFunction { .. }) {
             continue;
-        };
-        if declared == prefix {
+        }
+        if library
+            .item_path(item)
+            .is_some_and(|declared| declared == prefix)
+        {
             for ty in memory_read_type_names() {
                 let documentation = StandardLibraryDocumentation::generate(item.id, &[]);
                 builder.add(CompletionItem {
@@ -658,24 +671,24 @@ fn add_inferred_fields(builder: &mut CompletionBuilder, syntax: &Program, receiv
                 }
             }
         }
-        TypeKind::Builtin(builtin) => {
-            for item in LanguageCatalog::new().items() {
-                let LanguageItemKind::BuiltinField(field) = item.kind else {
-                    continue;
-                };
-                if field.receiver_type() == *builtin {
-                    let label = item.name.rsplit('.').next().unwrap_or(item.name);
-                    builder.add(catalog_language_completion(
-                        label,
-                        CompletionKind::Property,
-                        item,
-                        label.to_owned(),
-                        false,
-                    ));
-                }
+        TypeKind::Standard(owner) => {
+            for field in StandardLibrary::new().public_fields(*owner) {
+                builder.add(CompletionItem {
+                    label: field.name.to_owned(),
+                    kind: CompletionKind::Property,
+                    detail: Some(format!(
+                        "{}.{}",
+                        StandardLibrary::new().type_decl(*owner).name,
+                        field.name
+                    )),
+                    documentation: Some(render_documentation(&field.documentation)),
+                    insert_text: field.name.to_owned(),
+                    is_snippet: false,
+                });
             }
         }
-        TypeKind::Enum(_)
+        TypeKind::Builtin(_)
+        | TypeKind::Enum(_)
         | TypeKind::Array { .. }
         | TypeKind::Option { .. }
         | TypeKind::Result { .. } => {}
@@ -684,10 +697,10 @@ fn add_inferred_fields(builder: &mut CompletionBuilder, syntax: &Program, receiv
 
 fn add_inferred_methods(builder: &mut CompletionBuilder, syntax: &Program, receiver: &TypeKind) {
     for item in StandardLibrary::new().methods_for_type(receiver) {
-        let ItemKind::Method { name, .. } = item.kind else {
+        let ItemKind::Method { .. } = item.kind else {
             unreachable!()
         };
-        builder.add(stdlib_completion(name, item, CompletionKind::Method));
+        builder.add(stdlib_completion(item.name, item, CompletionKind::Method));
     }
     for function in &syntax.functions {
         if function
@@ -720,6 +733,10 @@ fn syntax_receiver_matches(declared: SyntaxTypeRef, receiver: &TypeKind) -> bool
         (SyntaxTypeRef::Array(expected), TypeKind::Array { layout, .. }) => expected == *layout,
         (SyntaxTypeRef::Option(expected), TypeKind::Option { layout, .. }) => expected == *layout,
         (SyntaxTypeRef::Result(expected), TypeKind::Result { layout, .. }) => expected == *layout,
+        (SyntaxTypeRef::Named(name), TypeKind::Standard(actual)) => StandardLibrary::new()
+            .type_by_name(name)
+            .is_some_and(|expected| expected.id == *actual),
+        (SyntaxTypeRef::Standard(expected), TypeKind::Standard(actual)) => expected == *actual,
         (syntax, TypeKind::Builtin(actual)) => syntax_builtin(syntax) == Some(*actual),
         _ => false,
     }
@@ -740,15 +757,9 @@ fn syntax_builtin(ty: SyntaxTypeRef) -> Option<BuiltinType> {
         SyntaxTypeRef::Address => BuiltinType::Address,
         SyntaxTypeRef::F32 => BuiltinType::F32,
         SyntaxTypeRef::F64 => BuiltinType::F64,
-        SyntaxTypeRef::String => BuiltinType::String,
-        SyntaxTypeRef::Signature => BuiltinType::Signature,
-        SyntaxTypeRef::Duration => BuiltinType::Duration,
-        SyntaxTypeRef::Module => BuiltinType::Module,
-        SyntaxTypeRef::UnityModule => BuiltinType::UnityModule,
-        SyntaxTypeRef::UnityImage => BuiltinType::UnityImage,
-        SyntaxTypeRef::UnityClass => BuiltinType::UnityClass,
-        SyntaxTypeRef::UnityField => BuiltinType::UnityField,
-        SyntaxTypeRef::Record(_)
+        SyntaxTypeRef::Named(_)
+        | SyntaxTypeRef::Standard(_)
+        | SyntaxTypeRef::Record(_)
         | SyntaxTypeRef::Enum(_)
         | SyntaxTypeRef::Array(_)
         | SyntaxTypeRef::Option(_)

@@ -11,7 +11,9 @@ use crate::{
     language::{LanguageCatalog, LanguageItem},
     lexer::{Token, TokenKind},
     semantic::{ResolvedCall, SemanticModel},
-    stdlib::{StandardLibrary, StdlibItem, StdlibItemId, TypeRef as CatalogTypeRef},
+    stdlib::{
+        StandardLibrary, StdlibItem, StdlibItemId, StdlibSymbolId, TypeRef as CatalogTypeRef,
+    },
     syntax::SourceDocument,
     types::{TypeId, TypeKind},
     visit::{self, Visitor},
@@ -72,6 +74,7 @@ pub(crate) fn hover(
                 substitutions(item, &type_arguments, semantic.as_ref()),
             )
         }
+        DefinitionTarget::StandardLibrarySymbol(symbol) => render_stdlib_symbol_hover(symbol),
         DefinitionTarget::Language(item) => {
             render_language_hover(LanguageCatalog::new().item(item))
         }
@@ -204,6 +207,7 @@ fn render_type(ty: TypeId, context: &SemanticContext) -> String {
     let types = context.semantics.types();
     match types.kind(ty) {
         TypeKind::Builtin(builtin) => builtin.to_string(),
+        TypeKind::Standard(standard) => StandardLibrary::new().type_decl(*standard).name.to_owned(),
         TypeKind::Record(id) => context
             .syntax
             .records
@@ -404,6 +408,43 @@ fn render_stdlib_hover(item: StdlibItemId, substitutions: Vec<(&str, String)>) -
     StandardLibraryDocumentation::generate(item, &substitutions).hover_markdown()
 }
 
+fn render_stdlib_symbol_hover(symbol: StdlibSymbolId) -> String {
+    let library = StandardLibrary::new();
+    let (form, documentation) = match symbol {
+        StdlibSymbolId::Namespace(id) => {
+            let declaration = library.namespace(id);
+            (declaration.name.to_owned(), &declaration.documentation)
+        }
+        StdlibSymbolId::Type(id) => {
+            let declaration = library.type_decl(id);
+            (declaration.name.to_owned(), &declaration.documentation)
+        }
+        StdlibSymbolId::Field(id) => {
+            let declaration = library.field(id);
+            let owner = library.type_decl(declaration.owner);
+            (
+                format!("{}.{}: {}", owner.name, declaration.name, declaration.ty),
+                &declaration.documentation,
+            )
+        }
+        StdlibSymbolId::Variant(id) => {
+            let declaration = library.variant(id);
+            let owner = library.type_decl(declaration.owner);
+            (
+                format!("{}.{}", owner.name, declaration.name),
+                &declaration.documentation,
+            )
+        }
+        StdlibSymbolId::Item(id) => return render_stdlib_hover(id, Vec::new()),
+    };
+    let mut markdown = format!(
+        "```splitscript\n{form}\n```\n\n{}\n\n{}",
+        documentation.summary, documentation.details
+    );
+    append_examples(&mut markdown, documentation.examples);
+    markdown
+}
+
 fn render_language_hover(item: &LanguageItem) -> String {
     let mut markdown = format!(
         "```splitscript\n{}\n```\n\n{}\n\n{}",
@@ -503,7 +544,7 @@ fn infer_method_call(
         .methods_for_type(&analysis.type_kind)
         .into_iter()
         .find(|item| {
-            matches!(item.kind, crate::stdlib::ItemKind::Method { name, .. } if name == method_name)
+            matches!(item.kind, crate::stdlib::ItemKind::Method { .. }) && item.name == method_name
         })?;
     let type_arguments = inferred_method_type_arguments(item, analysis.ty, &analysis.type_kind);
     let semantic = semantic_context(&mut probe)?;
@@ -515,10 +556,7 @@ fn inferred_method_type_arguments(
     receiver: TypeId,
     receiver_kind: &TypeKind,
 ) -> Vec<TypeId> {
-    let crate::stdlib::ItemKind::Method {
-        receiver: declared, ..
-    } = item.kind
-    else {
+    let crate::stdlib::ItemKind::Method { receiver: declared } = item.kind else {
         return Vec::new();
     };
     item.signature

@@ -12,6 +12,7 @@ use crate::{
         ResultTypeId,
     },
     inference::Type,
+    stdlib::{CoreTypeId, StandardLibrary, StdlibTypeId},
 };
 
 /// An interned type in one checked program.
@@ -40,17 +41,27 @@ pub enum BuiltinType {
     Address,
     F32,
     F64,
-    String,
-    Signature,
-    Duration,
-    Module,
-    UnityModule,
-    UnityImage,
-    UnityClass,
-    UnityField,
 }
 
 impl BuiltinType {
+    pub const fn core(self) -> CoreTypeId {
+        match self {
+            Self::Void => CoreTypeId::Void,
+            Self::Bool => CoreTypeId::Bool,
+            Self::I8 => CoreTypeId::I8,
+            Self::U8 => CoreTypeId::U8,
+            Self::I16 => CoreTypeId::I16,
+            Self::U16 => CoreTypeId::U16,
+            Self::I32 => CoreTypeId::I32,
+            Self::U32 => CoreTypeId::U32,
+            Self::I64 => CoreTypeId::I64,
+            Self::U64 => CoreTypeId::U64,
+            Self::Address => CoreTypeId::Address,
+            Self::F32 => CoreTypeId::F32,
+            Self::F64 => CoreTypeId::F64,
+        }
+    }
+
     pub fn is_integer(self) -> bool {
         matches!(
             self,
@@ -85,14 +96,6 @@ impl BuiltinType {
             Self::Address => Type::Address,
             Self::F32 => Type::F32,
             Self::F64 => Type::F64,
-            Self::String => Type::String,
-            Self::Signature => Type::Signature,
-            Self::Duration => Type::Duration,
-            Self::Module => Type::Module,
-            Self::UnityModule => Type::UnityModule,
-            Self::UnityImage => Type::UnityImage,
-            Self::UnityClass => Type::UnityClass,
-            Self::UnityField => Type::UnityField,
         }
     }
 }
@@ -113,14 +116,6 @@ impl fmt::Display for BuiltinType {
             Self::Address => "address",
             Self::F32 => "f32",
             Self::F64 => "f64",
-            Self::String => "String",
-            Self::Signature => "Signature",
-            Self::Duration => "Duration",
-            Self::Module => "Module",
-            Self::UnityModule => "UnityModule",
-            Self::UnityImage => "UnityImage",
-            Self::UnityClass => "UnityClass",
-            Self::UnityField => "UnityField",
         })
     }
 }
@@ -129,6 +124,7 @@ impl fmt::Display for BuiltinType {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeKind {
     Builtin(BuiltinType),
+    Standard(StdlibTypeId),
     Record(RecordId),
     Enum(EnumId),
     Array {
@@ -172,16 +168,11 @@ impl Default for TypeStore {
             BuiltinType::Address,
             BuiltinType::F32,
             BuiltinType::F64,
-            BuiltinType::String,
-            BuiltinType::Signature,
-            BuiltinType::Duration,
-            BuiltinType::Module,
-            BuiltinType::UnityModule,
-            BuiltinType::UnityImage,
-            BuiltinType::UnityClass,
-            BuiltinType::UnityField,
         ] {
             store.intern(TypeKind::Builtin(builtin));
+        }
+        for standard in StandardLibrary::new().types() {
+            store.intern(TypeKind::Standard(standard.id));
         }
         store
     }
@@ -206,6 +197,10 @@ impl TypeStore {
 
     pub fn id_for_builtin(&self, builtin: BuiltinType) -> TypeId {
         self.interned[&TypeKind::Builtin(builtin)]
+    }
+
+    pub fn id_for_standard(&self, standard: StdlibTypeId) -> TypeId {
+        self.interned[&TypeKind::Standard(standard)]
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (TypeId, &TypeKind)> {
@@ -236,14 +231,7 @@ impl TypeStore {
             Type::Address => TypeKind::Builtin(BuiltinType::Address),
             Type::F32 => TypeKind::Builtin(BuiltinType::F32),
             Type::F64 => TypeKind::Builtin(BuiltinType::F64),
-            Type::String => TypeKind::Builtin(BuiltinType::String),
-            Type::Signature => TypeKind::Builtin(BuiltinType::Signature),
-            Type::Duration => TypeKind::Builtin(BuiltinType::Duration),
-            Type::Module => TypeKind::Builtin(BuiltinType::Module),
-            Type::UnityModule => TypeKind::Builtin(BuiltinType::UnityModule),
-            Type::UnityImage => TypeKind::Builtin(BuiltinType::UnityImage),
-            Type::UnityClass => TypeKind::Builtin(BuiltinType::UnityClass),
-            Type::UnityField => TypeKind::Builtin(BuiltinType::UnityField),
+            Type::Standard(standard) => TypeKind::Standard(standard),
             Type::Record(id) => TypeKind::Record(id),
             Type::Enum(id) => TypeKind::Enum(id),
             Type::Array(id) => {

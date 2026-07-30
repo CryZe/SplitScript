@@ -42,183 +42,71 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         .state
         .as_ref()
         .expect("checked programs have a state block");
-    let mut recursive_types = vec![
-        SubType {
-            is_final: true,
-            supertype_idx: None,
-            composite_type: CompositeType {
-                inner: CompositeInnerType::Struct(StructType {
-                    fields: state
-                        .fields
-                        .iter()
-                        .map(|field| FieldType {
-                            element_type: layout.storage_type(value_type(field.id, semantics)),
-                            mutable: true,
-                        })
-                        .collect(),
-                }),
-                shared: false,
-                descriptor: None,
-                describes: None,
-            },
+    let mut recursive_types = vec![SubType {
+        is_final: true,
+        supertype_idx: None,
+        composite_type: CompositeType {
+            inner: CompositeInnerType::Struct(StructType {
+                fields: state
+                    .fields
+                    .iter()
+                    .map(|field| FieldType {
+                        element_type: layout.storage_type(value_type(field.id, semantics)),
+                        mutable: true,
+                    })
+                    .collect(),
+            }),
+            shared: false,
+            descriptor: None,
+            describes: None,
         },
-        SubType {
-            is_final: true,
-            supertype_idx: None,
-            composite_type: CompositeType {
-                inner: CompositeInnerType::Struct(StructType {
-                    fields: vec![
-                        FieldType {
-                            element_type: StorageType::Val(ValType::I64),
-                            mutable: false,
-                        },
-                        FieldType {
+    }];
+    for declaration in StandardLibrary::new().types() {
+        let inner = match declaration.representation {
+            RuntimeRepresentation::Scalar { .. } => continue,
+            RuntimeRepresentation::GcArray {
+                element, mutable, ..
+            } => CompositeInnerType::Array(ArrayType(FieldType {
+                element_type: layout
+                    .storage_type(Type::from_declared(DeclaredTypeRef::Core(element))),
+                mutable,
+            })),
+            RuntimeRepresentation::GcStruct { .. } => CompositeInnerType::Struct(StructType {
+                fields: StandardLibrary::new()
+                    .fields_of(declaration.id)
+                    .map(|field| FieldType {
+                        element_type: layout.storage_type(Type::from_declared(field.ty)),
+                        mutable: false,
+                    })
+                    .collect(),
+            }),
+            RuntimeRepresentation::Enum { .. } => CompositeInnerType::Struct(StructType {
+                fields: std::iter::once(FieldType {
+                    element_type: StorageType::Val(ValType::I32),
+                    mutable: false,
+                })
+                .chain(
+                    StandardLibrary::new()
+                        .variants_of(declaration.id)
+                        .map(|_| FieldType {
                             element_type: StorageType::Val(ValType::I32),
                             mutable: false,
-                        },
-                    ]
-                    .into(),
-                }),
-                shared: false,
-                descriptor: None,
-                describes: None,
-            },
-        },
-        SubType {
+                        }),
+                )
+                .collect(),
+            }),
+        };
+        recursive_types.push(SubType {
             is_final: true,
             supertype_idx: None,
             composite_type: CompositeType {
-                inner: CompositeInnerType::Array(ArrayType(FieldType {
-                    element_type: StorageType::I8,
-                    // Strings remain immutable at the language level. Internal
-                    // mutability lets standard-library decoders construct a
-                    // dynamically sized GC string without linear-memory handles.
-                    mutable: true,
-                })),
+                inner,
                 shared: false,
                 descriptor: None,
                 describes: None,
             },
-        },
-        SubType {
-            is_final: true,
-            supertype_idx: None,
-            composite_type: CompositeType {
-                inner: CompositeInnerType::Struct(StructType {
-                    fields: vec![
-                        FieldType {
-                            element_type: StorageType::Val(ValType::I64),
-                            mutable: false,
-                        },
-                        FieldType {
-                            element_type: StorageType::Val(ValType::I64),
-                            mutable: false,
-                        },
-                    ]
-                    .into(),
-                }),
-                shared: false,
-                descriptor: None,
-                describes: None,
-            },
-        },
-        SubType {
-            is_final: true,
-            supertype_idx: None,
-            composite_type: CompositeType {
-                inner: CompositeInnerType::Struct(StructType {
-                    fields: vec![
-                        FieldType {
-                            element_type: StorageType::Val(ValType::I64),
-                            mutable: false,
-                        },
-                        FieldType {
-                            element_type: StorageType::Val(ValType::I64),
-                            mutable: false,
-                        },
-                        FieldType {
-                            element_type: StorageType::Val(ValType::I32),
-                            mutable: false,
-                        },
-                        FieldType {
-                            element_type: StorageType::Val(ValType::I32),
-                            mutable: false,
-                        },
-                    ]
-                    .into(),
-                }),
-                shared: false,
-                descriptor: None,
-                describes: None,
-            },
-        },
-        SubType {
-            is_final: true,
-            supertype_idx: None,
-            composite_type: CompositeType {
-                inner: CompositeInnerType::Struct(StructType {
-                    fields: vec![
-                        FieldType {
-                            element_type: StorageType::Val(ValType::I64),
-                            mutable: false,
-                        },
-                        FieldType {
-                            element_type: StorageType::Val(val_type(Type::UnityModule)),
-                            mutable: false,
-                        },
-                    ]
-                    .into(),
-                }),
-                shared: false,
-                descriptor: None,
-                describes: None,
-            },
-        },
-        SubType {
-            is_final: true,
-            supertype_idx: None,
-            composite_type: CompositeType {
-                inner: CompositeInnerType::Struct(StructType {
-                    fields: vec![
-                        FieldType {
-                            element_type: StorageType::Val(ValType::I64),
-                            mutable: false,
-                        },
-                        FieldType {
-                            element_type: StorageType::Val(val_type(Type::UnityModule)),
-                            mutable: false,
-                        },
-                    ]
-                    .into(),
-                }),
-                shared: false,
-                descriptor: None,
-                describes: None,
-            },
-        },
-        SubType {
-            is_final: true,
-            supertype_idx: None,
-            composite_type: CompositeType {
-                inner: CompositeInnerType::Struct(StructType {
-                    fields: vec![
-                        FieldType {
-                            element_type: StorageType::Val(ValType::I32),
-                            mutable: false,
-                        },
-                        FieldType {
-                            element_type: StorageType::Val(ValType::I32),
-                            mutable: false,
-                        },
-                    ]
-                    .into(),
-                }),
-                shared: false,
-                descriptor: None,
-                describes: None,
-            },
-        },
-    ];
+        });
+    }
     let mut fields = Vec::with_capacity(
         async_layout
             .as_ref()
@@ -310,7 +198,9 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                         mutable: false,
                     },
                     FieldType {
-                        element_type: StorageType::Val(val_type(Type::String)),
+                        element_type: StorageType::Val(val_type(Type::Standard(
+                            StdlibTypeId::String,
+                        ))),
                         mutable: false,
                     },
                 ]

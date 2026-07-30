@@ -10,17 +10,16 @@ use std::collections::HashSet;
 
 use crate::{
     ast::{
-        ActionKind, BinaryOp, EnumId, EnumVariantId, ExprId, FunctionId, MatchPattern,
-        OptionTypeId, PatternId, RecordFieldId, RecordId, ResultTypeId, SuspensionMode, UnaryOp,
-        ValueId,
+        ActionKind, BinaryOp, EnumTypeId, ExprId, FunctionId, MatchPattern, OptionTypeId,
+        PatternId, RecordFieldId, RecordId, ResultTypeId, SuspensionMode, UnaryOp, ValueId,
     },
     hir::{
         self, ExpressionResolution, ImplicitConversion, TypedExpression, TypedExpressionKind,
         TypedFallbackBranch, TypedInterpolatedPart, TypedProgram, TypedStatementKind, TypedVisitor,
     },
     semantic::{
-        ResolvedCall, ResolvedMember, ResolvedValue, ResolvedWrapperPattern, SemanticModel,
-        ValueConversion,
+        ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue, ResolvedWrapperPattern,
+        SemanticModel, ValueConversion,
     },
     stdlib::{CancellationKind, Implementation, IntrinsicId, StandardLibrary},
     types::{BuiltinType, TypeId, TypeKind},
@@ -93,8 +92,8 @@ pub enum ExpressionKind {
         fields: Vec<(RecordFieldId, ExprId)>,
     },
     Enum {
-        enumeration: EnumId,
-        variant: EnumVariantId,
+        enumeration: EnumTypeId,
+        variant: ResolvedEnumVariantId,
         payload: Option<ExprId>,
     },
     Path {
@@ -168,8 +167,8 @@ pub struct MatchArm {
 #[derive(Debug, Clone)]
 pub enum LoweredPattern {
     Enum {
-        enumeration: EnumId,
-        variant: EnumVariantId,
+        enumeration: EnumTypeId,
+        variant: ResolvedEnumVariantId,
         binding: Option<ValueId>,
     },
     Bool(bool),
@@ -1339,6 +1338,49 @@ impl TypedVisitor for LocalPlanner<'_> {
                         .expect("retried expression belongs to typed HIR")
                         .ty;
                     self.push(ty, LocalPurpose::SuspensionScratch(value));
+                } else if let Some(intrinsic) = resolved_intrinsic(program, value) {
+                    let u64_type = self.semantics.types().id_for_builtin(BuiltinType::U64);
+                    let scratch_types = match intrinsic {
+                        IntrinsicId::ProcessModule => vec![u64_type, u64_type],
+                        IntrinsicId::ProcessFollow
+                        | IntrinsicId::ProcessScan
+                        | IntrinsicId::ProcessReadRelative32
+                        | IntrinsicId::UnityClassField
+                        | IntrinsicId::UnityClassStaticInstance
+                        | IntrinsicId::UnityClassStaticTable
+                        | IntrinsicId::ModuleScan => vec![u64_type],
+                        IntrinsicId::UnityIl2Cpp => vec![
+                            self.semantics
+                                .types()
+                                .id_for_standard(crate::stdlib::StdlibTypeId::UnityModule),
+                        ],
+                        IntrinsicId::UnityModuleImage => vec![
+                            self.semantics
+                                .types()
+                                .id_for_standard(crate::stdlib::StdlibTypeId::UnityImage),
+                        ],
+                        IntrinsicId::UnityImageClass => vec![
+                            self.semantics
+                                .types()
+                                .id_for_standard(crate::stdlib::StdlibTypeId::UnityClass),
+                        ],
+                        IntrinsicId::UnityClassFieldAny => vec![
+                            self.semantics
+                                .types()
+                                .id_for_standard(crate::stdlib::StdlibTypeId::UnityField),
+                        ],
+                        IntrinsicId::NextTick | IntrinsicId::ProcessRead => Vec::new(),
+                        _ => unreachable!("type checking only permits awaitable intrinsics"),
+                    };
+                    for (slot, ty) in scratch_types.into_iter().enumerate() {
+                        self.push(
+                            ty,
+                            LocalPurpose::IntrinsicScratch {
+                                expression: value,
+                                slot: slot as u8,
+                            },
+                        );
+                    }
                 }
             }
             _ => {}

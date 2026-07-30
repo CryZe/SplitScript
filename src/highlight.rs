@@ -4,11 +4,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
     ast::{
-        Action, Expr, ExprKind, FunctionDecl, MatchPattern, Program, SettingKind, Span, Stmt,
-        TypeRef, ValueId, VariableDecl,
+        Action, EnumTypeId, Expr, ExprKind, FunctionDecl, MatchPattern, Program, SettingKind, Span,
+        Stmt, TypeRef, ValueId, VariableDecl,
     },
     lexer::{Lexeme, Token, TokenKind, TriviaKind},
     semantic::{ResolvedCall, ResolvedValue, SemanticModel},
+    stdlib::StandardLibrary,
     syntax::SourceDocument,
     visit::{self, Visitor},
 };
@@ -605,13 +606,8 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 variant,
                 binding,
             } => {
-                if let Some(enumeration) = self
-                    .syntax
-                    .enums
-                    .iter()
-                    .find(|candidate| candidate.id == *enumeration)
-                {
-                    self.mark_ident(arm.span, &enumeration.name, SemanticTokenKind::Enum, 0);
+                if let Some(name) = enum_name(self.syntax, *enumeration) {
+                    self.mark_ident(arm.span, name, SemanticTokenKind::Enum, 0);
                 }
                 self.mark_ident(arm.span, variant, SemanticTokenKind::EnumMember, 0);
                 if let Some(binding) = binding {
@@ -648,18 +644,8 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 variant,
                 ..
             } => {
-                if let Some(enumeration) = self
-                    .syntax
-                    .enums
-                    .iter()
-                    .find(|candidate| candidate.id == *enumeration)
-                {
-                    self.mark_ident(
-                        expression.span,
-                        &enumeration.name,
-                        SemanticTokenKind::Enum,
-                        0,
-                    );
+                if let Some(name) = enum_name(self.syntax, *enumeration) {
+                    self.mark_ident(expression.span, name, SemanticTokenKind::Enum, 0);
                 }
                 self.mark_ident(expression.span, variant, SemanticTokenKind::EnumMember, 0);
             }
@@ -685,6 +671,17 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             _ => {}
         }
         visit::walk_expr(self, expression);
+    }
+}
+
+fn enum_name(program: &Program, enumeration: EnumTypeId) -> Option<&str> {
+    match enumeration {
+        EnumTypeId::Source(id) => program
+            .enums
+            .iter()
+            .find(|candidate| candidate.id == id)
+            .map(|declaration| declaration.name.as_str()),
+        EnumTypeId::Standard(id) => Some(StandardLibrary::new().type_decl(id).name),
     }
 }
 
@@ -727,10 +724,8 @@ fn is_builtin_type(name: &str) -> bool {
 }
 
 fn is_namespace(name: &str) -> bool {
-    matches!(
-        name,
-        "current" | "old" | "settings" | "oldSettings" | "process" | "timer" | "Unity"
-    )
+    matches!(name, "current" | "old" | "settings" | "oldSettings")
+        || StandardLibrary::new().namespace_by_name(name).is_some()
 }
 
 fn is_operator(kind: &TokenKind) -> bool {

@@ -40,10 +40,6 @@ pub struct Lexed {
 }
 
 impl Lexed {
-    pub fn lexemes(&self) -> &[Lexeme] {
-        &self.lexemes
-    }
-
     pub fn tokens(&self) -> impl Iterator<Item = &Token> {
         self.lexemes.iter().filter_map(|lexeme| match lexeme {
             Lexeme::Token(token) => Some(token),
@@ -114,6 +110,7 @@ pub enum TokenKind {
     Eof,
 }
 
+#[cfg(test)]
 pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
     Ok(lex_lossless(source)?.tokens().cloned().collect())
 }

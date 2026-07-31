@@ -6,6 +6,39 @@ Game-specific names and offsets belong in the autosplitter; process access,
 signature scanning, engine metadata, watchers, strings, collections, timing,
 and cancellation belong here.
 
+## GBA emulator support
+
+`state GBA { ... }` selects the standard-library GBA state provider. The
+provider attaches to a supported emulator, discovers its EWRAM and IWRAM
+mapping, and exposes a read-only `gba: GbaEmulator` value. Its generic
+`gba.read(address) -> T!` method accepts original GBA hardware addresses and
+infers the memory representation from its expected result type. Reads outside
+`0x02000000..0x02040000` and `0x03000000..0x03008000`, including reads that
+cross either region boundary, return an error.
+
+State fields with a fixed address should use the concise `at` syntax. The GBA
+provider maps it through the same address translation and typed-read operation
+as `gba.read`; the explicit method remains available for addresses computed by
+the script.
+
+```splitscript
+state GBA {
+    inventory0: u8 at 0x02002B32
+    scene: u8 at 0x03000BF4
+}
+```
+
+Discovery covers VisualBoyAdvance/VBA-M, mGBA's contiguous mapping, NO$GBA,
+standalone Mednafen, the supported RetroArch cores, and mGBA-based BizHawk.
+Pointer-backed layouts refresh the current RAM base during reads so starting
+or reloading a ROM does not leave the script with a stale mapping.
+
+The provider owns the emulator executable list and attachment lifecycle.
+Autosplitters do not call an attachment function or retain an optional handle.
+Only `gba` is available as the process-access root in a GBA script; ordinary
+native-process scripts use `process` instead. This keeps the two memory models
+distinct and lets completion and diagnostics present only the applicable API.
+
 ## Compiler and tooling model
 
 The library surface is described by a backend-independent catalog. Each entry
@@ -15,6 +48,16 @@ examples, related items, deprecation information, and an implementation key.
 Type checking resolves source calls to these IDs. WebAssembly generation and
 async lowering only handle the resolved implementation key; neither resolves
 source names.
+
+`CompilerContext` owns the selected catalog through a cloneable
+`StandardLibrary` handle backed by an immutable `Arc` graph. Compiler passes
+borrow that graph; parsed, checked, tooling, and backend products clone the
+owner only when they must retain it. The bundled graph is cached, while tests
+also construct and inject an independently owned validated graph through the
+same context path. This makes catalog identity and lifetime explicit without
+requiring each pass to reconstruct global state. The future privileged
+SplitScript loader can replace the declaration producer behind this ownership
+boundary.
 
 Effects distinguish ordinary process reads from operations that require an
 attached process, suspend or retry, and cancel when that process closes.
@@ -217,7 +260,9 @@ expressed as normal source code.
 ## Unity IL2CPP
 
 The implemented IL2CPP surface supports 64-bit Unity base, 2019, 2020, and
-2022 layouts:
+2022 layouts. These supported versions, their metadata offsets, and the
+discovery signatures are represented by one validated compiler descriptor;
+sync and suspending operations do not maintain separate layout tables.
 
 ```text
 let unity = await Unity.il2cpp(2020)

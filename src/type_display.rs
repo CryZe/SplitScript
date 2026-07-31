@@ -1,0 +1,37 @@
+//! Canonical source spelling for resolved semantic types used by editor tooling.
+
+use crate::{
+    database::SemanticSnapshot,
+    types::{TypeId, TypeKind},
+};
+
+pub(crate) fn display_type(ty: TypeId, snapshot: &SemanticSnapshot) -> String {
+    let types = snapshot.semantics().types();
+    match types.kind(ty) {
+        TypeKind::Builtin(builtin) => builtin.to_string(),
+        TypeKind::Standard(standard) => snapshot
+            .context()
+            .standard_library()
+            .type_decl(*standard)
+            .name
+            .to_owned(),
+        TypeKind::Record(id) => snapshot
+            .syntax()
+            .records
+            .iter()
+            .find(|record| record.id == *id)
+            .map(|record| record.name.clone())
+            .unwrap_or_else(|| format!("record#{}", id.index())),
+        TypeKind::Enum(id) => snapshot
+            .enum_types()
+            .iter()
+            .find(|enumeration| enumeration.id == *id)
+            .map(|enumeration| enumeration.name.clone())
+            .unwrap_or_else(|| format!("enum#{}", id.index())),
+        TypeKind::Array { element, .. } => {
+            format!("Array<{}>", display_type(*element, snapshot))
+        }
+        TypeKind::Option { value, .. } => format!("{}?", display_type(*value, snapshot)),
+        TypeKind::Result { value, .. } => format!("{}!", display_type(*value, snapshot)),
+    }
+}

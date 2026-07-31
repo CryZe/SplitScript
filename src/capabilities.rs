@@ -10,21 +10,37 @@ use crate::{
     equality::EqualityCapabilities,
     memory::MemoryLayouts,
     semantic::SemanticModel,
-    stdlib::{StandardLibrary, StdlibCapabilityId},
+    stdlib::{CapabilityBehavior, StandardLibrary, StdlibCapabilityId},
     types::{TypeId, TypeKind},
 };
 
 #[derive(Debug, Clone)]
 pub struct CapabilityAnalysis {
+    standard_library: StandardLibrary,
     equality: EqualityCapabilities,
     memory: MemoryLayouts,
 }
 
 impl CapabilityAnalysis {
     pub fn build(records: &[RecordDecl], enums: &[EnumDecl], semantics: &SemanticModel) -> Self {
+        Self::build_with_library(records, enums, semantics, StandardLibrary::new())
+    }
+
+    pub fn build_with_library(
+        records: &[RecordDecl],
+        enums: &[EnumDecl],
+        semantics: &SemanticModel,
+        standard_library: StandardLibrary,
+    ) -> Self {
         Self {
-            equality: EqualityCapabilities::build(records, enums, semantics),
-            memory: MemoryLayouts::build(records, semantics),
+            standard_library: standard_library.clone(),
+            equality: EqualityCapabilities::build_with_library(
+                records,
+                enums,
+                semantics,
+                standard_library.clone(),
+            ),
+            memory: MemoryLayouts::build_with_library(records, semantics, standard_library),
         }
     }
 
@@ -34,17 +50,23 @@ impl CapabilityAnalysis {
         capability: StdlibCapabilityId,
         semantics: &SemanticModel,
     ) -> Result<(), String> {
-        match capability {
-            StdlibCapabilityId::Equatable => self.equality.require(ty, semantics),
-            StdlibCapabilityId::MemoryReadable => self.memory.layout(ty, semantics).map(|_| ()),
-            capability => match semantics.types().kind(ty) {
+        match self.standard_library.capability(capability).behavior {
+            CapabilityBehavior::StructuralEquality => self.equality.require(ty, semantics),
+            CapabilityBehavior::StructuralMemoryLayout => {
+                self.memory.layout(ty, semantics).map(|_| ())
+            }
+            CapabilityBehavior::Declared => match semantics.types().kind(ty) {
                 TypeKind::Builtin(core)
-                    if StandardLibrary::new().core_type_has_capability(core.core(), capability) =>
+                    if self
+                        .standard_library
+                        .core_type_has_capability(*core, capability) =>
                 {
                     Ok(())
                 }
                 TypeKind::Standard(standard)
-                    if StandardLibrary::new().type_has_capability(*standard, capability) =>
+                    if self
+                        .standard_library
+                        .type_has_capability(*standard, capability) =>
                 {
                     Ok(())
                 }

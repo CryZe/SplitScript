@@ -4,13 +4,14 @@
     "module": "Node16",
     "moduleResolution": "Node16",
     "lib": [
-      "ES2022"
+      "ES2022",
+      "DOM"
     ],
     "types": [
       "node",
       "vscode"
     ],
-    "outDir": "out",
+    "outDir": "dist",
     "rootDir": "src",
     "sourceMap": true,
     "strict": true,

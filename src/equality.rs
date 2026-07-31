@@ -16,13 +16,27 @@ use crate::{
 
 #[derive(Debug, Clone, Default)]
 pub struct EqualityCapabilities {
+    standard_library: StandardLibrary,
     records: HashMap<RecordId, Result<(), String>>,
     enums: HashMap<EnumId, Result<(), String>>,
 }
 
 impl EqualityCapabilities {
     pub fn build(records: &[RecordDecl], enums: &[EnumDecl], semantics: &SemanticModel) -> Self {
-        let mut capabilities = Self::default();
+        Self::build_with_library(records, enums, semantics, StandardLibrary::new())
+    }
+
+    pub fn build_with_library(
+        records: &[RecordDecl],
+        enums: &[EnumDecl],
+        semantics: &SemanticModel,
+        standard_library: StandardLibrary,
+    ) -> Self {
+        let mut capabilities = Self {
+            standard_library,
+            records: HashMap::new(),
+            enums: HashMap::new(),
+        };
         for record in records {
             let result = capabilities.check_record(
                 record.id,
@@ -49,13 +63,15 @@ impl EqualityCapabilities {
     pub fn require(&self, ty: TypeId, semantics: &SemanticModel) -> Result<(), String> {
         match semantics.types().kind(ty) {
             TypeKind::Builtin(builtin)
-                if StandardLibrary::new()
-                    .core_type_has_capability(builtin.core(), StdlibCapabilityId::Equatable) =>
+                if self
+                    .standard_library
+                    .core_type_has_capability(*builtin, StdlibCapabilityId::Equatable) =>
             {
                 Ok(())
             }
             TypeKind::Standard(standard)
-                if StandardLibrary::new()
+                if self
+                    .standard_library
                     .type_has_capability(*standard, StdlibCapabilityId::Equatable) =>
             {
                 Ok(())
@@ -103,13 +119,15 @@ impl EqualityCapabilities {
         }
         let result = match semantics.types().kind(ty) {
             TypeKind::Builtin(builtin)
-                if StandardLibrary::new()
-                    .core_type_has_capability(builtin.core(), StdlibCapabilityId::Equatable) =>
+                if self
+                    .standard_library
+                    .core_type_has_capability(*builtin, StdlibCapabilityId::Equatable) =>
             {
                 Ok(())
             }
             TypeKind::Standard(standard)
-                if StandardLibrary::new()
+                if self
+                    .standard_library
                     .type_has_capability(*standard, StdlibCapabilityId::Equatable) =>
             {
                 Ok(())

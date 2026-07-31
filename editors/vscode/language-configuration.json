@@ -81,7 +81,7 @@
     {
       "beforeText": "^\\s*///.*$",
       "action": {
-        "indentAction": "none",
+        "indent": "none",
         "appendText": "/// "
       }
     }

@@ -1,0 +1,405 @@
+// Port of the unfinished The Legend of Zelda: The Minish Cap autosplitter.
+// The GBA state provider owns emulator attachment and exposes the typed `gba`
+// value used by the state reads below.
+
+/// A split that has been detected but must wait for an animation to finish.
+enum DelayedSplit {
+    /// No delayed split is waiting.
+    Inactive
+    /// Split shortly after Link receives the Minish Cap.
+    ReceiveMinishCap
+    /// Split after the Four Sword acquisition sequence finishes.
+    GetFourSword
+}
+
+settings {
+    /// Splits when Smith's Sword is added to the inventory.
+    "Get Smith's Sword" => getSmithsSword: true
+    /// Splits after the animation in which Link receives the Minish Cap.
+    "Receive Minish Cap" => receiveMinishCap: true
+    /// Splits the first time Link enters Deepwood Shrine.
+    "Enter Deepwood Shrine" => enterDeepwoodShrine: true
+    /// Splits when the Gust Jar is added to the inventory.
+    "Get Gust Jar" => getGustJar: true
+    /// Splits the first time Link enters the Deepwood Shrine boss room.
+    "Enter Deepwood Shrine Boss Room" => enterDeepwoodShrineBossRoom: true
+    /// Splits when the Earth Element is obtained.
+    "Get Earth Element" => getEarthElement: true
+    /// Splits the first time Link enters Mt. Crenel.
+    "Enter Mt. Crenel" => enterMtCrenel: true
+    /// Splits when the Grip Ring is obtained.
+    "Get Grip Ring" => getGripRing: true
+    /// Splits the first time Link enters the Cave of Flames.
+    "Enter Cave of Flames" => enterCaveOfFlames: true
+    /// Splits when the Cane of Pacci is added to the inventory.
+    "Get Cane of Pacci" => getCaneOfPacci: true
+    /// Splits the first time Link enters the Cave of Flames boss room.
+    "Enter Cave of Flames Boss Room" => enterCaveOfFlamesBossRoom: true
+    /// Splits when the Fire Element is obtained.
+    "Get Fire Element" => getFireElement: true
+    /// Splits when the Pegasus Boots are added to the inventory.
+    "Get Pegasus Boots" => getPegasusBoots: true
+    /// Splits when the Bow is added to the inventory.
+    "Get Bow" => getBow: true
+    /// Splits the first time Link enters the Fortress of Winds.
+    "Enter Fortress of Winds" => enterFortressOfWinds: true
+    /// Splits when the Mole Mitts are added to the inventory.
+    "Get Mole Mitts" => getMoleMitts: true
+    /// Splits the first time Link enters the Fortress of Winds boss room.
+    "Enter Fortress of Winds Boss Room" => enterFortressOfWindsBossRoom: true
+    /// Splits when the Ocarina of Wind is added to the inventory.
+    "Get Ocarina" => getOcarina: true
+    /// Splits when the Magical Boomerang is added to the inventory.
+    "Get Magical Boomerang" => getMagicalBoomerang: true
+    /// Splits when the Power Bracelets are obtained.
+    "Get Power Bracelets" => getPowerBracelets: true
+    /// Splits when the Flippers are obtained.
+    "Get Flippers" => getFlippers: true
+    /// Splits the first time Link enters the Temple of Droplets.
+    "Enter Temple of Droplets" => enterTempleOfDroplets: true
+    /// Splits when the Flame Lantern is added to the inventory.
+    "Get Flame Lantern" => getFlameLantern: true
+    /// Splits when the Water Element is obtained.
+    "Get Water Element" => getWaterElement: true
+    /// Splits the first time Link enters the Palace of Winds.
+    "Enter Palace of Winds" => enterPalaceOfWinds: true
+    /// Splits when Roc's Cape is added to the inventory.
+    "Get Roc's Cape" => getRocsCape: true
+    /// Splits when the Wind Element is obtained.
+    "Get Wind Element" => getWindElement: true
+    /// Splits after the Four Sword acquisition sequence finishes.
+    "Get Four Sword" => getFourSword: true
+    /// Splits when the Dark Hyrule Castle Big Key is obtained.
+    "Get DHC Big Key" => getDhcBigKey: true
+    /// Splits when the final Vaati phase is defeated.
+    "Defeat Vaati" => defeatVaati: true
+}
+
+state GBA {
+    /// Raw inventory flags for swords and related equipment.
+    inventory0: u8 at 0x02002B32
+    /// Raw inventory flags containing the Four Sword state.
+    inventory1: u8 at 0x02002B33
+    /// Raw inventory flags containing the Bow state.
+    inventory2: u8 at 0x02002B34
+    /// Raw inventory flags for the Boomerang and Flame Lantern.
+    inventory3: u8 at 0x02002B35
+    /// Raw inventory flags for the Gust Jar, Cane of Pacci, and Mole Mitts.
+    inventory4: u8 at 0x02002B36
+    /// Raw inventory flags for Roc's Cape, the Pegasus Boots, and the Ocarina.
+    inventory5: u8 at 0x02002B37
+    /// Bit set containing the four collected elements.
+    elements: u8 at 0x02002B42
+    /// Bit set containing permanent equipment such as the Grip Ring.
+    permanentEquipment: u8 at 0x02002B43
+    /// Identifier of the currently loaded room or scene.
+    scene: u8 at 0x03000BF4
+    /// Dark Hyrule Castle key flags used to detect the Big Key.
+    dhcBigKey: i32 at 0x02002EB2
+    /// Remaining phases in the final Vaati encounter.
+    vaati3Phases: i32 at 0x030017BC
+    /// Identifier of Link's current sprite or animation state.
+    sprite: u16 at 0x0300116C
+    /// The game's wrapping 16-bit frame counter.
+    frameCount: u16 at 0x0300100C
+    /// Horizontal position of the title-screen user interface.
+    uixPosition: i32 at 0x03001E4E
+    /// Vertical position of the title-screen user interface.
+    uiyPosition: i32 at 0x0300187A
+    /// Link's vertical position in the current room.
+    linkPositionY: u16 at 0x030010BE
+    /// Rupee count currently displayed by the HUD.
+    visualRupees: u16 at 0x0200AF0E
+    /// Health currently displayed by the HUD, measured in quarter hearts.
+    visualHearts: u8 at 0x0200AF03
+    /// Small-key count currently displayed by the HUD.
+    visualKeys: u8 at 0x0200AF12
+    /// Number of collected Tiger Scrolls.
+    tigerScrolls: u8 at 0x02002B44
+    /// Number of collected Mysterious Shells.
+    mysteriousShells: u16 at 0x02002B02
+    /// Current bomb count.
+    bombs: u8 at 0x02002AEC
+}
+
+/// Number of completed frames before the current 16-bit frame-counter cycle.
+let accumulatedFrameCount: i64 = 0
+/// Split animation that is currently waiting for its target frame.
+let delayedSplit = DelayedSplit.Inactive
+/// Absolute frame on which the pending delayed split should fire.
+let delayedSplitAt: i64 = 0
+
+/// Whether Smith's Sword has already been observed during this run.
+let gotSmithsSword = false
+/// Whether the Deepwood Shrine entrance split has already fired this run.
+let enteredDeepwoodShrine = false
+/// Whether the Deepwood Shrine boss-room split has already fired this run.
+let enteredDeepwoodShrineBoss = false
+/// Whether the Mt. Crenel entrance split has already fired this run.
+let enteredMtCrenel = false
+/// Whether the Cave of Flames entrance split has already fired this run.
+let enteredCaveOfFlames = false
+/// Whether the Cave of Flames boss-room split has already fired this run.
+let enteredCaveOfFlamesBoss = false
+/// Whether the Fortress of Winds entrance split has already fired this run.
+let enteredFortressOfWinds = false
+/// Whether the Fortress of Winds boss-room split has already fired this run.
+let enteredFortressOfWindsBoss = false
+/// Whether the Temple of Droplets entrance split has already fired this run.
+let enteredTempleOfDroplets = false
+/// Whether the Palace of Winds entrance split has already fired this run.
+let enteredPalaceOfWinds = false
+
+/// Returns a monotonic frame count that accounts for the game's counter wrapping.
+fn totalFrameCount(frameCount) {
+    return accumulatedFrameCount + frameCount as i64
+}
+
+/// Returns whether any bit in `mask` was newly set between two snapshots.
+fn acquired(oldValue, currentValue, mask) {
+    return oldValue & mask == 0 && currentValue & mask != 0
+}
+
+/// Formats a quarter-heart count for display in LiveSplit.
+fn heartsText(quarters) {
+    let fraction = match quarters % 4 {
+        1 => "¼",
+        2 => "½",
+        3 => "¾",
+        _ => ""
+    }
+    if quarters >= 1 && quarters <= 3 {
+        return fraction
+    }
+    return `{quarters / 4}{fraction}`
+}
+
+/// Restores all per-run split guards and delayed-split state to their defaults.
+fn resetRunProgress() {
+    gotSmithsSword = false
+    enteredDeepwoodShrine = false
+    enteredDeepwoodShrineBoss = false
+    enteredMtCrenel = false
+    enteredCaveOfFlames = false
+    enteredCaveOfFlamesBoss = false
+    enteredFortressOfWinds = false
+    enteredFortressOfWindsBoss = false
+    enteredTempleOfDroplets = false
+    enteredPalaceOfWinds = false
+    delayedSplit = DelayedSplit.Inactive
+    delayedSplitAt = 0
+}
+
+whileAttached {
+    setVariable("Hearts", heartsText(current.visualHearts))
+    setVariable("Rupees", current.visualRupees as String)
+    setVariable("Keys", current.visualKeys as String)
+    setVariable("Tiger Scrolls", current.tigerScrolls as String)
+    setVariable("Mysterious Shells", current.mysteriousShells as String)
+    setVariable("Bombs", current.bombs as String)
+
+    let timerState = timer.state()
+    if timerState == TimerState.Running || timerState == TimerState.Paused {
+        if current.frameCount < old.frameCount {
+            accumulatedFrameCount += old.frameCount as i64 + 1
+        }
+    }
+}
+
+start {
+    if current.uixPosition == 24
+        && old.uiyPosition == 144
+        && current.uiyPosition > 144
+    {
+        accumulatedFrameCount = -(current.frameCount as i64)
+        resetRunProgress()
+        return true
+    }
+}
+
+split {
+    if delayedSplit != DelayedSplit.Inactive
+        && totalFrameCount(current.frameCount) >= delayedSplitAt
+    {
+        debug print(match delayedSplit {
+            DelayedSplit.ReceiveMinishCap => "Receive Minish Cap",
+            DelayedSplit.GetFourSword => "Get Four Sword",
+            DelayedSplit.Inactive => "Delayed split"
+        })
+        delayedSplit = DelayedSplit.Inactive
+        return true
+    }
+
+    if acquired(old.inventory0, current.inventory0, 1 << 2) && settings.getSmithsSword {
+        debug print("Get Smith's Sword")
+        return true
+    }
+
+    if old.sprite != 0x031C
+        && current.sprite == 0x031C
+        && current.scene == 0x00
+        && settings.receiveMinishCap
+    {
+        delayedSplit = DelayedSplit.ReceiveMinishCap
+        delayedSplitAt = totalFrameCount(current.frameCount) + 20
+        return false
+    }
+
+    if !enteredDeepwoodShrine && current.scene == 0x48 && settings.enterDeepwoodShrine {
+        enteredDeepwoodShrine = true
+        debug print("Enter Deepwood Shrine")
+        return true
+    }
+    if acquired(old.inventory4, current.inventory4, 1 << 2) && settings.getGustJar {
+        debug print("Get Gust Jar")
+        return true
+    }
+    if !enteredDeepwoodShrineBoss
+        && current.scene == 0x49
+        && settings.enterDeepwoodShrineBossRoom
+    {
+        enteredDeepwoodShrineBoss = true
+        debug print("Enter Deepwood Shrine Boss Room")
+        return true
+    }
+    if acquired(old.elements, current.elements, 1 << 0) && settings.getEarthElement {
+        debug print("Get Earth Element")
+        return true
+    }
+    if !enteredMtCrenel && current.scene == 0x06 && settings.enterMtCrenel {
+        enteredMtCrenel = true
+        debug print("Enter Mt. Crenel")
+        return true
+    }
+    if acquired(old.permanentEquipment, current.permanentEquipment, 1 << 0)
+        && settings.getGripRing
+    {
+        debug print("Get Grip Ring")
+        return true
+    }
+    if !enteredCaveOfFlames && current.scene == 0x50 && settings.enterCaveOfFlames {
+        enteredCaveOfFlames = true
+        debug print("Enter Cave of Flames")
+        return true
+    }
+    if acquired(old.inventory4, current.inventory4, 1 << 4) && settings.getCaneOfPacci {
+        debug print("Get Cane of Pacci")
+        return true
+    }
+    if !enteredCaveOfFlamesBoss
+        && current.scene == 0x51
+        && settings.enterCaveOfFlamesBossRoom
+    {
+        enteredCaveOfFlamesBoss = true
+        debug print("Enter Cave of Flames Boss Room")
+        return true
+    }
+    if acquired(old.elements, current.elements, 1 << 2) && settings.getFireElement {
+        debug print("Get Fire Element")
+        return true
+    }
+    if acquired(old.inventory5, current.inventory5, 1 << 2) && settings.getPegasusBoots {
+        debug print("Get Pegasus Boots")
+        return true
+    }
+    if acquired(old.inventory2, current.inventory2, 1 << 2) && settings.getBow {
+        debug print("Get Bow")
+        return true
+    }
+    if !enteredFortressOfWinds && current.scene == 0x18 && settings.enterFortressOfWinds {
+        enteredFortressOfWinds = true
+        debug print("Enter Fortress of Winds")
+        return true
+    }
+    if acquired(old.inventory4, current.inventory4, 1 << 6) && settings.getMoleMitts {
+        debug print("Get Mole Mitts")
+        return true
+    }
+    if !enteredFortressOfWindsBoss
+        && current.scene == 0x58
+        && current.linkPositionY <= 1015
+        && settings.enterFortressOfWindsBossRoom
+    {
+        enteredFortressOfWindsBoss = true
+        debug print("Enter Fortress of Winds Boss Room")
+        return true
+    }
+    if acquired(old.inventory5, current.inventory5, 1 << 6) && settings.getOcarina {
+        debug print("Get Ocarina")
+        return true
+    }
+    if acquired(old.inventory3, current.inventory3, 1 << 0)
+        && settings.getMagicalBoomerang
+    {
+        debug print("Get Magical Boomerang")
+        return true
+    }
+    if acquired(old.permanentEquipment, current.permanentEquipment, 1 << 2)
+        && settings.getPowerBracelets
+    {
+        debug print("Get Power Bracelets")
+        return true
+    }
+    if acquired(old.permanentEquipment, current.permanentEquipment, 1 << 4)
+        && settings.getFlippers
+    {
+        debug print("Get Flippers")
+        return true
+    }
+    if !enteredTempleOfDroplets && current.scene == 0x60 && settings.enterTempleOfDroplets {
+        enteredTempleOfDroplets = true
+        debug print("Enter Temple of Droplets")
+        return true
+    }
+    if acquired(old.inventory3, current.inventory3, 1 << 6) && settings.getFlameLantern {
+        debug print("Get Flame Lantern")
+        return true
+    }
+    // TODO from the Rust autosplitter: Enter Octo.
+    if acquired(old.elements, current.elements, 1 << 4) && settings.getWaterElement {
+        debug print("Get Water Element")
+        return true
+    }
+    if !enteredPalaceOfWinds && current.scene == 0x70 && settings.enterPalaceOfWinds {
+        enteredPalaceOfWinds = true
+        debug print("Enter Palace of Winds")
+        return true
+    }
+    if acquired(old.inventory5, current.inventory5, 1 << 0) && settings.getRocsCape {
+        debug print("Get Roc's Cape")
+        return true
+    }
+    // TODO from the Rust autosplitter: Enter Gyorg.
+    if acquired(old.elements, current.elements, 1 << 6) && settings.getWindElement {
+        debug print("Get Wind Element")
+        return true
+    }
+    if acquired(old.inventory1, current.inventory1, 1 << 4) && settings.getFourSword {
+        delayedSplit = DelayedSplit.GetFourSword
+        delayedSplitAt = totalFrameCount(current.frameCount) + 244
+        return false
+    }
+
+    // TODOs from the Rust autosplitter: Enter DHC, second DHC key, Black
+    // Knight, Darknuts, Vaati 1, and Vaati 2.
+    if old.dhcBigKey & 4 == 0 && current.dhcBigKey & 4 != 0 && settings.getDhcBigKey {
+        debug print("Get DHC Big Key")
+        return true
+    }
+    if current.scene == 0x8B
+        && old.vaati3Phases == 1
+        && current.vaati3Phases == 0
+        && settings.defeatVaati
+    {
+        debug print("Defeat Vaati")
+        return true
+    }
+}
+
+isLoading {
+    return true
+}
+
+gameTime {
+    return Duration.fromFrames(totalFrameCount(current.frameCount), 60)
+}

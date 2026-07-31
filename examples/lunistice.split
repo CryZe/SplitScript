@@ -12,10 +12,6 @@ record LevelTimeParts {
     hundredths: f32
 }
 
-fn bar() -> f32! {
-    return process.read(0x100)
-}
-
 state ["Lunistice.exe", "Lunistice-Demo.exe"] {
     gameState = process.read(gameManagerInstance.offset(gameStateOffset))
     points = process.read(gameManagerInstance.offset(pointsOffset))
@@ -129,28 +125,12 @@ fn characterName(character, dlcDemo) {
     }
 }
 
-fn someFn() {
-    return process.read(0x100)
-}
 
 onDetached {
-    print("Hello, World :)")
     setTickRate(1.0)
 }
 
-settings {
-    /// Tooltip
-    "General" {
-        "Another bool" => anotherBool: false,
-        "A bool" => aBoolss: true,
-    }
-}
-
 onAttach {
-    let value: u32 = someFn() else 0
-    if settings.aBoolss {
-        value += 1
-    }
     let unity = await Unity.il2cpp(2020)
     debug print("Found IL2CPP")
 

@@ -1,7 +1,41 @@
 //! Structured Wasm-IR block, assignment, expression, and intrinsic emission.
 
-use super::*;
-use crate::stdlib::RuntimeRepresentation;
+use std::collections::HashMap;
+
+use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
+
+use crate::{
+    abi::AbiImportId,
+    ast::{
+        ActionKind, ArrayTypeDecl, BinaryOp, EnumDecl, EnumTypeId, ExprId, FunctionId, RecordDecl,
+        ResultTypeId, UnaryOp, ValueId,
+    },
+    intrinsic_registry::RuntimeHelperId,
+    memory::MemoryLayouts,
+    semantic::{ResolvedMember, ResolvedValue, SemanticModel, ValueConversionKind},
+    stdlib::{IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibTypeId},
+    types::TypeId,
+    wasm_ir,
+};
+
+use super::{
+    EqualityFunctions, GcLayout, RuntimeHelperPlan, SettingStorage, Type, array_element_type,
+    emit_array_get, emit_async_frame_ref, emit_default, emit_failure_transfer, emit_int,
+    emit_memory_value, emit_result_error, emit_result_success, emit_string_literal,
+    emit_struct_get, emit_typed_struct_get, enum_variant_payload, expression_type,
+    global_plan::RuntimeGlobals, imports::Abi, memory_plan::AbiReadScratch, record_field_type,
+    resolved_intrinsic, result_value_type, runtime_helpers::emit_value_equality,
+    script_functions::emit_action_default, semantic_type, value_type,
+};
+
+#[derive(Default)]
+pub(super) struct MatchLayout {
+    pub values: HashMap<ExprId, u32>,
+    pub bindings: HashMap<crate::ast::PatternId, (u32, Type)>,
+    pub fallback_values: HashMap<ExprId, u32>,
+    pub intrinsic_temps: HashMap<ExprId, Vec<u32>>,
+    pub suspension_temps: HashMap<ExprId, u32>,
+}
 
 #[derive(Clone, Copy)]
 pub(super) enum LocalStorage<'a> {
@@ -14,19 +48,22 @@ pub(super) enum LocalStorage<'a> {
 
 #[derive(Clone, Copy)]
 pub(super) struct ExprContext<'a> {
+    pub standard_library: &'a StandardLibrary,
     pub abi: &'a Abi,
     pub state: &'a crate::ast::StateDecl,
     pub locals: LocalStorage<'a>,
     pub globals: &'a HashMap<ValueId, u32>,
     pub global_types: &'a HashMap<ValueId, Type>,
     pub settings: &'a HashMap<ValueId, SettingStorage>,
-    pub stdlib: &'a Stdlib,
+    pub runtime_globals: RuntimeGlobals,
+    pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionId, u32>,
     pub equality_functions: &'a EqualityFunctions,
     pub records: &'a [RecordDecl],
     pub enums: &'a [EnumDecl],
     pub arrays: &'a [ArrayTypeDecl],
     pub memory: &'a MemoryLayouts,
+    pub abi_read: AbiReadScratch,
     pub matches: &'a MatchLayout,
     pub pattern_bindings: &'a HashMap<ValueId, (u32, Type)>,
     pub semantics: &'a SemanticModel,
@@ -87,15 +124,25 @@ impl LoopControl {
         }
     }
 
-    pub(super) fn emit_break(self, function: &mut Function) {
-        self.emit(function, true);
+    pub(super) fn emit_break(
+        self,
+        function: &mut Function,
+        gc: &GcLayout,
+        globals: RuntimeGlobals,
+    ) {
+        self.emit(function, true, gc, globals);
     }
 
-    pub(super) fn emit_continue(self, function: &mut Function) {
-        self.emit(function, false);
+    pub(super) fn emit_continue(
+        self,
+        function: &mut Function,
+        gc: &GcLayout,
+        globals: RuntimeGlobals,
+    ) {
+        self.emit(function, false, gc, globals);
     }
 
-    fn emit(self, function: &mut Function, is_break: bool) {
+    fn emit(self, function: &mut Function, is_break: bool, gc: &GcLayout, globals: RuntimeGlobals) {
         match self {
             Self::Branch {
                 break_depth,
@@ -117,11 +164,11 @@ impl LoopControl {
                 } else {
                     continue_state
                 };
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, globals);
                 function
                     .instruction(&Instruction::I32Const(state.index() as i32))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: gc.async_frame_index(),
                         field_index: 0,
                     })
                     .instruction(&Instruction::Br(dispatcher_depth));
@@ -144,7 +191,9 @@ fn compile_block_with_loop(
     let context = &expression_context;
     for statement in &block.statements {
         match statement {
-            wasm_ir::Statement::Store { target, op, value } => {
+            wasm_ir::Statement::Store {
+                target, op, value, ..
+            } => {
                 compile_assignment(function, *target, *op, *value, context);
             }
             wasm_ir::Statement::If {
@@ -210,12 +259,12 @@ fn compile_block_with_loop(
         wasm_ir::Terminator::Break => {
             loop_control
                 .expect("checked break statements belong to loops")
-                .emit_break(function);
+                .emit_break(function, context.gc, context.runtime_globals);
         }
         wasm_ir::Terminator::Continue => {
             loop_control
                 .expect("checked continue statements belong to loops")
-                .emit_continue(function);
+                .emit_continue(function, context.gc, context.runtime_globals);
         }
         wasm_ir::Terminator::AsyncWhile { .. } => {
             unreachable!("async loops are lowered by the async action compiler")
@@ -224,7 +273,7 @@ fn compile_block_with_loop(
             if let Some(value) = value {
                 compile_expr(function, *value, context);
             } else if let Some(action) = action {
-                emit_action_default(function, action);
+                emit_action_default(function, action, context.gc);
             }
             function.instruction(&Instruction::Return);
         }
@@ -256,17 +305,17 @@ pub(super) fn compile_assignment(
     match context.locals {
         LocalStorage::Hybrid { frame, .. } if frame.contains_key(&target) => {
             let (field, ty) = frame[&target];
-            emit_async_frame_ref(function);
+            emit_async_frame_ref(function, context.runtime_globals);
             if let Some(op) = op {
-                emit_async_frame_ref(function);
-                emit_typed_struct_get(function, async_frame_type_index(), field, ty);
+                emit_async_frame_ref(function, context.runtime_globals);
+                emit_typed_struct_get(function, context.gc.async_frame_index(), field, ty);
                 compile_expr(function, value, context);
                 emit_binary_instruction(function, op, ty);
             } else {
                 compile_expr(function, value, context);
             }
             function.instruction(&Instruction::StructSet {
-                struct_type_index: async_frame_type_index(),
+                struct_type_index: context.gc.async_frame_index(),
                 field_index: field,
             });
         }
@@ -307,17 +356,17 @@ pub(super) fn compile_assignment(
 }
 
 fn resolved_receiver(
-    target: &ResolvedCall,
+    target: &wasm_ir::CallTarget,
     context: &ExprContext<'_>,
 ) -> (ResolvedValue, Type, Vec<ResolvedMember>) {
     let (receiver, receiver_type, receiver_members) = match target {
-        ResolvedCall::UserMethod {
+        wasm_ir::CallTarget::UserMethod {
             receiver,
             receiver_type,
             receiver_members,
             ..
         } => (*receiver, *receiver_type, receiver_members.clone()),
-        ResolvedCall::StandardLibrary {
+        wasm_ir::CallTarget::Intrinsic {
             receiver: Some(receiver),
             receiver_type: Some(receiver_type),
             receiver_members,
@@ -334,7 +383,7 @@ fn resolved_receiver(
 
 pub(super) fn compile_receiver(
     function: &mut Function,
-    target: &ResolvedCall,
+    target: &wasm_ir::CallTarget,
     context: &ExprContext<'_>,
 ) -> Type {
     let (receiver, receiver_type, receiver_members) = resolved_receiver(target, context);
@@ -350,6 +399,21 @@ fn compile_resolved_path(
     context: &ExprContext<'_>,
 ) -> Type {
     let value_type = match value {
+        ResolvedValue::ProviderValue(provider) => {
+            function.instruction(&Instruction::GlobalGet(
+                context
+                    .runtime_globals
+                    .provider_value
+                    .expect("provider value references require provider storage"),
+            ));
+            Type::Standard(
+                context
+                    .wasm_ir
+                    .standard_library()
+                    .state_provider(provider)
+                    .process_type,
+            )
+        }
         ResolvedValue::CurrentState(field) | ResolvedValue::OldState(field) => {
             let snapshot = u32::from(matches!(value, ResolvedValue::OldState(_)));
             function.instruction(&Instruction::LocalGet(snapshot));
@@ -384,8 +448,8 @@ fn compile_resolved_path(
                 match context.locals {
                     LocalStorage::Hybrid { frame, .. } if frame.contains_key(&value) => {
                         let (field, ty) = frame[&value];
-                        emit_async_frame_ref(function);
-                        emit_typed_struct_get(function, async_frame_type_index(), field, ty);
+                        emit_async_frame_ref(function, context.runtime_globals);
+                        emit_typed_struct_get(function, context.gc.async_frame_index(), field, ty);
                         ty
                     }
                     LocalStorage::Hybrid { wasm, .. } if wasm.contains_key(&value) => {
@@ -418,7 +482,7 @@ fn emit_path_fields(
     for field in fields {
         let (struct_type_index, field_index, field_type) = match field {
             ResolvedMember::StandardField(field) => {
-                let library = StandardLibrary::new();
+                let library = context.standard_library;
                 let declaration = library.field(*field);
                 let owner = library.type_decl(declaration.owner);
                 let RuntimeRepresentation::GcStruct { .. } = owner.representation else {
@@ -487,7 +551,7 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
                 function
                     .instruction(&Instruction::I32Const(0))
                     .instruction(&Instruction::RefNull(HeapType::Concrete(
-                        standard_gc_type_index(StdlibTypeId::String),
+                        context.gc.standard_index(StdlibTypeId::String),
                     )))
                     .instruction(&Instruction::StructNew(
                         context.gc.index(Type::Result(result)),
@@ -514,7 +578,7 @@ fn compile_expr_unconverted(
             }
             Type::Standard(StdlibTypeId::Duration) => {
                 function.instruction(&Instruction::RefNull(HeapType::Concrete(
-                    standard_gc_type_index(StdlibTypeId::Duration),
+                    context.gc.standard_index(StdlibTypeId::Duration),
                 )));
             }
             Type::Option(option) => {
@@ -535,11 +599,13 @@ fn compile_expr_unconverted(
                 function.instruction(&Instruction::F64Const((*value).into()));
             }
         }
-        wasm_ir::ExpressionKind::String(value) => emit_string_literal(function, value),
+        wasm_ir::ExpressionKind::String(value) => emit_string_literal(function, value, context.gc),
         wasm_ir::ExpressionKind::InterpolatedString(parts) => {
             for part in parts {
                 match part {
-                    wasm_ir::InterpolatedPart::Text(value) => emit_string_literal(function, value),
+                    wasm_ir::InterpolatedPart::Text(value) => {
+                        emit_string_literal(function, value, context.gc)
+                    }
                     wasm_ir::InterpolatedPart::Expression {
                         expression,
                         string_conversion_source: None,
@@ -574,7 +640,9 @@ fn compile_expr_unconverted(
                 array_size: parts.len() as u32,
             });
             function.instruction(&Instruction::Call(
-                context.stdlib.helper(GeneratedHelper::ConcatStrings),
+                context
+                    .runtime_helpers
+                    .function(RuntimeHelperId::ConcatStrings),
             ));
         }
         wasm_ir::ExpressionKind::Signature(_) => {
@@ -614,7 +682,9 @@ fn compile_expr_unconverted(
             variant,
             payload,
         } => {
-            let selected = enum_variant_index(*enumeration, *variant, context.enums);
+            let selected = context
+                .gc
+                .enum_variant_index(*enumeration, *variant, context.enums);
             function.instruction(&Instruction::I32Const(selected as i32));
             match enumeration {
                 EnumTypeId::Source(enumeration) => {
@@ -641,7 +711,7 @@ fn compile_expr_unconverted(
                 }
                 EnumTypeId::Standard(enumeration) => {
                     debug_assert!(payload.is_none());
-                    for _ in StandardLibrary::new().variants_of(*enumeration) {
+                    for _ in context.standard_library.variants_of(*enumeration) {
                         function.instruction(&Instruction::I32Const(0));
                     }
                 }
@@ -825,7 +895,10 @@ fn compile_expr_unconverted(
                     binding,
                 } = &arm.pattern
                 {
-                    let variant_index = enum_variant_index(*enumeration, *variant, context.enums);
+                    let variant_index =
+                        context
+                            .gc
+                            .enum_variant_index(*enumeration, *variant, context.enums);
                     Some((*enumeration, variant_index, *binding))
                 } else {
                     None
@@ -977,12 +1050,12 @@ fn compile_expr_unconverted(
             compile_expr(function, *argument, context);
             function.instruction(&Instruction::LocalSet(*local));
         }
-        emit_numeric_method(function, intrinsic, receiver_type, temps);
+        emit_numeric_method(function, intrinsic, receiver_type, temps, context.gc);
         return;
     }
     match resolved_intrinsic(target) {
         None => match target {
-            ResolvedCall::UserMethod {
+            wasm_ir::CallTarget::UserMethod {
                 function: target_function,
                 ..
             } => {
@@ -992,16 +1065,16 @@ fn compile_expr_unconverted(
                 }
                 function.instruction(&Instruction::Call(context.functions[target_function]));
             }
-            ResolvedCall::UserFunction { function: target } => {
+            wasm_ir::CallTarget::UserFunction { function: target } => {
                 for argument in args {
                     compile_expr(function, *argument, context);
                 }
                 function.instruction(&Instruction::Call(context.functions[target]));
             }
-            ResolvedCall::StandardLibrary { .. } => {
+            wasm_ir::CallTarget::Intrinsic { .. } => {
                 unreachable!("standard-library implementations have intrinsic IDs")
             }
-            ResolvedCall::ResultError { result } => {
+            wasm_ir::CallTarget::ResultError { result } => {
                 emit_default(
                     function,
                     result_value_type(*result, context.semantics),
@@ -1013,18 +1086,18 @@ fn compile_expr_unconverted(
                     context.gc.index(Type::Result(*result)),
                 ));
             }
-            ResolvedCall::OptionSome { option } => {
+            wasm_ir::CallTarget::OptionSome { option } => {
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::StructNew(
                     context.gc.index(Type::Option(*option)),
                 ));
             }
-            ResolvedCall::ResultSuccess { result } => {
+            wasm_ir::CallTarget::ResultSuccess { result } => {
                 compile_expr(function, args[0], context);
                 function
                     .instruction(&Instruction::I32Const(0))
                     .instruction(&Instruction::RefNull(HeapType::Concrete(
-                        standard_gc_type_index(StdlibTypeId::String),
+                        context.gc.standard_index(StdlibTypeId::String),
                     )))
                     .instruction(&Instruction::StructNew(
                         context.gc.index(Type::Result(*result)),
@@ -1035,7 +1108,9 @@ fn compile_expr_unconverted(
             IntrinsicId::Print => {
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::PrintString),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::PrintString),
                 ));
             }
             IntrinsicId::StringLength => {
@@ -1047,14 +1122,18 @@ fn compile_expr_unconverted(
             IntrinsicId::StringConcat => {
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::ConcatStrings),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::ConcatStrings),
                 ));
             }
             IntrinsicId::TimerSetVariable => {
                 compile_expr(function, args[0], context);
                 compile_expr(function, args[1], context);
                 function.instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::TimerSetVariable),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::TimerSetVariable),
                 ));
             }
             IntrinsicId::TimerState => {
@@ -1062,7 +1141,7 @@ fn compile_expr_unconverted(
                 let Type::Standard(StdlibTypeId::TimerState) = ty else {
                     unreachable!("timer.state returns the declared standard enum")
                 };
-                let timer_state = StandardLibrary::new().type_decl(StdlibTypeId::TimerState);
+                let timer_state = context.standard_library.type_decl(StdlibTypeId::TimerState);
                 function
                     .instruction(&Instruction::Call(
                         context.abi.function(AbiImportId::TimerGetState),
@@ -1075,7 +1154,7 @@ fn compile_expr_unconverted(
                     .instruction(&Instruction::Else)
                     .instruction(&Instruction::I32Const(4))
                     .instruction(&Instruction::End);
-                for _ in StandardLibrary::new().variants_of(timer_state.id) {
+                for _ in context.standard_library.variants_of(timer_state.id) {
                     function.instruction(&Instruction::I32Const(0));
                 }
                 function.instruction(&Instruction::StructNew(
@@ -1093,7 +1172,7 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::ProcessRead => {
                 let read_type = match target {
-                    ResolvedCall::StandardLibrary { type_arguments, .. } => type_arguments[0],
+                    wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => type_arguments[0],
                     _ => unreachable!("process.read must resolve to its standard-library item"),
                 };
                 let Type::Result(result_type) =
@@ -1101,14 +1180,24 @@ fn compile_expr_unconverted(
                 else {
                     unreachable!("synchronous process reads produce Result values")
                 };
-                emit_process_read_expr(function, args[0], read_type, result_type, context);
+                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+                compile_expr(function, args[0], context);
+                emit_process_read_from_stack(
+                    function,
+                    read_type,
+                    result_type,
+                    "process read failed",
+                    context,
+                );
             }
             IntrinsicId::ProcessFollow => {
-                function.instruction(&Instruction::GlobalGet(PROCESS_GLOBAL));
+                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
                 compile_expr(function, args[0], context);
                 compile_expr(function, args[1], context);
                 function.instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::FollowAddress),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::FollowAddress),
                 ));
                 emit_sentinel_result(
                     function,
@@ -1123,10 +1212,12 @@ fn compile_expr_unconverted(
                 unreachable!("process.scan is lowered as an await")
             }
             IntrinsicId::ProcessReadRelative32 => {
-                function.instruction(&Instruction::GlobalGet(PROCESS_GLOBAL));
+                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::ReadRelative32),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::ReadRelative32),
                 ));
                 emit_sentinel_result(
                     function,
@@ -1138,11 +1229,13 @@ fn compile_expr_unconverted(
                 );
             }
             IntrinsicId::ProcessReadManagedString => {
-                function.instruction(&Instruction::GlobalGet(PROCESS_GLOBAL));
+                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
                 compile_expr(function, args[0], context);
                 compile_expr(function, args[1], context);
                 function.instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::ReadManagedString),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::ReadManagedString),
                 ));
                 emit_sentinel_result(
                     function,
@@ -1156,12 +1249,78 @@ fn compile_expr_unconverted(
             IntrinsicId::UnityIl2Cpp => {
                 unreachable!("Unity.il2cpp is lowered as an await")
             }
+            IntrinsicId::GbaAttach => {
+                function
+                    .instruction(&Instruction::GlobalGet(context.runtime_globals.process))
+                    .instruction(&Instruction::Call(
+                        context.runtime_helpers.function(RuntimeHelperId::GbaAttach),
+                    ));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Standard(StdlibTypeId::GbaEmulator),
+                    Instruction::RefIsNull,
+                    "GBA emulator memory is not available",
+                    context,
+                );
+            }
+            IntrinsicId::GbaEmulatorRead => {
+                let read_type = match target {
+                    wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => type_arguments[0],
+                    _ => unreachable!("GBA reads resolve to their standard-library method"),
+                };
+                let Type::Result(result_type) =
+                    expression_type(expression, context.wasm_ir, context.semantics)
+                else {
+                    unreachable!("GBA reads produce Result values")
+                };
+                let address = context.matches.intrinsic_temps[&expression][0];
+                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                let size = context
+                    .memory
+                    .layout(read_type, context.semantics)
+                    .expect("checked GBA reads are MemoryReadable")
+                    .size();
+                function
+                    .instruction(&Instruction::I32Const(size as i32))
+                    .instruction(&Instruction::Call(
+                        context
+                            .runtime_helpers
+                            .function(RuntimeHelperId::GbaTranslateAddress),
+                    ))
+                    .instruction(&Instruction::LocalTee(address))
+                    .instruction(&Instruction::I64Eqz)
+                    .instruction(&Instruction::If(BlockType::Result(
+                        context.gc.val_type(Type::Result(result_type)),
+                    )));
+                emit_result_error(
+                    function,
+                    result_type,
+                    semantic_type(read_type, context.semantics),
+                    "invalid or unavailable GBA memory address",
+                    context.gc,
+                );
+                function
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::GlobalGet(context.runtime_globals.process))
+                    .instruction(&Instruction::LocalGet(address));
+                emit_process_read_from_stack(
+                    function,
+                    read_type,
+                    result_type,
+                    "GBA memory read failed",
+                    context,
+                );
+                function.instruction(&Instruction::End);
+            }
             IntrinsicId::DurationFromParts => {
                 compile_expr(function, args[0], context);
                 compile_expr(function, args[1], context);
-                function.instruction(&Instruction::StructNew(standard_gc_type_index(
-                    StdlibTypeId::Duration,
-                )));
+                function.instruction(&Instruction::StructNew(
+                    context.gc.standard_index(StdlibTypeId::Duration),
+                ));
             }
             IntrinsicId::DurationFromFrames => {
                 compile_expr(function, args[0], context);
@@ -1177,9 +1336,9 @@ fn compile_expr_unconverted(
                 function
                     .instruction(&Instruction::I64DivS)
                     .instruction(&Instruction::I32WrapI64)
-                    .instruction(&Instruction::StructNew(standard_gc_type_index(
-                        StdlibTypeId::Duration,
-                    )));
+                    .instruction(&Instruction::StructNew(
+                        context.gc.standard_index(StdlibTypeId::Duration),
+                    ));
             }
             IntrinsicId::DurationSaturatingSecondsF32 => {
                 compile_expr(function, args[0], context);
@@ -1193,9 +1352,9 @@ fn compile_expr_unconverted(
                     .instruction(&Instruction::F32Const(1_000_000_000.0.into()))
                     .instruction(&Instruction::F32Mul)
                     .instruction(&Instruction::I32TruncSatF32S)
-                    .instruction(&Instruction::StructNew(standard_gc_type_index(
-                        StdlibTypeId::Duration,
-                    )));
+                    .instruction(&Instruction::StructNew(
+                        context.gc.standard_index(StdlibTypeId::Duration),
+                    ));
             }
             IntrinsicId::NumericMin | IntrinsicId::NumericMax | IntrinsicId::NumericClamp => {
                 unreachable!("numeric intrinsics are lowered before ordinary calls")
@@ -1263,18 +1422,24 @@ fn compile_fallback_branch(
             context
                 .loop_control
                 .expect("checked `else break` belongs to a loop")
-                .emit_break(function);
+                .emit_break(function, context.gc, context.runtime_globals);
         }
         wasm_ir::FallbackBranch::Continue => {
             context
                 .loop_control
                 .expect("checked `else continue` belongs to a loop")
-                .emit_continue(function);
+                .emit_continue(function, context.gc, context.runtime_globals);
         }
     }
 }
 
-fn emit_numeric_method(function: &mut Function, intrinsic: IntrinsicId, ty: Type, temps: &[u32]) {
+fn emit_numeric_method(
+    function: &mut Function,
+    intrinsic: IntrinsicId,
+    ty: Type,
+    temps: &[u32],
+    gc: &GcLayout,
+) {
     if matches!(ty, Type::F32 | Type::F64) {
         function
             .instruction(&Instruction::LocalGet(temps[0]))
@@ -1302,7 +1467,7 @@ fn emit_numeric_method(function: &mut Function, intrinsic: IntrinsicId, ty: Type
         return;
     }
 
-    let result = BlockType::Result(val_type(ty));
+    let result = BlockType::Result(gc.val_type(ty));
     if intrinsic == IntrinsicId::NumericClamp {
         function
             .instruction(&Instruction::LocalGet(temps[0]))
@@ -1344,11 +1509,11 @@ fn emit_numeric_method(function: &mut Function, intrinsic: IntrinsicId, ty: Type
         .instruction(&Instruction::End);
 }
 
-fn emit_process_read_expr(
+fn emit_process_read_from_stack(
     function: &mut Function,
-    address: ExprId,
     ty: TypeId,
     result_type: ResultTypeId,
+    error: &str,
     context: &ExprContext<'_>,
 ) {
     let physical_type = semantic_type(ty, context.semantics);
@@ -1357,10 +1522,8 @@ fn emit_process_read_expr(
         .layout(ty, context.semantics)
         .expect("checked process reads are MemoryReadable")
         .size();
-    function.instruction(&Instruction::GlobalGet(PROCESS_GLOBAL));
-    compile_expr(function, address, context);
     function
-        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(context.abi_read.destination(size)))
         .instruction(&Instruction::I32Const(size as i32))
         .instruction(&Instruction::Call(
             context.abi.function(AbiImportId::ProcessRead),
@@ -1371,6 +1534,7 @@ fn emit_process_read_expr(
     emit_memory_value(
         function,
         ty,
+        context.abi_read,
         0,
         context.memory,
         context.semantics,
@@ -1378,13 +1542,7 @@ fn emit_process_read_expr(
     );
     emit_result_success(function, result_type, context.gc);
     function.instruction(&Instruction::Else);
-    emit_result_error(
-        function,
-        result_type,
-        physical_type,
-        "process read failed",
-        context.gc,
-    );
+    emit_result_error(function, result_type, physical_type, error, context.gc);
     function.instruction(&Instruction::End);
 }
 
@@ -1433,7 +1591,7 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
             })
             .instruction(&Instruction::I32Const(source.is_signed() as i32))
             .instruction(&Instruction::Call(
-                context.stdlib.helper(GeneratedHelper::FormatI64),
+                context.runtime_helpers.function(RuntimeHelperId::FormatI64),
             ));
         return;
     }
@@ -1537,7 +1695,7 @@ fn emit_binary(
     let operand_type = expression_type(left, context.wasm_ir, context.semantics);
     if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
         && matches!(operand_type, Type::Standard(_))
-        && operand_type.is_enum()
+        && operand_type.is_enum(context.standard_library)
     {
         for expression in [left, right] {
             compile_expr(function, expression, context);
@@ -1563,8 +1721,8 @@ fn emit_binary(
             operand_type,
             context.equality_functions,
             context
-                .stdlib
-                .optional_helper(GeneratedHelper::StringEquality)
+                .runtime_helpers
+                .optional_function(RuntimeHelperId::StringEquality)
                 .unwrap_or(0),
         );
         if op == BinaryOp::Ne {

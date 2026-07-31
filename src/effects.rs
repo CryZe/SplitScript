@@ -4,7 +4,7 @@ use crate::{
     ast::{ActionKind, FunctionId, Span},
     hir::{self, TypedExpression, TypedProgram, TypedVisitor},
     semantic::ResolvedCall,
-    stdlib::{Effect, StandardLibrary},
+    stdlib::Effect,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -39,9 +39,14 @@ impl TypedVisitor for CallCollector<'_> {
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
         match program.call(expression.id) {
             Some(ResolvedCall::StandardLibrary { item, .. }) => {
-                self.facts
-                    .effects
-                    .extend_from_slice(StandardLibrary::new().item(*item).effects);
+                self.facts.effects.extend(
+                    program
+                        .standard_library()
+                        .item(*item)
+                        .effects
+                        .iter()
+                        .copied(),
+                );
             }
             Some(
                 ResolvedCall::UserFunction { function } | ResolvedCall::UserMethod { function, .. },
@@ -119,7 +124,7 @@ impl OperationAnalysis {
             fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
                 let violation = match program.call(expression.id) {
                     Some(ResolvedCall::StandardLibrary { item, .. }) => {
-                        let item = StandardLibrary::new().item(*item);
+                        let item = program.standard_library().item(*item);
                         item.operation_semantics()
                             .requires_attached_process
                             .then_some(DetachedCallViolation {

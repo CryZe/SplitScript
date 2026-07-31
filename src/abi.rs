@@ -5,49 +5,6 @@
 
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[repr(usize)]
-pub enum AbiImportId {
-    TimerGetState,
-    TimerStart,
-    TimerSplit,
-    TimerReset,
-    TimerSetGameTime,
-    TimerPauseGameTime,
-    TimerResumeGameTime,
-    TimerSetVariable,
-    RuntimeSetTickRate,
-    ProcessAttach,
-    ProcessDetach,
-    ProcessIsOpen,
-    ProcessRead,
-    ProcessGetModuleAddress,
-    ProcessGetModuleSize,
-    RuntimePrintMessage,
-    UserSettingsAddBool,
-    UserSettingsAddTitle,
-    UserSettingsAddChoice,
-    UserSettingsAddChoiceOption,
-    UserSettingsAddFileSelect,
-    UserSettingsAddFileSelectNameFilter,
-    UserSettingsAddFileSelectMimeFilter,
-    UserSettingsSetTooltip,
-    SettingsMapLoad,
-    SettingsMapFree,
-    SettingsMapGet,
-    SettingValueFree,
-    SettingValueGetBool,
-    SettingValueGetString,
-}
-
-impl AbiImportId {
-    pub const COUNT: usize = 30;
-
-    pub const fn index(self) -> usize {
-        self as usize
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbiType {
     I32,
@@ -167,7 +124,48 @@ macro_rules! import {
     };
 }
 
-const IMPORTS: &[AbiImport] = &[
+macro_rules! abi_catalog {
+    ($(
+        import!(
+            $id:ident,
+            $name:literal,
+            $parameters:expr,
+            $results:expr,
+            $effects:expr,
+            $lifetime:literal,
+            $summary:literal
+        )
+    ),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        #[repr(usize)]
+        pub enum AbiImportId {
+            $($id),*
+        }
+
+        impl AbiImportId {
+            pub const ALL: &'static [Self] = &[$(Self::$id),*];
+            pub const COUNT: usize = Self::ALL.len();
+
+            pub const fn index(self) -> usize {
+                self as usize
+            }
+        }
+
+        const IMPORTS: &[AbiImport] = &[$(
+            import!(
+                $id,
+                $name,
+                $parameters,
+                $results,
+                $effects,
+                $lifetime,
+                $summary
+            )
+        ),*];
+    };
+}
+
+abi_catalog! {
     import!(
         TimerGetState,
         "timer_get_state",
@@ -323,6 +321,51 @@ const IMPORTS: &[AbiImport] = &[
         PROCESS_READ,
         "The handle and module-name bytes are borrowed for this call.",
         "Finds a module image size."
+    ),
+    import!(
+        ProcessGetMemoryRangeCount,
+        "process_get_memory_range_count",
+        &[borrowed("process", AbiType::I64)],
+        &[value("count", AbiType::I64)],
+        PROCESS_READ,
+        "The process handle is borrowed for this call.",
+        "Returns the number of mapped process-memory ranges."
+    ),
+    import!(
+        ProcessGetMemoryRangeAddress,
+        "process_get_memory_range_address",
+        &[
+            borrowed("process", AbiType::I64),
+            value("index", AbiType::I64)
+        ],
+        &[value("address", AbiType::I64)],
+        PROCESS_READ,
+        "The process handle is borrowed for this call.",
+        "Returns a mapped memory range's base address."
+    ),
+    import!(
+        ProcessGetMemoryRangeSize,
+        "process_get_memory_range_size",
+        &[
+            borrowed("process", AbiType::I64),
+            value("index", AbiType::I64)
+        ],
+        &[value("size", AbiType::I64)],
+        PROCESS_READ,
+        "The process handle is borrowed for this call.",
+        "Returns a mapped memory range's size."
+    ),
+    import!(
+        ProcessGetMemoryRangeFlags,
+        "process_get_memory_range_flags",
+        &[
+            borrowed("process", AbiType::I64),
+            value("index", AbiType::I64)
+        ],
+        &[value("flags", AbiType::I64)],
+        PROCESS_READ,
+        "The process handle is borrowed for this call.",
+        "Returns a mapped memory range's access flags."
     ),
     import!(
         RuntimePrintMessage,
@@ -521,7 +564,7 @@ const IMPORTS: &[AbiImport] = &[
         "The handle and output range are borrowed for this call.",
         "Decodes a UTF-8 setting value."
     ),
-];
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AbiCatalog;

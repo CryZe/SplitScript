@@ -13,54 +13,6 @@ use crate::{
     types::BuiltinType,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum LanguageItemId {
-    Let,
-    Function,
-    Record,
-    Enum,
-    State,
-    Settings,
-    If,
-    Else,
-    While,
-    Break,
-    Continue,
-    Debug,
-    Match,
-    Return,
-    Throw,
-    Await,
-    Retry,
-    Propagate,
-    AsCast,
-    NoneConstructor,
-    SomeConstructor,
-    SuccessConstructor,
-    ErrorConstructor,
-    SelfValue,
-    SignatureLiteral,
-    TemplateString,
-    ArrayType,
-    OptionType,
-    ResultType,
-    BuiltinType(BuiltinType),
-    CurrentSnapshot,
-    OldSnapshot,
-    OldSettingsSnapshot,
-    SettingDocumentation,
-    ChoiceSetting,
-    FileSetting,
-    OnDetached,
-    OnAttach,
-    WhileAttached,
-    Start,
-    Split,
-    Reset,
-    IsLoading,
-    GameTime,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LanguageItemKind {
     Keyword,
@@ -120,6 +72,19 @@ split {
 }"#;
 
 const SETTINGS_SOURCE: &str = include_str!("../examples/lso_desktop_settings.split");
+
+const DOCUMENTATION_COMMENT_SOURCE: &str = r#"state "game.exe" {}
+
+/// Formats a level number for display.
+fn levelLabel(level) {
+    return `Level {level}`
+}
+
+settings {
+    /// Splits when the boss is defeated.
+    "Split boss" => splitBoss: true
+}
+"#;
 
 const CONTROL_FLOW_SOURCE: &str = r#"state "game.exe" {}
 
@@ -404,12 +369,18 @@ focused_example!(
     "fn readHealth() -> i32! {\n    return process.read.i32(healthAddress)?\n}",
     TYPES_AND_LITERALS_SOURCE
 );
-focused_example!(
-    SETTING_DOC_EXAMPLE,
-    "Add a tooltip",
-    "/// Splits when the boss is defeated.\n\"Split boss\" => splitBoss: true",
-    SETTINGS_SOURCE
-);
+const DOCUMENTATION_COMMENT_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Document a source symbol",
+        "/// Formats a level number for display.\nfn levelLabel(level) {\n    return `Level {level}`\n}",
+        DOCUMENTATION_COMMENT_SOURCE,
+    ),
+    Example::checked(
+        "Add a setting tooltip",
+        "/// Splits when the boss is defeated.\n\"Split boss\" => splitBoss: true",
+        DOCUMENTATION_COMMENT_SOURCE,
+    ),
+];
 focused_example!(
     CHOICE_EXAMPLE,
     "Choose an enum value",
@@ -502,7 +473,35 @@ macro_rules! compiler_symbol_item {
     };
 }
 
-const ITEMS: &[LanguageItem] = &[
+macro_rules! define_language_catalog {
+    (
+        ordinary_before { $(language_item!($before_id:ident, $($before:tt)*)),* $(,)? }
+        builtins { $(builtin_type_item!($builtin_id:ident, $($builtin:tt)*)),* $(,)? }
+        compiler_symbols { $(compiler_symbol_item!(LanguageItemId::$compiler_id:ident, $($compiler:tt)*)),* $(,)? }
+        ordinary_after { $(language_item!($after_id:ident, $($after:tt)*)),* $(,)? }
+        actions { $(action_item!($action_id:ident, $($action:tt)*)),* $(,)? }
+    ) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub enum LanguageItemId {
+            $($before_id,)*
+            BuiltinType(BuiltinType),
+            $($compiler_id,)*
+            $($after_id,)*
+            $($action_id),*
+        }
+
+        const ITEMS: &[LanguageItem] = &[
+            $(language_item!($before_id, $($before)*),)*
+            $(builtin_type_item!($builtin_id, $($builtin)*),)*
+            $(compiler_symbol_item!(LanguageItemId::$compiler_id, $($compiler)*),)*
+            $(language_item!($after_id, $($after)*),)*
+            $(action_item!($action_id, $($action)*),)*
+        ];
+    };
+}
+
+define_language_catalog! {
+    ordinary_before {
     language_item!(
         Let,
         "let",
@@ -755,6 +754,8 @@ const ITEMS: &[LanguageItem] = &[
         "A T? contains either Some(T) or None. Plain values lift to Some, and match uses Some(value) plus None.",
         OPTION_TYPE_EXAMPLE
     ),
+    }
+    builtins {
     builtin_type_item!(
         Bool,
         "bool",
@@ -839,6 +840,8 @@ const ITEMS: &[LanguageItem] = &[
         "Floating-point values are useful for game coordinates, timers, and duration conversion.",
         "let tickRate: f64 = 60.0"
     ),
+    }
+    compiler_symbols {
     compiler_symbol_item!(
         LanguageItemId::CurrentSnapshot,
         "current",
@@ -869,6 +872,8 @@ const ITEMS: &[LanguageItem] = &[
         "let changed = settings.enabled != oldSettings.enabled",
         SETTINGS_SOURCE
     ),
+    }
+    ordinary_after {
     language_item!(
         ResultType,
         "T!",
@@ -879,13 +884,13 @@ const ITEMS: &[LanguageItem] = &[
         RESULT_TYPE_EXAMPLE
     ),
     language_item!(
-        SettingDocumentation,
+        DocumentationComment,
         "///",
         LanguageItemKind::Syntax,
-        "/// tooltip text",
-        "Documents a setting or heading.",
-        "Consecutive documentation-comment lines become one tooltip and may include blank documentation lines between paragraphs.",
-        SETTING_DOC_EXAMPLE
+        "/// documentation text",
+        "Documents a source declaration, state field, setting, or heading.",
+        "On functions and methods, global variables, state fields, records and their fields, and enums and their variants, the documentation appears in editor hovers. On settings and headings, it becomes a tooltip in the settings UI. Consecutive documentation-comment lines form paragraphs; use an empty `///` line to start a new paragraph.",
+        DOCUMENTATION_COMMENT_EXAMPLES
     ),
     language_item!(
         ChoiceSetting,
@@ -905,6 +910,8 @@ const ITEMS: &[LanguageItem] = &[
         "File settings support named glob filters, a wildcard fallback, and one or more MIME filters.",
         FILE_EXAMPLE
     ),
+    }
+    actions {
     action_item!(
         OnDetached,
         OnDetached,
@@ -969,7 +976,8 @@ const ITEMS: &[LanguageItem] = &[
         "Falling through returns None so the runtime leaves the current game time unchanged.",
         "gameTime {\n    return Duration.fromSeconds(current.gameTime)\n}"
     ),
-];
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LanguageCatalog;
@@ -1005,7 +1013,7 @@ impl LanguageCatalog {
                 "!" => LanguageItemId::ResultType,
                 "choice" | "default" => LanguageItemId::ChoiceSetting,
                 "file" | "mime" => LanguageItemId::FileSetting,
-                "///" => LanguageItemId::SettingDocumentation,
+                "///" => LanguageItemId::DocumentationComment,
                 "`" => LanguageItemId::TemplateString,
                 _ => return None,
             };

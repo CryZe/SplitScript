@@ -1,0 +1,55 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository:
+    name: Compiler, tooling, Wasm, and runtime
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install extension dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Install WebAssembly validation tools
+        run: cargo install wasm-tools --version 1.201.0 --locked
+
+      - name: Reject tracked compiler artifacts
+        shell: pwsh
+        run: |
+          $artifacts = git ls-files -- '*.wasm' '*.wat'
+          if ($artifacts) {
+            Write-Error "Generated WebAssembly artifacts must not be tracked:`n$artifacts"
+          }
+
+      - name: Run the repository verification matrix
+        run: cargo xtask check

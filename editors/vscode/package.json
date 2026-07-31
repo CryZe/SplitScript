@@ -19,11 +19,19 @@
     "speedrunning",
     "WebAssembly"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
+  "browser": "./dist/web/extension.js",
+  "capabilities": {
+    "virtualWorkspaces": {
+      "supported": true
+    },
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
   "files": [
-    "out/**",
+    "dist/**",
     "syntaxes/**",
-    "server/**",
     "language-configuration.json",
     "README.md"
   ],
@@ -49,6 +57,11 @@
       }
     ],
     "semanticTokenTypes": [
+      {
+        "id": "constant",
+        "superType": "variable",
+        "description": "A language constant such as a boolean literal."
+      },
       {
         "id": "setting",
         "superType": "property",
@@ -90,6 +103,9 @@
       {
         "language": "splitscript",
         "scopes": {
+          "constant": [
+            "constant.language.splitscript"
+          ],
           "setting": [
             "variable.other.property.splitscript"
           ],
@@ -171,32 +187,6 @@
         }
       ]
     },
-    "configuration": {
-      "title": "SplitScript",
-      "properties": {
-        "splitScript.server.path": {
-          "type": "string",
-          "default": "",
-          "scope": "machine-overridable",
-          "description": "Path to the splitls executable. Relative paths resolve from the first workspace folder. Empty uses the bundled, repository development, or PATH executable."
-        },
-        "splitScript.server.arguments": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "scope": "machine-overridable",
-          "description": "Additional command-line arguments passed to splitls."
-        },
-        "splitScript.compiler.path": {
-          "type": "string",
-          "default": "",
-          "scope": "machine-overridable",
-          "description": "Path to the splitc executable. Relative paths resolve from the current file's workspace. Empty uses a bundled, server-adjacent, repository development, or PATH executable."
-        }
-      }
-    },
     "configurationDefaults": {
       "[splitscript]": {
         "editor.formatOnSave": false,
@@ -205,17 +195,26 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
+    "vscode:prepublish": "node scripts/build.mjs --production",
+    "compile": "node scripts/build.mjs",
+    "clean": "node scripts/clean.mjs",
+    "compile:ts": "tsc -p tsconfig.node.json",
+    "bundle:web": "node scripts/bundle-web.mjs",
+    "test:web-host": "vscode-test-web --browser=chromium --headless=true --quality=stable --commit=e4c7e7b1d6d060162f4aa7f8225271b67ce1df75 --extensionDevelopmentPath=. --extensionTestsPath=dist/web/test/index.js test-workspace",
+    "open:web-host": "vscode-test-web --browser=chromium --headless=false --quality=stable --commit=e4c7e7b1d6d060162f4aa7f8225271b67ce1df75 --extensionDevelopmentPath=. test-workspace",
     "watch": "tsc --watch -p ./",
-    "check": "tsc --noEmit -p ./"
+    "check": "tsc --noEmit -p ./",
+    "test": "tsc --noEmit -p tsconfig.test.json && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/*.test.mts"
   },
   "dependencies": {
+    "vscode-jsonrpc": "9.0.1",
     "vscode-languageclient": "10.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/vscode": "1.125.0",
+    "@vscode/test-web": "^0.0.81",
+    "esbuild": "^0.28.1",
     "typescript": "7.0.2"
   }
 }

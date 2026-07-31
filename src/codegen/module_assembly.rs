@@ -30,7 +30,7 @@ pub(super) fn finish(
     } = sections;
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
-        minimum: 1,
+        minimum: data.layout().minimum_pages(),
         maximum: None,
         memory64: false,
         shared: false,

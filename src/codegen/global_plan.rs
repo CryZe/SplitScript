@@ -1,20 +1,50 @@
-use super::*;
+use std::collections::HashMap;
+
+use wasm_encoder::{ConstExpr, GlobalSection, GlobalType, HeapType, RefType, ValType};
+
+use crate::{
+    ast::{Program, ValueId},
+    semantic::SemanticModel,
+    stdlib::{StandardLibrary, StdlibTypeId},
+    wasm_ir,
+};
+
+use super::{GcLayout, STATE_TYPE, Type, constant, semantic_type, value_type};
 
 pub(super) struct GlobalPlan {
     pub section: GlobalSection,
+    pub runtime: RuntimeGlobals,
     pub variables: HashMap<ValueId, u32>,
     pub variable_types: HashMap<ValueId, Type>,
     pub settings: HashMap<ValueId, SettingStorage>,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct SettingStorage {
+    pub current: u32,
+    pub old: u32,
+    pub ty: Type,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct RuntimeGlobals {
+    pub process: u32,
+    pub provider_value: Option<u32>,
+    pub current: u32,
+    pub old: u32,
+    pub attach_ready: u32,
+    pub async_frame: u32,
+    pub detached_entered: u32,
+}
+
 pub(super) fn encode(
     program: &Program,
     semantics: &SemanticModel,
-    typed_hir: &TypedProgram,
     gc: &GcLayout,
     wasm_ir: &wasm_ir::Program,
 ) -> GlobalPlan {
     let mut section = GlobalSection::new();
+    let process = section.len();
     section.global(
         GlobalType {
             val_type: ValType::I64,
@@ -23,20 +53,50 @@ pub(super) fn encode(
         },
         &ConstExpr::i64_const(0),
     );
+    let provider_value = program
+        .state
+        .as_ref()
+        .and_then(|state| state.provider.as_ref())
+        .and_then(|provider| provider.resolved)
+        .map(|provider| {
+            let ty = wasm_ir
+                .standard_library()
+                .state_provider(provider)
+                .process_type;
+            let index = section.len();
+            section.global(
+                GlobalType {
+                    val_type: gc.val_type(Type::Standard(ty)),
+                    mutable: true,
+                    shared: false,
+                },
+                &ConstExpr::ref_null(HeapType::Concrete(gc.standard_index(ty))),
+            );
+            index
+        });
     let nullable_state = ValType::Ref(RefType {
         nullable: true,
         heap_type: HeapType::Concrete(STATE_TYPE),
     });
-    for _ in 0..2 {
-        section.global(
-            GlobalType {
-                val_type: nullable_state,
-                mutable: true,
-                shared: false,
-            },
-            &ConstExpr::ref_null(HeapType::Concrete(STATE_TYPE)),
-        );
-    }
+    let current = section.len();
+    section.global(
+        GlobalType {
+            val_type: nullable_state,
+            mutable: true,
+            shared: false,
+        },
+        &ConstExpr::ref_null(HeapType::Concrete(STATE_TYPE)),
+    );
+    let old = section.len();
+    section.global(
+        GlobalType {
+            val_type: nullable_state,
+            mutable: true,
+            shared: false,
+        },
+        &ConstExpr::ref_null(HeapType::Concrete(STATE_TYPE)),
+    );
+    let attach_ready = section.len();
     section.global(
         GlobalType {
             val_type: ValType::I32,
@@ -45,17 +105,19 @@ pub(super) fn encode(
         },
         &ConstExpr::i32_const(0),
     );
+    let async_frame = section.len();
     section.global(
         GlobalType {
             val_type: ValType::Ref(RefType {
                 nullable: true,
-                heap_type: HeapType::Concrete(async_frame_type_index()),
+                heap_type: HeapType::Concrete(gc.async_frame_index()),
             }),
             mutable: true,
             shared: false,
         },
-        &ConstExpr::ref_null(HeapType::Concrete(async_frame_type_index())),
+        &ConstExpr::ref_null(HeapType::Concrete(gc.async_frame_index())),
     );
+    let detached_entered = section.len();
     section.global(
         GlobalType {
             val_type: ValType::I32,
@@ -79,13 +141,18 @@ pub(super) fn encode(
             mutable: variable.mutable,
             shared: false,
         };
-        if ty.is_enum() {
+        if let Type::Option(option) = ty {
+            section.global(
+                global_type,
+                &ConstExpr::ref_null(HeapType::Concrete(gc.index(Type::Option(option)))),
+            );
+        } else if ty.is_enum(wasm_ir.standard_library()) {
             section.global(
                 global_type,
                 &ConstExpr::ref_null(HeapType::Concrete(gc.index(ty))),
             );
         } else {
-            section.global(global_type, &constant(variable.value.id, typed_hir, ty));
+            section.global(global_type, &constant(variable.value.id, wasm_ir, ty));
         }
         variables.insert(variable.id, index);
         variable_types.insert(variable.id, ty);
@@ -98,21 +165,35 @@ pub(super) fn encode(
         };
         let ty = semantic_type(ty, semantics);
         let current = section.len();
-        emit_setting_global(&mut section, ty, gc);
+        emit_setting_global(&mut section, ty, gc, wasm_ir.standard_library());
         let old = section.len();
-        emit_setting_global(&mut section, ty, gc);
+        emit_setting_global(&mut section, ty, gc, wasm_ir.standard_library());
         settings.insert(setting.id, SettingStorage { current, old, ty });
     }
 
     GlobalPlan {
         section,
+        runtime: RuntimeGlobals {
+            process,
+            provider_value,
+            current,
+            old,
+            attach_ready,
+            async_frame,
+            detached_entered,
+        },
         variables,
         variable_types,
         settings,
     }
 }
 
-fn emit_setting_global(section: &mut GlobalSection, ty: Type, gc: &GcLayout) {
+fn emit_setting_global(
+    section: &mut GlobalSection,
+    ty: Type,
+    gc: &GcLayout,
+    standard_library: &StandardLibrary,
+) {
     let global_type = GlobalType {
         val_type: gc.val_type(ty),
         mutable: true,
@@ -122,11 +203,9 @@ fn emit_setting_global(section: &mut GlobalSection, ty: Type, gc: &GcLayout) {
         Type::Bool => section.global(global_type, &ConstExpr::i32_const(0)),
         Type::Standard(StdlibTypeId::String) => section.global(
             global_type,
-            &ConstExpr::ref_null(HeapType::Concrete(standard_gc_type_index(
-                StdlibTypeId::String,
-            ))),
+            &ConstExpr::ref_null(HeapType::Concrete(gc.standard_index(StdlibTypeId::String))),
         ),
-        ty if ty.is_enum() => section.global(
+        ty if ty.is_enum(standard_library) => section.global(
             global_type,
             &ConstExpr::ref_null(HeapType::Concrete(gc.index(ty))),
         ),

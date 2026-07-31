@@ -1,12 +1,38 @@
 //! Wasm-IR async state-machine, suspension, retry, and cancellation emission.
 
-use super::expression::LoopControl;
-use super::*;
+use std::collections::HashMap;
+
+use wasm_encoder::{BlockType, Function, Instruction};
+
+use crate::{
+    abi::AbiImportId,
+    ast::{Action, ExprId, SuspensionMode, ValueId},
+    intrinsic_registry::RuntimeHelperId,
+    stdlib::{IntrinsicId, StdlibFieldId, StdlibTypeId},
+    types::TypeKind,
+    wasm_ir::{self, BodyOwner},
+};
+
+use super::{
+    GcLayout, Type,
+    async_frame::AsyncFrameLayout,
+    call_target,
+    context::AttachContext,
+    data_plan::{SignaturePool, StringPool},
+    emit_async_frame_ref, emit_memory_value, emit_typed_struct_get,
+    expression::{
+        ExprContext, LocalStorage, LoopControl, MatchLayout, compile_assignment, compile_expr,
+        compile_receiver,
+    },
+    global_plan::RuntimeGlobals,
+    imports::Abi,
+    memarg, plan_wasm_locals, resolved_intrinsic, semantic_type, unity_layout,
+};
 
 pub(super) fn compile_async_attach(
     action: &Action,
     layout: &AsyncFrameLayout,
-    runtime: &RuntimeContext<'_>,
+    runtime: &AttachContext<'_>,
 ) -> Function {
     let wasm_body = runtime
         .lowering
@@ -35,6 +61,7 @@ pub(super) fn compile_async_attach(
     );
     let pattern_bindings = HashMap::new();
     let context = ExprContext {
+        standard_library: runtime.lowering.standard_library,
         abi: runtime.abi,
         state: runtime.lowering.state,
         locals: LocalStorage::Hybrid {
@@ -44,13 +71,15 @@ pub(super) fn compile_async_attach(
         globals: runtime.lowering.globals,
         global_types: runtime.lowering.global_types,
         settings: runtime.lowering.settings,
-        stdlib: runtime.lowering.stdlib,
+        runtime_globals: runtime.lowering.runtime_globals,
+        runtime_helpers: runtime.lowering.runtime_helpers,
         functions: runtime.lowering.functions,
         equality_functions: runtime.lowering.equality_functions,
         records: runtime.lowering.records,
         enums: runtime.lowering.enums,
         arrays: runtime.lowering.arrays,
         memory: runtime.lowering.memory,
+        abi_read: runtime.lowering.abi_read,
         matches: &matches,
         pattern_bindings: &pattern_bindings,
         semantics: runtime.lowering.semantics,
@@ -71,10 +100,10 @@ pub(super) fn compile_async_attach(
 
     function.instruction(&Instruction::Loop(BlockType::Empty));
     for (pc, state) in states.into_iter().enumerate() {
-        emit_async_frame_ref(&mut function);
+        emit_async_frame_ref(&mut function, context.runtime_globals);
         function
             .instruction(&Instruction::StructGet {
-                struct_type_index: async_frame_type_index(),
+                struct_type_index: runtime.lowering.gc.async_frame_index(),
                 field_index: 0,
             })
             .instruction(&Instruction::I32Const(pc as i32))
@@ -120,7 +149,12 @@ pub(super) fn compile_async_attach(
                     &context,
                 );
                 function.instruction(&Instruction::Else);
-                set_async_state(&mut function, exit_state);
+                set_async_state(
+                    &mut function,
+                    exit_state,
+                    runtime.lowering.gc,
+                    runtime.lowering.runtime_globals,
+                );
                 function
                     .instruction(&Instruction::Br(2))
                     .instruction(&Instruction::End);
@@ -148,7 +182,12 @@ pub(super) fn compile_async_attach(
                     layout,
                     &context,
                 );
-                set_async_state(&mut function, resume_state);
+                set_async_state(
+                    &mut function,
+                    resume_state,
+                    runtime.lowering.gc,
+                    runtime.lowering.runtime_globals,
+                );
                 function.instruction(&Instruction::Br(1));
             }
         }
@@ -245,22 +284,22 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::LocalGet(module_size_local))
-                    .instruction(&Instruction::StructNew(standard_gc_type_index(
-                        StdlibTypeId::Module,
-                    )))
+                    .instruction(&Instruction::StructNew(
+                        context.gc.standard_index(StdlibTypeId::Module),
+                    ))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
         }
         Some(IntrinsicId::ProcessRead) => {
             let read_type_id = match target {
-                ResolvedCall::StandardLibrary { type_arguments, .. } => type_arguments[0],
+                wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => type_arguments[0],
                 _ => unreachable!("process.read must resolve to its standard-library item"),
             };
             let read_type = semantic_type(read_type_id, context.semantics);
@@ -270,13 +309,15 @@ fn compile_suspension_poll(
                 .expect("checked process reads are MemoryReadable")
                 .size();
             if let Some((_, stored_type)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 debug_assert_eq!(stored_type, read_type);
             }
             function.instruction(&Instruction::LocalGet(0));
             compile_expr(function, args[0], context);
             function
-                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::I32Const(
+                    context.abi_read.destination(read_size),
+                ))
                 .instruction(&Instruction::I32Const(read_size as i32))
                 .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
                 .instruction(&Instruction::I32Eqz)
@@ -286,7 +327,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::End);
             if read_type == Type::Address {
                 function
-                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::I32Const(context.abi_read.start()))
                     .instruction(&Instruction::I64Load(memarg()))
                     .instruction(&Instruction::I64Eqz)
                     .instruction(&Instruction::If(BlockType::Empty))
@@ -298,13 +339,14 @@ fn compile_suspension_poll(
                 emit_memory_value(
                     function,
                     read_type_id,
+                    context.abi_read,
                     0,
                     context.memory,
                     context.semantics,
                     context.gc,
                 );
                 function.instruction(&Instruction::StructSet {
-                    struct_type_index: async_frame_type_index(),
+                    struct_type_index: context.gc.async_frame_index(),
                     field_index: field,
                 });
             }
@@ -315,7 +357,9 @@ fn compile_suspension_poll(
             compile_expr(function, args[1], context);
             function
                 .instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::FollowAddress),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::FollowAddress),
                 ))
                 .instruction(&Instruction::LocalTee(module_address_local))
                 .instruction(&Instruction::I64Eqz)
@@ -324,11 +368,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
@@ -351,7 +395,9 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(entry.mask as i32))
                 .instruction(&Instruction::I32Const(entry.len as i32))
                 .instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::ScanProcessRange),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::ScanProcessRange),
                 ))
                 .instruction(&Instruction::LocalTee(module_address_local))
                 .instruction(&Instruction::I64Eqz)
@@ -360,11 +406,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
@@ -374,7 +420,9 @@ fn compile_suspension_poll(
             compile_expr(function, args[0], context);
             function
                 .instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::ReadRelative32),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::ReadRelative32),
                 ))
                 .instruction(&Instruction::LocalTee(module_address_local))
                 .instruction(&Instruction::I64Eqz)
@@ -383,11 +431,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
@@ -397,7 +445,9 @@ fn compile_suspension_poll(
             compile_expr(function, args[0], context);
             function
                 .instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::UnityAttach),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::UnityAttach),
                 ))
                 .instruction(&Instruction::LocalTee(unity_module_local))
                 .instruction(&Instruction::RefIsNull)
@@ -406,11 +456,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(unity_module_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
@@ -421,7 +471,9 @@ fn compile_suspension_poll(
             compile_expr(function, args[0], context);
             function
                 .instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::UnityGetImage),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::UnityGetImage),
                 ))
                 .instruction(&Instruction::LocalTee(unity_image_local))
                 .instruction(&Instruction::RefIsNull)
@@ -430,11 +482,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(unity_image_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
@@ -445,7 +497,9 @@ fn compile_suspension_poll(
             compile_expr(function, args[0], context);
             function
                 .instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::UnityGetClass),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::UnityGetClass),
                 ))
                 .instruction(&Instruction::LocalTee(unity_class_local))
                 .instruction(&Instruction::RefIsNull)
@@ -454,11 +508,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(unity_class_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
@@ -469,7 +523,9 @@ fn compile_suspension_poll(
             compile_expr(function, args[0], context);
             function
                 .instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::UnityGetFieldAny),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::UnityGetFieldAny),
                 ))
                 .instruction(&Instruction::LocalTee(unity_field_local))
                 .instruction(&Instruction::RefIsNull)
@@ -478,11 +534,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(unity_field_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
@@ -493,7 +549,9 @@ fn compile_suspension_poll(
             compile_expr(function, args[0], context);
             function
                 .instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::UnityGetFieldOffset),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::UnityGetFieldOffset),
                 ))
                 .instruction(&Instruction::LocalTee(module_address_local))
                 .instruction(&Instruction::I64Eqz)
@@ -502,14 +560,14 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::I64Const(1))
                     .instruction(&Instruction::I64Sub)
                     .instruction(&Instruction::I32WrapI64)
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
@@ -521,8 +579,8 @@ fn compile_suspension_poll(
             function
                 .instruction(&Instruction::Call(
                     context
-                        .stdlib
-                        .helper(GeneratedHelper::UnityGetStaticInstance),
+                        .runtime_helpers
+                        .function(RuntimeHelperId::UnityGetStaticInstance),
                 ))
                 .instruction(&Instruction::LocalTee(module_address_local))
                 .instruction(&Instruction::I64Eqz)
@@ -531,35 +589,62 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
         }
         Some(IntrinsicId::UnityClassStaticTable) => {
-            function.instruction(&Instruction::LocalGet(0));
             compile_receiver(function, target, context);
             function
                 .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
-                    struct_type_index: standard_gc_type_index(StdlibTypeId::UnityClass),
-                    field_index: standard_field_index(StdlibFieldId::UnityClassAddress),
+                    struct_type_index: context.gc.standard_index(StdlibTypeId::UnityClass),
+                    field_index: context
+                        .gc
+                        .standard_field_index(StdlibFieldId::UnityClassModule),
                 })
-                .instruction(&Instruction::I64Const(0xb8))
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: context.gc.standard_index(StdlibTypeId::UnityModule),
+                    field_index: context
+                        .gc
+                        .standard_field_index(StdlibFieldId::UnityModuleVersion),
+                })
+                .instruction(&Instruction::I64ExtendI32U)
+                .instruction(&Instruction::LocalSet(module_address_local))
+                .instruction(&Instruction::LocalGet(0));
+            compile_receiver(function, target, context);
+            function
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: context.gc.standard_index(StdlibTypeId::UnityClass),
+                    field_index: context
+                        .gc
+                        .standard_field_index(StdlibFieldId::UnityClassAddress),
+                });
+            unity_layout::emit_versioned_offset(
+                function,
+                module_address_local,
+                unity_layout::VersionedOffset::ClassStaticTable,
+            );
+            function
                 .instruction(&Instruction::I64Add)
-                .instruction(&Instruction::I32Const(0))
-                .instruction(&Instruction::I32Const(8))
+                .instruction(&Instruction::I32Const(
+                    context.abi_read.destination(unity_layout::POINTER_SIZE),
+                ))
+                .instruction(&Instruction::I32Const(unity_layout::POINTER_SIZE as i32))
                 .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
                 .instruction(&Instruction::I32Eqz)
                 .instruction(&Instruction::If(BlockType::Empty))
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End)
-                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::I32Const(context.abi_read.start()))
                 .instruction(&Instruction::I64Load(memarg()))
                 .instruction(&Instruction::LocalTee(module_address_local))
                 .instruction(&Instruction::I64Eqz)
@@ -568,11 +653,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
@@ -592,21 +677,25 @@ fn compile_suspension_poll(
             function
                 .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
-                    struct_type_index: standard_gc_type_index(StdlibTypeId::Module),
-                    field_index: standard_field_index(StdlibFieldId::ModuleAddress),
+                    struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
+                    field_index: context
+                        .gc
+                        .standard_field_index(StdlibFieldId::ModuleAddress),
                 });
             compile_receiver(function, target, context);
             function
                 .instruction(&Instruction::RefAsNonNull)
                 .instruction(&Instruction::StructGet {
-                    struct_type_index: standard_gc_type_index(StdlibTypeId::Module),
-                    field_index: standard_field_index(StdlibFieldId::ModuleSize),
+                    struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
+                    field_index: context.gc.standard_field_index(StdlibFieldId::ModuleSize),
                 })
                 .instruction(&Instruction::I32Const(entry.needle as i32))
                 .instruction(&Instruction::I32Const(entry.mask as i32))
                 .instruction(&Instruction::I32Const(entry.len as i32))
                 .instruction(&Instruction::Call(
-                    context.stdlib.helper(GeneratedHelper::ScanProcessRange),
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::ScanProcessRange),
                 ))
                 .instruction(&Instruction::LocalTee(module_address_local))
                 .instruction(&Instruction::I64Eqz)
@@ -615,11 +704,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(binding) {
-                emit_async_frame_ref(function);
+                emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: async_frame_type_index(),
+                        struct_type_index: context.gc.async_frame_index(),
                         field_index: field,
                     });
             }
@@ -667,7 +756,7 @@ fn compile_retry_poll(
 
     if let Some((field, stored_type)) = frame.field(binding) {
         debug_assert_eq!(stored_type, semantic_type(*result_value, context.semantics));
-        emit_async_frame_ref(function);
+        emit_async_frame_ref(function, context.runtime_globals);
         function
             .instruction(&Instruction::LocalGet(result_local))
             .instruction(&Instruction::RefAsNonNull);
@@ -678,7 +767,7 @@ fn compile_retry_poll(
             stored_type,
         );
         function.instruction(&Instruction::StructSet {
-            struct_type_index: async_frame_type_index(),
+            struct_type_index: context.gc.async_frame_index(),
             field_index: field,
         });
     }
@@ -798,12 +887,17 @@ fn collect_async_states<'a>(
     }
 }
 
-fn set_async_state(function: &mut Function, state: wasm_ir::AsyncStateId) {
-    emit_async_frame_ref(function);
+fn set_async_state(
+    function: &mut Function,
+    state: wasm_ir::AsyncStateId,
+    gc: &GcLayout,
+    globals: RuntimeGlobals,
+) {
+    emit_async_frame_ref(function, globals);
     function
         .instruction(&Instruction::I32Const(state.index() as i32))
         .instruction(&Instruction::StructSet {
-            struct_type_index: async_frame_type_index(),
+            struct_type_index: gc.async_frame_index(),
             field_index: 0,
         });
 }
@@ -815,7 +909,7 @@ fn compile_async_flow(
     loop_depth: u32,
     loop_control: Option<LoopControl>,
     cancellation_region: wasm_ir::CancellationRegion,
-    runtime: &RuntimeContext<'_>,
+    runtime: &AttachContext<'_>,
     layout: &AsyncFrameLayout,
     context: &ExprContext<'_>,
 ) {
@@ -826,7 +920,9 @@ fn compile_async_flow(
     let context = &expression_context;
     for statement in &block.statements {
         match statement {
-            wasm_ir::Statement::Store { target, op, value } => {
+            wasm_ir::Statement::Store {
+                target, op, value, ..
+            } => {
                 compile_assignment(function, *target, *op, *value, context);
             }
             wasm_ir::Statement::If {
@@ -901,15 +997,15 @@ fn compile_async_flow(
         wasm_ir::Terminator::Break => {
             loop_control
                 .expect("checked break statements belong to loops")
-                .emit_break(function);
+                .emit_break(function, context.gc, context.runtime_globals);
         }
         wasm_ir::Terminator::Continue => {
             loop_control
                 .expect("checked continue statements belong to loops")
-                .emit_continue(function);
+                .emit_continue(function, context.gc, context.runtime_globals);
         }
         wasm_ir::Terminator::AsyncWhile { header_state, .. } => {
-            set_async_state(function, *header_state);
+            set_async_state(function, *header_state, context.gc, context.runtime_globals);
             function.instruction(&Instruction::Br(loop_depth));
         }
         wasm_ir::Terminator::Return(value) => {
@@ -932,7 +1028,7 @@ fn compile_async_flow(
                 Some(cancellation_region),
                 "awaited standard-library operation must participate in its body's cancellation region"
             );
-            set_async_state(function, *poll_state);
+            set_async_state(function, *poll_state, context.gc, context.runtime_globals);
             if *mode == SuspensionMode::Await
                 && resolved_intrinsic(call_target(context.wasm_ir, *value))
                     == Some(IntrinsicId::NextTick)
@@ -953,7 +1049,7 @@ fn compile_async_flow(
                     context,
                 );
             }
-            set_async_state(function, *resume_state);
+            set_async_state(function, *resume_state, context.gc, context.runtime_globals);
             function.instruction(&Instruction::Br(loop_depth));
         }
         wasm_ir::Terminator::Throw { .. } => {

@@ -4,7 +4,7 @@
 //! module owns temporary types and variables. This module is the stable,
 //! inference-free boundary for later compiler stages and tooling.
 
-use std::{collections::HashMap, fmt};
+use std::collections::HashMap;
 
 use crate::{
     ast::{
@@ -12,7 +12,7 @@ use crate::{
         RecordId, ResultTypeDecl, ResultTypeId,
     },
     inference::Type,
-    stdlib::{CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
+    stdlib::{CoreTypeId, StandardLibrary, StdlibTypeId},
 };
 
 /// An interned type in one checked program.
@@ -25,107 +25,12 @@ impl TypeId {
     }
 }
 
-/// A built-in, non-constructed SplitScript type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum BuiltinType {
-    Void,
-    Bool,
-    I8,
-    U8,
-    I16,
-    U16,
-    I32,
-    U32,
-    I64,
-    U64,
-    Address,
-    F32,
-    F64,
-}
-
-impl BuiltinType {
-    pub const fn from_core(core: CoreTypeId) -> Self {
-        match core {
-            CoreTypeId::Void => Self::Void,
-            CoreTypeId::Bool => Self::Bool,
-            CoreTypeId::I8 => Self::I8,
-            CoreTypeId::U8 => Self::U8,
-            CoreTypeId::I16 => Self::I16,
-            CoreTypeId::U16 => Self::U16,
-            CoreTypeId::I32 => Self::I32,
-            CoreTypeId::U32 => Self::U32,
-            CoreTypeId::I64 => Self::I64,
-            CoreTypeId::U64 => Self::U64,
-            CoreTypeId::Address => Self::Address,
-            CoreTypeId::F32 => Self::F32,
-            CoreTypeId::F64 => Self::F64,
-        }
-    }
-
-    pub const fn core(self) -> CoreTypeId {
-        match self {
-            Self::Void => CoreTypeId::Void,
-            Self::Bool => CoreTypeId::Bool,
-            Self::I8 => CoreTypeId::I8,
-            Self::U8 => CoreTypeId::U8,
-            Self::I16 => CoreTypeId::I16,
-            Self::U16 => CoreTypeId::U16,
-            Self::I32 => CoreTypeId::I32,
-            Self::U32 => CoreTypeId::U32,
-            Self::I64 => CoreTypeId::I64,
-            Self::U64 => CoreTypeId::U64,
-            Self::Address => CoreTypeId::Address,
-            Self::F32 => CoreTypeId::F32,
-            Self::F64 => CoreTypeId::F64,
-        }
-    }
-
-    pub fn is_integer(self) -> bool {
-        StandardLibrary::new().core_type_has_capability(self.core(), StdlibCapabilityId::Integer)
-    }
-
-    pub fn is_numeric(self) -> bool {
-        StandardLibrary::new().core_type_has_capability(self.core(), StdlibCapabilityId::Numeric)
-    }
-
-    pub(crate) const fn syntax(self) -> crate::ast::TypeRef {
-        match self {
-            Self::Void => crate::ast::TypeRef::Void,
-            Self::Bool => crate::ast::TypeRef::Bool,
-            Self::I8 => crate::ast::TypeRef::I8,
-            Self::U8 => crate::ast::TypeRef::U8,
-            Self::I16 => crate::ast::TypeRef::I16,
-            Self::U16 => crate::ast::TypeRef::U16,
-            Self::I32 => crate::ast::TypeRef::I32,
-            Self::U32 => crate::ast::TypeRef::U32,
-            Self::I64 => crate::ast::TypeRef::I64,
-            Self::U64 => crate::ast::TypeRef::U64,
-            Self::Address => crate::ast::TypeRef::Address,
-            Self::F32 => crate::ast::TypeRef::F32,
-            Self::F64 => crate::ast::TypeRef::F64,
-        }
-    }
-}
-
-impl fmt::Display for BuiltinType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Void => "void",
-            Self::Bool => "bool",
-            Self::I8 => "i8",
-            Self::U8 => "u8",
-            Self::I16 => "i16",
-            Self::U16 => "u16",
-            Self::I32 => "i32",
-            Self::U32 => "u32",
-            Self::I64 => "i64",
-            Self::U64 => "u64",
-            Self::Address => "address",
-            Self::F32 => "f32",
-            Self::F64 => "f64",
-        })
-    }
-}
+/// Semantic name for a core, non-constructed SplitScript type.
+///
+/// This is an alias, not a second primitive-type universe. The standard
+/// library's [`CoreTypeId`] is the identity used by syntax, semantics, and
+/// catalog queries.
+pub type BuiltinType = CoreTypeId;
 
 /// The fully resolved shape of an interned semantic type.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -157,24 +62,31 @@ pub struct TypeStore {
 
 impl Default for TypeStore {
     fn default() -> Self {
+        Self::new(&StandardLibrary::new())
+    }
+}
+
+impl TypeStore {
+    pub(crate) fn new(library: &StandardLibrary) -> Self {
         let mut store = Self {
             kinds: Vec::new(),
             interned: HashMap::new(),
         };
-        let library = StandardLibrary::new();
         for core in library.core_types() {
-            store.intern(TypeKind::Builtin(BuiltinType::from_core(core.id)));
+            store.intern(TypeKind::Builtin(core.id));
         }
         for standard in library.types() {
             store.intern(TypeKind::Standard(standard.id));
         }
         store
     }
-}
 
-impl TypeStore {
-    pub(crate) fn with_source_types(records: &[RecordDecl], enums: &[EnumDecl]) -> Self {
-        let mut store = Self::default();
+    pub(crate) fn with_source_types(
+        library: &StandardLibrary,
+        records: &[RecordDecl],
+        enums: &[EnumDecl],
+    ) -> Self {
+        let mut store = Self::new(library);
         for record in records {
             store.intern(TypeKind::Record(record.id));
         }
@@ -205,7 +117,7 @@ impl TypeStore {
     }
 
     pub fn id_for_core(&self, core: CoreTypeId) -> TypeId {
-        self.id_for_builtin(BuiltinType::from_core(core))
+        self.id_for_builtin(core)
     }
 
     pub fn id_for_standard(&self, standard: StdlibTypeId) -> TypeId {
@@ -288,19 +200,7 @@ impl TypeStore {
         results: &[ResultTypeDecl],
     ) -> TypeId {
         match ty {
-            crate::ast::TypeRef::Void => self.id_for_builtin(BuiltinType::Void),
-            crate::ast::TypeRef::Bool => self.id_for_builtin(BuiltinType::Bool),
-            crate::ast::TypeRef::I8 => self.id_for_builtin(BuiltinType::I8),
-            crate::ast::TypeRef::U8 => self.id_for_builtin(BuiltinType::U8),
-            crate::ast::TypeRef::I16 => self.id_for_builtin(BuiltinType::I16),
-            crate::ast::TypeRef::U16 => self.id_for_builtin(BuiltinType::U16),
-            crate::ast::TypeRef::I32 => self.id_for_builtin(BuiltinType::I32),
-            crate::ast::TypeRef::U32 => self.id_for_builtin(BuiltinType::U32),
-            crate::ast::TypeRef::I64 => self.id_for_builtin(BuiltinType::I64),
-            crate::ast::TypeRef::U64 => self.id_for_builtin(BuiltinType::U64),
-            crate::ast::TypeRef::Address => self.id_for_builtin(BuiltinType::Address),
-            crate::ast::TypeRef::F32 => self.id_for_builtin(BuiltinType::F32),
-            crate::ast::TypeRef::F64 => self.id_for_builtin(BuiltinType::F64),
+            crate::ast::TypeRef::Core(core) => self.id_for_core(core),
             crate::ast::TypeRef::Standard(standard) => self.id_for_standard(standard),
             crate::ast::TypeRef::Record(record) => self.id_for_record(record),
             crate::ast::TypeRef::Enum(enumeration) => self.id_for_enum(enumeration),

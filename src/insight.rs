@@ -1,20 +1,24 @@
 //! Semantic hover and signature information for editor clients.
 
+use std::sync::Arc;
+
 use crate::{
-    ast::{EnumDecl, Expr, ExprKind, Program, Span},
+    ast::{Expr, ExprKind, Program, Span},
     database::{
-        CompilerDatabase, DefinitionTarget, SemanticQueryResult, SourceDefinition,
-        SourceDefinitionId,
+        CompilerDatabase, DefinitionTarget, SemanticQueryResult, SemanticSnapshot,
+        SourceDefinition, SourceDefinitionId,
     },
     documentation::StandardLibraryDocumentation,
-    effects::{FunctionOperationSemantics, OperationAnalysis},
+    effects::FunctionOperationSemantics,
     language::{LanguageCatalog, LanguageItem},
     lexer::{Token, TokenKind},
-    semantic::{ResolvedCall, SemanticModel},
+    semantic::ResolvedCall,
     stdlib::{
         StandardLibrary, StdlibItem, StdlibItemId, StdlibSymbolId, TypeRef as CatalogTypeRef,
     },
+    stdlib_semantic::StandardLibrarySemanticExt,
     syntax::SourceDocument,
+    type_display::display_type,
     types::{TypeId, TypeKind},
     visit::{self, Visitor},
 };
@@ -49,6 +53,7 @@ pub(crate) fn hover(
     database: &mut CompilerDatabase,
     offset: usize,
 ) -> SemanticQueryResult<Option<HoverInfo>> {
+    let standard_library = database.context().standard_library();
     let Some(token) = database.token_at(offset)? else {
         return Ok(None);
     };
@@ -70,11 +75,14 @@ pub(crate) fn hover(
                 .unwrap_or_default();
             let semantic = semantic_context(database);
             render_stdlib_hover(
+                standard_library,
                 item,
                 substitutions(item, &type_arguments, semantic.as_ref()),
             )
         }
-        DefinitionTarget::StandardLibrarySymbol(symbol) => render_stdlib_symbol_hover(symbol),
+        DefinitionTarget::StandardLibrarySymbol(symbol) => {
+            render_stdlib_symbol_hover(standard_library, symbol)
+        }
         DefinitionTarget::Language(item) => {
             render_language_hover(LanguageCatalog::new().item(item))
         }
@@ -98,6 +106,8 @@ pub(crate) fn signature_help(
     database: &mut CompilerDatabase,
     offset: usize,
 ) -> SemanticQueryResult<Option<SignatureHelp>> {
+    let compiler_context = database.context();
+    let standard_library = compiler_context.standard_library();
     let recovered = database.recovering_parse()?;
     let document = recovered.source_document().clone();
     let syntax = recovered.syntax().clone();
@@ -107,7 +117,7 @@ pub(crate) fn signature_help(
     let mut semantic = semantic_context(database);
     let resolved = semantic.as_ref().and_then(|context| {
         call_expression_at(&syntax, call_site.open, &call_site.callee)
-            .and_then(|expression| context.semantics.call(expression.id))
+            .and_then(|expression| context.semantics().call(expression.id))
             .and_then(|call| match call {
                 ResolvedCall::StandardLibrary {
                     item,
@@ -118,13 +128,13 @@ pub(crate) fn signature_help(
             })
     });
     let mut selected = resolved.or_else(|| {
-        StandardLibrary::new()
+        standard_library
             .resolve_path(&call_site.callee)
             .map(|candidate| (candidate.item.id, Vec::new()))
     });
     if selected.is_none()
         && let Some((item, type_arguments, probe_semantic)) =
-            infer_method_call(document.source(), &call_site)
+            infer_method_call(document.source(), &call_site, &compiler_context)
     {
         selected = Some((item, type_arguments));
         semantic = Some(probe_semantic);
@@ -133,7 +143,11 @@ pub(crate) fn signature_help(
         return Ok(None);
     };
     let substitutions = substitutions(item, &type_arguments, semantic.as_ref());
-    let documentation = StandardLibraryDocumentation::generate(item, &substitutions);
+    let documentation = StandardLibraryDocumentation::generate_with_library(
+        &standard_library,
+        item,
+        &substitutions,
+    );
     let signature = SignatureInformation {
         label: documentation.signature.clone(),
         documentation: documentation.details_markdown(),
@@ -159,29 +173,29 @@ pub(crate) fn signature_help(
 use crate::hir::ExpressionResolution;
 
 struct SemanticContext {
-    syntax: Program,
-    semantics: SemanticModel,
-    enum_types: Vec<EnumDecl>,
-    effects: Option<OperationAnalysis>,
+    standard_library: StandardLibrary,
+    snapshot: Arc<SemanticSnapshot>,
 }
 
 fn semantic_context(database: &mut CompilerDatabase) -> Option<SemanticContext> {
-    match database.check() {
-        Ok(checked) => Some(SemanticContext {
-            syntax: checked.syntax().clone(),
-            semantics: checked.semantics().clone(),
-            enum_types: checked.enum_types().to_vec(),
-            effects: Some(checked.effects().clone()),
-        }),
-        Err(_) => database
-            .recovering_check()
-            .ok()
-            .map(|checked| SemanticContext {
-                syntax: checked.syntax().clone(),
-                semantics: checked.semantics().clone(),
-                enum_types: checked.enum_types().to_vec(),
-                effects: checked.effects().cloned(),
-            }),
+    let snapshot = database.semantic_snapshot().ok()?;
+    Some(SemanticContext {
+        standard_library: snapshot.context().standard_library(),
+        snapshot,
+    })
+}
+
+impl SemanticContext {
+    fn syntax(&self) -> &crate::ast::Program {
+        self.snapshot.syntax()
+    }
+
+    fn semantics(&self) -> &crate::semantic::SemanticModel {
+        self.snapshot.semantics()
+    }
+
+    fn effects(&self) -> Option<&crate::effects::OperationAnalysis> {
+        self.snapshot.effects()
     }
 }
 
@@ -193,7 +207,8 @@ fn substitutions(
     let Some(context) = context else {
         return Vec::new();
     };
-    StandardLibrary::new()
+    context
+        .standard_library
         .item(item)
         .signature
         .type_parameters
@@ -204,52 +219,42 @@ fn substitutions(
 }
 
 fn render_type(ty: TypeId, context: &SemanticContext) -> String {
-    let types = context.semantics.types();
-    match types.kind(ty) {
-        TypeKind::Builtin(builtin) => builtin.to_string(),
-        TypeKind::Standard(standard) => StandardLibrary::new().type_decl(*standard).name.to_owned(),
-        TypeKind::Record(id) => context
-            .syntax
-            .records
-            .iter()
-            .find(|record| record.id == *id)
-            .map(|record| record.name.clone())
-            .unwrap_or_else(|| format!("record#{}", id.index())),
-        TypeKind::Enum(id) => context
-            .enum_types
-            .iter()
-            .find(|enumeration| enumeration.id == *id)
-            .map(|enumeration| enumeration.name.clone())
-            .unwrap_or_else(|| format!("enum#{}", id.index())),
-        TypeKind::Array { element, .. } => {
-            format!("Array<{}>", render_type(*element, context))
-        }
-        TypeKind::Option { value, .. } => format!("{}?", render_type(*value, context)),
-        TypeKind::Result { value, .. } => format!("{}!", render_type(*value, context)),
-    }
+    display_type(ty, &context.snapshot)
 }
 
 fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext) -> Option<String> {
-    let syntax = &context.syntax;
-    let semantics = &context.semantics;
+    let syntax = context.syntax();
+    let semantics = context.semantics();
     match definition.id {
+        SourceDefinitionId::State => Some(source_markdown(
+            "current / old: state snapshot",
+            "Read-only transactional state values. `current` contains the latest committed state and `old` contains the preceding committed state.",
+        )),
+        SourceDefinitionId::Settings => Some(source_markdown(
+            "settings / oldSettings: settings snapshot",
+            "Read-only settings values. `settings` contains the latest host settings and `oldSettings` contains their values from the preceding update.",
+        )),
         SourceDefinitionId::Value(value) => {
             let ty = semantics.value_type(value)?;
             let ty = render_type(ty, context);
-            let (signature, description) = if syntax.globals.iter().any(|global| global.id == value)
+            let (signature, description) = if let Some(global) =
+                syntax.globals.iter().find(|global| global.id == value)
             {
                 (
                     format!("let {}: {ty}", definition.name),
-                    "Global variable".to_owned(),
+                    documented_description("Global variable", global.documentation.as_deref()),
                 )
-            } else if syntax
+            } else if let Some(field) = syntax
                 .state
                 .as_ref()
-                .is_some_and(|state| state.fields.iter().any(|field| field.id == value))
+                .and_then(|state| state.fields.iter().find(|field| field.id == value))
             {
                 (
                     format!("current.{}: {ty}", definition.name),
-                    "Transactional state field".to_owned(),
+                    documented_description(
+                        "Transactional state field",
+                        field.documentation.as_deref(),
+                    ),
                 )
             } else if let Some(setting) = syntax.settings.iter().find(|setting| setting.id == value)
             {
@@ -281,9 +286,13 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 .records
                 .iter()
                 .find(|record| record.fields.iter().any(|candidate| candidate.id == field))?;
+            let field = record
+                .fields
+                .iter()
+                .find(|candidate| candidate.id == field)?;
             Some(source_markdown(
                 &format!("{}.{}: {ty}", record.name, definition.name),
-                "Record field",
+                &documented_description("Record field", field.documentation.as_deref()),
             ))
         }
         SourceDefinitionId::Function(function) => {
@@ -315,9 +324,9 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             let description = source_function_description(
                 function.method_of.is_some(),
                 function.debug_only,
+                function.documentation.as_deref(),
                 context
-                    .effects
-                    .as_ref()
+                    .effects()
                     .map(|effects| effects.function(function.id)),
             );
             Some(source_markdown(
@@ -336,7 +345,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 .find(|candidate| candidate.id == record)?;
             Some(source_markdown(
                 &format!("record {}", record.name),
-                "Record type",
+                &documented_description("Record type", record.documentation.as_deref()),
             ))
         }
         SourceDefinitionId::Enum(enumeration) => {
@@ -346,7 +355,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 .find(|candidate| candidate.id == enumeration)?;
             Some(source_markdown(
                 &format!("enum {}", enumeration.name),
-                "Enum type",
+                &documented_description("Enum type", enumeration.documentation.as_deref()),
             ))
         }
         SourceDefinitionId::EnumVariant(variant) => {
@@ -359,6 +368,11 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             let payload = semantics
                 .enum_variant_payload(variant)
                 .map(|ty| format!("({})", render_type(ty, context)));
+            let variant_documentation = enumeration
+                .variants
+                .iter()
+                .find(|candidate| candidate.id == variant)
+                .and_then(|variant| variant.documentation.as_deref());
             Some(source_markdown(
                 &format!(
                     "{}.{}{}",
@@ -366,7 +380,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     definition.name,
                     payload.as_deref().unwrap_or_default()
                 ),
-                "Enum variant",
+                &documented_description("Enum variant", variant_documentation),
             ))
         }
     }
@@ -375,9 +389,11 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
 fn source_function_description(
     is_method: bool,
     debug_only: bool,
+    documentation: Option<&str>,
     operation: Option<FunctionOperationSemantics>,
 ) -> String {
-    let mut description = if is_method { "Method" } else { "Function" }.to_owned();
+    let mut description =
+        documented_description(if is_method { "Method" } else { "Function" }, documentation);
     if debug_only {
         description.push_str("\n\n**Build availability:** Debug builds only");
     }
@@ -400,17 +416,41 @@ fn source_function_description(
     description
 }
 
+fn documented_description(kind: &str, documentation: Option<&str>) -> String {
+    let mut description = kind.to_owned();
+    if let Some(documentation) = documentation {
+        description.push_str("\n\n");
+        description.push_str(documentation);
+    }
+    description
+}
+
 fn source_markdown(signature: &str, description: &str) -> String {
     format!("```splitscript\n{signature}\n```\n\n{description}")
 }
 
-fn render_stdlib_hover(item: StdlibItemId, substitutions: Vec<(&str, String)>) -> String {
-    StandardLibraryDocumentation::generate(item, &substitutions).hover_markdown()
+fn render_stdlib_hover(
+    standard_library: StandardLibrary,
+    item: StdlibItemId,
+    substitutions: Vec<(&str, String)>,
+) -> String {
+    StandardLibraryDocumentation::generate_with_library(&standard_library, item, &substitutions)
+        .hover_markdown()
 }
 
-fn render_stdlib_symbol_hover(symbol: StdlibSymbolId) -> String {
-    let library = StandardLibrary::new();
+fn render_stdlib_symbol_hover(library: StandardLibrary, symbol: StdlibSymbolId) -> String {
     let (form, documentation) = match symbol {
+        StdlibSymbolId::StateProvider(id) => {
+            let declaration = library.state_provider(id);
+            let value_type = library.type_decl(declaration.process_type);
+            (
+                format!(
+                    "state {} {{ ... }}\n{}: {}",
+                    declaration.name, declaration.value_name, value_type.name
+                ),
+                &declaration.documentation,
+            )
+        }
         StdlibSymbolId::Namespace(id) => {
             let declaration = library.namespace(id);
             (declaration.name.to_owned(), &declaration.documentation)
@@ -431,7 +471,12 @@ fn render_stdlib_symbol_hover(symbol: StdlibSymbolId) -> String {
             let declaration = library.field(id);
             let owner = library.type_decl(declaration.owner);
             (
-                format!("{}.{}: {}", owner.name, declaration.name, declaration.ty),
+                format!(
+                    "{}.{}: {}",
+                    owner.name,
+                    declaration.name,
+                    library.render_declared_type(declaration.ty)
+                ),
                 &declaration.documentation,
             )
         }
@@ -443,7 +488,7 @@ fn render_stdlib_symbol_hover(symbol: StdlibSymbolId) -> String {
                 &declaration.documentation,
             )
         }
-        StdlibSymbolId::Item(id) => return render_stdlib_hover(id, Vec::new()),
+        StdlibSymbolId::Item(id) => return render_stdlib_hover(library, id, Vec::new()),
     };
     let mut markdown = format!(
         "```splitscript\n{form}\n```\n\n{}\n\n{}",
@@ -537,6 +582,7 @@ fn callee_before(tokens: &[&Token], open: usize) -> Option<(Vec<String>, Option<
 fn infer_method_call(
     source: &str,
     call: &CallSite,
+    compiler_context: &crate::CompilerContext,
 ) -> Option<(StdlibItemId, Vec<TypeId>, SemanticContext)> {
     let method_dot = call.method_dot?;
     let line_end = source[call.open.start..]
@@ -545,10 +591,11 @@ fn infer_method_call(
     let mut probe_source = String::with_capacity(source.len());
     probe_source.push_str(&source[..method_dot]);
     probe_source.push_str(&source[line_end..]);
-    let mut probe = CompilerDatabase::new(probe_source);
+    let mut probe = CompilerDatabase::with_context(compiler_context.clone(), probe_source);
     let analysis = probe.analysis_at(method_dot.checked_sub(1)?).ok()??;
     let method_name = call.callee.last()?;
-    let item = StandardLibrary::new()
+    let item = compiler_context
+        .standard_library()
         .methods_for_type(&analysis.type_kind)
         .into_iter()
         .find(|item| {
@@ -583,16 +630,38 @@ fn catalog_receiver_argument(
     receiver_kind: &TypeKind,
 ) -> Option<TypeId> {
     match (declared, receiver_kind) {
-        (CatalogTypeRef::Variable(name), _) if name == parameter => Some(receiver),
+        (CatalogTypeRef::Parameter(name), _) if name == parameter => Some(receiver),
         (
-            CatalogTypeRef::Array(element),
+            CatalogTypeRef::Application {
+                constructor,
+                arguments: [CatalogTypeRef::Parameter(name)],
+            },
             TypeKind::Array {
                 element: actual, ..
             },
-        ) if matches!(*element, CatalogTypeRef::Variable(name) if name == parameter) => {
+        ) if constructor == crate::stdlib::StdlibTypeConstructorId::Array && *name == parameter => {
             Some(*actual)
         }
-        (CatalogTypeRef::Result(value), TypeKind::Result { value: actual, .. }) if matches!(*value, CatalogTypeRef::Variable(name) if name == parameter) => {
+        (
+            CatalogTypeRef::Application {
+                constructor,
+                arguments: [CatalogTypeRef::Parameter(name)],
+            },
+            TypeKind::Option { value: actual, .. },
+        ) if constructor == crate::stdlib::StdlibTypeConstructorId::Option
+            && *name == parameter =>
+        {
+            Some(*actual)
+        }
+        (
+            CatalogTypeRef::Application {
+                constructor,
+                arguments: [CatalogTypeRef::Parameter(name)],
+            },
+            TypeKind::Result { value: actual, .. },
+        ) if constructor == crate::stdlib::StdlibTypeConstructorId::Result
+            && *name == parameter =>
+        {
             Some(*actual)
         }
         _ => None,
@@ -798,6 +867,69 @@ whileAttached {
             assert!(
                 hover.markdown.contains(description),
                 "missing `{description}` in {}",
+                hover.markdown
+            );
+        }
+    }
+
+    #[test]
+    fn source_hover_includes_user_documentation() {
+        let source = r#"
+/// A point in game memory.
+record Point {
+    /// Horizontal position.
+    x: i32
+}
+/// The current run mode.
+enum Mode {
+    /// Normal gameplay.
+    Active
+}
+/// Accumulated collectible count.
+let total = 0
+state "game.exe" {
+    /// Latest player position.
+    point: Point at 0x100
+}
+/// Inspects the current state.
+///
+/// This is safe to call every tick.
+fn inspect(point: Point, mode: Mode) {
+    if mode == Mode.Active {
+        print(point.x as String)
+    }
+}
+whileAttached {
+    inspect(current.point, Mode.Active)
+    print(total as String)
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        for (needle, expected) in [
+            ("record Point", "A point in game memory."),
+            ("point.x", "Horizontal position."),
+            ("enum Mode", "The current run mode."),
+            ("Mode.Active", "Normal gameplay."),
+            ("total as", "Accumulated collectible count."),
+            ("current.point", "Latest player position."),
+            (
+                "inspect(current",
+                "Inspects the current state.\n\nThis is safe to call every tick.",
+            ),
+        ] {
+            let offset = source.find(needle).unwrap()
+                + match needle {
+                    "record Point" => "record ".len(),
+                    "enum Mode" => "enum ".len(),
+                    "point.x" => "point.".len(),
+                    "Mode.Active" => "Mode.".len(),
+                    "current.point" => "current.".len(),
+                    _ => 0,
+                };
+            let hover = database.hover(offset).unwrap().expect("source hover");
+            assert!(
+                hover.markdown.contains(expected),
+                "missing `{expected}` in {}",
                 hover.markdown
             );
         }

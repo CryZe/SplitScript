@@ -2,20 +2,6 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "build splitls",
-      "type": "process",
-      "command": "cargo",
-      "args": [
-        "build",
-        "--bin",
-        "splitls"
-      ],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "problemMatcher": []
-    },
-    {
       "label": "compile SplitScript VS Code extension",
       "type": "process",
       "command": "npm",
@@ -30,9 +16,7 @@
     },
     {
       "label": "build SplitScript extension",
-      "dependsOrder": "parallel",
       "dependsOn": [
-        "build splitls",
         "compile SplitScript VS Code extension"
       ],
       "problemMatcher": [],

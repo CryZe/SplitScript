@@ -1,6 +1,20 @@
 //! Deterministic WebAssembly GC type and layout planning.
 
-use super::*;
+use wasm_encoder::{
+    ArrayType, CompositeInnerType, CompositeType, FieldType, StorageType, StructType, SubType,
+    TypeSection, ValType,
+};
+
+use crate::{
+    ast::{ArrayTypeDecl, EnumDecl, OptionTypeDecl, Program, ResultTypeDecl},
+    semantic::SemanticModel,
+    stdlib::{DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibTypeId},
+};
+
+use super::{
+    GcLayout, Type, array_element_type, async_frame::AsyncFrameLayout, enum_variant_payload,
+    option_value_type, reachability, record_field_type, result_value_type, value_type,
+};
 
 pub(super) struct EncodedTypes {
     pub section: TypeSection,
@@ -9,6 +23,7 @@ pub(super) struct EncodedTypes {
 }
 
 pub(super) struct Inputs<'a> {
+    pub standard_library: &'a StandardLibrary,
     pub program: &'a Program,
     pub semantics: &'a SemanticModel,
     pub async_layout: Option<&'a AsyncFrameLayout>,
@@ -21,6 +36,7 @@ pub(super) struct Inputs<'a> {
 
 pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
     let Inputs {
+        standard_library,
         program,
         semantics,
         async_layout,
@@ -31,6 +47,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         reachability,
     } = inputs;
     let layout = GcLayout::plan(
+        standard_library.clone(),
         program,
         enums,
         array_types,
@@ -61,7 +78,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             describes: None,
         },
     }];
-    for declaration in StandardLibrary::new().types() {
+    for declaration in standard_library.types() {
         let inner = match declaration.representation {
             RuntimeRepresentation::Scalar { .. } => continue,
             RuntimeRepresentation::GcArray {
@@ -72,7 +89,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                 mutable,
             })),
             RuntimeRepresentation::GcStruct { .. } => CompositeInnerType::Struct(StructType {
-                fields: StandardLibrary::new()
+                fields: standard_library
                     .fields_of(declaration.id)
                     .map(|field| FieldType {
                         element_type: layout.storage_type(Type::from_declared(field.ty)),
@@ -86,7 +103,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                     mutable: false,
                 })
                 .chain(
-                    StandardLibrary::new()
+                    standard_library
                         .variants_of(declaration.id)
                         .map(|_| FieldType {
                             element_type: StorageType::Val(ValType::I32),
@@ -198,9 +215,9 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                         mutable: false,
                     },
                     FieldType {
-                        element_type: StorageType::Val(val_type(Type::Standard(
-                            StdlibTypeId::String,
-                        ))),
+                        element_type: StorageType::Val(
+                            layout.val_type(Type::Standard(StdlibTypeId::String)),
+                        ),
                         mutable: false,
                     },
                 ]

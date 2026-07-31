@@ -15,7 +15,7 @@ suite verifies the table below against the catalog renderer.
 | --- | --- | --- |
 | `_start` | `() -> ()` | Allocate GC state snapshots and register settings |
 | `update` | `() -> ()` | Host ABI polling entry point; drives SplitScript lifecycle blocks and timer actions |
-| `memory` | one-page linear memory | Static UTF-8 strings and process-read scratch space |
+| `memory` | dynamically sized linear memory | Named runtime scratch regions followed by immutable UTF-8/signature data and growable host-string staging |
 
 ## Imports
 
@@ -36,6 +36,10 @@ suite verifies the table below against the catalog renderer.
 | `process_read` | `(i64, i64, i32, i32) -> i32` |
 | `process_get_module_address` | `(i64, i32, i32) -> i64` |
 | `process_get_module_size` | `(i64, i32, i32) -> i64` |
+| `process_get_memory_range_count` | `(i64) -> i64` |
+| `process_get_memory_range_address` | `(i64, i64) -> i64` |
+| `process_get_memory_range_size` | `(i64, i64) -> i64` |
+| `process_get_memory_range_flags` | `(i64, i64) -> i64` |
 | `runtime_print_message` | `(i32, i32) -> ()` |
 | `user_settings_add_bool` | `(i32, i32, i32, i32, i32) -> i32` |
 | `user_settings_add_title` | `(i32, i32, i32, i32, i32) -> ()` |

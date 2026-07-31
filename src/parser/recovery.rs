@@ -1,0 +1,480 @@
+//! Token consumption, diagnostics, and grammar recovery.
+
+use super::{
+    ActionKind, Diagnostic, Parser, RecoveryNode, RecoveryNodeKind, Span, Token, TokenKind,
+    parse_integer,
+};
+
+impl Parser<'_> {
+    pub(super) fn terminator(&mut self) -> Result<(), Diagnostic> {
+        if self.eat(&TokenKind::Semicolon).is_some()
+            || self.at(&TokenKind::RBrace)
+            || self.at(&TokenKind::Eof)
+            || self.line_break_before_current()
+        {
+            Ok(())
+        } else {
+            Err(self.error("expected `;` or a line break after the statement"))
+        }
+    }
+
+    pub(super) fn line_break_before_current(&self) -> bool {
+        let previous_end = self.previous().span.end;
+        let current_start = self.current().span.start;
+        self.source[previous_end.min(self.source.len())..current_start.min(self.source.len())]
+            .contains(['\n', '\r'])
+    }
+
+    pub(super) fn expect_u64(&mut self, message: &'static str) -> Result<u64, Diagnostic> {
+        let token = self.current().clone();
+        if let TokenKind::Int(text) = &token.kind {
+            let (value, suffix) =
+                parse_integer(text).map_err(|error| Diagnostic::new(error, token.span))?;
+            if suffix.is_some_and(|ty| !ty.is_integer()) {
+                return Err(Diagnostic::new(message, token.span));
+            }
+            self.bump();
+            Ok(value)
+        } else {
+            Err(Diagnostic::new(message, token.span))
+        }
+    }
+
+    pub(super) fn expect_bool(&mut self, message: &'static str) -> Result<bool, Diagnostic> {
+        let token = self.current().clone();
+        match &token.kind {
+            TokenKind::Ident(name) if name == "true" => {
+                self.bump();
+                Ok(true)
+            }
+            TokenKind::Ident(name) if name == "false" => {
+                self.bump();
+                Ok(false)
+            }
+            _ => Err(Diagnostic::new(message, token.span)),
+        }
+    }
+
+    pub(super) fn expect_string(&mut self, message: &'static str) -> Result<String, Diagnostic> {
+        let token = self.current().clone();
+        if let TokenKind::String(value) = token.kind {
+            self.bump();
+            Ok(value)
+        } else {
+            Err(Diagnostic::new(message, token.span))
+        }
+    }
+
+    pub(super) fn expect_ident(&mut self, expected: &'static str) -> Result<Span, Diagnostic> {
+        let token = self.current().clone();
+        if matches!(&token.kind, TokenKind::Ident(name) if name == expected) {
+            self.bump();
+            Ok(token.span)
+        } else {
+            Err(Diagnostic::new(
+                format!("expected `{expected}`"),
+                token.span,
+            ))
+        }
+    }
+
+    pub(super) fn expect_any_ident(
+        &mut self,
+        message: &'static str,
+    ) -> Result<(String, Span), Diagnostic> {
+        let token = self.current().clone();
+        if let TokenKind::Ident(name) = token.kind {
+            self.bump();
+            Ok((name, token.span))
+        } else {
+            Err(Diagnostic::new(message, token.span))
+        }
+    }
+
+    pub(super) fn expect(
+        &mut self,
+        kind: TokenKind,
+        message: &'static str,
+    ) -> Result<Span, Diagnostic> {
+        let token = self.current().clone();
+        if token.kind == kind {
+            self.bump();
+            Ok(token.span)
+        } else {
+            Err(Diagnostic::new(message, token.span))
+        }
+    }
+
+    pub(super) fn eat_ident(&mut self, expected: &str) -> Option<Span> {
+        if self.at_ident(expected) {
+            Some(self.bump().span)
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn at_ident(&self, expected: &str) -> bool {
+        matches!(&self.current().kind, TokenKind::Ident(name) if name == expected)
+    }
+
+    pub(super) fn eat(&mut self, kind: &TokenKind) -> Option<Span> {
+        if self.at(kind) {
+            Some(self.bump().span)
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn at(&self, kind: &TokenKind) -> bool {
+        self.current().kind == *kind
+    }
+
+    pub(super) fn current(&self) -> &Token {
+        &self.tokens[self.pos]
+    }
+
+    pub(super) fn previous(&self) -> &Token {
+        &self.tokens[self.pos.saturating_sub(1)]
+    }
+
+    pub(super) fn peek(&self, offset: usize) -> &Token {
+        &self.tokens[(self.pos + offset).min(self.tokens.len() - 1)]
+    }
+
+    pub(super) fn bump(&mut self) -> &Token {
+        let index = self.pos;
+        if !matches!(self.tokens[index].kind, TokenKind::Eof) {
+            self.pos += 1;
+        }
+        &self.tokens[index]
+    }
+
+    pub(super) fn error(&self, message: impl Into<String>) -> Diagnostic {
+        Diagnostic::new(message, self.current().span)
+    }
+
+    pub(super) fn record_let_keyword_diagnostic(&mut self) {
+        let span = self.current().span;
+        let TokenKind::Ident(keyword) = &self.current().kind else {
+            unreachable!("the familiar declaration keyword is an identifier")
+        };
+        let keyword = keyword.clone();
+        self.diagnostics.push(
+            Diagnostic::new(
+                format!("SplitScript uses `let` instead of `{keyword}` for variable declarations"),
+                span,
+            )
+            .with_primary_label("replace this familiar declaration keyword")
+            .with_machine_applicable_fix(
+                format!("replace `{keyword}` with `let`"),
+                span,
+                "let",
+            ),
+        );
+    }
+
+    pub(super) fn record_none_keyword_diagnostic(&mut self, span: Span) {
+        self.diagnostics.push(
+            Diagnostic::new(
+                "SplitScript uses `None` instead of `null` for absent optional values",
+                span,
+            )
+            .with_primary_label("replace this JavaScript-style value")
+            .with_machine_applicable_fix("replace `null` with `None`", span, "None"),
+        );
+    }
+
+    pub(super) fn record_fn_keyword_diagnostic(&mut self) {
+        let span = self.current().span;
+        let TokenKind::Ident(keyword) = &self.current().kind else {
+            unreachable!("the familiar function keyword is an identifier")
+        };
+        let keyword = keyword.clone();
+        self.diagnostics.push(
+            Diagnostic::new(
+                format!("SplitScript uses `fn` instead of `{keyword}` for functions"),
+                span,
+            )
+            .with_primary_label("replace this familiar function keyword")
+            .with_machine_applicable_fix(
+                format!("replace `{keyword}` with `fn`"),
+                span,
+                "fn",
+            ),
+        );
+    }
+
+    pub(super) fn record_string_type_diagnostic(&mut self, span: Span) {
+        self.diagnostics.push(
+            Diagnostic::new(
+                "SplitScript uses `String` instead of `string` for the string type",
+                span,
+            )
+            .with_primary_label("type names are case-sensitive")
+            .with_machine_applicable_fix(
+                "replace `string` with `String`",
+                span,
+                "String",
+            ),
+        );
+    }
+
+    pub(super) fn record_duration_type_diagnostic(&mut self, span: Span) {
+        self.diagnostics.push(
+            Diagnostic::new(
+                "SplitScript uses `Duration` instead of `TimeSpan` for timer durations",
+                span,
+            )
+            .with_primary_label("replace this C# type name")
+            .with_machine_applicable_fix(
+                "replace `TimeSpan` with `Duration`",
+                span,
+                "Duration",
+            ),
+        );
+    }
+
+    pub(super) fn record_numeric_type_diagnostic(
+        &mut self,
+        span: Span,
+        csharp_name: &str,
+        splitscript_name: &str,
+    ) {
+        self.diagnostics.push(
+            Diagnostic::new(
+                format!(
+                    "SplitScript uses `{splitscript_name}` instead of `{csharp_name}` for this numeric type"
+                ),
+                span,
+            )
+            .with_primary_label("replace this C# numeric type name")
+            .with_machine_applicable_fix(
+                format!("replace `{csharp_name}` with `{splitscript_name}`"),
+                span,
+                splitscript_name,
+            ),
+        );
+    }
+
+    pub(super) fn current_action_kind(&self) -> Option<ActionKind> {
+        let TokenKind::Ident(name) = &self.current().kind else {
+            return None;
+        };
+        ActionKind::parse(name)
+    }
+
+    pub(super) fn is_top_level_start(&self) -> bool {
+        matches!(
+            &self.current().kind,
+            TokenKind::Ident(name)
+                if matches!(name.as_str(), "state" | "settings" | "let" | "const" | "var" | "debug" | "fn" | "func" | "function" | "record" | "enum")
+                    || ActionKind::parse(name).is_some()
+        )
+    }
+
+    pub(super) fn synchronize_top_level(&mut self, declaration_start: usize) {
+        let mut brace_depth = self.brace_depth_before(self.pos);
+
+        if self.pos > declaration_start && brace_depth == 0 && self.is_top_level_start() {
+            return;
+        }
+
+        while !self.at(&TokenKind::Eof) {
+            let kind = self.bump().kind.clone();
+            match kind {
+                TokenKind::LBrace => brace_depth += 1,
+                TokenKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
+                _ => {}
+            }
+            if brace_depth == 0 && self.is_top_level_start() {
+                return;
+            }
+        }
+    }
+
+    pub(super) fn synchronize_statement(&mut self, statement_start: usize, block_depth: u32) {
+        let mut brace_depth = self.brace_depth_before(self.pos);
+        loop {
+            if self.at(&TokenKind::Eof)
+                || (self.at(&TokenKind::RBrace) && brace_depth == block_depth)
+            {
+                return;
+            }
+            if self.pos > statement_start
+                && brace_depth == block_depth
+                && self.line_break_before_current()
+                && self.is_statement_start()
+            {
+                return;
+            }
+
+            let kind = self.bump().kind.clone();
+            match kind {
+                TokenKind::LBrace => brace_depth += 1,
+                TokenKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
+                TokenKind::Semicolon if brace_depth == block_depth => return,
+                _ => {}
+            }
+        }
+    }
+
+    pub(super) fn recover_delimited_item<T>(
+        &mut self,
+        parsed: Result<T, Diagnostic>,
+        item_start: usize,
+        body_depth: u32,
+    ) -> Option<T> {
+        match parsed {
+            Ok(item) => Some(item),
+            Err(error) => {
+                self.record_recovery_diagnostic(error);
+                let skipped_start = self.tokens[item_start].span.start;
+                self.synchronize_delimited_item(item_start, body_depth);
+                self.record_error_region(skipped_start, self.current().span.start);
+                None
+            }
+        }
+    }
+
+    pub(super) fn recover_parameter<T>(
+        &mut self,
+        parsed: Result<T, Diagnostic>,
+        item_start: usize,
+    ) -> Option<T> {
+        match parsed {
+            Ok(parameter) => Some(parameter),
+            Err(error) => {
+                self.record_recovery_diagnostic(error);
+                let skipped_start = self.tokens[item_start].span.start;
+                self.synchronize_parameter(item_start);
+                self.record_error_region(skipped_start, self.current().span.start);
+                None
+            }
+        }
+    }
+
+    pub(super) fn record_recovery_diagnostic(&mut self, error: Diagnostic) {
+        if error.message.starts_with("expected") {
+            self.recovery_nodes.push(RecoveryNode {
+                kind: RecoveryNodeKind::Missing,
+                span: Span {
+                    start: error.span.start,
+                    end: error.span.start,
+                },
+            });
+        }
+        self.diagnostics.push(error);
+    }
+
+    pub(super) fn record_error_region(&mut self, start: usize, end: usize) {
+        let end = end.max(start);
+        if end != start {
+            self.recovery_nodes.push(RecoveryNode {
+                kind: RecoveryNodeKind::Error,
+                span: Span { start, end },
+            });
+        }
+    }
+
+    pub(super) fn synchronize_parameter(&mut self, item_start: usize) {
+        loop {
+            if self.at(&TokenKind::Eof)
+                || self.at(&TokenKind::RParen)
+                || self.at(&TokenKind::LBrace)
+                || self.at(&TokenKind::Minus)
+            {
+                return;
+            }
+            if self.pos > item_start
+                && self.line_break_before_current()
+                && matches!(self.current().kind, TokenKind::Ident(_))
+            {
+                return;
+            }
+            if matches!(self.bump().kind, TokenKind::Comma) {
+                return;
+            }
+        }
+    }
+
+    pub(super) fn synchronize_delimited_item(&mut self, item_start: usize, body_depth: u32) {
+        let mut brace_depth = self.brace_depth_before(self.pos);
+        loop {
+            if self.at(&TokenKind::Eof)
+                || (self.at(&TokenKind::RBrace) && brace_depth == body_depth)
+            {
+                return;
+            }
+            if self.pos > item_start
+                && brace_depth == body_depth
+                && self.line_break_before_current()
+                && matches!(
+                    self.current().kind,
+                    TokenKind::Ident(_)
+                        | TokenKind::Int(_)
+                        | TokenKind::String(_)
+                        | TokenKind::DocComment(_)
+                )
+            {
+                return;
+            }
+
+            let kind = self.bump().kind.clone();
+            match kind {
+                TokenKind::LBrace => brace_depth += 1,
+                TokenKind::RBrace => brace_depth = brace_depth.saturating_sub(1),
+                TokenKind::Comma | TokenKind::Semicolon if brace_depth == body_depth => return,
+                _ => {}
+            }
+        }
+    }
+
+    pub(super) fn record_missing_closing(&mut self, message: &'static str) {
+        let error = self.error(message);
+        self.record_missing(error);
+    }
+
+    pub(super) fn record_missing(&mut self, error: Diagnostic) {
+        let position = error.span.start;
+        self.diagnostics.push(error);
+        self.recovery_nodes.push(RecoveryNode {
+            kind: RecoveryNodeKind::Missing,
+            span: Span {
+                start: position,
+                end: position,
+            },
+        });
+    }
+
+    pub(super) fn brace_depth_before(&self, position: usize) -> u32 {
+        self.tokens[..position]
+            .iter()
+            .fold(0u32, |depth, token| match token.kind {
+                TokenKind::LBrace => depth + 1,
+                TokenKind::RBrace => depth.saturating_sub(1),
+                _ => depth,
+            })
+    }
+
+    pub(super) fn is_statement_start(&self) -> bool {
+        match &self.current().kind {
+            TokenKind::Ident(name) => name != "else",
+            _ => self.is_expression_start(),
+        }
+    }
+
+    pub(super) fn is_expression_start(&self) -> bool {
+        matches!(
+            self.current().kind,
+            TokenKind::Ident(_)
+                | TokenKind::Int(_)
+                | TokenKind::Float(_)
+                | TokenKind::String(_)
+                | TokenKind::TemplateStart
+                | TokenKind::LParen
+                | TokenKind::LBracket
+                | TokenKind::Bang
+                | TokenKind::Minus
+        )
+    }
+}

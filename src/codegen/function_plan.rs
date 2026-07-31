@@ -1,22 +1,39 @@
-use super::*;
+use std::collections::HashMap;
+
+use wasm_encoder::{FunctionSection, HeapType, RefType, TypeSection, ValType};
+
+use crate::{
+    ast::{
+        ActionKind, ArrayTypeDecl, EnumDecl, FunctionId, OptionTypeDecl, Program, ResultTypeDecl,
+    },
+    equality::EqualityCapabilities,
+    semantic::SemanticModel,
+    stdlib::{RuntimeRepresentation, StandardLibrary},
+};
+
+use super::{
+    EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, Type, action_result_val_type,
+    dependencies::BackendDependencies, function_result, reachability, runtime_helper_registry,
+    semantic_type, value_type,
+};
 
 /// The complete, deterministic assignment of generated function signatures
 /// and indices. Body generation consumes this plan but cannot mutate the
 /// shared type or function index spaces.
 pub(super) struct FunctionPlan<'a> {
     pub section: FunctionSection,
-    pub stdlib: Stdlib,
+    pub runtime_helpers: RuntimeHelperPlan,
     pub equality: EqualityFunctions,
     pub users: HashMap<FunctionId, u32>,
     pub reads: Vec<u32>,
     pub actions: HashMap<ActionKind, u32>,
     pub start: u32,
     pub update: u32,
-    pub string_values: Option<&'a ArrayTypeDecl>,
-    pub u64_offsets: Option<&'a ArrayTypeDecl>,
+    pub arrays: &'a [ArrayTypeDecl],
 }
 
 pub(super) struct Inputs<'a> {
+    pub standard_library: &'a StandardLibrary,
     pub program: &'a Program,
     pub semantics: &'a SemanticModel,
     pub enums: &'a [EnumDecl],
@@ -36,6 +53,7 @@ pub(super) fn encode<'a>(
     inputs: Inputs<'a>,
 ) -> FunctionPlan<'a> {
     let Inputs {
+        standard_library,
         program,
         semantics,
         enums,
@@ -60,139 +78,20 @@ pub(super) fn encode<'a>(
         function_index
     };
 
-    let string_values = arrays.iter().find(|array| {
-        array_element_type(array.id, semantics) == Type::Standard(StdlibTypeId::String)
-    });
-    let u64_offsets = arrays
-        .iter()
-        .find(|array| array_element_type(array.id, semantics) == Type::U64);
-    let string_ref = gc.val_type(Type::Standard(StdlibTypeId::String));
     let mut helper_functions = HashMap::new();
-    for helper in dependencies
-        .core_helpers()
-        .chain(dependencies.settings_helpers())
-    {
-        let (params, results) = match helper {
-            GeneratedHelper::PrintString => (vec![string_ref], vec![]),
-            GeneratedHelper::TimerSetVariable => (vec![string_ref, string_ref], vec![]),
-            GeneratedHelper::FormatI64 => (vec![ValType::I64, ValType::I32], vec![string_ref]),
-            GeneratedHelper::ConcatStrings => (
-                vec![
-                    gc.val_type(Type::Array(
-                        string_values
-                            .expect("String concatenation has a String array layout")
-                            .id,
-                    )),
-                ],
-                vec![string_ref],
-            ),
-            GeneratedHelper::StringEquality => (vec![string_ref, string_ref], vec![ValType::I32]),
-            GeneratedHelper::ScanProcessRange => (
-                vec![
-                    ValType::I64,
-                    ValType::I64,
-                    ValType::I64,
-                    ValType::I32,
-                    ValType::I32,
-                    ValType::I32,
-                ],
-                vec![ValType::I64],
-            ),
-            GeneratedHelper::ReadRelative32 => {
-                (vec![ValType::I64, ValType::I64], vec![ValType::I64])
-            }
-            GeneratedHelper::ReadManagedString => (
-                vec![ValType::I64, ValType::I64, ValType::I32],
-                vec![string_ref],
-            ),
-            GeneratedHelper::FollowAddress => (
-                vec![
-                    ValType::I64,
-                    ValType::I64,
-                    gc.val_type(Type::Array(
-                        u64_offsets
-                            .expect("address following has a u64 array layout")
-                            .id,
-                    )),
-                ],
-                vec![ValType::I64],
-            ),
-            GeneratedHelper::UnityAttach => (
-                vec![ValType::I64, ValType::I32],
-                vec![gc.val_type(Type::Standard(StdlibTypeId::UnityModule))],
-            ),
-            GeneratedHelper::UnityGetImage => (
-                vec![
-                    ValType::I64,
-                    gc.val_type(Type::Standard(StdlibTypeId::UnityModule)),
-                    string_ref,
-                ],
-                vec![gc.val_type(Type::Standard(StdlibTypeId::UnityImage))],
-            ),
-            GeneratedHelper::UnityGetClass => (
-                vec![
-                    ValType::I64,
-                    gc.val_type(Type::Standard(StdlibTypeId::UnityImage)),
-                    string_ref,
-                ],
-                vec![gc.val_type(Type::Standard(StdlibTypeId::UnityClass))],
-            ),
-            GeneratedHelper::UnityGetFieldOffset => (
-                vec![
-                    ValType::I64,
-                    gc.val_type(Type::Standard(StdlibTypeId::UnityClass)),
-                    string_ref,
-                ],
-                vec![ValType::I64],
-            ),
-            GeneratedHelper::UnityGetFieldAny => (
-                vec![
-                    ValType::I64,
-                    gc.val_type(Type::Standard(StdlibTypeId::UnityClass)),
-                    gc.val_type(Type::Array(
-                        string_values
-                            .expect("field alternatives have a String array layout")
-                            .id,
-                    )),
-                ],
-                vec![gc.val_type(Type::Standard(StdlibTypeId::UnityField))],
-            ),
-            GeneratedHelper::UnityGetStaticInstance => (
-                vec![
-                    ValType::I64,
-                    gc.val_type(Type::Standard(StdlibTypeId::UnityClass)),
-                    gc.val_type(Type::Array(
-                        string_values
-                            .expect("static instances have a String array layout")
-                            .id,
-                    )),
-                ],
-                vec![ValType::I64],
-            ),
-            GeneratedHelper::CStringEquality => (
-                vec![
-                    ValType::I64,
-                    ValType::I64,
-                    string_ref,
-                    ValType::I32,
-                    ValType::I32,
-                ],
-                vec![ValType::I32],
-            ),
-            GeneratedHelper::BackingFieldEquality => (
-                vec![ValType::I64, ValType::I64, string_ref],
-                vec![ValType::I32],
-            ),
-            GeneratedHelper::StringFromMemory => {
-                (vec![ValType::I32, ValType::I32], vec![string_ref])
-            }
-            GeneratedHelper::RefreshSettings => (vec![], vec![]),
-        };
+    let ordered_helpers = dependencies.helpers().collect::<Vec<_>>();
+    for helper in ordered_helpers.iter().copied() {
+        let descriptor = runtime_helper_registry::descriptor(helper);
+        let (params, results) =
+            runtime_helper_registry::resolve_signature(descriptor.signature, arrays, semantics, gc);
         helper_functions.insert(helper, declare(params, results));
     }
 
-    let mut equality = EqualityFunctions::default();
-    for record in StandardLibrary::new().types().iter().filter(|record| {
+    let mut equality = EqualityFunctions {
+        standard_library: standard_library.clone(),
+        ..EqualityFunctions::default()
+    };
+    for record in standard_library.types().iter().filter(|record| {
         reachability.requires_standard_record_equality(record.id)
             && matches!(
                 record.representation,
@@ -236,8 +135,9 @@ pub(super) fn encode<'a>(
         }
     }
 
-    let stdlib = Stdlib {
-        helpers: helper_functions,
+    let runtime_helpers = RuntimeHelperPlan {
+        ordered: ordered_helpers,
+        functions: helper_functions,
     };
 
     let mut users = HashMap::new();
@@ -289,7 +189,7 @@ pub(super) fn encode<'a>(
                     action.kind,
                     ActionKind::OnDetached | ActionKind::OnAttach | ActionKind::WhileAttached
                 ))
-                .then(|| action_result_val_type(action.kind))
+                .then(|| action_result_val_type(action.kind, gc))
                 .into_iter()
                 .collect(),
             )
@@ -302,14 +202,13 @@ pub(super) fn encode<'a>(
 
     FunctionPlan {
         section,
-        stdlib,
+        runtime_helpers,
         equality,
         users,
         reads,
         actions,
         start,
         update,
-        string_values,
-        u64_offsets,
+        arrays,
     }
 }

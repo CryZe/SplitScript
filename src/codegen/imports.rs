@@ -78,7 +78,14 @@ fn val_type(ty: AbiType) -> ValType {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use wasm_encoder::TypeSection;
+
+    use crate::{
+        abi::{AbiCatalog, AbiImportId},
+        codegen::dependencies::BackendDependencies,
+    };
+
+    use super::encode;
 
     #[test]
     fn catalog_order_assigns_contiguous_type_and_function_indices() {

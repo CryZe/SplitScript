@@ -52,6 +52,7 @@ struct ContinuationRange {
 
 #[derive(Debug)]
 struct DelimiterRange {
+    opening: usize,
     closing: usize,
     direct_breaks: Vec<usize>,
 }
@@ -60,6 +61,7 @@ struct DelimiterRange {
 struct BraceFrame {
     parent_indentation: usize,
     brace_indentation: usize,
+    opening: usize,
 }
 
 #[derive(Default)]
@@ -405,6 +407,7 @@ impl<'a> Formatter<'a> {
             self.brace_stack.push(BraceFrame {
                 parent_indentation: self.indentation,
                 brace_indentation: self.current_line_indentation,
+                opening: current.span().start,
             });
             self.indentation = self.current_line_indentation + 1;
         } else if matches!(current_token, Some(TokenKind::RBrace))
@@ -546,7 +549,10 @@ impl<'a> Formatter<'a> {
             .delimiters
             .iter()
             .filter(|range| {
-                offset < range.closing
+                self.brace_stack
+                    .last()
+                    .is_none_or(|brace| brace.opening < range.opening)
+                    && offset < range.closing
                     && range
                         .direct_breaks
                         .iter()
@@ -565,6 +571,7 @@ enum DelimiterKind {
 
 struct PendingDelimiter {
     kind: DelimiterKind,
+    opening: usize,
     direct_breaks: Vec<usize>,
 }
 
@@ -590,10 +597,12 @@ fn delimiter_ranges(document: &SourceDocument) -> Vec<DelimiterRange> {
             Lexeme::Token(token) => match token.kind {
                 TokenKind::LParen => stack.push(PendingDelimiter {
                     kind: DelimiterKind::Parenthesis,
+                    opening: token.span.start,
                     direct_breaks: Vec::new(),
                 }),
                 TokenKind::LBracket => stack.push(PendingDelimiter {
                     kind: DelimiterKind::Bracket,
+                    opening: token.span.start,
                     direct_breaks: Vec::new(),
                 }),
                 TokenKind::RParen => close_delimiter(
@@ -627,6 +636,7 @@ fn close_delimiter(
     };
     if delimiter.kind == expected && !delimiter.direct_breaks.is_empty() {
         ranges.push(DelimiterRange {
+            opening: delimiter.opening,
             closing,
             direct_breaks: delimiter.direct_breaks,
         });
@@ -940,6 +950,43 @@ settings {
     }
 
     #[test]
+    fn preserves_source_declaration_documentation_comments() {
+        let source = r#"state "game.exe"{
+/// Current stage.
+stage:i32 at 0x100
+}
+/// Shared counter.
+let count=0
+/// Coordinate pair.
+record Point{
+/// Horizontal coordinate.
+x:i32
+}
+/// Converts a point.
+fn describe(point:Point){return point.x as String}
+"#;
+        let expected = r#"state "game.exe" {
+    /// Current stage.
+    stage: i32 at 0x100
+}
+/// Shared counter.
+let count = 0
+/// Coordinate pair.
+record Point {
+    /// Horizontal coordinate.
+    x: i32
+}
+/// Converts a point.
+fn describe(point: Point) {
+    return point.x as String
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn puts_a_multiline_header_brace_at_the_header_indentation() {
         let source = r#"state "game.exe" {}
 split {
@@ -1021,6 +1068,41 @@ split {
         && isFinalBaseLevel(old.levelOrScene)
         && isBaseCredits(current.levelOrScene)
     return creditsTransition
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn block_indentation_supersedes_an_enclosing_multiline_call() {
+        let source = r#"state "game.exe" {}
+enum DelayedSplit {
+Inactive
+ReceiveMinishCap
+GetFourSword
+}
+whileAttached {
+debug print(match delayedSplit {
+DelayedSplit.ReceiveMinishCap => "Receive Minish Cap",
+DelayedSplit.GetFourSword => "Get Four Sword",
+DelayedSplit.Inactive => "Delayed split"
+})
+}"#;
+        let expected = r#"state "game.exe" {}
+enum DelayedSplit {
+    Inactive
+    ReceiveMinishCap
+    GetFourSword
+}
+whileAttached {
+    debug print(match delayedSplit {
+        DelayedSplit.ReceiveMinishCap => "Receive Minish Cap",
+        DelayedSplit.GetFourSword => "Get Four Sword",
+        DelayedSplit.Inactive => "Delayed split"
+    })
 }
 "#;
 

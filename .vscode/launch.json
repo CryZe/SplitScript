@@ -10,7 +10,22 @@
         "${workspaceFolder}"
       ],
       "outFiles": [
-        "${workspaceFolder}/editors/vscode/out/**/*.js"
+        "${workspaceFolder}/editors/vscode/dist/**/*.js"
+      ],
+      "preLaunchTask": "build SplitScript extension"
+    },
+    {
+      "name": "Run SplitScript Web Extension",
+      "type": "pwa-extensionHost",
+      "debugWebWorkerHost": true,
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/editors/vscode",
+        "--extensionDevelopmentKind=web",
+        "${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/editors/vscode/dist/web/**/*.js"
       ],
       "preLaunchTask": "build SplitScript extension"
     }

@@ -28,6 +28,7 @@ pub enum SemanticTokenKind {
     Parameter,
     Property,
     Namespace,
+    Constant,
     String,
     Number,
     Operator,
@@ -41,7 +42,7 @@ pub enum SemanticTokenKind {
 }
 
 impl SemanticTokenKind {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Keyword,
         Self::Type,
         Self::Struct,
@@ -53,6 +54,7 @@ impl SemanticTokenKind {
         Self::Parameter,
         Self::Property,
         Self::Namespace,
+        Self::Constant,
         Self::String,
         Self::Number,
         Self::Operator,
@@ -82,6 +84,7 @@ impl SemanticTokenKind {
             Self::Parameter => "parameter",
             Self::Property => "property",
             Self::Namespace => "namespace",
+            Self::Constant => "constant",
             Self::String => "string",
             Self::Number => "number",
             Self::Operator => "operator",
@@ -121,6 +124,7 @@ impl SemanticHighlightIndex {
         document: &SourceDocument,
         syntax: &Program,
         semantics: Option<&SemanticModel>,
+        standard_library: StandardLibrary,
     ) -> Self {
         let mut value_kinds = ValueKindCollector::default();
         value_kinds.visit_program(syntax);
@@ -143,6 +147,7 @@ impl SemanticHighlightIndex {
             document,
             syntax,
             semantics,
+            standard_library,
             entries: BTreeMap::new(),
             value_kinds: value_kinds.kinds,
             debug_ranges: value_kinds.debug_ranges,
@@ -231,6 +236,7 @@ struct HighlightCollector<'a> {
     document: &'a SourceDocument,
     syntax: &'a Program,
     semantics: Option<&'a SemanticModel>,
+    standard_library: StandardLibrary,
     entries: BTreeMap<usize, SemanticHighlight>,
     value_kinds: HashMap<ValueId, SemanticTokenKind>,
     debug_ranges: Vec<Span>,
@@ -261,10 +267,13 @@ impl HighlightCollector<'_> {
                         TokenKind::Ident(name) if name == "sig" => {
                             Some(SemanticTokenKind::Signature)
                         }
+                        TokenKind::Ident(name) if matches!(name.as_str(), "true" | "false") => {
+                            Some(SemanticTokenKind::Constant)
+                        }
                         TokenKind::Ident(name) if is_keyword(name) => {
                             Some(SemanticTokenKind::Keyword)
                         }
-                        TokenKind::Ident(name) if is_builtin_type(name) => {
+                        TokenKind::Ident(name) if is_builtin_type(&self.standard_library, name) => {
                             Some(SemanticTokenKind::Type)
                         }
                         TokenKind::Ident(name) if record_names.contains(name.as_str()) => {
@@ -276,7 +285,7 @@ impl HighlightCollector<'_> {
                         TokenKind::Ident(name) if function_names.contains(name.as_str()) => {
                             Some(SemanticTokenKind::Function)
                         }
-                        TokenKind::Ident(name) if is_namespace(name) => {
+                        TokenKind::Ident(name) if is_namespace(&self.standard_library, name) => {
                             Some(SemanticTokenKind::Namespace)
                         }
                         TokenKind::String(_)
@@ -375,26 +384,46 @@ impl HighlightCollector<'_> {
             return;
         }
 
+        // Semantic highlighting walks the parser's recovery tree so it remains
+        // available while a document is being edited. Enum resolution happens
+        // on a cloned tree, where `Mode.Active` is rewritten from a generic path
+        // into an enum expression. The expression ID bridges those two trees:
+        // prefer the resolved enum identity over the path-shaped syntax instead
+        // of styling the variant as an ordinary property.
+        if self
+            .semantics
+            .and_then(|model| model.enum_variant(expression.id))
+            .is_some()
+            && spans.len() >= 2
+        {
+            self.insert(spans[0], SemanticTokenKind::Enum, 0);
+            self.insert(*spans.last().unwrap(), SemanticTokenKind::EnumMember, 0);
+            return;
+        }
+
         if let Some(value) = self.semantics.and_then(|model| model.value(expression.id)) {
             match value {
+                ResolvedValue::ProviderValue(_) => {
+                    self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
+                }
                 ResolvedValue::Variable(id) => {
                     self.insert(spans[0], self.value_kind(id), 0);
                 }
                 ResolvedValue::CurrentState(_) | ResolvedValue::OldState(_) => {
-                    self.insert(spans[0], SemanticTokenKind::Namespace, MODIFIER_READONLY);
+                    self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
                     if let Some(span) = spans.get(1) {
                         self.insert(*span, SemanticTokenKind::StateField, MODIFIER_READONLY);
                     }
                 }
                 ResolvedValue::Setting(id) | ResolvedValue::OldSetting(id) => {
-                    self.insert(spans[0], SemanticTokenKind::Namespace, MODIFIER_READONLY);
+                    self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
                     if let Some(span) = spans.get(1) {
                         self.insert(*span, self.value_kind(id), MODIFIER_READONLY);
                     }
                 }
             }
         } else if matches!(names.first().map(String::as_str), Some("current" | "old")) {
-            self.insert(spans[0], SemanticTokenKind::Namespace, MODIFIER_READONLY);
+            self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
             if let Some(span) = spans.get(1) {
                 self.insert(*span, SemanticTokenKind::StateField, MODIFIER_READONLY);
             }
@@ -402,7 +431,7 @@ impl HighlightCollector<'_> {
             names.first().map(String::as_str),
             Some("settings" | "oldSettings")
         ) {
-            self.insert(spans[0], SemanticTokenKind::Namespace, MODIFIER_READONLY);
+            self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
             if let Some(span) = spans.get(1) {
                 self.insert(*span, SemanticTokenKind::Setting, MODIFIER_READONLY);
             }
@@ -460,6 +489,26 @@ impl HighlightCollector<'_> {
 }
 
 impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
+    fn visit_program(&mut self, program: &'ast Program) {
+        if let Some(provider) = program
+            .state
+            .as_ref()
+            .and_then(|state| state.provider.as_ref())
+            && self
+                .standard_library
+                .state_provider_by_name(&provider.name)
+                .is_some()
+        {
+            self.mark_ident(
+                provider.span,
+                &provider.name,
+                SemanticTokenKind::Type,
+                MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
+            );
+        }
+        visit::walk_program(self, program);
+    }
+
     fn visit_state_field(&mut self, field: &'ast crate::ast::StateField) {
         self.mark_ident(
             field.span,
@@ -474,25 +523,28 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
         if matches!(setting.kind, SettingKind::Title { .. }) {
             self.mark_first_string(setting.span, SemanticTokenKind::SettingTitle);
         } else {
-            self.mark_first_string(setting.span, SemanticTokenKind::Setting);
             self.mark_ident(
                 setting.span,
                 &setting.name,
                 SemanticTokenKind::Setting,
                 MODIFIER_DECLARATION,
             );
-            if let SettingKind::Choice {
-                enumeration,
-                options,
-                ..
-            } = &setting.kind
-                && let Some(enumeration) = self
-                    .syntax
-                    .enums
-                    .iter()
-                    .find(|candidate| candidate.id == *enumeration)
-            {
+            if let SettingKind::Choice { options, .. } = &setting.kind {
                 for option in options {
+                    let Some(variant) = self
+                        .semantics
+                        .and_then(|semantics| semantics.setting_choice_option(option.id))
+                    else {
+                        continue;
+                    };
+                    let Some(enumeration) = self.syntax.enums.iter().find(|enumeration| {
+                        enumeration
+                            .variants
+                            .iter()
+                            .any(|candidate| candidate.id == variant)
+                    }) else {
+                        continue;
+                    };
                     self.mark_ident(option.span, &enumeration.name, SemanticTokenKind::Enum, 0);
                     self.mark_ident(
                         option.span,
@@ -606,7 +658,9 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 variant,
                 binding,
             } => {
-                if let Some(name) = enum_name(self.syntax, *enumeration) {
+                if let Some(name) =
+                    enum_reference_name(self.syntax, enumeration, &self.standard_library)
+                {
                     self.mark_ident(arm.span, name, SemanticTokenKind::Enum, 0);
                 }
                 self.mark_ident(arm.span, variant, SemanticTokenKind::EnumMember, 0);
@@ -644,20 +698,19 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 variant,
                 ..
             } => {
-                if let Some(name) = enum_name(self.syntax, *enumeration) {
+                if let Some(name) =
+                    enum_reference_name(self.syntax, enumeration, &self.standard_library)
+                {
                     self.mark_ident(expression.span, name, SemanticTokenKind::Enum, 0);
                 }
                 self.mark_ident(expression.span, variant, SemanticTokenKind::EnumMember, 0);
             }
-            ExprKind::Record { record, fields } => {
-                if let Some(record) = self
-                    .syntax
-                    .records
-                    .iter()
-                    .find(|candidate| candidate.id == *record)
-                {
-                    self.mark_ident(expression.span, &record.name, SemanticTokenKind::Struct, 0);
-                }
+            ExprKind::Record {
+                name: _,
+                name_span,
+                fields,
+            } => {
+                self.insert(*name_span, SemanticTokenKind::Struct, 0);
                 for (name, value) in fields {
                     self.mark_last_ident_before(
                         expression.span,
@@ -674,14 +727,31 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 }
 
-fn enum_name(program: &Program, enumeration: EnumTypeId) -> Option<&str> {
+fn enum_name<'a>(
+    program: &'a Program,
+    enumeration: EnumTypeId,
+    standard_library: &StandardLibrary,
+) -> Option<&'a str> {
     match enumeration {
         EnumTypeId::Source(id) => program
             .enums
             .iter()
             .find(|candidate| candidate.id == id)
             .map(|declaration| declaration.name.as_str()),
-        EnumTypeId::Standard(id) => Some(StandardLibrary::new().type_decl(id).name),
+        EnumTypeId::Standard(id) => Some(standard_library.type_decl(id).name),
+    }
+}
+
+fn enum_reference_name<'a>(
+    program: &'a Program,
+    enumeration: &'a crate::ast::EnumReference,
+    standard_library: &StandardLibrary,
+) -> Option<&'a str> {
+    match enumeration {
+        crate::ast::EnumReference::Named { name, .. } => Some(name),
+        crate::ast::EnumReference::Resolved(enumeration) => {
+            enum_name(program, *enumeration, standard_library)
+        }
     }
 }
 
@@ -710,8 +780,6 @@ fn is_keyword(name: &str) -> bool {
             | "choice"
             | "file"
             | "mime"
-            | "true"
-            | "false"
             | "None"
             | "Some"
             | "Ok"
@@ -719,15 +787,14 @@ fn is_keyword(name: &str) -> bool {
     )
 }
 
-fn is_builtin_type(name: &str) -> bool {
+fn is_builtin_type(standard_library: &StandardLibrary, name: &str) -> bool {
     TypeRef::parse(name).is_some()
-        || StandardLibrary::new().type_by_name(name).is_some()
+        || standard_library.type_by_name(name).is_some()
         || matches!(name, "void" | "Array")
 }
 
-fn is_namespace(name: &str) -> bool {
-    matches!(name, "current" | "old" | "settings" | "oldSettings")
-        || StandardLibrary::new().namespace_by_name(name).is_some()
+fn is_namespace(standard_library: &StandardLibrary, name: &str) -> bool {
+    standard_library.namespace_by_name(name).is_some()
 }
 
 fn is_operator(kind: &TokenKind) -> bool {
@@ -836,9 +903,37 @@ whileAttached {
         assert!(contains(
             source,
             &first,
+            "\"Enabled\"",
+            SemanticTokenKind::String,
+            0
+        ));
+        assert!(!contains(
+            source,
+            &first,
+            "\"Enabled\"",
+            SemanticTokenKind::Setting,
+            0
+        ));
+        assert!(contains(
+            source,
+            &first,
             "enabled",
             SemanticTokenKind::Setting,
             MODIFIER_DECLARATION
+        ));
+        assert!(contains(
+            source,
+            &first,
+            "true",
+            SemanticTokenKind::Constant,
+            0
+        ));
+        assert!(!contains(
+            source,
+            &first,
+            "true",
+            SemanticTokenKind::Keyword,
+            0
         ));
         assert!(contains(
             source,
@@ -868,6 +963,25 @@ whileAttached {
             SemanticTokenKind::EnumMember,
             MODIFIER_DECLARATION
         ));
+        assert_eq!(
+            first
+                .highlights()
+                .iter()
+                .filter(|highlight| {
+                    &source[highlight.span.start..highlight.span.end] == "Active"
+                        && highlight.kind == SemanticTokenKind::EnumMember
+                })
+                .count(),
+            2,
+            "both the declaration and constructor use should be enum members"
+        );
+        assert!(!contains(
+            source,
+            &first,
+            "Active",
+            SemanticTokenKind::Property,
+            0
+        ));
         assert!(contains(
             source,
             &first,
@@ -893,6 +1007,69 @@ whileAttached {
             SemanticTokenKind::Method,
             MODIFIER_DEFAULT_LIBRARY
         ));
+    }
+
+    #[test]
+    fn highlights_state_providers_and_snapshot_roots_as_domain_values() {
+        let source = r#"state GBA {
+    room: u8 at 0x03000010
+}
+settings {
+    "Enabled" => enabled: true
+}
+whileAttached {
+    let changed = current.room != old.room
+        || settings.enabled != oldSettings.enabled
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+        assert!(contains(
+            source,
+            &highlights,
+            "GBA",
+            SemanticTokenKind::Type,
+            MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY
+        ));
+        for root in ["current", "old", "settings", "oldSettings"] {
+            assert!(contains(
+                source,
+                &highlights,
+                root,
+                SemanticTokenKind::Variable,
+                MODIFIER_READONLY
+            ));
+        }
+    }
+
+    #[test]
+    fn highlights_resolved_choice_setting_variants() {
+        let source = r#"enum CaptureMode {
+    WindowTitle
+    ExecutableName
+}
+state "game.exe" {}
+settings {
+    "Capture Source" => captureMode: choice {
+        "Window Title" => CaptureMode.WindowTitle
+        "Executable Name" => CaptureMode.ExecutableName default
+    }
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+        for spelling in ["WindowTitle", "ExecutableName"] {
+            assert_eq!(
+                highlights
+                    .highlights()
+                    .iter()
+                    .filter(|highlight| {
+                        &source[highlight.span.start..highlight.span.end] == spelling
+                            && highlight.kind == SemanticTokenKind::EnumMember
+                    })
+                    .count(),
+                2,
+                "both the declaration and choice option should be enum members"
+            );
+        }
     }
 
     #[test]

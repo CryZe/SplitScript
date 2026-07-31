@@ -5,11 +5,11 @@ use std::collections::HashMap;
 use crate::{
     ast::{
         ArrayTypeDecl, ArrayTypeId, AssignmentId, EnumVariantId, ExprId, FunctionId,
-        OptionTypeDecl, OptionTypeId, PatternId, RecordFieldId, ResultTypeDecl, ResultTypeId,
-        SettingChoiceOptionId, ValueId,
+        OptionTypeDecl, OptionTypeId, PatternId, RecordFieldId, RecordId, ResultTypeDecl,
+        ResultTypeId, SettingChoiceOptionId, ValueId,
     },
     inference::Type,
-    stdlib::{StdlibFieldId, StdlibItemId, StdlibVariantId},
+    stdlib::{StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibVariantId},
     types::{TypeId, TypeKind, TypeStore},
 };
 
@@ -79,6 +79,7 @@ pub struct ValueConversion {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedValue {
+    ProviderValue(StdlibStateProviderId),
     Variable(ValueId),
     CurrentState(ValueId),
     OldState(ValueId),
@@ -122,6 +123,7 @@ pub struct SemanticModel {
     state_poll_results: HashMap<ValueId, TypeId>,
     propagation_targets: HashMap<ExprId, TypeId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
+    record_literals: HashMap<ExprId, RecordId>,
     record_literal_fields: HashMap<ExprId, Vec<RecordFieldId>>,
     enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
     pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
@@ -224,6 +226,10 @@ impl SemanticModel {
             .map(Vec::as_slice)
     }
 
+    pub fn record_literal(&self, expression: ExprId) -> Option<RecordId> {
+        self.record_literals.get(&expression).copied()
+    }
+
     pub fn enum_variant(&self, expression: ExprId) -> Option<ResolvedEnumVariantId> {
         self.enum_variants.get(&expression).copied()
     }
@@ -314,6 +320,7 @@ pub(crate) struct SemanticBuilder {
     state_poll_results: HashMap<ValueId, Type>,
     propagation_targets: HashMap<ExprId, Type>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
+    record_literals: HashMap<ExprId, RecordId>,
     record_literal_fields: HashMap<ExprId, Vec<RecordFieldId>>,
     enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
     pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
@@ -397,6 +404,11 @@ impl SemanticBuilder {
         fields: Vec<RecordFieldId>,
     ) {
         let previous = self.record_literal_fields.insert(expression, fields);
+        debug_assert!(previous.is_none(), "record expression IDs must be unique");
+    }
+
+    pub(crate) fn resolve_record_literal(&mut self, expression: ExprId, record: RecordId) {
+        let previous = self.record_literals.insert(expression, record);
         debug_assert!(previous.is_none(), "record expression IDs must be unique");
     }
 
@@ -499,6 +511,7 @@ impl SemanticBuilder {
             state_poll_results,
             propagation_targets,
             path_members,
+            record_literals,
             record_literal_fields,
             enum_variants,
             pattern_variants,
@@ -708,6 +721,7 @@ impl SemanticBuilder {
             state_poll_results,
             propagation_targets,
             path_members,
+            record_literals,
             record_literal_fields,
             enum_variants,
             pattern_variants,

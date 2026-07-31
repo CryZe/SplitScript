@@ -1,1287 +1,819 @@
-# SplitScript roadmap
+# SplitScript active roadmap
 
-This roadmap is ordered by dependency and impact, not merely implementation
-size. Language semantics should settle before editor tooling treats them as a
-stable public contract.
+This file contains only active or deliberately deferred work, ordered by
+dependency and impact. The detailed implementation history and the
+2026-07-30 maintainability audit are preserved in
+[`docs/ROADMAP_ARCHIVE.md`](docs/ROADMAP_ARCHIVE.md).
 
 Priority meanings:
 
-- **P0** — correctness or foundational design needed by real autosplitters.
+- **P0** — correctness or foundational design needed before the next major
+  standard-library or language expansion.
 - **P1** — important language and API ergonomics once the foundations exist.
-- **P2** — tooling, migration, build profiles, and ecosystem scaling.
-- **Ongoing** — work that should continuously validate every other priority.
-
-## P0 — Unify the standard-library declaration and type model
-
-Do this before any further substantial standard-library expansion. This work
-turns `StandardLibrary` from the former callable-only catalog into the source
-of truth for namespaces, nominal types, fields, enum variants, capabilities,
-and runtime representations. The remaining unchecked items finish unifying
-source type resolution, inference, and derived capabilities around that graph.
-
-Preserve the current language and generated behavior while establishing this
-invariant:
-
-> Adding an ordinary standard-library nominal type requires one declaration.
-> Intrinsic behavior may additionally require one deliberately scoped
-> implementation, but must not require parser, inference, checker,
-> documentation, LSP, or physical-layout declarations.
-
-### Hierarchical standard-library authoring model
-
-The compiler and tooling now consume one normalized symbol graph, but the Rust
-source that creates that graph is still fragmented: types, namespaces, fields,
-variants, callable items, owner links, qualified names, and intrinsic IDs live
-in parallel blocks. The architectural goal is not complete until the authoring
-model mirrors the API hierarchy as cleanly as the consumer model does.
-
-- [x] As the immediate migration, replace the parallel `declare_standard_types!`,
-  `declare_standard_namespaces!`, `declare_standard_fields!`,
-  `declare_standard_variants!`, and `declare_standard_items!` inputs with one
-  hierarchical declarative Rust macro. This is an authoring adapter for the
-  normalized symbol graph, not the intended permanent source format.
-- [x] Make each nominal type declaration contain its documentation,
-  capabilities, value-usage policy, runtime representation, public and
-  runtime-private fields, enum variants, associated functions, and instance
-  methods. Opening `Module`, `Duration`, or `UnityClass` must reveal its whole
-  public and physical API in one place.
-- [x] Give root functions, namespaces, nested namespaces, core-type extension
-  methods, capabilities, and type constructors equally explicit owner blocks.
-  `process.read`, numeric methods, address methods, and array methods must not
-  remain a flat exceptional list.
-- [x] Derive owners and qualified names from declaration nesting. A member
-  declaration must not repeat `StdlibOwner::Type(...)`, `Module.scan`, and
-  `Module` independently.
-- [x] Generate `StdlibNamespaceId`, `StdlibTypeId`, `StdlibFieldId`,
-  `StdlibVariantId`, `StdlibItemId`, `IntrinsicId`, and the flattened
-  `NAMESPACES`/`TYPES`/`FIELDS`/`VARIANTS`/`ITEMS` tables from the hierarchical
-  source. Generated flat tables remain an internal compatibility layer for
-  generic consumers, not an authoring surface.
-- [x] Keep intrinsic implementation bodies deliberately separate, but bind
-  their generated intrinsic key alongside the owning function or method.
-  Validation must prove that every declared intrinsic has exactly one backend
-  implementation and that no implementation is orphaned.
-- [x] Migrate every existing declaration, including the test-only ordinary
-  catalog record, then delete the retired macros, duplicated owner/name data,
-  and manual intrinsic-ID list.
-- [x] Add architecture tests showing that representative types with fields,
-  variants, associated functions, and methods are declared in owner blocks yet
-  remain resolvable, documentable, completable, and code-generatable through
-  the normalized graph.
-- [ ] Long term, define the standard library in SplitScript source and make its
-  loader produce the same normalized symbol graph as the interim Rust macro.
-  Add the prerequisite language features deliberately: modules/namespaces,
-  generic declarations and capability bounds, declaration-only intrinsic and
-  host functions, effect metadata, private runtime fields, attached
-  documentation, and ordinary reusable library bodies.
-- [ ] Compile bundled standard-library sources in an explicit privileged mode,
-  never as ordinary project code. Only that mode may declare intrinsic or host
-  bindings, representation hooks, runtime-private fields, trusted effects, and
-  other low-level implementation details. User files must be unable to enable
-  the mode, import its private surface, shadow the bundled library, or call raw
-  intrinsic entry points.
-- [ ] Keep a small Rust intrinsic/host registry as the trust boundary. Loading
-  the SplitScript standard library must resolve every privileged declaration
-  against that registry and verify its signature, effects, availability,
-  suspension/cancellation behavior, and representation contract. Reject
-  unknown, duplicate, orphaned, or understated bindings before compiling user
-  code.
-- [ ] Once the SplitScript source loader covers the complete library, delete
-  the interim Rust declaration macro. Rust should retain only core primitive
-  definitions, backend-neutral representation primitives, the host ABI
-  catalog, and deliberately scoped intrinsic lowering implementations.
-
-### Library declaration graph
-
-- [x] Extend `StandardLibrary` from a callable catalog into a complete,
-  backend-independent symbol graph with stable IDs for namespaces, nominal
-  types, fields, runtime-private slots, enum variants, callables, capabilities,
-  and intrinsic implementations.
-- [x] Give every callable an explicit owner—root, namespace, nominal type, or
-  capability—instead of deriving namespaces from string path prefixes.
-  Declare `process`, `timer`, and `Unity` as namespaces; keep `Duration` and
-  the Unity value types as nominal types with associated or instance members.
-- [x] Replace catalog `Builtin(BuiltinType)` and `Named("...")` references with
-  stable core-type, standard-type, type-parameter, and constructed-type
-  identities. Names are lookup/display data, never semantic identity.
-- [x] Describe public fields and runtime-private storage in the owning type
-  declaration. Runtime metadata must be backend-neutral: scalar, GC struct,
-  GC array, enum, compile-time-only, and derived record representations rather
-  than `wasm_encoder` types or numeric heap/field indices.
-- [x] Generate namespace, standard type, field, variant, and callable IDs
-  together with their declaration rows, so adding an ordinary symbol cannot
-  leave a parallel ID enum or inverse owner list out of sync.
-- [x] Add catalog validation for unique IDs and names, resolvable owners and
-  type references, valid representation dependencies, field/variant identity,
-  complete public documentation, capability consistency, and intrinsic
-  signature/implementation agreement.
-
-### One semantic type universe
-
-- [x] Restrict compiler-core types to genuine language primitives and
-  constructors: `void`, `bool`, fixed-width numbers, `address`, inference
-  variables, arrays, `T?`, and `T!`. Model `String`, `Duration`, `Module`,
-  `TimerState`, and the Unity family as declared nominal library types;
-  represent `Signature` as a single declared compile-time intrinsic type.
-- [x] Preserve unresolved nominal type paths in syntax and resolve them against
-  one environment containing core, standard-library, and source declarations.
-  The parser must not enumerate future standard-library type names.
-  - [x] Keep source-written standard-library type names nominal in syntax and
-    resolve them to catalog identities when entering inference/semantics.
-  - [x] Apply the same name-resolution boundary to source record/enum names:
-    source annotations now carry an interned nominal-name identity and resolve
-    alongside catalog names only when entering semantics.
-  - [x] Consolidate constructor, enum-pattern, choice-setting, and nominal-type
-    lookup into one declaration environment rather than parallel parser maps.
-- [x] Simplify inference to known semantic `TypeId` values plus inference
-  variables and the minimum temporary constructor terms needed while a
-  constructed type's element/value remains unresolved. Remove the parallel
-  nominal variants and conversion tables in `ast::TypeRef`, `inference::Type`,
-  and `BuiltinType` as their migrations complete.
-  - [x] Build one semantic `TypeStore` before inference and represent every
-    standard-library nominal inference case as its canonical `Type::Known(TypeId)`.
-    Checked publication preserves that identity directly; no library type has
-    a dedicated inference or semantic variant or a post-inference conversion
-    table.
-  - [x] Represent source record and enum inference types with the same known
-    semantic `TypeId` values used by checked programs; nominal inference no
-    longer has separate standard/source variants.
-  - [x] Represent core primitives with their canonical semantic `TypeId` as
-    well; inference no longer has parallel primitive or nominal variants.
-  - [x] Intern resolved array, Option, and Result terms during inference while
-    retaining only the minimum temporary constructor terms needed while their
-    element/value types are still unresolved.
-- [x] Introduce well-known type/variant handles for genuine language and ABI
-  contracts such as string literals, interpolation, `gameTime`, signature
-  literals, and timer-state conversion. A well-known handle references the
-  catalog declaration; it does not redeclare its name, fields, variants,
-  capabilities, nullability, or representation.
-- [x] Generalize equality, process-memory layout, interpolation/string
-  conversion, and future traits into capability queries over semantic
-  `TypeId`. Derive record/enum capabilities from their members where
-  appropriate rather than matching concrete library types.
-  - [x] Declare core and standard-type capabilities once in the catalog and
-    make inference constraints, callable applicability, casts,
-    interpolation, memory-read eligibility, and equality query them instead
-    of maintaining concrete-type lists.
-  - [x] Treat inference checks for source records, enums, and wrappers as
-    conservative admissibility only, then prove them through one recursive
-    semantic-`TypeId` capability query. Preserve precise equality failures and
-    process-memory layouts as capability evidence for diagnostics and backend
-    planning; validate catalog type-parameter constraints generically.
-
-### Generic members, layouts, and tooling
-
-- [x] Resolve standard and source fields through one declaration query and one
-  stable member identity. Remove `BuiltinFieldId` and the type checker’s
-  `Module`/Unity field-name tables.
-- [x] Make completion, hover, signature help, go-to-definition, semantic
-  highlighting, rename reservation, and generated documentation traverse the
-  same symbol graph. Remove standard types and fields from `LanguageCatalog`;
-  that catalog should contain only keywords, syntax, lifecycle/actions, and
-  other genuinely language-defined concepts.
-- [x] Plan reachable Wasm GC layouts from semantic type declarations. Backend
-  code must query type and field layout IDs rather than use fixed constants
-  such as `UNITY_IMAGE_TYPE` or numeric field indices.
-- [x] Make intrinsic lowering request its actual temporary values and query
-  declared representations. Remove unconditional Unity scratch locals and
-  helper signatures that reconstruct library types independently.
-- [x] Keep exact-type branching only inside behavior that is intrinsically
-  type-specific. Such code may reference stable standard type/field/variant
-  IDs, but it must not restate their source names, semantic shapes, storage
-  layout, or documentation.
-
-### Vertical migration and removal order
-
-- [x] Establish catalog declarations and adapters without changing source
-  syntax or runtime behavior; add characterization tests for compiler queries,
-  docs/LSP results, GC layouts, and generated Wasm before deleting old paths.
-- [x] Migrate explicit `process`, `timer`, and `Unity` namespaces and switch all
-  editor/documentation discovery away from inferred callable path prefixes and
-  hard-coded namespace lists.
-- [x] Migrate `TimerState` first as the enum/variant proving case. Remove its
-  synthetic AST enum, checker injection, name-based backend lookup, and
-  duplicate `LanguageCatalog` entries.
-- [x] Migrate `Module` as the field and nominal-GC-record proving case. Its
-  `address` and `size` members and physical slots must come from one
-  declaration.
-- [x] Migrate `UnityModule`, `UnityImage`, `UnityClass`, and `UnityField`
-  together, including public fields, runtime-private ownership references,
-  methods, async temporaries, generated helpers, and GC layout planning.
-- [x] Migrate `Duration`, then `String`, then `Signature`, accounting for their
-  lifecycle/ABI contracts, non-nullability, literal/interpolation behavior,
-  array representation, and compile-time-only behavior without duplicating
-  their declarations.
-- [x] Delete the retired standard-type variants, conversion matches, fixed GC
-  indices, numeric field indices, special member tables, and duplicate
-  language/tooling documentation after each vertical slice. Do not retain
-  compatibility aliases; the language is not yet in production.
-- [x] Finish with full compiler, formatter, generated-documentation, LSP,
-  extension, example-autosplitter, Wasm validation, and runtime regression
-  coverage. Add a test proving that a new ordinary catalog record with fields
-  becomes resolvable, documentable, completable, and code-generatable without
-  adding a concrete-type match elsewhere.
-  - [x] A test-only `CatalogRecordProbe` declaration exercises nominal
-    resolution, semantic `TypeId` identity, public fields, go-to-definition,
-    hover documentation, completion, derived process-memory layout,
-    structural equality helpers, and valid Wasm GC generation. Its ID is not
-    referenced by production compiler or tooling code.
-  - [x] Re-run the full Rust suite, formatter check, VS Code TypeScript check,
-    release compilation of both example autosplitters, and Wasm validation.
-    The existing Node 24 Lunistice harness still reaches its previously
-    characterized null-dereference in the unchanged attachment runtime; the
-    generated module validates and this refactor does not alter that runtime
-    path.
-
-## Completed foundation — Conditional state expressions
-
-### Expression-valued `if`
-
-- [x] Make `if` an expression with type inference across its branches.
-- [x] Evaluate only the selected branch. This is essential for memory reads:
-  an inactive branch must not touch the target process.
-- [x] Use ordinary expression syntax in `state` rather than inventing a
-  state-only conditional around individual fields.
-- [x] Allow a state field to combine edition-specific representations into one
-  enum value. The Lunistice state should become conceptually:
-
-  ```text
-  levelOrScene = if isDlcDemo {
-      LevelOrScene.Scene(process.read.managedString(
-          process.read(gameManagerInstance.offset(levelOrSceneOffset)),
-          128
-      ))
-  } else {
-      LevelOrScene.Level(process.read(
-          gameManagerInstance.offset(levelOrSceneOffset)
-      ))
-  }
-  ```
-
-  This fixes the current bug where both `level` and `currentScene` are read from
-  the same union-like location even though only one representation is valid.
-  Implemented in [`examples/lunistice.split`](examples/lunistice.split); its
-  runtime test verifies a 4-byte base-game read versus an 8-byte DLC pointer
-  read at the shared location, never both.
-
-## P0 — Compiler and standard-library architecture checkpoint
-
-Do this checkpoint before adding `Option`, `Result`, generic reads, traits, or
-another substantial batch of standard-library APIs. The original prototype
-was useful for discovering the language, but did not scale: its parsed AST was
-mutated in place with inferred types, calls remained string paths, type
-checking and code generation resolved built-ins independently, and
-[`src/codegen.rs`](src/codegen.rs) owns ABI declarations, runtime generation,
-async lowering, layout, helper selection, and expression emission in one file.
-`min`, `max`, and `clamp` make the problem especially visible: their names,
-typing rules, temporary-local requirements, and lowering are manually
-recognized in several unrelated functions.
-
-This is an architectural refactor, not a language redesign. Preserve the
-current source syntax and generated behavior with regression tests while
-introducing the following boundaries.
-
-### Staged compiler pipeline and semantic model
-
-- [x] Replace the single mutable AST pipeline with explicit products:
-  `syntax AST -> resolved HIR -> typed HIR -> lowered Wasm IR -> WebAssembly`.
-  Syntax nodes should describe what the user wrote; inferred types, resolved
-  symbols, coercions, and selected calls belong in semantic IR.
-
-  - [x] Add an inspectable declaration-level HIR at `lower`, keep syntax
-    immutable during type checking, and return inferred backend layouts in the
-    checked product instead of appending them to the parsed AST.
-  - [x] Materialize checked statement and expression resolution into typed body
-    HIR nodes. Paths, calls, members, constructors, assignments, patterns, and
-    choice settings carry their stable semantic targets directly; resolutions
-    that depend on inference are intentionally attached after checking.
-  - [x] Publish typed HIR with `TypeId` results and explicit coercions, then
-    make the backend consume it instead of syntax plus semantic side tables.
-
-    - [x] Give every checked expression a stable-ID-ordered typed HIR node with
-      its `TypeId`, span, and optional type-directed resolution. Migrate backend
-      path, assignment, constructor, and match-pattern identity lookup to it.
-    - [x] Move expression/statement shape and child ownership into typed HIR,
-      including match arms and async statements. Add typed-HIR traversal and
-      migrate backend string/signature discovery to it as the first structural
-      consumers.
-    - [x] Represent interpolation-to-string conversion explicitly on the typed
-      operand edge, migrate ordinary statement/expression emission and async
-      lowering together, and remove backend syntax walks and expression
-      resolution side-table lookups from user bodies.
-- [x] Give declarations, types, standard-library items, and call targets stable
-  IDs. A typed call must identify a user function/method or a standard-library
-  item directly; the backend must never resolve `Vec<String>` paths again.
-
-  - [x] Assign stable per-program `ExprId` values during parsing and key
-    resolved standard-library calls by expression identity rather than source
-    spans.
-  - [x] Assign stable `FunctionId` values to user functions and methods, resolve
-    every user call to its callable ID, and make the backend dispatch through a
-    single ID-indexed Wasm function table rather than function/method names.
-  - [x] Assign stable `ValueId` values to globals, parameters, locals, await
-    bindings, state fields, and settings. Expose ordinary and snapshot-aware
-    path roots for go-to-definition and use ID-keyed local, async-frame, state,
-    settings, and global storage for backend reads.
-  - [x] Assign stable `AssignmentId` values, publish assignment targets as
-    `ValueId`, and make local, async-frame, and global writes consume semantic
-    targets rather than resolving names again in the backend.
-  - [x] Assign `ValueId` values to match payload bindings, include the resolved
-    receiver root and semantic receiver type in method-call facts, and lower
-    receivers directly through ID-keyed storage without backend name maps.
-  - [x] Assign typed IDs to records, enums, record fields, enum variants, and
-    built-in fields. Publish semantic member chains for paths and method
-    receivers, and make record literals and enum constructors expose their
-    resolved field/variant IDs to the backend.
-  - [x] Assign `PatternId` and `SettingChoiceOptionId` values, publish resolved
-    enum variants for match arms and choice defaults/options, and remove their
-    backend variant-name lookup.
-- [x] Separate syntactic type references, private inference types, semantic
-  `TypeId` values, and backend physical value categories. Constructed semantic
-  types retain the stable declaration/layout identities needed by tooling and
-  Wasm GC lowering.
-
-  - [x] Introduce the inference-free `TypeId` / `TypeKind` interner used by
-    checked semantic call resolutions and editor-facing queries. Move catalog
-    built-ins and typed-path arguments to the independent `BuiltinType` model.
-  - [x] Store every resolved expression type as a semantic `TypeId`, expose it
-    by `ExprId`, and make the Wasm backend consume the semantic facts.
-  - [x] Keep omitted global/local/await/state/parameter/function-result
-    annotations absent in checked syntax. Publish every inferred declaration
-    type by `ValueId` (and each function result by `FunctionId`) in the semantic
-    model, and make the Wasm backend consume those facts.
-  - [x] Publish record-field, enum-payload, and array-element layouts as
-    ID-keyed semantic `TypeId` facts, give arrays a dedicated `ArrayTypeId`, and
-    make the Wasm backend consume those facts instead of AST layout types.
-  - [x] Introduce inference-free `ast::TypeRef` values for every source
-    annotation, cast target, and integer suffix. Keep parser-owned array type
-    references separate from checker-owned inferred array layouts.
-  - [x] Remove the temporary `Expr::ty` slot and synthetic-expression escape
-    hatch. Record pending expression types directly by `ExprId` during checking
-    and resolve them into the semantic model without mutating or revisiting the
-    syntax tree.
-  - [x] Move temporary types and inference variables completely out of `ast`.
-    A dedicated inference context now owns union/find unification, requirement
-    composition, literal bounds, defaulting, and inferred array layouts.
-  - [x] Remove `TypeStore`'s parallel legacy representation. Wasm storage/value
-    selection now lowers semantic `TypeId` / `TypeKind` values into
-    backend-local physical categories without importing inference types or
-    reading source annotations.
-- [x] Keep bidirectional inference and expected-type propagation, but express
-  them through a reusable constraint/unification layer. Standard-library
-  overloads and methods must submit the same constraints as ordinary language
-  constructs instead of having one-off branches in `Checker::call`.
-
-  - [x] Extract the reusable inference context and make ordinary expressions,
-    declarations, and standard-library generic constraints share it.
-  - [x] Replace the remaining procedural overload/method selection branches
-    with declarative candidates that submit constraints to the same context.
-  - [x] Defer record-member resolution when a receiver is still an inference
-    variable, then solve it from later call sites or a unique combination of
-    accessed fields. `fn levelTimeText(parts) { parts.minutes }` now infers
-    `LevelTimeParts` from `levelTimeText(current.levelTimeParts)` without an
-    annotation; genuinely ambiguous shared field names receive a focused
-    diagnostic instead of an arbitrary nominal-type guess.
-- [x] Add shared AST visitor and folder utilities. String/signature collection,
-  await discovery, local collection, and later tooling passes should not each
-  need another exhaustive recursive walker whenever a new expression kind is
-  added. Give resolved/typed HIR sibling traversal utilities when those IRs are
-  introduced rather than pretending the syntax visitor can traverse them.
-- [x] Expose the stages through a compiler facade (`parse`, `lower`, `check`,
-  and `codegen`) while retaining `compile` as the convenient one-shot API.
-  Stage results must be inspectable without invoking the WebAssembly backend.
-
-### One standard-library catalog
-
-- [x] Replace name-based `Builtin::resolve` and method-name special cases with
-  a declarative, backend-independent `StandardLibrary` catalog. Each item needs
-  one canonical record containing:
-
-  - a stable symbol ID and qualified name;
-  - item kind, receiver (for methods), parameters, return type scheme, generic
-    variables, and capability constraints;
-  - availability and effects such as pure, process-reading, suspending,
-    lifecycle-restricted, or debug-only;
-  - summary, full documentation, parameter documentation, examples,
-    deprecation/migration information, and links to related items;
-  - an implementation key: ordinary SplitScript body, compiler intrinsic, or
-    host ABI operation. The catalog may name an intrinsic, but backend code is
-    the only layer that knows how that intrinsic becomes Wasm.
-
-- [x] Provide read-only catalog queries for exact lookup, method lookup by
-  receiver/capability, symbol enumeration, signature rendering, and
-  documentation retrieval. Type checking, diagnostics, generated docs, LSP
-  completion, hover, and signature help must all call these APIs rather than
-  maintain parallel lists.
-- [x] Model language-only concepts—keywords, action/lifecycle blocks, the
-  settings DSL, and syntax forms—in a sibling `LanguageCatalog` using the same
-  documentation/example model. They are not fake functions, but the docs and
-  editor still need a uniform way to discover them. First-class control flow
-  such as `retry expression` belongs here rather than in `StandardLibrary`.
-- [x] Validate the catalogs at test time: IDs and canonical names are unique,
-  references resolve, every intrinsic has a backend implementation, every
-  public item has documentation, and every example parses and type-checks.
-- [x] Migrate `min`, `max`, and `clamp` first as the proving case. They should
-  be numeric methods with a shared constrained type variable and stable
-  intrinsic IDs (or ordinary generic library bodies once those are
-  expressible). Remove all raw checks for those names from type checking,
-  temporary-local collection, and expression emission.
-- [x] Then migrate every existing built-in and type-directed method. Adding a
-  normal library API after this point should require one catalog declaration
-  plus either a source body or one deliberately scoped backend intrinsic—not
-  edits across parser, checker, code generator, documentation, and LSP code.
-- [ ] Once modules and generic library functions exist, allow ordinary
-  standard-library declarations and bodies to be authored in SplitScript and
-  compiled into the same validated symbol graph. Keep most future library
-  functionality there; reserve compiler intrinsics for representation
-  primitives, host boundaries, and suspension/control-flow operations that
-  cannot be ordinary source code. The interim hierarchical Rust declaration
-  macro must feed the same graph so this later source migration replaces only
-  the producer, not every compiler and tooling consumer.
-
-### ABI, lowering, and code-generation boundaries
-
-- [x] Describe host imports in a declarative ABI catalog containing their Wasm
-  signature, ownership/lifetime contract, effects, and documentation. Generate
-  import declarations and host-backed standard-library bindings from it, and
-  make [`docs/ABI.md`](docs/ABI.md) a generated/verified view rather than a
-  second hand-maintained source of truth.
-- [x] Introduce a small Wasm-oriented lowering IR with explicit locals,
-  blocks/terminators, coercions, and suspension points. This
-  should replace direct typed-HIR-to-encoder emission and the remaining ad hoc
-  scratch-layout planning, and prepare for
-  `else return`, transactional `Result` handling, profile erasure, and a real
-  async state-machine pass; a general optimizer or target-independent SSA IR is
-  not required yet.
-
-  - [x] Expose an inspectable `lower_wasm` stage with structured statements,
-    `Fallthrough`/`Return`/`Suspend` terminators, and explicit suspension
-    continuations. Make ordinary action/function emission and `onAttach`
-    state-machine construction consume it.
-  - [x] Plan value locals, async-frame fields, match inputs/payload bindings,
-    and numeric-intrinsic scratch locals in the lowering product using semantic
-    `TypeId`s. Assign concrete Wasm indices only in the encoder.
-  - [x] Lower expression operations and typed coercion edges into the Wasm IR.
-    Do not add a backend-only failure channel while doing this; result-aware
-    control-flow edges belong after the language's real `T!` semantics.
-
-    - [x] Add a stable-ID expression plan and migrate None/bool/integer/float
-      literals, resolved value/member paths, unary operations, binary
-      operations, explicit casts, semantic result types, and implicit
-      Option/Result lift edges. Ordinary encoding consumes these nodes without
-      re-querying their typed-HIR operation or path resolution.
-    - [x] Migrate String literals/interpolation with explicit String-conversion
-      edges, signature literals and their data collection, arrays, resolved
-      record-field constructors, and resolved enum-variant constructors.
-    - [x] Migrate call arguments and resolved call targets, including user
-      function IDs, method receivers/member chains, standard-library item IDs,
-      and inferred generic type arguments. Ordinary and suspending call
-      emission no longer queries typed HIR for semantic call resolution.
-    - [x] Migrate expression-valued `if`, including nested `else if` branches
-      and value-producing GC/reference branches.
-    - [x] Migrate `else` fallback branches and postfix `?` propagation,
-      preserving value, `return value`, bare `return`, and the exact inferred
-      Result boundary in Wasm IR.
-    - [x] Migrate `match` with resolved enum variants, payload binding IDs,
-      literal/wildcard patterns, guards, and result arms. Remove the temporary
-      `ExpressionKind::TypedHir` boundary and the expression encoder's
-      typed-HIR context.
-- [x] Split code generation by responsibility only after the typed-HIR and
-  lowering interfaces exist: ABI/imports, GC type/layout planning, ordinary
-  expression lowering, async/state-machine lowering, generated runtime,
-  standard-library intrinsic lowering, and final Wasm encoding. Moving the
-  existing functions into many files before establishing those data flows
-  would only redistribute the coupling.
-
-  - [x] Extract host-import type emission and stable ABI function-index
-    assignment into `codegen/imports.rs`, driven solely by `AbiCatalog`.
-  - [x] Extract deterministic GC type/layout construction into
-    `codegen/gc_types.rs`. Return the completed recursive type section and next
-    free type index as an explicit backend plan covering state, built-ins,
-    async frames, records, enums, arrays, Options, and Results.
-  - [x] Extract final section assembly after generated functions, globals,
-    exports, and data dependencies are represented as explicit backend plans.
-  - [x] Extract ordinary block/assignment/expression emission and
-    standard-library intrinsic dispatch into `codegen/expression.rs`, around
-    the completed Wasm-IR expression plan and a narrow set of entry points used
-    by actions, state reads, and async polling.
-  - [x] Extract `onAttach` async/state-machine emission into
-    `codegen/async_state.rs`, around Wasm-IR suspension states, continuation
-    blocks, `retry`, and process-lifetime cancellation regions. Keep polling
-    and state traversal private behind one orchestrator entry point.
-  - [x] Extract settings registration, host-map refresh, value decoding,
-    current/old rotation, tooltips/filters, and start-time initialization into
-    `codegen/settings.rs`, exposing only its three generated function bodies.
-  - [x] Extract the per-tick update runtime into `codegen/update.rs`: process
-    attach/detach, cancellation cleanup, settings refresh, transactional state
-    reads, snapshot rotation, lifecycle action ordering, and timer dispatch.
-  - [x] Extract generated String, formatting, equality, scanning, address,
-    managed-memory, and Unity/IL2CPP helpers into
-    `codegen/runtime_helpers.rs`. Generate ordered core/equality body plans
-    through one interface from resolved indices and discovered array support.
-  - [x] Extract generated-function signature and index planning into
-    `codegen/function_plan.rs`. Allocate helper, settings, equality, user,
-    state-read, action, start, and update functions in one deterministic pass;
-    body emitters only consume its named indices.
-  - [x] Extract state-read, user-function, and ordinary action body generation
-    plus Wasm-local assignment into `codegen/script_functions.rs`.
-  - [x] Extract global/data planning and final section assembly so
-    `codegen::compile` becomes only the deterministic module orchestrator.
-- [x] Track dependencies between selected library items, generated helpers,
-  strings/signatures, and host imports so the backend can eventually emit only
-  what a program uses. Deterministic output remains required.
-
-  - [x] Introduce a backend dependency analysis over resolved standard-library
-    calls and generated-helper edges. Use it to omit Unity module-name and
-    IL2CPP signature data from scripts that never call `Unity.il2cpp`.
-  - [x] Make generated function planning and body emission consume the helper
-    set so unused helper signatures and placeholder bodies are removed. Helper
-    calls use checked dependency-index lookups, and settings-free scripts omit
-    both settings adapter functions and their update/start calls.
-  - [x] Derive the required host-import set transitively from emitted helpers,
-    state sources, settings, lifecycle behavior, and direct intrinsics. Emit
-    the filtered subset in ABI-catalog order and use checked import lookups;
-    setting registration/value imports are filtered by individual kind.
-  - [x] Compute source-function and expression reachability from actions,
-    state expressions, and global initializers, following user-function and
-    user-method calls transitively. Filter user function signatures/bodies,
-    source strings/signature literals, helpers, and host imports by that set.
-  - [x] Filter generated structural-equality signatures/bodies from reachable
-    `==` / `!=` operand types, recursively retaining nested record/enum and
-    String equality dependencies. A minimal script now emits no equality body.
-  - [x] Introduce an explicit `GcLayout` plan returned by GC type construction;
-    use it for recursive field storage, globals, generated function signatures,
-    and expression/action local types while preserving the current layout set.
-  - [x] Replace emitter-side semantic-ID index arithmetic with `GcLayout`
-    lookups for aggregate construction/access, defaults, memory reads, settings,
-    generated helpers, and failure propagation. Dynamic GC types now fail fast
-    if they reach the fixed built-in type conversion path.
-  - [x] Filter inferred GC layouts by reachable storage, signatures, and
-    expressions, with transitive closure through record fields, enum payloads,
-    arrays, Options, and Results. Compiler-generated helper layouts are
-    explicit roots, and `GcLayout` owns both compact ordering and encoding.
-
-### Refactor safety and scope
-
-- [x] Capture compile-pass and runtime behavior for every currently supported
-  feature before changing the pipeline, including both Lunistice layouts,
-  settings changes, await cancellation, transactional failed reads, numeric
-  methods, matches, strings, and GC values across suspension.
-- [x] Add focused snapshots for resolved/typed HIR and diagnostics. Backend
-  tests should assert observable Wasm behavior instead of depending on
-  incidental function/type indices.
-- [ ] Keep this as internal modules in the existing crate initially. Split into
-  syntax, HIR/type-system, standard-library, compiler, Wasm backend, CLI, docs,
-  and LSP crates only when the new interfaces are stable and at least two
-  consumers need them. Crate boundaries should enforce proven architecture,
-  not be used to discover it.
-- [x] Record compile-time and generated-Wasm-size baselines. Correctness and a
-  clean semantic API come first, but the catalog/query design must not require
-  repeatedly scanning all symbols or regenerating all helpers for each editor
-  request.
-
-## P0 — `Option`, `Result`, and explicit failure
-
-The semantic type representation, catalog type schemes, typed HIR, and basic
-lowering IR from the architecture checkpoint are prerequisites for this work.
-
-### `Option` and `Result`
-
-- [x] Add `T?` as the spelling of an optional constructed type. Preserve its
-  value type and monomorphized Wasm GC layout in semantic queries.
-- [x] Use `None` to construct the empty option and `Some(value)` as an optional
-  explicit present-value constructor. A plain `T` automatically lifts into
-  `T?` when the expected type is optional. Require an annotation or other
-  expected-type context when a bare `None` has no constraint on `T`.
-- [x] Add `T!` as a result constructed type with a standard language error
-  payload. Preserve its value type and monomorphized Wasm GC layout in semantic
-  queries; the error type is deliberately not generic initially.
-- [x] Use `Err("message")` to construct failure and `Ok(value)` as an optional
-  explicit success constructor. A plain `T` automatically lifts into the
-  successful result when `T!` is expected. Require an annotation or other
-  expected-type context when `Err` has no constraint on its success type.
-- [x] Reject adjacent repeated postfix constructors (`T??`, `T!!`, `T?!`, and
-  `T!?`) with a focused diagnostic. Nested constructed types remain possible
-  through an enclosing type, such as `Array<T?>!`, without giving adjacent
-  punctuation an ambiguous meaning.
-- [x] Record optional/successful lifts explicitly on typed-HIR expression edges
-  with source and target `TypeId`s, and lower empty, successful, and failed
-  values to their WebAssembly GC representations.
-- [x] Define structural equality for both wrappers when `T` supports equality:
-  Options compare empty/present state and present values; Results compare their
-  success/error state, successful values, or standard error strings.
-- [x] Define exhaustive matching for both wrapper types. Options use `None` and
-  `Some(value)`; Results use `Err(error)` and `Ok(value)`. `_` remains a full
-  wildcard, and guarded arms do not satisfy exhaustiveness.
-- [x] Extend bidirectional inference so payload-bearing `Some(value)` and
-  `Ok(value)` constructors work without expected-type context. Canonicalize
-  provisional wrapper layouts after inference so later annotated uses share one
-  nominal Wasm GC type. Payload-free `None` and success-type-free `Err(error)`
-  still require context because their missing type cannot be inferred.
-- [x] Decide which standard-library operations return `T?` versus `T!`.
-  Immediate process operations whose attempt can fail return `T!`: fixed-layout
-  reads, pointer following, relative-address decoding, and managed-string
-  decoding. Suspended module/signature/Unity discovery yields `T` because
-  temporary absence is its pending state and process closure is cancellation.
-  Future one-shot lookup APIs where absence is an expected completed outcome
-  return `T?`; none of the current catalog operations have that contract.
-- [x] Preserve transactional state polling: an unhandled failed state read must
-  skip the entire snapshot rather than commit partially updated fields.
-- [x] After `T!` is represented in typed HIR, make result propagation explicit
-  in the lowering IR. Replace the hidden `READ_FAILED_GLOBAL` writes emitted by
-  individual process-read call cases with ordinary `Result` construction and
-  handling. The state transaction boundary may initially preserve the same
-  all-or-nothing commit behavior, but it must consume the language-level result
-  path rather than a second backend-only error channel.
-
-### `else` unwrapping and control flow
-
-- [x] Support a low-precedence `else` operation for `T?` and `T!`, serving the
-  common roles of `unwrap_or` and Rust's `let ... else` without method noise.
-- [x] Permit a value fallback:
-
-  ```text
-  let name = optionalName else "Unknown"
-  ```
-
-- [x] Permit `return` as diverging control flow in the fallback:
-
-  ```text
-  let module = findModule() else return Err("module not found")
-  ```
-
-- [x] Add `while condition { ... }` statement loops as the foundation for loop
-  control flow. Conditions are checked before every iteration and loop bodies
-  are lexically scoped.
-- [x] Add statement-form `break` and `continue` with nearest-loop behavior,
-  including from nested conditional blocks. They are currently rejected
-  outside loops.
-- [x] Add direct `else break` and `else continue` fallback branches. Expression
-  lowering carries structured branch targets through nested expression `if`,
-  match arms, and short-circuit expressions. `else` is otherwise
-  the lowest-precedence, right-associative expression operation; expression
-  `if` owns its braced `else`, while `else return` is a diverging fallback.
-- [x] Produce a useful diagnostic when `else` is applied to a non-optional,
-  non-result value.
-- [x] Add postfix `?` for `T!`. It unwraps success and propagates the original
-  error to the nearest typed failure boundary. A state-field assignment and a
-  function returning `T!` are currently boundaries.
-- [x] Add `throw error` as the underlying error control-flow primitive for
-  `T!` functions. Thrown errors are typed independently from `Err(error)`, which
-  constructs an ordinary result value. Explicit `throw` and the failure arm of
-  `value?` share one failure-transfer lowering operation rather than separate
-  implicit-return implementations.
-## P0 — Typed process deserialization
-
-Start this only after standard-library calls resolve through the catalog and
-typed HIR. Record layout/deserialization should be a reusable semantic service,
-not another collection of `process.read` branches inside code generation.
-
-### One generic `process.read`
-
-- [x] Replace primitive-specific calls such as `process.read.i32(address)` with
-  `process.read(address)` and infer the result from its expected type.
-- [x] Keep suffix paths such as `process.read.i32(address)` as the explicit type
-  escape hatch for contexts where inference has no constraint.
-- [x] Make synchronous and retried reads share the same type-directed API and
-  clear failure semantics.
-- [x] When inference is ambiguous, explain which annotation would resolve it
-  and show an example in the diagnostic.
-
-### Records as readable memory layouts
-
-- [x] Introduce a compiler-known `MemoryReadable` / `Deserializable` capability.
-  Every primitive memory type implements it.
-- [x] Automatically make a record readable when all its fields are readable.
-  The initial layout is field order with explicit, documented size and padding
-  rules.
-- [x] Read a record with one host `process_read` call, then deserialize its
-  fields locally. Besides being faster, this gives a coherent snapshot.
-- [ ] Once real target layouts require it, add declarative layout controls for
-  exact field offsets, explicit padding/packing, per-record or per-field
-  little-/big-endian decoding, and eventually custom decoding, without changing
-  `process.read` call sites. Keep natural layout as the zero-annotation default.
-- [x] Add a record for Lunistice's adjacent clock fields and replace three
-  reads with one:
-
-  ```text
-  record LevelTimeParts {
-      minutes: f32
-      seconds: f32
-      hundredths: f32
-  }
-
-  levelTimeParts: LevelTimeParts = process.read(
-      timerInstance.offset(levelTimeVectorOffset)
-  )
-  ```
-
-### Managed strings
-
-- [x] Remove the naming inconsistency of the standalone
-  `process.readManagedString` function.
-- [x] Initially place specialized readers in the same namespace, for example
-  `process.read.managedString(address, maxUtf16Units)`, because a managed string
-  is a pointer-based runtime object rather than a fixed inline memory layout.
-- [ ] Explore representing Unity managed strings as a `Deserializable` wrapper
-  once custom deserialization exists. Do not pretend they are ordinary inline
-  `String` values merely to force them through the generic reader.
-
-### Traits / interfaces
-
-- [x] Establish one compiler-known structural equality capability shared by
-  semantic diagnostics and Wasm helper generation. Records and enums derive it
-  recursively from their fields and payloads; this service can later feed LSP
-  availability and hover information without reconstructing backend rules.
-- [ ] Design a trait or type-class system compatible with bidirectional
-  inference. It should support standard-library constraints such as
-  `Deserializable` without forcing routine scripts to spell generic bounds.
-- [ ] Start with compiler-known traits needed by memory reading, formatting,
-  equality, and string interpolation.
-- [ ] Decide later whether users can define and implement their own traits.
-  Avoid committing to a full Rust-like trait system before real splitter ports
-  demonstrate the necessary surface.
-- [ ] Put trait/capability declarations and implementations in the same
-  semantic catalog used by standard-library signatures. Completion and hover
-  need to explain why a method is available for an inferred type, including
-  which bound supplied it.
-
-### Anonymous records
-
-- [ ] Add structural anonymous record values and types after named-record
-  deserialization is stable.
-- [ ] Infer their field types bidirectionally and allow ordinary field access,
-  nesting, matching, and GC storage.
-- [ ] Decide whether anonymous records can implement `Deserializable` from a
-  type annotation or remain value-level conveniences only. Named records should
-  remain the recommended form for documented target-process layouts.
-
-## P1 — Core language and lifecycle polish
-
-### Compound assignment
-
-- [x] Support `+=`, `-=`, `*=`, `/=`, `%=` and the applicable bitwise/shift
-  assignment operators.
-- [x] Reuse the normal operator typing and cast rules. The left side must be an
-  assignable location and must be evaluated exactly once.
-- [x] Replace verbose code such as
-  `runTimeSeconds = runTimeSeconds + old.levelTime` with
-  `runTimeSeconds += old.levelTime` in the Lunistice port.
-
-### Timer state as an enum
-
-- [x] Replace the integer returned by `timer.state()` with an exhaustive
-  `TimerState` enum.
-- [x] Name variants after the actual ASR states and document host integer
-  conversion only at the ABI boundary.
-- [x] Support structural `==` / `!=` for enums, including active payload
-  comparison, and update the Lunistice port to compare named `TimerState`
-  variants directly instead of matching solely to emulate equality.
-
-### Small global runtime functions
-
-- [x] Make frequently used, unambiguous operations global:
-  `setVariable(key, value)` and `setTickRate(hz)`.
-- [x] Keep namespaced APIs where the namespace provides real disambiguation or
-  discoverability. Do not flatten the entire standard library as a blanket
-  rule.
-- [x] Remove the prototype spellings `timer.setVariable` and
-  `runtime.setTickRate`; the language has no compatibility burden yet, so one
-  canonical spelling is preferable to aliases or migration diagnostics.
-- [x] Rename the implementation-shaped `Duration.saturatingSecondsF32` API to
-  the scripting-oriented `Duration.fromSeconds`. Keep range handling as a
-  documented safety property, not part of the function name, and retain no
-  compatibility alias while the language is still unpublished.
-
-### Lifecycle vocabulary
-
-- [x] Rename `update` to `whileAttached` so its execution condition is visible
-  in the source.
-- [x] Audit all lifecycle names together. The former detached block runs once
-  on entry, so `onDetached` is more accurate than `whileDetached`.
-- [x] Reserve `whileDetached` for a future block that genuinely runs on every
-  detached polling tick, if a real use case needs it.
-- [x] Use the coherent set `onAttach`, `whileAttached`, and
-  `onDetached`, with the async and cancellation behavior documented beside the
-  names.
-
-### General async and cancellation lowering
-
-- [x] After the lowering IR and `Result` semantics are stable, replace the
-  current `onAttach` statement-index special case with a dedicated
-  state-machine transformation over lowered control flow. Every await has a
-  stable poll state and continuation state; nested conditional branches lower
-  through the same dispatcher without replaying preceding statements while a
-  poll remains pending.
-- [x] Compute which locals actually live across each suspension point rather
-  than storing every attach local in one continuation frame. Backward liveness
-  is recorded on each lowered `Suspend`; the physical GC frame contains the
-  deterministic union, while locals killed before use remain ordinary Wasm
-  locals.
-- [ ] Once real-world frame sizes justify it, coalesce non-overlapping
-  suspension-live ranges into shared physical frame slots without changing the
-  per-suspension liveness exposed by the lowering IR.
-- [x] Model process lifetime as a structured cancellation region so library
-  futures can offer the equivalent of ASR's `until_process_closes(...)`
-  without every operation hard-coding `onAttach` checks. The lowered body owns
-  the region, cancellable `Suspend` terminators reference it, and process exit
-  resets readiness plus the complete continuation frame in one runtime action.
-- [ ] Let the standard-library catalog describe whether an operation suspends,
-  can be cancelled, or requires an attached process. The checker, async
-  lowering, docs, and LSP signature/hover output should expose the same facts.
-
-  - [x] Add `RequiresAttachedProcess` and `CancelsOnProcessClose` alongside the
-    existing suspension/retry effects, and make async lowering derive its
-    cancellation edge from the resolved catalog item.
-  - [x] Normalize raw effects into a public `OperationSemantics` query shared
-    by the checker and lowering. Validate contradictory catalog declarations,
-    render the same facts for hover/documentation consumers, and reject direct
-    process operations in `onDetached`.
-  - [x] Infer operational requirements through user-function call graphs so a
-    helper that reads process state cannot be called transitively from
-    `onDetached`. Publish the fixed-point result through `CheckedProgram` for
-    ordinary functions, methods, and recursive call graphs without manual
-    function annotations.
-  - [ ] Surface those effects through the future machine-readable docs and LSP
-    hover/signature protocol rather than inventing editor-specific flags.
-- [ ] Broaden suspending control flow and the future library incrementally:
-
-  - [x] Allow awaits in nested `if` / `else if` / `else` control flow inside
-    `onAttach`, preserving the selected branch and its continuation.
-  - [x] Add `await nextTick()` as the first reusable suspension primitive. It
-    resumes on the following attached-process update without replaying prior
-    statements and is cancelled with its process-lifetime region.
-  - [x] Add first-class `retry expression` control flow for arbitrary `T!`
-    expressions. It re-evaluates the expression once per update, yields `T` on
-    success, and uses the assignment as its suspension/Result boundary. This
-    works through ordinary user functions rather than a hard-coded builtin.
-  - [x] Lower `while` loops containing `await` or `retry` through explicit async
-    header and exit states. Resumed bodies preserve nearest-loop `break` and
-    `continue` targets, including fallback forms and nested suspending loops.
-  - [ ] Add suspending user functions and reusable race combinators after their
-    inference, cancellation, and frame-ownership rules are specified.
-
-## P2 — Later control-flow extensions
-
-Explicit catches are intentionally deferred. Ordinary autosplitters can already
-handle failures with `T!`, `else`, postfix `?`, `throw`, function boundaries,
-and transactional state-field boundaries; catch syntax does not currently
-unblock a representative port.
-
-- [ ] Design explicit `catch` boundaries and their expression syntax. An
-  uncaught throw leaves a `T!` function as its error result; state-field
-  assignments catch into their poll result. Ensure nested catches compose
-  without losing the original error or forcing equal success types.
-- [ ] Once explicit catches exist, allow `throw` anywhere their boundary is in
-  scope, including actions and expression-oriented state DSL contexts where a
-  statement block becomes available.
-
-## P2 — Debug and release profiles
-
-Implement this on typed HIR/lowering IR and catalog effects. Profile erasure
-must be a semantic lowering pass, not conditionals scattered through AST walks
-and Wasm emission.
-
-- [x] Add explicit debug and release compiler profiles to the CLI and compiler
-  library API. `--profile debug|release` is shared by one-shot and watch builds,
-  debug is the default, and the selected profile is retained by Wasm lowering
-  for the upcoming semantic erasure pass.
-- [x] Add the first `debug` modifier for expression statements and calls such
-  as `debug print(...)`, assignments, `if`, `while`, and unbound suspension
-  statements.
-- [x] Extend `debug` to function and method declarations. Debug functions are
-  checked normally but omitted from release Wasm IR.
-- [x] Add debug-only local bindings, suspended bindings, and globals. Retained
-  code cannot use their names, and release lowering removes global storage and
-  initialization as well as local statements.
-- [ ] Extend `debug` to remaining declarations only when a real use case
-  establishes their erasure and dependency rules.
-- [x] Remove supported debug-only statements from release WebAssembly before
-  reachability, and verify their strings and imports are eliminated too.
-- [x] Enforce the release name-resolution rule for functions and bindings:
-  ordinary retained code cannot use a debug-only name, while debug statements
-  and debug functions can. Apply the same rule when more declaration kinds
-  become debug-capable.
-- [x] Initially restrict `debug` to statements whose removal has a
-  clear type (`unit`). A value-producing debug expression needs either a
-  release fallback or another explicit rule; silently inventing a default value
-  would be unsafe. Debug-only bindings now have explicit lexical visibility
-  and erasure rules; terminating statements remain rejected.
-- [x] Type-check debug-only code in release builds so debug paths do not
-  silently rot, while removing it before release code generation.
-- [x] Add profile-aware compiler and runtime tests and document current
-  diagnostic and debug logging behavior.
-
-## P2 — Formatter, LSP, and editor support
-
-### Watch builds
-
-- [x] Add `splitc watch <input.split> [-o <output.wasm>]` with an immediate
-  initial build and content-based change detection that survives editor file
-  replacement and coarse filesystem timestamps.
-- [x] Publish each successful module through a same-directory temporary file
-  and rename, so debugger reloaders do not observe partial Wasm. Preserve the
-  last successful output when reading or compilation fails.
-
-### Tooling-ready syntax and compiler database
-
-Do this immediately before formatter/LSP implementation. It builds on the
-compiler facade and typed HIR, but it does not block the intervening language
-and standard-library work.
-
-- [x] Add a lossless source document and token/trivia layer. The compiler uses
-  the same lexer pass for parsing and for an ordered lexeme stream that retains
-  whitespace, ordinary comments, documentation comments, exact token spelling,
-  and byte spans across parsed, lowered, and checked products. Formatting must
-  consume this layer rather than pretty-printing the semantic AST.
-- [x] Add an editor-facing recovering parse API with a partial AST, multiple
-  diagnostics, and explicit missing/error recovery nodes at top-level
-  declaration boundaries. Batch parsing uses the same pass but remains strict.
-- [x] Recover independently inside function, action, and nested statement
-  blocks. Synchronize at semicolons, closing braces, and plausible statements
-  on later lines without consuming a valid boundary token.
-- [x] Recover invalid record fields and enum variants independently while
-  retaining later valid members and their stable IDs.
-- [x] Recover invalid state fields independently in both supported state
-  syntaxes, retaining other pointer paths and state expressions.
-- [x] Recover neighboring settings independently in the simple settings block,
-  nested documentation DSL, and older constructor-shaped syntax.
-- [x] Recover invalid `choice` options and file filters while retaining their
-  containing setting and later valid entries.
-- [x] Recover invalid match arms independently while retaining the match
-  expression, later arms, and enclosing function or action.
-- [x] Recover invalid function parameters independently and retain function
-  bodies when the parameter list is missing its closing parenthesis.
-- [x] Recover malformed array elements and function-call arguments
-  independently, retaining later expressions and their enclosing statement.
-- [x] Recover malformed record-literal fields and template interpolations
-  independently, retaining neighboring fields, later interpolations, and the
-  enclosing expression.
-- [x] Add a syntax-only error expression and use it for missing unary/binary
-  operands and malformed parenthesized expressions. Preserve the following
-  statement without allowing recovery placeholders into typed HIR.
-- [x] Recover missing conditions, empty or malformed branches, and a missing
-  `else` inside expression-valued `if`, retaining the complete conditional and
-  following statements.
-- [x] Recover malformed declaration and statement root expressions without
-  discarding globals, state fields, locals, assignments, control-flow
-  statements, suspensions, throws, or standalone expression statements.
-  Missing `match` scrutinees likewise retain the enclosing match expression.
-- [ ] When modules or another multi-source feature are actually introduced,
-  add `FileId`, a source map, and file-aware spans as part of that feature.
-  Single-file scripts keep file-local byte spans for now; line/column
-  conversion remains at the presentation boundary.
-- [x] Move diagnostics into a dedicated model with stable compiler-stage codes
-  and severity. Lexical, syntax, type, and post-type semantic errors use
-  `SS0001` through `SS0004`, and the CLI renderer exposes the same values that
-  editor tooling can query.
-- [x] Add primary and secondary labels, notes, and applicability-classified,
-  multi-edit fixes to the shared diagnostic value. CLI rendering consumes this
-  model, and the repeated wrapper-postfix diagnostic proves a real
-  machine-applicable source edit. Eventual LSP conversion must use these same
-  values rather than introducing a parallel diagnostic shape.
-- [ ] Enrich individual diagnostics with focused labels, notes, and fixes as
-  language features and editor code actions are implemented; do not block the
-  compiler database on exhaustively annotating every existing error first.
-- [x] Back the compiler facade with reusable single-source queries for syntax,
-  lowering, name resolution, inference, references, and diagnostics. Begin
-  with explicit caching/invalidation; adopt a framework such as Salsa only if
-  measurement shows it is worthwhile.
-
-  - [x] Add a revisioned `CompilerDatabase` that caches recovering/strict
-    parsing, declaration lowering, checking, and diagnostics as shared query
-    results. Identical source updates are no-ops; changed text invalidates all
-    dependent stages without introducing a `FileId`.
-  - [x] Expose declaration lookup, inferred expression/value/function-result
-    types, semantic type shapes, resolved calls and paths, assignment targets,
-    and a cached read/write reference index without forcing clients to know
-    which compiler product owns each fact.
-- [x] Preserve partial syntax/HIR results after errors and expose symbol/type
-  lookup at a source position. Completion, hover, semantic tokens, navigation,
-  and code actions must not invoke or depend on the Wasm backend.
-
-  - [x] Lower declarations retained by the recovering parser into cached HIR
-    even when strict parsing fails.
-  - [x] Query the smallest checked expression at a byte position with its
-    inferred `TypeId`, semantic `TypeKind`, and resolved path/call/constructor
-    information.
-  - [x] Expose exact lossless token lookup at a byte position and align the
-    identifier components of typed paths and call targets with their precise
-    source spans, excluding arguments and nested child expressions.
-  - [x] Resolve identifier segments in checked expressions to exact
-    source-definition spans for values, functions, record fields, enums, and
-    enum variants. Represent standard-library calls and compiler-provided
-    fields as catalog targets rather than inventing source spans.
-  - [x] Add a syntax-reference index for source-defined types in annotations,
-    method receivers, return types, enum payloads, and casts, plus record
-    literal type/field labels and enum-pattern type/variant labels. Declaration
-    and pattern-binding identifiers navigate to themselves.
-  - [x] Navigate source-spellable built-in types, array/option/result syntax,
-    wrapper constructors and patterns, keywords, lifecycle names, setting
-    documentation, and choice/file DSL tokens to stable `LanguageCatalog`
-    items. Choice option enum/variant labels navigate to their source.
-  - [x] Catalog and navigate snapshot roots, standard-library value fields,
-    and the `TimerState` type and variants. Their semantic IDs resolve to the
-    `StandardLibrary` symbol graph rather than editor-specific special cases.
-  - [x] Preserve useful semantic facts when other expressions fail type
-    checking so navigation and hover remain available in unaffected regions.
-    The recovering checker publishes its diagnostics alongside a partial
-    semantic model; database type, resolution, position-analysis, and
-    definition queries fall back to that model without constructing typed HIR
-    or invoking the Wasm backend.
-
-### Formatter
-
-- [x] Build a canonical formatter first, sharing the compiler lexer/parser.
-- [x] Preserve ordinary comments and `///` setting documentation comments.
-- [x] Cover settings DSL indentation, match arms, interpolated strings, state
-  expressions, and multiline process reads.
-- [x] Expose formatting through `splitc fmt` and a cached
-  `CompilerDatabase::format` query for the future LSP.
-
-### Language server
-
-- [x] Create the `splitls` LSP server module and stdio binary inside the
-  existing crate, backed by one reusable `CompilerDatabase` per open document
-  rather than reparsing independently for each feature. Keep it internal until
-  the crate-splitting criteria above are met.
-- [x] Implement diagnostics and formatting first, including full document
-  synchronization, UTF-16 positions, document versions, structured diagnostic
-  metadata, and cached whole-document formatting edits.
-- [x] Add semantic highlighting, including settings titles, state fields,
-  action/lifecycle blocks, types, enum variants, signatures, and debug-only
-  code. A cached compiler-owned highlight index combines lossless lexical
-  tokens, syntax declarations, and recovered semantic resolutions; the LSP
-  only converts its byte spans into delta-encoded UTF-16 semantic tokens.
-- [x] Add completion for keywords, action blocks, standard-library symbols,
-  settings, state snapshots, record fields, enum variants, and inferred methods.
-  The compiler owns candidate kinds, snippets, documentation, and replacement
-  spans. An incomplete `receiver.` is probed without its unfinished suffix so
-  receiver types and record/user/standard-library members stay inferable. Root
-  completion follows lexical scope and includes parameters, preceding ordinary
-  and suspension bindings, nested-block locals, and match bindings while
-  excluding declarations after the cursor.
-- [x] Add standard-library hover and signature help directly from
-  `StandardLibrary` catalog queries. Completion already consumes catalog
-  signatures and documentation; hover and signature help additionally show
-  inferred substitutions, effects/availability, parameter docs, and the
-  compiler-validated catalog examples without importing the Wasm backend.
-  Signature help counts nested delimiters correctly and probes the inferred
-  receiver when a method call is still syntactically incomplete. Source hover
-  renders inferred types for globals, locals, parameters, state and setting
-  fields, record fields, functions and methods, records, enums, and variants.
-  Function and method hover also renders transitive operational effects,
-  attachment constraints, synchronous behavior, and debug-only availability.
-- [x] Drive keyword, settings DSL, and lifecycle hover documentation from the
-  sibling `LanguageCatalog`; completion already consumes the catalog and the
-  extension must not duplicate prose or syntax lists.
-- [x] Add an integration test that asks the LSP for a catalog symbol such as
-  numeric `.clamp`, then verifies that completion and hover expose the same
-  signature and documentation as generated standard-library docs. The
-  renderer-independent `StandardLibraryDocumentation` payload is now shared by
-  completion, hover, and signature help; the test compares their JSON-RPC
-  responses against both its generic and inferred `T = i32` forms.
-- [x] Add go-to-definition and find-references for functions, types, globals,
-  state fields, settings, record fields, and enum variants. Both features use
-  stable source declaration IDs and exact identifier-token references from the
-  compiler database; the LSP only maps those spans into locations for the
-  current single-file URI. References distinguish same-spelling declarations
-  and honor the protocol's `includeDeclaration` flag.
-- [x] Add identity-safe rename after the core navigation features are stable.
-  `prepareRename` selects the exact occurrence under the cursor, and the
-  compiler query validates identifier syntax, reserved catalog names, and a
-  rebuilt candidate document. It additionally verifies that every existing
-  source reference retains the same stable declaration ID, preventing captures
-  that could still type-check. Rename currently requires a semantically valid
-  document so newly introduced conflicts can be distinguished reliably.
-- [x] Add document symbols and code actions. A cached, editor-neutral compiler
-  query restores source order and models state/settings as domain containers,
-  nested setting titles as outline groups, record/enum children, methods, and
-  lifecycle events. LSP quick fixes are derived from the compiler's structured
-  diagnostic fixes, honor requested ranges and `context.only`, and preserve
-  applicability metadata rather than duplicating repair logic in the server.
-
-### VS Code extension
-
-- [x] Package the LSP client, language configuration, file association, basic
-  fallback grammar, formatter integration, and build/debug tasks. The
-  TypeScript client uses `vscode-languageclient` 10, discovers configured,
-  bundled, repository-development, or `PATH` copies of `splitls`, and restarts
-  when server settings change. The repository launch/task configuration builds
-  both halves and also exposes compile/watch tasks for the current `.split`
-  file. The extension itself exposes two explicit editor-title, context-menu,
-  and Command Palette workflows: a status-bar-managed debug watcher that
-  rebuilds after saves, and a one-shot release build that cannot race with the
-  watcher. Both share compiler discovery, automatic initial saving,
-  notifications, and an output channel; the extension package passes TypeScript
-  checking and a dry-run pack.
-- [x] Use semantic tokens from the LSP as the authoritative highlighting layer;
-  keep TextMate highlighting only as a fast startup fallback. The extension
-  enables semantic highlighting for SplitScript, contributes every custom
-  domain token type and modifier with standard supertypes/theme scopes, and has
-  a Rust integration test that prevents its manifest from drifting from the
-  server legend.
+- **P2** — tooling, documentation, migration, and ecosystem scaling.
+- **Ongoing** — evidence that must accompany changes in every priority.
+
+## P0 — Finish the source-defined standard-library boundary
+
+The normalized graph, stable data-backed IDs, hierarchical declarations,
+semantic adapter, compiler context, trusted intrinsic registry, runtime-helper
+registry, generated ABI/language catalogs, and catalog-derived backend layouts
+are in place. Ordinary compiler and tooling consumers no longer need to know
+how the bundled library is authored.
+
+The remaining maintainability problem is ownership: `StandardLibrary` still
+borrows one process-global graph made from Rust declarations. That prevents an
+alternate catalog from proving that the boundaries are real, and it is not the
+desired long-term authoring experience.
+
+- [x] Make `CompilerContext` own an immutable, shareable validated catalog
+  graph rather than a copyable handle to a `'static` singleton. `StandardLibrary`
+  now owns an `Arc` to its indexed graph, context/stage products are `Clone`
+  rather than `Copy`, and algorithms borrow the library while explicit product
+  boundaries clone the owner. A separately built validated graph is injected
+  through context and tested across parsing, checking, typed HIR, Wasm IR, and
+  binary generation. The source-loader task below will generalize the graph's
+  declaration storage beyond the currently bundled static data.
+- [ ] Define the ordinary standard-library surface in privileged SplitScript
+  source. Its declarations should co-locate namespaces, types, capabilities,
+  fields, variants, methods/functions, documentation, and focused examples.
+- [ ] Add an explicit standard-library compilation mode. It may use reserved
+  declaration forms and intrinsic bindings that user programs cannot spell;
+  loading untrusted source must never grant host or compiler privileges.
+- [ ] Keep a small Rust trust boundary for core primitives, compiler-provided
+  representations, intrinsics, runtime helpers, and ABI imports. Validate every
+  privileged source binding against that registry before the graph is usable.
+- [ ] Once the source loader covers the bundled library, delete the Rust
+  authoring macro and generated declaration duplication in one change. Do not
+  maintain two canonical sources or compatibility aliases.
+- [ ] After modules and ordinary generic library functions exist, move
+  non-intrinsic behavior such as numeric helpers out of compiler dispatch and
+  into library source.
+
+### Catalog completeness
+
+- [ ] Author focused, compiler-checked examples for namespaces, types, fields,
+  variants, capabilities, and type constructors, then require examples for
+  every public documented symbol. Do not pad symbols with shared test-like
+  programs; the rendered snippet must teach that symbol specifically.
+- [ ] Add a trusted custom-capability handler registry only when the first
+  capability cannot be described by declared membership, structural equality,
+  or structural memory layout. Bind and validate it like an intrinsic rather
+  than adding another capability-ID switch.
+
+## P0 — Preserve architectural boundaries under growth
+
+The audit removed the largest accidental couplings: parsing is syntactic;
+resolution and validation are named stages; checking has explicit passes;
+typed HIR and complete backend IR are distinct; codegen consumes one
+`BackendProgram`; the database publishes a shared semantic snapshot; the LSP
+uses typed protocol boundaries; and one command verifies compiler, extension,
+Wasm, and runtime behavior.
+
+The remaining evidence-backed risks are scale visibility and API containment.
+
+- [x] Add repeatable warm compiler-database query and end-to-end LSP latency
+  baselines alongside the existing one-shot compile/Wasm-size baseline.
+  `tooling_baseline` generates a 500-function source and measures cold checking,
+  cached checking, hover, highlights, definitions, and full JSON-RPC hover.
+- [ ] Add a generated large-catalog dimension after alternate catalog
+  construction exists, so graph validation/indexing and catalog-backed queries
+  are measured rather than repeated against the fixed bundled graph.
+- [x] Classify the crate API into a small compiler facade, a tooling facade,
+  and explicitly inspectable stage products. `src/lib.rs` now exposes only
+  `compiler` and `tooling` modules plus the convenient root pipeline functions;
+  parser/checker/backend passes, registries, and adapters are private. The
+  integration suite imports the facades, so tests no longer force every
+  implementation module into the package API. Do not split into crates until
+  two real consumers need independently versioned APIs.
+- [ ] Review modules above the soft 1,000-line signal when a related feature
+  changes them: `codegen/expression.rs`, `wasm_ir.rs`, `hir.rs`, `language.rs`,
+  `formatter.rs`, `codegen/async_state.rs`, and `completion.rs`. Split only at
+  a named product/context or visitor boundary; line count alone is not a
+  reason to scatter one mutable responsibility.
+- [ ] Keep `cargo xtask check` as the only local and CI verification matrix.
+  Extend it whenever a product surface is added rather than duplicating steps
+  in workflow YAML. Generated `.wasm`/`.wat` files belong under ignored
+  `target` directories and must never be committed.
+
+## P0 — Add typed state providers after the Minish Cap port
+
+The GBA port now uses the completed first state-provider slice. `state GBA`
+owns emulator selection and discovery and exposes a read-only `gba` value of
+type `GbaEmulator`; scripts never retain or attach the emulator themselves.
+
+- [x] Add provider declarations and generic `state <provider>` resolution to
+  the standard-library graph. `state GBA` now obtains its emulator process
+  names, process type, attachment intrinsic, and documentation from one
+  catalog declaration rather than parser or backend name switches.
+
+- [x] Add declarative state providers to the standard-library graph so
+  attachment families are library-owned declarations rather than parser or
+  backend switches. Provider metadata must include its source name, typed
+  value name and type, process list, attachment implementation, effects, and
+  documentation.
+- [x] Support `state GBA { ... }`. The GBA provider owns the complete emulator
+  process list and discovery logic; individual autosplitters must not repeat
+  executable or core names. Its catalog declaration also selects the typed
+  direct-read operation used by concise fields such as `room: u8 at
+  0x03000010`; computed addresses can still use `gba.read(...)`.
+- [x] Give each selected provider one implicit typed value with a catalog-owned
+  name. Under `state GBA`, `gba.read` accepts original GBA hardware addresses
+  and performs emulator translation; native states instead expose the
+  `process` namespace. Completion hides the unavailable root, and diagnostics
+  explain the correct one. Preserve generic typed reads and the same
+  Result/failure-boundary behavior as native process reads.
+- [ ] Generalize the model for future emulator families without reserving one
+  parser keyword per platform. Revisit ordinary native process attachment as
+  a provider too, eliminating the current mismatch where `process` is only a
+  namespace while Unity and emulator abstractions are nominal types.
+- [x] Remove the temporary explicit GBA attachment API. The Minish Cap port now
+  uses only `state GBA` and `gba`; compiler, runtime, formatter, hover,
+  completion, definition, highlighting, and documentation paths consume the
+  provider declaration. No compatibility alias exists.
+
+## P0 — Complete typed process deserialization
+
+- [ ] Add bounded native string state reads. Cover fixed-size ASL-style
+  `string4`/`string32`/`string150` fields, null-terminated and fixed-length
+  byte strings, explicit UTF-8/ASCII/UTF-16 decoding, embedded nulls, invalid
+  input, and failed reads. Keep these distinct from IL2CPP managed strings and
+  return `Result`/`Option` where absence or decoding failure is meaningful.
+- [ ] Add fixed-length memory-readable arrays/buffers so indexed ASL state such
+  as flags, inventory slots, and mission arrays can be read transactionally.
+  Reuse `Array<T>` and `MemoryReadable` instead of introducing special
+  `byte255`-style nominal types; require an explicit length at the read site or
+  in a declared layout and diagnose unreasonable allocations.
+- [ ] Add declarative record-layout controls when a real target requires them:
+  exact offsets, padding/alignment, packing, and per-field endianness. Preserve
+  field-order native-endian layout as the ergonomic default and diagnose
+  overlap, out-of-bounds fields, and unsupported combinations.
+- [ ] Explore representing Unity managed strings as a readable wrapper or
+  derived layout instead of a permanent special method, while preserving the
+  pointer chasing, length validation, and UTF-16 conversion it requires.
+- [ ] Design the user-facing trait/type-class model around capabilities already
+  represented in the catalog. Begin with memory reading, formatting/
+  interpolation, equality, and numeric operations; decide separately whether
+  user code can declare or implement traits.
+- [ ] Keep trait declarations, implementations, docs, and method lookup in the
+  source-defined standard-library model rather than a parallel checker table.
+- [ ] Add structural anonymous record values/types after named-record layout
+  semantics settle. Infer their fields bidirectionally and decide explicitly
+  whether anonymous records can be memory-readable.
+- [ ] Make `current`, `old`, `settings`, and `oldSettings` first-class read-only
+  snapshot values rather than path-only compiler roots. Give state and settings
+  snapshots proper structural types so values such as `let snapshot = current`
+  can flow through inference, parameters, and returns without losing field
+  identity. Tooling already presents the roots as read-only variables and
+  navigates them to their declaring block.
+
+## P0 — Support versioned and discovered native state
+
+The 2026-07-31 manual ASL-port review shows that scalar, single-layout scripts
+port cleanly. The most common fidelity blocker is not expression syntax but the
+assumption that every process candidate shares one fixed state layout. ASL's
+second `state("game", "version")` string is a version label, not another
+executable name.
+
+- [ ] Design typed state-layout variants. One logical state declaration should
+  be able to provide per-process/per-version module names and pointer paths
+  while exposing one checked common snapshot interface. Attachment must select
+  exactly one variant from explicit probes and report unknown/ambiguous builds;
+  it must never reinterpret a version label as a process fallback.
+- [ ] Complete the read-only process/module identity surface needed for safe
+  version probes. `Module.address` and `Module.size` already cover common size
+  checks; add attached executable identity, module enumeration/search, path or
+  host-supplied version identity, and a deterministic executable fingerprint.
+  Prefer host-provided metadata/fingerprinting over unrestricted filesystem
+  access from Wasm.
+- [ ] Make the existing attach-time-discovered state-source pattern a documented
+  first-class contract. Scripts can already scan/follow/resolve into globals in
+  `onAttach` and use expression-backed state fields; add a canonical recipe,
+  clearer typing/tooling, and specified behavior for temporarily unreadable and
+  optional fields so authors do not recreate `MemoryWatcher` manually. Keep
+  process-close cancellation and transactional snapshot rotation automatic.
+- [ ] Extend the existing signature APIs only where the corpus proves a gap:
+  reusable scan targets, multiple/fallback signatures, range and memory-page
+  selection, capture/offset transforms, relative-address decoding, and concise
+  pointer-follow composition. Basic `sig` literals, module/process scanning,
+  `process.follow`, and `process.readRelative32` already exist and should be
+  documented rather than reimplemented.
+- [ ] Add provider-backed engine discovery beyond current Unity IL2CPP support.
+  Prioritize Unity Mono object/class/field/string discovery, then assess an
+  Unreal provider for `GWorld`/object/name traversal from representative ports.
+  External `asl-help` wrappers should map to maintained typed providers rather
+  than reflection-shaped compiler exceptions.
+- [ ] Keep emulator families on the same provider model. Use real corpus ports
+  to prioritize Dolphin/PCSX2/RetroArch/DOSBox-style address translation after
+  GBA; do not add emulator-name conditionals to the parser or type checker.
+
+## P1 — Add port-driven collections, text, math, and time
+
+- [ ] Add `for`/`for ... in` iteration over arrays and future iterable types,
+  with `break`/`continue`, inference for the element binding, async restrictions,
+  formatter support, and lowering tests. `while` remains the primitive loop,
+  but large coordinate/mission tables should not require hand-written indices.
+- [ ] Add growable typed collections after the source-defined standard-library
+  boundary is ready: `List<T>`/`Vec<T>`, `Map<K, V>`, and `Set<T>`, including
+  indexing or lookup, insertion/removal, containment, clearing, and iteration.
+  Derive key constraints from declared equality/hash capabilities. Named
+  records should be the normal replacement for C# tuples; add tuple syntax only
+  if ports show that records remain materially noisy.
+- [ ] Fill out immutable `String` operations used by real split logic:
+  `contains`, `startsWith`, `endsWith`, substring/slicing, replacement, and
+  deliberate case comparison. Specify byte versus Unicode indexing and keep
+  every allocation bounded. Add focused docs showing fixed-memory strings,
+  managed strings, and ordinary GC strings as separate concepts.
+- [ ] Add catalog-owned floating-point helpers such as `round`, precision-aware
+  rounding, `floor`, `ceil`, `abs`, and finite/NaN checks. Extend contextual
+  numeric-literal inference so an exact integer-looking literal can satisfy an
+  `f32`/`f64` expectation without requiring a cosmetic `.0`, while retaining
+  range and precision diagnostics.
+- [ ] Complete `Duration` arithmetic and constructors (`zero`, milliseconds,
+  seconds, and appropriate integer/floating inputs), then add a monotonic
+  `Instant`/elapsed-time API for debounce and delayed-split logic. Wall-clock
+  calendar time should not be used where a monotonic clock is intended.
+
+## P1 — Model polling, settings, and timer integration explicitly
+
+- [ ] Design a state-normalization/filtering layer for ASL patterns that mutate
+  `current` or copy from `old` to suppress invalid transitions. Snapshots must
+  remain immutable; express retain-last-valid, debounce, edge filtering, and
+  derived fields declaratively or with persistent typed state.
+- [ ] Decide and document the equivalent of a boolean-returning ASL `update`
+  block. If it gates snapshot commit or lifecycle evaluation, represent that as
+  an explicit polling/tick guard rather than giving the non-returning
+  `whileAttached` block an ambiguous return value.
+- [ ] Extend static settings for data-heavy ports: stable external keys that do
+  not need to be SplitScript identifiers (including numeric ASL keys), typed
+  keyed lookup when an index is genuinely dynamic, conditional visibility or
+  enablement, and a maintainable way to declare repeated tables. Preserve the
+  current label-first DSL, nested headings, choices, files, and `///`-only
+  tooltips; do not restore legacy `settings.Add` or compact aliases.
+- [ ] Design a typed, least-privilege timer/run API for the recurring host data
+  that split logic actually needs: timing method, category and attempt
+  metadata, current segment/split history, and run offset. Separate read-only
+  metadata from mutations such as changing an offset, pausing, or selecting a
+  timing method, and add ABI support only for operations LiveSplit can expose
+  safely and consistently.
+- [ ] Document and test the existing lifecycle mappings before adding APIs:
+  `isLoading` controls game-time pausing, `onDetached` replaces process-exit
+  cleanup, `timer.state()` replaces phase integers, and `setTickRate` replaces
+  ASL `refreshRate`. Add new primitives only where these mappings cannot
+  preserve behavior.
+- [ ] Add structured async discovery combinators only as ports require them:
+  timeout, race/select, bounded concurrent scans, and cancellation scopes.
+  Preserve automatic process-close cancellation and avoid exposing threads or
+  unconstrained background tasks as a scripting-language primitive.
+- [ ] Write an explicit sandbox capability policy for process writes/code
+  injection, arbitrary file reads, network/process launching, modal UI, custom
+  audio, and host control. These appear in legacy ASL files but are not implied
+  language requirements. Prefer safe host abstractions or documented non-goals;
+  any dangerous opt-in capability needs visible consent and cleanup semantics.
+
+## P1 — Async, failure, and control-flow extensions
+
+- [ ] Coalesce non-overlapping async-frame slots only if real autosplitters
+  make frame size material. Preserve liveness evidence and cancellation-safe
+  cleanup; do not add allocator complexity for hypothetical savings.
+- [ ] Let source-defined standard-library declarations express suspension,
+  retry, cancellation, and attachment requirements through privileged metadata
+  validated against intrinsic contracts.
+- [ ] Broaden suspending control flow incrementally from real ports (nested
+  loops, matches, and future combinators), adding a runtime conformance test
+  for each new shape.
+- [ ] Design explicit `catch` boundaries later. `throw` should propagate to the
+  nearest catch or return a `Result` from the function when uncaught; postfix
+  `?` remains ergonomic propagation built on the same semantics.
+- [ ] Extend `debug` to additional declaration kinds only when a concrete use
+  case defines reachability, type-checking, and release-erasure behavior.
+
+## P1 — Source-level debugging for debug builds
+
+Debug compilation should produce a module that can be stepped in the original
+`.split` source with readable stacks and variables. Release compilation must
+remain stripped. This is separate from the `debug` source modifier: the
+modifier controls which program constructs survive profile lowering, while
+this work describes the surviving program to debuggers.
+
+The ASL v2 prototype is a useful reference for the WebAssembly `name` custom
+section: it names functions, locals, globals, GC types, and struct fields. It
+does not contain a DWARF producer; Binaryen's `--debug-info` option only
+preserves debug information that already exists. SplitScript must generate its
+own metadata. Use the [WebAssembly name-section
+conventions](https://webassembly.github.io/spec/core/appendix/custom.html#name-section),
+the [DWARF for WebAssembly
+conventions](https://yurydelendik.github.io/webassembly-dwarf/), and
+[Wasmtime's native-debugging
+contract](https://docs.wasmtime.dev/examples-debugging-native-debugger.html)
+as the compatibility baseline.
+
+Embedded DWARF is the source-level format. Do **not** generate a JavaScript
+source map: it would duplicate a weaker line mapping and is not needed by the
+Wasmtime host. Initially embed each `.debug_*` payload as its own Wasm custom
+section. Revisit external debug files only if debug-module size becomes a real
+problem.
+
+### Establish the compatibility boundary first
+
+- [ ] Build a minimal compatibility fixture against the exact Wasmtime version
+  and configuration used by the LiveSplit host. It must contain scalar locals,
+  a global, a source record represented by a Wasm GC struct, a GC-backed value,
+  and several source lines. Run it with `Config::debug_info(true)` and the
+  lowest practical Cranelift optimization level, then record which supported
+  debugger/version combinations can set source breakpoints, step, show stacks,
+  inspect scalar locals/globals, and inspect GC references and fields. Keep the
+  fixture as a conformance test where automation is possible.
+- [ ] Treat Wasm GC inspection as an explicit research result, not an assumed
+  DWARF feature. `DW_OP_WASM_location` standardizes how a debugger finds a Wasm
+  local/global/operand-stack value, but the current DWARF-for-Wasm convention
+  does not specify how a debugger traverses a `structref`/`arrayref` or presents
+  Wasm GC fields. Verify Wasmtime's native-DWARF transformation end to end
+  before choosing a representation.
+- [ ] If ordinary DWARF consumers cannot inspect GC aggregates, first expose
+  the reference as an honest opaque value while retaining full stepping and
+  scalar inspection. Then evaluate, in order: Wasmtime-supported GC debug
+  metadata, a stable runtime/debugger visualizer API, and debug-only shadow
+  storage. Do not describe Wasmtime's private moving-GC heap layout as a DWARF
+  C-style struct or depend on internal native pointers. A custom debug adapter
+  is justified only if the standard/native path cannot provide the required
+  source-language view.
+
+### Preserve source and finalized backend identities
+
+- [ ] Add single-file debug source identity to the compilation input. The CLI
+  supplies the `.split` path and source text; path-less library callers receive
+  a deterministic synthetic filename. Decide and document whether the module
+  stores an absolute path, a workspace-relative path plus compilation
+  directory, or an explicit source-root mapping so debug artifacts are both
+  usable and do not leak paths accidentally. This does not require general
+  `FileId`/module support; extend the DWARF file table when a real multi-source
+  feature arrives.
+- [ ] Retain source provenance through typed HIR and Wasm IR for expressions,
+  statements, terminators, lexical scopes, declarations, and async suspension/
+  resume boundaries. `ExprId` already survives into Wasm IR, but statements
+  and generated control flow need explicit origins so the backend never
+  guesses spans by walking the AST again.
+- [ ] Introduce one profile-aware `DebugArtifactPlan` after all type, import,
+  function, global, GC-layout, local, and body plans are finalized. It owns the
+  mapping from semantic identities (`FunctionId`, `ValueId`, source types and
+  fields, lifecycle actions, and generated helper identities) to their actual
+  Wasm indices and names. Name/DWARF emission must consume these existing plans
+  instead of recreating index-assignment logic.
+- [ ] Make encoded function bodies retain source marks at exact instruction
+  boundaries. `wasm_encoder::Function::byte_len()` can capture body-relative
+  positions while emitting; after every body is finalized, account for the
+  Code-section function count, each body-size LEB, and local-declaration bytes
+  to produce the Code-section-relative instruction offsets required by
+  DWARF-for-Wasm. Verify every recorded address is an instruction boundary with
+  `wasmparser`.
+- [ ] Mark generated scaffolding as having no source location instead of
+  attributing it to the nearest user statement. This includes transaction
+  rotation, state polling, settings refresh, retry/cancellation machinery,
+  async dispatch, wrapper construction, equality helpers, and ABI adapters.
+  Stepping should stop at user statements, conditions, call sites, returns,
+  and meaningful expression boundaries, not wander through compiler code.
+
+### Emit readable names in debug modules
+
+- [ ] Emit a `name` custom section only for `BuildProfile::Debug`. Name the
+  module and every indexed entity for which the format has a useful namespace:
+  imported ABI functions, runtime/equality helpers, user functions and
+  methods, lifecycle and state-read functions, `_start`/`update`, parameters,
+  source locals, deterministic compiler temporaries, source/runtime globals,
+  memory, GC types, and GC struct fields. Use readable collision-resistant
+  generated names such as `state.level.read` rather than raw numeric IDs.
+- [ ] Drive type and field names directly from `GcLayout`, and function/global/
+  local names from `FunctionPlan`, `GlobalPlan`, and each body's local plan.
+  Add plan-level uniqueness/completeness checks so an added runtime helper or
+  constructed GC type cannot silently remain `func[42]` or `type[17]`.
+- [ ] Assert that release modules contain neither the `name` section nor any
+  `.debug_*` custom section, and do not embed source paths or symbol strings as
+  incidental debug metadata. Keep ordinary runtime-required strings and the
+  SplitScript ABI/version marker unaffected.
+
+### Emit DWARF incrementally
+
+- [ ] Use `gimli::write` (which supports `DW_OP_WASM_location`) to emit a
+  single compilation unit and the minimum interoperable embedded DWARF
+  sections. Choose DWARF 4 or 5 from the Wasmtime/debugger compatibility
+  fixture rather than from novelty. Parse the finished sections back with
+  `gimli` in tests.
+- [ ] Land source breakpoints and stepping first: emit the compilation-unit and
+  subprogram DIEs, function address ranges, source file/directory metadata,
+  and a `.debug_line` program mapping Code-section-relative instruction
+  offsets to UTF-8-derived line and column positions. Represent lifecycle
+  blocks and state-field readers with source-facing names and ranges even
+  though they lower to generated Wasm functions.
+- [ ] Add scalar type and variable inspection next. Emit exact signed/unsigned
+  integer widths, `bool`, `f32`, `f64`, and `address`; function parameters;
+  lexical local variables; and globals. Use DWARF location descriptions with
+  `DW_OP_WASM_location` for Wasm locals and globals, location/range lists for
+  real scope and lifetime, and an empty location when a value is genuinely
+  unavailable. Never claim a stack temporary is a source variable.
+- [ ] Model enums, records, arrays, `String`, `Option`, `Result`, `Duration`,
+  async frames, and other GC-backed values only to the level proven usable by
+  the compatibility fixture. Keep logical SplitScript types distinct from
+  backend helper structs. If aggregate children cannot be inspected through
+  standard DWARF, document that limitation rather than publishing misleading
+  member offsets.
+- [ ] Handle suspension explicitly. Before `await`/`retry`, a source binding
+  may live in a Wasm local; after suspension it may live in the GC async frame
+  and execute during a later `update` call. Emit correct disjoint line and
+  variable ranges where representable, and otherwise mark the binding
+  unavailable for the affected range. Stepping across suspension must resume
+  at the next source statement rather than expose the async dispatcher.
+
+### Integrate the runtime and VS Code workflow
+
+- [ ] Add an explicit build-profile marker to the SplitScript metadata section
+  so the host can reject a release module for a source-debug session. Configure
+  the LiveSplit Wasmtime engine with debug information enabled and low
+  optimization for debug sessions, while retaining the normal release engine
+  configuration for published autosplitters. Measure startup, tick, and memory
+  overhead rather than enabling native debug transforms for every release run.
+- [ ] Prove a manual native-debugger workflow before building editor UI:
+  compile/watch a debug module, load it in the real host, attach a supported
+  debugger, set a breakpoint in the `.split` file, and step through attach,
+  state polling, a lifecycle action, and an async retry/resume. Document source
+  path mapping and hot-reload/restart expectations.
+- [ ] Then add a VS Code debug workflow. Prefer a thin launch/attach integration
+  with a supported native debug adapter (for example LLDB where Wasmtime
+  supports it) over implementing another debugger. Only build a SplitScript
+  Debug Adapter Protocol implementation if the GC/source-language inspection
+  experiment demonstrates a concrete gap. Starting a debug session should own
+  debug watch, wait for a successful module, start or attach to the host, and
+  stop/restart cleanly without racing release builds.
+- [ ] Add automated artifact tests for section presence/absence, name/index
+  correctness, instruction-boundary and line-table round trips, type/location
+  DIEs, deterministic output, and debug-versus-release size. Add an end-to-end
+  Wasmtime trap/backtrace or debugger harness that proves a generated frame
+  resolves to the expected `.split` function and line; keep a small documented
+  manual matrix only for debugger behavior that cannot be made reliable in CI.
+- [ ] Document the supported host, Wasmtime, debugger, and platform matrix;
+  scalar and GC-variable inspection capabilities; async stepping behavior;
+  source-path privacy; and the difference between `debug` declarations, debug
+  build metadata, and release artifacts.
+
+## P1 — Ship a self-contained portable VS Code toolchain
+
+The native tools and the extension are separate delivery products built from
+one implementation. `splitc` and `splitls` must remain first-class native
+executables, tested and published separately for command-line, editor-neutral,
+and automation use. The VS Code extension must bundle a WebAssembly build of
+the same Rust compiler/tooling core: installing one VSIX must provide language
+features, release compilation, and debug watch without downloading SplitScript
+executables, finding tools on `PATH`, or selecting an OS-specific binary.
+
+This is feasible without pretending that a language server must be an OS
+process. A VS Code web extension runs in a browser worker, cannot spawn native
+executables, and can run language servers in additional workers. VS Code's
+official [`@vscode/wasm-wasi-lsp`
+integration](https://code.visualstudio.com/blogs/2024/06/07/wasm-part2)
+can run a `wasm32-wasip1` stdio language server and supports custom requests;
+its URI bridge and workspace mount also cover virtual and remote workspaces.
+The official [WebAssembly component-model
+integration](https://code.visualstudio.com/blogs/2024/05/08/wasm) provides a
+second path: expose an in-memory Rust API from `wasm32-unknown-unknown`, bind it
+to TypeScript through WIT, and run expensive work in a worker. The latter can
+use the browser's built-in WebAssembly runtime and avoid the separate [WASI
+Core extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode.wasm-wasi-core),
+whereas the former preserves the current stdio shell with less adaptation.
+
+Do not equate "one extension" with "one mutable worker". Language queries must
+remain responsive during code generation. It is acceptable—and likely
+preferable—for the VSIX to instantiate the same bundled compiler module in one
+long-lived language-service worker and one build worker. Consolidate source,
+semantic state contracts, and packaged artifacts; do not force unrelated work
+through one serial event loop merely to reduce the process count.
+
+### Establish the shared product boundary
+
+- [ ] Extract one transport-neutral Rust service boundary around the existing
+  compiler and tooling facades. It accepts source text, a source identity and
+  revision, compiler options, and cancellation; it returns structured
+  diagnostics and generated Wasm bytes. `splitc` remains the native filesystem/
+  watch shell and `splitls` remains the native stdio LSP shell. Neither native
+  executable may depend on VS Code or the WebAssembly adapter.
+  - [x] Land the versioned in-memory request/response boundary with source URI,
+    revision, build profile, structured diagnostics/fixes, bounded source input,
+    and raw artifact bytes. Keep cancellation pending until it can interrupt
+    real compiler stages rather than merely discard an already-finished build.
+- [ ] Add a thin extension-only Rust adapter rather than compiling `src/main.rs`
+  and its polling watcher into the browser. Decide whether this is a workspace
+  crate when the second target is introduced; the compiler/catalog/query
+  implementation must still have one owner and one test suite. The same commit
+  must keep native `cargo build --bin splitc --bin splitls` working.
+- [ ] Define a versioned build protocol such as
+  `CompileRequest { uri, revision, source, profile }` and
+  `CompileResponse { revision, diagnostics, artifact }`. Debug and release are
+  output profiles of that request, not profiles of the embedded compiler
+  module itself. Discard stale responses, support cancellation, cap input and
+  output sizes, and never scrape human-readable CLI stderr in the extension.
+
+### Prototype and choose the WebAssembly host deliberately
+
+- [ ] Build two small end-to-end prototypes against the real compiler before
+  committing the package architecture:
+  1. `wasm32-wasip1` plus `@vscode/wasm-wasi-lsp`, preserving stdio LSP and
+     adding a custom compile request;
+  2. `wasm32-unknown-unknown` plus WIT/component bindings, with the existing
+     JSON-RPC `LanguageServer` hosted behind worker messages and compilation
+     exposed as an in-memory `list<u8>` operation.
+  Compare VSIX size, cold/warm startup, hover latency while compiling, artifact
+  transfer/copying, cancellation, memory recovery, virtual-workspace behavior,
+  browser support, and maintenance cost. Record the decision in an ADR.
+  - [x] Complete the direct core-Wasm protocol slice. A dedicated unpublished
+    adapter crate builds for `wasm32-unknown-unknown`; the TypeScript binding
+    sends JSON metadata and receives a compact envelope with generated Wasm as
+    raw bytes rather than base64. The optimized module is 1,588,797 bytes, runs
+    in Node's browser-compatible WebAssembly API with no host imports, compiles
+    a real source file, and returns structured diagnostics for an invalid one.
+    The native compiler library remains an `rlib`, so ordinary native builds do
+    not produce an extension-only DLL.
+  - [x] Put the direct adapter behind a dedicated worker and transfer generated
+    artifact buffers back without copying them into JSON. A real worker test
+    initializes the bundled module, compiles valid and invalid revisions, and
+    shuts down deterministically; extension-host compilation never runs on its
+    shared event loop.
+  - [ ] Measure repeated full-size builds and memory recovery, then exercise the
+    worker in a web extension host and virtual workspace. The first host adapter
+    uses Node `worker_threads` for today's desktop extension; retain the common
+    protocol and add a browser `Worker` adapter rather than leaking Node types
+    into the compiler binding.
+  - [ ] Complete the matching WASI stdio/custom-request prototype and compare it
+    against the direct result. The existing unmodified `splitls` already builds
+    successfully for `wasm32-wasip1`, so the remaining experiment is host and
+    extension integration rather than compiler portability.
+- [ ] Prefer the direct component/worker design if it proves reliable because
+  it is strictly self-contained and gives compilation a typed byte-array API.
+  Choose WASI when preserving stdio and filesystem behavior materially lowers
+  risk; if so, decide explicitly whether an automatically installed Microsoft
+  WASI Core extension satisfies the self-sufficiency requirement. A custom LSP
+  request is supported, but large Wasm artifacts must not become inefficient
+  JSON number arrays or unbounded base64 payloads without measurement.
+- [ ] Add `cargo check` and tests for the selected WebAssembly target early.
+  Keep filesystem paths, environment lookup, process spawning, and polling in
+  native/VS Code shells. The existing compiler library is already principally
+  in-memory and `splitls` is only a small stdio wrapper; preserve that useful
+  boundary instead of adding conditional platform code throughout the core.
+
+### Replace extension process orchestration
+
+- [ ] Add a `browser` entry and bundle the extension JavaScript, worker code,
+  generated bindings, and compiler Wasm into the VSIX. Use
+  `ExtensionContext.extensionUri` plus `vscode.workspace.fs`; remove runtime
+  dependence on Node `fs`, `path`, `child_process`, `process.platform`, and
+  `Uri.fsPath`. The same web-extension implementation should run in desktop VS
+  Code, remote extension hosts, Codespaces, `vscode.dev`, and `github.dev`.
+  - [x] Add the browser manifest entry, a single-file esbuild bundle, and
+    separately bundled compiler and language-server browser workers. Shared
+    activation/build orchestration contains only VS Code and web-platform APIs;
+    the Node and browser entries inject their own worker clients. A bundle
+    harness executes both generated browser workers against the real compiler
+    Wasm and rejects external imports other than `vscode`.
+  - [x] Exercise the packaged result in an actual VS Code web extension host
+    and `@vscode/test-web` virtual workspace. The Chromium acceptance test
+    activates and restarts the real LSP client, verifies hover, performs a
+    release build, starts debug watch, writes through the virtual filesystem,
+    saves a changed document, observes a distinct rebuilt module, and stops the
+    watcher. Keep the broader failure/cancellation/platform matrix below open.
+- [x] Replace native executable discovery and the public
+  `server.path`/`server.arguments`/`compiler.path` settings. The installed
+  extension must work offline from its bundled assets and must not ask users to
+  install Rust or separate SplitScript releases. A repository-development
+  override, if still useful, belongs in developer tooling rather than the
+  published product contract.
+  - [x] Remove compiler and server path settings and all `splitc`/`splitls`
+    discovery and spawning. The desktop extension now starts the shared Rust
+    language-server handler in a dedicated worker over direct JSON messages.
+- [x] Keep the language client thin and preserve LSP as the editor-neutral
+  protocol. A worker/postMessage transport or a WASI stdio transport is an
+  implementation detail; hover, completion, semantic tokens, diagnostics,
+  definitions, formatting, inlay hints, and custom build requests must all
+  consume the same compiler-owned semantic snapshot and symbol identities.
+- [ ] Make VS Code own debug-watch orchestration. Listen for saves or relevant
+  document changes, debounce and cancel superseded builds, request
+  `BuildProfile::Debug`, and write the returned bytes through
+  `vscode.workspace.fs`. Explicit Build Release requests
+  `BuildProfile::Release`. Preserve exclusive build/watch state, use exact
+  document revisions, and define safe output/rename behavior for file and
+  virtual workspace providers; do not embed the CLI's filesystem polling loop.
+  - [x] Compile immutable, revision-tagged source snapshots on save, coalesce
+    queued saves, discard superseded worker responses, and atomically replace
+    the neighboring module through `workspace.fs`. Explicit release builds use
+    the same path with the release profile and reject a result if the document
+    changed while it was being built.
+- [ ] Keep interactive language work responsive. Benchmark a single custom-LSP
+  compile request against a dedicated build worker/module instance and choose
+  the latter if compilation delays requests or retains too much memory. The
+  extension should load/compile bundled Wasm bytes once where possible, then
+  instantiate isolated services with deterministic shutdown and restart.
+  - [x] Isolate compilation in its own long-lived worker immediately. The worker
+    initializes the optimized module once, serializes build requests, transfers
+    artifact ownership back to the client, rejects all pending requests if it
+    exits, and is terminated with the extension controller.
+  - [x] Give interactive LSP work a separate long-lived worker and Wasm instance.
+    `vscode-languageclient` talks through its standard message transports, so
+    the Rust handler still owns diagnostics, hover, completion, semantic tokens,
+    navigation, formatting, and inlay hints without parallel VS Code providers.
+    Restart and shutdown deterministically replace/terminate the worker.
+
+### Package, publish, and verify both delivery products
+
+- [ ] Extend `cargo xtask check` with the WebAssembly target, generated-binding
+  freshness, extension bundling, a VSIX-content audit, and web-extension tests.
+  The VSIX must contain no `.exe`, ELF, Mach-O, platform directory matrix, or
+  undeclared network bootstrap. Optimize and strip the embedded compiler Wasm
+  independently of whether it emits debug or release autosplitter modules.
+- [ ] Test the bundled extension through desktop and `@vscode/test-web`, using a
+  local file workspace and a virtual workspace. Cover startup, restart, hover,
+  a successful and failed release build, repeated debug rebuilds, stale-result
+  suppression, cancellation, output writes, and worker failure recovery on
+  Windows, Linux, and macOS without rebuilding the VSIX per platform.
+- [ ] Keep a separate native release matrix for `splitc` and `splitls`, with
+  archives, checksums, versions, and CLI smoke tests. Verify native and embedded
+  builds against the same language conformance corpus so the convenient VSIX
+  distribution cannot silently implement a different compiler.
+- [ ] Document the two installation stories clearly: the VS Code extension is
+  batteries-included, while native `splitc`/`splitls` downloads remain available
+  for other editors, terminals, CI, and automation. Document supported VS Code
+  desktop/web/remote environments, package size and memory expectations, and
+  any accepted host-runtime dependency from the architecture decision.
+
+### Offer the extension in a hosted browser IDE
+
+Prefer hosting an open-source Code OSS web workbench with the SplitScript web
+extension preinstalled over building a separate Monaco application. That gives
+browser-only users the same command palette, settings, keybindings, extension
+host, language features, and build workflow without maintaining a second
+editor integration. `@vscode/test-web` proves the technical shape, but it is a
+development server and downloaded Microsoft VS Code builds are not our
+redistributable product. A production deployment must use the MIT-licensed
+Code OSS sources (with our own product identity) or another explicitly
+redistributable compatible workbench.
+
+- [ ] Build a deployment-sized Code OSS web proof of concept with the packaged
+  SplitScript extension installed by default. Record the exact upstream source
+  and license obligations, product configuration and branding, extension-
+  gallery decision, update strategy, static-hosting/server requirements,
+  compressed transfer size, cold/warm startup, memory use, and maintenance
+  cost. Do not turn `@vscode/test-web` into production infrastructure.
+- [ ] Define browser workspace persistence and artifact delivery. Users must be
+  able to create/import a `.split` file, retain it locally, invoke the existing
+  **Build Debug** and **Build Release** commands, and download/export the
+  resulting `.wasm`. Prefer standard workbench and filesystem-provider APIs so
+  compiler and language-server code remains unchanged.
+- [ ] Add a focused hosted-product layer for curated examples, new-file
+  templates, bounded share links, documentation entry points, and a settings
+  preview. Keep process attachment and the actual autosplitter runtime out of
+  the ordinary browser sandbox unless a separately designed secure host bridge
+  is present.
+- [ ] Package the workbench, extension, workers, and Wasm with content hashes
+  and a strict CSP; require no runtime network fetch outside the deployment's
+  declared static assets and optional extension gallery. Test current Chromium,
+  Firefox, and Safari, including worker restart, repeated compilation, memory
+  recovery, persistence, and artifact download.
+- [ ] Reuse the extension's conformance and `@vscode/test-web` suites against
+  the hosted build. The hosted product must not add alternate language-service
+  or compiler providers.
+- [ ] Keep a custom Monaco shell only as a documented fallback if the Code OSS
+  experiment shows unacceptable payload, hosting, licensing, customization,
+  or long-term update costs. If needed, first extract a browser-neutral SDK
+  around the existing compiler/LSP workers; do not fork language intelligence.
+
+## P2 — Editor and multi-source evolution
+
+- [ ] Introduce file identities only together with a real multi-source feature
+  such as modules/imports. Most autosplitters remain one file; avoid forcing
+  premature cross-file complexity into every span and query.
+- [ ] Enrich diagnostics with focused labels, notes, and machine-applicable
+  fixes as real confusing cases are found.
 - [ ] Add snippets for state, settings, lifecycle blocks, match, records, and
-  common process/Unity attachment patterns.
+  common standard-library patterns. Keep completion candidates compiler-owned
+  and the VS Code client thin.
 
-## P2 — Documentation and migration
+## P2 — Generated documentation
 
-### Generated language and standard-library documentation
+- [ ] Build a rustdoc-like HTML renderer from
+  `StandardLibraryDocumentation`, the language catalog, and the complete
+  symbol graph. It must not parse Rust authoring source or maintain a second
+  API catalog.
+- [ ] Generate canonical signatures from semantic schemes; link namespaces,
+  types, fields, variants, capabilities, and related symbols by their common
+  documentation identity.
+- [ ] Publish machine-readable documentation for clients that cannot link the
+  compiler library directly.
+- [ ] Test that HTML, machine-readable output, hover, signature help, and
+  completion resolve the same symbol identity and show the same focused
+  example.
 
-- [ ] Build the browsable rustdoc-like renderer as a consumer of
-  `StandardLibrary` and `LanguageCatalog`; the structured source of truth and
-  compiled-example validation are established in the P0 architecture
-  checkpoint, not recreated here. Reuse the renderer-independent
-  `StandardLibraryDocumentation` entry model already consumed by editor tools.
-- [ ] Generate canonical signatures from semantic type schemes and link types,
-  traits, methods, related items, source definitions, and host capabilities.
-- [ ] Publish machine-readable catalog data for editor tooling that cannot link
-  the compiler library directly, with a schema/compiler version handshake.
-- [ ] Test that rendered pages, machine-readable output, and LSP hover identify
-  the same catalog item and use the same documentation payload.
+## P2 — Migration guidance
 
-### Guides for existing communities
-
-- [ ] Write “Coming from old ASL / C#”, “Coming from TypeScript / JavaScript”,
-  and “Coming from Rust” guides.
-- [ ] Include syntax maps, lifecycle differences, numeric and address types,
-  nullability/results, process reads, async attachment, settings, and complete
-  small ports.
-- [ ] Explain semantic differences, not just token substitutions—especially
-  transactional state, inference, cancellation, and WebAssembly sandboxing.
-
-### Familiarity-oriented diagnostics instead of broad aliases
-
-- [x] Add recovery diagnostics with preferred machine-applicable fixes for the
-  first unambiguous foreign spellings:
-  - C#/JavaScript declarations: `const` and `var` → `let`; `func` and
-    `function` → `fn`;
-  - JavaScript absence and C# library names: `null` → `None`, `string` →
-    `String`, and `TimeSpan` → `Duration`;
-  - C# numeric keywords: `sbyte`/`byte`, `short`/`ushort`, `int`/`uint`,
-    `long`/`ulong`, and `float`/`double` → the corresponding
-    `i8`/`u8` through `i64`/`u64` and `f32`/`f64` types.
-  Recovery must produce canonical syntax immediately so one familiar spelling
-  does not cause a cascade of unrelated parser or type errors.
-- [x] Add context-sensitive “did you mean” diagnostics for unresolved catalog
-  and user-defined function/method calls. Compare names across camelCase,
-  PascalCase, and snake_case before applying ordinary edit-distance matching,
-  so `Duration.FromSeconds`, `Duration.from_seconds`, and small typos all point
-  to `Duration.fromSeconds`. Filter methods by the inferred receiver type,
-  replace only the exact name segment, and suppress ambiguous or unrelated
-  guesses. LSP code actions expose unique suggestions as machine-applicable.
-- [ ] Move the growing foreign-spelling table and its source-language,
-  replacement, explanation, and applicability metadata behind a migration
-  catalog consumed by diagnostics and LSP code actions. Keep context-sensitive
-  recognition in the parser/checker: catalog data must not make ordinary
-  bindings such as `let double = ...; double.clamp(...)` look like type names.
-- [ ] Add the remaining unambiguous token and delimiter fixes first:
-  - JavaScript `===`/`!==` → `==`/`!=` (there is no coercing equality), and
-    `${value}` → `{value}` inside SplitScript backtick interpolation;
-  - TypeScript `boolean` and CLR `Boolean` → `bool`, plus CLR primitive names
-    such as `Int32`, `UInt32`, `Single`, `Double`, and `System.Int32` → their
-    canonical SplitScript types;
-  - C#/Rust `IntPtr`, `UIntPtr`, `nint`, and `nuint` → `address` only in
-    target-process-address contexts where that nominal conversion is correct;
-  - Rust `let mut name` → `let name`, because SplitScript `let` bindings are
-    already mutable.
-- [ ] Add type-aware fixes only after name and type resolution, so they are not
-  offered for shadowed user symbols:
-  - JavaScript/TypeScript `value ?? fallback` → `value else fallback` when the
-    left side is an Option or Result and the fallback has the unwrapped type;
-  - `.toString()`/`.ToString()` → `as String`, and `.Length` → `.length`, when
-    the receiver and result make the rewrite equivalent;
-  - `console.log(value)` and Rust `println!(...)` → `print(...)` only for call
-    shapes whose formatting behavior is preserved;
-  - C# `Math.Min`/`Math.Max`/`Math.Clamp` and Rust `min`/`max` forms → the
-    type-directed `.min(...)`, `.max(...)`, and `.clamp(...)` methods.
-- [ ] Provide focused explanatory diagnostics without an automatic replacement
-  when the foreign type has no unique equivalent: TypeScript `number` and
-  `bigint`, C# `decimal`, and generic error-bearing `Result<T, E>` all require a
-  width, representation, or error-model decision from the author.
-- [ ] Recognize common structural syntax and show a canonical example, but leave
-  multi-token rewriting to `splitc migrate` unless equivalence is proven:
-  - Rust `Option<T>`/`Result<T, E>` versus `T?`/`T!`, postfix `.await`,
-    `unwrap_or`, `vec![]`, `loop`, and `&str`;
-  - C# casts `(T)value`, `new` expressions, `$"..."` interpolation, and
-    `switch`; JavaScript ternaries, optional chaining, arrow functions, object
-    literals, and `switch`;
-  - explicit `async onAttach` should explain that `onAttach` is inherently
-    suspending; `async fn` must not be presented as equivalent until reusable
-    suspending functions exist.
-- [ ] Add old-ASL-specific lifecycle migration diagnostics:
-  - `update` → `whileAttached` is a direct block-name migration;
-  - `init` should point to `onAttach` and explain suspension and automatic
-    process-close cancellation;
-  - `exit` should point to `onDetached` while warning that `onDetached` also
-    runs once for the initial detached state;
-  - `startup`, `shutdown`, and `onStart` need guidance rather than blind renames
-    because their lifetime boundaries do not all have one-to-one replacements.
-- [ ] Teach `splitc migrate` the old-ASL shapes that require coordinated AST
-  rewrites: `state("process")` declarations, `vars`, `settings.Add`/
-  `AddDropdown`/`SetToolTip`, refresh-rate assignment, timer APIs, C# memory-read
-  helpers, and action/lifecycle blocks. Preserve comments and report every
-  construct that needs manual review.
-- [ ] Test every migration rule with a positive case, a shadowing/ambiguity
-  negative case, the advertised applicability, and—where a fix is marked
-  machine-applicable—a test that applying all edits yields compiling canonical
-  source. Build the eventual migration-command fixtures from real splitter
-  ports rather than synthetic syntax alone.
-- [ ] Prefer diagnostics and automated code actions over accepting foreign
-  spellings as permanent aliases. Multiple equivalent syntaxes fragment style,
-  complicate the formatter and documentation, and make search/completion less
-  predictable. Only add a compatibility alias when porting data shows that it
-  removes substantial friction without changing semantics; the formatter must
-  still emit one canonical spelling.
+- [ ] Publish a compiler-checked “Porting ASL to SplitScript” cookbook driven by
+  `luna-porting/manual`. Include complete recipes for module-qualified fields,
+  signatures and relative pointers, attach-time discovered addresses, records
+  and arrays, nested settings, game-time accumulation, filtered watcher state,
+  version probes, and cancellation. Every recipe must compile in `xtask` so a
+  porting agent cannot mistake an existing feature for a missing one.
+- [ ] Add a generated capability index that says, for each common ASL concept,
+  “supported directly”, “use this SplitScript pattern”, “planned”, or
+  “intentional sandbox non-goal”. Cover `MemoryWatcher`, `DeepPointer`,
+  `SigScanTarget`/`SignatureScanner`, `stringN`, duplicate versioned states,
+  `settings.Add` parents and keyed access, `refreshRate`, `exit`, mutable
+  `current`, boolean `update`, `TimeSpan`, timer/run metadata, and host UI.
+  Generate links to canonical language/standard-library symbol identities
+  rather than maintaining an unverified prose-only API list.
+- [ ] Make that capability index drive porting-aware compiler diagnostics and
+  LSP code actions, not documentation alone. When syntax or resolution strongly
+  indicates an ASL concept, emit one focused diagnostic that names the concept,
+  its support status, the canonical SplitScript construct, and a documentation
+  link; suppress predictable follow-on errors from the same unsupported shape.
+- [ ] Add machine-applicable local rewrites for unambiguous mappings such as
+  `refreshRate = value` to `setTickRate(value)`, timer phase comparisons to
+  `timer.state()`/`TimerState`, simple `TimeSpan.From*` calls to `Duration`, and
+  recognized signature/deep-pointer spellings to `sig`, `process.follow`,
+  `process.readRelative32`, or expression-backed state reads. Only offer a fix
+  after name/type resolution proves that user-defined symbols are not being
+  rewritten.
+- [ ] Give structural ASL constructs targeted guidance even when one local edit
+  is unsafe: duplicate version-labelled `state` blocks, `MemoryWatcher`/
+  `StringWatcher`, `settings.Add` trees, boolean-returning `update`, assignments
+  to `current`, `exit`, timer/run metadata, and fixed `stringN` fields. Route
+  coordinated rewrites through `splitc migrate`; for planned features say so
+  explicitly, and for sandbox non-goals explain the safe boundary rather than
+  reporting a generic unknown symbol.
+- [ ] Test porting diagnostics end to end through batch output, LSP diagnostics,
+  hover/documentation links, and code actions. Each rule needs positive,
+  shadowing/ambiguity, recovery, cascade-suppression, and fix-round-trip cases;
+  applying every machine-applicable edit must yield canonical formatted source.
+- [ ] Write guides for authors coming from old ASL/C#, TypeScript/JavaScript,
+  and Rust. Cover syntax, lifecycle, numeric/address types, `Duration`, async
+  retry/cancellation, `Option`/`Result`, settings, and process reads, including
+  semantic differences rather than token substitutions alone.
+- [ ] Move foreign-spelling knowledge into a structured migration catalog with
+  source-language provenance, replacement kind, explanation, and applicability
+  instead of growing ad hoc parser/checker branches.
+- [ ] Complete the remaining unambiguous foreign-token fixes after the existing
+  `function`/`const`/`var`/`null`/type-name diagnostics: JavaScript `===`/`!==`,
+  `${...}` interpolation, TypeScript/CLR boolean and primitive spellings, and
+  Rust `let mut`. Keep canonical output unique; do not accept aliases silently.
+- [ ] Add type-aware fixes only after resolution so shadowed user symbols do
+  not receive incorrect replacements. Cover `.ToString()`/`.Length`,
+  `Math.Min`/`Max`/`Clamp`, null-coalescing, and common logging calls only where
+  the inferred receiver/result makes the conversion equivalent. Ambiguous
+  conversions should show an explanation without an automatic edit.
+- [ ] Prefer diagnostics and code actions over accepting permanent aliases for
+  foreign syntax. SplitScript has no production compatibility obligation yet.
 
 ## Ongoing — Port-driven language development
 
-- [ ] Maintain a representative corpus of real autosplitters covering native
-  games, Unity Mono, Unity IL2CPP, Unreal, emulators, pointer-heavy games,
-  settings-heavy splitters, load removal, game-time calculation, and process
-  restarts.
-- [ ] Port additional splitters incrementally and record every missing feature,
-  awkward pattern, generated-Wasm issue, and diagnostic failure.
-- [ ] Promote repeated game-independent patterns into the standard library;
-  keep game-specific signatures, offsets, and policies in scripts.
-- [ ] Add a runtime conformance test for every promoted feature, including
-  cancellation, failed reads, settings changes, process closure, and memory
-  handle cleanup.
-- [ ] Use the port corpus as formatter fixtures, LSP integration projects,
-  documentation examples, compile-time benchmarks, and release regressions.
-- [ ] Do not declare the language generally usable based only on Lunistice. The
-  corpus—not speculative feature count—is the readiness criterion.
+- [ ] Treat hand-reviewed files under `luna-porting/manual` as the authoritative
+  migration evidence. The broad 1,613-file/1,175-candidate generated inventory
+  is useful for frequency estimates, but a generated file that compiles is not
+  evidence of semantic parity.
+- [ ] Keep a structured review record per manual port: original source,
+  targeted executable/version, faithful behaviors, deliberate omissions,
+  blocking capability IDs, workaround quality, compiler revision, and runtime
+  validation status. Distinguish complete, variant-limited, and behavior-limited
+  ports rather than reporting all three as merely “compiled”.
+- [ ] Re-audit deferred/manual notes against the current compiler catalog at
+  milestones. The first review incorrectly treated some existing facilities as
+  absent—basic signatures, arrays/records, nested settings, `onDetached`,
+  `setTickRate`, and cancellation-aware retry—so stale copied compilers and
+  missing documentation must not turn into duplicate feature work.
+- [ ] Maintain a representative corpus spanning Unity Mono/IL2CPP, native
+  games, emulators, pointer paths, signatures, settings trees, load removal,
+  game time, cancellation, and unusual numeric layouts.
+- [ ] Port splitters incrementally and record missing features here before
+  generalizing them. Promote repeated game-independent patterns into the
+  standard library and add compiler plus runtime conformance coverage.
+- [ ] Use the corpus as formatter fixtures, LSP integration projects,
+  documentation examples, and performance inputs.
+- [ ] Do not call the language generally usable based only on Lunistice; require
+  several unrelated production-scale ports and stable author feedback.
 
 ## Recommended execution order
 
-1. Keep the completed expression-valued `if` and Lunistice union-state behavior
-   locked down with compile and runtime regression tests.
-2. Establish the compiler facade, semantic `TypeId`/symbol model, constraint
-   layer, resolved typed HIR, and shared visitors without changing language
-   behavior.
-3. Build the standard-library/language/ABI catalogs and their validation API.
-   Migrate `min`/`max`/`clamp` first, then all existing built-ins; make a small
-   catalog documentation query testable before adding more library APIs.
-4. Add the Wasm-oriented lowering IR and backend boundaries, initially without
-   inventing a separate failure protocol. Split the code generator internally
-   only as those interfaces make the split natural.
-5. Specify and implement `T?`, `T!`, and `else` fallback/control flow on those
-   foundations, including their typed-HIR and Wasm GC representations.
-6. Lower process-read failures through ordinary `T!` values and result-aware
-   control flow, then implement generic typed reads, named-record
-   deserialization, the minimal
-   capability/trait machinery, and Lunistice's single `LevelTimeParts` read.
-7. Land compound assignment, `TimerState`, global convenience functions, and
-   lifecycle renaming as one language-consistency pass through the catalog.
-8. Generalize async lowering and structured process cancellation before adding
-   a larger future/combinator library.
-9. Add lossless syntax, structured diagnostics, source-aware compiler queries,
-   and the formatter; then build LSP and VS Code support. Standard-library
-   completion/hover/signature help must already have catalog data to consume.
-10. Build the browsable documentation renderer and machine-readable catalog
-    export from the same API used by the LSP.
-11. Add debug/release profiles as typed-HIR/lowering passes and expand them
-    using real debugging workflows.
-12. Continue porting diverse autosplitters and measuring compile time/Wasm size
-    throughout every step; use the corpus to revise priorities rather than
-    waiting until the architecture is “finished.”
+1. Bootstrap privileged SplitScript standard-library declarations, migrate one
+   complete namespace/type/method slice through every consumer, then move the
+   remaining bundled library and remove the Rust authoring macro.
+2. Implement bounded native strings/fixed arrays and versioned/discovered state
+   layouts; these block the largest share of faithful manual ports.
+3. Publish the compiler-checked ASL cookbook and capability index alongside the
+   first port-driven features so existing scan/array/settings/lifecycle support
+   becomes discoverable immediately.
+4. Add collections/iteration, String/math/time ergonomics, and data-driven
+   settings from concrete manual ports, not as disconnected general-purpose
+   library growth.
+5. Establish the shared native/WebAssembly service boundary and choose the
+   extension host with the measured WASI-versus-component prototype. Package
+   language features and compilation into one portable VSIX while retaining
+   separately published native `splitc` and `splitls` executables.
+6. Establish the Wasmtime/DWARF compatibility fixture, then implement debug
+   names and source-line stepping before variable and Wasm GC inspection. Do
+   not build VS Code debugger UI until the real-host native workflow works.
+7. Add Unity Mono and the next engine/emulator provider, then evaluate timer
+   metadata and structured async needs against newly unblocked ports.
+8. Keep sandbox-sensitive host capabilities explicitly deferred until their
+   security, consent, ABI, and cleanup contracts are designed.

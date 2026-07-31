@@ -60,20 +60,33 @@ impl MemoryTypeLayout<'_> {
 
 #[derive(Debug, Clone, Default)]
 pub struct MemoryLayouts {
+    standard_library: StandardLibrary,
     records: HashMap<TypeId, Result<RecordMemoryLayout, String>>,
     source_records: HashMap<RecordId, TypeId>,
 }
 
 impl MemoryLayouts {
     pub fn build(records: &[RecordDecl], semantics: &SemanticModel) -> Self {
-        let mut layouts = Self::default();
+        Self::build_with_library(records, semantics, StandardLibrary::new())
+    }
+
+    pub fn build_with_library(
+        records: &[RecordDecl],
+        semantics: &SemanticModel,
+        standard_library: StandardLibrary,
+    ) -> Self {
+        let mut layouts = Self {
+            standard_library,
+            records: HashMap::new(),
+            source_records: HashMap::new(),
+        };
         for record in records {
             let ty = semantics.types().id_for_record(record.id);
             layouts.source_records.insert(record.id, ty);
             let mut visiting = HashSet::new();
             let _ = layouts.build_record(ty, records, semantics, &mut visiting);
         }
-        let library = StandardLibrary::new();
+        let library = layouts.standard_library.clone();
         for standard in library.types().iter().filter(|standard| {
             library.type_has_capability(standard.id, StdlibCapabilityId::MemoryReadable)
                 && matches!(
@@ -98,7 +111,7 @@ impl MemoryLayouts {
         semantics: &SemanticModel,
     ) -> Result<MemoryTypeLayout<'a>, String> {
         match semantics.types().kind(ty) {
-            TypeKind::Builtin(builtin) => scalar_layout(*builtin)
+            TypeKind::Builtin(builtin) => scalar_layout(&self.standard_library, *builtin)
                 .map(|(size, alignment)| MemoryTypeLayout::Scalar { size, alignment })
                 .ok_or_else(|| format!("type `{builtin}` is not MemoryReadable")),
             TypeKind::Record(record) => self
@@ -109,7 +122,7 @@ impl MemoryLayouts {
                 .map(MemoryTypeLayout::Record)
                 .map_err(Clone::clone),
             TypeKind::Standard(standard) => {
-                let library = StandardLibrary::new();
+                let library = &self.standard_library;
                 let declaration = library.type_decl(*standard);
                 if !library.type_has_capability(*standard, StdlibCapabilityId::MemoryReadable) {
                     return Err(format!("type `{}` is not MemoryReadable", declaration.name));
@@ -153,6 +166,19 @@ impl MemoryLayouts {
             .map_err(String::as_str)
     }
 
+    /// Largest fixed-layout value represented by this analysis. Backend
+    /// scratch planning uses this conservative bound so every generated
+    /// `process.read<T>` destination is sized before body emission.
+    pub fn maximum_size(&self) -> u32 {
+        self.records
+            .values()
+            .filter_map(|layout| layout.as_ref().ok())
+            .map(|layout| layout.size)
+            .max()
+            .unwrap_or(0)
+            .max(8)
+    }
+
     fn build_record(
         &mut self,
         ty: TypeId,
@@ -192,7 +218,7 @@ impl MemoryLayouts {
                     )
                 }
                 TypeKind::Standard(standard) => {
-                    let library = StandardLibrary::new();
+                    let library = &self.standard_library;
                     let declaration = library.type_decl(*standard);
                     if !library.type_has_capability(*standard, StdlibCapabilityId::MemoryReadable)
                         || !matches!(
@@ -262,13 +288,13 @@ impl MemoryLayouts {
         visiting: &mut HashSet<TypeId>,
     ) -> Result<(u32, u32), String> {
         match semantics.types().kind(ty) {
-            TypeKind::Builtin(builtin) => scalar_layout(*builtin)
+            TypeKind::Builtin(builtin) => scalar_layout(&self.standard_library, *builtin)
                 .ok_or_else(|| format!("`{builtin}` has no fixed process-memory layout")),
             TypeKind::Record(_) => self
                 .build_record(ty, records, semantics, visiting)
                 .map(|layout| (layout.size, layout.alignment)),
             TypeKind::Standard(standard) => {
-                let library = StandardLibrary::new();
+                let library = &self.standard_library;
                 let declaration = library.type_decl(*standard);
                 if !library.type_has_capability(*standard, StdlibCapabilityId::MemoryReadable) {
                     return Err(format!(
@@ -307,9 +333,9 @@ fn declared_type_id(ty: DeclaredTypeRef, semantics: &SemanticModel) -> TypeId {
     }
 }
 
-fn scalar_layout(ty: BuiltinType) -> Option<(u32, u32)> {
-    StandardLibrary::new()
-        .core_type(ty.core())
+fn scalar_layout(library: &StandardLibrary, ty: BuiltinType) -> Option<(u32, u32)> {
+    library
+        .core_type(ty)
         .memory_layout
         .map(|layout| (layout.size, layout.alignment))
 }

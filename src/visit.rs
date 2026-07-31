@@ -570,7 +570,11 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
         }
         ExprKind::Propagate(value) => folder.fold_expr(value),
         ExprKind::Member { receiver, .. } => folder.fold_expr(receiver),
-        ExprKind::Unary { expr, .. } | ExprKind::Cast { expr, .. } => folder.fold_expr(expr),
+        ExprKind::Unary { expr, .. } => folder.fold_expr(expr),
+        ExprKind::Cast { expr, target } => {
+            folder.fold_expr(expr);
+            folder.fold_type_ref(target);
+        }
         ExprKind::Binary { left, right, .. } => {
             folder.fold_expr(left);
             folder.fold_expr(right);

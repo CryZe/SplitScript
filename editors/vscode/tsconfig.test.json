@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "sourceMap": false,
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "src/embeddedCompiler.ts",
+    "src/taskState.ts",
+    "test/**/*.ts",
+    "test/**/*.mts"
+  ]
+}

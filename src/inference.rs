@@ -7,7 +7,7 @@ use std::{collections::HashMap, fmt, ops::BitOr};
 
 use crate::{
     ast::{ArrayTypeId, OptionTypeId, ResultTypeId, TypeRef},
-    stdlib::{CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
+    stdlib::{CapabilityBehavior, CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
     types::{BuiltinType, TypeId, TypeKind, TypeStore},
 };
 
@@ -24,7 +24,7 @@ impl Type {
     pub(crate) fn to_ref(self, types: &TypeStore) -> TypeRef {
         match self {
             Self::Known(id) => match types.kind(id) {
-                TypeKind::Builtin(builtin) => builtin.syntax(),
+                TypeKind::Builtin(builtin) => TypeRef::core(*builtin),
                 TypeKind::Standard(standard) => TypeRef::Standard(*standard),
                 TypeKind::Record(record) => TypeRef::Record(*record),
                 TypeKind::Enum(enumeration) => TypeRef::Enum(*enumeration),
@@ -54,30 +54,53 @@ impl fmt::Display for Type {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct Requirements(u8);
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Requirements(Vec<StdlibCapabilityId>);
 
 impl Requirements {
-    pub(crate) const NONE: Self = Self(0);
-    pub(crate) const EQUATABLE: Self = Self(1 << 0);
-    pub(crate) const NUMERIC: Self = Self(1 << 1);
-    pub(crate) const INTEGER: Self = Self(1 << 2);
-    pub(crate) const SIGNED: Self = Self(1 << 3);
-    pub(crate) const FLOAT: Self = Self(1 << 4);
-    pub(crate) const STRING_CAST: Self = Self(1 << 5);
-    pub(crate) const MEMORY_READABLE: Self = Self(1 << 6);
-    pub(crate) const INTERPOLATABLE: Self = Self(1 << 7);
+    pub(crate) fn none() -> Self {
+        Self::default()
+    }
 
-    fn intersects(self, other: Self) -> bool {
-        self.0 & other.0 != 0
+    pub(crate) fn capability(capability: StdlibCapabilityId) -> Self {
+        Self(vec![capability])
+    }
+
+    pub(crate) fn capabilities(capabilities: impl IntoIterator<Item = StdlibCapabilityId>) -> Self {
+        let mut requirements = Self::none();
+        for capability in capabilities {
+            if !requirements.0.contains(&capability) {
+                requirements.0.push(capability);
+            }
+        }
+        requirements
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn contains(&self, capability: StdlibCapabilityId) -> bool {
+        self.0.contains(&capability)
+    }
+
+    fn intersects(&self, capabilities: &[StdlibCapabilityId]) -> bool {
+        capabilities
+            .iter()
+            .any(|capability| self.contains(*capability))
     }
 }
 
 impl BitOr for Requirements {
     type Output = Self;
 
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Self(self.0 | rhs.0)
+    fn bitor(mut self, rhs: Self) -> Self::Output {
+        for capability in rhs.0 {
+            if !self.0.contains(&capability) {
+                self.0.push(capability);
+            }
+        }
+        self
     }
 }
 
@@ -117,6 +140,7 @@ pub(crate) struct ResultLayout {
 }
 
 pub(crate) struct InferenceContext {
+    standard_library: StandardLibrary,
     types: TypeStore,
     variables: Vec<Variable>,
     arrays: Vec<ArrayLayout>,
@@ -130,6 +154,7 @@ pub(crate) struct InferenceContext {
 
 impl InferenceContext {
     pub(crate) fn new(
+        standard_library: StandardLibrary,
         types: TypeStore,
         first_constructed_type_index: u32,
         arrays: impl IntoIterator<Item = ArrayLayout>,
@@ -146,6 +171,7 @@ impl InferenceContext {
             .chain(results.iter().map(|layout| layout.id.index() as u32 + 1))
             .fold(first_constructed_type_index, u32::max);
         Self {
+            standard_library,
             types,
             variables: Vec::new(),
             arrays,
@@ -189,7 +215,7 @@ impl InferenceContext {
         ty: Type,
         capability: StdlibCapabilityId,
     ) -> bool {
-        type_may_have_capability(&self.types, ty, capability)
+        type_may_have_capability(&self.standard_library, &self.types, ty, capability)
     }
 
     pub(crate) fn is_integer(&self, ty: Type) -> bool {
@@ -207,7 +233,7 @@ impl InferenceContext {
     pub(crate) fn known_type_name(&self, id: TypeId) -> String {
         match self.types.kind(id) {
             TypeKind::Builtin(builtin) => builtin.to_string(),
-            TypeKind::Standard(standard) => StandardLibrary::new().type_decl(*standard).name.into(),
+            TypeKind::Standard(standard) => self.standard_library.type_decl(*standard).name.into(),
             TypeKind::Record(record) => format!("record#{record}"),
             TypeKind::Enum(enumeration) => format!("enum#{enumeration}"),
             TypeKind::Array { .. } => "Array".into(),
@@ -247,15 +273,15 @@ impl InferenceContext {
         let Type::Variable(variable) = self.shallow(ty) else {
             return false;
         };
-        let requirements = self.variables[variable as usize].requirements;
-        !requirements.intersects(
-            Requirements::FLOAT
-                | Requirements::INTEGER
-                | Requirements::NUMERIC
-                | Requirements::SIGNED
-                | Requirements::STRING_CAST
-                | Requirements::INTERPOLATABLE,
-        )
+        let requirements = &self.variables[variable as usize].requirements;
+        !requirements.intersects(&[
+            StdlibCapabilityId::Float,
+            StdlibCapabilityId::Integer,
+            StdlibCapabilityId::Numeric,
+            StdlibCapabilityId::Signed,
+            StdlibCapabilityId::StringCast,
+            StdlibCapabilityId::Interpolatable,
+        ])
     }
 
     pub(crate) fn unify(&mut self, left: Type, right: Type) -> Result<Type, InferenceError> {
@@ -297,14 +323,24 @@ impl InferenceContext {
         match self.shallow(ty) {
             Type::Variable(variable) => {
                 let variable = self.root(variable);
-                let combined = self.variables[variable as usize].requirements | requirements;
-                if !requirements_are_possible(&self.types, combined) {
+                let combined =
+                    self.variables[variable as usize].requirements.clone() | requirements;
+                if !requirements_are_possible(&self.standard_library, &self.types, &combined) {
                     return Err(error("incompatible type constraints"));
                 }
                 self.variables[variable as usize].requirements = combined;
                 Ok(())
             }
-            concrete if type_meets_requirements(&self.types, concrete, requirements) => Ok(()),
+            concrete
+                if type_meets_requirements(
+                    &self.standard_library,
+                    &self.types,
+                    concrete,
+                    &requirements,
+                ) =>
+            {
+                Ok(())
+            }
             concrete => Err(InferenceError::UnsupportedOperation(concrete)),
         }
     }
@@ -316,16 +352,16 @@ impl InferenceContext {
             if root != id || self.variables[root as usize].binding.is_some() {
                 continue;
             }
-            let requirements = self.variables[root as usize].requirements;
-            let default = if requirements.intersects(Requirements::FLOAT) {
+            let requirements = &self.variables[root as usize].requirements;
+            let default = if requirements.intersects(&[StdlibCapabilityId::Float]) {
                 Some(self.known_builtin(BuiltinType::F64))
-            } else if requirements.intersects(
-                Requirements::INTEGER
-                    | Requirements::NUMERIC
-                    | Requirements::SIGNED
-                    | Requirements::STRING_CAST
-                    | Requirements::INTERPOLATABLE,
-            ) {
+            } else if requirements.intersects(&[
+                StdlibCapabilityId::Integer,
+                StdlibCapabilityId::Numeric,
+                StdlibCapabilityId::Signed,
+                StdlibCapabilityId::StringCast,
+                StdlibCapabilityId::Interpolatable,
+            ]) {
                 Some(self.known_builtin(BuiltinType::I32))
             } else {
                 None
@@ -625,7 +661,7 @@ impl InferenceContext {
         let left_variable = self.variables[left as usize].clone();
         self.variables[right as usize].parent = left;
         self.variables[left as usize].requirements =
-            left_variable.requirements | right_variable.requirements;
+            left_variable.requirements.clone() | right_variable.requirements.clone();
         self.variables[left as usize].largest_literal = left_variable
             .largest_literal
             .max(right_variable.largest_literal);
@@ -640,8 +676,11 @@ impl InferenceContext {
             self.validate_binding(left, binding)?;
             self.variables[left as usize].binding = Some(binding);
             Ok(self.shallow(Type::Variable(left)))
-        } else if requirements_are_possible(&self.types, self.variables[left as usize].requirements)
-        {
+        } else if requirements_are_possible(
+            &self.standard_library,
+            &self.types,
+            &self.variables[left as usize].requirements,
+        ) {
             Ok(Type::Variable(left))
         } else {
             Err(error("incompatible type constraints"))
@@ -664,7 +703,12 @@ impl InferenceContext {
 
     fn validate_binding(&self, variable: u32, ty: Type) -> Result<(), InferenceError> {
         let inference = &self.variables[variable as usize];
-        if !type_meets_requirements(&self.types, ty, inference.requirements) {
+        if !type_meets_requirements(
+            &self.standard_library,
+            &self.types,
+            ty,
+            &inference.requirements,
+        ) {
             return Err(InferenceError::UnsatisfiedConstraints(ty));
         }
         if let Some(literal) = inference.largest_literal
@@ -694,57 +738,45 @@ fn fits_unsigned_literal(types: &TypeStore, value: u64, ty: Type) -> bool {
     }
 }
 
-fn type_meets_requirements(types: &TypeStore, ty: Type, requirements: Requirements) -> bool {
+fn type_meets_requirements(
+    standard_library: &StandardLibrary,
+    types: &TypeStore,
+    ty: Type,
+    requirements: &Requirements,
+) -> bool {
     if matches!(ty, Type::Variable(_)) {
         return true;
     }
-    [
-        (Requirements::EQUATABLE, StdlibCapabilityId::Equatable),
-        (Requirements::NUMERIC, StdlibCapabilityId::Numeric),
-        (Requirements::INTEGER, StdlibCapabilityId::Integer),
-        (Requirements::SIGNED, StdlibCapabilityId::Signed),
-        (Requirements::FLOAT, StdlibCapabilityId::Float),
-        (Requirements::STRING_CAST, StdlibCapabilityId::StringCast),
-        (
-            Requirements::INTERPOLATABLE,
-            StdlibCapabilityId::Interpolatable,
-        ),
-        (
-            Requirements::MEMORY_READABLE,
-            StdlibCapabilityId::MemoryReadable,
-        ),
-    ]
-    .into_iter()
-    .all(|(requirement, capability)| {
-        !requirements.intersects(requirement) || type_may_have_capability(types, ty, capability)
-    })
+    requirements
+        .0
+        .iter()
+        .all(|capability| type_may_have_capability(standard_library, types, ty, *capability))
 }
 
 /// Conservative pre-semantic admissibility check. Derived capabilities are
 /// proven recursively by `CapabilityAnalysis` once inference produces a
 /// semantic TypeId.
 pub(crate) fn type_may_have_capability(
+    library: &StandardLibrary,
     types: &TypeStore,
     ty: Type,
     capability: StdlibCapabilityId,
 ) -> bool {
-    let library = StandardLibrary::new();
+    let behavior = library.capability(capability).behavior;
     match ty {
         Type::Known(id) => match types.kind(id) {
-            TypeKind::Builtin(builtin) => {
-                library.core_type_has_capability(builtin.core(), capability)
-            }
+            TypeKind::Builtin(builtin) => library.core_type_has_capability(*builtin, capability),
             TypeKind::Standard(standard) => library.type_has_capability(*standard, capability),
             TypeKind::Record(_) => matches!(
-                capability,
-                StdlibCapabilityId::Equatable | StdlibCapabilityId::MemoryReadable
+                behavior,
+                CapabilityBehavior::StructuralEquality | CapabilityBehavior::StructuralMemoryLayout
             ),
             TypeKind::Enum(_) | TypeKind::Option { .. } | TypeKind::Result { .. } => {
-                capability == StdlibCapabilityId::Equatable
+                behavior == CapabilityBehavior::StructuralEquality
             }
             TypeKind::Array { .. } => false,
         },
-        Type::Option(_) | Type::Result(_) => capability == StdlibCapabilityId::Equatable,
+        Type::Option(_) | Type::Result(_) => behavior == CapabilityBehavior::StructuralEquality,
         Type::Array(_) | Type::Variable(_) => false,
     }
 }
@@ -761,8 +793,11 @@ fn canonical_wrapper_type(
     }
 }
 
-fn requirements_are_possible(types: &TypeStore, requirements: Requirements) -> bool {
-    let library = StandardLibrary::new();
+fn requirements_are_possible(
+    library: &StandardLibrary,
+    types: &TypeStore,
+    requirements: &Requirements,
+) -> bool {
     library
         .core_types()
         .iter()
@@ -773,7 +808,7 @@ fn requirements_are_possible(types: &TypeStore, requirements: Requirements) -> b
                 .iter()
                 .map(|ty| Type::Known(types.id_for_standard(ty.id))),
         )
-        .any(|ty| type_meets_requirements(types, ty, requirements))
+        .any(|ty| type_meets_requirements(library, types, ty, requirements))
 }
 
 fn error(message: impl Into<String>) -> InferenceError {
@@ -786,9 +821,13 @@ mod tests {
 
     #[test]
     fn unifies_bidirectionally_and_checks_literal_bounds() {
-        let mut inference = InferenceContext::new(TypeStore::default(), 0, [], [], []);
-        let value = inference.fresh(Requirements::INTEGER, Some(256));
-        let alias = inference.fresh(Requirements::NONE, None);
+        let mut inference =
+            InferenceContext::new(StandardLibrary::new(), TypeStore::default(), 0, [], [], []);
+        let value = inference.fresh(
+            Requirements::capability(StdlibCapabilityId::Integer),
+            Some(256),
+        );
+        let alias = inference.fresh(Requirements::none(), None);
         inference.unify(alias, value).unwrap();
         assert!(
             inference
@@ -802,12 +841,29 @@ mod tests {
 
     #[test]
     fn combines_constraints_and_defaults_numeric_variables() {
-        let mut inference = InferenceContext::new(TypeStore::default(), 0, [], [], []);
-        let value = inference.fresh(Requirements::SIGNED, None);
-        inference.require(value, Requirements::NUMERIC).unwrap();
+        let mut inference =
+            InferenceContext::new(StandardLibrary::new(), TypeStore::default(), 0, [], [], []);
+        let value = inference.fresh(Requirements::capability(StdlibCapabilityId::Signed), None);
+        inference
+            .require(value, Requirements::capability(StdlibCapabilityId::Numeric))
+            .unwrap();
         assert!(inference.default_unbound().is_empty());
         let i32_type = inference.known_builtin(BuiltinType::I32);
         assert_eq!(inference.resolve(value), i32_type);
+    }
+
+    #[test]
+    fn capability_requirements_are_not_limited_to_well_known_bit_positions() {
+        let loaded = StdlibCapabilityId::from_u32(10_000);
+        let requirements = Requirements::capabilities([
+            StdlibCapabilityId::Numeric,
+            loaded,
+            StdlibCapabilityId::Numeric,
+        ]);
+
+        assert!(requirements.contains(StdlibCapabilityId::Numeric));
+        assert!(requirements.contains(loaded));
+        assert_eq!(requirements.0.len(), 2);
     }
 
     #[test]
@@ -818,6 +874,7 @@ mod tests {
         let types = TypeStore::default();
         let u32_type = Type::Known(types.id_for_builtin(BuiltinType::U32));
         let mut inference = InferenceContext::new(
+            StandardLibrary::new(),
             types,
             3,
             [ArrayLayout {

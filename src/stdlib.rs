@@ -6,732 +6,312 @@
 
 mod catalog;
 mod declarations;
+mod graph;
+mod ids;
+mod schema;
+mod source;
+mod validation;
 
-pub use catalog::{
+pub use ids::{
     IntrinsicId, StdlibCapabilityId, StdlibFieldId, StdlibItemId, StdlibNamespaceId,
-    StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
+    StdlibStateProviderId, StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
+};
+pub use schema::{
+    Availability, CancellationKind, Deprecation, Effect, EffectSet, Implementation, ItemKind,
+    OperationSemantics, Parameter, ParameterRule, Signature, StdlibItem, SuspensionKind,
+    TypeParameter, TypeRef,
 };
 
 pub use declarations::{
-    CoreType, CoreTypeId, DeclaredTypeRef, FieldVisibility, RuntimeRepresentation,
-    ScalarMemoryLayout, StdlibCapability, StdlibField, StdlibNamespace, StdlibOwner,
-    StdlibSymbolId, StdlibType, StdlibTypeConstructor, StdlibTypeKind, StdlibVariant, ValueUsage,
+    CapabilityBehavior, CoreType, CoreTypeId, DeclaredTypeRef, FieldVisibility,
+    RuntimeRepresentation, ScalarMemoryLayout, StdlibCapability, StdlibField, StdlibNamespace,
+    StdlibOwner, StdlibStateProvider, StdlibSymbolId, StdlibType, StdlibTypeConstructor,
+    StdlibTypeKind, StdlibVariant, ValueUsage,
 };
 
-use catalog::{CAPABILITIES, FIELDS, ITEMS, NAMESPACES, TYPE_CONSTRUCTORS, TYPES, VARIANTS};
+use catalog::{
+    CAPABILITIES, FIELDS, ITEMS, NAMESPACES, STATE_PROVIDERS, TYPE_CONSTRUCTORS, TYPES, VARIANTS,
+};
 use declarations::CORE_TYPES;
+pub(crate) use declarations::with_core_types;
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
-use crate::{
-    catalog::{Documentation, Example},
-    types::{BuiltinType, TypeKind},
-};
+use graph::{StandardLibraryGraph, default_standard_library_graph};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Implementation {
-    Intrinsic(IntrinsicId),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Effect {
-    Pure,
-    Allocates,
-    MutatesValue,
-    ReadsTimer,
-    ReadsProcess,
-    RequiresAttachedProcess,
-    Retryable,
-    Suspends,
-    CancelsOnProcessClose,
-    WritesTimer,
-    WritesRuntime,
-}
-
-impl Effect {
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Pure => "pure",
-            Self::Allocates => "allocates",
-            Self::MutatesValue => "mutates the receiver",
-            Self::ReadsTimer => "reads timer state",
-            Self::ReadsProcess => "reads process memory",
-            Self::RequiresAttachedProcess => "requires an attached process",
-            Self::Retryable => "retryable",
-            Self::Suspends => "suspends",
-            Self::CancelsOnProcessClose => "cancels when the process closes",
-            Self::WritesTimer => "writes timer state",
-            Self::WritesRuntime => "writes runtime state",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TypeConstraint {
-    Numeric,
-    MemoryReadable,
-}
-
-impl TypeConstraint {
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::Numeric => "Numeric",
-            Self::MemoryReadable => "MemoryReadable",
-        }
-    }
-
-    pub const fn capability(self) -> StdlibCapabilityId {
-        match self {
-            Self::Numeric => StdlibCapabilityId::Numeric,
-            Self::MemoryReadable => StdlibCapabilityId::MemoryReadable,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TypeRef {
-    Core(CoreTypeId),
-    Standard(StdlibTypeId),
-    Variable(&'static str),
-    Array(&'static TypeRef),
-    Result(&'static TypeRef),
-}
+use crate::{catalog::Documentation, intrinsic_registry};
 
 impl TypeRef {
-    fn render(self) -> String {
-        self.render_with(&[])
+    fn render(self, library: &StandardLibrary) -> String {
+        self.render_with(library, &[])
     }
 
-    fn render_with(self, substitutions: &[(&str, String)]) -> String {
+    fn render_with(self, library: &StandardLibrary, substitutions: &[(&str, String)]) -> String {
         match self {
             Self::Core(ty) => ty.to_string(),
-            Self::Standard(ty) => StandardLibrary::new().type_decl(ty).name.to_owned(),
-            Self::Variable(name) => substitutions
+            Self::Standard(ty) => library.type_decl(ty).name.to_owned(),
+            Self::Parameter(name) => substitutions
                 .iter()
                 .find_map(|(parameter, ty)| (*parameter == name).then(|| ty.clone()))
                 .unwrap_or_else(|| name.to_owned()),
-            Self::Array(element) => format!("[{}]", element.render_with(substitutions)),
-            Self::Result(value) => format!("{}!", value.render_with(substitutions)),
+            Self::Application {
+                constructor,
+                arguments,
+            } => {
+                let rendered = arguments
+                    .iter()
+                    .map(|argument| argument.render_with(library, substitutions))
+                    .collect::<Vec<_>>();
+                if constructor == StdlibTypeConstructorId::Array && rendered.len() == 1 {
+                    format!("[{}]", rendered[0])
+                } else if constructor == StdlibTypeConstructorId::Option && rendered.len() == 1 {
+                    format!("{}?", rendered[0])
+                } else if constructor == StdlibTypeConstructorId::Result && rendered.len() == 1 {
+                    format!("{}!", rendered[0])
+                } else {
+                    format!(
+                        "{}<{}>",
+                        library.type_constructor(constructor).name,
+                        rendered.join(", ")
+                    )
+                }
+            }
         }
     }
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TypeParameter {
-    pub name: &'static str,
-    pub constraints: &'static [TypeConstraint],
+#[derive(Debug, Clone)]
+pub struct StandardLibrary {
+    graph: Arc<StandardLibraryGraph>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParameterRule {
-    Value,
-    StringLiteral,
-    SignatureLiteral,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Parameter {
-    pub name: &'static str,
-    pub ty: TypeRef,
-    pub rule: ParameterRule,
-    pub documentation: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ItemKind {
-    Function,
-    TypedFunction { type_parameter: &'static str },
-    Method { receiver: TypeRef },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Signature {
-    pub type_parameters: &'static [TypeParameter],
-    pub parameters: &'static [Parameter],
-    pub result: TypeRef,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Availability {
-    Everywhere,
-    OnAttach,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SuspensionKind {
-    None,
-    Retryable,
-    Suspends,
-}
-
-impl SuspensionKind {
-    pub const fn is_awaitable(self) -> bool {
-        !matches!(self, Self::None)
+impl PartialEq for StandardLibrary {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.graph, &other.graph)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CancellationKind {
-    None,
-    ProcessClose,
-}
+impl Eq for StandardLibrary {}
 
-/// Normalized operational facts consumed by type checking, lowering,
-/// documentation, and editor tooling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OperationSemantics {
-    pub availability: Availability,
-    pub suspension: SuspensionKind,
-    pub requires_attached_process: bool,
-    pub cancellation: CancellationKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Deprecation {
-    pub message: &'static str,
-    pub replacement: Option<StdlibItemId>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StdlibItem {
-    pub id: StdlibItemId,
-    pub owner: StdlibOwner,
-    pub name: &'static str,
-    pub qualified_name: &'static str,
-    pub kind: ItemKind,
-    pub signature: Signature,
-    pub effects: &'static [Effect],
-    pub availability: Availability,
-    pub deprecation: Option<Deprecation>,
-    pub documentation: Documentation<StdlibItemId>,
-    pub implementation: Implementation,
-}
-
-impl StdlibItem {
-    pub fn operation_semantics(self) -> OperationSemantics {
-        let suspension = if self.effects.contains(&Effect::Suspends) {
-            SuspensionKind::Suspends
-        } else if self.effects.contains(&Effect::Retryable) {
-            SuspensionKind::Retryable
-        } else {
-            SuspensionKind::None
-        };
-        OperationSemantics {
-            availability: self.availability,
-            suspension,
-            requires_attached_process: self.effects.contains(&Effect::RequiresAttachedProcess),
-            cancellation: if self.effects.contains(&Effect::CancelsOnProcessClose) {
-                CancellationKind::ProcessClose
-            } else {
-                CancellationKind::None
-            },
-        }
+impl std::hash::Hash for StandardLibrary {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.graph).hash(state);
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CallCandidate {
-    pub item: &'static StdlibItem,
-    pub type_arguments: Vec<(&'static str, BuiltinType)>,
-}
-
-impl CallCandidate {
-    pub const fn receiver(&self) -> Option<TypeRef> {
-        match self.item.kind {
-            ItemKind::Method { receiver } => Some(receiver),
-            ItemKind::Function | ItemKind::TypedFunction { .. } => None,
-        }
+impl Default for StandardLibrary {
+    fn default() -> Self {
+        Self::new()
     }
 }
-
-const VOID: TypeRef = TypeRef::Core(CoreTypeId::Void);
-const U32: TypeRef = TypeRef::Core(CoreTypeId::U32);
-const U64: TypeRef = TypeRef::Core(CoreTypeId::U64);
-const I32: TypeRef = TypeRef::Core(CoreTypeId::I32);
-const I64: TypeRef = TypeRef::Core(CoreTypeId::I64);
-const F32: TypeRef = TypeRef::Core(CoreTypeId::F32);
-const F64: TypeRef = TypeRef::Core(CoreTypeId::F64);
-const ADDRESS: TypeRef = TypeRef::Core(CoreTypeId::Address);
-const STRING: TypeRef = TypeRef::Standard(StdlibTypeId::String);
-const SIGNATURE: TypeRef = TypeRef::Standard(StdlibTypeId::Signature);
-const DURATION: TypeRef = TypeRef::Standard(StdlibTypeId::Duration);
-const MODULE: TypeRef = TypeRef::Standard(StdlibTypeId::Module);
-const UNITY_MODULE: TypeRef = TypeRef::Standard(StdlibTypeId::UnityModule);
-const UNITY_IMAGE: TypeRef = TypeRef::Standard(StdlibTypeId::UnityImage);
-const UNITY_CLASS: TypeRef = TypeRef::Standard(StdlibTypeId::UnityClass);
-const UNITY_FIELD: TypeRef = TypeRef::Standard(StdlibTypeId::UnityField);
-const TIMER_STATE: TypeRef = TypeRef::Standard(StdlibTypeId::TimerState);
-const T_REF: TypeRef = TypeRef::Variable("T");
-const T_RESULT: TypeRef = TypeRef::Result(&T_REF);
-const ADDRESS_RESULT: TypeRef = TypeRef::Result(&ADDRESS);
-const STRING_RESULT: TypeRef = TypeRef::Result(&STRING);
-const STRING_ARRAY: TypeRef = TypeRef::Array(&STRING);
-const U64_ARRAY: TypeRef = TypeRef::Array(&U64);
-const T_ARRAY: TypeRef = TypeRef::Array(&T_REF);
-
-const NUMERIC_PARAMETER: &[TypeParameter] = &[TypeParameter {
-    name: "T",
-    constraints: &[TypeConstraint::Numeric],
-}];
-const MEMORY_PARAMETER: &[TypeParameter] = &[TypeParameter {
-    name: "T",
-    constraints: &[TypeConstraint::MemoryReadable],
-}];
-const UNCONSTRAINED_T: &[TypeParameter] = &[TypeParameter {
-    name: "T",
-    constraints: &[],
-}];
-
-const PURE: &[Effect] = &[Effect::Pure];
-const ALLOCATES: &[Effect] = &[Effect::Allocates];
-const PROCESS: &[Effect] = &[Effect::ReadsProcess, Effect::RequiresAttachedProcess];
-const PROCESS_SUSPEND: &[Effect] = &[
-    Effect::ReadsProcess,
-    Effect::RequiresAttachedProcess,
-    Effect::Suspends,
-    Effect::CancelsOnProcessClose,
-];
-const NEXT_TICK: &[Effect] = &[
-    Effect::RequiresAttachedProcess,
-    Effect::Suspends,
-    Effect::CancelsOnProcessClose,
-];
-const TIMER_WRITE: &[Effect] = &[Effect::WritesTimer];
-const TIMER_READ: &[Effect] = &[Effect::ReadsTimer];
-const RUNTIME_WRITE: &[Effect] = &[Effect::WritesRuntime];
-const MUTATES_VALUE: &[Effect] = &[Effect::MutatesValue];
-
-const fn parameter(name: &'static str, ty: TypeRef, documentation: &'static str) -> Parameter {
-    Parameter {
-        name,
-        ty,
-        rule: ParameterRule::Value,
-        documentation,
-    }
-}
-
-const fn literal_parameter(
-    name: &'static str,
-    ty: TypeRef,
-    rule: ParameterRule,
-    documentation: &'static str,
-) -> Parameter {
-    Parameter {
-        name,
-        ty,
-        rule,
-        documentation,
-    }
-}
-
-const BASIC_EXAMPLE: &str = r#"state "game.exe" {}
-whileAttached {
-    let values = ["a", "b"]
-    let joined = String.concat(values)
-    print(joined)
-    setVariable("Length", String.length(joined) as String)
-    let state = timer.state()
-    setTickRate(60.0)
-}"#;
-const DURATION_EXAMPLE: &str = r#"state "game.exe" {}
-gameTime {
-    return match timer.state() {
-        TimerState.NotRunning => Duration.fromFrames(120, 60),
-        TimerState.Running => Duration.fromParts(2, 0),
-        _ => Duration.fromSeconds(2.0)
-    }
-}"#;
-const NUMERIC_EXAMPLE: &str = r#"state "game.exe" {}
-whileAttached {
-    let value: i32 = 9
-    let minimum = value.min(7)
-    let maximum = value.max(10)
-    let bounded = value.clamp(0, 7)
-}"#;
-const ARRAY_EXAMPLE: &str = r#"state "game.exe" {}
-whileAttached {
-    let bytes = [0x48u8, 0u8]
-    bytes.set(1, 0x8bu8)
-    let first = bytes.get(0)
-    let count = bytes.length()
-}"#;
-const ADDRESS_EXAMPLE: &str = r#"state "game.exe" {}
-whileAttached {
-    let base: address = 0x1000
-    let field = base.offset(4)
-    let next = field.add(8)
-}"#;
-const PROCESS_EXAMPLE: &str = r#"state "game.exe" {}
-onAttach {
-    let module = await process.module("GameAssembly.dll")
-    let marker = await module.scan(sig"48 8B ?? 89")
-    let rangedMarker = await process.scan(module.address, module.size, sig"48 8B ?? 89")
-    let object = retry process.follow(module.address, [0x100, 0x20])
-    let health = retry process.read.i32(object.offset(0x10))
-    let target = retry process.readRelative32(marker.offset(3))
-    let scene = retry process.read.managedString(target, 64)
-    print(`{rangedMarker}:{health}:{scene}`)
-}"#;
-const UNITY_EXAMPLE: &str = r#"state "game.exe" {}
-onAttach {
-    let unity = await Unity.il2cpp(2020)
-    let image = await unity.image("Assembly-CSharp")
-    let gameManager = await image.class("GameManager")
-    let healthOffset = await gameManager.field("health")
-    let levelField = await gameManager.fieldAny(["currentLevel", "level"])
-    let staticTable = await gameManager.staticTable()
-    let instance = await gameManager.staticInstance(["Instance", "_instance"])
-    print(`{healthOffset}:{levelField.offset}:{staticTable}:{instance}`)
-}"#;
-const NEXT_TICK_EXAMPLE: &str = r#"state "game.exe" {}
-onAttach {
-    await nextTick()
-    print("Initialization resumed")
-}"#;
-
-macro_rules! doc_example {
-    ($name:ident, $title:literal, $source:literal, $validation:expr) => {
-        const $name: &[Example] = &[Example::checked($title, $source, $validation)];
-    };
-}
-
-doc_example!(
-    NUMERIC_MIN_EXAMPLE,
-    "Keep the smaller value",
-    "let visibleStage = stage.min(7)",
-    NUMERIC_EXAMPLE
-);
-doc_example!(
-    NUMERIC_MAX_EXAMPLE,
-    "Keep the larger value",
-    "let nonNegativeScore = score.max(0)",
-    NUMERIC_EXAMPLE
-);
-doc_example!(
-    NUMERIC_CLAMP_EXAMPLE,
-    "Restrict a value to a range",
-    "let visibleStage = stage.clamp(1, 7)",
-    NUMERIC_EXAMPLE
-);
-doc_example!(
-    PRINT_EXAMPLE,
-    "Write to the runtime log",
-    "print(\"Attached to the game\")",
-    BASIC_EXAMPLE
-);
-doc_example!(
-    SET_VARIABLE_EXAMPLE,
-    "Expose a layout variable",
-    "setVariable(\"Level\", levelName)",
-    BASIC_EXAMPLE
-);
-doc_example!(
-    SET_TICK_RATE_EXAMPLE,
-    "Poll more frequently",
-    "setTickRate(120.0)",
-    BASIC_EXAMPLE
-);
-doc_example!(
-    NEXT_TICK_DOC_EXAMPLE,
-    "Resume on the next update",
-    "await nextTick()",
-    NEXT_TICK_EXAMPLE
-);
-doc_example!(
-    STRING_LENGTH_EXAMPLE,
-    "Measure UTF-8 text",
-    "let byteLength = String.length(levelName)",
-    BASIC_EXAMPLE
-);
-doc_example!(
-    STRING_CONCAT_EXAMPLE,
-    "Join strings",
-    "let label = String.concat([\"Stage \", stageName])",
-    BASIC_EXAMPLE
-);
-doc_example!(
-    TIMER_STATE_EXAMPLE,
-    "Check whether the timer is running",
-    "let isRunning = timer.state() == TimerState.Running",
-    BASIC_EXAMPLE
-);
-doc_example!(
-    PROCESS_MODULE_EXAMPLE,
-    "Wait for a module",
-    "let gameAssembly = await process.module(\"GameAssembly.dll\")",
-    PROCESS_EXAMPLE
-);
-doc_example!(
-    PROCESS_READ_EXAMPLE,
-    "Read a typed value",
-    "let health = process.read.i32(player.offset(0x20)) else 0",
-    PROCESS_EXAMPLE
-);
-doc_example!(
-    PROCESS_FOLLOW_EXAMPLE,
-    "Follow a pointer path",
-    "let player = retry process.follow(module.address, [0x100, 0x20])",
-    PROCESS_EXAMPLE
-);
-doc_example!(
-    PROCESS_SCAN_EXAMPLE,
-    "Scan a memory range",
-    "let marker = await process.scan(module.address, module.size, sig\"48 8B ?? 89\")",
-    PROCESS_EXAMPLE
-);
-doc_example!(
-    PROCESS_RELATIVE_EXAMPLE,
-    "Resolve a relative target",
-    "let target = retry process.readRelative32(instruction.offset(3))",
-    PROCESS_EXAMPLE
-);
-doc_example!(
-    MANAGED_STRING_EXAMPLE,
-    "Read a Unity string",
-    "let scene = process.read.managedString(sceneAddress, 64) else \"Unknown\"",
-    PROCESS_EXAMPLE
-);
-doc_example!(
-    UNITY_IL2CPP_EXAMPLE,
-    "Discover IL2CPP metadata",
-    "let unity = await Unity.il2cpp(2020)",
-    UNITY_EXAMPLE
-);
-doc_example!(
-    DURATION_FRAMES_EXAMPLE,
-    "Convert frames to game time",
-    "return Duration.fromFrames(frameCount, 60)",
-    DURATION_EXAMPLE
-);
-doc_example!(
-    DURATION_PARTS_EXAMPLE,
-    "Construct an exact duration",
-    "return Duration.fromParts(seconds, nanoseconds)",
-    DURATION_EXAMPLE
-);
-doc_example!(
-    DURATION_SECONDS_EXAMPLE,
-    "Convert seconds to game time",
-    "return Duration.fromSeconds(elapsedSeconds)",
-    DURATION_EXAMPLE
-);
-doc_example!(
-    ADDRESS_OFFSET_EXAMPLE,
-    "Add a field offset",
-    "let healthAddress = player.offset(0x20)",
-    ADDRESS_EXAMPLE
-);
-doc_example!(
-    ADDRESS_ADD_EXAMPLE,
-    "Add a full-width offset",
-    "let target = module.address.add(sectionOffset)",
-    ADDRESS_EXAMPLE
-);
-doc_example!(
-    MODULE_SCAN_EXAMPLE,
-    "Scan an entire module",
-    "let marker = await gameAssembly.scan(sig\"48 8B ?? 89\")",
-    PROCESS_EXAMPLE
-);
-doc_example!(
-    UNITY_IMAGE_EXAMPLE,
-    "Find a managed assembly",
-    "let image = await unity.image(\"Assembly-CSharp\")",
-    UNITY_EXAMPLE
-);
-doc_example!(
-    UNITY_CLASS_EXAMPLE,
-    "Find a managed class",
-    "let gameManager = await image.class(\"GameManager\")",
-    UNITY_EXAMPLE
-);
-doc_example!(
-    UNITY_FIELD_EXAMPLE,
-    "Find a field offset",
-    "let healthOffset = await gameManager.field(\"health\")",
-    UNITY_EXAMPLE
-);
-doc_example!(
-    UNITY_FIELD_ANY_EXAMPLE,
-    "Try multiple field names",
-    "let levelField = await gameManager.fieldAny([\"currentLevel\", \"level\"])",
-    UNITY_EXAMPLE
-);
-doc_example!(
-    UNITY_STATIC_TABLE_EXAMPLE,
-    "Find static storage",
-    "let staticTable = await gameManager.staticTable()",
-    UNITY_EXAMPLE
-);
-doc_example!(
-    UNITY_STATIC_INSTANCE_EXAMPLE,
-    "Find a singleton instance",
-    "let instance = await gameManager.staticInstance([\"Instance\", \"_instance\"])",
-    UNITY_EXAMPLE
-);
-doc_example!(
-    ARRAY_LENGTH_EXAMPLE,
-    "Count array elements",
-    "let fieldCount = fieldNames.length()",
-    ARRAY_EXAMPLE
-);
-doc_example!(
-    ARRAY_GET_EXAMPLE,
-    "Read an array element",
-    "let firstField = fieldNames.get(0)",
-    ARRAY_EXAMPLE
-);
-doc_example!(
-    ARRAY_SET_EXAMPLE,
-    "Replace an array element",
-    "fieldNames.set(0, \"health\")",
-    ARRAY_EXAMPLE
-);
-
-#[derive(Debug, Clone, Copy, Default)]
-pub struct StandardLibrary;
 
 impl StandardLibrary {
-    pub const fn new() -> Self {
-        Self
+    pub fn new() -> Self {
+        Self {
+            graph: default_standard_library_graph(),
+        }
     }
 
-    pub fn core_types(self) -> &'static [CoreType] {
+    #[cfg(test)]
+    pub(crate) fn isolated_bundled() -> Self {
+        Self {
+            graph: Arc::new(StandardLibraryGraph::build().unwrap_or_else(|errors| {
+                panic!(
+                    "the isolated bundled standard-library graph is invalid:\n{}",
+                    errors.join("\n")
+                )
+            })),
+        }
+    }
+
+    pub fn core_types(&self) -> &'static [CoreType] {
         CORE_TYPES
     }
 
-    pub fn core_type(self, id: CoreTypeId) -> &'static CoreType {
-        CORE_TYPES
-            .iter()
-            .find(|ty| ty.id == id)
+    pub fn state_providers(&self) -> &'static [StdlibStateProvider] {
+        STATE_PROVIDERS
+    }
+
+    pub fn state_provider(&self, id: StdlibStateProviderId) -> &'static StdlibStateProvider {
+        self.graph
+            .state_providers
+            .get(&id)
+            .copied()
+            .expect("every standard-library state provider ID must have a declaration")
+    }
+
+    pub fn state_provider_by_name(&self, name: &str) -> Option<&'static StdlibStateProvider> {
+        self.graph.state_providers_by_name.get(name).copied()
+    }
+
+    pub fn core_type(&self, id: CoreTypeId) -> &'static CoreType {
+        self.graph
+            .core_types
+            .get(&id)
+            .copied()
             .expect("every core type ID must have a declaration")
     }
 
-    pub fn core_type_has_capability(self, ty: CoreTypeId, capability: StdlibCapabilityId) -> bool {
+    pub fn core_type_has_capability(&self, ty: CoreTypeId, capability: StdlibCapabilityId) -> bool {
         self.core_type(ty).capabilities.contains(&capability)
     }
 
-    pub fn capabilities(self) -> &'static [StdlibCapability] {
+    pub fn capabilities(&self) -> &'static [StdlibCapability] {
         CAPABILITIES
     }
 
-    pub fn capability(self, id: StdlibCapabilityId) -> &'static StdlibCapability {
-        CAPABILITIES
-            .iter()
-            .find(|capability| capability.id == id)
+    pub fn capability(&self, id: StdlibCapabilityId) -> &'static StdlibCapability {
+        self.graph
+            .capabilities
+            .get(&id)
+            .copied()
             .expect("every standard-library capability ID must have a declaration")
     }
 
-    pub fn type_constructors(self) -> &'static [StdlibTypeConstructor] {
+    pub fn type_constructors(&self) -> &'static [StdlibTypeConstructor] {
         TYPE_CONSTRUCTORS
     }
 
-    pub fn type_constructor(self, id: StdlibTypeConstructorId) -> &'static StdlibTypeConstructor {
-        TYPE_CONSTRUCTORS
-            .iter()
-            .find(|constructor| constructor.id == id)
+    pub fn type_constructor(&self, id: StdlibTypeConstructorId) -> &'static StdlibTypeConstructor {
+        self.graph
+            .type_constructors
+            .get(&id)
+            .copied()
             .expect("every standard-library type-constructor ID must have a declaration")
     }
 
-    pub fn namespaces(self) -> &'static [StdlibNamespace] {
+    pub fn namespaces(&self) -> &'static [StdlibNamespace] {
         NAMESPACES
     }
 
-    pub fn namespace(self, id: StdlibNamespaceId) -> &'static StdlibNamespace {
-        NAMESPACES
-            .iter()
-            .find(|namespace| namespace.id == id)
+    pub fn namespace(&self, id: StdlibNamespaceId) -> &'static StdlibNamespace {
+        self.graph
+            .namespaces
+            .get(&id)
+            .copied()
             .expect("every standard-library namespace ID must have a declaration")
     }
 
-    pub fn namespace_by_name(self, name: &str) -> Option<&'static StdlibNamespace> {
-        NAMESPACES
-            .iter()
-            .find(|namespace| namespace.path.len() == 1 && namespace.name == name)
+    pub fn namespace_by_name(&self, name: &str) -> Option<&'static StdlibNamespace> {
+        self.graph.namespaces_by_name.get(name).copied()
     }
 
-    pub fn namespace_by_path(self, path: &[&str]) -> Option<&'static StdlibNamespace> {
-        NAMESPACES.iter().find(|namespace| namespace.path == path)
+    pub fn namespace_by_path(&self, path: &[&str]) -> Option<&'static StdlibNamespace> {
+        self.graph.namespaces_by_path.get(path).copied()
     }
 
-    pub fn types(self) -> &'static [StdlibType] {
+    pub fn types(&self) -> &'static [StdlibType] {
         TYPES
     }
 
-    pub fn type_decl(self, id: StdlibTypeId) -> &'static StdlibType {
-        TYPES
-            .iter()
-            .find(|ty| ty.id == id)
+    pub fn type_decl(&self, id: StdlibTypeId) -> &'static StdlibType {
+        self.graph
+            .types
+            .get(&id)
+            .copied()
             .expect("every standard-library type ID must have a declaration")
     }
 
-    pub fn type_by_name(self, name: &str) -> Option<&'static StdlibType> {
-        TYPES.iter().find(|ty| ty.name == name)
+    pub fn type_by_name(&self, name: &str) -> Option<&'static StdlibType> {
+        self.graph.types_by_name.get(name).copied()
     }
 
-    pub fn type_has_capability(self, ty: StdlibTypeId, capability: StdlibCapabilityId) -> bool {
+    pub fn type_has_capability(&self, ty: StdlibTypeId, capability: StdlibCapabilityId) -> bool {
         self.type_decl(ty).capabilities.contains(&capability)
     }
 
-    pub fn fields(self) -> &'static [StdlibField] {
+    pub fn render_declared_type(&self, ty: DeclaredTypeRef) -> &'static str {
+        match ty {
+            DeclaredTypeRef::Core(core) => self.core_type(core).name,
+            DeclaredTypeRef::Standard(standard) => self.type_decl(standard).name,
+        }
+    }
+
+    pub fn fields(&self) -> &'static [StdlibField] {
         FIELDS
     }
 
-    pub fn field(self, id: StdlibFieldId) -> &'static StdlibField {
-        FIELDS
-            .iter()
-            .find(|field| field.id == id)
+    pub fn field(&self, id: StdlibFieldId) -> &'static StdlibField {
+        self.graph
+            .fields
+            .get(&id)
+            .copied()
             .expect("every standard-library field ID must have a declaration")
     }
 
-    pub fn fields_of(self, owner: StdlibTypeId) -> impl Iterator<Item = &'static StdlibField> {
-        FIELDS.iter().filter(move |field| field.owner == owner)
+    pub fn fields_of(&self, owner: StdlibTypeId) -> impl Iterator<Item = &'static StdlibField> {
+        self.graph
+            .fields_by_owner
+            .get(&owner)
+            .into_iter()
+            .flat_map(|fields| fields.iter().copied())
     }
 
-    pub fn public_field(self, owner: StdlibTypeId, name: &str) -> Option<&'static StdlibField> {
-        self.public_fields(owner).find(|field| field.name == name)
+    pub fn public_field(&self, owner: StdlibTypeId, name: &str) -> Option<&'static StdlibField> {
+        self.graph.public_fields.get(&(owner, name)).copied()
     }
 
-    pub fn public_fields(self, owner: StdlibTypeId) -> impl Iterator<Item = &'static StdlibField> {
+    pub fn public_fields(&self, owner: StdlibTypeId) -> impl Iterator<Item = &'static StdlibField> {
         self.fields_of(owner)
             .filter(|field| field.visibility == FieldVisibility::Public)
     }
 
-    pub fn variants(self) -> &'static [StdlibVariant] {
+    pub fn variants(&self) -> &'static [StdlibVariant] {
         VARIANTS
     }
 
-    pub fn variant(self, id: StdlibVariantId) -> &'static StdlibVariant {
-        VARIANTS
-            .iter()
-            .find(|variant| variant.id == id)
+    pub fn variant(&self, id: StdlibVariantId) -> &'static StdlibVariant {
+        self.graph
+            .variants
+            .get(&id)
+            .copied()
             .expect("every standard-library variant ID must have a declaration")
     }
 
-    pub fn variants_of(self, owner: StdlibTypeId) -> impl Iterator<Item = &'static StdlibVariant> {
-        VARIANTS
-            .iter()
-            .filter(move |variant| variant.owner == owner)
+    pub fn variants_of(&self, owner: StdlibTypeId) -> impl Iterator<Item = &'static StdlibVariant> {
+        self.graph
+            .variants_by_owner
+            .get(&owner)
+            .into_iter()
+            .flat_map(|variants| variants.iter().copied())
     }
 
-    pub fn items(self) -> &'static [StdlibItem] {
+    pub fn items(&self) -> &'static [StdlibItem] {
         ITEMS
     }
 
-    pub fn item(self, id: StdlibItemId) -> &'static StdlibItem {
-        ITEMS
-            .iter()
-            .find(|item| item.id == id)
+    pub fn methods(&self) -> impl Iterator<Item = &'static StdlibItem> {
+        self.graph.methods.iter().copied()
+    }
+
+    pub fn method_items_named(&self, name: &str) -> impl Iterator<Item = &'static StdlibItem> + '_ {
+        self.graph
+            .methods_by_name
+            .get(name)
+            .into_iter()
+            .flat_map(|items| items.iter().copied())
+    }
+
+    pub fn item(&self, id: StdlibItemId) -> &'static StdlibItem {
+        self.graph
+            .items
+            .get(&id)
+            .copied()
             .expect("every standard-library ID must have a catalog entry")
     }
 
-    pub fn item_by_name(self, qualified_name: &str) -> Option<&'static StdlibItem> {
-        ITEMS
-            .iter()
-            .find(|item| item.qualified_name == qualified_name)
+    pub fn item_by_name(&self, qualified_name: &str) -> Option<&'static StdlibItem> {
+        self.graph.items_by_name.get(qualified_name).copied()
     }
 
-    pub fn item_path(self, item: &StdlibItem) -> Option<Vec<&'static str>> {
+    pub fn children_of(&self, owner: StdlibOwner) -> impl Iterator<Item = StdlibSymbolId> + '_ {
+        self.graph
+            .children_by_owner
+            .get(&owner)
+            .into_iter()
+            .flat_map(|children| children.iter().copied())
+    }
+
+    pub fn item_path(&self, item: &StdlibItem) -> Option<Vec<&'static str>> {
         let mut path = match item.owner {
             StdlibOwner::Root => Vec::new(),
             StdlibOwner::Namespace(namespace) => self.namespace(namespace).path.to_vec(),
@@ -744,78 +324,14 @@ impl StandardLibrary {
         Some(path)
     }
 
-    pub fn function_candidates(self, path: &[String]) -> Vec<CallCandidate> {
-        ITEMS
-            .iter()
-            .filter_map(|item| {
-                let declared = self.item_path(item)?;
-                match item.kind {
-                    ItemKind::Function
-                        if path.iter().map(String::as_str).eq(declared.iter().copied()) =>
-                    {
-                        Some(CallCandidate {
-                            item,
-                            type_arguments: Vec::new(),
-                        })
-                    }
-                    ItemKind::TypedFunction { type_parameter }
-                        if (path.len() == declared.len() || path.len() == declared.len() + 1)
-                            && path[..declared.len()]
-                                .iter()
-                                .map(String::as_str)
-                                .eq(declared.iter().copied()) =>
-                    {
-                        Some(CallCandidate {
-                            item,
-                            type_arguments: if path.len() == declared.len() {
-                                Vec::new()
-                            } else {
-                                vec![(type_parameter, memory_type(&path[declared.len()])?)]
-                            },
-                        })
-                    }
-                    ItemKind::Function
-                    | ItemKind::TypedFunction { .. }
-                    | ItemKind::Method { .. } => None,
-                }
-            })
-            .collect()
-    }
-
-    pub fn method_candidates(self, name: &str) -> Vec<CallCandidate> {
-        ITEMS
-            .iter()
-            .filter_map(|item| {
-                matches!(item.kind, ItemKind::Method { .. } if item.name == name).then_some(
-                    CallCandidate {
-                        item,
-                        type_arguments: Vec::new(),
-                    },
-                )
-            })
-            .collect()
-    }
-
-    /// Returns method catalog entries applicable to a fully inferred receiver.
-    pub fn methods_for_type(self, receiver: &TypeKind) -> Vec<&'static StdlibItem> {
-        ITEMS
-            .iter()
-            .filter(|item| catalog_method_accepts(item, receiver))
-            .collect()
-    }
-
-    pub fn resolve_path(self, path: &[String]) -> Option<CallCandidate> {
-        self.function_candidates(path).into_iter().next()
-    }
-
-    pub fn render_signature(self, id: StdlibItemId) -> String {
+    pub fn render_signature(&self, id: StdlibItemId) -> String {
         self.render_signature_with(id, &[])
     }
 
     /// Renders a catalog signature after replacing named type parameters with
     /// semantic types inferred at one call site.
     pub fn render_signature_with(
-        self,
+        &self,
         id: StdlibItemId,
         substitutions: &[(&str, String)],
     ) -> String {
@@ -826,7 +342,11 @@ impl StandardLibrary {
                 format!("{}(", item.qualified_name)
             }
             ItemKind::Method { receiver } => {
-                format!("{}.{}(", receiver.render_with(substitutions), item.name)
+                format!(
+                    "{}.{}(",
+                    receiver.render_with(self, substitutions),
+                    item.name
+                )
             }
         };
         for (index, parameter) in signature.parameters.iter().enumerate() {
@@ -835,10 +355,10 @@ impl StandardLibrary {
             }
             rendered.push_str(parameter.name);
             rendered.push_str(": ");
-            rendered.push_str(&parameter.ty.render_with(substitutions));
+            rendered.push_str(&parameter.ty.render_with(self, substitutions));
         }
         rendered.push_str(") -> ");
-        rendered.push_str(&signature.result.render_with(substitutions));
+        rendered.push_str(&signature.result.render_with(self, substitutions));
         let unresolved = signature
             .type_parameters
             .iter()
@@ -862,14 +382,14 @@ impl StandardLibrary {
                     if constraint_index != 0 {
                         rendered.push_str(" + ");
                     }
-                    rendered.push_str(constraint.name());
+                    rendered.push_str(self.capability(*constraint).name);
                 }
             }
         }
         rendered
     }
 
-    pub fn render_operation_semantics(self, id: StdlibItemId) -> String {
+    pub fn render_operation_semantics(&self, id: StdlibItemId) -> String {
         let semantics = self.item(id).operation_semantics();
         let mut facts = vec![match semantics.availability {
             Availability::Everywhere => "available everywhere",
@@ -889,8 +409,8 @@ impl StandardLibrary {
         facts.join("; ")
     }
 
-    pub fn validate(self) -> Vec<String> {
-        let mut errors = declarations::validate();
+    pub fn validate(&self) -> Vec<String> {
+        let mut errors = validation::validate(NAMESPACES, TYPES, FIELDS, VARIANTS);
         validate_named_declarations(
             "capability",
             CAPABILITIES,
@@ -903,11 +423,136 @@ impl StandardLibrary {
             |value| (value.id, value.name, value.documentation),
             &mut errors,
         );
+        for constructor in TYPE_CONSTRUCTORS {
+            let mut parameters = HashSet::new();
+            for parameter in constructor.parameters {
+                if parameter.trim().is_empty() {
+                    errors.push(format!(
+                        "type constructor `{}` has an empty parameter name",
+                        constructor.name
+                    ));
+                } else if !parameters.insert(*parameter) {
+                    errors.push(format!(
+                        "type constructor `{}` repeats parameter `{parameter}`",
+                        constructor.name
+                    ));
+                }
+            }
+        }
         let mut ids = HashSet::new();
         let mut intrinsics = HashSet::new();
         let mut qualified_names = HashSet::new();
         let mut call_shapes = HashSet::new();
         let mut example_sources = HashSet::new();
+        let mut provider_names = HashSet::new();
+        let mut provider_values = HashSet::new();
+        for provider in STATE_PROVIDERS {
+            if provider.name.trim().is_empty() {
+                errors.push("state provider has an empty name".to_owned());
+            } else if !provider_names.insert(provider.name) {
+                errors.push(format!("duplicate state provider `{}`", provider.name));
+            }
+            if provider.value_name.trim().is_empty() {
+                errors.push(format!(
+                    "state provider `{}` has an empty value name",
+                    provider.name
+                ));
+            } else if !provider_values.insert(provider.value_name) {
+                errors.push(format!(
+                    "state providers repeat value name `{}`",
+                    provider.value_name
+                ));
+            }
+            if !TYPES.iter().any(|ty| ty.id == provider.process_type) {
+                errors.push(format!(
+                    "state provider `{}` references unknown process type `{:?}`",
+                    provider.name, provider.process_type
+                ));
+            }
+            if provider.processes.is_empty() {
+                errors.push(format!(
+                    "state provider `{}` declares no process names",
+                    provider.name
+                ));
+            }
+            let direct_read = ITEMS.iter().find(|item| item.id == provider.direct_read);
+            match direct_read {
+                Some(item)
+                    if item.owner == StdlibOwner::Type(provider.process_type)
+                        && matches!(
+                            item.kind,
+                            ItemKind::Method {
+                                receiver: TypeRef::Standard(receiver)
+                            } if receiver == provider.process_type
+                        )
+                        && item.signature.parameters.len() == 1
+                        && item.signature.parameters[0].ty == TypeRef::Core(CoreTypeId::U32)
+                        && item.signature.type_parameters.len() == 1
+                        && item.signature.type_parameters[0]
+                            .constraints
+                            .contains(&StdlibCapabilityId::MemoryReadable)
+                        && matches!(
+                            item.signature.result,
+                            TypeRef::Application {
+                                constructor: StdlibTypeConstructorId::Result,
+                                arguments: [TypeRef::Parameter(_)]
+                            }
+                        ) => {}
+                Some(item) => errors.push(format!(
+                    "state provider `{}` has incompatible direct-read operation `{}`",
+                    provider.name, item.qualified_name
+                )),
+                None => errors.push(format!(
+                    "state provider `{}` references missing direct-read item `{:?}`",
+                    provider.name, provider.direct_read
+                )),
+            }
+            if provider.documentation.summary.trim().is_empty()
+                || provider.documentation.details.trim().is_empty()
+            {
+                errors.push(format!(
+                    "state provider `{}` has incomplete documentation",
+                    provider.name
+                ));
+            }
+            if provider.documentation.examples.is_empty() {
+                errors.push(format!(
+                    "state provider `{}` has no examples",
+                    provider.name
+                ));
+            }
+            for example in provider.documentation.examples {
+                if example.title.trim().is_empty()
+                    || example.source.trim().is_empty()
+                    || example.validation_source().trim().is_empty()
+                {
+                    errors.push(format!(
+                        "state provider `{}` has an incomplete example",
+                        provider.name
+                    ));
+                }
+                if !example.source.contains(provider.value_name)
+                    && !example.source.contains(&format!("state {}", provider.name))
+                {
+                    errors.push(format!(
+                        "example for state provider `{}` demonstrates neither `state {}` nor `{}`",
+                        provider.name, provider.name, provider.value_name
+                    ));
+                }
+                if !example_sources.insert(example.source) {
+                    errors.push(format!(
+                        "state provider `{}` reuses another symbol's visible example",
+                        provider.name
+                    ));
+                }
+            }
+            if !intrinsics.insert(provider.attachment) {
+                errors.push(format!(
+                    "intrinsic `{:?}` is bound by more than one standard-library declaration",
+                    provider.attachment
+                ));
+            }
+        }
         for item in ITEMS {
             if !ids.insert(item.id) {
                 errors.push(format!("duplicate standard-library ID `{:?}`", item.id));
@@ -917,6 +562,38 @@ impl StandardLibrary {
                 errors.push(format!(
                     "intrinsic `{:?}` is bound by more than one standard-library item",
                     intrinsic
+                ));
+            }
+            let contract = intrinsic_registry::contract(intrinsic);
+            if !contract.accepts(item.kind) {
+                errors.push(format!(
+                    "`{}` has a callable kind incompatible with intrinsic `{intrinsic:?}`",
+                    item.qualified_name
+                ));
+            }
+            if !contract.signature.matches(item.kind, item.signature) {
+                errors.push(format!(
+                    "`{}` has a signature incompatible with intrinsic `{intrinsic:?}`",
+                    item.qualified_name,
+                ));
+            }
+            if contract.effects != item.effects {
+                errors.push(format!(
+                    "`{}` declares effects {:?}, but intrinsic `{intrinsic:?}` requires {:?}",
+                    item.qualified_name, item.effects, contract.effects
+                ));
+            }
+            if contract.availability != item.availability {
+                errors.push(format!(
+                    "`{}` declares {:?} availability, but intrinsic `{intrinsic:?}` requires {:?}",
+                    item.qualified_name, item.availability, contract.availability
+                ));
+            }
+            if contract.lowering == intrinsic_registry::LoweringClass::Suspension
+                && !contract.effects.contains(&Effect::Suspends)
+            {
+                errors.push(format!(
+                    "intrinsic `{intrinsic:?}` uses suspension lowering without a suspension effect"
                 ));
             }
             if !qualified_names.insert(item.qualified_name) {
@@ -940,7 +617,7 @@ impl StandardLibrary {
                         .join(".")
                 ),
                 ItemKind::Method { receiver } => {
-                    format!("method {}.{}", receiver.render(), item.name)
+                    format!("method {}.{}", receiver.render(self), item.name)
                 }
             };
             if let Some(path) = &path
@@ -957,6 +634,48 @@ impl StandardLibrary {
                     "duplicate standard-library call shape `{call_shape}`"
                 ));
             }
+            let mut type_parameters = HashSet::new();
+            for parameter in item.signature.type_parameters {
+                if !type_parameters.insert(parameter.name) {
+                    errors.push(format!(
+                        "`{}` repeats type parameter `{}`",
+                        item.qualified_name, parameter.name
+                    ));
+                }
+                for constraint in parameter.constraints {
+                    if !CAPABILITIES
+                        .iter()
+                        .any(|candidate| candidate.id == *constraint)
+                    {
+                        errors.push(format!(
+                            "`{}` references unknown capability `{constraint:?}`",
+                            item.qualified_name
+                        ));
+                    }
+                }
+            }
+            if let ItemKind::Method { receiver } = item.kind {
+                validate_catalog_type_ref(
+                    receiver,
+                    item.signature.type_parameters,
+                    item.qualified_name,
+                    &mut errors,
+                );
+            }
+            for parameter in item.signature.parameters {
+                validate_catalog_type_ref(
+                    parameter.ty,
+                    item.signature.type_parameters,
+                    item.qualified_name,
+                    &mut errors,
+                );
+            }
+            validate_catalog_type_ref(
+                item.signature.result,
+                item.signature.type_parameters,
+                item.qualified_name,
+                &mut errors,
+            );
             if item.documentation.summary.trim().is_empty() {
                 errors.push(format!(
                     "`{}` has no documentation summary",
@@ -1001,6 +720,15 @@ impl StandardLibrary {
                 }
             }
             let semantics = item.operation_semantics();
+            if item.effects.is_empty() {
+                errors.push(format!("`{}` declares no effects", item.qualified_name));
+            }
+            if item.effects.contains(&Effect::Pure) && item.effects.iter().count() != 1 {
+                errors.push(format!(
+                    "`{}` declares `pure` together with observable effects",
+                    item.qualified_name
+                ));
+            }
             if item.effects.contains(&Effect::Retryable) && item.effects.contains(&Effect::Suspends)
             {
                 errors.push(format!(
@@ -1048,9 +776,9 @@ impl StandardLibrary {
                 }
             }
             for related in item.documentation.related {
-                if !ITEMS.iter().any(|candidate| candidate.id == *related) {
+                if !stdlib_symbol_exists(*related) {
                     errors.push(format!(
-                        "`{}` links to missing item `{:?}`",
+                        "`{}` links to missing standard-library symbol `{:?}`",
                         item.qualified_name, related
                     ));
                 }
@@ -1066,33 +794,84 @@ impl StandardLibrary {
                 ));
             }
         }
+        for intrinsic in IntrinsicId::ALL {
+            if !intrinsics.contains(intrinsic) {
+                errors.push(format!(
+                    "intrinsic `{intrinsic:?}` has no public standard-library binding"
+                ));
+            }
+        }
         errors
     }
 }
 
-fn catalog_method_accepts(item: &StdlibItem, receiver: &TypeKind) -> bool {
-    let ItemKind::Method { receiver: declared } = item.kind else {
-        return false;
-    };
-    match declared {
-        TypeRef::Core(expected) => {
-            matches!(receiver, TypeKind::Builtin(actual) if actual.core() == expected)
+fn stdlib_symbol_exists(symbol: StdlibSymbolId) -> bool {
+    match symbol {
+        StdlibSymbolId::StateProvider(id) => STATE_PROVIDERS.iter().any(|value| value.id == id),
+        StdlibSymbolId::Namespace(id) => NAMESPACES.iter().any(|value| value.id == id),
+        StdlibSymbolId::Capability(id) => CAPABILITIES.iter().any(|value| value.id == id),
+        StdlibSymbolId::TypeConstructor(id) => TYPE_CONSTRUCTORS.iter().any(|value| value.id == id),
+        StdlibSymbolId::Type(id) => TYPES.iter().any(|value| value.id == id),
+        StdlibSymbolId::Field(id) => FIELDS.iter().any(|value| value.id == id),
+        StdlibSymbolId::Variant(id) => VARIANTS.iter().any(|value| value.id == id),
+        StdlibSymbolId::Item(id) => ITEMS.iter().any(|value| value.id == id),
+    }
+}
+
+fn validate_catalog_type_ref(
+    ty: TypeRef,
+    parameters: &[TypeParameter],
+    item: &str,
+    errors: &mut Vec<String>,
+) {
+    match ty {
+        TypeRef::Core(core) => {
+            if !CORE_TYPES.iter().any(|candidate| candidate.id == core) {
+                errors.push(format!("`{item}` references unknown core type `{core:?}`"));
+            }
         }
-        TypeRef::Array(_) => matches!(receiver, TypeKind::Array { .. }),
-        TypeRef::Result(_) => matches!(receiver, TypeKind::Result { .. }),
-        TypeRef::Standard(expected) => {
-            matches!(receiver, TypeKind::Standard(actual) if *actual == expected)
+        TypeRef::Standard(standard) => {
+            if !TYPES.iter().any(|candidate| candidate.id == standard) {
+                errors.push(format!(
+                    "`{item}` references unknown standard type `{standard:?}`"
+                ));
+            }
         }
-        TypeRef::Variable(name) => item
-            .signature
-            .type_parameters
-            .iter()
-            .find(|parameter| parameter.name == name)
-            .is_none_or(|parameter| {
-                parameter.constraints.iter().all(|constraint| {
-                    semantic_type_may_have_capability(receiver, constraint.capability())
-                })
-            }),
+        TypeRef::Parameter(parameter) => {
+            if !parameters
+                .iter()
+                .any(|candidate| candidate.name == parameter)
+            {
+                errors.push(format!(
+                    "`{item}` references undeclared type parameter `{parameter}`"
+                ));
+            }
+        }
+        TypeRef::Application {
+            constructor,
+            arguments,
+        } => {
+            let Some(declaration) = TYPE_CONSTRUCTORS
+                .iter()
+                .find(|candidate| candidate.id == constructor)
+            else {
+                errors.push(format!(
+                    "`{item}` references unknown type constructor `{constructor:?}`"
+                ));
+                return;
+            };
+            if declaration.parameters.len() != arguments.len() {
+                errors.push(format!(
+                    "`{item}` applies `{}` to {} type arguments instead of {}",
+                    declaration.name,
+                    arguments.len(),
+                    declaration.parameters.len()
+                ));
+            }
+            for argument in arguments {
+                validate_catalog_type_ref(*argument, parameters, item, errors);
+            }
+        }
     }
 }
 
@@ -1118,34 +897,4 @@ fn validate_named_declarations<T, I>(
             errors.push(format!("{kind} `{name}` has incomplete documentation"));
         }
     }
-}
-
-// Candidate discovery has only a TypeKind, not the declarations required to
-// prove recursive capabilities. CapabilityAnalysis performs final validation.
-fn semantic_type_may_have_capability(ty: &TypeKind, capability: StdlibCapabilityId) -> bool {
-    let library = StandardLibrary::new();
-    match ty {
-        TypeKind::Builtin(builtin) => library.core_type_has_capability(builtin.core(), capability),
-        TypeKind::Standard(standard) => library.type_has_capability(*standard, capability),
-        TypeKind::Record(_) => matches!(
-            capability,
-            StdlibCapabilityId::Equatable | StdlibCapabilityId::MemoryReadable
-        ),
-        TypeKind::Enum(_) | TypeKind::Option { .. } | TypeKind::Result { .. } => {
-            capability == StdlibCapabilityId::Equatable
-        }
-        TypeKind::Array { .. } => false,
-    }
-}
-
-fn memory_type(name: &str) -> Option<BuiltinType> {
-    let library = StandardLibrary::new();
-    library
-        .core_types()
-        .iter()
-        .find(|ty| {
-            ty.name == name
-                && library.core_type_has_capability(ty.id, StdlibCapabilityId::MemoryReadable)
-        })
-        .map(|ty| BuiltinType::from_core(ty.id))
 }

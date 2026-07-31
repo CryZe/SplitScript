@@ -20,7 +20,8 @@ state ["Lunistice.exe", "Lunistice-Demo.exe"] {
 }
 
 settings {
-    splitOnPoints: bool = true, "Split when the point counter changes"
+    /// Splits whenever the point counter changes.
+    "Split on Points" => splitOnPoints: true
 }
 
 onAttach {
@@ -44,6 +45,15 @@ autosplitter concepts use their own syntax: `state`, `settings`, `onAttach`,
 `start`, `split`, `reset`, `isLoading`, and `gameTime` are top-level constructs,
 not disguised function exports.
 
+The examples include a full port of the currently implemented behavior in the
+unfinished Rust Minish Cap autosplitter. It exercises GBA emulator discovery,
+hardware-address translation, inferred generic reads, settings, timer
+variables, delayed splits, and frame-based game time:
+
+```console
+cargo run --bin splitc -- examples/minish_cap.split -o target/minish_cap.wasm
+```
+
 ## Build and use
 
 ```console
@@ -51,6 +61,18 @@ cargo test
 cargo run --bin splitc -- examples/lunistice.split -o target/lunistice.wasm
 wasm-tools validate --features all target/lunistice.wasm
 ```
+
+Before submitting compiler or tooling changes, run the complete repository
+matrix:
+
+```console
+cargo xtask check
+```
+
+It checks formatting and Clippy, runs every Rust and VS Code test, compiles and
+validates the release/debug fixture modules, and executes every Node host
+runtime—including both Lunistice layouts. Generated modules stay under the
+ignored `target/verify` directory.
 
 After installation, the CLI is `splitc`:
 
@@ -81,9 +103,12 @@ catalog-backed standard-library calls, state and setting snapshots, records,
 enums, inferred methods, and visible lexical bindings such as parameters and
 preceding local or awaited variables. Hover exposes inferred types for source
 variables, parameters, fields, and functions, plus transitive effects and
-runtime constraints for user functions. Catalog-backed hover and signature help
-also include resolved generic types, parameter documentation, runtime effects,
-and examples.
+runtime constraints for user functions. User-authored `///` documentation on
+source declarations is included in those hovers. Catalog-backed hover and
+signature help also include resolved generic types, parameter documentation,
+runtime effects, and examples. Inlay hints show inferred types beside unannotated globals,
+locals, parameters, function return types, state fields, and awaited or retried
+bindings while leaving explicit annotations uncluttered.
 Go-to-definition and find-references cover source functions, records and their
 fields, enums and variants, globals, locals, state fields, and settings. Source
 navigation is identity-based, so shadowed or same-spelling declarations remain
@@ -97,10 +122,11 @@ Editor integrations should launch it directly and communicate over
 stdin/stdout; stdout is reserved for protocol messages.
 
 An initial VS Code client lives in [`editors/vscode`](editors/vscode). It
-associates `.split` files, launches `splitls`, forwards all advertised LSP
-features including formatting, and supplies language editing rules plus a fast
-TextMate fallback while semantic tokens are loading. During repository
-development, install and compile it with:
+associates `.split` files and runs the same Rust language-server implementation
+from the compiler WebAssembly bundled with the extension. A dedicated worker
+forwards all advertised LSP features including formatting, while the extension
+supplies language editing rules plus a fast TextMate fallback while semantic
+tokens are loading. During repository development, install and compile it with:
 
 ```console
 cd editors/vscode
@@ -110,15 +136,21 @@ npm run compile
 ```
 
 Open the repository in VS Code and launch **Run SplitScript Extension** to build
-the Rust server and TypeScript client before starting an Extension Development
-Host. A custom server can be selected through `splitScript.server.path`; without
-one, the client checks a packaged binary, `target/debug/splitls`, and then
-`splitls` on `PATH`. **SplitScript: Start Debug Watch** compiles immediately in
-debug mode and rebuilds the neighboring `.wasm` whenever the source is saved;
+the bundled WebAssembly adapter and TypeScript client before starting an
+Extension Development Host. No separate `splitls` or server-path setting is
+needed. **SplitScript: Start Debug Watch** compiles immediately in debug mode
+and rebuilds the neighboring `.wasm` whenever the source is saved;
 its status-bar item stops the watcher. **SplitScript: Build Release** saves and
 performs a one-shot release build for the final module. Both are also editor
-title and context-menu actions. Use `splitScript.compiler.path` to override
-`splitc` discovery.
+title and context-menu actions. These build workflows use the Rust compiler
+WebAssembly bundled with the extension in a dedicated worker; they do not
+discover, download, or spawn `splitc`.
+
+The same extension also has a bundled browser entry. Launch **Run SplitScript
+Web Extension** to exercise it in VS Code's web extension host. Both compilation
+and language tooling use browser workers, `ExtensionContext.extensionUri`, and
+`vscode.workspace.fs`, so the package has no platform-specific executable path
+and can operate on virtual workspace providers.
 
 During development, use the `watch` subcommand. It compiles immediately and
 then recompiles whenever the source contents change:

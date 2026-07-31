@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::stdlib::{CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId};
+use crate::stdlib::{CoreTypeId, StandardLibrary, StdlibStateProviderId, StdlibTypeId};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Span {
@@ -99,6 +99,29 @@ impl EnumId {
 pub enum EnumTypeId {
     Source(EnumId),
     Standard(StdlibTypeId),
+}
+
+/// An enum name as it moves from syntax into declaration resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnumReference {
+    Named { name: String, span: Span },
+    Resolved(EnumTypeId),
+}
+
+impl EnumReference {
+    pub fn resolved(&self) -> Option<EnumTypeId> {
+        match self {
+            Self::Named { .. } => None,
+            Self::Resolved(enumeration) => Some(*enumeration),
+        }
+    }
+
+    pub fn source(&self) -> Option<EnumId> {
+        match self.resolved() {
+            Some(EnumTypeId::Source(enumeration)) => Some(enumeration),
+            Some(EnumTypeId::Standard(_)) | None => None,
+        }
+    }
 }
 
 impl fmt::Display for EnumTypeId {
@@ -260,11 +283,17 @@ impl Span {
 #[derive(Debug, Clone, Default)]
 pub struct Program {
     pub type_names: Vec<String>,
+    pub type_name_spans: Vec<Span>,
     pub state: Option<StateDecl>,
+    /// The complete `settings` declaration, including its keyword and body.
+    pub settings_span: Option<Span>,
     pub settings: Vec<SettingDecl>,
     pub globals: Vec<VariableDecl>,
     pub records: Vec<RecordDecl>,
     pub enums: Vec<EnumDecl>,
+    /// Interned source type-expression nodes. Their IDs are syntax identities,
+    /// not inferred types or physical layouts; later stages translate them
+    /// into their own semantic and backend type universes.
     pub array_types: Vec<ArrayTypeDecl>,
     pub option_types: Vec<OptionTypeDecl>,
     pub result_types: Vec<ResultTypeDecl>,
@@ -275,6 +304,10 @@ pub struct Program {
 impl Program {
     pub fn type_name(&self, id: TypeNameId) -> &str {
         &self.type_names[id.index()]
+    }
+
+    pub fn type_name_span(&self, id: TypeNameId) -> Span {
+        self.type_name_spans[id.index()]
     }
 }
 
@@ -300,6 +333,8 @@ pub struct ResultTypeDecl {
 pub struct EnumDecl {
     pub id: EnumId,
     pub name: String,
+    pub documentation: Option<String>,
+    pub name_span: Span,
     pub variants: Vec<EnumVariant>,
     pub span: Span,
 }
@@ -308,6 +343,7 @@ pub struct EnumDecl {
 pub struct EnumVariant {
     pub id: EnumVariantId,
     pub name: String,
+    pub documentation: Option<String>,
     pub payload: Option<TypeRef>,
     pub span: Span,
 }
@@ -316,6 +352,8 @@ pub struct EnumVariant {
 pub struct RecordDecl {
     pub id: RecordId,
     pub name: String,
+    pub documentation: Option<String>,
+    pub name_span: Span,
     pub fields: Vec<RecordField>,
     pub span: Span,
 }
@@ -324,6 +362,7 @@ pub struct RecordDecl {
 pub struct RecordField {
     pub id: RecordFieldId,
     pub name: String,
+    pub documentation: Option<String>,
     pub ty: TypeRef,
     pub span: Span,
 }
@@ -332,6 +371,7 @@ pub struct RecordField {
 pub struct FunctionDecl {
     pub id: FunctionId,
     pub name: String,
+    pub documentation: Option<String>,
     pub debug_only: bool,
     pub method_of: Option<TypeRef>,
     pub params: Vec<Parameter>,
@@ -350,15 +390,24 @@ pub struct Parameter {
 
 #[derive(Debug, Clone)]
 pub struct StateDecl {
+    pub provider: Option<StateProviderRef>,
     pub processes: Vec<String>,
     pub fields: Vec<StateField>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
+pub struct StateProviderRef {
+    pub name: String,
+    pub span: Span,
+    pub resolved: Option<StdlibStateProviderId>,
+}
+
+#[derive(Debug, Clone)]
 pub struct StateField {
     pub id: ValueId,
     pub name: String,
+    pub documentation: Option<String>,
     pub annotation: Option<TypeRef>,
     pub source: StateSource,
     pub span: Span,
@@ -389,8 +438,11 @@ pub struct SettingDecl {
 impl SettingDecl {
     pub fn value_type(&self) -> Option<TypeRef> {
         match &self.kind {
-            SettingKind::Bool { .. } => Some(TypeRef::Bool),
-            SettingKind::Choice { enumeration, .. } => Some(TypeRef::Enum(*enumeration)),
+            SettingKind::Bool { .. } => Some(TypeRef::core(CoreTypeId::Bool)),
+            SettingKind::Choice { enumeration, .. } => match enumeration.resolved()? {
+                EnumTypeId::Source(enumeration) => Some(TypeRef::Enum(enumeration)),
+                EnumTypeId::Standard(enumeration) => Some(TypeRef::Standard(enumeration)),
+            },
             SettingKind::File { .. } => Some(TypeRef::Standard(StdlibTypeId::String)),
             SettingKind::Title { .. } => None,
         }
@@ -406,7 +458,7 @@ pub enum SettingKind {
         heading_level: u32,
     },
     Choice {
-        enumeration: EnumId,
+        enumeration: EnumReference,
         default_variant: String,
         options: Vec<SettingChoiceOption>,
     },
@@ -436,6 +488,7 @@ pub enum SettingFileFilter {
 pub struct VariableDecl {
     pub id: ValueId,
     pub name: String,
+    pub documentation: Option<String>,
     pub mutable: bool,
     pub debug_only: bool,
     pub annotation: Option<TypeRef>,
@@ -485,8 +538,12 @@ impl ActionKind {
 
     pub fn return_type(self) -> TypeRef {
         match self {
-            Self::OnDetached | Self::OnAttach | Self::WhileAttached => TypeRef::Void,
-            Self::Start | Self::Split | Self::Reset | Self::IsLoading => TypeRef::Bool,
+            Self::OnDetached | Self::OnAttach | Self::WhileAttached => {
+                TypeRef::core(CoreTypeId::Void)
+            }
+            Self::Start | Self::Split | Self::Reset | Self::IsLoading => {
+                TypeRef::core(CoreTypeId::Bool)
+            }
             Self::GameTime => TypeRef::Standard(StdlibTypeId::Duration),
         }
     }
@@ -596,11 +653,12 @@ pub enum ExprKind {
     Signature(String),
     Array(Vec<Expr>),
     Record {
-        record: RecordId,
+        name: String,
+        name_span: Span,
         fields: Vec<(String, Expr)>,
     },
     Enum {
-        enumeration: EnumTypeId,
+        enumeration: EnumReference,
         variant: String,
         payload: Option<Box<Expr>>,
     },
@@ -683,7 +741,7 @@ pub struct PatternBinding {
 #[derive(Debug, Clone)]
 pub enum MatchPattern {
     Enum {
-        enumeration: EnumTypeId,
+        enumeration: EnumReference,
         variant: String,
         binding: Option<PatternBinding>,
     },
@@ -731,73 +789,39 @@ pub enum BinaryOp {
 /// inference variables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TypeRef {
-    Void,
-    Bool,
-    I8,
-    U8,
-    I16,
-    U16,
-    I32,
-    U32,
-    I64,
-    U64,
-    Address,
-    F32,
-    F64,
+    Core(CoreTypeId),
     /// A source-written nominal type name. Standard-library identity is
     /// resolved after parsing rather than embedded into syntax.
     Named(TypeNameId),
     Standard(StdlibTypeId),
     Record(RecordId),
     Enum(EnumId),
+    /// IDs into the parsed program's interned constructed type-expression
+    /// tables. Allocating these while parsing preserves syntax sharing without
+    /// performing semantic type inference or layout allocation.
     Array(ArrayTypeId),
     Option(OptionTypeId),
     Result(ResultTypeId),
 }
 
 impl TypeRef {
+    pub const fn core(core: CoreTypeId) -> Self {
+        Self::Core(core)
+    }
+
     pub fn core_type(self) -> Option<CoreTypeId> {
-        Some(match self {
-            Self::Void => CoreTypeId::Void,
-            Self::Bool => CoreTypeId::Bool,
-            Self::I8 => CoreTypeId::I8,
-            Self::U8 => CoreTypeId::U8,
-            Self::I16 => CoreTypeId::I16,
-            Self::U16 => CoreTypeId::U16,
-            Self::I32 => CoreTypeId::I32,
-            Self::U32 => CoreTypeId::U32,
-            Self::I64 => CoreTypeId::I64,
-            Self::U64 => CoreTypeId::U64,
-            Self::Address => CoreTypeId::Address,
-            Self::F32 => CoreTypeId::F32,
-            Self::F64 => CoreTypeId::F64,
-            _ => return None,
-        })
+        match self {
+            Self::Core(core) => Some(core),
+            _ => None,
+        }
     }
 
     pub fn parse(name: &str) -> Option<Self> {
-        Some(match name {
-            "void" => Self::Void,
-            "bool" => Self::Bool,
-            "i8" => Self::I8,
-            "u8" => Self::U8,
-            "i16" => Self::I16,
-            "u16" => Self::U16,
-            "i32" => Self::I32,
-            "u32" => Self::U32,
-            "i64" => Self::I64,
-            "u64" => Self::U64,
-            "address" | "Address" => Self::Address,
-            "f32" => Self::F32,
-            "f64" => Self::F64,
-            _ => return None,
-        })
+        CoreTypeId::parse(name).map(Self::Core)
     }
 
     pub fn is_integer(self) -> bool {
-        self.core_type().is_some_and(|core| {
-            StandardLibrary::new().core_type_has_capability(core, StdlibCapabilityId::Integer)
-        })
+        self.core_type().is_some_and(CoreTypeId::is_integer)
     }
 
     pub fn standard_type(self) -> Option<StdlibTypeId> {
@@ -810,29 +834,17 @@ impl TypeRef {
 
 impl fmt::Display for TypeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Void => "void",
-            Self::Bool => "bool",
-            Self::I8 => "i8",
-            Self::U8 => "u8",
-            Self::I16 => "i16",
-            Self::U16 => "u16",
-            Self::I32 => "i32",
-            Self::U32 => "u32",
-            Self::I64 => "i64",
-            Self::U64 => "u64",
-            Self::Address => "address",
-            Self::F32 => "f32",
-            Self::F64 => "f64",
-            Self::Named(id) => return write!(f, "type-name#{id}"),
+        match self {
+            Self::Core(core) => core.fmt(f),
+            Self::Named(id) => write!(f, "type-name#{id}"),
             Self::Standard(standard) => {
-                return f.write_str(StandardLibrary::new().type_decl(*standard).name);
+                f.write_str(StandardLibrary::new().type_decl(*standard).name)
             }
-            Self::Record(id) => return write!(f, "record#{id}"),
-            Self::Enum(id) => return write!(f, "enum#{id}"),
-            Self::Array(id) => return write!(f, "Array#{id}"),
-            Self::Option(id) => return write!(f, "Option#{id}"),
-            Self::Result(id) => return write!(f, "Result#{id}"),
-        })
+            Self::Record(id) => write!(f, "record#{id}"),
+            Self::Enum(id) => write!(f, "enum#{id}"),
+            Self::Array(id) => write!(f, "Array#{id}"),
+            Self::Option(id) => write!(f, "Option#{id}"),
+            Self::Result(id) => write!(f, "Result#{id}"),
+        }
     }
 }

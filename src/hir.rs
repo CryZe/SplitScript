@@ -1,4 +1,4 @@
-//! Declaration-level resolved HIR produced before type checking.
+//! Resolved declaration index and typed body HIR.
 //!
 //! Lowering first establishes an inspectable declaration index. After checking,
 //! typed expressions and blocks own body shape, child identities, types, and
@@ -9,15 +9,15 @@ use std::collections::HashMap;
 use crate::{
     ast::{
         ActionKind, AssignmentId, BinaryOp, Block, EnumId, EnumTypeId, EnumVariantId, Expr, ExprId,
-        ExprKind, FallbackBranch, FunctionId, InterpolatedPart, MatchArm, MatchPattern, PatternId,
-        Program as SyntaxProgram, RecordFieldId, RecordId, SettingChoiceOptionId, SettingKind,
-        Span, Stmt, SuspensionMode, TypeRef, UnaryOp, ValueId,
+        ExprKind, FallbackBranch, FunctionId, InterpolatedPart, MatchArm, MatchPattern,
+        PatternBinding, PatternId, Program as SyntaxProgram, RecordFieldId, RecordId,
+        SettingChoiceOptionId, SettingKind, Span, Stmt, SuspensionMode, TypeRef, UnaryOp, ValueId,
     },
     semantic::{
         ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue, ResolvedWrapperPattern,
         SemanticModel, ValueConversion,
     },
-    stdlib::StdlibTypeId,
+    stdlib::{StandardLibrary, StdlibTypeId},
     types::{TypeId, TypeKind},
     visit::{self, Visitor as SyntaxVisitor},
 };
@@ -41,12 +41,12 @@ pub struct Declaration {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Program {
+pub struct DeclarationIndex {
     declarations: Vec<Declaration>,
     by_name: HashMap<String, Vec<usize>>,
 }
 
-impl Program {
+impl DeclarationIndex {
     pub(crate) fn lower(syntax: &SyntaxProgram) -> Self {
         let mut program = Self::default();
         if let Some(state) = &syntax.state {
@@ -162,11 +162,30 @@ pub enum ImplicitConversion {
 
 #[derive(Debug, Clone)]
 pub struct TypedMatchArm {
-    pub pattern: MatchPattern,
+    pub pattern: TypedPattern,
     pub resolution: ResolvedPattern,
     pub guard: Option<ExprId>,
     pub value: ExprId,
     pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum TypedPattern {
+    Enum {
+        enumeration: EnumTypeId,
+        variant: String,
+        binding: Option<PatternBinding>,
+    },
+    Bool(bool),
+    Int {
+        value: u64,
+        suffix: Option<TypeRef>,
+    },
+    None,
+    OptionSome(Option<PatternBinding>),
+    ResultSuccess(Option<PatternBinding>),
+    ResultError(Option<PatternBinding>),
+    Wildcard,
 }
 
 #[derive(Debug, Clone)]
@@ -337,7 +356,8 @@ pub struct GlobalInitializer {
 
 #[derive(Debug, Clone)]
 pub struct TypedProgram {
-    declarations: Program,
+    standard_library: StandardLibrary,
+    declarations: DeclarationIndex,
     expressions: Vec<TypedExpression>,
     assignments: Vec<ResolvedAssignment>,
     patterns: Vec<ResolvedPattern>,
@@ -351,9 +371,10 @@ pub struct TypedProgram {
 
 impl TypedProgram {
     pub(crate) fn build(
-        declarations: Program,
+        declarations: DeclarationIndex,
         syntax: &SyntaxProgram,
         semantics: &SemanticModel,
+        standard_library: StandardLibrary,
     ) -> Self {
         let mut builder = TypedBodyBuilder {
             semantics,
@@ -432,6 +453,7 @@ impl TypedProgram {
         }
 
         Self {
+            standard_library,
             declarations,
             expressions,
             assignments,
@@ -445,8 +467,12 @@ impl TypedProgram {
         }
     }
 
-    pub fn declarations(&self) -> &Program {
+    pub fn declarations(&self) -> &DeclarationIndex {
         &self.declarations
+    }
+
+    pub fn standard_library(&self) -> &StandardLibrary {
+        &self.standard_library
     }
 
     pub fn expression(&self, id: ExprId) -> Option<&TypedExpression> {
@@ -883,8 +909,10 @@ fn lower_expression_kind(expression: &Expr, semantics: &SemanticModel) -> TypedE
         ExprKind::Array(elements) => {
             TypedExpressionKind::Array(elements.iter().map(|element| element.id).collect())
         }
-        ExprKind::Record { record, fields } => TypedExpressionKind::Record {
-            record: *record,
+        ExprKind::Record { fields, .. } => TypedExpressionKind::Record {
+            record: semantics
+                .record_literal(expression.id)
+                .expect("checked record literals resolve their nominal declaration"),
             fields: fields
                 .iter()
                 .map(|(name, value)| (name.clone(), value.id))
@@ -895,7 +923,9 @@ fn lower_expression_kind(expression: &Expr, semantics: &SemanticModel) -> TypedE
             variant,
             payload,
         } => TypedExpressionKind::Enum {
-            enumeration: *enumeration,
+            enumeration: enumeration
+                .resolved()
+                .expect("typed enum constructors have resolved declarations"),
             variant: variant.clone(),
             payload: payload.as_ref().map(|payload| payload.id),
         },
@@ -904,7 +934,35 @@ fn lower_expression_kind(expression: &Expr, semantics: &SemanticModel) -> TypedE
             arms: arms
                 .iter()
                 .map(|arm| TypedMatchArm {
-                    pattern: arm.pattern.clone(),
+                    pattern: match &arm.pattern {
+                        MatchPattern::Enum {
+                            enumeration,
+                            variant,
+                            binding,
+                        } => TypedPattern::Enum {
+                            enumeration: enumeration
+                                .resolved()
+                                .expect("typed enum patterns have resolved declarations"),
+                            variant: variant.clone(),
+                            binding: binding.clone(),
+                        },
+                        MatchPattern::Bool(value) => TypedPattern::Bool(*value),
+                        MatchPattern::Int { value, suffix } => TypedPattern::Int {
+                            value: *value,
+                            suffix: *suffix,
+                        },
+                        MatchPattern::None => TypedPattern::None,
+                        MatchPattern::OptionSome(binding) => {
+                            TypedPattern::OptionSome(binding.clone())
+                        }
+                        MatchPattern::ResultSuccess(binding) => {
+                            TypedPattern::ResultSuccess(binding.clone())
+                        }
+                        MatchPattern::ResultError(binding) => {
+                            TypedPattern::ResultError(binding.clone())
+                        }
+                        MatchPattern::Wildcard => TypedPattern::Wildcard,
+                    },
                     resolution: ResolvedPattern {
                         id: arm.pattern_id,
                         variant: semantics.pattern_variant(arm.pattern_id),

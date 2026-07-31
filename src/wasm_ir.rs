@@ -8,15 +8,21 @@
 
 use std::collections::HashSet;
 
+mod visit;
+pub use visit::{
+    Visitor, visit_expression_children, walk_expression, walk_statement, walk_terminator,
+};
+
 use crate::{
     ast::{
-        ActionKind, BinaryOp, EnumTypeId, ExprId, FunctionId, MatchPattern, OptionTypeId,
-        PatternId, RecordFieldId, RecordId, ResultTypeId, SuspensionMode, UnaryOp, ValueId,
+        ActionKind, BinaryOp, EnumTypeId, ExprId, FunctionId, OptionTypeId, PatternId,
+        RecordFieldId, RecordId, ResultTypeId, SuspensionMode, UnaryOp, ValueId,
     },
     hir::{
         self, ExpressionResolution, ImplicitConversion, TypedExpression, TypedExpressionKind,
-        TypedFallbackBranch, TypedInterpolatedPart, TypedProgram, TypedStatementKind, TypedVisitor,
+        TypedFallbackBranch, TypedInterpolatedPart, TypedPattern, TypedProgram, TypedStatementKind,
     },
+    intrinsic_registry::{self, ScratchPolicy, ScratchType},
     semantic::{
         ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue, ResolvedWrapperPattern,
         SemanticModel, ValueConversion,
@@ -117,7 +123,7 @@ pub enum ExpressionKind {
         right: ExprId,
     },
     Call {
-        target: ResolvedCall,
+        target: CallTarget,
         arguments: Vec<ExprId>,
     },
     If {
@@ -136,6 +142,36 @@ pub enum ExpressionKind {
     Match {
         value: ExprId,
         arms: Vec<MatchArm>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum CallTarget {
+    UserFunction {
+        function: FunctionId,
+    },
+    UserMethod {
+        function: FunctionId,
+        receiver: ResolvedValue,
+        receiver_type: TypeId,
+        receiver_members: Vec<ResolvedMember>,
+    },
+    Intrinsic {
+        item: crate::stdlib::StdlibItemId,
+        intrinsic: IntrinsicId,
+        type_arguments: Vec<TypeId>,
+        receiver: Option<ResolvedValue>,
+        receiver_type: Option<TypeId>,
+        receiver_members: Vec<ResolvedMember>,
+    },
+    ResultError {
+        result: ResultTypeId,
+    },
+    OptionSome {
+        option: OptionTypeId,
+    },
+    ResultSuccess {
+        result: ResultTypeId,
     },
 }
 
@@ -218,6 +254,10 @@ pub struct Block {
 pub enum Statement {
     Store {
         target: ValueId,
+        /// Whether this store introduces the body's local rather than assigning
+        /// an existing local/global. Local planning consumes this semantic
+        /// distinction instead of re-reading typed HIR.
+        declaration: bool,
         op: Option<BinaryOp>,
         value: ExprId,
     },
@@ -280,6 +320,7 @@ pub struct StateExpression {
 
 #[derive(Debug, Clone, Default)]
 pub struct Program {
+    standard_library: StandardLibrary,
     profile: crate::BuildProfile,
     bodies: Vec<Body>,
     global_initializers: Vec<(ValueId, ExprId)>,
@@ -293,56 +334,65 @@ impl Program {
         semantics: &SemanticModel,
         profile: crate::BuildProfile,
     ) -> Self {
-        let mut bodies = Vec::new();
-        for function in typed_hir.function_bodies() {
-            if function.debug_only && profile == crate::BuildProfile::Release {
-                continue;
-            }
-            bodies.push(lower_body(
-                BodyOwner::Function(function.function),
-                &function.body,
-                typed_hir,
-                semantics,
-                profile,
-            ));
-        }
-        for action in typed_hir.action_bodies() {
-            bodies.push(lower_body(
-                BodyOwner::Action(action.action),
-                &action.body,
-                typed_hir,
-                semantics,
-                profile,
-            ));
-        }
+        let expressions = typed_hir
+            .expressions()
+            .map(|expression| lower_expression(expression, typed_hir.standard_library()))
+            .collect::<Vec<_>>();
         let global_initializers = typed_hir
             .global_initializers()
             .filter(|initializer| !initializer.debug_only || profile == crate::BuildProfile::Debug)
             .map(|initializer| (initializer.value, initializer.expression))
             .collect();
-        let state_expressions = typed_hir
+        let mut program = Self {
+            standard_library: typed_hir.standard_library().clone(),
+            profile,
+            bodies: Vec::new(),
+            global_initializers,
+            state_expressions: Vec::new(),
+            expressions,
+        };
+        for function in typed_hir.function_bodies() {
+            if function.debug_only && profile == crate::BuildProfile::Release {
+                continue;
+            }
+            let body = lower_body(
+                BodyOwner::Function(function.function),
+                &function.body,
+                typed_hir,
+                semantics,
+                profile,
+                &program,
+            );
+            program.bodies.push(body);
+        }
+        for action in typed_hir.action_bodies() {
+            let body = lower_body(
+                BodyOwner::Action(action.action),
+                &action.body,
+                typed_hir,
+                semantics,
+                profile,
+                &program,
+            );
+            program.bodies.push(body);
+        }
+        program.state_expressions = typed_hir
             .state_sources()
             .map(|(field, expression)| StateExpression {
                 field,
                 expression,
-                locals: plan_expression(expression, typed_hir, semantics),
+                locals: plan_expression(expression, &program, semantics),
             })
             .collect();
-        let expressions = typed_hir
-            .expressions()
-            .map(lower_expression)
-            .collect::<Vec<_>>();
-        Self {
-            profile,
-            bodies,
-            global_initializers,
-            state_expressions,
-            expressions,
-        }
+        program
     }
 
     pub fn profile(&self) -> crate::BuildProfile {
         self.profile
+    }
+
+    pub fn standard_library(&self) -> &StandardLibrary {
+        &self.standard_library
     }
 
     pub fn global_initializers(&self) -> impl Iterator<Item = (ValueId, ExprId)> + '_ {
@@ -385,7 +435,7 @@ impl Program {
     }
 }
 
-fn lower_expression(expression: &TypedExpression) -> Expression {
+fn lower_expression(expression: &TypedExpression, library: &StandardLibrary) -> Expression {
     let kind = match &expression.kind {
         TypedExpressionKind::None => ExpressionKind::None,
         TypedExpressionKind::Bool(value) => ExpressionKind::Bool(*value),
@@ -482,7 +532,7 @@ fn lower_expression(expression: &TypedExpression) -> Expression {
                 unreachable!("checked calls have a resolved target")
             };
             ExpressionKind::Call {
-                target: target.clone(),
+                target: lower_call_target(target, library),
                 arguments: arguments.clone(),
             }
         }
@@ -515,7 +565,7 @@ fn lower_expression(expression: &TypedExpression) -> Expression {
                 .map(|arm| MatchArm {
                     pattern_id: arm.resolution.id,
                     pattern: match &arm.pattern {
-                        MatchPattern::Enum {
+                        TypedPattern::Enum {
                             enumeration,
                             binding,
                             ..
@@ -527,9 +577,9 @@ fn lower_expression(expression: &TypedExpression) -> Expression {
                                 .expect("checked enum patterns have resolved variants"),
                             binding: binding.as_ref().map(|binding| binding.id),
                         },
-                        MatchPattern::Bool(value) => LoweredPattern::Bool(*value),
-                        MatchPattern::Int { value, .. } => LoweredPattern::Int(*value),
-                        MatchPattern::None => {
+                        TypedPattern::Bool(value) => LoweredPattern::Bool(*value),
+                        TypedPattern::Int { value, .. } => LoweredPattern::Int(*value),
+                        TypedPattern::None => {
                             let Some(ResolvedWrapperPattern::OptionNone(option)) =
                                 arm.resolution.wrapper
                             else {
@@ -537,7 +587,7 @@ fn lower_expression(expression: &TypedExpression) -> Expression {
                             };
                             LoweredPattern::OptionNone(option)
                         }
-                        MatchPattern::OptionSome(binding) => {
+                        TypedPattern::OptionSome(binding) => {
                             let Some(ResolvedWrapperPattern::OptionSome(option)) =
                                 arm.resolution.wrapper
                             else {
@@ -548,7 +598,7 @@ fn lower_expression(expression: &TypedExpression) -> Expression {
                                 binding: binding.as_ref().map(|binding| binding.id),
                             }
                         }
-                        MatchPattern::ResultSuccess(binding) => {
+                        TypedPattern::ResultSuccess(binding) => {
                             let Some(ResolvedWrapperPattern::ResultSuccess(result)) =
                                 arm.resolution.wrapper
                             else {
@@ -559,7 +609,7 @@ fn lower_expression(expression: &TypedExpression) -> Expression {
                                 binding: binding.as_ref().map(|binding| binding.id),
                             }
                         }
-                        MatchPattern::ResultError(binding) => {
+                        TypedPattern::ResultError(binding) => {
                             let Some(ResolvedWrapperPattern::ResultError(result)) =
                                 arm.resolution.wrapper
                             else {
@@ -570,7 +620,7 @@ fn lower_expression(expression: &TypedExpression) -> Expression {
                                 binding: binding.as_ref().map(|binding| binding.id),
                             }
                         }
-                        MatchPattern::Wildcard => LoweredPattern::Wildcard,
+                        TypedPattern::Wildcard => LoweredPattern::Wildcard,
                     },
                     guard: arm.guard,
                     value: arm.value,
@@ -586,12 +636,52 @@ fn lower_expression(expression: &TypedExpression) -> Expression {
     }
 }
 
+fn lower_call_target(target: &ResolvedCall, library: &StandardLibrary) -> CallTarget {
+    match target {
+        ResolvedCall::UserFunction { function } => CallTarget::UserFunction {
+            function: *function,
+        },
+        ResolvedCall::UserMethod {
+            function,
+            receiver,
+            receiver_type,
+            receiver_members,
+        } => CallTarget::UserMethod {
+            function: *function,
+            receiver: *receiver,
+            receiver_type: *receiver_type,
+            receiver_members: receiver_members.clone(),
+        },
+        ResolvedCall::StandardLibrary {
+            item,
+            type_arguments,
+            receiver,
+            receiver_type,
+            receiver_members,
+        } => {
+            let Implementation::Intrinsic(intrinsic) = library.item(*item).implementation;
+            CallTarget::Intrinsic {
+                item: *item,
+                intrinsic,
+                type_arguments: type_arguments.clone(),
+                receiver: *receiver,
+                receiver_type: *receiver_type,
+                receiver_members: receiver_members.clone(),
+            }
+        }
+        ResolvedCall::ResultError { result } => CallTarget::ResultError { result: *result },
+        ResolvedCall::OptionSome { option } => CallTarget::OptionSome { option: *option },
+        ResolvedCall::ResultSuccess { result } => CallTarget::ResultSuccess { result: *result },
+    }
+}
+
 fn lower_body(
     owner: BodyOwner,
     block: &hir::TypedBlock,
     typed_hir: &TypedProgram,
     semantics: &SemanticModel,
     profile: crate::BuildProfile,
+    wasm_ir: &Program,
 ) -> Body {
     let mut entry = if owner == BodyOwner::Action(ActionKind::OnAttach) {
         lower_async_block(block, typed_hir, semantics, profile)
@@ -600,8 +690,8 @@ fn lower_body(
     };
     let mut next_async_state = 1;
     assign_async_states(&mut entry, &mut next_async_state);
-    let locals = plan_block(block, typed_hir, semantics, profile);
-    let frame_values = plan_frame_values(&mut entry, &locals, typed_hir);
+    let locals = plan_block(&entry, wasm_ir, semantics);
+    let frame_values = plan_frame_values(&mut entry, &locals, wasm_ir);
     let cancellation_region = (owner == BodyOwner::Action(ActionKind::OnAttach))
         .then_some(CancellationRegion::ProcessLifetime);
     Body {
@@ -614,11 +704,7 @@ fn lower_body(
     }
 }
 
-fn plan_frame_values(
-    entry: &mut Block,
-    locals: &[Local],
-    typed_hir: &TypedProgram,
-) -> Vec<ValueId> {
+fn plan_frame_values(entry: &mut Block, locals: &[Local], program: &Program) -> Vec<ValueId> {
     let local_values = locals
         .iter()
         .filter_map(|local| match local.purpose {
@@ -632,7 +718,7 @@ fn plan_frame_values(
         HashSet::new(),
         &local_values,
         locals,
-        typed_hir,
+        program,
         &mut frame_values,
     );
     locals
@@ -649,7 +735,7 @@ fn analyze_suspension_liveness(
     live_after: HashSet<ValueId>,
     local_values: &HashSet<ValueId>,
     ordered_locals: &[Local],
-    typed_hir: &TypedProgram,
+    program: &Program,
     frame_values: &mut HashSet<ValueId>,
 ) -> HashSet<ValueId> {
     let mut live = match &mut block.terminator {
@@ -665,11 +751,11 @@ fn analyze_suspension_liveness(
                 live_after,
                 local_values,
                 ordered_locals,
-                typed_hir,
+                program,
                 frame_values,
             );
             let mut suspension_live = continuation_live.clone();
-            collect_expression_values(*value, &mut suspension_live, local_values, typed_hir);
+            collect_expression_values(*value, &mut suspension_live, local_values, program);
             live_values.clear();
             live_values.extend(
                 ordered_locals
@@ -687,13 +773,13 @@ fn analyze_suspension_liveness(
             if let Some(binding) = binding {
                 before_suspend.remove(binding);
             }
-            collect_expression_values(*value, &mut before_suspend, local_values, typed_hir);
+            collect_expression_values(*value, &mut before_suspend, local_values, program);
             before_suspend
         }
         Terminator::Return(value) => {
             let mut live = HashSet::new();
             if let Some(value) = value {
-                collect_expression_values(*value, &mut live, local_values, typed_hir);
+                collect_expression_values(*value, &mut live, local_values, program);
             }
             live
         }
@@ -709,18 +795,18 @@ fn analyze_suspension_liveness(
                 live_after,
                 local_values,
                 ordered_locals,
-                typed_hir,
+                program,
                 frame_values,
             );
             let mut loop_live = continuation_live;
-            collect_expression_values(*condition, &mut loop_live, local_values, typed_hir);
+            collect_expression_values(*condition, &mut loop_live, local_values, program);
             loop {
                 let body_live = analyze_suspension_liveness(
                     body,
                     loop_live.clone(),
                     local_values,
                     ordered_locals,
-                    typed_hir,
+                    program,
                     frame_values,
                 );
                 let previous_len = loop_live.len();
@@ -733,7 +819,7 @@ fn analyze_suspension_liveness(
         }
         Terminator::Throw { error, .. } => {
             let mut live = HashSet::new();
-            collect_expression_values(*error, &mut live, local_values, typed_hir);
+            collect_expression_values(*error, &mut live, local_values, program);
             live
         }
         Terminator::Fallthrough => live_after,
@@ -743,7 +829,7 @@ fn analyze_suspension_liveness(
         &mut live,
         local_values,
         ordered_locals,
-        typed_hir,
+        program,
         frame_values,
     );
     live
@@ -754,20 +840,22 @@ fn analyze_statements_liveness(
     live: &mut HashSet<ValueId>,
     local_values: &HashSet<ValueId>,
     ordered_locals: &[Local],
-    typed_hir: &TypedProgram,
+    program: &Program,
     frame_values: &mut HashSet<ValueId>,
 ) {
     for statement in statements.iter_mut().rev() {
         match statement {
-            Statement::Store { target, op, value } => {
+            Statement::Store {
+                target, op, value, ..
+            } => {
                 live.remove(target);
                 if op.is_some() && local_values.contains(target) {
                     live.insert(*target);
                 }
-                collect_expression_values(*value, live, local_values, typed_hir);
+                collect_expression_values(*value, live, local_values, program);
             }
             Statement::Evaluate { expression, .. } => {
-                collect_expression_values(*expression, live, local_values, typed_hir);
+                collect_expression_values(*expression, live, local_values, program);
             }
             Statement::If {
                 condition,
@@ -779,7 +867,7 @@ fn analyze_statements_liveness(
                     live.clone(),
                     local_values,
                     ordered_locals,
-                    typed_hir,
+                    program,
                     frame_values,
                 );
                 let else_live = analyze_suspension_liveness(
@@ -787,11 +875,11 @@ fn analyze_statements_liveness(
                     live.clone(),
                     local_values,
                     ordered_locals,
-                    typed_hir,
+                    program,
                     frame_values,
                 );
                 then_live.extend(else_live);
-                collect_expression_values(*condition, &mut then_live, local_values, typed_hir);
+                collect_expression_values(*condition, &mut then_live, local_values, program);
                 *live = then_live;
             }
             Statement::While { condition, body } => {
@@ -800,11 +888,11 @@ fn analyze_statements_liveness(
                     live.clone(),
                     local_values,
                     ordered_locals,
-                    typed_hir,
+                    program,
                     frame_values,
                 );
                 body_live.extend(live.iter().copied());
-                collect_expression_values(*condition, &mut body_live, local_values, typed_hir);
+                collect_expression_values(*condition, &mut body_live, local_values, program);
                 *live = body_live;
             }
         }
@@ -815,46 +903,38 @@ fn collect_expression_values(
     expression: ExprId,
     live: &mut HashSet<ValueId>,
     local_values: &HashSet<ValueId>,
-    typed_hir: &TypedProgram,
+    program: &Program,
 ) {
     struct Collector<'a> {
         live: &'a mut HashSet<ValueId>,
         local_values: &'a HashSet<ValueId>,
     }
 
-    impl TypedVisitor for Collector<'_> {
-        fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
-            if let Some((Some(ResolvedValue::Variable(value)), _)) =
-                program.value_path(expression.id)
+    impl Visitor for Collector<'_> {
+        fn visit_expression(&mut self, expression: &Expression, program: &Program) {
+            let root = match &expression.kind {
+                ExpressionKind::Path { root, .. } => *root,
+                ExpressionKind::Call {
+                    target:
+                        CallTarget::UserMethod { receiver, .. }
+                        | CallTarget::Intrinsic {
+                            receiver: Some(receiver),
+                            ..
+                        },
+                    ..
+                } => Some(*receiver),
+                _ => None,
+            };
+            if let Some(ResolvedValue::Variable(value)) = root
                 && self.local_values.contains(&value)
             {
                 self.live.insert(value);
             }
-            if let Some(call) = program.call(expression.id) {
-                let receiver = match call {
-                    ResolvedCall::UserMethod { receiver, .. } => Some(*receiver),
-                    ResolvedCall::StandardLibrary { receiver, .. } => *receiver,
-                    ResolvedCall::UserFunction { .. }
-                    | ResolvedCall::ResultError { .. }
-                    | ResolvedCall::OptionSome { .. }
-                    | ResolvedCall::ResultSuccess { .. } => None,
-                };
-                if let Some(ResolvedValue::Variable(value)) = receiver
-                    && self.local_values.contains(&value)
-                {
-                    self.live.insert(value);
-                }
-            }
-            hir::walk_typed_expression(self, expression, program);
+            walk_expression(self, expression, program);
         }
     }
 
-    Collector { live, local_values }.visit_expression(
-        typed_hir
-            .expression(expression)
-            .expect("lowered expressions belong to typed HIR"),
-        typed_hir,
-    );
+    Collector { live, local_values }.visit_expression_id(expression, program);
 }
 
 fn lower_block(
@@ -899,6 +979,7 @@ fn lower_async_statements(
                     0,
                     Statement::Store {
                         target: *value,
+                        declaration: true,
                         op: None,
                         value: *initializer,
                     },
@@ -913,6 +994,7 @@ fn lower_async_statements(
                     0,
                     Statement::Store {
                         target: assignment.target,
+                        declaration: false,
                         op: *op,
                         value: *value,
                     },
@@ -1152,6 +1234,7 @@ fn lower_statements(
             TypedStatementKind::Variable { value, initializer } => {
                 block.statements.push(Statement::Store {
                     target: *value,
+                    declaration: true,
                     op: None,
                     value: *initializer,
                 });
@@ -1163,6 +1246,7 @@ fn lower_statements(
             } => {
                 block.statements.push(Statement::Store {
                     target: assignment.target,
+                    declaration: false,
                     op: *op,
                     value: *value,
                 });
@@ -1254,7 +1338,8 @@ fn suspension_cancellation(
     let ResolvedCall::StandardLibrary { item, .. } = typed_hir.call(expression)? else {
         return None;
     };
-    (StandardLibrary::new()
+    (typed_hir
+        .standard_library()
         .item(*item)
         .operation_semantics()
         .cancellation
@@ -1262,43 +1347,27 @@ fn suspension_cancellation(
         .then_some(CancellationRegion::ProcessLifetime)
 }
 
-fn plan_block(
-    block: &hir::TypedBlock,
-    typed_hir: &TypedProgram,
-    semantics: &SemanticModel,
-    profile: crate::BuildProfile,
-) -> Vec<Local> {
-    let mut planner = LocalPlanner::new(semantics, profile);
-    planner.visit_block(block, typed_hir);
+fn plan_block(block: &Block, program: &Program, semantics: &SemanticModel) -> Vec<Local> {
+    let mut planner = LocalPlanner::new(semantics);
+    Visitor::visit_block(&mut planner, block, program);
     planner.locals
 }
 
-fn plan_expression(
-    expression: ExprId,
-    typed_hir: &TypedProgram,
-    semantics: &SemanticModel,
-) -> Vec<Local> {
-    let mut planner = LocalPlanner::new(semantics, crate::BuildProfile::Debug);
-    planner.visit_expression(
-        typed_hir
-            .expression(expression)
-            .expect("state source belongs to typed HIR"),
-        typed_hir,
-    );
+fn plan_expression(expression: ExprId, program: &Program, semantics: &SemanticModel) -> Vec<Local> {
+    let mut planner = LocalPlanner::new(semantics);
+    planner.visit_expression_id(expression, program);
     planner.locals
 }
 
 struct LocalPlanner<'a> {
     semantics: &'a SemanticModel,
-    profile: crate::BuildProfile,
     locals: Vec<Local>,
 }
 
 impl<'a> LocalPlanner<'a> {
-    fn new(semantics: &'a SemanticModel, profile: crate::BuildProfile) -> Self {
+    fn new(semantics: &'a SemanticModel) -> Self {
         Self {
             semantics,
-            profile,
             locals: Vec::new(),
         }
     }
@@ -1315,89 +1384,95 @@ impl<'a> LocalPlanner<'a> {
             .expect("checked local values have semantic types");
         self.push(ty, LocalPurpose::Value(value));
     }
+
+    fn push_intrinsic_scratch(
+        &mut self,
+        expression: ExprId,
+        expression_ty: TypeId,
+        policy: ScratchPolicy,
+    ) {
+        let ty = match policy.ty {
+            ScratchType::Core(core) => self.semantics.types().id_for_core(core),
+            ScratchType::Expression => expression_ty,
+            ScratchType::ResultValue => {
+                let TypeKind::Result { value, .. } = self.semantics.types().kind(expression_ty)
+                else {
+                    unreachable!("result-value scratch requires a Result expression")
+                };
+                *value
+            }
+        };
+        for slot in 0..policy.slots {
+            self.push(ty, LocalPurpose::IntrinsicScratch { expression, slot });
+        }
+    }
 }
 
-impl TypedVisitor for LocalPlanner<'_> {
-    fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
-        if statement.debug_only && self.profile == crate::BuildProfile::Release {
-            return;
+impl Visitor for LocalPlanner<'_> {
+    fn visit_statement(&mut self, statement: &Statement, program: &Program) {
+        if let Statement::Store {
+            target,
+            declaration: true,
+            ..
+        } = statement
+        {
+            self.value(*target);
         }
-        match statement.kind {
-            TypedStatementKind::Variable { value, .. } => self.value(value),
-            TypedStatementKind::Suspend {
-                mode,
-                binding,
-                value,
-            } => {
-                if let Some(binding) = binding {
-                    self.value(binding);
-                }
-                if mode == SuspensionMode::Retry {
-                    let ty = program
-                        .expression(value)
-                        .expect("retried expression belongs to typed HIR")
-                        .ty;
-                    self.push(ty, LocalPurpose::SuspensionScratch(value));
-                } else if let Some(intrinsic) = resolved_intrinsic(program, value) {
-                    let result_type = program
-                        .expression(value)
-                        .expect("awaited expression belongs to typed HIR")
-                        .ty;
-                    let u64_type = self.semantics.types().id_for_builtin(BuiltinType::U64);
-                    let scratch_types = match intrinsic {
-                        IntrinsicId::ProcessModule => vec![u64_type, u64_type],
-                        IntrinsicId::ProcessFollow
-                        | IntrinsicId::ProcessScan
-                        | IntrinsicId::ProcessReadRelative32
-                        | IntrinsicId::UnityClassField
-                        | IntrinsicId::UnityClassStaticInstance
-                        | IntrinsicId::UnityClassStaticTable
-                        | IntrinsicId::ModuleScan => vec![u64_type],
-                        IntrinsicId::UnityIl2Cpp
-                        | IntrinsicId::UnityModuleImage
-                        | IntrinsicId::UnityImageClass
-                        | IntrinsicId::UnityClassFieldAny => vec![result_type],
-                        IntrinsicId::NextTick | IntrinsicId::ProcessRead => Vec::new(),
-                        _ => unreachable!("type checking only permits awaitable intrinsics"),
-                    };
-                    for (slot, ty) in scratch_types.into_iter().enumerate() {
-                        self.push(
-                            ty,
-                            LocalPurpose::IntrinsicScratch {
-                                expression: value,
-                                slot: slot as u8,
-                            },
-                        );
-                    }
-                }
-            }
-            _ => {}
-        }
-        hir::walk_typed_statement(self, statement, program);
+        walk_statement(self, statement, program);
     }
 
-    fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
-        if let TypedExpressionKind::Match { value, arms } = &expression.kind {
-            self.visit_expression(
-                program
-                    .expression(*value)
-                    .expect("match input belongs to typed HIR"),
-                program,
-            );
+    fn visit_terminator(&mut self, terminator: &Terminator, program: &Program) {
+        if let Terminator::Suspend {
+            mode,
+            binding,
+            value,
+            ..
+        } = terminator
+        {
+            if let Some(binding) = binding {
+                self.value(*binding);
+            }
+            let result_type = program
+                .expression(*value)
+                .expect("suspended expression belongs to Wasm IR")
+                .ty;
+            if *mode == SuspensionMode::Retry {
+                self.push(result_type, LocalPurpose::SuspensionScratch(*value));
+            } else if let Some(intrinsic) = resolved_intrinsic(program, *value)
+                && let Some(policy) = intrinsic_registry::contract(intrinsic).async_scratch
+            {
+                self.push_intrinsic_scratch(*value, result_type, policy);
+            }
+        }
+        walk_terminator(self, terminator, program);
+    }
+
+    fn visit_expression(&mut self, expression: &Expression, program: &Program) {
+        if let ExpressionKind::Match { value, arms } = &expression.kind {
+            self.visit_expression_id(*value, program);
             let value_type = program
                 .expression(*value)
-                .expect("match input belongs to typed HIR")
+                .expect("match input belongs to Wasm IR")
                 .ty;
             self.push(value_type, LocalPurpose::MatchValue(expression.id));
             for arm in arms {
                 let binding = match &arm.pattern {
-                    MatchPattern::Enum {
+                    LoweredPattern::Enum {
                         binding: Some(binding),
                         ..
                     }
-                    | MatchPattern::OptionSome(Some(binding))
-                    | MatchPattern::ResultSuccess(Some(binding))
-                    | MatchPattern::ResultError(Some(binding)) => Some(binding.id),
+                    | LoweredPattern::OptionSome {
+                        binding: Some(binding),
+                        ..
+                    }
+                    | LoweredPattern::ResultSuccess {
+                        binding: Some(binding),
+                        ..
+                    }
+                    | LoweredPattern::ResultError {
+                        binding: Some(binding),
+                        ..
+                    } => Some(*binding),
                     _ => None,
                 };
                 if let Some(binding) = binding {
@@ -1405,112 +1480,65 @@ impl TypedVisitor for LocalPlanner<'_> {
                         .semantics
                         .value_type(binding)
                         .expect("checked pattern bindings have types");
-                    self.push(binding_type, LocalPurpose::MatchBinding(arm.resolution.id));
+                    self.push(binding_type, LocalPurpose::MatchBinding(arm.pattern_id));
                 }
                 if let Some(guard) = arm.guard {
-                    self.visit_expression(
-                        program
-                            .expression(guard)
-                            .expect("match guard belongs to typed HIR"),
-                        program,
-                    );
+                    self.visit_expression_id(guard, program);
                 }
-                self.visit_expression(
-                    program
-                        .expression(arm.value)
-                        .expect("match arm value belongs to typed HIR"),
-                    program,
-                );
+                self.visit_expression_id(arm.value, program);
             }
             return;
         }
 
-        if let TypedExpressionKind::Fallback { value, fallback } = &expression.kind {
-            self.visit_expression(
-                program
-                    .expression(*value)
-                    .expect("fallback input belongs to typed HIR"),
-                program,
-            );
+        if let ExpressionKind::Fallback { value, fallback } = &expression.kind {
+            self.visit_expression_id(*value, program);
             let value_type = program
                 .expression(*value)
-                .expect("fallback input belongs to typed HIR")
+                .expect("fallback input belongs to Wasm IR")
                 .ty;
             self.push(value_type, LocalPurpose::FallbackValue(expression.id));
             match fallback {
-                TypedFallbackBranch::Value(fallback) => self.visit_expression(
-                    program
-                        .expression(*fallback)
-                        .expect("fallback value belongs to typed HIR"),
-                    program,
-                ),
-                TypedFallbackBranch::Return(Some(value)) => self.visit_expression(
-                    program
-                        .expression(*value)
-                        .expect("fallback return value belongs to typed HIR"),
-                    program,
-                ),
-                TypedFallbackBranch::Return(None)
-                | TypedFallbackBranch::Break
-                | TypedFallbackBranch::Continue => {}
+                FallbackBranch::Value(fallback) => {
+                    self.visit_expression_id(*fallback, program);
+                }
+                FallbackBranch::Return(Some(value)) => {
+                    self.visit_expression_id(*value, program);
+                }
+                FallbackBranch::Return(None) | FallbackBranch::Break | FallbackBranch::Continue => {
+                }
             }
             return;
         }
 
-        if let TypedExpressionKind::Propagate { value, .. } = expression.kind {
-            self.visit_expression(
-                program
-                    .expression(value)
-                    .expect("propagated input belongs to typed HIR"),
-                program,
-            );
+        if let ExpressionKind::Propagate { value, .. } = expression.kind {
+            self.visit_expression_id(value, program);
             let input_type = program
                 .expression(value)
-                .expect("propagated input belongs to typed HIR")
+                .expect("propagated input belongs to Wasm IR")
                 .ty;
             self.push(input_type, LocalPurpose::FallbackValue(expression.id));
             return;
         }
 
-        hir::walk_typed_expression(self, expression, program);
-        if let TypedExpressionKind::Call { .. } = expression.kind
-            && let Some(intrinsic) = resolved_intrinsic(program, expression.id)
+        walk_expression(self, expression, program);
+        if let ExpressionKind::Call {
+            target: CallTarget::Intrinsic { intrinsic, .. },
+            ..
+        } = expression.kind
+            && let Some(policy) = intrinsic_registry::contract(intrinsic).synchronous_scratch
         {
-            let scratch_types = match intrinsic {
-                IntrinsicId::NumericClamp => vec![expression.ty; 4],
-                IntrinsicId::NumericMin | IntrinsicId::NumericMax => vec![expression.ty; 2],
-                IntrinsicId::TimerState => {
-                    vec![self.semantics.types().id_for_builtin(BuiltinType::U32)]
-                }
-                IntrinsicId::ProcessFollow
-                | IntrinsicId::ProcessReadRelative32
-                | IntrinsicId::ProcessReadManagedString => {
-                    let TypeKind::Result { value, .. } = self.semantics.types().kind(expression.ty)
-                    else {
-                        unreachable!("fallible process helpers return Result values")
-                    };
-                    vec![*value]
-                }
-                _ => Vec::new(),
-            };
-            for (slot, ty) in scratch_types.into_iter().enumerate() {
-                self.push(
-                    ty,
-                    LocalPurpose::IntrinsicScratch {
-                        expression: expression.id,
-                        slot: slot as u8,
-                    },
-                );
-            }
+            self.push_intrinsic_scratch(expression.id, expression.ty, policy);
         }
     }
 }
 
-fn resolved_intrinsic(program: &TypedProgram, expression: ExprId) -> Option<IntrinsicId> {
-    let ResolvedCall::StandardLibrary { item, .. } = program.call(expression)? else {
+fn resolved_intrinsic(program: &Program, expression: ExprId) -> Option<IntrinsicId> {
+    let ExpressionKind::Call {
+        target: CallTarget::Intrinsic { intrinsic, .. },
+        ..
+    } = &program.expression(expression)?.kind
+    else {
         return None;
     };
-    match StandardLibrary::new().item(*item).implementation {
-        Implementation::Intrinsic(intrinsic) => Some(intrinsic),
-    }
+    Some(*intrinsic)
 }

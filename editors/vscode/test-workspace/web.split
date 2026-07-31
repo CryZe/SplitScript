@@ -1,0 +1,10 @@
+state "game.exe" {}
+
+fn double(value: u32) {
+    return value + value
+}
+
+onDetached {
+    let answer = double(21)
+    debug print(`answer {answer}`)
+}

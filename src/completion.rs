@@ -12,7 +12,8 @@ use crate::{
     documentation::StandardLibraryDocumentation,
     language::{LanguageCatalog, LanguageItem, LanguageItemKind},
     stdlib::{ItemKind, StandardLibrary, StdlibItem, StdlibNamespace},
-    types::{BuiltinType, TypeKind},
+    stdlib_semantic::StandardLibrarySemanticExt,
+    types::TypeKind,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -53,12 +54,14 @@ pub(crate) fn complete(
     offset: usize,
 ) -> SemanticQueryResult<CompletionList> {
     let source = database.source().to_owned();
+    let compiler_context = database.context();
+    let standard_library = compiler_context.standard_library();
     let offset = floor_char_boundary(&source, offset.min(source.len()));
     let syntax = database.recovering_parse()?.syntax().clone();
     if let Some(context) = member_context(&source, offset) {
-        Ok(complete_member(&source, &syntax, context))
+        Ok(complete_member(&source, &syntax, context, compiler_context))
     } else {
-        Ok(complete_root(&source, &syntax, offset))
+        Ok(complete_root(&source, &syntax, offset, standard_library))
     }
 }
 
@@ -115,7 +118,12 @@ impl CompletionBuilder {
     }
 }
 
-fn complete_root(source: &str, syntax: &Program, offset: usize) -> CompletionList {
+fn complete_root(
+    source: &str,
+    syntax: &Program,
+    offset: usize,
+    standard_library: StandardLibrary,
+) -> CompletionList {
     let replacement = identifier_span(source, offset);
     let prefix = source[replacement.start..offset].to_owned();
     let mut builder = CompletionBuilder::new(prefix, replacement);
@@ -125,13 +133,35 @@ fn complete_root(source: &str, syntax: &Program, offset: usize) -> CompletionLis
             builder.add(completion);
         }
     }
-    add_root_standard_library(&mut builder);
+    let provider = syntax
+        .state
+        .as_ref()
+        .and_then(|state| state.provider.as_ref())
+        .and_then(|provider| standard_library.state_provider_by_name(&provider.name));
+    add_root_standard_library(&mut builder, &standard_library, provider.is_some());
+    if let Some(provider) = provider {
+        let ty = standard_library.type_decl(provider.process_type);
+        builder.add(CompletionItem {
+            label: provider.value_name.to_owned(),
+            kind: CompletionKind::Variable,
+            detail: Some(ty.name.to_owned()),
+            documentation: Some(render_documentation(&provider.documentation)),
+            insert_text: provider.value_name.to_owned(),
+            is_snippet: false,
+        });
+    }
     add_source_declarations(&mut builder, syntax);
     add_visible_bindings(&mut builder, syntax, offset);
     builder.finish()
 }
 
-fn complete_member(source: &str, syntax: &Program, context: MemberContext) -> CompletionList {
+fn complete_member(
+    source: &str,
+    syntax: &Program,
+    context: MemberContext,
+    compiler_context: crate::CompilerContext,
+) -> CompletionList {
+    let standard_library = compiler_context.standard_library();
     let mut builder = CompletionBuilder::new(context.prefix.clone(), context.replacement);
     let path = context
         .receiver_path
@@ -186,11 +216,11 @@ fn complete_member(source: &str, syntax: &Program, context: MemberContext) -> Co
         _ => {}
     }
 
-    add_standard_library_path_members(&mut builder, &path);
+    add_standard_library_path_members(&mut builder, &path, &standard_library);
 
-    if let Some((receiver, probe_syntax)) = infer_receiver(source, &context) {
-        add_inferred_fields(&mut builder, &probe_syntax, &receiver);
-        add_inferred_methods(&mut builder, &probe_syntax, &receiver);
+    if let Some((receiver, probe_syntax)) = infer_receiver(source, &context, compiler_context) {
+        add_inferred_fields(&mut builder, &probe_syntax, &receiver, &standard_library);
+        add_inferred_methods(&mut builder, &probe_syntax, &receiver, &standard_library);
     }
     builder.finish()
 }
@@ -243,13 +273,14 @@ fn catalog_language_completion(
     }
 }
 
-fn add_root_standard_library(builder: &mut CompletionBuilder) {
-    let library = StandardLibrary::new();
-    for namespace in library
-        .namespaces()
-        .iter()
-        .filter(|namespace| namespace.path.len() == 1)
-    {
+fn add_root_standard_library(
+    builder: &mut CompletionBuilder,
+    library: &StandardLibrary,
+    hide_process: bool,
+) {
+    for namespace in library.namespaces().iter().filter(|namespace| {
+        namespace.path.len() == 1 && !(hide_process && namespace.path == ["process"])
+    }) {
         builder.add(stdlib_namespace_completion(namespace));
     }
     for ty in library.types() {
@@ -271,7 +302,12 @@ fn add_root_standard_library(builder: &mut CompletionBuilder) {
             continue;
         };
         if path.len() == 1 {
-            builder.add(stdlib_completion(item.name, item, CompletionKind::Function));
+            builder.add(stdlib_completion(
+                item.name,
+                item,
+                CompletionKind::Function,
+                library,
+            ));
         }
     }
 }
@@ -287,9 +323,11 @@ fn stdlib_namespace_completion(namespace: &StdlibNamespace) -> CompletionItem {
     }
 }
 
-fn add_standard_library_path_members(builder: &mut CompletionBuilder, prefix: &[&str]) {
-    let library = StandardLibrary::new();
-
+fn add_standard_library_path_members(
+    builder: &mut CompletionBuilder,
+    prefix: &[&str],
+    library: &StandardLibrary,
+) {
     if let [type_name] = prefix
         && let Some(ty) = library.type_by_name(type_name)
     {
@@ -314,7 +352,12 @@ fn add_standard_library_path_members(builder: &mut CompletionBuilder, prefix: &[
         }
         let label = path[prefix.len()];
         if path.len() == prefix.len() + 1 {
-            builder.add(stdlib_completion(label, item, CompletionKind::Function));
+            builder.add(stdlib_completion(
+                label,
+                item,
+                CompletionKind::Function,
+                library,
+            ));
         }
     }
 
@@ -333,7 +376,8 @@ fn add_standard_library_path_members(builder: &mut CompletionBuilder, prefix: &[
             .is_some_and(|declared| declared == prefix)
         {
             for ty in memory_read_type_names() {
-                let documentation = StandardLibraryDocumentation::generate(item.id, &[]);
+                let documentation =
+                    StandardLibraryDocumentation::generate_with_library(library, item.id, &[]);
                 builder.add(CompletionItem {
                     label: (*ty).to_owned(),
                     kind: CompletionKind::Type,
@@ -347,8 +391,13 @@ fn add_standard_library_path_members(builder: &mut CompletionBuilder, prefix: &[
     }
 }
 
-fn stdlib_completion(label: &str, item: &StdlibItem, kind: CompletionKind) -> CompletionItem {
-    let documentation = StandardLibraryDocumentation::generate(item.id, &[]);
+fn stdlib_completion(
+    label: &str,
+    item: &StdlibItem,
+    kind: CompletionKind,
+    library: &StandardLibrary,
+) -> CompletionItem {
+    let documentation = StandardLibraryDocumentation::generate_with_library(library, item.id, &[]);
     CompletionItem {
         label: label.to_owned(),
         kind,
@@ -658,7 +707,12 @@ fn statement_span(statement: &Stmt) -> Span {
     }
 }
 
-fn add_inferred_fields(builder: &mut CompletionBuilder, syntax: &Program, receiver: &TypeKind) {
+fn add_inferred_fields(
+    builder: &mut CompletionBuilder,
+    syntax: &Program,
+    receiver: &TypeKind,
+    standard_library: &StandardLibrary,
+) {
     match receiver {
         TypeKind::Record(id) => {
             if let Some(record) = syntax.records.iter().find(|record| record.id == *id) {
@@ -672,13 +726,13 @@ fn add_inferred_fields(builder: &mut CompletionBuilder, syntax: &Program, receiv
             }
         }
         TypeKind::Standard(owner) => {
-            for field in StandardLibrary::new().public_fields(*owner) {
+            for field in standard_library.public_fields(*owner) {
                 builder.add(CompletionItem {
                     label: field.name.to_owned(),
                     kind: CompletionKind::Property,
                     detail: Some(format!(
                         "{}.{}",
-                        StandardLibrary::new().type_decl(*owner).name,
+                        standard_library.type_decl(*owner).name,
                         field.name
                     )),
                     documentation: Some(render_documentation(&field.documentation)),
@@ -695,18 +749,27 @@ fn add_inferred_fields(builder: &mut CompletionBuilder, syntax: &Program, receiv
     }
 }
 
-fn add_inferred_methods(builder: &mut CompletionBuilder, syntax: &Program, receiver: &TypeKind) {
-    for item in StandardLibrary::new().methods_for_type(receiver) {
+fn add_inferred_methods(
+    builder: &mut CompletionBuilder,
+    syntax: &Program,
+    receiver: &TypeKind,
+    standard_library: &StandardLibrary,
+) {
+    for item in standard_library.methods_for_type(receiver) {
         let ItemKind::Method { .. } = item.kind else {
             unreachable!()
         };
-        builder.add(stdlib_completion(item.name, item, CompletionKind::Method));
+        builder.add(stdlib_completion(
+            item.name,
+            item,
+            CompletionKind::Method,
+            standard_library,
+        ));
     }
     for function in &syntax.functions {
-        if function
-            .method_of
-            .is_some_and(|declared| syntax_receiver_matches(syntax, declared, receiver))
-        {
+        if function.method_of.is_some_and(|declared| {
+            syntax_receiver_matches(syntax, declared, receiver, standard_library)
+        }) {
             let parameters = function
                 .params
                 .iter()
@@ -726,14 +789,19 @@ fn add_inferred_methods(builder: &mut CompletionBuilder, syntax: &Program, recei
     }
 }
 
-fn syntax_receiver_matches(syntax: &Program, declared: SyntaxTypeRef, receiver: &TypeKind) -> bool {
+fn syntax_receiver_matches(
+    syntax: &Program,
+    declared: SyntaxTypeRef,
+    receiver: &TypeKind,
+    standard_library: &StandardLibrary,
+) -> bool {
     match (declared, receiver) {
         (SyntaxTypeRef::Record(expected), TypeKind::Record(actual)) => expected == *actual,
         (SyntaxTypeRef::Enum(expected), TypeKind::Enum(actual)) => expected == *actual,
         (SyntaxTypeRef::Array(expected), TypeKind::Array { layout, .. }) => expected == *layout,
         (SyntaxTypeRef::Option(expected), TypeKind::Option { layout, .. }) => expected == *layout,
         (SyntaxTypeRef::Result(expected), TypeKind::Result { layout, .. }) => expected == *layout,
-        (SyntaxTypeRef::Named(name), TypeKind::Standard(actual)) => StandardLibrary::new()
+        (SyntaxTypeRef::Named(name), TypeKind::Standard(actual)) => standard_library
             .type_by_name(syntax.type_name(name))
             .is_some_and(|expected| expected.id == *actual),
         (SyntaxTypeRef::Named(name), TypeKind::Record(actual)) => syntax
@@ -745,41 +813,20 @@ fn syntax_receiver_matches(syntax: &Program, declared: SyntaxTypeRef, receiver: 
             .iter()
             .any(|item| item.name == syntax.type_name(name) && item.id == *actual),
         (SyntaxTypeRef::Standard(expected), TypeKind::Standard(actual)) => expected == *actual,
-        (syntax, TypeKind::Builtin(actual)) => syntax_builtin(syntax) == Some(*actual),
+        (syntax, TypeKind::Builtin(actual)) => syntax.core_type() == Some(*actual),
         _ => false,
     }
 }
 
-fn syntax_builtin(ty: SyntaxTypeRef) -> Option<BuiltinType> {
-    Some(match ty {
-        SyntaxTypeRef::Void => BuiltinType::Void,
-        SyntaxTypeRef::Bool => BuiltinType::Bool,
-        SyntaxTypeRef::I8 => BuiltinType::I8,
-        SyntaxTypeRef::U8 => BuiltinType::U8,
-        SyntaxTypeRef::I16 => BuiltinType::I16,
-        SyntaxTypeRef::U16 => BuiltinType::U16,
-        SyntaxTypeRef::I32 => BuiltinType::I32,
-        SyntaxTypeRef::U32 => BuiltinType::U32,
-        SyntaxTypeRef::I64 => BuiltinType::I64,
-        SyntaxTypeRef::U64 => BuiltinType::U64,
-        SyntaxTypeRef::Address => BuiltinType::Address,
-        SyntaxTypeRef::F32 => BuiltinType::F32,
-        SyntaxTypeRef::F64 => BuiltinType::F64,
-        SyntaxTypeRef::Named(_)
-        | SyntaxTypeRef::Standard(_)
-        | SyntaxTypeRef::Record(_)
-        | SyntaxTypeRef::Enum(_)
-        | SyntaxTypeRef::Array(_)
-        | SyntaxTypeRef::Option(_)
-        | SyntaxTypeRef::Result(_) => return None,
-    })
-}
-
-fn infer_receiver(source: &str, context: &MemberContext) -> Option<(TypeKind, Program)> {
+fn infer_receiver(
+    source: &str,
+    context: &MemberContext,
+    compiler_context: crate::CompilerContext,
+) -> Option<(TypeKind, Program)> {
     let mut probe_source = String::with_capacity(source.len());
     probe_source.push_str(&source[..context.dot]);
     probe_source.push_str(&source[context.replacement.end..]);
-    let mut probe = CompilerDatabase::new(probe_source);
+    let mut probe = CompilerDatabase::with_context(compiler_context, probe_source);
     let receiver_offset = context.dot.checked_sub(1)?;
     let receiver = probe.analysis_at(receiver_offset).ok()??.type_kind;
     let syntax = probe.recovering_parse().ok()?.syntax().clone();
@@ -938,6 +985,26 @@ whileAttached {
             "state \"game.exe\" {}\nwhileAttached { let number: i32 = 4\nnumber.\n}",
         );
         assert!(labels(&mut bare, "number.").contains(&"min".to_owned()));
+    }
+
+    #[test]
+    fn gba_states_expose_only_the_typed_provider_value() {
+        let source = "state GBA { room: u8 = gba.re }";
+        let mut database = CompilerDatabase::new(source);
+        assert!(labels(&mut database, "gba.re").contains(&"read".to_owned()));
+
+        let root_source = "state GBA {}\nwhileAttached { gb }";
+        let mut database = CompilerDatabase::new(root_source);
+        let provider_items = labels(&mut database, " gb");
+        assert!(provider_items.contains(&"gba".to_owned()));
+
+        let process_source = "state GBA {}\nwhileAttached { pro }";
+        let mut database = CompilerDatabase::new(process_source);
+        assert!(!labels(&mut database, " pro").contains(&"process".to_owned()));
+
+        let native_source = "state \"game.exe\" {}\nwhileAttached { pro }";
+        let mut database = CompilerDatabase::new(native_source);
+        assert!(labels(&mut database, " pro").contains(&"process".to_owned()));
     }
 
     #[test]

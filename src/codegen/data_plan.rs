@@ -4,27 +4,25 @@ use wasm_encoder::{ConstExpr, DataSection};
 
 use crate::{
     ast::{Program, SettingFileFilter, SettingKind, StateSource},
+    memory::MemoryLayouts,
     signature::parse_signature,
     wasm_ir,
 };
 
 use super::dependencies::BackendDependencies;
+use super::gba_layout;
+use super::memory_plan::{LinearMemoryLayout, ScratchRequirements};
 use super::reachability::Reachability;
-
-pub(super) const IL2CPP_ASSEMBLIES_SIGNATURE: &str = "75 ?? 48 8B 1D ?? ?? ?? ?? 48 3B 1D";
-pub(super) const IL2CPP_METADATA_SIGNATURE: &str =
-    "67 6C 6F 62 61 6C 2D 6D 65 74 61 64 61 74 61 2E 64 61 74 00";
-pub(super) const IL2CPP_LEA_SIGNATURE: &str = "48 8D 0D";
-pub(super) const IL2CPP_SHR_SIGNATURE: &str = "48 C1 E9";
-pub(super) const IL2CPP_RAX_SIGNATURE: &str = "48 89 05";
+use super::unity_layout::{DISCOVERY_LAYOUT, DISCOVERY_SIGNATURES};
 
 pub(super) struct StaticData {
     pub strings: StringPool,
     pub signatures: SignaturePool,
+    layout: LinearMemoryLayout,
 }
 
-#[derive(Default)]
 pub(super) struct StringPool {
+    base: u32,
     bytes: Vec<u8>,
     entries: HashMap<String, (u32, u32)>,
 }
@@ -49,9 +47,10 @@ impl StaticData {
         wasm_ir: &wasm_ir::Program,
         reachability: &Reachability,
         dependencies: &BackendDependencies,
+        memory: &MemoryLayouts,
     ) -> Self {
         let state = program.state.as_ref().expect("checked programs have state");
-        let mut strings = StringPool::default();
+        let mut strings = StringPool::new();
         for process in &state.processes {
             strings.intern(process);
         }
@@ -115,10 +114,19 @@ impl StaticData {
             }
         }
         if dependencies.uses_unity_metadata() {
-            strings.intern("GameAssembly.dll");
+            strings.intern(DISCOVERY_LAYOUT.module_name);
+        }
+        if dependencies.uses_gba_emulator_discovery() {
+            for name in gba_layout::PROCESS_NAMES
+                .iter()
+                .chain(gba_layout::RETROARCH_CORES)
+                .chain(std::iter::once(&gba_layout::EMUHAWK_CORE))
+            {
+                strings.intern(name);
+            }
         }
 
-        let mut signatures = SignaturePool::new(64 + strings.bytes.len() as u32);
+        let mut signatures = SignaturePool::new();
         for expression in wasm_ir.expressions() {
             if !reachability.contains_expression(expression.id) {
                 continue;
@@ -128,29 +136,57 @@ impl StaticData {
             }
         }
         if dependencies.uses_unity_metadata() {
-            for signature in [
-                IL2CPP_ASSEMBLIES_SIGNATURE,
-                IL2CPP_METADATA_SIGNATURE,
-                IL2CPP_LEA_SIGNATURE,
-                IL2CPP_SHR_SIGNATURE,
-                IL2CPP_RAX_SIGNATURE,
-            ] {
+            for signature in DISCOVERY_SIGNATURES {
+                signatures.intern(signature.pattern);
+            }
+        }
+        if dependencies.uses_gba_emulator_discovery() {
+            for signature in gba_layout::SIGNATURES {
                 signatures.intern(signature);
             }
         }
 
+        let static_data_len = strings
+            .bytes
+            .len()
+            .checked_add(signatures.bytes.len())
+            .expect("static data length must fit the host address space");
+        let layout = LinearMemoryLayout::plan(
+            static_data_len,
+            ScratchRequirements {
+                abi_read_capacity: memory.maximum_size().max(16),
+                maximum_signature_len: signatures.maximum_len(),
+            },
+        );
+        strings.base = layout.static_data_start();
+        signatures.base = strings
+            .base
+            .checked_add(
+                u32::try_from(strings.bytes.len())
+                    .expect("string data must fit WebAssembly linear memory"),
+            )
+            .expect("string data must fit WebAssembly linear memory");
         Self {
             strings,
             signatures,
+            layout,
         }
     }
 
+    pub fn layout(&self) -> LinearMemoryLayout {
+        self.layout
+    }
+
     pub fn encode(&self) -> DataSection {
+        debug_assert_eq!(
+            self.layout.static_data_end(),
+            u64::from(self.signatures.base) + self.signatures.bytes.len() as u64
+        );
         let mut section = DataSection::new();
         if !self.strings.bytes.is_empty() {
             section.active(
                 0,
-                &ConstExpr::i32_const(64),
+                &ConstExpr::i32_const(self.strings.base as i32),
                 self.strings.bytes.iter().copied(),
             );
         }
@@ -166,11 +202,8 @@ impl StaticData {
 }
 
 impl SignaturePool {
-    fn new(base: u32) -> Self {
-        Self {
-            base,
-            ..Self::default()
-        }
+    fn new() -> Self {
+        Self::default()
     }
 
     fn intern(&mut self, signature: &str) {
@@ -193,16 +226,49 @@ impl SignaturePool {
     }
 
     pub fn get(&self, signature: &str) -> SignatureEntry {
-        self.entries[signature]
+        let entry = self.entries[signature];
+        SignatureEntry {
+            needle: self
+                .base
+                .checked_add(entry.needle)
+                .expect("signature address must fit wasm32"),
+            mask: self
+                .base
+                .checked_add(entry.mask)
+                .expect("signature address must fit wasm32"),
+            len: entry.len,
+        }
+    }
+
+    fn maximum_len(&self) -> u32 {
+        self.entries
+            .values()
+            .map(|entry| entry.len)
+            .max()
+            .unwrap_or(0)
     }
 }
 
 impl StringPool {
+    fn new() -> Self {
+        Self {
+            base: 0,
+            bytes: Vec::new(),
+            entries: HashMap::new(),
+        }
+    }
+
     fn intern(&mut self, value: &str) -> (u32, u32) {
         if let Some(entry) = self.entries.get(value) {
             return *entry;
         }
-        let offset = 64 + self.bytes.len() as u32;
+        let offset = self
+            .base
+            .checked_add(
+                u32::try_from(self.bytes.len())
+                    .expect("string data must fit WebAssembly linear memory"),
+            )
+            .expect("string data must fit WebAssembly linear memory");
         let len = value.len() as u32;
         self.bytes.extend_from_slice(value.as_bytes());
         self.entries.insert(value.to_owned(), (offset, len));
@@ -210,6 +276,12 @@ impl StringPool {
     }
 
     pub fn get(&self, value: &str) -> (u32, u32) {
-        self.entries[value]
+        let (offset, len) = self.entries[value];
+        (
+            self.base
+                .checked_add(offset)
+                .expect("string address must fit wasm32"),
+            len,
+        )
     }
 }

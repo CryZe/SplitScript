@@ -407,6 +407,30 @@ formats its decimal value. Other reference and domain types are not castable.
 
 ## Functions
 
+`///` documentation comments can precede functions and methods, global
+variables, state fields, records and their fields, and enums and their
+variants. The language server includes this documentation in hover information
+alongside inferred types and function effects. Consecutive non-empty lines form
+one paragraph; an empty `///` line starts a new Markdown paragraph.
+
+```text
+/// Returns whether the player reached the final stage.
+fn isFinalLevel(level) {
+    return stage(level) == 7
+}
+
+record Position {
+    /// Horizontal position in world units.
+    x: f32
+    /// Vertical position in world units.
+    y: f32
+}
+```
+
+Documentation comments on settings remain their runtime GUI tooltips as
+described in the settings section. Ordinary `//` comments are never published
+as documentation.
+
 Function parameter and return annotations are optional. Their constraints are
 solved together with every function body and call site, including forward
 calls. A function with no value-returning `return` is inferred as returning
@@ -618,15 +642,8 @@ map. User code sees the freshly decoded values through `settings`; the values
 from the preceding tick are available through `oldSettings` for change
 detection. Missing host entries use their declared defaults (or an empty string
 for a file setting). Misspelled settings and invalid choice variants are
-compile-time errors.
-
-The older compact boolean form remains accepted:
-
-```text
-settings {
-    splitBosses: bool = true, "Split after every boss"
-}
-```
+compile-time errors. The quoted text before `=>` is the setting's visible
+label; `///` documentation comments are the only way to define its tooltip.
 
 ## Actions
 

@@ -1,6 +1,30 @@
 //! Per-tick process, snapshot, lifecycle-action, and timer runtime emission.
 
-use super::*;
+use std::collections::HashMap;
+
+use wasm_encoder::{BlockType, Function, HeapType, Instruction, RefType, ValType};
+
+use crate::{
+    abi::AbiImportId,
+    ast::{ActionKind, Program},
+    stdlib::{StdlibFieldId, StdlibTypeId},
+    wasm_ir,
+};
+
+use super::{
+    GcLayout, STATE_TYPE, Type, data_plan::StringPool, emit_typed_struct_get,
+    global_plan::RuntimeGlobals, imports::Abi, semantic_type, value_type,
+};
+
+/// Per-tick runtime view of the completed backend plans.
+pub(super) struct UpdateContext<'a> {
+    pub standard_library: &'a crate::stdlib::StandardLibrary,
+    pub abi: &'a Abi,
+    pub gc: &'a GcLayout,
+    pub runtime_globals: RuntimeGlobals,
+    pub semantics: &'a crate::semantic::SemanticModel,
+    pub provider_attach: Option<u32>,
+}
 
 pub(super) fn compile_update(
     program: &Program,
@@ -9,9 +33,10 @@ pub(super) fn compile_update(
     actions: &HashMap<ActionKind, u32>,
     refresh_settings: Option<u32>,
     cancellation_region: Option<wasm_ir::CancellationRegion>,
-    lowering: &LoweringContext<'_>,
+    lowering: &UpdateContext<'_>,
 ) -> Function {
     let abi = lowering.abi;
+    let globals = lowering.runtime_globals;
     let semantics = lowering.semantics;
     let has_game_time = actions.contains_key(&ActionKind::GameTime);
     let mut locals = vec![(2, ValType::I32)];
@@ -20,7 +45,7 @@ pub(super) fn compile_update(
             1,
             ValType::Ref(RefType {
                 nullable: true,
-                heap_type: HeapType::Concrete(standard_gc_type_index(StdlibTypeId::Duration)),
+                heap_type: HeapType::Concrete(lowering.gc.standard_index(StdlibTypeId::Duration)),
             }),
         ));
     }
@@ -52,77 +77,113 @@ pub(super) fn compile_update(
         function.instruction(&Instruction::Call(refresh_settings));
     }
     function
-        .instruction(&Instruction::GlobalGet(PROCESS_GLOBAL))
+        .instruction(&Instruction::GlobalGet(globals.process))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty));
     if let Some(detached) = actions.get(&ActionKind::OnDetached) {
         function
-            .instruction(&Instruction::GlobalGet(DETACHED_ENTERED_GLOBAL))
+            .instruction(&Instruction::GlobalGet(globals.detached_entered))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty));
-        emit_action_args(&mut function);
+        emit_action_args(&mut function, globals);
         function
             .instruction(&Instruction::Call(*detached))
             .instruction(&Instruction::I32Const(1))
-            .instruction(&Instruction::GlobalSet(DETACHED_ENTERED_GLOBAL))
+            .instruction(&Instruction::GlobalSet(globals.detached_entered))
             .instruction(&Instruction::End);
     }
     for process in &state.processes {
         let (process_ptr, process_len) = strings.get(process);
         function
-            .instruction(&Instruction::GlobalGet(PROCESS_GLOBAL))
+            .instruction(&Instruction::GlobalGet(globals.process))
             .instruction(&Instruction::I64Eqz)
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::I32Const(process_ptr as i32))
             .instruction(&Instruction::I32Const(process_len as i32))
             .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessAttach)))
-            .instruction(&Instruction::GlobalSet(PROCESS_GLOBAL))
+            .instruction(&Instruction::GlobalSet(globals.process))
             .instruction(&Instruction::End);
     }
     function
         .instruction(&Instruction::End)
-        .instruction(&Instruction::GlobalGet(PROCESS_GLOBAL))
+        .instruction(&Instruction::GlobalGet(globals.process))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::GlobalSet(DETACHED_ENTERED_GLOBAL))
-        .instruction(&Instruction::GlobalGet(PROCESS_GLOBAL))
+        .instruction(&Instruction::GlobalSet(globals.detached_entered))
+        .instruction(&Instruction::GlobalGet(globals.process))
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessIsOpen)))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::GlobalGet(PROCESS_GLOBAL))
+        .instruction(&Instruction::GlobalGet(globals.process))
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessDetach)))
         .instruction(&Instruction::I64Const(0))
-        .instruction(&Instruction::GlobalSet(PROCESS_GLOBAL));
+        .instruction(&Instruction::GlobalSet(globals.process));
+    if let Some(provider_global) = globals.provider_value {
+        let provider_type = state
+            .provider
+            .as_ref()
+            .and_then(|provider| provider.resolved)
+            .map(|provider| {
+                lowering
+                    .standard_library
+                    .state_provider(provider)
+                    .process_type
+            })
+            .expect("provider storage requires a resolved provider");
+        function
+            .instruction(&Instruction::RefNull(HeapType::Concrete(
+                lowering.gc.standard_index(provider_type),
+            )))
+            .instruction(&Instruction::GlobalSet(provider_global));
+    }
     if let Some(region) = cancellation_region {
-        emit_cancel_region(&mut function, region);
+        emit_cancel_region(&mut function, region, lowering.gc, globals);
     }
     if let Some(detached) = actions.get(&ActionKind::OnDetached) {
-        emit_action_args(&mut function);
+        emit_action_args(&mut function, globals);
         function
             .instruction(&Instruction::Call(*detached))
             .instruction(&Instruction::I32Const(1))
-            .instruction(&Instruction::GlobalSet(DETACHED_ENTERED_GLOBAL));
+            .instruction(&Instruction::GlobalSet(globals.detached_entered));
     }
     function
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
 
+    if let (Some(provider_global), Some(provider_attach)) =
+        (globals.provider_value, lowering.provider_attach)
+    {
+        function
+            .instruction(&Instruction::GlobalGet(provider_global))
+            .instruction(&Instruction::RefIsNull)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::GlobalGet(globals.process))
+            .instruction(&Instruction::Call(provider_attach))
+            .instruction(&Instruction::GlobalSet(provider_global))
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::GlobalGet(provider_global))
+            .instruction(&Instruction::RefIsNull)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End);
+    }
+
     if let Some(on_attach) = actions.get(&ActionKind::OnAttach) {
         function
-            .instruction(&Instruction::GlobalGet(ATTACH_READY_GLOBAL))
+            .instruction(&Instruction::GlobalGet(globals.attach_ready))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::GlobalGet(PROCESS_GLOBAL))
+            .instruction(&Instruction::GlobalGet(globals.process))
             .instruction(&Instruction::Call(*on_attach))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End)
             .instruction(&Instruction::I32Const(1))
-            .instruction(&Instruction::GlobalSet(ATTACH_READY_GLOBAL))
+            .instruction(&Instruction::GlobalSet(globals.attach_ready))
             .instruction(&Instruction::End);
     }
 
@@ -140,7 +201,7 @@ pub(super) fn compile_update(
         };
         let poll_result_local = first_poll_result + index as u32;
         function
-            .instruction(&Instruction::GlobalGet(PROCESS_GLOBAL))
+            .instruction(&Instruction::GlobalGet(globals.process))
             .instruction(&Instruction::Call(read_functions[index]))
             .instruction(&Instruction::LocalTee(poll_result_local))
             .instruction(&Instruction::RefAsNonNull)
@@ -167,13 +228,13 @@ pub(super) fn compile_update(
         });
     }
     function
-        .instruction(&Instruction::GlobalGet(CURRENT_GLOBAL))
-        .instruction(&Instruction::GlobalSet(OLD_GLOBAL))
+        .instruction(&Instruction::GlobalGet(globals.current))
+        .instruction(&Instruction::GlobalSet(globals.old))
         .instruction(&Instruction::LocalGet(candidate_state))
-        .instruction(&Instruction::GlobalSet(CURRENT_GLOBAL));
+        .instruction(&Instruction::GlobalSet(globals.current));
 
     if let Some(update) = actions.get(&ActionKind::WhileAttached) {
-        emit_action_args(&mut function);
+        emit_action_args(&mut function, globals);
         function.instruction(&Instruction::Call(*update));
     }
     function
@@ -185,7 +246,7 @@ pub(super) fn compile_update(
             .instruction(&Instruction::LocalGet(timer_state))
             .instruction(&Instruction::I32Eqz)
             .instruction(&Instruction::If(BlockType::Empty));
-        emit_action_args(&mut function);
+        emit_action_args(&mut function, globals);
         function
             .instruction(&Instruction::Call(*start))
             .instruction(&Instruction::I32Const(1))
@@ -207,7 +268,7 @@ pub(super) fn compile_update(
         .instruction(&Instruction::If(BlockType::Empty));
 
     if let Some(is_loading) = actions.get(&ActionKind::IsLoading) {
-        emit_action_args(&mut function);
+        emit_action_args(&mut function, globals);
         function
             .instruction(&Instruction::Call(*is_loading))
             .instruction(&Instruction::LocalTee(nullable_bool))
@@ -227,7 +288,7 @@ pub(super) fn compile_update(
             .instruction(&Instruction::End);
     }
     if let Some(game_time) = actions.get(&ActionKind::GameTime) {
-        emit_action_args(&mut function);
+        emit_action_args(&mut function, globals);
         function
             .instruction(&Instruction::Call(*game_time))
             .instruction(&Instruction::LocalTee(duration_local))
@@ -237,14 +298,18 @@ pub(super) fn compile_update(
             .instruction(&Instruction::LocalGet(duration_local))
             .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
-                struct_type_index: standard_gc_type_index(StdlibTypeId::Duration),
-                field_index: standard_field_index(StdlibFieldId::DurationSeconds),
+                struct_type_index: lowering.gc.standard_index(StdlibTypeId::Duration),
+                field_index: lowering
+                    .gc
+                    .standard_field_index(StdlibFieldId::DurationSeconds),
             })
             .instruction(&Instruction::LocalGet(duration_local))
             .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
-                struct_type_index: standard_gc_type_index(StdlibTypeId::Duration),
-                field_index: standard_field_index(StdlibFieldId::DurationNanoseconds),
+                struct_type_index: lowering.gc.standard_index(StdlibTypeId::Duration),
+                field_index: lowering
+                    .gc
+                    .standard_field_index(StdlibFieldId::DurationNanoseconds),
             })
             .instruction(&Instruction::Call(
                 abi.function(AbiImportId::TimerSetGameTime),
@@ -253,7 +318,7 @@ pub(super) fn compile_update(
     }
 
     if let Some(reset) = actions.get(&ActionKind::Reset) {
-        emit_action_args(&mut function);
+        emit_action_args(&mut function, globals);
         function
             .instruction(&Instruction::Call(*reset))
             .instruction(&Instruction::I32Const(1))
@@ -262,11 +327,11 @@ pub(super) fn compile_update(
             .instruction(&Instruction::Call(abi.function(AbiImportId::TimerReset)));
         if let Some(split) = actions.get(&ActionKind::Split) {
             function.instruction(&Instruction::Else);
-            emit_split(&mut function, *split, abi);
+            emit_split(&mut function, *split, abi, globals);
         }
         function.instruction(&Instruction::End);
     } else if let Some(split) = actions.get(&ActionKind::Split) {
-        emit_split(&mut function, *split, abi);
+        emit_split(&mut function, *split, abi, globals);
     }
 
     function
@@ -275,20 +340,25 @@ pub(super) fn compile_update(
     function
 }
 
-fn emit_cancel_region(function: &mut Function, region: wasm_ir::CancellationRegion) {
+fn emit_cancel_region(
+    function: &mut Function,
+    region: wasm_ir::CancellationRegion,
+    gc: &GcLayout,
+    globals: RuntimeGlobals,
+) {
     match region {
         wasm_ir::CancellationRegion::ProcessLifetime => {
             function
                 .instruction(&Instruction::I32Const(0))
-                .instruction(&Instruction::GlobalSet(ATTACH_READY_GLOBAL))
-                .instruction(&Instruction::StructNewDefault(async_frame_type_index()))
-                .instruction(&Instruction::GlobalSet(ASYNC_FRAME_GLOBAL));
+                .instruction(&Instruction::GlobalSet(globals.attach_ready))
+                .instruction(&Instruction::StructNewDefault(gc.async_frame_index()))
+                .instruction(&Instruction::GlobalSet(globals.async_frame));
         }
     }
 }
 
-fn emit_split(function: &mut Function, split: u32, abi: &Abi) {
-    emit_action_args(function);
+fn emit_split(function: &mut Function, split: u32, abi: &Abi, globals: RuntimeGlobals) {
+    emit_action_args(function, globals);
     function
         .instruction(&Instruction::Call(split))
         .instruction(&Instruction::I32Const(1))
@@ -298,10 +368,10 @@ fn emit_split(function: &mut Function, split: u32, abi: &Abi) {
         .instruction(&Instruction::End);
 }
 
-fn emit_action_args(function: &mut Function) {
+fn emit_action_args(function: &mut Function, globals: RuntimeGlobals) {
     function
-        .instruction(&Instruction::GlobalGet(CURRENT_GLOBAL))
+        .instruction(&Instruction::GlobalGet(globals.current))
         .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::GlobalGet(OLD_GLOBAL))
+        .instruction(&Instruction::GlobalGet(globals.old))
         .instruction(&Instruction::RefAsNonNull);
 }

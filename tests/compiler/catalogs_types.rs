@@ -1,0 +1,1136 @@
+//! catalogs types integration tests.
+
+use super::*;
+
+#[test]
+fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
+    let library = StandardLibrary::new();
+    let gba = library
+        .state_provider_by_name("GBA")
+        .expect("the bundled GBA provider should be discoverable by source name");
+    assert_eq!(gba.id, StdlibStateProviderId::Gba);
+    assert_eq!(gba.value_name, "gba");
+    assert_eq!(gba.process_type, StdlibTypeId::GbaEmulator);
+    assert_eq!(gba.direct_read, StdlibItemId::GbaEmulatorRead);
+    assert!(gba.processes.contains(&"mGBA.exe"));
+
+    let lowered = splitscript::lower(splitscript::parse("state GBA {}").unwrap());
+    let state = lowered.syntax().state.as_ref().unwrap();
+    assert_eq!(
+        state
+            .provider
+            .as_ref()
+            .and_then(|provider| provider.resolved),
+        Some(StdlibStateProviderId::Gba)
+    );
+    assert_eq!(
+        state.processes,
+        gba.processes
+            .iter()
+            .map(|process| (*process).to_owned())
+            .collect::<Vec<_>>()
+    );
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile("state GBA { room: u8 at 0x03000010 }").unwrap())
+        .expect("provider-backed attachment should compile to valid Wasm");
+
+    let invalid = splitscript::parse("state GBA { room: u8 = process.read(0) else 0 }")
+        .map(splitscript::lower)
+        .unwrap();
+    let diagnostics = splitscript::check(invalid)
+        .expect_err("native process operations should not be available in a GBA state");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("`process` is unavailable under `state GBA`; use `gba` instead")
+    }));
+
+    let invalid = splitscript::parse("state GBA { room: u8 at \"game.exe\", 0x10 }")
+        .map(splitscript::lower)
+        .unwrap();
+    let diagnostics = splitscript::check(invalid)
+        .expect_err("provider direct reads should reject native module paths");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("direct reads use hardware addresses and cannot name a module")
+    }));
+
+    let source = "state GBA { room: u8 at 0x03000010 }";
+    let mut database = splitscript::tooling::database::CompilerDatabase::new(source);
+    let provider_offset = source.find("GBA").unwrap() + 1;
+    assert_eq!(
+        database.definition_at(provider_offset).unwrap(),
+        Some(
+            splitscript::tooling::database::DefinitionTarget::StandardLibrarySymbol(
+                splitscript::compiler::stdlib::StdlibSymbolId::StateProvider(
+                    StdlibStateProviderId::Gba
+                )
+            )
+        )
+    );
+    let hover = database
+        .hover(provider_offset)
+        .unwrap()
+        .expect("the provider name should have catalog documentation");
+    assert!(hover.markdown.contains("state GBA { ... }"));
+    assert!(hover.markdown.contains("gba: GbaEmulator"));
+}
+
+#[test]
+fn abi_catalog_drives_wasm_imports_and_the_internal_reference() {
+    let catalog = AbiCatalog::new();
+    assert_eq!(catalog.validate(), Vec::<String>::new());
+    assert_eq!(
+        catalog.render_signature(AbiImportId::ProcessRead),
+        "(i64, i64, i32, i32) -> i32"
+    );
+    let process_read = catalog.import(AbiImportId::ProcessRead);
+    assert_eq!(
+        process_read.parameters[0].ownership,
+        AbiOwnership::BorrowedHandle
+    );
+    assert_eq!(
+        process_read.parameters[2].ownership,
+        AbiOwnership::OutputMemory
+    );
+    assert!(process_read.effects.contains(&AbiEffect::ReadsProcess));
+    assert_eq!(
+        catalog.import(AbiImportId::ProcessAttach).results[0].ownership,
+        AbiOwnership::OwnedHandle
+    );
+
+    let wasm = splitscript::compile("state \"game.exe\" {}").unwrap();
+    let mut emitted = Vec::new();
+    for payload in Parser::new(0).parse_all(&wasm) {
+        if let Payload::ImportSection(section) = payload.unwrap() {
+            for import in section.into_imports() {
+                let import = import.unwrap();
+                assert!(matches!(import.ty, TypeRef::Func(_)));
+                emitted.push((import.module.to_owned(), import.name.to_owned()));
+            }
+        }
+    }
+    let required = [
+        AbiImportId::TimerGetState,
+        AbiImportId::ProcessAttach,
+        AbiImportId::ProcessDetach,
+        AbiImportId::ProcessIsOpen,
+    ];
+    let declared = catalog
+        .imports()
+        .filter(|import| required.contains(&import.id))
+        .map(|import| (import.module.to_owned(), import.name.to_owned()))
+        .collect::<Vec<_>>();
+    assert_eq!(emitted, declared);
+
+    let abi_document = include_str!("../../docs/ABI.md");
+    let table_start = abi_document
+        .find("| Import | WebAssembly type |")
+        .expect("ABI reference should contain its generated import table");
+    let table_end = abi_document[table_start..]
+        .find("\n\n")
+        .map_or(abi_document.len(), |offset| table_start + offset);
+    assert_eq!(
+        abi_document[table_start..table_end].trim_end(),
+        catalog.render_import_table().trim_end(),
+        "docs/ABI.md import table must remain a verified catalog view"
+    );
+}
+
+#[test]
+fn settings_host_imports_are_filtered_by_setting_kind() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            settings {
+                "Enabled" => enabled: true
+            }
+        "#,
+    )
+    .expect("Boolean settings should compile");
+    let mut imports = Vec::new();
+    for payload in Parser::new(0).parse_all(&wasm) {
+        if let Payload::ImportSection(section) = payload.unwrap() {
+            imports.extend(
+                section
+                    .into_imports()
+                    .map(|import| import.unwrap().name.to_owned()),
+            );
+        }
+    }
+
+    assert!(imports.iter().any(|name| name == "user_settings_add_bool"));
+    assert!(imports.iter().any(|name| name == "setting_value_get_bool"));
+    assert!(
+        !imports
+            .iter()
+            .any(|name| name == "setting_value_get_string")
+    );
+    assert!(
+        !imports
+            .iter()
+            .any(|name| name == "user_settings_add_choice")
+    );
+    assert!(
+        !imports
+            .iter()
+            .any(|name| name == "user_settings_add_file_select")
+    );
+}
+
+#[derive(Default)]
+pub(super) struct TypedExpressionCounter(pub usize);
+
+impl splitscript::compiler::hir::TypedVisitor for TypedExpressionCounter {
+    fn visit_expression(
+        &mut self,
+        expression: &splitscript::compiler::hir::TypedExpression,
+        program: &splitscript::compiler::hir::TypedProgram,
+    ) {
+        self.0 += 1;
+        splitscript::compiler::hir::walk_typed_expression(self, expression, program);
+    }
+}
+
+#[test]
+fn standard_library_catalog_is_valid_documented_and_compilable() {
+    let library = StandardLibrary::new();
+    assert_eq!(library.validate(), Vec::<String>::new());
+    assert!(library.core_type_has_capability(
+        splitscript::compiler::stdlib::CoreTypeId::I32,
+        splitscript::compiler::stdlib::StdlibCapabilityId::MemoryReadable,
+    ));
+    assert!(library.core_type_has_capability(
+        splitscript::compiler::stdlib::CoreTypeId::F64,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Float,
+    ));
+    assert!(!library.core_type_has_capability(
+        splitscript::compiler::stdlib::CoreTypeId::F64,
+        splitscript::compiler::stdlib::StdlibCapabilityId::StringCast,
+    ));
+    assert!(library.type_has_capability(
+        splitscript::compiler::stdlib::StdlibTypeId::String,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Interpolatable,
+    ));
+    assert_eq!(
+        library.item_by_name("Numeric.clamp").map(|item| item.id),
+        Some(StdlibItemId::NumericClamp)
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::NumericClamp),
+        "T.clamp(minimum: T, maximum: T) -> T where T: Numeric"
+    );
+    assert_eq!(
+        library.item_by_name("setVariable").map(|item| item.id),
+        Some(StdlibItemId::SetVariable)
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::SetTickRate),
+        "setTickRate(hz: f64) -> void"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::DurationFromSeconds),
+        "Duration.fromSeconds(seconds: f32) -> Duration"
+    );
+    for removed in [
+        "timer.setVariable",
+        "runtime.setTickRate",
+        "Duration.saturatingSecondsF32",
+    ] {
+        assert!(
+            library.item_by_name(removed).is_none(),
+            "prototype alias `{removed}` must not remain in the catalog"
+        );
+    }
+
+    for item in library.items() {
+        assert!(!item.documentation.summary.is_empty());
+        for example in item.documentation.examples {
+            splitscript::compile(example.validation_source()).unwrap_or_else(|errors| {
+                panic!(
+                    "standard-library example `{}: {}` failed: {errors:#?}",
+                    item.qualified_name, example.title
+                )
+            });
+        }
+    }
+    for provider in library.state_providers() {
+        assert!(!provider.documentation.summary.is_empty());
+        for example in provider.documentation.examples {
+            splitscript::compile(example.validation_source()).unwrap_or_else(|errors| {
+                panic!(
+                    "state-provider example `{}: {}` failed: {errors:#?}",
+                    provider.name, example.title
+                )
+            });
+        }
+    }
+}
+
+#[test]
+fn language_catalog_is_valid_documented_and_compilable() {
+    let language = LanguageCatalog::new();
+    assert_eq!(language.validate(), Vec::<String>::new());
+    let retry = language
+        .item_by_name("retry")
+        .expect("retry should be a catalog-backed language construct");
+    assert_eq!(retry.id, LanguageItemId::Retry);
+    assert_eq!(retry.kind, LanguageItemKind::Keyword);
+    assert_eq!(retry.form, "let value = retry resultExpression");
+    assert!(retry.documentation.details.contains("T!"));
+    assert_eq!(
+        language
+            .builtin_type(splitscript::compiler::types::BuiltinType::I32)
+            .map(|item| item.id),
+        Some(LanguageItemId::BuiltinType(
+            splitscript::compiler::types::BuiltinType::I32
+        ))
+    );
+    assert_eq!(
+        language
+            .item_for_source_token("Address")
+            .map(|item| item.id),
+        Some(LanguageItemId::BuiltinType(
+            splitscript::compiler::types::BuiltinType::Address
+        ))
+    );
+    assert_eq!(
+        language.item_for_source_token("choice").map(|item| item.id),
+        Some(LanguageItemId::ChoiceSetting)
+    );
+    assert_eq!(
+        StandardLibrary::new()
+            .field(StdlibFieldId::ModuleAddress)
+            .name,
+        "address"
+    );
+    assert_eq!(
+        StandardLibrary::new()
+            .variant(StdlibVariantId::TimerStateRunning)
+            .name,
+        "Running"
+    );
+
+    for action in [
+        splitscript::compiler::ast::ActionKind::OnDetached,
+        splitscript::compiler::ast::ActionKind::OnAttach,
+        splitscript::compiler::ast::ActionKind::WhileAttached,
+        splitscript::compiler::ast::ActionKind::Start,
+        splitscript::compiler::ast::ActionKind::Split,
+        splitscript::compiler::ast::ActionKind::Reset,
+        splitscript::compiler::ast::ActionKind::IsLoading,
+        splitscript::compiler::ast::ActionKind::GameTime,
+    ] {
+        let item = language.action(action);
+        assert_eq!(item.name, action.name());
+        assert_eq!(item.kind, LanguageItemKind::Action(action));
+    }
+
+    for item in language.items() {
+        assert!(!item.documentation.summary.is_empty());
+        for example in item.documentation.examples {
+            splitscript::compile(example.validation_source()).unwrap_or_else(|errors| {
+                panic!(
+                    "language example `{}: {}` failed: {errors:#?}",
+                    item.name, example.title
+                )
+            });
+        }
+    }
+}
+
+#[test]
+fn compiler_database_resolves_language_catalog_syntax() {
+    use splitscript::{
+        compiler::types::BuiltinType,
+        tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId},
+        tooling::language::LanguageItemId,
+    };
+
+    let source = r#"
+        enum Mode {
+            A
+            B
+        }
+
+        settings {
+            /// Select the active mode.
+            "Mode" => selected: choice {
+                "First" => Mode.A default
+                "Second" => Mode.B
+            }
+            /// Select an input file.
+            "Input" => input: file {
+                mime => "application/octet-stream"
+            }
+        }
+
+        state "game.exe" {
+            level: i32 at 0x1000
+        }
+
+        fn maybe(value: i32) -> i32? {
+            return Some(value)
+        }
+
+        fn fallible() -> i32! {
+            return Err("unavailable")
+        }
+
+        fn propagated() -> i32! {
+            return fallible()?
+        }
+
+        onAttach {
+            let module = await process.module("GameAssembly.dll")
+            print(module.address as String)
+        }
+
+        whileAttached {
+            let timerState = TimerState.Running
+            let levelChanged = current.level != old.level
+            let settingChanged = settings.selected != oldSettings.selected
+            let value = match maybe(1) {
+                Some(value) => value,
+                None => 0
+            }
+            print(`value {value}`)
+        }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    let checked = database.check().unwrap();
+    let mode = checked.syntax().enums[0].id;
+    let variant = checked.syntax().enums[0].variants[0].id;
+
+    let i32_type = source.find("value: i32").unwrap() + "value: ".len();
+    assert_eq!(
+        database.definition_at(i32_type).unwrap(),
+        Some(DefinitionTarget::Language(LanguageItemId::BuiltinType(
+            BuiltinType::I32
+        )))
+    );
+    let option_type = source.find("i32?").unwrap() + "i32".len();
+    assert_eq!(
+        database.definition_at(option_type).unwrap(),
+        Some(DefinitionTarget::Language(LanguageItemId::OptionType))
+    );
+    let result_type = source.find("i32!").unwrap() + "i32".len();
+    assert_eq!(
+        database.definition_at(result_type).unwrap(),
+        Some(DefinitionTarget::Language(LanguageItemId::ResultType))
+    );
+    let propagation = source.find("fallible()?").unwrap() + "fallible()".len();
+    assert_eq!(
+        database.definition_at(propagation).unwrap(),
+        Some(DefinitionTarget::Language(LanguageItemId::Propagate))
+    );
+
+    let module_field = source.find("module.address").unwrap() + "module.".len();
+    assert_eq!(
+        database.definition_at(module_field).unwrap(),
+        Some(DefinitionTarget::StandardLibrarySymbol(
+            splitscript::compiler::stdlib::StdlibSymbolId::Field(StdlibFieldId::ModuleAddress)
+        ))
+    );
+    let timer_state = source.find("TimerState.Running").unwrap();
+    assert_eq!(
+        database.definition_at(timer_state).unwrap(),
+        Some(DefinitionTarget::StandardLibrarySymbol(
+            splitscript::compiler::stdlib::StdlibSymbolId::Type(StdlibTypeId::TimerState)
+        ))
+    );
+    assert_eq!(
+        database
+            .definition_at(timer_state + "TimerState.".len())
+            .unwrap(),
+        Some(DefinitionTarget::StandardLibrarySymbol(
+            splitscript::compiler::stdlib::StdlibSymbolId::Variant(
+                StdlibVariantId::TimerStateRunning
+            )
+        ))
+    );
+
+    for (root, expected) in [
+        ("current.level", SourceDefinitionId::State),
+        ("old.level", SourceDefinitionId::State),
+        ("settings.selected", SourceDefinitionId::Settings),
+        ("oldSettings.selected", SourceDefinitionId::Settings),
+    ] {
+        let offset = source.find(root).unwrap();
+        assert!(
+            matches!(
+                database.definition_at(offset).unwrap(),
+                Some(DefinitionTarget::Source(definition)) if definition.id == expected
+            ),
+            "wrong snapshot declaration target for `{root}`"
+        );
+    }
+    for (root, expected) in [
+        ("current.level", "current / old: state snapshot"),
+        (
+            "settings.selected",
+            "settings / oldSettings: settings snapshot",
+        ),
+    ] {
+        let hover = database
+            .hover(source.find(root).unwrap())
+            .unwrap()
+            .expect("snapshot roots should have source-aware documentation");
+        assert!(hover.markdown.contains(expected));
+    }
+
+    for (spelling, expected) in [
+        ("Some(value)", LanguageItemId::SomeConstructor),
+        ("Err(\"unavailable\")", LanguageItemId::ErrorConstructor),
+        ("None =>", LanguageItemId::NoneConstructor),
+        ("choice {", LanguageItemId::ChoiceSetting),
+        ("default", LanguageItemId::ChoiceSetting),
+        ("file {", LanguageItemId::FileSetting),
+        ("mime =>", LanguageItemId::FileSetting),
+        ("whileAttached", LanguageItemId::WhileAttached),
+    ] {
+        let offset = source.find(spelling).unwrap();
+        assert_eq!(
+            database.definition_at(offset).unwrap(),
+            Some(DefinitionTarget::Language(expected)),
+            "wrong catalog target for `{spelling}`"
+        );
+    }
+
+    let doc_comment = source.find("/// Select").unwrap();
+    assert_eq!(
+        database.definition_at(doc_comment).unwrap(),
+        Some(DefinitionTarget::Language(
+            LanguageItemId::DocumentationComment
+        ))
+    );
+    let doc_hover = database
+        .hover(doc_comment)
+        .unwrap()
+        .expect("documentation comments should have language hover");
+    assert!(
+        doc_hover
+            .markdown
+            .contains("source declaration, state field")
+    );
+    assert!(doc_hover.markdown.contains("functions and methods"));
+    assert!(doc_hover.markdown.contains("Document a source symbol"));
+    assert!(doc_hover.markdown.contains("Add a setting tooltip"));
+    let template = source.find('`').unwrap();
+    assert_eq!(
+        database.definition_at(template).unwrap(),
+        Some(DefinitionTarget::Language(LanguageItemId::TemplateString))
+    );
+
+    let choice = source.find("Mode.A default").unwrap();
+    assert!(matches!(
+        database.definition_at(choice).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if definition.id == SourceDefinitionId::Enum(mode)
+    ));
+    assert!(matches!(
+        database.definition_at(choice + "Mode.".len()).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if definition.id == SourceDefinitionId::EnumVariant(variant)
+    ));
+}
+
+#[test]
+fn checked_program_exposes_resolved_standard_library_calls_without_codegen() {
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let value: i32 = 10
+            let bounded = value.clamp(0, 7)
+        }
+    "#;
+    let parsed = splitscript::parse(source).expect("source should parse");
+    let checked = splitscript::check(parsed).expect("source should type-check");
+    let calls = checked.semantics().calls().collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1);
+    let ResolvedCall::StandardLibrary {
+        item,
+        type_arguments,
+        ..
+    } = calls[0].1
+    else {
+        panic!("the call should resolve to the standard library");
+    };
+    assert_eq!(*item, StdlibItemId::NumericClamp);
+    assert_eq!(type_arguments.len(), 1);
+    assert_eq!(
+        checked.semantics().types().kind(type_arguments[0]),
+        &TypeKind::Builtin(BuiltinType::I32)
+    );
+
+    let action = checked
+        .syntax()
+        .actions
+        .first()
+        .expect("whileAttached action");
+    let splitscript::compiler::ast::Stmt::Variable(bounded) = &action.body.statements[1] else {
+        panic!("the second statement should declare the bounded value");
+    };
+    assert_eq!(calls[0].0, bounded.value.id);
+    let result_type = checked
+        .semantics()
+        .expression_type(bounded.value.id)
+        .expect("every checked expression has a semantic type");
+    assert_eq!(
+        checked.semantics().types().kind(result_type),
+        &TypeKind::Builtin(BuiltinType::I32)
+    );
+}
+
+#[test]
+fn expression_ids_distinguish_nested_nodes_and_expose_their_types() {
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let sum: i32 = 1 + 2
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
+    let splitscript::compiler::ast::Stmt::Variable(sum) =
+        &checked.syntax().actions[0].body.statements[0]
+    else {
+        panic!("expected the sum variable");
+    };
+    let splitscript::compiler::ast::ExprKind::Binary { left, right, .. } = &sum.value.kind else {
+        panic!("expected a binary expression");
+    };
+    assert_ne!(sum.value.id, left.id);
+    assert_ne!(sum.value.id, right.id);
+    assert_ne!(left.id, right.id);
+    for expression in [&sum.value, left.as_ref(), right.as_ref()] {
+        let ty = checked
+            .semantics()
+            .expression_type(expression.id)
+            .expect("the expression should have a semantic type");
+        assert_eq!(
+            checked.semantics().types().kind(ty),
+            &TypeKind::Builtin(BuiltinType::I32)
+        );
+    }
+}
+
+#[test]
+fn inferred_declaration_types_are_semantic_and_syntax_annotations_stay_optional() {
+    let source = r#"
+        let seed = 7
+
+        state "game.exe" {
+            score = seed
+        }
+
+        fn identity(value) {
+            return value
+        }
+
+        onAttach {
+            let module = await process.module("GameAssembly.dll")
+            let copy = identity(seed)
+            let address = module.address
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
+    let syntax = checked.syntax();
+    let semantics = checked.semantics();
+
+    let assert_builtin = |value, expected| {
+        let ty = semantics
+            .value_type(value)
+            .expect("every value declaration should have a semantic type");
+        assert_eq!(semantics.types().kind(ty), &TypeKind::Builtin(expected));
+    };
+    let assert_standard = |value, expected| {
+        let ty = semantics
+            .value_type(value)
+            .expect("every value declaration should have a semantic type");
+        assert_eq!(semantics.types().kind(ty), &TypeKind::Standard(expected));
+    };
+
+    let global = &syntax.globals[0];
+    assert_eq!(global.annotation, None);
+    assert_builtin(global.id, BuiltinType::I32);
+
+    let state_field = &syntax.state.as_ref().unwrap().fields[0];
+    assert_eq!(state_field.annotation, None);
+    assert_builtin(state_field.id, BuiltinType::I32);
+
+    let function = &syntax.functions[0];
+    assert_eq!(function.params[0].annotation, None);
+    assert_eq!(function.return_annotation, None);
+    assert_builtin(function.params[0].id, BuiltinType::I32);
+    let result = semantics
+        .function_result(function.id)
+        .expect("every function should have a semantic result type");
+    assert_eq!(
+        semantics.types().kind(result),
+        &TypeKind::Builtin(BuiltinType::I32)
+    );
+
+    let statements = &syntax.actions[0].body.statements;
+    let splitscript::compiler::ast::Stmt::Suspend {
+        binding: Some(module),
+        ..
+    } = &statements[0]
+    else {
+        panic!("expected an awaited module binding");
+    };
+    assert_eq!(module.annotation, None);
+    assert_standard(module.id, StdlibTypeId::Module);
+
+    let splitscript::compiler::ast::Stmt::Variable(copy) = &statements[1] else {
+        panic!("expected the inferred function-call binding");
+    };
+    assert_eq!(copy.annotation, None);
+    assert_builtin(copy.id, BuiltinType::I32);
+
+    let splitscript::compiler::ast::Stmt::Variable(address) = &statements[2] else {
+        panic!("expected the inferred member-path binding");
+    };
+    assert_eq!(address.annotation, None);
+    assert_builtin(address.id, BuiltinType::Address);
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("semantic declaration types should drive valid Wasm lowering");
+}
+
+#[test]
+fn parsed_type_references_are_inference_free_syntax() {
+    let source = r#"
+        state "game.exe" {
+            level: u16 at "game.exe", 0x10
+        }
+
+        record Buffer {
+            values: Array<u32>
+        }
+
+        fn widen(value: i32) -> u64 {
+            return value as u64
+        }
+
+        whileAttached {
+            let count: i64 = 1i64
+        }
+    "#;
+    let parsed = splitscript::parse(source).unwrap();
+    {
+        use splitscript::compiler::ast::TypeRef;
+
+        let syntax = parsed.syntax();
+        assert_eq!(
+            syntax.state.as_ref().unwrap().fields[0].annotation,
+            Some(TypeRef::core(CoreTypeId::U16))
+        );
+
+        let values = &syntax.records[0].fields[0];
+        let TypeRef::Array(array) = values.ty else {
+            panic!("the record field should retain its parsed array reference");
+        };
+        assert_eq!(
+            syntax
+                .array_types
+                .iter()
+                .find(|declaration| declaration.id == array)
+                .unwrap()
+                .element,
+            TypeRef::core(CoreTypeId::U32)
+        );
+
+        let function = &syntax.functions[0];
+        assert_eq!(
+            function.params[0].annotation,
+            Some(TypeRef::core(CoreTypeId::I32))
+        );
+        assert_eq!(
+            function.return_annotation,
+            Some(TypeRef::core(CoreTypeId::U64))
+        );
+        let splitscript::compiler::ast::Stmt::Return {
+            value: Some(cast), ..
+        } = &function.body.statements[0]
+        else {
+            panic!("expected the cast return expression");
+        };
+        let splitscript::compiler::ast::ExprKind::Cast { target, .. } = &cast.kind else {
+            panic!("expected a parsed cast");
+        };
+        assert_eq!(*target, TypeRef::core(CoreTypeId::U64));
+
+        let splitscript::compiler::ast::Stmt::Variable(count) =
+            &syntax.actions[0].body.statements[0]
+        else {
+            panic!("expected the annotated local");
+        };
+        assert_eq!(count.annotation, Some(TypeRef::core(CoreTypeId::I64)));
+        let splitscript::compiler::ast::ExprKind::Int { suffix, .. } = &count.value.kind else {
+            panic!("expected the suffixed integer literal");
+        };
+        assert_eq!(*suffix, Some(TypeRef::core(CoreTypeId::I64)));
+    }
+
+    let checked = splitscript::check(parsed).unwrap();
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("syntax type references should adapt to semantic types and valid Wasm");
+}
+
+#[test]
+fn source_standard_type_names_resolve_after_parsing() {
+    use splitscript::compiler::ast::TypeRef;
+
+    let parsed = splitscript::parse(
+        r#"
+            state "game.exe" {}
+            fn base(module: Module) -> address { return module.address }
+        "#,
+    )
+    .unwrap();
+    let function = &parsed.syntax().functions[0];
+    let Some(TypeRef::Named(name)) = function.params[0].annotation else {
+        panic!("source nominal annotations should retain a name identity");
+    };
+    assert_eq!(parsed.syntax().type_name(name), "Module");
+
+    let checked = splitscript::check(parsed).unwrap();
+    let parameter_type = checked
+        .semantics()
+        .value_type(checked.syntax().functions[0].params[0].id)
+        .unwrap();
+    assert_eq!(
+        parameter_type,
+        checked
+            .semantics()
+            .types()
+            .id_for_standard(StdlibTypeId::Module),
+        "name resolution, inference, and published semantics must preserve one standard TypeId",
+    );
+    assert_eq!(
+        checked.semantics().types().kind(parameter_type),
+        &TypeKind::Standard(StdlibTypeId::Module)
+    );
+}
+
+#[test]
+fn source_record_and_enum_annotations_resolve_after_parsing() {
+    use splitscript::compiler::ast::TypeRef;
+
+    let parsed = splitscript::parse(
+        r#"
+            state "game.exe" {}
+            record Point {
+                x: i32
+            }
+            enum Location {
+                Known(Point)
+                Unknown
+            }
+            fn identity(point: Point) -> Point { return point }
+            fn keep(location: Location) -> Location { return location }
+        "#,
+    )
+    .unwrap();
+    for (function, expected_name) in parsed.syntax().functions.iter().zip(["Point", "Location"]) {
+        let Some(TypeRef::Named(parameter_name)) = function.params[0].annotation else {
+            panic!("source nominal parameters should retain name identities");
+        };
+        let Some(TypeRef::Named(result_name)) = function.return_annotation else {
+            panic!("source nominal results should retain name identities");
+        };
+        assert_eq!(parameter_name, result_name);
+        assert_eq!(parsed.syntax().type_name(parameter_name), expected_name);
+    }
+
+    let checked = splitscript::check(parsed).unwrap();
+    let point_parameter = checked.syntax().functions[0].params[0].id;
+    let location_parameter = checked.syntax().functions[1].params[0].id;
+    assert_eq!(
+        checked.semantics().value_type(point_parameter).unwrap(),
+        checked
+            .semantics()
+            .types()
+            .id_for_record(checked.syntax().records[0].id),
+    );
+    assert_eq!(
+        checked.semantics().value_type(location_parameter).unwrap(),
+        checked
+            .semantics()
+            .types()
+            .id_for_enum(checked.syntax().enums[0].id),
+    );
+    assert_eq!(
+        checked
+            .semantics()
+            .types()
+            .kind(checked.semantics().value_type(point_parameter).unwrap()),
+        &TypeKind::Record(checked.syntax().records[0].id)
+    );
+    assert_eq!(
+        checked
+            .semantics()
+            .types()
+            .kind(checked.semantics().value_type(location_parameter).unwrap()),
+        &TypeKind::Enum(checked.syntax().enums[0].id)
+    );
+}
+
+#[test]
+fn semantic_capabilities_query_declared_and_derived_types_by_type_id() {
+    let checked = splitscript::check(
+        splitscript::parse(
+            r#"
+            state "game.exe" {}
+            record Pair {
+                left: i32
+                right: i32
+            }
+            enum MaybePair {
+                Pair(Pair)
+                Empty
+            }
+            fn keep(value: MaybePair) -> MaybePair { return value }
+        "#,
+        )
+        .expect("the capability fixture should parse"),
+    )
+    .expect("the capability fixture should type-check");
+    let types = checked.semantics().types();
+    let pair = types
+        .iter()
+        .find_map(|(id, kind)| {
+            matches!(kind, TypeKind::Record(record) if *record == checked.syntax().records[0].id)
+                .then_some(id)
+        })
+        .expect("the source record should have a semantic type");
+    let maybe_pair = types
+        .iter()
+        .find_map(|(id, kind)| {
+            matches!(kind, TypeKind::Enum(enumeration) if *enumeration == checked.syntax().enums[0].id)
+                .then_some(id)
+        })
+        .expect("the source enum should have a semantic type");
+    let string = types.id_for_standard(StdlibTypeId::String);
+    let capabilities = checked.capabilities();
+
+    assert!(capabilities.has(
+        pair,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Equatable,
+        checked.semantics(),
+    ));
+    assert!(capabilities.has(
+        pair,
+        splitscript::compiler::stdlib::StdlibCapabilityId::MemoryReadable,
+        checked.semantics(),
+    ));
+    assert!(capabilities.has(
+        maybe_pair,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Equatable,
+        checked.semantics(),
+    ));
+    assert!(!capabilities.has(
+        maybe_pair,
+        splitscript::compiler::stdlib::StdlibCapabilityId::MemoryReadable,
+        checked.semantics(),
+    ));
+    assert!(capabilities.has(
+        string,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Interpolatable,
+        checked.semantics(),
+    ));
+}
+
+#[test]
+fn semantic_type_ids_intern_constructed_generic_arguments() {
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let matrix = [[1i32], [2i32]]
+            let row = matrix.get(0)
+        }
+    "#;
+    let parsed = splitscript::parse(source).expect("source should parse");
+    let checked = splitscript::check(parsed).expect("source should type-check");
+    let (_, call) = checked
+        .semantics()
+        .calls()
+        .find(|(_, call)| {
+            matches!(
+                call,
+                ResolvedCall::StandardLibrary {
+                    item: StdlibItemId::ArrayGet,
+                    ..
+                }
+            )
+        })
+        .expect("the array get should be resolved");
+    let ResolvedCall::StandardLibrary { type_arguments, .. } = call else {
+        panic!("array.get should resolve to the standard library");
+    };
+    let TypeKind::Array { element, .. } = checked.semantics().types().kind(type_arguments[0])
+    else {
+        panic!("the generic argument should be an interned array type");
+    };
+    assert_eq!(
+        checked.semantics().types().kind(*element),
+        &TypeKind::Builtin(BuiltinType::I32)
+    );
+}
+
+#[test]
+fn option_and_result_annotations_are_distinct_interned_semantic_types() {
+    let source = r#"
+        state "game.exe" {}
+
+        record Wrappers {
+            maybe: i32?
+            attempt: String!
+        }
+
+        fn inspect(maybe: i32?, attempt: String!) {}
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
+    let syntax = checked.syntax();
+    let semantics = checked.semantics();
+    let function = &syntax.functions[0];
+
+    let maybe = semantics.value_type(function.params[0].id).unwrap();
+    let TypeKind::Option {
+        layout: maybe_layout,
+        value: maybe_value,
+    } = semantics.types().kind(maybe)
+    else {
+        panic!("`i32?` should remain a first-class option type");
+    };
+    assert_eq!(
+        semantics.types().kind(*maybe_value),
+        &TypeKind::Builtin(BuiltinType::I32)
+    );
+    let splitscript::compiler::ast::TypeRef::Option(parsed_maybe_layout) =
+        function.params[0].annotation.unwrap()
+    else {
+        panic!("the parsed annotation should retain its option layout");
+    };
+    assert_eq!(*maybe_layout, parsed_maybe_layout);
+
+    let attempt = semantics.value_type(function.params[1].id).unwrap();
+    let TypeKind::Result {
+        layout: attempt_layout,
+        value: attempt_value,
+    } = semantics.types().kind(attempt)
+    else {
+        panic!("`String!` should remain a first-class result type");
+    };
+    assert_eq!(
+        semantics.types().kind(*attempt_value),
+        &TypeKind::Standard(StdlibTypeId::String)
+    );
+    let splitscript::compiler::ast::TypeRef::Result(parsed_attempt_layout) =
+        function.params[1].annotation.unwrap()
+    else {
+        panic!("the parsed annotation should retain its result layout");
+    };
+    assert_eq!(*attempt_layout, parsed_attempt_layout);
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("option and result annotations should have valid Wasm GC layouts");
+}
+
+#[test]
+fn option_and_result_equality_is_structural_and_payload_checked() {
+    let source = include_str!("../wrapper_equality.split");
+    let wasm = splitscript::compile(source).expect("wrapper equality should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("Option and Result equality helpers should produce valid Wasm GC");
+
+    let invalid = r#"
+        state "game.exe" {}
+
+        fn same(left: Array<i32>?, right: Array<i32>?) -> bool {
+            return left == right
+        }
+
+        whileAttached {
+            let value = same(None, None)
+        }
+    "#;
+    let diagnostics = splitscript::compile(invalid)
+        .expect_err("wrappers should require equality on their contained values");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("optional value does not support equality")
+    }));
+}
+
+#[test]
+fn option_and_result_matches_bind_values_and_require_exhaustiveness() {
+    let source = include_str!("../wrapper_match.split");
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("wrapper matches should type-check");
+    assert!(
+        checked
+            .typed_hir()
+            .patterns()
+            .any(|pattern| pattern.wrapper.is_some())
+    );
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("wrapper match lowering should produce valid Wasm GC");
+
+    for (source, missing) in [
+        (
+            r#"
+                state "game.exe" {}
+                fn unwrap(value: i32?) -> i32 {
+                    return match value { Some(present) => present }
+                }
+            "#,
+            "missing `None`",
+        ),
+        (
+            r#"
+                state "game.exe" {}
+                fn unwrap(value: i32!) -> i32 {
+                    return match value { Ok(success) => success }
+                }
+            "#,
+            "missing `Err(error)`",
+        ),
+    ] {
+        let diagnostics = splitscript::compile(source)
+            .expect_err("wrapper matches without both states must be rejected");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(missing)),
+            "expected `{missing}` in {diagnostics:?}"
+        );
+    }
+
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn unwrap(value: i32?) -> i32 {
+                return match value {
+                    present => present,
+                    None => 0
+                }
+            }
+        "#,
+    )
+    .expect_err("bare wrapper bindings should be rejected as misleading");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("use `Some(present)` or `Ok(present)`")
+    }));
+}

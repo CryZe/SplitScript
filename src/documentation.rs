@@ -32,7 +32,14 @@ pub struct StandardLibraryDocumentation {
 
 impl StandardLibraryDocumentation {
     pub fn generate(id: StdlibItemId, substitutions: &[(&str, String)]) -> Self {
-        let library = StandardLibrary::new();
+        Self::generate_with_library(&StandardLibrary::new(), id, substitutions)
+    }
+
+    pub fn generate_with_library(
+        library: &StandardLibrary,
+        id: StdlibItemId,
+        substitutions: &[(&str, String)],
+    ) -> Self {
         let item = library.item(id);
         Self {
             id,

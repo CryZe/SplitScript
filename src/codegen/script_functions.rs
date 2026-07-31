@@ -1,12 +1,10 @@
-use super::*;
-
 /// Emits one transactional state-field polling body. Pointer-backed fields
 /// perform host reads and expression-backed fields execute their Wasm-IR plan.
 pub(super) fn compile_read(
     field: &StateField,
     abi: &Abi,
     strings: &StringPool,
-    lowering: &LoweringContext<'_>,
+    lowering: &EmissionContext<'_>,
 ) -> Function {
     let StateSource::Pointer(path) = &field.source else {
         let StateSource::Expression(_) = &field.source else {
@@ -36,19 +34,22 @@ pub(super) fn compile_read(
         let locals = HashMap::new();
         let pattern_bindings = HashMap::new();
         let context = ExprContext {
+            standard_library: lowering.standard_library,
             abi: lowering.abi,
             state: lowering.state,
             locals: LocalStorage::Wasm(&locals),
             globals: lowering.globals,
             global_types: lowering.global_types,
             settings: lowering.settings,
-            stdlib: lowering.stdlib,
+            runtime_globals: lowering.runtime_globals,
+            runtime_helpers: lowering.runtime_helpers,
             functions: lowering.functions,
             equality_functions: lowering.equality_functions,
             records: lowering.records,
             enums: lowering.enums,
             arrays: lowering.arrays,
             memory: lowering.memory,
+            abi_read: lowering.abi_read,
             matches: &matches,
             pattern_bindings: &pattern_bindings,
             semantics: lowering.semantics,
@@ -80,6 +81,29 @@ pub(super) fn compile_read(
     let Type::Result(result_type) = poll_result else {
         unreachable!("state poll-result types are Result layouts")
     };
+    if let Some(provider) = lowering
+        .state
+        .provider
+        .as_ref()
+        .and_then(|provider| provider.resolved)
+    {
+        let provider = lowering.standard_library.state_provider(provider);
+        let Implementation::Intrinsic(direct_read) = lowering
+            .standard_library
+            .item(provider.direct_read)
+            .implementation;
+        return match direct_read {
+            IntrinsicId::GbaEmulatorRead => compile_gba_direct_read(
+                path.offsets[0] as u32,
+                field_type_id,
+                field_type,
+                field_size,
+                result_type,
+                lowering,
+            ),
+            _ => unreachable!("validated state-provider direct reads have backend lowering"),
+        };
+    }
     let mut function = Function::new([(1, ValType::I64)]);
     let address_local = 1;
     let offsets = &path.offsets;
@@ -115,35 +139,28 @@ pub(super) fn compile_read(
             .instruction(&Instruction::LocalSet(address_local));
     }
 
+    let process_read = ProcessReadEmission {
+        abi,
+        address_local,
+        fallback_ty: field_type,
+        result_type,
+        gc: lowering.gc,
+        abi_read: lowering.abi_read,
+    };
     for offset in offsets.iter().skip(1) {
-        emit_process_read(
-            &mut function,
-            abi,
-            address_local,
-            8,
-            field_type,
-            result_type,
-            lowering.gc,
-        );
+        emit_process_read(&mut function, &process_read, 8);
         function
-            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::I32Const(lowering.abi_read.start()))
             .instruction(&Instruction::I64Load(memarg()))
             .instruction(&Instruction::I64Const(*offset as i64))
             .instruction(&Instruction::I64Add)
             .instruction(&Instruction::LocalSet(address_local));
     }
-    emit_process_read(
-        &mut function,
-        abi,
-        address_local,
-        field_size,
-        field_type,
-        result_type,
-        lowering.gc,
-    );
+    emit_process_read(&mut function, &process_read, field_size);
     emit_memory_value(
         &mut function,
         field_type_id,
+        lowering.abi_read,
         0,
         lowering.memory,
         lowering.semantics,
@@ -154,29 +171,97 @@ pub(super) fn compile_read(
     function
 }
 
-fn emit_process_read(
-    function: &mut Function,
-    abi: &Abi,
+fn compile_gba_direct_read(
+    address: u32,
+    field_type_id: crate::types::TypeId,
+    field_type: Type,
+    field_size: u32,
+    result_type: ResultTypeId,
+    lowering: &EmissionContext<'_>,
+) -> Function {
+    let mut function = Function::new([(1, ValType::I64)]);
+    let address_local = 1;
+    function
+        .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
+        .instruction(&Instruction::GlobalGet(
+            lowering
+                .runtime_globals
+                .provider_value
+                .expect("provider direct reads require provider storage"),
+        ))
+        .instruction(&Instruction::I32Const(address as i32))
+        .instruction(&Instruction::I32Const(field_size as i32))
+        .instruction(&Instruction::Call(
+            lowering
+                .runtime_helpers
+                .function(RuntimeHelperId::GbaTranslateAddress),
+        ))
+        .instruction(&Instruction::LocalTee(address_local))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_result_error(
+        &mut function,
+        result_type,
+        field_type,
+        "invalid or unavailable GBA memory address",
+        lowering.gc,
+    );
+    function
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+
+    emit_process_read(
+        &mut function,
+        &ProcessReadEmission {
+            abi: lowering.abi,
+            address_local,
+            fallback_ty: field_type,
+            result_type,
+            gc: lowering.gc,
+            abi_read: lowering.abi_read,
+        },
+        field_size,
+    );
+    emit_memory_value(
+        &mut function,
+        field_type_id,
+        lowering.abi_read,
+        0,
+        lowering.memory,
+        lowering.semantics,
+        lowering.gc,
+    );
+    emit_result_success(&mut function, result_type, lowering.gc);
+    function.instruction(&Instruction::End);
+    function
+}
+
+struct ProcessReadEmission<'a> {
+    abi: &'a Abi,
     address_local: u32,
-    size: u32,
     fallback_ty: Type,
     result_type: ResultTypeId,
-    gc: &GcLayout,
-) {
+    gc: &'a GcLayout,
+    abi_read: memory_plan::AbiReadScratch,
+}
+
+fn emit_process_read(function: &mut Function, emission: &ProcessReadEmission<'_>, size: u32) {
     function
         .instruction(&Instruction::LocalGet(0))
-        .instruction(&Instruction::LocalGet(address_local))
-        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalGet(emission.address_local))
+        .instruction(&Instruction::I32Const(emission.abi_read.destination(size)))
         .instruction(&Instruction::I32Const(size as i32))
-        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
+        .instruction(&Instruction::Call(
+            emission.abi.function(AbiImportId::ProcessRead),
+        ))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty));
     emit_result_error(
         function,
-        result_type,
-        fallback_ty,
+        emission.result_type,
+        emission.fallback_ty,
         "process read failed",
-        gc,
+        emission.gc,
     );
     function
         .instruction(&Instruction::Return)
@@ -185,7 +270,7 @@ fn emit_process_read(
 
 pub(super) fn compile_user_function(
     declaration: &FunctionDecl,
-    lowering: &LoweringContext<'_>,
+    lowering: &EmissionContext<'_>,
 ) -> Function {
     let wasm_body = lowering
         .wasm_ir
@@ -220,19 +305,22 @@ pub(super) fn compile_user_function(
     );
     let pattern_bindings = HashMap::new();
     let context = ExprContext {
+        standard_library: lowering.standard_library,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm(&locals),
         globals: lowering.globals,
         global_types: lowering.global_types,
         settings: lowering.settings,
-        stdlib: lowering.stdlib,
+        runtime_globals: lowering.runtime_globals,
+        runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         equality_functions: lowering.equality_functions,
         records: lowering.records,
         enums: lowering.enums,
         arrays: lowering.arrays,
         memory: lowering.memory,
+        abi_read: lowering.abi_read,
         matches: &matches,
         pattern_bindings: &pattern_bindings,
         semantics: lowering.semantics,
@@ -248,7 +336,7 @@ pub(super) fn compile_user_function(
     function
 }
 
-pub(super) fn compile_action(action: &Action, lowering: &LoweringContext<'_>) -> Function {
+pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) -> Function {
     let wasm_body = lowering
         .wasm_ir
         .body(BodyOwner::Action(action.kind))
@@ -272,19 +360,22 @@ pub(super) fn compile_action(action: &Action, lowering: &LoweringContext<'_>) ->
     );
     let pattern_bindings = HashMap::new();
     let context = ExprContext {
+        standard_library: lowering.standard_library,
         abi: lowering.abi,
         state: lowering.state,
         locals: LocalStorage::Wasm(&locals),
         globals: lowering.globals,
         global_types: lowering.global_types,
         settings: lowering.settings,
-        stdlib: lowering.stdlib,
+        runtime_globals: lowering.runtime_globals,
+        runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
         equality_functions: lowering.equality_functions,
         records: lowering.records,
         enums: lowering.enums,
         arrays: lowering.arrays,
         memory: lowering.memory,
+        abi_read: lowering.abi_read,
         matches: &matches,
         pattern_bindings: &pattern_bindings,
         semantics: lowering.semantics,
@@ -293,12 +384,12 @@ pub(super) fn compile_action(action: &Action, lowering: &LoweringContext<'_>) ->
         loop_control: None,
     };
     compile_block(&mut function, &wasm_body.entry, &context, Some(action.kind));
-    emit_action_default(&mut function, action.kind);
+    emit_action_default(&mut function, action.kind, lowering.gc);
     function.instruction(&Instruction::End);
     function
 }
 
-pub(super) fn emit_action_default(function: &mut Function, action: ActionKind) {
+pub(super) fn emit_action_default(function: &mut Function, action: ActionKind, gc: &GcLayout) {
     match action {
         ActionKind::Start | ActionKind::Split | ActionKind::Reset => {
             function.instruction(&Instruction::I32Const(0));
@@ -308,7 +399,7 @@ pub(super) fn emit_action_default(function: &mut Function, action: ActionKind) {
         }
         ActionKind::GameTime => {
             function.instruction(&Instruction::RefNull(HeapType::Concrete(
-                standard_gc_type_index(StdlibTypeId::Duration),
+                gc.standard_index(StdlibTypeId::Duration),
             )));
         }
         ActionKind::OnDetached | ActionKind::OnAttach | ActionKind::WhileAttached => {}
@@ -357,3 +448,26 @@ pub(super) fn plan_wasm_locals(
         }
     }
 }
+use std::collections::HashMap;
+
+use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
+
+use crate::{
+    abi::AbiImportId,
+    ast::{Action, ActionKind, FunctionDecl, ResultTypeId, StateField, StateSource, ValueId},
+    intrinsic_registry::RuntimeHelperId,
+    semantic::SemanticModel,
+    stdlib::{Implementation, IntrinsicId, StdlibTypeId},
+    wasm_ir::{self, BodyOwner, LocalPurpose},
+};
+
+use super::{
+    GcLayout, Type,
+    context::EmissionContext,
+    data_plan::StringPool,
+    emit_memory_value, emit_result_error, emit_result_success,
+    expression::{ExprContext, LocalStorage, MatchLayout, compile_block, compile_expr},
+    function_result,
+    imports::Abi,
+    memarg, memory_plan, semantic_type, value_type,
+};

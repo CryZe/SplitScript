@@ -1,7 +1,7 @@
 use std::io::{self, BufRead, Write};
 
 use serde_json::Value;
-use splitscript::lsp::LanguageServer;
+use splitscript::tooling::lsp::LanguageServer;
 
 fn main() -> io::Result<()> {
     let stdin = io::stdin();

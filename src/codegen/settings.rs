@@ -1,10 +1,40 @@
 //! Settings registration, refresh, decoding, and start-time initialization.
 
-use super::*;
+use std::collections::HashMap;
 
-pub(super) fn compile_string_from_memory() -> Function {
+use wasm_encoder::{BlockType, Function, Instruction, ValType};
+
+use crate::{
+    abi::AbiImportId,
+    ast::{EnumDecl, Program, RecordDecl, RecordId, SettingFileFilter, SettingKind, ValueId},
+    semantic::{ResolvedEnumVariantId, SemanticModel},
+    stdlib::{StandardLibrary, StdlibTypeId},
+    types::{TypeId, TypeKind},
+    wasm_ir,
+};
+
+use super::memory_plan::RuntimeScratch;
+use super::{
+    GcLayout, STATE_TYPE, SettingStorage, Type, data_plan::StringPool, emit_default,
+    emit_string_literal, enum_variant_payload, global_plan::RuntimeGlobals, imports::Abi, memarg,
+    semantic_type, value_type,
+};
+
+/// Settings-only view of the completed backend plans.
+pub(super) struct SettingsContext<'a> {
+    pub standard_library: &'a StandardLibrary,
+    pub abi: &'a Abi,
+    pub enums: &'a [EnumDecl],
+    pub gc: &'a GcLayout,
+    pub globals: &'a HashMap<ValueId, u32>,
+    pub runtime_globals: RuntimeGlobals,
+    pub semantics: &'a SemanticModel,
+    pub wasm_ir: &'a wasm_ir::Program,
+}
+
+pub(super) fn compile_string_from_memory(gc: &GcLayout) -> Function {
     let mut function = Function::new([
-        (1, val_type(Type::Standard(StdlibTypeId::String))),
+        (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
         (1, ValType::I32),
     ]);
     let pointer = 0;
@@ -13,9 +43,9 @@ pub(super) fn compile_string_from_memory() -> Function {
     let index = 3;
     function
         .instruction(&Instruction::LocalGet(length))
-        .instruction(&Instruction::ArrayNewDefault(standard_gc_type_index(
-            StdlibTypeId::String,
-        )))
+        .instruction(&Instruction::ArrayNewDefault(
+            gc.standard_index(StdlibTypeId::String),
+        ))
         .instruction(&Instruction::LocalSet(output))
         .instruction(&Instruction::Block(BlockType::Empty))
         .instruction(&Instruction::Loop(BlockType::Empty))
@@ -30,9 +60,9 @@ pub(super) fn compile_string_from_memory() -> Function {
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::I32Add)
         .instruction(&Instruction::I32Load8U(memarg()))
-        .instruction(&Instruction::ArraySet(standard_gc_type_index(
-            StdlibTypeId::String,
-        )))
+        .instruction(&Instruction::ArraySet(
+            gc.standard_index(StdlibTypeId::String),
+        ))
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::I32Add)
@@ -47,18 +77,23 @@ pub(super) fn compile_string_from_memory() -> Function {
 
 pub(super) fn compile_refresh_settings(
     program: &Program,
-    lowering: &LoweringContext<'_>,
+    lowering: &SettingsContext<'_>,
     strings: &StringPool,
     settings: &HashMap<ValueId, SettingStorage>,
     string_from_memory: u32,
     string_eq: u32,
+    scratch: RuntimeScratch,
 ) -> Function {
+    let settings_length = scratch.settings_length.start();
     let semantics = lowering.semantics;
     let abi = lowering.abi;
     let enums = lowering.enums;
     let mut function = Function::new([
         (2, ValType::I64),
-        (1, val_type(Type::Standard(StdlibTypeId::String))),
+        (
+            1,
+            lowering.gc.val_type(Type::Standard(StdlibTypeId::String)),
+        ),
     ]);
     let map = 0;
     let value = 1;
@@ -101,12 +136,12 @@ pub(super) fn compile_refresh_settings(
             SettingKind::Bool { .. } => {
                 function
                     .instruction(&Instruction::LocalGet(value))
-                    .instruction(&Instruction::I32Const(SETTINGS_LENGTH_SCRATCH))
+                    .instruction(&Instruction::I32Const(settings_length))
                     .instruction(&Instruction::Call(
                         abi.function(AbiImportId::SettingValueGetBool),
                     ))
                     .instruction(&Instruction::If(BlockType::Empty))
-                    .instruction(&Instruction::I32Const(SETTINGS_LENGTH_SCRATCH))
+                    .instruction(&Instruction::I32Const(settings_length))
                     .instruction(&Instruction::I32Load8U(memarg()))
                     .instruction(&Instruction::GlobalSet(storage.current))
                     .instruction(&Instruction::End);
@@ -116,17 +151,26 @@ pub(super) fn compile_refresh_settings(
                 options,
                 ..
             } => {
-                emit_load_setting_string(&mut function, abi, value, decoded, string_from_memory);
+                emit_load_setting_string(
+                    &mut function,
+                    abi,
+                    value,
+                    decoded,
+                    string_from_memory,
+                    scratch,
+                );
                 function.instruction(&Instruction::If(BlockType::Empty));
                 for option in options {
                     function.instruction(&Instruction::LocalGet(decoded));
-                    emit_string_literal(&mut function, &option.variant);
+                    emit_string_literal(&mut function, &option.variant, lowering.gc);
                     function
                         .instruction(&Instruction::Call(string_eq))
                         .instruction(&Instruction::If(BlockType::Empty));
                     emit_enum_variant(
                         &mut function,
-                        *enumeration,
+                        enumeration
+                            .source()
+                            .expect("checked choice settings use source enums"),
                         semantics
                             .setting_choice_option(option.id)
                             .expect("checked choice options have resolved variants"),
@@ -141,7 +185,14 @@ pub(super) fn compile_refresh_settings(
                 function.instruction(&Instruction::End);
             }
             SettingKind::File { .. } => {
-                emit_load_setting_string(&mut function, abi, value, decoded, string_from_memory);
+                emit_load_setting_string(
+                    &mut function,
+                    abi,
+                    value,
+                    decoded,
+                    string_from_memory,
+                    scratch,
+                );
                 function
                     .instruction(&Instruction::If(BlockType::Empty))
                     .instruction(&Instruction::LocalGet(decoded))
@@ -172,20 +223,24 @@ fn emit_load_setting_string(
     value: u32,
     decoded: u32,
     string_from_memory: u32,
+    scratch: RuntimeScratch,
 ) {
+    let settings_length = scratch.settings_length.start();
+    let settings_string = scratch.settings_string.start();
+    let settings_string_capacity = scratch.settings_string.capacity();
     function
-        .instruction(&Instruction::I32Const(SETTINGS_LENGTH_SCRATCH))
-        .instruction(&Instruction::I32Const(SETTINGS_STRING_CAPACITY))
+        .instruction(&Instruction::I32Const(settings_length))
+        .instruction(&Instruction::I32Const(settings_string_capacity))
         .instruction(&Instruction::I32Store(memarg()))
         .instruction(&Instruction::LocalGet(value))
-        .instruction(&Instruction::I32Const(SETTINGS_STRING_SCRATCH))
-        .instruction(&Instruction::I32Const(SETTINGS_LENGTH_SCRATCH))
+        .instruction(&Instruction::I32Const(settings_string))
+        .instruction(&Instruction::I32Const(settings_length))
         .instruction(&Instruction::Call(
             abi.function(AbiImportId::SettingValueGetString),
         ))
         .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
-        .instruction(&Instruction::I32Const(SETTINGS_STRING_SCRATCH))
-        .instruction(&Instruction::I32Const(SETTINGS_LENGTH_SCRATCH))
+        .instruction(&Instruction::I32Const(settings_string))
+        .instruction(&Instruction::I32Const(settings_length))
         .instruction(&Instruction::I32Load(memarg()))
         .instruction(&Instruction::Call(string_from_memory))
         .instruction(&Instruction::LocalSet(decoded))
@@ -209,7 +264,9 @@ fn emit_setting_default(
         }
         SettingKind::Choice { enumeration, .. } => emit_enum_variant(
             function,
-            *enumeration,
+            enumeration
+                .source()
+                .expect("checked choice settings use source enums"),
             semantics
                 .setting_choice_default(setting.id)
                 .expect("checked choice settings have resolved defaults"),
@@ -217,7 +274,7 @@ fn emit_setting_default(
             semantics,
             gc,
         ),
-        SettingKind::File { .. } => emit_string_literal(function, ""),
+        SettingKind::File { .. } => emit_string_literal(function, "", gc),
         SettingKind::Title { .. } => return,
     }
     function.instruction(&Instruction::GlobalSet(global));
@@ -228,7 +285,7 @@ fn emit_setting_registration(
     setting: &crate::ast::SettingDecl,
     strings: &StringPool,
     storage: Option<SettingStorage>,
-    lowering: &LoweringContext<'_>,
+    lowering: &SettingsContext<'_>,
 ) {
     let abi = lowering.abi;
     let enums = lowering.enums;
@@ -271,7 +328,9 @@ fn emit_setting_registration(
             let storage = storage.unwrap();
             emit_enum_variant(
                 function,
-                *enumeration,
+                enumeration
+                    .source()
+                    .expect("checked choice settings use source enums"),
                 semantics
                     .setting_choice_default(setting.id)
                     .expect("checked choice settings have resolved defaults"),
@@ -313,7 +372,7 @@ fn emit_setting_registration(
         }
         SettingKind::File { filters } => {
             let storage = storage.unwrap();
-            emit_string_literal(function, "");
+            emit_string_literal(function, "", gc);
             function
                 .instruction(&Instruction::GlobalSet(storage.current))
                 .instruction(&Instruction::GlobalGet(storage.current))
@@ -401,7 +460,7 @@ fn emit_enum_variant(
 
 pub(super) fn compile_start(
     program: &Program,
-    lowering: &LoweringContext<'_>,
+    lowering: &SettingsContext<'_>,
     strings: &StringPool,
     settings: &HashMap<ValueId, SettingStorage>,
     refresh_settings: Option<u32>,
@@ -414,7 +473,8 @@ pub(super) fn compile_start(
         .iter()
         .filter(|variable| lowering.wasm_ir.contains_global(variable.id))
     {
-        if let Type::Enum(enumeration) = value_type(variable.id, semantics) {
+        let ty = value_type(variable.id, semantics);
+        if ty.is_enum(lowering.standard_library) {
             let wasm_ir::ExpressionKind::Enum { variant, .. } = &lowering
                 .wasm_ir
                 .expression(variable.value.id)
@@ -423,28 +483,43 @@ pub(super) fn compile_start(
             else {
                 unreachable!("checked enum globals use enum constructors")
             };
-            let ResolvedEnumVariantId::Source(variant) = variant else {
-                unreachable!("choice settings use source enum variants")
-            };
-            emit_enum_variant(
-                &mut function,
-                enumeration,
-                *variant,
-                lowering.enums,
-                semantics,
-                lowering.gc,
-            );
+            match (ty, variant) {
+                (Type::Enum(enumeration), ResolvedEnumVariantId::Source(variant)) => {
+                    emit_enum_variant(
+                        &mut function,
+                        enumeration,
+                        *variant,
+                        lowering.enums,
+                        semantics,
+                        lowering.gc,
+                    );
+                }
+                (Type::Standard(enumeration), ResolvedEnumVariantId::Standard(variant)) => {
+                    emit_standard_enum_variant(
+                        &mut function,
+                        enumeration,
+                        *variant,
+                        lowering.standard_library,
+                        lowering.gc,
+                    )
+                }
+                _ => unreachable!("checked enum globals use variants from the same declaration"),
+            }
             function.instruction(&Instruction::GlobalSet(lowering.globals[&variable.id]));
         }
     }
     emit_initial_state(&mut function, program, semantics, lowering.gc);
-    function.instruction(&Instruction::GlobalSet(CURRENT_GLOBAL));
+    function.instruction(&Instruction::GlobalSet(lowering.runtime_globals.current));
     emit_initial_state(&mut function, program, semantics, lowering.gc);
-    function.instruction(&Instruction::GlobalSet(OLD_GLOBAL));
+    function.instruction(&Instruction::GlobalSet(lowering.runtime_globals.old));
     if has_async_frame {
         function
-            .instruction(&Instruction::StructNewDefault(async_frame_type_index()))
-            .instruction(&Instruction::GlobalSet(ASYNC_FRAME_GLOBAL));
+            .instruction(&Instruction::StructNewDefault(
+                lowering.gc.async_frame_index(),
+            ))
+            .instruction(&Instruction::GlobalSet(
+                lowering.runtime_globals.async_frame,
+            ));
     }
     for setting in &program.settings {
         emit_setting_registration(
@@ -460,6 +535,24 @@ pub(super) fn compile_start(
     }
     function.instruction(&Instruction::End);
     function
+}
+
+fn emit_standard_enum_variant(
+    function: &mut Function,
+    enumeration: StdlibTypeId,
+    variant: crate::stdlib::StdlibVariantId,
+    standard_library: &StandardLibrary,
+    gc: &GcLayout,
+) {
+    let selected = standard_library
+        .variants_of(enumeration)
+        .position(|candidate| candidate.id == variant)
+        .expect("checked standard enum variants belong to their declaration");
+    function.instruction(&Instruction::I32Const(selected as i32));
+    for _ in standard_library.variants_of(enumeration) {
+        function.instruction(&Instruction::I32Const(0));
+    }
+    function.instruction(&Instruction::StructNew(gc.standard_index(enumeration)));
 }
 
 /// Constructs the source-language defaults for state instead of relying on

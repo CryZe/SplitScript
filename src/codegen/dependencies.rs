@@ -3,63 +3,19 @@ use std::collections::BTreeSet;
 use crate::{
     abi::AbiImportId,
     ast::{ActionKind, Program, SettingFileFilter, SettingKind, StateSource},
-    semantic::{ResolvedCall, SemanticModel},
-    stdlib::{Implementation, IntrinsicId, StandardLibrary, StdlibItemId, StdlibTypeId},
+    intrinsic_registry::{self, DependencyRoot, RuntimeHelperId},
+    semantic::SemanticModel,
+    stdlib::{Implementation, IntrinsicId, StdlibItemId, StdlibTypeId},
     types::TypeKind,
     wasm_ir,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(super) enum GeneratedHelper {
-    PrintString,
-    TimerSetVariable,
-    FormatI64,
-    ConcatStrings,
-    StringEquality,
-    ScanProcessRange,
-    ReadRelative32,
-    ReadManagedString,
-    FollowAddress,
-    UnityAttach,
-    UnityGetImage,
-    UnityGetClass,
-    UnityGetFieldOffset,
-    UnityGetFieldAny,
-    UnityGetStaticInstance,
-    CStringEquality,
-    BackingFieldEquality,
-    StringFromMemory,
-    RefreshSettings,
-}
-
-impl GeneratedHelper {
-    pub const CORE_ORDER: &'static [Self] = &[
-        Self::PrintString,
-        Self::TimerSetVariable,
-        Self::FormatI64,
-        Self::StringEquality,
-        Self::ScanProcessRange,
-        Self::ReadRelative32,
-        Self::ReadManagedString,
-        Self::UnityAttach,
-        Self::CStringEquality,
-        Self::BackingFieldEquality,
-        Self::UnityGetImage,
-        Self::UnityGetClass,
-        Self::UnityGetFieldOffset,
-        Self::UnityGetFieldAny,
-        Self::UnityGetStaticInstance,
-        Self::ConcatStrings,
-        Self::FollowAddress,
-    ];
-
-    pub const SETTINGS_ORDER: &'static [Self] = &[Self::StringFromMemory, Self::RefreshSettings];
-}
+use super::runtime_helper_registry;
 
 #[derive(Debug, Default)]
 pub(super) struct BackendDependencies {
     stdlib_items: BTreeSet<StdlibItemId>,
-    helpers: BTreeSet<GeneratedHelper>,
+    helpers: BTreeSet<RuntimeHelperId>,
     host_imports: BTreeSet<AbiImportId>,
 }
 
@@ -70,7 +26,6 @@ impl BackendDependencies {
         wasm_ir: &wasm_ir::Program,
         reachability: &super::reachability::Reachability,
     ) -> Self {
-        let library = StandardLibrary::new();
         let mut dependencies = Self::default();
         dependencies.require_import(AbiImportId::TimerGetState);
         dependencies.require_import(AbiImportId::ProcessAttach);
@@ -78,6 +33,25 @@ impl BackendDependencies {
         dependencies.require_import(AbiImportId::ProcessIsOpen);
 
         if let Some(state) = &program.state {
+            if let Some(provider) = state
+                .provider
+                .as_ref()
+                .and_then(|provider| provider.resolved)
+            {
+                let provider = wasm_ir.standard_library().state_provider(provider);
+                dependencies.require_intrinsic(provider.attachment);
+                if state
+                    .fields
+                    .iter()
+                    .any(|field| matches!(field.source, StateSource::Pointer(_)))
+                {
+                    let Implementation::Intrinsic(direct_read) = wasm_ir
+                        .standard_library()
+                        .item(provider.direct_read)
+                        .implementation;
+                    dependencies.require_intrinsic(direct_read);
+                }
+            }
             for field in &state.fields {
                 if let StateSource::Pointer(path) = &field.source {
                     dependencies.require_import(AbiImportId::ProcessRead);
@@ -109,15 +83,17 @@ impl BackendDependencies {
             }
             match &expression.kind {
                 wasm_ir::ExpressionKind::Call {
-                    target: ResolvedCall::StandardLibrary { item, .. },
+                    target:
+                        wasm_ir::CallTarget::Intrinsic {
+                            item, intrinsic, ..
+                        },
                     ..
                 } => {
                     dependencies.stdlib_items.insert(*item);
-                    let Implementation::Intrinsic(intrinsic) = library.item(*item).implementation;
-                    dependencies.require_intrinsic(intrinsic);
+                    dependencies.require_intrinsic(*intrinsic);
                 }
                 wasm_ir::ExpressionKind::InterpolatedString(parts) => {
-                    dependencies.require(GeneratedHelper::ConcatStrings);
+                    dependencies.require(RuntimeHelperId::ConcatStrings);
                     if parts.iter().any(|part| {
                         matches!(
                             part,
@@ -127,7 +103,7 @@ impl BackendDependencies {
                             }
                         )
                     }) {
-                        dependencies.require(GeneratedHelper::FormatI64);
+                        dependencies.require(RuntimeHelperId::FormatI64);
                     }
                 }
                 wasm_ir::ExpressionKind::Cast { .. }
@@ -136,14 +112,14 @@ impl BackendDependencies {
                         TypeKind::Standard(StdlibTypeId::String)
                     ) =>
                 {
-                    dependencies.require(GeneratedHelper::FormatI64);
+                    dependencies.require(RuntimeHelperId::FormatI64);
                 }
                 _ => {}
             }
         }
 
         if reachability.requires_string_equality() {
-            dependencies.require(GeneratedHelper::StringEquality);
+            dependencies.require(RuntimeHelperId::StringEquality);
         }
 
         if !program.settings.is_empty() {
@@ -158,15 +134,15 @@ impl BackendDependencies {
                 )
             });
             if has_values {
-                dependencies.require(GeneratedHelper::RefreshSettings);
+                dependencies.require(RuntimeHelperId::RefreshSettings);
                 dependencies.require_import(AbiImportId::SettingsMapLoad);
                 dependencies.require_import(AbiImportId::SettingsMapFree);
                 dependencies.require_import(AbiImportId::SettingsMapGet);
                 dependencies.require_import(AbiImportId::SettingValueFree);
             }
             if has_string_values {
-                dependencies.require(GeneratedHelper::StringFromMemory);
-                dependencies.require(GeneratedHelper::StringEquality);
+                dependencies.require(RuntimeHelperId::StringFromMemory);
+                dependencies.require(RuntimeHelperId::StringEquality);
             }
             for setting in &program.settings {
                 if setting.tooltip.is_some() {
@@ -206,25 +182,22 @@ impl BackendDependencies {
         dependencies
     }
 
-    pub fn uses_helper(&self, helper: GeneratedHelper) -> bool {
+    pub fn uses_helper(&self, helper: RuntimeHelperId) -> bool {
         self.helpers.contains(&helper)
     }
 
     pub fn uses_unity_metadata(&self) -> bool {
-        self.uses_helper(GeneratedHelper::UnityAttach)
+        self.uses_helper(RuntimeHelperId::UnityAttach)
     }
 
-    pub fn core_helpers(&self) -> impl Iterator<Item = GeneratedHelper> + '_ {
-        GeneratedHelper::CORE_ORDER
-            .iter()
-            .copied()
-            .filter(|helper| self.uses_helper(*helper))
+    pub fn uses_gba_emulator_discovery(&self) -> bool {
+        self.uses_helper(RuntimeHelperId::GbaAttach)
     }
 
-    pub fn settings_helpers(&self) -> impl Iterator<Item = GeneratedHelper> + '_ {
-        GeneratedHelper::SETTINGS_ORDER
+    pub fn helpers(&self) -> impl Iterator<Item = RuntimeHelperId> + '_ {
+        runtime_helper_registry::DESCRIPTORS
             .iter()
-            .copied()
+            .map(|descriptor| descriptor.id)
             .filter(|helper| self.uses_helper(*helper))
     }
 
@@ -233,131 +206,24 @@ impl BackendDependencies {
     }
 
     fn require_intrinsic(&mut self, intrinsic: IntrinsicId) {
-        match intrinsic {
-            IntrinsicId::Print => self.require(GeneratedHelper::PrintString),
-            IntrinsicId::StringConcat => self.require(GeneratedHelper::ConcatStrings),
-            IntrinsicId::TimerSetVariable => self.require(GeneratedHelper::TimerSetVariable),
-            IntrinsicId::TimerState => self.require_import(AbiImportId::TimerGetState),
-            IntrinsicId::RuntimeSetTickRate => {
-                self.require_import(AbiImportId::RuntimeSetTickRate);
-            }
-            IntrinsicId::ProcessModule => {
-                self.require_import(AbiImportId::ProcessGetModuleAddress);
-                self.require_import(AbiImportId::ProcessGetModuleSize);
-            }
-            IntrinsicId::ProcessRead => self.require_import(AbiImportId::ProcessRead),
-            IntrinsicId::ProcessFollow => self.require(GeneratedHelper::FollowAddress),
-            IntrinsicId::ProcessScan | IntrinsicId::ModuleScan => {
-                self.require(GeneratedHelper::ScanProcessRange);
-            }
-            IntrinsicId::ProcessReadRelative32 => {
-                self.require(GeneratedHelper::ReadRelative32);
-            }
-            IntrinsicId::ProcessReadManagedString => {
-                self.require(GeneratedHelper::ReadManagedString);
-            }
-            IntrinsicId::UnityIl2Cpp => {
-                self.require(GeneratedHelper::UnityAttach);
-            }
-            IntrinsicId::UnityModuleImage => {
-                self.require(GeneratedHelper::UnityGetImage);
-            }
-            IntrinsicId::UnityImageClass => {
-                self.require(GeneratedHelper::UnityGetClass);
-            }
-            IntrinsicId::UnityClassField => {
-                self.require(GeneratedHelper::UnityGetFieldOffset);
-            }
-            IntrinsicId::UnityClassFieldAny => {
-                self.require(GeneratedHelper::UnityGetFieldAny);
-            }
-            IntrinsicId::UnityClassStaticInstance => {
-                self.require(GeneratedHelper::UnityGetStaticInstance);
-            }
-            IntrinsicId::NumericMin
-            | IntrinsicId::NumericMax
-            | IntrinsicId::NumericClamp
-            | IntrinsicId::StringLength
-            | IntrinsicId::NextTick
-            | IntrinsicId::DurationFromFrames
-            | IntrinsicId::DurationFromParts
-            | IntrinsicId::DurationSaturatingSecondsF32
-            | IntrinsicId::AddressOffset
-            | IntrinsicId::AddressAdd
-            | IntrinsicId::ArrayLength
-            | IntrinsicId::ArrayGet
-            | IntrinsicId::ArraySet => {}
-            IntrinsicId::UnityClassStaticTable => {
-                self.require_import(AbiImportId::ProcessRead);
+        for root in intrinsic_registry::contract(intrinsic).dependency_roots {
+            match root {
+                DependencyRoot::Helper(helper) => self.require(*helper),
+                DependencyRoot::HostImport(import) => self.require_import(*import),
             }
         }
     }
 
-    fn require(&mut self, helper: GeneratedHelper) {
+    fn require(&mut self, helper: RuntimeHelperId) {
         if !self.helpers.insert(helper) {
             return;
         }
-        match helper {
-            GeneratedHelper::PrintString => {
-                self.require_import(AbiImportId::RuntimePrintMessage);
-            }
-            GeneratedHelper::TimerSetVariable => {
-                self.require_import(AbiImportId::TimerSetVariable);
-            }
-            GeneratedHelper::ScanProcessRange
-            | GeneratedHelper::ReadRelative32
-            | GeneratedHelper::ReadManagedString
-            | GeneratedHelper::FollowAddress
-            | GeneratedHelper::CStringEquality
-            | GeneratedHelper::BackingFieldEquality
-            | GeneratedHelper::UnityGetImage
-            | GeneratedHelper::UnityGetClass
-            | GeneratedHelper::UnityGetFieldOffset
-            | GeneratedHelper::UnityGetStaticInstance => {
-                self.require_import(AbiImportId::ProcessRead);
-            }
-            GeneratedHelper::UnityAttach => {
-                self.require_import(AbiImportId::ProcessGetModuleAddress);
-                self.require_import(AbiImportId::ProcessGetModuleSize);
-            }
-            GeneratedHelper::FormatI64
-            | GeneratedHelper::ConcatStrings
-            | GeneratedHelper::StringEquality
-            | GeneratedHelper::UnityGetFieldAny
-            | GeneratedHelper::StringFromMemory
-            | GeneratedHelper::RefreshSettings => {}
+        let descriptor = runtime_helper_registry::descriptor(helper);
+        for import in descriptor.host_imports {
+            self.require_import(*import);
         }
-        match helper {
-            GeneratedHelper::UnityAttach => {
-                self.require(GeneratedHelper::ScanProcessRange);
-                self.require(GeneratedHelper::ReadRelative32);
-            }
-            GeneratedHelper::UnityGetImage | GeneratedHelper::UnityGetClass => {
-                self.require(GeneratedHelper::CStringEquality);
-            }
-            GeneratedHelper::UnityGetFieldOffset => {
-                self.require(GeneratedHelper::CStringEquality);
-                self.require(GeneratedHelper::BackingFieldEquality);
-            }
-            GeneratedHelper::UnityGetFieldAny => {
-                self.require(GeneratedHelper::UnityGetFieldOffset);
-            }
-            GeneratedHelper::UnityGetStaticInstance => {
-                self.require(GeneratedHelper::UnityGetFieldAny);
-            }
-            GeneratedHelper::PrintString
-            | GeneratedHelper::TimerSetVariable
-            | GeneratedHelper::FormatI64
-            | GeneratedHelper::ConcatStrings
-            | GeneratedHelper::StringEquality
-            | GeneratedHelper::ScanProcessRange
-            | GeneratedHelper::ReadRelative32
-            | GeneratedHelper::ReadManagedString
-            | GeneratedHelper::FollowAddress
-            | GeneratedHelper::CStringEquality
-            | GeneratedHelper::BackingFieldEquality
-            | GeneratedHelper::StringFromMemory
-            | GeneratedHelper::RefreshSettings => {}
+        for dependency in descriptor.dependencies {
+            self.require(*dependency);
         }
     }
 
@@ -375,18 +241,20 @@ impl BackendDependencies {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{intrinsic_registry::RuntimeHelperId, stdlib::IntrinsicId};
+
+    use super::BackendDependencies;
 
     #[test]
     fn helper_dependencies_are_closed_transitively() {
         let mut dependencies = BackendDependencies::default();
-        dependencies.require(GeneratedHelper::UnityGetStaticInstance);
+        dependencies.require(RuntimeHelperId::UnityGetStaticInstance);
 
-        assert!(dependencies.uses_helper(GeneratedHelper::UnityGetStaticInstance));
-        assert!(dependencies.uses_helper(GeneratedHelper::UnityGetFieldAny));
-        assert!(dependencies.uses_helper(GeneratedHelper::UnityGetFieldOffset));
-        assert!(dependencies.uses_helper(GeneratedHelper::CStringEquality));
-        assert!(dependencies.uses_helper(GeneratedHelper::BackingFieldEquality));
+        assert!(dependencies.uses_helper(RuntimeHelperId::UnityGetStaticInstance));
+        assert!(dependencies.uses_helper(RuntimeHelperId::UnityGetFieldAny));
+        assert!(dependencies.uses_helper(RuntimeHelperId::UnityGetFieldOffset));
+        assert!(dependencies.uses_helper(RuntimeHelperId::CStringEquality));
+        assert!(dependencies.uses_helper(RuntimeHelperId::BackingFieldEquality));
     }
 
     #[test]
@@ -395,7 +263,7 @@ mod tests {
         dependencies.require_intrinsic(IntrinsicId::UnityIl2Cpp);
 
         assert!(dependencies.uses_unity_metadata());
-        assert!(dependencies.uses_helper(GeneratedHelper::ScanProcessRange));
-        assert!(dependencies.uses_helper(GeneratedHelper::ReadRelative32));
+        assert!(dependencies.uses_helper(RuntimeHelperId::ScanProcessRange));
+        assert!(dependencies.uses_helper(RuntimeHelperId::ReadRelative32));
     }
 }

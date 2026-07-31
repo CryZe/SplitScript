@@ -5,12 +5,12 @@ use crate::{
         ArrayTypeId, BinaryOp, EnumDecl, EnumId, ExprId, FunctionId, OptionTypeId, Program,
         RecordId, ResultTypeId,
     },
-    semantic::{ResolvedCall, SemanticModel},
+    semantic::SemanticModel,
     stdlib::{
         DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibTypeId,
     },
     types::{TypeId, TypeKind},
-    wasm_ir::{self, BodyOwner, FallbackBranch, Terminator},
+    wasm_ir::{self, BodyOwner, Visitor},
 };
 
 #[derive(Debug, Default)]
@@ -36,11 +36,12 @@ impl Reachability {
         semantics: &SemanticModel,
         enums: &[EnumDecl],
         wasm_ir: &wasm_ir::Program,
+        standard_library: &StandardLibrary,
     ) -> Self {
         let mut pending = Vec::new();
         for body in wasm_ir.bodies() {
             if matches!(body.owner, BodyOwner::Action(_)) {
-                collect_block_expressions(&body.entry, &mut pending);
+                collect_block_expression_roots(&body.entry, wasm_ir, &mut pending);
             }
         }
         pending.extend(
@@ -62,7 +63,7 @@ impl Reachability {
             let expression = wasm_ir
                 .expression(id)
                 .expect("reachable expressions belong to Wasm IR");
-            collect_expression_children(&expression.kind, &mut pending);
+            wasm_ir::visit_expression_children(&expression.kind, |child| pending.push(child));
             if let wasm_ir::ExpressionKind::Binary {
                 op: BinaryOp::Eq | BinaryOp::Ne,
                 left,
@@ -73,16 +74,16 @@ impl Reachability {
                     .expression(left)
                     .expect("binary operands belong to Wasm IR")
                     .ty;
-                reachable.require_equality(ty, program, enums, semantics);
+                reachable.require_equality(ty, program, enums, semantics, standard_library);
             }
             if let wasm_ir::ExpressionKind::Call { target, .. } = &expression.kind {
                 let function = match target {
-                    ResolvedCall::UserFunction { function }
-                    | ResolvedCall::UserMethod { function, .. } => Some(*function),
-                    ResolvedCall::StandardLibrary { .. }
-                    | ResolvedCall::ResultError { .. }
-                    | ResolvedCall::OptionSome { .. }
-                    | ResolvedCall::ResultSuccess { .. } => None,
+                    wasm_ir::CallTarget::UserFunction { function }
+                    | wasm_ir::CallTarget::UserMethod { function, .. } => Some(*function),
+                    wasm_ir::CallTarget::Intrinsic { .. }
+                    | wasm_ir::CallTarget::ResultError { .. }
+                    | wasm_ir::CallTarget::OptionSome { .. }
+                    | wasm_ir::CallTarget::ResultSuccess { .. } => None,
                 };
                 if let Some(function) = function
                     && reachable.functions.insert(function)
@@ -90,7 +91,7 @@ impl Reachability {
                     let body = wasm_ir
                         .body(BodyOwner::Function(function))
                         .expect("resolved user functions have Wasm IR bodies");
-                    collect_block_expressions(&body.entry, &mut pending);
+                    collect_block_expression_roots(&body.entry, wasm_ir, &mut pending);
                 }
             }
         }
@@ -175,10 +176,10 @@ impl Reachability {
                     string_array.expect("interpolation has a compiler-generated String array"),
                 ),
                 wasm_ir::ExpressionKind::Call { target, .. } => match target {
-                    ResolvedCall::UserMethod { receiver_type, .. } => {
+                    wasm_ir::CallTarget::UserMethod { receiver_type, .. } => {
                         type_roots.push(*receiver_type);
                     }
-                    ResolvedCall::StandardLibrary {
+                    wasm_ir::CallTarget::Intrinsic {
                         type_arguments,
                         receiver_type,
                         ..
@@ -186,10 +187,10 @@ impl Reachability {
                         type_roots.extend(type_arguments.iter().copied());
                         type_roots.extend(*receiver_type);
                     }
-                    ResolvedCall::UserFunction { .. }
-                    | ResolvedCall::ResultError { .. }
-                    | ResolvedCall::OptionSome { .. }
-                    | ResolvedCall::ResultSuccess { .. } => {}
+                    wasm_ir::CallTarget::UserFunction { .. }
+                    | wasm_ir::CallTarget::ResultError { .. }
+                    | wasm_ir::CallTarget::OptionSome { .. }
+                    | wasm_ir::CallTarget::ResultSuccess { .. } => {}
                 },
                 wasm_ir::ExpressionKind::Propagate { target, .. } => type_roots.push(*target),
                 _ => {}
@@ -314,6 +315,7 @@ impl Reachability {
         program: &Program,
         enums: &[EnumDecl],
         semantics: &SemanticModel,
+        standard_library: &StandardLibrary,
     ) {
         let mut pending = vec![root];
         let mut visited = BTreeSet::new();
@@ -324,7 +326,7 @@ impl Reachability {
             match semantics.types().kind(ty) {
                 TypeKind::Standard(StdlibTypeId::String) => self.string_equality = true,
                 TypeKind::Standard(standard) => {
-                    let library = StandardLibrary::new();
+                    let library = standard_library;
                     let declaration = library.type_decl(*standard);
                     if library.type_has_capability(*standard, StdlibCapabilityId::Equatable)
                         && matches!(
@@ -383,106 +385,22 @@ impl Reachability {
     }
 }
 
-fn collect_block_expressions(block: &wasm_ir::Block, output: &mut Vec<ExprId>) {
-    for statement in &block.statements {
-        match statement {
-            wasm_ir::Statement::Store { value, .. }
-            | wasm_ir::Statement::Evaluate {
-                expression: value, ..
-            } => output.push(*value),
-            wasm_ir::Statement::If {
-                condition,
-                then_block,
-                else_block,
-            } => {
-                output.push(*condition);
-                collect_block_expressions(then_block, output);
-                collect_block_expressions(else_block, output);
-            }
-            wasm_ir::Statement::While { condition, body } => {
-                output.push(*condition);
-                collect_block_expressions(body, output);
-            }
-        }
-    }
-    match &block.terminator {
-        Terminator::Fallthrough | Terminator::Break | Terminator::Continue => {}
-        Terminator::AsyncWhile {
-            condition,
-            body,
-            continuation,
-            ..
-        } => {
-            output.push(*condition);
-            collect_block_expressions(body, output);
-            collect_block_expressions(continuation, output);
-        }
-        Terminator::Return(value) => output.extend(value),
-        Terminator::Throw { error, .. } => output.push(*error),
-        Terminator::Suspend {
-            value,
-            continuation,
-            ..
-        } => {
-            output.push(*value);
-            collect_block_expressions(continuation, output);
-        }
-    }
-}
+fn collect_block_expression_roots(
+    block: &wasm_ir::Block,
+    program: &wasm_ir::Program,
+    output: &mut Vec<ExprId>,
+) {
+    struct RootCollector<'a>(&'a mut Vec<ExprId>);
 
-fn collect_expression_children(kind: &wasm_ir::ExpressionKind, output: &mut Vec<ExprId>) {
-    match kind {
-        wasm_ir::ExpressionKind::None
-        | wasm_ir::ExpressionKind::Bool(_)
-        | wasm_ir::ExpressionKind::Int(_)
-        | wasm_ir::ExpressionKind::Float(_)
-        | wasm_ir::ExpressionKind::String(_)
-        | wasm_ir::ExpressionKind::Signature(_)
-        | wasm_ir::ExpressionKind::Path { .. } => {}
-        wasm_ir::ExpressionKind::Member { receiver, .. } => output.push(*receiver),
-        wasm_ir::ExpressionKind::InterpolatedString(parts) => {
-            for part in parts {
-                if let wasm_ir::InterpolatedPart::Expression { expression, .. } = part {
-                    output.push(*expression);
-                }
-            }
-        }
-        wasm_ir::ExpressionKind::Array(elements) => output.extend(elements),
-        wasm_ir::ExpressionKind::Record { fields, .. } => {
-            output.extend(fields.iter().map(|(_, value)| value));
-        }
-        wasm_ir::ExpressionKind::Enum { payload, .. } => output.extend(payload),
-        wasm_ir::ExpressionKind::Unary { operand, .. } => output.push(*operand),
-        wasm_ir::ExpressionKind::Cast { value }
-        | wasm_ir::ExpressionKind::Propagate { value, .. } => output.push(*value),
-        wasm_ir::ExpressionKind::Binary { left, right, .. } => {
-            output.push(*left);
-            output.push(*right);
-        }
-        wasm_ir::ExpressionKind::Call { arguments, .. } => output.extend(arguments),
-        wasm_ir::ExpressionKind::If {
-            condition,
-            then_expr,
-            else_expr,
-        } => {
-            output.push(*condition);
-            output.push(*then_expr);
-            output.push(*else_expr);
-        }
-        wasm_ir::ExpressionKind::Fallback { value, fallback } => {
-            output.push(*value);
-            match fallback {
-                FallbackBranch::Value(value) => output.push(*value),
-                FallbackBranch::Return(value) => output.extend(value),
-                FallbackBranch::Break | FallbackBranch::Continue => {}
-            }
-        }
-        wasm_ir::ExpressionKind::Match { value, arms } => {
-            output.push(*value);
-            for arm in arms {
-                output.extend(arm.guard);
-                output.push(arm.value);
-            }
+    impl Visitor for RootCollector<'_> {
+        fn visit_expression(
+            &mut self,
+            expression: &wasm_ir::Expression,
+            _program: &wasm_ir::Program,
+        ) {
+            self.0.push(expression.id);
         }
     }
+
+    RootCollector(output).visit_block(block, program);
 }

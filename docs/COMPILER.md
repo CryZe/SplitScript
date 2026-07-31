@@ -3,11 +3,13 @@
 SplitScript exposes its front-end stages as separate inspectable products:
 
 ```text
-source
+CompilerContext (immutable compiler services and catalog graph) + source
   -> parse -> ParsedProgram (syntax AST)
-  -> lower -> LoweredProgram (immutable syntax + declaration HIR)
-  -> check -> CheckedProgram (syntax + declaration HIR + typed body HIR + inferred layouts)
-  -> lower_wasm -> wasm_ir::Program (control flow + storage plans)
+  -> lower -> LoweredProgram (resolved syntax + DeclarationIndex + diagnostics)
+  -> type check -> typed HIR + inferred layouts
+  -> validate -> capabilities + effects + semantic diagnostics
+  -> check -> CheckedProgram
+  -> lower_wasm -> BackendProgram (Wasm IR + coherent checked backend inputs)
   -> codegen -> WebAssembly GC
 ```
 
@@ -21,11 +23,35 @@ globals, and functions remain in typed HIR for diagnostics in every profile.
 Release Wasm lowering filters them before local planning, async-state
 construction, global storage planning, and backend reachability. The backend
 consumes the resulting Wasm-IR global set rather than making its own profile
-decision.
+decision. `BackendProgram` dereferences to its inspectable `wasm_ir::Program`
+for control-flow queries, but also carries the matching syntax, semantic model,
+constructed layouts, and validated capability analyses as one
+coherent backend input. Binary encoding accepts only this product, so callers
+cannot accidentally combine stage results from different compilations.
 
-`lower` currently establishes a deterministic declaration index with stable
+Every staged product also retains the `CompilerContext` that created it. The
+default context owns the process-wide validated standard-library graph;
+parsing, type checking, recovery, typed HIR and semantic analyses,
+`CompilerDatabase` tooling queries, documentation, Wasm IR, backend planning,
+and binary emission consume that same handle rather than reconstructing a
+catalog. Compatibility entry points may still select the default context, but
+an active compilation never changes catalogs between stages.
+
+`lower` establishes a deterministic `hir::DeclarationIndex` with stable
 IDs for named types, functions, values, and lifecycle actions. Tools can query
-this HIR even when type checking would fail.
+this deliberately narrow index even when type checking would fail; it is not
+presented as a resolved body HIR. `LoweredProgram` itself is the resolution
+product. Nominal declaration conflicts and
+unknown type names are retained separately from parser recovery diagnostics:
+they do not invalidate the syntax tree or prevent formatting, but strict
+checking reports them before inference. Record literals retain their written
+name in syntax and publish their resolved `RecordId` through the semantic
+model instead of requiring parser-time nominal lookup. Enum-qualified paths,
+calls, match patterns, and choice settings likewise remain named syntax until
+`resolution::resolve_program` runs during lowering. That pass resolves source
+and catalog enum identities and rewrites constructors; typed HIR then owns a
+separate resolved pattern representation. The parser performs no declaration
+pre-scan and has no standard-library dependency.
 
 Every successful compiler stage also retains a `SourceDocument` produced by
 the same lexer pass used by the parser. Its ordered lexeme stream includes
@@ -38,7 +64,9 @@ layer without reconstructing spelling or layout from the semantic AST.
 document, a partial syntax AST, every diagnostic recoverable at top-level
 declaration boundaries, and zero-width missing or source-backed error recovery
 nodes. The ordinary `parse` entry point uses the same recovery pass but remains
-strict: any collected syntax diagnostic makes the batch parse fail.
+strict only about syntax: any collected grammar diagnostic makes the batch
+parse fail, while resolution diagnostics travel with the parsed/lowered
+products until checking.
 
 Statement blocks also recover at semicolons, their closing brace, or the next
 plausible statement on a later line. Nested blocks recover independently, so a
@@ -98,8 +126,19 @@ remain byte offsets within the one source file; a `FileId` and source map are
 deliberately deferred until the language gains modules or another feature that
 accepts multiple sources.
 
-[`src/database.rs`](../src/database.rs) provides the revisioned single-source
-query facade used as the foundation for editor tooling. Recovering parse,
+Post-type semantic checks live in [`src/validation.rs`](../src/validation.rs),
+not in the public pipeline glue. One `ValidationOutput` derives capability and
+operation-effect facts and owns detached-call, equality, memory-readability,
+and generic-capability diagnostics. Strict and recovering checks invoke this
+same stage; recovery retains derived effects when validation reports an error,
+so hover and other editor features do not reconstruct a weaker analysis path.
+
+The [`src/database`](../src/database) module family provides the revisioned
+single-source query facade used as the foundation for editor tooling.
+`queries.rs` owns source revisions and query orchestration, `cache.rs` owns
+per-revision storage, `snapshot.rs` owns the strict-or-recovered semantic view,
+and position analysis, value references, and rename validation have independent
+products. Recovering parse,
 strict parse, declaration lowering, semantic checking, and diagnostics are
 cached as shared results. Supplying identical text preserves both the revision
 and cached allocations; a changed buffer invalidates all dependent stages.
@@ -120,9 +159,11 @@ name queries. For checked source, `analysis_at` selects the smallest typed
 expression containing a byte offset and returns its inferred type shape and
 semantic resolution. When syntax is valid but type checking reports errors,
 `recovering_check` keeps the diagnostics and publishes all semantic facts that
-could still be resolved. Database type, call/path, assignment, position, and
-definition queries transparently use that partial model, so an unrelated bad
-expression does not disable hover or navigation elsewhere. Recovery-only
+could still be resolved. One cached `SemanticSnapshot` selects the strict or
+recovered product and gives every editor query the same view. Database type,
+call/path, assignment, position, definition, hover, and signature queries use
+that shared product, so an unrelated bad expression does not disable hover or
+navigation elsewhere. Recovery-only
 fallback types merely make the semantic model representable; strict `check`
 continues to reject the program and typed HIR and Wasm lowering are never built
 from those fallbacks. Exact identifier segments connect recovered resolutions
@@ -158,11 +199,12 @@ minimal, Lunistice, cancellation, and settings fixtures. Results and the exact
 methodology live in [`docs/BASELINES.md`](BASELINES.md); timings remain trend
 signals rather than platform-sensitive test thresholds.
 
-The backend consumes typed HIR for all user body work: local and async-frame
-layout discovery, match scratch planning, string/signature discovery,
-statement and expression emission, global constant expressions, and async
-polling. Calls, paths, assignments, constructors, and match patterns therefore
-arrive with semantic targets already selected; the backend no longer descends
+Wasm lowering consumes typed HIR once and publishes a backend-owned expression
+DAG plus structured control flow. Local and async-frame layout discovery, match
+and intrinsic scratch planning, string/signature discovery, statement and
+expression emission, global constant expressions, and async polling consume
+that lowered product. Calls, paths, assignments, constructors, and match
+patterns therefore arrive with semantic targets already selected; encoding no longer descends
 through syntax expressions or re-queries expression-resolution side tables.
 Parsed declarations still provide source-level state-pointer and settings
 metadata.
@@ -175,20 +217,107 @@ IDs remain distinct, but both use the shared `catalog::Documentation` and
 integrity, and the compiler test suite parses, checks, and lowers every embedded
 example before editor or generated-documentation clients can expose it.
 
-The public standard library is authored hierarchically in
-[`src/stdlib/catalog.rs`](../src/stdlib/catalog.rs). Each namespace, nominal
-type, capability, and type constructor owns its fields, variants, associated
-functions, and methods. The declaration macro derives owners, qualified names,
-stable symbol IDs, intrinsic IDs, and the flat normalized tables consumed by
-the compiler and tooling. Those tables are a compatibility view, not a second
-authoring surface. Architecture tests reject reintroduction of the retired
-parallel type, field, variant, and item registries.
+The bundled standard library is authored hierarchically once in
+[`src/stdlib/source.rs`](../src/stdlib/source.rs). Each namespace, nominal type,
+capability, and type constructor owns its fields, variants, associated
+functions, and methods. Every callable uses one named declaration containing
+its kind, generic and value parameters, result, effects, availability,
+documentation, focused public example, and intrinsic binding; there are no
+separate function/method factory grammars. Independent macro consumers derive opaque catalog IDs
+in [`src/stdlib/ids.rs`](../src/stdlib/ids.rs) and normalized declarations in
+[`src/stdlib/catalog.rs`](../src/stdlib/catalog.rs), so neither consumer is a
+second authoring registry. Catalog IDs are open `u32` newtypes with generated
+well-known constants; this permits a future trusted loader to allocate IDs for
+source declarations, while the closed `IntrinsicId` enum remains the compiler
+trust boundary. Dependency-light public shapes live in `declarations.rs` and
+`schema.rs`, while cross-declaration checks live above them in `validation.rs`.
+[`src/stdlib/graph.rs`](../src/stdlib/graph.rs) validates identity, names,
+paths, referenced owners, and namespace parents once, then indexes declarations
+by identity/name/path plus owner-to-child, field, variant, and method edges.
+Compiler and tooling queries consume this immutable graph; flat tables remain
+deterministic iteration views. Architecture tests enforce the one-way producer
+layers and reject reintroduction of retired parallel registries or positional
+callable factories.
+
+Callable signatures use a backend-neutral declaration type expression. Core
+types, nominal library types, and type parameters are atomic references; every
+generic shape is the same recursive application node keyed by an open catalog
+constructor ID. Array, Option, and Result are unary constructor declarations,
+so adding a future generic constructor does not add a parallel type-expression
+variant. Catalog validation resolves constructor IDs, checks arity and nested
+arguments, and rejects references to undeclared type parameters before the
+semantic adapter instantiates the supported constructors.
+
+The magical scalar types have one separate declaration stream in
+`stdlib/declarations.rs`. `with_core_types!` generates their `CoreTypeId`s,
+canonical names, capability sets, scalar memory layouts, and the backend's
+physical primitive variants/conversion. Syntax stores `TypeRef::Core(CoreTypeId)`
+directly. The semantic `BuiltinType` name is only an alias for `CoreTypeId`, not
+a parallel enum; constructed syntax, semantic, and physical types remain
+separate because they carry genuinely different stage-specific facts.
+
+Generic bounds store catalog capability IDs directly. Inference accumulates a
+deduplicated set of those IDs rather than maintaining a fixed bit assignment.
+Capability declarations select their evaluation behavior: declared membership,
+recursive equality, or recursive process-memory layout. Candidate discovery,
+inference admissibility, and final semantic validation consult that descriptor,
+so adding a marker capability does not add a compiler switch. A future
+privileged custom behavior will be registered at the same trust boundary as
+intrinsics when a real standard-library use case requires one.
+
+Callable effects are stored as a canonical `EffectSet`, not declaration-order
+slices. Iteration is deterministic and duplicate effects are impossible.
+Catalog validation rejects empty sets, purity mixed with observable behavior,
+retry/suspend contradictions, cancellation without suspension/attachment,
+process reads without attachment, and non-suspending onAttach-only calls.
+`OperationSemantics` is the shared normalized view used by checking, hover,
+async planning, and documentation. The trusted intrinsic registry will add the
+remaining implementation-to-declaration effect conformance check.
+
+Compiler-implemented calls also have an independent trusted registry in
+`intrinsic_registry.rs`. `IntrinsicId::ALL` is generated with the public IDs,
+while an exhaustive Rust match requires one contract for every implementation.
+Before user code is checked, catalog validation compares each public binding's
+callable kind, generic capability bounds, typed selector, method receiver,
+recursive parameter/result types, literal-only parameter rules, exact effects,
+and availability with that contract. Generic parameters are matched by ordinal,
+so cosmetic names do not become ABI. The contract also classifies host-boundary, representation,
+retryable, and suspending lowering. Direct generated-helper and host-import
+roots live in the same contract, and the
+backend dependency planner interprets those roots instead of dispatching on
+`IntrinsicId`. Synchronous and suspension scratch policies also live in the
+contract as typed core/expression/Result-payload slots, so Wasm-IR local
+planning no longer rematches every intrinsic. The runtime-helper registry
+recursively derives observable effects through helper and ABI roots and checks
+them against the trusted contract before Wasm emission, so public declarations
+cannot understate their implementation.
+
+Wasm-IR lowering is also the single semantic-to-backend call boundary. It
+converts front-end `ResolvedCall` values into its own `CallTarget`; intrinsic
+targets retain the public item ID, trusted intrinsic ID, concrete type
+arguments, and resolved receiver path. Backend reachability, dependency
+planning, async polling, and expression emission no longer reopen the catalog
+or import the front-end call enum to rediscover implementation identity.
+
+All standard-library documentation links use `StdlibSymbolId`, including
+callables. Validation resolves related links across namespaces, capabilities,
+constructors, types, fields, variants, and callable items, so tooling and a
+future HTML renderer share one cross-kind identity space.
+
+The normalized catalog layer is backend-neutral: it does not import inference
+or semantic type representations. [`src/stdlib_semantic.rs`](../src/stdlib_semantic.rs)
+is the explicit one-way adapter that turns semantic `TypeKind` values into
+applicable catalog methods and typed call candidates. Type checking,
+completion, and hover opt into that adapter; documentation, graph validation,
+and future catalog loaders remain independent of compiler-semantic types. An
+architecture test guards this dependency direction.
 
 That Rust macro is intentionally an interim producer for the normalized graph.
 The long-term producer will load bundled standard-library modules written in
 SplitScript once the language can express modules, generics and capability
 bounds, private runtime representation, effect declarations, and reusable
-library bodies. Such modules are trusted compiler inputs, not ordinary project
+library bodies. Those sources will be split by runtime domain instead of
+recreating the interim monolithic token stream. Such modules are trusted compiler inputs, not ordinary project
 files: only a compiler-created privileged loading path may declare intrinsic
 or host bindings, representation hooks, runtime-private fields, or trusted
 effects. There is no source directive, CLI switch, import, or shadowable module
@@ -236,6 +365,10 @@ layout construction. It emits one recursive group containing the state and
 built-in runtime types, the async continuation frame, and only reachable
 nominal records, enums, inferred arrays, Options, and Results. `GcLayout` owns
 their compact deterministic order and the encoder consumes that same order.
+It also derives standard type indices, standard field slots, enum variant
+indices, physical value representations, and the continuation-frame position
+from the compilation's catalog graph. No emitter is allowed to rediscover
+those facts from the process-wide default catalog.
 The resulting plan contains the completed type section and first free type
 index, which feeds host-import and generated-function type assignment without
 making the final orchestrator understand individual GC fields.
@@ -256,23 +389,37 @@ game-time handling, and timer start/split/reset commands. Final assembly passes
 only resolved read/action function indices and receives one generated update
 body, keeping host lifecycle policy out of the section orchestrator.
 
-[`src/codegen/runtime_helpers.rs`](../src/codegen/runtime_helpers.rs) owns the
-generated helper library: host/GC String conversion and formatting, structural
-String/source-record/catalog-record/enum/Option/Result equality, signature
-scanning, address following, relative reads, managed UTF-16 decoding, and
-Unity/IL2CPP discovery. A single interface
-receives resolved function indices plus discovered String/u64 array layouts and
-returns ordered core and equality body plans. The orchestrator inserts settings
-bodies between those groups to preserve its already-planned function-index
-order without knowing how any helper is implemented.
+[`src/codegen/runtime_helper_registry.rs`](../src/codegen/runtime_helper_registry.rs)
+is the sole generated-helper registry. Each descriptor owns the helper's
+`RuntimeHelperId`, symbolic Wasm signature, direct helper and ABI dependencies,
+and body-builder callback. Descriptor order is canonical and dependency-first;
+there is no parallel helper-order list, signature match, dependency match, or
+body dispatch. Intrinsic contracts refer to this same helper identity rather
+than mirroring it in an intrinsic-only enum.
+
+[`src/codegen/runtime_helpers.rs`](../src/codegen/runtime_helpers.rs) is the
+small descriptor-callback orchestrator. Implementations are split by domain in
+[`src/codegen/runtime_helpers/`](../src/codegen/runtime_helpers/): String
+conversion/formatting, structural equality, process memory/signature scanning/
+managed UTF-16, Unity type and field discovery, and Unity attachment. Each
+domain has explicit imports and a narrow builder surface. Runtime bodies are
+built by iterating the ordered `RuntimeHelperPlan`; settings adapters use the
+same path, while type-directed structural equality remains a separate
+generated-function family.
 
 [`src/codegen/function_plan.rs`](../src/codegen/function_plan.rs) owns the
 single generated-function index space. Starting after the catalog-driven host
-imports, it declares every helper, settings adapter, structural equality body,
-user function, state reader, lifecycle action, and exported entry point in
-body-emission order. Optional String-array and u64-array helpers are discovered
-there as dependencies. Emitters receive named indices and cannot advance the
-type or function counters themselves.
+imports, it resolves descriptor signatures and records helper indices in one
+ordered `RuntimeHelperPlan`, then declares structural equality bodies, user
+functions, state readers, lifecycle actions, and exported entry points in body
+emission order. Emitters receive named indices and cannot advance the type or
+function counters themselves.
+
+[`src/codegen/global_plan.rs`](../src/codegen/global_plan.rs) allocates runtime,
+source, and settings globals. Its `RuntimeGlobals` result names the process
+handle, current/old snapshots, attach readiness, async frame, and detached
+entry latch. All emitters consume those roles rather than relying on raw global
+numbers or declaration order.
 
 [`src/codegen/script_functions.rs`](../src/codegen/script_functions.rs) emits
 ordinary source-defined bodies: transactional pointer and expression state
@@ -285,16 +432,46 @@ share that assignment routine without owning index policy.
 all static UTF-8 text and parsed signature needles/masks before body emission.
 It exposes immutable lookup pools to emitters and alone encodes their linear
 memory data segments, keeping memory offsets deterministic and preventing the
-final assembler from rediscovering source dependencies.
+final assembler from rediscovering source dependencies. Pools retain relative
+offsets until scratch requirements are known, then relocate together after the
+page-aligned runtime area centralized in
+[`src/codegen/memory_plan.rs`](../src/codegen/memory_plan.rs). The memory plan
+checks wasm32 bounds and derives the module's minimum page count from the
+actual static payload, so large sources cannot overlap scratch storage or
+produce out-of-bounds active data segments.
+The plan packs typed settings, scanning, C-string, managed-UTF, and ABI-read
+roles into explicit primary/companion alias classes. The primary bank is sized
+from the largest analyzed readable layout, logical API capacities, and actual
+signature overlap; the companion bank holds values that must coexist with it.
+A readable record larger than one page therefore moves static data rather than
+overflowing a historical buffer. Unbounded host String staging begins at the
+first page after immutable data and grows memory before writing, preventing
+long runtime messages from corrupting static strings or signatures. A distinct aligned
+`AbiReadScratch` role owns synchronous process-read output across source-state,
+expression, async, process-helper, and Unity-helper emission. Each call checks
+its complete size, decoding uses the named base, and callers must materialize a
+value before any nested read reuses the buffer; an architecture test rejects
+anonymous destinations and raw address-zero loads.
+
+[`src/codegen/unity_layout.rs`](../src/codegen/unity_layout.rs) is the sole
+target-layout authority for the implemented 64-bit IL2CPP family. It declares
+the accepted Unity versions and their versioned class offsets alongside the
+invariant assembly/image/class/field schema, pointer width, module name,
+discovery signatures, scan windows, and instruction displacements. The table
+generates supported-version and offset-selection instruction sequences used by
+both ordinary runtime helpers and async polling. Compiler-start validation and
+architecture tests reject malformed, duplicated, misaligned, incomplete, or
+redeclared layout facts before an emitter can silently drift.
 
 [`src/codegen/dependencies.rs`](../src/codegen/dependencies.rs) scans resolved
-standard-library calls in Wasm IR and closes their generated-helper
+standard-library calls in Wasm IR and closes descriptor-declared helper and ABI
 dependencies transitively. The first consumer is static-data planning: Unity's
 module name and built-in IL2CPP signatures are absent unless `Unity.il2cpp` is
-used. Function planning and body generation traverse the same canonical,
-filtered helper order; checked helper-index lookups catch missing transitive
-edges, and no placeholder signatures or bodies remain. Settings-free programs
-also omit their two map-decoding adapters and refresh calls. Tests assert
+used. Function planning and body generation traverse the same filtered
+descriptor order and the latter consumes the former's concrete plan; checked
+helper-index lookups catch missing transitive edges, and no placeholder
+signatures or bodies remain. Settings-free programs also omit their two
+map-decoding adapters and refresh calls. Tests assert
 observable data-segment and function-count behavior rather than exact indices.
 
 The same dependency plan owns required host imports. Fixed process lifecycle
@@ -305,6 +482,15 @@ that set while retaining catalog order, and all body emitters use checked ID
 lookups. Consequently a minimal script imports only timer-state inspection and
 the three process-lifecycle operations, while richer scripts pull in precisely
 the timer, memory, logging, and settings APIs their emitted bodies call.
+`abi.rs` authors each import once; that declaration list generates the stable
+`AbiImportId` variants, `ALL`/`COUNT`, and normalized import table together, so
+identity and table order cannot drift.
+
+`language.rs` likewise authors ordinary syntax, built-in types,
+compiler-provided snapshot roots, and lifecycle actions in one grouped source.
+It generates `LanguageItemId` and the ordered documentation table together
+while preserving typed core-type and `ActionKind` payload relationships;
+language syntax remains deliberately separate from the standard library.
 
 [`src/codegen/reachability.rs`](../src/codegen/reachability.rs) computes the
 source-level live graph before backend dependencies are selected. Lifecycle
@@ -341,7 +527,7 @@ changing individual emitters.
 
 [`src/codegen/module_assembly.rs`](../src/codegen/module_assembly.rs) is the
 final binary boundary. It receives completed type, import, function, global,
-code, and static-data plans; adds the fixed memory, `_start`/`update` exports,
+code, and static-data plans; adds the planned memory, `_start`/`update` exports,
 and SplitScript metadata; and serializes sections in canonical Wasm order.
 The top-level encoder is now a deterministic orchestrator of these plans.
 
@@ -409,7 +595,7 @@ process-lifetime region as process-backed futures.
 `retry expression` uses the same state machine but is not a catalog intrinsic.
 The checker requires the expression to have type `T!`, the Wasm IR records the
 `Retry` suspension mode and plans a typed Result scratch local, and polling
-re-evaluates the ordinary typed-HIR expression. An error returns pending; a
+re-evaluates the ordinary lowered expression. An error returns pending; a
 success extracts the Result payload into the continuation frame when the
 binding remains live. This makes user-defined Result-returning functions
 retryable without giving the backend special knowledge of those functions.
@@ -504,6 +690,15 @@ tables implicitly; passes that need types or resolutions should carry the
 appropriate checked product explicitly. That keeps syntax traversal useful to
 the formatter and early LSP features, which run before successful type checking.
 
+Lowered Wasm IR has its own `wasm_ir::Visitor`. It traverses structured blocks,
+statements, terminators, and the expression DAG through stable IDs. The sibling
+`visit_expression_children` query is the one exhaustive definition of direct
+expression edges for analyses that own a deduplicating worklist. Reachability,
+local/scratch planning, and suspension-frame liveness use these APIs; adding an
+expression form does not require another recursive child-shape match. Dependency
+and static-data planning scan the flat reachable expression table and match only
+the semantic payloads they consume.
+
 ## Formatting
 
 [`src/formatter.rs`](../src/formatter.rs) exposes `format_source` as a reusable
@@ -544,7 +739,11 @@ canonical text differs, making it suitable for CI.
 
 ## Language server
 
-[`src/lsp.rs`](../src/lsp.rs) owns transport-independent LSP state, while
+[`src/lsp.rs`](../src/lsp.rs) owns transport-independent routing and lifecycle
+state, while typed incoming DTOs, open-document ownership, compiler-to-LSP
+conversion, and protocol tests live in the sibling `lsp` modules. Malformed
+request envelopes and method parameters therefore have one decoding boundary
+and consistently produce JSON-RPC `-32600` and `-32602` errors. The
 [`src/bin/splitls.rs`](../src/bin/splitls.rs) provides standard
 `Content-Length`-framed JSON-RPC over stdin and stdout. This remains a module
 and sibling binary in the compiler crate for now, following the architecture
@@ -571,6 +770,17 @@ share. Recoverable syntax errors retain lexical and declaration highlighting;
 valid syntax with type errors additionally uses the recovering semantic model.
 The LSP layer only splits multiline spans and delta-encodes UTF-16 positions
 according to the advertised semantic-token legend.
+
+Inferred-type inlay hints have the same compiler-owned boundary.
+[`src/inlay_hints.rs`](../src/inlay_hints.rs) walks resolved declarations and
+emits byte positions plus source-shaped type labels only where the source omits
+an annotation. It covers globals, locals, parameters, function results, state
+fields, and suspension bindings, filters to the client-requested range, and
+remains available through the recovering semantic snapshot. Hover and inlay
+hints both use [`src/type_display.rs`](../src/type_display.rs), so nominal and
+constructed types cannot acquire different spellings between editor features.
+The LSP adapter only converts positions to UTF-16 and marks each result as a
+standard type hint.
 
 Completion follows the same ownership rule. [`src/completion.rs`](../src/completion.rs)
 returns editor-neutral candidate kinds, snippets, documentation, and byte-span
@@ -665,21 +875,67 @@ of rebuilding catalog presentation.
 ## VS Code client
 
 [`editors/vscode`](../editors/vscode) is a thin TypeScript extension around the
-same stdio server. Its language client selects file and untitled SplitScript
-documents and discovers `splitls` from an explicit machine-overridable setting,
-a future packaged `server` directory, this repository's debug target, or
-`PATH`. Changing the server path or arguments restarts the client. Formatting
-and every other dynamic editor feature remain LSP registrations rather than
-parallel VS Code providers. Compilation remains a direct CLI operation: the
-editor discovers or uses a configured `splitc` and offers two fixed workflows.
-Debug watch owns a long-running `splitc watch --profile debug` child process,
-rebuilds after saves, and exposes lifecycle state through an editor action and
-status-bar stop command. Build Release saves the active file and invokes a
-one-shot `--profile release` build. It stops an active watcher before building,
-so a subsequent debug rebuild cannot overwrite the release artifact. Both
-stream stdout and stderr to a dedicated output channel. Successful builds
-produce a neighboring `.wasm` through the CLI's atomic replacement path;
-failures leave the previous module untouched.
+same stdio server while the language-server portability slice is pending.
+Activation wiring, language-client lifecycle, compiler-task management, and
+the identity-safe exclusive task state are separate modules. The language
+client selects SplitScript documents from any workspace provider and starts the
+same Rust [`LanguageServer`](../src/lsp.rs) inside a dedicated worker backed by
+the bundled compiler WebAssembly. `vscode-languageclient` communicates with it
+through standard JSON-message transports, so formatting and every other dynamic
+editor feature remain LSP registrations rather than parallel VS Code providers.
+Restart replaces the worker and its isolated language-server state. Native
+`splitls` remains an independent stdio shell for non-VS-Code clients.
+
+Compilation no longer discovers or spawns `splitc`. The optimized compiler Wasm
+and a Node worker adapter are packaged under the extension's ignored `dist`
+directory. One long-lived worker initializes the module once and accepts exact
+source snapshots tagged with their VS Code document revision. Build Release
+uses the release profile and rejects output when the document changes during
+the build. Debug watch listens for saves, coalesces them while a build is in
+flight, compiles with the debug profile, and discards an older result whenever
+a newer save is queued. Both write the neighboring `.wasm` through
+`vscode.workspace.fs` using a temporary sibling and overwrite rename, so failed
+or superseded builds preserve the last successful module. Release and watch
+share one discriminated task owner and cannot overwrite each other. The worker
+protocol transfers raw artifact buffers rather than serializing them, reports
+structured compiler diagnostics, rejects pending requests if the worker exits,
+and terminates with the extension. Tests cover task ownership, envelope
+validation, direct Wasm compilation, and compilation through the real worker.
+
+The portable-extension migration now also has an in-memory compiler product.
+[`compiler::service`](../src/service.rs) accepts a versioned request containing
+the source URI, exact document revision, source text, and debug/release profile.
+It returns either structured diagnostics (including labels and fixes) or the
+generated module bytes for the same revision. It deliberately knows nothing
+about files, polling, child processes, VS Code, or terminal rendering. The
+native `splitc` and `splitls` binaries remain independent shells around the
+shared compiler/tooling implementation and remain publishable native products.
+
+[`crates/splitscript-vscode-wasm`](../crates/splitscript-vscode-wasm) is the
+first direct-WebAssembly adapter for that service. It is a separate unpublished
+`cdylib`, so the main compiler library remains an ordinary Rust `rlib` for
+native consumers. Its compact ABI accepts request metadata as JSON but returns
+the generated autosplitter module as raw bytes after a JSON metadata prefix;
+large artifacts are never expanded into JSON number arrays or base64. The
+platform-neutral TypeScript binding lives in
+[`embeddedCompiler.ts`](../editors/vscode/src/embeddedCompiler.ts). It currently
+serves both the direct protocol tests and the dedicated build worker. The same
+adapter exposes a direct JSON-message ABI around the editor-neutral Rust LSP
+handler; the extension runs it in a second, isolated worker and connects it to
+`vscode-languageclient` without stdio framing. Desktop adapters use Node
+`worker_threads`; browser adapters use the Web Worker API over the same
+messages and compiler ABI.
+
+The browser host slice exists alongside the desktop adapter. The manifest
+points `browser` at one esbuild-produced extension bundle, which imports
+`vscode-languageclient/browser`; two separately bundled browser workers host the
+compiler service and direct JSON-message LSP service. Shared activation and
+build orchestration receive host-specific worker factories and otherwise use
+only `ExtensionContext.extensionUri`, URI operations, and `workspace.fs`.
+Generated-worker tests execute the actual bundles against the packaged compiler
+Wasm and audit the browser entry's external imports. A real
+`@vscode/test-web`/virtual-workspace suite remains the acceptance boundary for
+declaring web delivery complete.
 
 The extension manifest owns the `.split` association, declarative language
 configuration, and fast-startup TextMate grammar. Semantic highlighting is
@@ -693,3 +949,40 @@ compile or watch the active script, and launch an Extension Development Host.
 The packaged client additionally contributes fixed debug-watch and release-build
 commands to the editor title and context menu, so users do not need the
 repository tasks or understand compiler profile flags.
+
+## Module responsibility policy
+
+Source files above roughly 1,000 lines receive an ownership review. This is a
+soft design signal, not a formatting gate: a split is useful only when the new
+modules communicate through a named product or a narrow context. The parser,
+type checker, generated runtime, compiler database, LSP handler, and compiler
+integration suite have all been decomposed on those terms. Their roots now
+orchestrate grammar domains, semantic passes, host domains, cached queries,
+protocol services, and subsystem suites respectively.
+
+The current modules above that signal are `codegen/expression.rs`,
+`wasm_ir.rs`, `hir.rs`, `language.rs`, `formatter.rs`,
+`codegen/async_state.rs`, and `completion.rs`. They remain cohesive for now:
+expression and async emission share backend plans, the IR and HIR define stage
+products and visitors, the language catalog is one authored declaration,
+formatting is one document transform, and completion is one query pipeline.
+Future work should split one of these only when a concrete feature exposes a
+stable boundary—for example call emission versus structural expression
+emission—not by moving methods that still share the same mutable context.
+
+## Package API boundary
+
+The package exposes two classified module trees. [`compiler`](../src/compiler.rs)
+contains the staged compiler API and deliberately inspectable syntax, HIR,
+semantic, standard-library, memory-layout, effect, and Wasm-IR products.
+[`tooling`](../src/tooling.rs) contains the revisioned database, completion,
+hover/signature, highlighting, document-symbol, language-catalog, documentation,
+and in-process LSP products. The crate root retains convenient compile/check/
+format functions and their product types.
+
+Implementation passes, inference/resolution/validation machinery, intrinsic
+and helper registries, protocol DTOs, and code emitters are private. Integration
+tests consume the same facades as external tools, preventing test convenience
+from accidentally making every source module part of the package contract. A
+new public item should therefore answer whether it is a compiler stage product
+or an editor-neutral tooling query; if neither applies, it stays internal.

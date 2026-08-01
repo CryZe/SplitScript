@@ -18,7 +18,7 @@ The authoritative source for this port is
 | Derived IL2CPP class field bindings | Discovered offsets stored once and consumed by expression-backed state fields |
 | `Watcher<GameManager>`, `Watcher<Timer>` | Transactional GC `current`/`old` snapshots; failed reads skip the complete tick |
 | Adjacent minutes, seconds, and hundredths reads | One naturally laid-out `LevelTimeParts` record read and local GC deserialization |
-| DLC managed scene name | Bounded UTF-16 `process.read.managedString` with surrogate-pair decoding |
+| DLC managed scene name | Bounded UTF-16 `process.readManagedString` with surrogate-pair decoding |
 | Points, resets, level time, level/scene, character runtime variables | GC string formatting plus `setVariable` |
 | 1 Hz detached polling and 120 Hz attached polling | `setTickRate` calls in `onDetached` and `onAttach`; process close returns to 1 Hz immediately |
 | Auto-start when the in-game timer begins in the first level | `timerStopped` transition plus base level / DLC Shrine checks |

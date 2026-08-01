@@ -2,10 +2,10 @@ use std::collections::BTreeSet;
 
 use crate::{
     ast::{
-        ArrayTypeId, BinaryOp, EnumDecl, EnumId, ExprId, FunctionId, OptionTypeId, Program,
-        RecordId, ResultTypeId,
+        ArrayTypeId, BinaryOp, EnumDecl, EnumId, ExprId, OptionTypeId, Program, RecordId,
+        ResultTypeId,
     },
-    semantic::SemanticModel,
+    semantic::{FunctionInstance, SemanticModel},
     stdlib::{
         DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibTypeId,
     },
@@ -15,8 +15,9 @@ use crate::{
 
 #[derive(Debug, Default)]
 pub(super) struct Reachability {
-    functions: BTreeSet<FunctionId>,
+    functions: BTreeSet<FunctionInstance>,
     expressions: BTreeSet<ExprId>,
+    expression_instances: BTreeSet<(Option<FunctionInstance>, ExprId)>,
     equality_records: BTreeSet<RecordId>,
     equality_standard_records: BTreeSet<StdlibTypeId>,
     equality_enums: BTreeSet<EnumId>,
@@ -41,29 +42,32 @@ impl Reachability {
         let mut pending = Vec::new();
         for body in wasm_ir.bodies() {
             if matches!(body.owner, BodyOwner::Action(_)) {
-                collect_block_expression_roots(&body.entry, wasm_ir, &mut pending);
+                collect_block_expression_roots(&body.entry, wasm_ir, None, &mut pending);
             }
         }
         pending.extend(
             wasm_ir
                 .state_expressions()
-                .map(|expression| expression.expression),
+                .map(|expression| (None, expression.expression)),
         );
         pending.extend(
             wasm_ir
                 .global_initializers()
-                .map(|(_, expression)| expression),
+                .map(|(_, expression)| (None, expression)),
         );
 
         let mut reachable = Self::default();
-        while let Some(id) = pending.pop() {
-            if !reachable.expressions.insert(id) {
+        while let Some((owner, id)) = pending.pop() {
+            if !reachable.expression_instances.insert((owner.clone(), id)) {
                 continue;
             }
+            reachable.expressions.insert(id);
             let expression = wasm_ir
                 .expression(id)
                 .expect("reachable expressions belong to Wasm IR");
-            wasm_ir::visit_expression_children(&expression.kind, |child| pending.push(child));
+            wasm_ir::visit_expression_children(&expression.kind, |child| {
+                pending.push((owner.clone(), child))
+            });
             if let wasm_ir::ExpressionKind::Binary {
                 op: BinaryOp::Eq | BinaryOp::Ne,
                 left,
@@ -74,24 +78,37 @@ impl Reachability {
                     .expression(left)
                     .expect("binary operands belong to Wasm IR")
                     .ty;
+                let ty = owner
+                    .as_ref()
+                    .map_or(ty, |owner| semantics.specialize_type(owner, ty));
                 reachable.require_equality(ty, program, enums, semantics, standard_library);
             }
             if let wasm_ir::ExpressionKind::Call { target, .. } = &expression.kind {
                 let function = match target {
                     wasm_ir::CallTarget::UserFunction { function }
-                    | wasm_ir::CallTarget::UserMethod { function, .. } => Some(*function),
+                    | wasm_ir::CallTarget::UserMethod { function, .. } => Some(function.clone()),
                     wasm_ir::CallTarget::Intrinsic { .. }
                     | wasm_ir::CallTarget::ResultError { .. }
                     | wasm_ir::CallTarget::OptionSome { .. }
                     | wasm_ir::CallTarget::ResultSuccess { .. } => None,
                 };
+                let function = function.map(|function| {
+                    owner.as_ref().map_or(function.clone(), |owner| {
+                        semantics.specialize_function_instance(owner, &function)
+                    })
+                });
                 if let Some(function) = function
-                    && reachable.functions.insert(function)
+                    && reachable.functions.insert(function.clone())
                 {
                     let body = wasm_ir
-                        .body(BodyOwner::Function(function))
+                        .body(BodyOwner::Function(function.clone()))
                         .expect("resolved user functions have Wasm IR bodies");
-                    collect_block_expression_roots(&body.entry, wasm_ir, &mut pending);
+                    collect_block_expression_roots(
+                        &body.entry,
+                        wasm_ir,
+                        Some(function),
+                        &mut pending,
+                    );
                 }
             }
         }
@@ -125,33 +142,50 @@ impl Reachability {
                 .filter_map(|setting| semantics.value_type(setting.id)),
         );
 
-        for body in wasm_ir.bodies().filter(|body| match body.owner {
-            BodyOwner::Action(_) => true,
-            BodyOwner::Function(function) => reachable.functions.contains(&function),
-        }) {
+        for body in wasm_ir
+            .bodies()
+            .filter(|body| matches!(body.owner, BodyOwner::Action(_)))
+        {
             type_roots.extend(body.locals.iter().map(|local| local.ty));
+        }
+        for instance in &reachable.functions {
+            let body = wasm_ir
+                .body(BodyOwner::Function(instance.clone()))
+                .expect("reachable functions have template bodies");
+            type_roots.extend(
+                body.locals
+                    .iter()
+                    .map(|local| semantics.specialize_type(instance, local.ty)),
+            );
         }
         for expression in wasm_ir.state_expressions() {
             type_roots.extend(expression.locals.iter().map(|local| local.ty));
         }
-        for function in program
-            .functions
-            .iter()
-            .filter(|function| reachable.functions.contains(&function.id))
-        {
+        for instance in &reachable.functions {
+            let function = program
+                .functions
+                .iter()
+                .find(|function| function.id == instance.function)
+                .expect("reachable functions have declarations");
             type_roots.extend(function.params.iter().map(|parameter| {
-                semantics
-                    .value_type(parameter.id)
-                    .expect("checked function parameters have types")
+                semantics.specialize_type(
+                    instance,
+                    semantics
+                        .value_type(parameter.id)
+                        .expect("checked function parameters have types"),
+                )
             }));
             type_roots.push(
-                semantics
-                    .function_result(function.id)
-                    .expect("checked functions have result types"),
+                semantics.specialize_type(
+                    instance,
+                    semantics
+                        .function_result(function.id)
+                        .expect("checked functions have result types"),
+                ),
             );
         }
         // Interpolation's concatenation helper receives a compiler-generated
-        // Array<String>; that layout is not the type of any source expression.
+        // [String]; that layout is not the type of any source expression.
         let string_array = semantics.types().iter().find_map(|(ty, kind)| {
             let TypeKind::Array { element, .. } = kind else {
                 return None;
@@ -162,14 +196,18 @@ impl Reachability {
             )
             .then_some(ty)
         });
-        for expression in reachable.expressions.iter().map(|id| {
-            wasm_ir
+        for (owner, id) in &reachable.expression_instances {
+            let expression = wasm_ir
                 .expression(*id)
-                .expect("reachable expressions exist")
-        }) {
-            type_roots.push(expression.ty);
+                .expect("reachable expressions exist");
+            let specialize = |ty| {
+                owner
+                    .as_ref()
+                    .map_or(ty, |owner| semantics.specialize_type(owner, ty))
+            };
+            type_roots.push(specialize(expression.ty));
             if let Some(conversion) = expression.conversion {
-                type_roots.extend([conversion.source, conversion.target]);
+                type_roots.extend([specialize(conversion.source), specialize(conversion.target)]);
             }
             match &expression.kind {
                 wasm_ir::ExpressionKind::InterpolatedString(_) => type_roots.push(
@@ -177,22 +215,24 @@ impl Reachability {
                 ),
                 wasm_ir::ExpressionKind::Call { target, .. } => match target {
                     wasm_ir::CallTarget::UserMethod { receiver_type, .. } => {
-                        type_roots.push(*receiver_type);
+                        type_roots.push(specialize(*receiver_type));
                     }
                     wasm_ir::CallTarget::Intrinsic {
                         type_arguments,
                         receiver_type,
                         ..
                     } => {
-                        type_roots.extend(type_arguments.iter().copied());
-                        type_roots.extend(*receiver_type);
+                        type_roots.extend(type_arguments.iter().copied().map(specialize));
+                        type_roots.extend(receiver_type.map(specialize));
                     }
                     wasm_ir::CallTarget::UserFunction { .. }
                     | wasm_ir::CallTarget::ResultError { .. }
                     | wasm_ir::CallTarget::OptionSome { .. }
                     | wasm_ir::CallTarget::ResultSuccess { .. } => {}
                 },
-                wasm_ir::ExpressionKind::Propagate { target, .. } => type_roots.push(*target),
+                wasm_ir::ExpressionKind::Propagate { target, .. } => {
+                    type_roots.push(specialize(*target));
+                }
                 _ => {}
             }
         }
@@ -200,8 +240,8 @@ impl Reachability {
         reachable
     }
 
-    pub fn contains_function(&self, function: FunctionId) -> bool {
-        self.functions.contains(&function)
+    pub fn functions(&self) -> impl Iterator<Item = &FunctionInstance> {
+        self.functions.iter()
     }
 
     pub fn contains_expression(&self, expression: ExprId) -> bool {
@@ -266,7 +306,9 @@ impl Reachability {
                 continue;
             }
             match semantics.types().kind(ty) {
-                TypeKind::Builtin(_) | TypeKind::Standard(_) => {}
+                TypeKind::Builtin(_)
+                | TypeKind::Standard(_)
+                | TypeKind::GenericParameter { .. } => {}
                 TypeKind::Record(record) => {
                     self.gc_records.insert(*record);
                     let declaration = program
@@ -293,7 +335,9 @@ impl Reachability {
                             .filter_map(|variant| semantics.enum_variant_payload(variant.id)),
                     );
                 }
-                TypeKind::Array { layout, element } => {
+                TypeKind::Array {
+                    layout, element, ..
+                } => {
                     self.gc_arrays.insert(*layout);
                     pending.push(*element);
                 }
@@ -343,7 +387,7 @@ impl Reachability {
                         }));
                     }
                 }
-                TypeKind::Builtin(_) => {}
+                TypeKind::Builtin(_) | TypeKind::GenericParameter { .. } => {}
                 TypeKind::Record(record) if self.equality_records.insert(*record) => {
                     let declaration = program
                         .records
@@ -388,9 +432,13 @@ impl Reachability {
 fn collect_block_expression_roots(
     block: &wasm_ir::Block,
     program: &wasm_ir::Program,
-    output: &mut Vec<ExprId>,
+    owner: Option<FunctionInstance>,
+    output: &mut Vec<(Option<FunctionInstance>, ExprId)>,
 ) {
-    struct RootCollector<'a>(&'a mut Vec<ExprId>);
+    struct RootCollector<'a> {
+        owner: Option<FunctionInstance>,
+        output: &'a mut Vec<(Option<FunctionInstance>, ExprId)>,
+    }
 
     impl Visitor for RootCollector<'_> {
         fn visit_expression(
@@ -398,9 +446,9 @@ fn collect_block_expression_roots(
             expression: &wasm_ir::Expression,
             _program: &wasm_ir::Program,
         ) {
-            self.0.push(expression.id);
+            self.output.push((self.owner.clone(), expression.id));
         }
     }
 
-    RootCollector(output).visit_block(block, program);
+    RootCollector { owner, output }.visit_block(block, program);
 }

@@ -3,6 +3,7 @@
 use crate::{
     ast::Program,
     inference::{ArrayLayout, InferenceContext, OptionLayout, ResultLayout, Type},
+    resolution::ProgramResolutions,
     semantic::SemanticBuilder,
     stdlib::StandardLibrary,
     types::TypeStore,
@@ -20,15 +21,20 @@ use super::{
 
 pub(super) fn check_recovering(
     program: &Program,
+    resolutions: &ProgramResolutions,
     standard_library: StandardLibrary,
 ) -> RecoveringCheckOutput {
-    let mut checker = initialize_checker(program, standard_library);
+    let mut checker = initialize_checker(program, resolutions, standard_library);
     declaration_pass::collect(&mut checker, program);
     body_pass::check(&mut checker, program);
     finalization::finish(checker, program)
 }
 
-fn initialize_checker(program: &Program, standard_library: StandardLibrary) -> Checker {
+fn initialize_checker(
+    program: &Program,
+    resolutions: &ProgramResolutions,
+    standard_library: StandardLibrary,
+) -> Checker {
     let records = program.records.clone();
     let enums = program.enums.clone();
     let semantic_types = TypeStore::with_source_types(&standard_library, &records, &enums);
@@ -37,7 +43,8 @@ fn initialize_checker(program: &Program, standard_library: StandardLibrary) -> C
         .iter()
         .map(|array| ArrayLayout {
             id: array.id,
-            element: syntax_type(array.element, &semantic_types),
+            element: syntax_type(array.element, &semantic_types, resolutions),
+            length: array.length,
         })
         .collect::<Vec<_>>();
     let option_types = program
@@ -45,7 +52,7 @@ fn initialize_checker(program: &Program, standard_library: StandardLibrary) -> C
         .iter()
         .map(|option| OptionLayout {
             id: option.id,
-            value: syntax_type(option.value, &semantic_types),
+            value: syntax_type(option.value, &semantic_types, resolutions),
         })
         .collect::<Vec<_>>();
     let result_types = program
@@ -53,7 +60,7 @@ fn initialize_checker(program: &Program, standard_library: StandardLibrary) -> C
         .iter()
         .map(|result| ResultLayout {
             id: result.id,
-            value: syntax_type(result.value, &semantic_types),
+            value: syntax_type(result.value, &semantic_types, resolutions),
         })
         .collect::<Vec<_>>();
     let void_type = Type::Known(semantic_types.id_for_core(crate::stdlib::CoreTypeId::Void));
@@ -65,25 +72,21 @@ fn initialize_checker(program: &Program, standard_library: StandardLibrary) -> C
         option_types,
         result_types,
     );
-    let provider_value = program
-        .state
-        .as_ref()
-        .and_then(|state| state.provider.as_ref())
-        .and_then(|reference| reference.resolved)
-        .map(|provider| {
-            let declaration = standard_library.state_provider(provider);
-            (
-                provider,
-                Type::Known(
-                    inference
-                        .type_store()
-                        .id_for_standard(declaration.process_type),
-                ),
-            )
-        });
+    let provider_value = resolutions.state_provider().map(|provider| {
+        let declaration = standard_library.state_provider(provider);
+        (
+            provider,
+            Type::Known(
+                inference
+                    .type_store()
+                    .id_for_standard(declaration.process_type),
+            ),
+        )
+    });
 
     Checker {
         standard_library,
+        resolutions: resolutions.clone(),
         errors: Vec::new(),
         declarations: DeclarationEnvironment::new(
             records,
@@ -107,6 +110,7 @@ fn initialize_checker(program: &Program, standard_library: StandardLibrary) -> C
         inferred_process_reads: Vec::new(),
         deferred_member_paths: Vec::new(),
         none_policy: NonePolicy::OptionalOnly,
-        semantics: SemanticBuilder::default(),
+        semantics: SemanticBuilder::with_state_provider(resolutions.state_provider()),
+        active_function_component: std::collections::HashSet::new(),
     }
 }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{ActionKind, Block, Expr, Span, Stmt, SuspensionMode, VariableDecl},
-    inference::Type,
+    inference::{Requirements, Type},
     stdlib::StdlibTypeId,
 };
 
@@ -39,11 +39,12 @@ impl Checker {
                         | Stmt::Assign { .. }
                         | Stmt::If { .. }
                         | Stmt::While { .. }
+                        | Stmt::For { .. }
                         | Stmt::Expression(_)
                         | Stmt::Suspend { .. }
                 ) {
                     self.error(
-                        "`debug` currently supports bindings, expression statements, assignments, `if`, `while`, and `await`/`retry` statements",
+                        "`debug` currently supports bindings, expression statements, assignments, `if`, `while`, `for`, and `await`/`retry` statements",
                         *span,
                     );
                 }
@@ -104,6 +105,110 @@ impl Checker {
                 );
                 self.with_loop(|checker| checker.block(body, true));
             }
+            Stmt::For {
+                binding,
+                iterable_value,
+                index_value,
+                iterable,
+                body,
+                ..
+            } => {
+                // Empty literals have no elements from which to infer `T`, but
+                // the loop body can still constrain its binding. Seed only
+                // that otherwise-ambiguous shape; non-empty and named arrays
+                // retain their exact source type (including `[T; N]`).
+                let empty_array_hint = matches!(&iterable.kind, crate::ast::ExprKind::Array(values) if values.is_empty())
+                    .then(|| {
+                        let element = self.fresh_inference(Requirements::none(), None);
+                        (Type::Array(self.array_type_id(element)), element)
+                    });
+                let iterable_ty = self.expr(iterable, empty_array_hint.map(|(array, _)| array));
+                let (iterable_ty, element_ty) = match iterable_ty {
+                    None => empty_array_hint.unwrap_or_else(|| {
+                        let element = self.fresh_inference(Requirements::none(), None);
+                        (Type::Array(self.array_type_id(element)), element)
+                    }),
+                    Some(ty) => match self.shallow_type(ty) {
+                        Type::Array(array) => (ty, self.inference.array_element(array)),
+                        Type::Known(id) => match self.inference.type_store().kind(id) {
+                            crate::types::TypeKind::Array { element, .. } => {
+                                (ty, Type::Known(*element))
+                            }
+                            _ => {
+                                let actual = self.type_name(ty);
+                                self.error(
+                                    format!(
+                                        "`for ... in` expects an array, but this expression has type `{actual}`"
+                                    ),
+                                    iterable.span,
+                                );
+                                let element = self.fresh_inference(Requirements::none(), None);
+                                (Type::Array(self.array_type_id(element)), element)
+                            }
+                        },
+                        Type::Variable(variable) => {
+                            let element = self.fresh_inference(Requirements::none(), None);
+                            let array = Type::Array(self.array_type_id(element));
+                            if self.inference.variable_requirements(variable).is_empty() {
+                                self.unify(ty, array, iterable.span);
+                            } else {
+                                let actual = self.type_name(ty);
+                                self.error(
+                                    format!(
+                                        "`for ... in` expects an array, but this expression has type `{actual}`"
+                                    ),
+                                    iterable.span,
+                                );
+                            }
+                            (array, element)
+                        }
+                        _ => {
+                            let actual = self.type_name(ty);
+                            self.error(
+                                format!(
+                                    "`for ... in` expects an array, but this expression has type `{actual}`"
+                                ),
+                                iterable.span,
+                            );
+                            let element = self.fresh_inference(Requirements::none(), None);
+                            (Type::Array(self.array_type_id(element)), element)
+                        }
+                    },
+                };
+                self.semantics
+                    .resolve_value_type(*iterable_value, iterable_ty);
+                self.semantics.resolve_value_type(
+                    *index_value,
+                    self.core_type(crate::stdlib::CoreTypeId::U32),
+                );
+                self.semantics.resolve_value_type(binding.id, element_ty);
+
+                let duplicate = self
+                    .scopes
+                    .iter()
+                    .rev()
+                    .any(|scope| scope.contains_key(&binding.name))
+                    || self.declarations.globals.contains_key(&binding.name)
+                    || self.is_provider_value_name(&binding.name);
+                if duplicate {
+                    self.error(
+                        format!("variable `{}` is already declared", binding.name),
+                        binding.span,
+                    );
+                }
+                self.scopes.push(HashMap::new());
+                self.scopes.last_mut().unwrap().insert(
+                    binding.name.clone(),
+                    Binding {
+                        id: Some(binding.id),
+                        ty: element_ty,
+                        mutable: false,
+                        debug_only: self.debug_context.is_debug(),
+                    },
+                );
+                self.with_loop(|checker| checker.block(body, false));
+                self.scopes.pop();
+            }
             Stmt::Break { span } => {
                 if !self.loops.is_inside() {
                     self.error("`break` is only available inside a loop", *span);
@@ -150,9 +255,11 @@ impl Checker {
                             let supported = self
                                 .semantics
                                 .standard_library_item(value.id)
-                                .map(|item| self.standard_library.item(item))
                                 .is_some_and(|item| {
-                                    item.operation_semantics().suspension.is_awaitable()
+                                    self.standard_library
+                                        .operation_semantics(item)
+                                        .suspension
+                                        .is_awaitable()
                                 });
                             if !supported {
                                 self.error("this operation is not awaitable", value.span);

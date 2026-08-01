@@ -1,8 +1,8 @@
 //! Source type-expression parsing and constructed syntax-type interning.
 
 use super::{
-    ArrayTypeDecl, ArrayTypeId, Diagnostic, OptionTypeDecl, OptionTypeId, Parser, ResultTypeDecl,
-    ResultTypeId, Span, TokenKind, TypeNameId, TypeRef, csharp_numeric_type,
+    ArrayTypeDecl, Diagnostic, OptionTypeDecl, Parser, ResultTypeDecl, Span, TokenKind, TypeNameId,
+    TypeRef, csharp_numeric_type,
 };
 
 impl Parser<'_> {
@@ -26,41 +26,54 @@ impl Parser<'_> {
         &mut self,
         message: &'static str,
     ) -> Result<(TypeRef, Span), Diagnostic> {
-        let (mut name, start) = self.expect_any_ident(message)?;
-        if name == "string" {
-            self.record_string_type_diagnostic(start);
-            name = "String".to_owned();
-        } else if name == "TimeSpan" {
-            self.record_duration_type_diagnostic(start);
-            name = "Duration".to_owned();
-        } else if let Some(replacement) = csharp_numeric_type(&name) {
-            self.record_numeric_type_diagnostic(start, &name, replacement);
-            name = replacement.to_owned();
-        }
-        let (mut ty, mut end) = if name == "Array" {
-            self.expect(TokenKind::Lt, "expected `<` after `Array`")?;
+        let (mut ty, start, mut end) = if let Some(start) = self.eat(&TokenKind::LBracket) {
             let (element, _) = self.parse_type("expected an array element type")?;
-            let end = self.expect(TokenKind::Gt, "expected `>` after the array element type")?;
-            let id = if let Some(&id) = self.array_type_ids.get(&element) {
+            let length = if self.eat(&TokenKind::Semicolon).is_some() {
+                let value = self.expect_u64("expected a fixed array length after `;`")?;
+                Some(u32::try_from(value).map_err(|_| {
+                    Diagnostic::new(
+                        "a fixed array length must fit in `u32`",
+                        self.previous().span,
+                    )
+                })?)
+            } else {
+                None
+            };
+            let end = self.expect(TokenKind::RBracket, "expected `]` after the array type")?;
+            let key = (element, length);
+            let id = if let Some(&id) = self.array_type_ids.get(&key) {
                 id
             } else {
-                let id = ArrayTypeId::from_index(self.next_constructed_type_id);
-                self.next_constructed_type_id += 1;
-                self.array_types.push(ArrayTypeDecl { id, element });
-                self.array_type_ids.insert(element, id);
+                let id = self.constructed_type_ids.array();
+                self.array_types.push(ArrayTypeDecl {
+                    id,
+                    element,
+                    length,
+                });
+                self.array_type_ids.insert(key, id);
                 id
             };
-            (TypeRef::Array(id), end)
+            (TypeRef::Array(id), start, end)
         } else {
-            (self.resolve_type(&name, start)?, start)
+            let (mut name, start) = self.expect_any_ident(message)?;
+            if name == "string" {
+                self.record_string_type_diagnostic(start);
+                name = "String".to_owned();
+            } else if name == "TimeSpan" {
+                self.record_duration_type_diagnostic(start);
+                name = "Duration".to_owned();
+            } else if let Some(replacement) = csharp_numeric_type(&name) {
+                self.record_numeric_type_diagnostic(start, &name, replacement);
+                name = replacement.to_owned();
+            }
+            (self.resolve_type(&name, start)?, start, start)
         };
 
         if let Some(suffix) = self.eat(&TokenKind::Question) {
             let id = if let Some(&id) = self.option_type_ids.get(&ty) {
                 id
             } else {
-                let id = OptionTypeId::from_index(self.next_constructed_type_id);
-                self.next_constructed_type_id += 1;
+                let id = self.constructed_type_ids.option();
                 self.option_types.push(OptionTypeDecl { id, value: ty });
                 self.option_type_ids.insert(ty, id);
                 id
@@ -71,8 +84,7 @@ impl Parser<'_> {
             let id = if let Some(&id) = self.result_type_ids.get(&ty) {
                 id
             } else {
-                let id = ResultTypeId::from_index(self.next_constructed_type_id);
-                self.next_constructed_type_id += 1;
+                let id = self.constructed_type_ids.result();
                 self.result_types.push(ResultTypeDecl { id, value: ty });
                 self.result_type_ids.insert(ty, id);
                 id

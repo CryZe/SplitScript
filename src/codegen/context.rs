@@ -3,10 +3,11 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{ArrayTypeDecl, EnumDecl, FunctionId, RecordDecl, ValueId},
+    ast::{EnumDecl, RecordDecl, ValueId},
     memory::MemoryLayouts,
-    semantic::SemanticModel,
+    semantic::{FunctionInstance, SemanticModel},
     stdlib::StandardLibrary,
+    types::ResolvedArrayType,
     wasm_ir,
 };
 
@@ -32,11 +33,11 @@ pub(super) struct EmissionContext<'a> {
     pub settings: &'a HashMap<ValueId, SettingStorage>,
     pub runtime_globals: RuntimeGlobals,
     pub runtime_helpers: &'a RuntimeHelperPlan,
-    pub functions: &'a HashMap<FunctionId, u32>,
+    pub functions: &'a HashMap<FunctionInstance, u32>,
     pub equality_functions: &'a EqualityFunctions,
     pub records: &'a [RecordDecl],
     pub enums: &'a [EnumDecl],
-    pub arrays: &'a [ArrayTypeDecl],
+    pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,
     pub abi_read: AbiReadScratch,
     pub semantics: &'a SemanticModel,

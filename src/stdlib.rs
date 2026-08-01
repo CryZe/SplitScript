@@ -8,8 +8,9 @@ mod catalog;
 mod declarations;
 mod graph;
 mod ids;
+mod intrinsics;
+mod library_bodies;
 mod schema;
-mod source;
 mod validation;
 
 pub use ids::{
@@ -18,15 +19,15 @@ pub use ids::{
 };
 pub use schema::{
     Availability, CancellationKind, Deprecation, Effect, EffectSet, Implementation, ItemKind,
-    OperationSemantics, Parameter, ParameterRule, Signature, StdlibItem, SuspensionKind,
-    TypeParameter, TypeRef,
+    OperationMetadata, OperationSemantics, Parameter, ParameterRule, Signature, StdlibItem,
+    SuspensionKind, TypeParameter, TypeRef,
 };
 
 pub use declarations::{
     CapabilityBehavior, CoreType, CoreTypeId, DeclaredTypeRef, FieldVisibility,
-    RuntimeRepresentation, ScalarMemoryLayout, StdlibCapability, StdlibField, StdlibNamespace,
-    StdlibOwner, StdlibStateProvider, StdlibSymbolId, StdlibType, StdlibTypeConstructor,
-    StdlibTypeKind, StdlibVariant, ValueUsage,
+    RuntimeRepresentation, ScalarMemoryLayout, StateProviderAttachment, StateProviderProcesses,
+    StdlibCapability, StdlibField, StdlibNamespace, StdlibOwner, StdlibStateProvider,
+    StdlibSymbolId, StdlibType, StdlibTypeConstructor, StdlibTypeKind, StdlibVariant, ValueUsage,
 };
 
 use catalog::{
@@ -34,6 +35,7 @@ use catalog::{
 };
 use declarations::CORE_TYPES;
 pub(crate) use declarations::with_core_types;
+pub(crate) use library_bodies::{RESERVED_FUNCTION_PREFIX, augment_program_with_library_bodies};
 
 use std::{collections::HashSet, sync::Arc};
 
@@ -106,21 +108,42 @@ impl Default for StandardLibrary {
 
 impl StandardLibrary {
     pub fn new() -> Self {
-        Self {
+        let library = Self {
             graph: default_standard_library_graph(),
-        }
+        };
+        library.initialize_source_body_operations();
+        library
     }
 
     #[cfg(test)]
     pub(crate) fn isolated_bundled() -> Self {
-        Self {
+        let library = Self {
             graph: Arc::new(StandardLibraryGraph::build().unwrap_or_else(|errors| {
                 panic!(
                     "the isolated bundled standard-library graph is invalid:\n{}",
                     errors.join("\n")
                 )
             })),
+        };
+        library.initialize_source_body_operations();
+        library
+    }
+
+    fn initialize_source_body_operations(&self) {
+        if self.graph.source_body_operations_are_initialized() {
+            return;
         }
+        let operations = crate::derive_standard_library_operation_metadata(self.clone())
+            .unwrap_or_else(|diagnostics| {
+                panic!(
+                    "source-defined standard-library operation analysis failed:\n{diagnostics:#?}"
+                )
+            });
+        self.graph.initialize_source_body_operations(operations);
+    }
+
+    pub(crate) fn source_body_operations_are_initialized(&self) -> bool {
+        self.graph.source_body_operations_are_initialized()
     }
 
     pub fn core_types(&self) -> &'static [CoreType] {
@@ -141,6 +164,12 @@ impl StandardLibrary {
 
     pub fn state_provider_by_name(&self, name: &str) -> Option<&'static StdlibStateProvider> {
         self.graph.state_providers_by_name.get(name).copied()
+    }
+
+    pub fn source_state_provider(&self) -> Option<&'static StdlibStateProvider> {
+        self.state_providers()
+            .iter()
+            .find(|provider| provider.processes == StateProviderProcesses::SourceState)
     }
 
     pub fn core_type(&self, id: CoreTypeId) -> &'static CoreType {
@@ -299,6 +328,41 @@ impl StandardLibrary {
             .expect("every standard-library ID must have a catalog entry")
     }
 
+    /// Returns the authoritative effects and availability for a catalog item.
+    /// Intrinsics use their trusted declarations; source bodies use the
+    /// compiler-derived result cached in this library graph.
+    pub fn operation_metadata(&self, id: StdlibItemId) -> OperationMetadata {
+        let item = self.item(id);
+        match item.implementation {
+            Implementation::Intrinsic(intrinsic) => {
+                let contract = intrinsic_registry::contract(intrinsic);
+                OperationMetadata {
+                    effects: contract.effects,
+                    availability: contract.availability,
+                }
+            }
+            Implementation::LibraryBody { .. } => self
+                .graph
+                .source_body_operation(id)
+                // During one-time bootstrap, calls to other source bodies are
+                // followed through their injected function identities by the
+                // ordinary operation analysis. A direct metadata query only
+                // needs a neutral provisional value.
+                .unwrap_or(OperationMetadata {
+                    effects: EffectSet::one(Effect::Pure),
+                    availability: Availability::Everywhere,
+                }),
+        }
+    }
+
+    pub fn effects(&self, id: StdlibItemId) -> EffectSet {
+        self.operation_metadata(id).effects
+    }
+
+    pub fn operation_semantics(&self, id: StdlibItemId) -> OperationSemantics {
+        self.operation_metadata(id).semantics()
+    }
+
     pub fn item_by_name(&self, qualified_name: &str) -> Option<&'static StdlibItem> {
         self.graph.items_by_name.get(qualified_name).copied()
     }
@@ -341,7 +405,7 @@ impl StandardLibrary {
             ItemKind::Function | ItemKind::TypedFunction { .. } => {
                 format!("{}(", item.qualified_name)
             }
-            ItemKind::Method { receiver } => {
+            ItemKind::Method { receiver } | ItemKind::TypedMethod { receiver, .. } => {
                 format!(
                     "{}.{}(",
                     receiver.render_with(self, substitutions),
@@ -390,7 +454,7 @@ impl StandardLibrary {
     }
 
     pub fn render_operation_semantics(&self, id: StdlibItemId) -> String {
-        let semantics = self.item(id).operation_semantics();
+        let semantics = self.operation_semantics(id);
         let mut facts = vec![match semantics.availability {
             Availability::Everywhere => "available everywhere",
             Availability::OnAttach => "available in onAttach",
@@ -446,6 +510,7 @@ impl StandardLibrary {
         let mut example_sources = HashSet::new();
         let mut provider_names = HashSet::new();
         let mut provider_values = HashSet::new();
+        let mut source_state_provider = None;
         for provider in STATE_PROVIDERS {
             if provider.name.trim().is_empty() {
                 errors.push("state provider has an empty name".to_owned());
@@ -469,11 +534,17 @@ impl StandardLibrary {
                     provider.name, provider.process_type
                 ));
             }
-            if provider.processes.is_empty() {
+            if matches!(provider.processes, StateProviderProcesses::Declared(processes) if processes.is_empty())
+            {
                 errors.push(format!(
                     "state provider `{}` declares no process names",
                     provider.name
                 ));
+            }
+            if provider.processes == StateProviderProcesses::SourceState
+                && source_state_provider.replace(provider.name).is_some()
+            {
+                errors.push("multiple state providers use `SourceState` process names".to_owned());
             }
             let direct_read = ITEMS.iter().find(|item| item.id == provider.direct_read);
             match direct_read {
@@ -483,10 +554,15 @@ impl StandardLibrary {
                             item.kind,
                             ItemKind::Method {
                                 receiver: TypeRef::Standard(receiver)
+                            } | ItemKind::TypedMethod {
+                                receiver: TypeRef::Standard(receiver), ..
                             } if receiver == provider.process_type
                         )
                         && item.signature.parameters.len() == 1
-                        && item.signature.parameters[0].ty == TypeRef::Core(CoreTypeId::U32)
+                        && matches!(
+                            item.signature.parameters[0].ty,
+                            TypeRef::Core(CoreTypeId::U32 | CoreTypeId::Address)
+                        )
                         && item.signature.type_parameters.len() == 1
                         && item.signature.type_parameters[0]
                             .constraints
@@ -546,55 +622,116 @@ impl StandardLibrary {
                     ));
                 }
             }
-            if !intrinsics.insert(provider.attachment) {
+            let StateProviderAttachment::Intrinsic(attachment_id) = provider.attachment else {
+                if !matches!(
+                    self.type_decl(provider.process_type).representation,
+                    RuntimeRepresentation::Scalar {
+                        storage: CoreTypeId::I64
+                    }
+                ) {
+                    errors.push(format!(
+                        "identity state provider `{}` must expose an i64 scalar handle",
+                        provider.name
+                    ));
+                }
+                continue;
+            };
+            if !intrinsics.insert(attachment_id) {
                 errors.push(format!(
                     "intrinsic `{:?}` is bound by more than one standard-library declaration",
-                    provider.attachment
+                    attachment_id
                 ));
             }
+            let attachment = intrinsic_registry::contract(attachment_id);
+            let attachment_result_matches = matches!(
+                attachment.signature.result,
+                intrinsic_registry::ContractTypeRef::Application {
+                    constructor: StdlibTypeConstructorId::Result,
+                    arguments: [intrinsic_registry::ContractTypeRef::Standard(process_type)]
+                } if *process_type == provider.process_type
+            );
+            if attachment.shape != intrinsic_registry::CallableShape::Function
+                || attachment.signature.type_parameter_constraints.is_some()
+                || attachment.signature.receiver.is_some()
+                || attachment
+                    .signature
+                    .parameters
+                    .iter()
+                    .flatten()
+                    .next()
+                    .is_some()
+                || !attachment_result_matches
+                || attachment.lowering != intrinsic_registry::LoweringClass::Retryable
+                || !attachment.effects.contains(&Effect::ReadsProcess)
+                || !attachment
+                    .effects
+                    .contains(&Effect::RequiresAttachedProcess)
+            {
+                errors.push(format!(
+                    "state provider `{}` has incompatible attachment intrinsic `{:?}`",
+                    provider.name, attachment_id
+                ));
+            }
+        }
+        if source_state_provider.is_none() {
+            errors.push("the standard library has no source-state process provider".to_owned());
         }
         for item in ITEMS {
             if !ids.insert(item.id) {
                 errors.push(format!("duplicate standard-library ID `{:?}`", item.id));
             }
-            let Implementation::Intrinsic(intrinsic) = item.implementation;
-            if !intrinsics.insert(intrinsic) {
-                errors.push(format!(
-                    "intrinsic `{:?}` is bound by more than one standard-library item",
-                    intrinsic
-                ));
-            }
-            let contract = intrinsic_registry::contract(intrinsic);
-            if !contract.accepts(item.kind) {
-                errors.push(format!(
-                    "`{}` has a callable kind incompatible with intrinsic `{intrinsic:?}`",
-                    item.qualified_name
-                ));
-            }
-            if !contract.signature.matches(item.kind, item.signature) {
-                errors.push(format!(
-                    "`{}` has a signature incompatible with intrinsic `{intrinsic:?}`",
-                    item.qualified_name,
-                ));
-            }
-            if contract.effects != item.effects {
-                errors.push(format!(
-                    "`{}` declares effects {:?}, but intrinsic `{intrinsic:?}` requires {:?}",
-                    item.qualified_name, item.effects, contract.effects
-                ));
-            }
-            if contract.availability != item.availability {
-                errors.push(format!(
-                    "`{}` declares {:?} availability, but intrinsic `{intrinsic:?}` requires {:?}",
-                    item.qualified_name, item.availability, contract.availability
-                ));
-            }
-            if contract.lowering == intrinsic_registry::LoweringClass::Suspension
-                && !contract.effects.contains(&Effect::Suspends)
-            {
-                errors.push(format!(
-                    "intrinsic `{intrinsic:?}` uses suspension lowering without a suspension effect"
-                ));
+            match item.implementation {
+                Implementation::Intrinsic(intrinsic) => {
+                    if !intrinsics.insert(intrinsic) {
+                        errors.push(format!(
+                            "intrinsic `{:?}` is bound by more than one standard-library item",
+                            intrinsic
+                        ));
+                    }
+                    let contract = intrinsic_registry::contract(intrinsic);
+                    if !contract.accepts(item.kind) {
+                        errors.push(format!(
+                            "`{}` has a callable kind incompatible with intrinsic `{intrinsic:?}`",
+                            item.qualified_name
+                        ));
+                    }
+                    if !contract.signature.matches(item.kind, item.signature) {
+                        errors.push(format!(
+                            "`{}` has a signature incompatible with intrinsic `{intrinsic:?}`",
+                            item.qualified_name,
+                        ));
+                    }
+                    if contract.lowering == intrinsic_registry::LoweringClass::Suspension
+                        && !contract.effects.contains(&Effect::Suspends)
+                    {
+                        errors.push(format!(
+                            "intrinsic `{intrinsic:?}` uses suspension lowering without a suspension effect"
+                        ));
+                    }
+                }
+                Implementation::LibraryBody {
+                    function_name,
+                    body,
+                } => {
+                    if !function_name.starts_with("__splitscript_stdlib_") {
+                        errors.push(format!(
+                            "`{}` has an invalid generated library-function name",
+                            item.qualified_name
+                        ));
+                    }
+                    if body.trim().is_empty() {
+                        errors.push(format!(
+                            "`{}` has an empty source implementation",
+                            item.qualified_name
+                        ));
+                    }
+                    if self.graph.source_body_operation(item.id).is_none() {
+                        errors.push(format!(
+                            "`{}` has no compiler-derived operation metadata",
+                            item.qualified_name
+                        ));
+                    }
+                }
             }
             if !qualified_names.insert(item.qualified_name) {
                 errors.push(format!(
@@ -618,6 +755,9 @@ impl StandardLibrary {
                 ),
                 ItemKind::Method { receiver } => {
                     format!("method {}.{}", receiver.render(self), item.name)
+                }
+                ItemKind::TypedMethod { receiver, .. } => {
+                    format!("typed method {}.{}[.*]", receiver.render(self), item.name)
                 }
             };
             if let Some(path) = &path
@@ -654,7 +794,9 @@ impl StandardLibrary {
                     }
                 }
             }
-            if let ItemKind::Method { receiver } = item.kind {
+            if let ItemKind::Method { receiver } | ItemKind::TypedMethod { receiver, .. } =
+                item.kind
+            {
                 validate_catalog_type_ref(
                     receiver,
                     item.signature.type_parameters,
@@ -695,6 +837,7 @@ impl StandardLibrary {
                 ItemKind::Function => format!("{}(", item.qualified_name),
                 ItemKind::TypedFunction { .. } => format!("{}.", item.qualified_name),
                 ItemKind::Method { .. } => format!(".{}(", item.name),
+                ItemKind::TypedMethod { .. } => format!(".{}.", item.name),
             };
             for example in item.documentation.examples {
                 if example.title.trim().is_empty()
@@ -719,18 +862,18 @@ impl StandardLibrary {
                     ));
                 }
             }
-            let semantics = item.operation_semantics();
-            if item.effects.is_empty() {
+            let effects = self.effects(item.id);
+            let semantics = self.operation_semantics(item.id);
+            if effects.is_empty() {
                 errors.push(format!("`{}` declares no effects", item.qualified_name));
             }
-            if item.effects.contains(&Effect::Pure) && item.effects.iter().count() != 1 {
+            if effects.contains(&Effect::Pure) && effects.iter().count() != 1 {
                 errors.push(format!(
                     "`{}` declares `pure` together with observable effects",
                     item.qualified_name
                 ));
             }
-            if item.effects.contains(&Effect::Retryable) && item.effects.contains(&Effect::Suspends)
-            {
+            if effects.contains(&Effect::Retryable) && effects.contains(&Effect::Suspends) {
                 errors.push(format!(
                     "`{}` cannot be both retryable and intrinsically suspending",
                     item.qualified_name
@@ -752,8 +895,7 @@ impl StandardLibrary {
                     item.qualified_name
                 ));
             }
-            if item.effects.contains(&Effect::ReadsProcess) && !semantics.requires_attached_process
-            {
+            if effects.contains(&Effect::ReadsProcess) && !semantics.requires_attached_process {
                 errors.push(format!(
                     "`{}` reads process state but does not require an attached process",
                     item.qualified_name

@@ -90,6 +90,219 @@ fn user_function_types_are_inferred_across_bodies_and_call_sites() {
 }
 
 #[test]
+fn inferred_functions_are_independently_instantiated_at_each_call_site() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn identity(value) {
+            return value
+        }
+
+        fn singleton(value) {
+            return [value]
+        }
+
+        fn localArrayLength(value) -> u32 {
+            let values = [value]
+            return values.length()
+        }
+
+        fn throughOption(value) {
+            let wrapped = Some(value)
+            return match wrapped {
+                Some(inner) => inner,
+                None => value
+            }
+        }
+
+        fn throughResult(value) {
+            let wrapped = Ok(value)
+            return match wrapped {
+                Ok(inner) => inner,
+                Err(_) => value
+            }
+        }
+
+        fn addOne(value) {
+            return value + 1
+        }
+
+        whileAttached {
+            let number: i32 = identity(7)
+            let text: String = identity("seven")
+            let numbers: [i32] = singleton(number)
+            let texts: [String] = singleton(text)
+            let numberCount = localArrayLength(number)
+            let textCount = localArrayLength(text)
+            let boolCount = localArrayLength(true)
+            let optional: bool = throughOption(true)
+            let successful: bool = throughResult(optional)
+            let small: i32 = addOne(1)
+            let large: u64 = addOne(1)
+            if successful {
+                print(`{numbers.length()}: {texts.get(0u32)} ({numberCount + textCount + boolCount + small as u32 + large as u32})`)
+            }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("ordinary inferred functions should be polymorphic");
+    for function in &checked.syntax().functions {
+        assert_eq!(
+            checked
+                .semantics()
+                .function_type_parameters(function.id)
+                .len(),
+            1
+        );
+    }
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("every concrete primitive and constructed instance should validate");
+}
+
+#[test]
+fn inferred_capability_bounds_are_enforced_at_every_call() {
+    let source = r#"
+        state "game.exe" {}
+        fn addOne(value) { return value + 1 }
+        whileAttached { let invalid = addOne(true) }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("a concrete type must satisfy the inferred Numeric bound");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("does not support")
+            || diagnostic.message.contains("type") && diagnostic.message.contains("bool")
+    }));
+}
+
+#[test]
+fn recursive_generic_components_reuse_the_callers_concrete_instance() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn alternate(value, remaining: u32) {
+            if remaining == 0u32 {
+                return value
+            }
+            return continueAlternate(value, remaining - 1u32)
+        }
+
+        fn continueAlternate(value, remaining: u32) {
+            return alternate(value, remaining)
+        }
+
+        whileAttached {
+            let number: i32 = alternate(7, 2u32)
+            let text: String = alternate("seven", 2u32)
+            print(`{number}: {text}`)
+        }
+    "#;
+    let wasm = splitscript::compile(source).expect("mutually recursive generics should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("recursive generic instances should produce valid Wasm");
+}
+
+#[test]
+fn inferred_method_parameters_are_instantiated_independently() {
+    let source = r#"
+        record Selector { marker: i32 }
+        state "game.exe" {}
+
+        fn Selector.choose(value, fallback) {
+            if self.marker == 0 {
+                return value
+            }
+            return fallback
+        }
+
+        whileAttached {
+            let selector = Selector { marker: 0 }
+            let number: i32 = selector.choose(1, 2)
+            let text: String = selector.choose("one", "two")
+            print(`{number}: {text}`)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("method arguments should support inferred schemes");
+    assert_eq!(
+        checked
+            .semantics()
+            .function_type_parameters(checked.syntax().functions[0].id)
+            .len(),
+        1
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("generic method instances should produce valid Wasm");
+}
+
+#[test]
+fn polymorphic_recursion_has_a_focused_diagnostic() {
+    let source = r#"
+        state "game.exe" {}
+        fn recurse(value) {
+            return recurse([value])
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("a recursive call may not instantiate its own component polymorphically");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("polymorphic recursion is not supported")
+    }));
+}
+
+#[test]
+fn generic_instance_expansion_has_a_deterministic_depth_limit() {
+    let mut source = String::from("state \"game.exe\" {}\n");
+    for index in 0..65 {
+        if index == 64 {
+            source.push_str(&format!("fn step{index}(value) {{ return value }}\n"));
+        } else {
+            source.push_str(&format!(
+                "fn step{index}(value) {{ return step{}(value) }}\n",
+                index + 1
+            ));
+        }
+    }
+    source.push_str("whileAttached { let value: i32 = step0(1) }\n");
+    let diagnostics = splitscript::compile(&source)
+        .expect_err("generic instance expansion should have a stable safety limit");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("recursion-depth limit of 64") })
+    );
+}
+
+#[test]
+fn generic_instance_expansion_has_a_deterministic_total_limit() {
+    let mut source = String::from(
+        "state \"game.exe\" {}\nfn identity(value) { return value }\nwhileAttached {\n",
+    );
+    let declarations = (0..257)
+        .map(|index| format!("record Item{index} {{ value: i32 }}\n"))
+        .collect::<String>();
+    source.insert_str(0, &declarations);
+    for index in 0..257 {
+        source.push_str(&format!(
+            "let item{index}: Item{index} = identity(Item{index} {{ value: {index} }})\n"
+        ));
+    }
+    source.push_str("}\n");
+    let diagnostics = splitscript::compile(&source)
+        .expect_err("generic instance expansion should have a total safety limit");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("limit of 256 concrete instances")
+    }));
+}
+
+#[test]
 fn global_types_are_inferred_from_uses_and_assignments() {
     let source = r#"
         let base = 0
@@ -470,7 +683,7 @@ fn enums_and_their_payloads_use_structural_equality() {
 
     let unsupported = r#"
         enum Values {
-            Items(Array<i32>)
+            Items([i32])
         }
 
         state "game.exe" {}
@@ -708,7 +921,7 @@ fn generic_gc_arrays_infer_elements_and_support_core_methods() {
         state "game.exe" {}
 
         record ScanBuffer {
-            bytes: Array<u8>
+            bytes: [u8]
         }
 
         fn ScanBuffer.prepare() -> bool {
@@ -720,7 +933,7 @@ fn generic_gc_arrays_infer_elements_and_support_core_methods() {
 
         onAttach {
             let inferred = [1, 2, 3]
-            let empty: Array<u16> = []
+            let empty: [u16] = []
             let buffer = ScanBuffer {
                 bytes: [0x48u8, 0u8, 0u8]
             }

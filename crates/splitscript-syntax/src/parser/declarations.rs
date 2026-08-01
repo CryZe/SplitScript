@@ -1,10 +1,12 @@
 //! Top-level declarations and the state/settings domain grammars.
 
+//! Declaration grammar.
+
 use super::{
     Action, ActionKind, CoreTypeId, Diagnostic, EnumDecl, EnumId, EnumReference, EnumVariant,
     FunctionDecl, FunctionId, Parameter, Parser, PointerPath, RecordDecl, RecordField, RecordId,
     SettingChoiceOption, SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl, StateField,
-    StateProviderRef, StateSource, TokenKind, TypeRef, csharp_numeric_type,
+    StateMemoryDecoder, StateProviderRef, StateSource, TokenKind, TypeRef, csharp_numeric_type,
 };
 
 impl Parser<'_> {
@@ -14,14 +16,14 @@ impl Parser<'_> {
         let id = EnumId::from_index(self.next_enum_id);
         self.next_enum_id += 1;
         self.expect(TokenKind::LBrace, "expected `{` after the enum name")?;
-        let body_depth = self.brace_depth_before(self.pos);
+        let body_depth = self.brace_depth_before(self.cursor.position());
         let mut variants = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
                 self.record_missing_closing("unterminated enum declaration");
                 break;
             }
-            let item_start = self.pos;
+            let item_start = self.cursor.position();
             let documentation = self.take_source_documentation();
             if self.at(&TokenKind::RBrace) {
                 self.diagnostics
@@ -71,14 +73,14 @@ impl Parser<'_> {
         let id = RecordId::from_index(self.next_record_id);
         self.next_record_id += 1;
         self.expect(TokenKind::LBrace, "expected `{` after the record name")?;
-        let body_depth = self.brace_depth_before(self.pos);
+        let body_depth = self.brace_depth_before(self.cursor.position());
         let mut fields = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
                 self.record_missing_closing("unterminated record declaration");
                 break;
             }
-            let item_start = self.pos;
+            let item_start = self.cursor.position();
             let documentation = self.take_source_documentation();
             if self.at(&TokenKind::RBrace) {
                 self.diagnostics
@@ -170,7 +172,7 @@ impl Parser<'_> {
                 missing_closing_parenthesis = true;
                 break;
             }
-            let item_start = self.pos;
+            let item_start = self.cursor.position();
             let parsed = (|| {
                 let (param_name, param_start) =
                     self.expect_any_ident("expected a parameter name")?;
@@ -238,14 +240,7 @@ impl Parser<'_> {
             && matches!(self.peek(1).kind, TokenKind::LBrace)
         {
             let (name, span) = self.expect_any_ident("expected a state provider name")?;
-            (
-                Some(StateProviderRef {
-                    name,
-                    span,
-                    resolved: None,
-                }),
-                Vec::new(),
-            )
+            (Some(StateProviderRef { name, span }), Vec::new())
         } else {
             (None, self.process_names()?)
         };
@@ -253,14 +248,14 @@ impl Parser<'_> {
             TokenKind::LBrace,
             "expected `{` after the process name list",
         )?;
-        let body_depth = self.brace_depth_before(self.pos);
+        let body_depth = self.brace_depth_before(self.cursor.position());
         let mut fields = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
                 self.record_missing_closing("unterminated state declaration");
                 break;
             }
-            let item_start = self.pos;
+            let item_start = self.cursor.position();
             let documentation = self.take_source_documentation();
             if self.at(&TokenKind::RBrace) {
                 self.diagnostics
@@ -296,7 +291,47 @@ impl Parser<'_> {
                     while self.eat(&TokenKind::Comma).is_some() {
                         offsets.push(self.expect_u64("expected a pointer offset")?);
                     }
-                    StateSource::Pointer(PointerPath { module, offsets })
+                    let decoder = if let Some(start) = self.eat_ident("as") {
+                        let (name, name_span) =
+                            self.expect_any_ident("expected a state memory decoder after `as`")?;
+                        if name != "utf8" {
+                            return Err(Diagnostic::new(
+                                format!("unknown state memory decoder `{name}`"),
+                                name_span,
+                            ));
+                        }
+                        self.expect(TokenKind::LParen, "expected `(` after `utf8`")?;
+                        let max_bytes = self.expect_u64("expected a maximum UTF-8 byte count")?;
+                        let end = self
+                            .expect(
+                                TokenKind::RParen,
+                                "expected `)` after the maximum UTF-8 byte count",
+                            )?
+                            .end;
+                        let Ok(max_bytes) = u32::try_from(max_bytes) else {
+                            return Err(Diagnostic::new(
+                                "the maximum UTF-8 byte count must fit in `u32`",
+                                start.join(Span {
+                                    start: name_span.start,
+                                    end,
+                                }),
+                            ));
+                        };
+                        Some(StateMemoryDecoder::Utf8 {
+                            max_bytes,
+                            span: Span {
+                                start: start.start,
+                                end,
+                            },
+                        })
+                    } else {
+                        None
+                    };
+                    StateSource::Pointer(PointerPath {
+                        module,
+                        offsets,
+                        decoder,
+                    })
                 };
                 let end = self.previous().span.end;
                 self.terminator()?;
@@ -364,13 +399,13 @@ impl Parser<'_> {
         heading_level: u32,
         heading_count: &mut u32,
     ) -> Result<(), Diagnostic> {
-        let body_depth = self.brace_depth_before(self.pos);
+        let body_depth = self.brace_depth_before(self.cursor.position());
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
                 self.record_missing_closing("unterminated settings group");
                 return Ok(());
             }
-            let item_start = self.pos;
+            let item_start = self.cursor.position();
             let parsed = self.settings_dsl_entry(settings, heading_level, heading_count);
             self.recover_delimited_item(parsed, item_start, body_depth);
         }
@@ -498,8 +533,7 @@ impl Parser<'_> {
     fn take_doc_comments(&mut self, paragraph_break: &str) -> Option<String> {
         let mut tooltip = String::new();
         let mut blank_lines = 0usize;
-        while let TokenKind::DocComment(line) = self.current().kind.clone() {
-            self.bump();
+        for line in self.cursor.take_doc_comments() {
             let line = line.trim();
             if line.is_empty() {
                 if !tooltip.is_empty() {
@@ -524,7 +558,7 @@ impl Parser<'_> {
 
     pub(super) fn choice_setting(&mut self) -> Result<SettingKind, Diagnostic> {
         self.expect(TokenKind::LBrace, "expected `{` after `choice`")?;
-        let body_depth = self.brace_depth_before(self.pos);
+        let body_depth = self.brace_depth_before(self.cursor.position());
         let mut enumeration: Option<(String, Span)> = None;
         let mut options = Vec::new();
         let mut default_variant = None;
@@ -533,7 +567,7 @@ impl Parser<'_> {
                 self.record_missing_closing("unterminated choice setting");
                 break;
             }
-            let item_start = self.pos;
+            let item_start = self.cursor.position();
             let parsed = (|| {
                 let option_start = self.current().span;
                 let description = self.expect_string("expected a choice option description")?;
@@ -590,7 +624,7 @@ impl Parser<'_> {
         };
         let default_variant = default_variant.unwrap_or_else(|| options[0].variant.clone());
         Ok(SettingKind::Choice {
-            enumeration: EnumReference::Named {
+            enumeration: EnumReference {
                 name: enum_name,
                 span: enum_span,
             },
@@ -601,14 +635,14 @@ impl Parser<'_> {
 
     pub(super) fn file_setting(&mut self) -> Result<SettingKind, Diagnostic> {
         self.expect(TokenKind::LBrace, "expected `{` after `file`")?;
-        let body_depth = self.brace_depth_before(self.pos);
+        let body_depth = self.brace_depth_before(self.cursor.position());
         let mut filters = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
                 self.record_missing_closing("unterminated file setting");
                 break;
             }
-            let item_start = self.pos;
+            let item_start = self.cursor.position();
             let parsed = (|| {
                 let filter = match self.current().kind.clone() {
                     TokenKind::String(description) => {
@@ -678,14 +712,14 @@ impl Parser<'_> {
         let process = self.expect_string("expected a process name string")?;
         self.expect(TokenKind::Comma, "expected `,` after the process name")?;
         self.expect(TokenKind::LBrace, "expected a state object")?;
-        let body_depth = self.brace_depth_before(self.pos);
+        let body_depth = self.brace_depth_before(self.cursor.position());
         let mut fields = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
                 self.record_missing_closing("unterminated state object");
                 break;
             }
-            let item_start = self.pos;
+            let item_start = self.cursor.position();
             let documentation = self.take_source_documentation();
             if self.at(&TokenKind::RBrace) {
                 self.diagnostics
@@ -733,7 +767,11 @@ impl Parser<'_> {
                     name,
                     documentation,
                     annotation: Some(ty),
-                    source: StateSource::Pointer(PointerPath { module, offsets }),
+                    source: StateSource::Pointer(PointerPath {
+                        module,
+                        offsets,
+                        decoder: None,
+                    }),
                     span: Span {
                         start: field_start.start,
                         end,

@@ -4,14 +4,14 @@
 //! compile a source file to a WebAssembly GC module.
 
 mod abi;
-mod ast;
+pub use splitscript_syntax::ast;
 mod capabilities;
 mod catalog;
 mod codegen;
 pub mod compiler;
 mod completion;
 mod database;
-mod diagnostic;
+pub use splitscript_syntax::diagnostic;
 mod documentation;
 mod effects;
 mod equality;
@@ -26,7 +26,7 @@ mod language;
 mod lexer;
 mod lsp;
 mod memory;
-mod parser;
+use splitscript_syntax::parser;
 mod resolution;
 mod semantic;
 mod service;
@@ -34,13 +34,13 @@ mod signature;
 mod stdlib;
 mod stdlib_semantic;
 mod symbols;
-mod syntax;
+pub use splitscript_syntax::source as syntax;
+pub use splitscript_syntax::visit;
 pub mod tooling;
 mod type_display;
 mod typeck;
 mod types;
 mod validation;
-mod visit;
 mod wasm_ir;
 
 pub use diagnostic::{
@@ -68,10 +68,10 @@ pub struct CompilerOptions {
 
 /// Immutable compiler-wide services shared by every stage of one compilation.
 ///
-/// Keeping the standard library here establishes the injection boundary used
-/// by the future privileged SplitScript standard-library loader. Individual
-/// passes should consume this context instead of reconstructing global
-/// catalogs.
+/// The build-time privileged SplitScript loader supplies the bundled catalog;
+/// this context is the runtime injection boundary for that validated graph.
+/// Individual passes consume the context instead of reconstructing global
+/// catalog state.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct CompilerContext {
     standard_library: stdlib::StandardLibrary,
@@ -89,6 +89,39 @@ impl CompilerContext {
     pub fn standard_library(&self) -> stdlib::StandardLibrary {
         self.standard_library.clone()
     }
+}
+
+/// Compiles the bundled source bodies as a self-contained program and derives
+/// their transitive operational metadata through the ordinary semantic
+/// pipeline. This runs once for each independently owned standard-library
+/// graph and never depends on user source.
+fn derive_standard_library_operation_metadata(
+    standard_library: stdlib::StandardLibrary,
+) -> Result<
+    std::collections::HashMap<stdlib::StdlibItemId, stdlib::OperationMetadata>,
+    Vec<Diagnostic>,
+> {
+    let context = CompilerContext::with_standard_library(standard_library.clone());
+    let checked = check(lower(parse_with_context(
+        context,
+        "state \"__splitscript_standard_library__\" {}",
+    )?))?;
+    let mut operations = std::collections::HashMap::new();
+    for item in standard_library.items() {
+        if !matches!(
+            item.implementation,
+            stdlib::Implementation::LibraryBody { .. }
+        ) {
+            continue;
+        }
+        let function = checked
+            .hir
+            .library_function(item.id)
+            .expect("checked standard-library bodies have function identities");
+        let metadata = checked.effects.function(function).metadata();
+        operations.insert(item.id, metadata);
+    }
+    Ok(operations)
 }
 
 /// A source file that has been parsed but not semantically checked.
@@ -148,7 +181,11 @@ pub struct LoweredProgram {
     context: CompilerContext,
     document: syntax::SourceDocument,
     syntax: ast::Program,
+    /// User syntax plus compiler-owned standard-library bodies. Kept private
+    /// so editor and public compiler queries never expose injected symbols.
+    compilation_syntax: ast::Program,
     hir: hir::DeclarationIndex,
+    resolutions: resolution::ProgramResolutions,
     resolution_diagnostics: Vec<Diagnostic>,
 }
 
@@ -205,14 +242,15 @@ pub struct CheckedProgram {
     context: CompilerContext,
     document: syntax::SourceDocument,
     syntax: ast::Program,
+    compilation_syntax: ast::Program,
     hir: hir::TypedProgram,
     semantics: semantic::SemanticModel,
     capabilities: capabilities::CapabilityAnalysis,
     effects: effects::OperationAnalysis,
     enum_types: Vec<ast::EnumDecl>,
-    array_types: Vec<ast::ArrayTypeDecl>,
-    option_types: Vec<ast::OptionTypeDecl>,
-    result_types: Vec<ast::ResultTypeDecl>,
+    array_types: Vec<types::ResolvedArrayType>,
+    option_types: Vec<types::ResolvedOptionType>,
+    result_types: Vec<types::ResolvedResultType>,
 }
 
 /// Semantic facts retained for editor tooling even when type checking reports
@@ -353,7 +391,7 @@ pub fn parse_recovering_with_context(
         resolution::validate_declarations(&output.program, &context.standard_library());
     Ok(RecoveredParse {
         context,
-        document: syntax::SourceDocument::new(source, lexed),
+        document: syntax::SourceDocument::from_lexed(source, lexed),
         syntax: output.program,
         diagnostics: output.diagnostics,
         resolution_diagnostics,
@@ -363,18 +401,34 @@ pub fn parse_recovering_with_context(
 
 /// Lowers parsed declarations into the inspectable pre-type-check HIR.
 pub fn lower(parsed: ParsedProgram) -> LoweredProgram {
-    let mut syntax = parsed.syntax;
+    let syntax = parsed.syntax;
+    let mut compilation_syntax = syntax.clone();
     let mut resolution_diagnostics = parsed.resolution_diagnostics;
-    resolution_diagnostics.extend(resolution::resolve_program(
-        &mut syntax,
+    if let Some(augmented) = stdlib::augment_program_with_library_bodies(
+        parsed.document.source(),
         &parsed.context.standard_library(),
+    )
+    .unwrap_or_else(|diagnostics| {
+        panic!(
+            "validated standard-library bodies must parse as ordinary SplitScript: {diagnostics:#?}"
+        )
+    }) {
+        compilation_syntax = augmented;
+    }
+    let mut resolutions = resolution::ProgramResolutions::default();
+    resolution_diagnostics.extend(resolution::resolve_program(
+        &compilation_syntax,
+        &parsed.context.standard_library(),
+        &mut resolutions,
     ));
     let hir = hir::DeclarationIndex::lower(&syntax);
     LoweredProgram {
         context: parsed.context,
         document: parsed.document,
         syntax,
+        compilation_syntax,
         hir,
+        resolutions,
         resolution_diagnostics,
     }
 }
@@ -385,18 +439,33 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         context,
         document,
         syntax,
+        compilation_syntax,
         hir,
+        resolutions,
         resolution_diagnostics,
     } = lowered.into();
     if !resolution_diagnostics.is_empty() {
         return Err(resolution_diagnostics);
     }
-    let output = typeck::check_with_library(&syntax, context.standard_library())?;
-    let typed_hir =
-        hir::TypedProgram::build(hir, &syntax, &output.semantics, context.standard_library());
+    let mut output = typeck::check_with_library(
+        &compilation_syntax,
+        &resolutions,
+        context.standard_library(),
+    )?;
+    let typed_hir = hir::TypedProgram::build(
+        hir,
+        &compilation_syntax,
+        &output.semantics,
+        context.standard_library(),
+        document.source().len(),
+        syntax.functions.len(),
+    );
+    output
+        .semantics
+        .set_visible_expression_count(typed_hir.visible_expression_count());
     let validation = validation::validate(
         context.standard_library(),
-        &syntax,
+        &compilation_syntax,
         &typed_hir,
         &output.semantics,
         &output.enum_types,
@@ -408,6 +477,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         context,
         document,
         syntax,
+        compilation_syntax,
         hir: typed_hir,
         semantics: output.semantics,
         capabilities: validation.capabilities,
@@ -426,21 +496,33 @@ pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
         context,
         document,
         syntax,
+        compilation_syntax,
         hir,
+        resolutions,
         resolution_diagnostics,
     } = lowered.into();
-    let recovered = typeck::check_recovering_with_library(&syntax, context.standard_library());
+    let mut recovered = typeck::check_recovering_with_library(
+        &compilation_syntax,
+        &resolutions,
+        context.standard_library(),
+    );
     let validation =
         (resolution_diagnostics.is_empty() && recovered.diagnostics.is_empty()).then(|| {
             let typed_hir = hir::TypedProgram::build(
                 hir.clone(),
-                &syntax,
+                &compilation_syntax,
                 &recovered.output.semantics,
                 context.standard_library(),
+                document.source().len(),
+                syntax.functions.len(),
             );
+            recovered
+                .output
+                .semantics
+                .set_visible_expression_count(typed_hir.visible_expression_count());
             validation::validate(
                 context.standard_library(),
-                &syntax,
+                &compilation_syntax,
                 &typed_hir,
                 &recovered.output.semantics,
                 &recovered.output.enum_types,

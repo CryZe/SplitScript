@@ -1,5 +1,7 @@
 //! Token consumption, diagnostics, and grammar recovery.
 
+//! Syntax recovery policy and synchronization.
+
 use super::{
     ActionKind, Diagnostic, Parser, RecoveryNode, RecoveryNodeKind, Span, Token, TokenKind,
     parse_integer,
@@ -114,7 +116,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn at_ident(&self, expected: &str) -> bool {
-        matches!(&self.current().kind, TokenKind::Ident(name) if name == expected)
+        self.cursor.at_ident(expected)
     }
 
     pub(super) fn eat(&mut self, kind: &TokenKind) -> Option<Span> {
@@ -126,27 +128,23 @@ impl Parser<'_> {
     }
 
     pub(super) fn at(&self, kind: &TokenKind) -> bool {
-        self.current().kind == *kind
+        self.cursor.at(kind)
     }
 
     pub(super) fn current(&self) -> &Token {
-        &self.tokens[self.pos]
+        self.cursor.current()
     }
 
     pub(super) fn previous(&self) -> &Token {
-        &self.tokens[self.pos.saturating_sub(1)]
+        self.cursor.previous()
     }
 
     pub(super) fn peek(&self, offset: usize) -> &Token {
-        &self.tokens[(self.pos + offset).min(self.tokens.len() - 1)]
+        self.cursor.peek(offset)
     }
 
     pub(super) fn bump(&mut self) -> &Token {
-        let index = self.pos;
-        if !matches!(self.tokens[index].kind, TokenKind::Eof) {
-            self.pos += 1;
-        }
-        &self.tokens[index]
+        self.cursor.bump()
     }
 
     pub(super) fn error(&self, message: impl Into<String>) -> Diagnostic {
@@ -273,9 +271,12 @@ impl Parser<'_> {
     }
 
     pub(super) fn synchronize_top_level(&mut self, declaration_start: usize) {
-        let mut brace_depth = self.brace_depth_before(self.pos);
+        let mut brace_depth = self.brace_depth_before(self.cursor.position());
 
-        if self.pos > declaration_start && brace_depth == 0 && self.is_top_level_start() {
+        if self.cursor.position() > declaration_start
+            && brace_depth == 0
+            && self.is_top_level_start()
+        {
             return;
         }
 
@@ -293,14 +294,14 @@ impl Parser<'_> {
     }
 
     pub(super) fn synchronize_statement(&mut self, statement_start: usize, block_depth: u32) {
-        let mut brace_depth = self.brace_depth_before(self.pos);
+        let mut brace_depth = self.brace_depth_before(self.cursor.position());
         loop {
             if self.at(&TokenKind::Eof)
                 || (self.at(&TokenKind::RBrace) && brace_depth == block_depth)
             {
                 return;
             }
-            if self.pos > statement_start
+            if self.cursor.position() > statement_start
                 && brace_depth == block_depth
                 && self.line_break_before_current()
                 && self.is_statement_start()
@@ -328,7 +329,7 @@ impl Parser<'_> {
             Ok(item) => Some(item),
             Err(error) => {
                 self.record_recovery_diagnostic(error);
-                let skipped_start = self.tokens[item_start].span.start;
+                let skipped_start = self.cursor.tokens()[item_start].span.start;
                 self.synchronize_delimited_item(item_start, body_depth);
                 self.record_error_region(skipped_start, self.current().span.start);
                 None
@@ -345,7 +346,7 @@ impl Parser<'_> {
             Ok(parameter) => Some(parameter),
             Err(error) => {
                 self.record_recovery_diagnostic(error);
-                let skipped_start = self.tokens[item_start].span.start;
+                let skipped_start = self.cursor.tokens()[item_start].span.start;
                 self.synchronize_parameter(item_start);
                 self.record_error_region(skipped_start, self.current().span.start);
                 None
@@ -385,7 +386,7 @@ impl Parser<'_> {
             {
                 return;
             }
-            if self.pos > item_start
+            if self.cursor.position() > item_start
                 && self.line_break_before_current()
                 && matches!(self.current().kind, TokenKind::Ident(_))
             {
@@ -398,14 +399,14 @@ impl Parser<'_> {
     }
 
     pub(super) fn synchronize_delimited_item(&mut self, item_start: usize, body_depth: u32) {
-        let mut brace_depth = self.brace_depth_before(self.pos);
+        let mut brace_depth = self.brace_depth_before(self.cursor.position());
         loop {
             if self.at(&TokenKind::Eof)
                 || (self.at(&TokenKind::RBrace) && brace_depth == body_depth)
             {
                 return;
             }
-            if self.pos > item_start
+            if self.cursor.position() > item_start
                 && brace_depth == body_depth
                 && self.line_break_before_current()
                 && matches!(
@@ -447,7 +448,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn brace_depth_before(&self, position: usize) -> u32 {
-        self.tokens[..position]
+        self.cursor.tokens()[..position]
             .iter()
             .fold(0u32, |depth, token| match token.kind {
                 TokenKind::LBrace => depth + 1,

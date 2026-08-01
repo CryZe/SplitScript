@@ -4,10 +4,14 @@ use splitscript::compiler::stdlib::semantic::StandardLibrarySemanticExt;
 use splitscript::{
     compiler::{
         abi::{AbiCatalog, AbiEffect, AbiImportId, AbiOwnership},
-        semantic::{ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue},
+        semantic::{
+            ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedRecordFieldId,
+            ResolvedValue,
+        },
         stdlib::{
-            Availability, CancellationKind, CoreTypeId, Effect, StandardLibrary, StdlibFieldId,
-            StdlibItemId, StdlibStateProviderId, StdlibTypeId, StdlibVariantId, SuspensionKind,
+            Availability, CancellationKind, CoreTypeId, Effect, Implementation, StandardLibrary,
+            StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibTypeId, StdlibVariantId,
+            SuspensionKind,
         },
         types::{BuiltinType, TypeKind},
     },

@@ -1,0 +1,12 @@
+[package]
+name = "splitscript-stdlib-loader"
+version = "0.1.0"
+edition = "2024"
+description = "Privileged source loader for SplitScript's bundled standard library"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+splitscript-syntax = { path = "../splitscript-syntax" }

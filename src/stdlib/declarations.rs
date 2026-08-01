@@ -6,9 +6,8 @@
 //! shapes; consumers resolve those identities into their own stage-specific
 //! representations.
 
-use std::fmt;
-
 use crate::catalog::Documentation;
+pub use splitscript_syntax::PrimitiveType as CoreTypeId;
 
 use super::ids::{
     IntrinsicId, StdlibCapabilityId, StdlibFieldId, StdlibItemId, StdlibNamespaceId,
@@ -42,11 +41,27 @@ pub struct StdlibStateProvider {
     pub id: StdlibStateProviderId,
     pub name: &'static str,
     pub value_name: &'static str,
-    pub processes: &'static [&'static str],
+    pub processes: StateProviderProcesses,
     pub process_type: StdlibTypeId,
-    pub attachment: IntrinsicId,
+    pub attachment: StateProviderAttachment,
     pub direct_read: StdlibItemId,
     pub documentation: Documentation<StdlibSymbolId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateProviderProcesses {
+    /// Process names are declared by the provider itself.
+    Declared(&'static [&'static str]),
+    /// Process names come from the source-level `state "..."` declaration.
+    SourceState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateProviderAttachment {
+    /// The provider value is the raw attached-process handle.
+    Identity,
+    /// A compiler intrinsic derives the provider value from the raw handle.
+    Intrinsic(IntrinsicId),
 }
 
 macro_rules! with_core_types {
@@ -69,20 +84,6 @@ macro_rules! with_core_types {
     };
 }
 
-macro_rules! define_core_type_ids {
-    ($($id:ident => { $($declaration:tt)* }),* $(,)?) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        pub enum CoreTypeId {
-            $($id),*
-        }
-
-        impl CoreTypeId {
-            pub const ALL: &'static [Self] = &[$(Self::$id),*];
-        }
-    };
-}
-
-with_core_types!(define_core_type_ids);
 pub(crate) use with_core_types;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -103,12 +104,6 @@ pub struct CoreType {
 pub struct ScalarMemoryLayout {
     pub size: u32,
     pub alignment: u32,
-}
-
-impl fmt::Display for CoreTypeId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.name())
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,14 +146,6 @@ pub struct ValueUsage {
     pub local_variable: bool,
     pub global_variable: bool,
 }
-
-pub(super) const ORDINARY_LOCAL_VALUE: ValueUsage = ValueUsage {
-    record_field: true,
-    enum_payload: true,
-    state_field: true,
-    local_variable: true,
-    global_variable: false,
-};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StdlibNamespace {
@@ -220,12 +207,6 @@ pub struct StdlibVariant {
     pub documentation: Documentation<StdlibSymbolId>,
 }
 
-pub(super) const EQUATABLE_INTERPOLATABLE: &[StdlibCapabilityId] = &[
-    StdlibCapabilityId::Equatable,
-    StdlibCapabilityId::Interpolatable,
-];
-pub(super) const EQUATABLE: &[StdlibCapabilityId] = &[StdlibCapabilityId::Equatable];
-
 const BOOL_CAPABILITIES: &[StdlibCapabilityId] = &[
     StdlibCapabilityId::Equatable,
     StdlibCapabilityId::MemoryReadable,
@@ -273,34 +254,6 @@ macro_rules! define_core_type_table {
 }
 
 with_core_types!(define_core_type_table);
-
-impl CoreTypeId {
-    pub fn name(self) -> &'static str {
-        CORE_TYPES[self as usize].name
-    }
-
-    pub fn parse(name: &str) -> Option<Self> {
-        if name == "Address" {
-            return Some(Self::Address);
-        }
-        CORE_TYPES
-            .iter()
-            .find(|declaration| declaration.name == name)
-            .map(|declaration| declaration.id)
-    }
-
-    pub fn is_integer(self) -> bool {
-        CORE_TYPES[self as usize]
-            .capabilities
-            .contains(&StdlibCapabilityId::Integer)
-    }
-
-    pub fn is_numeric(self) -> bool {
-        CORE_TYPES[self as usize]
-            .capabilities
-            .contains(&StdlibCapabilityId::Numeric)
-    }
-}
 
 #[cfg(test)]
 mod tests {

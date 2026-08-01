@@ -3,18 +3,16 @@ use std::collections::HashMap;
 use wasm_encoder::{FunctionSection, HeapType, RefType, TypeSection, ValType};
 
 use crate::{
-    ast::{
-        ActionKind, ArrayTypeDecl, EnumDecl, FunctionId, OptionTypeDecl, Program, ResultTypeDecl,
-    },
+    ast::{ActionKind, EnumDecl, Program},
     equality::EqualityCapabilities,
-    semantic::SemanticModel,
+    semantic::{FunctionInstance, SemanticModel},
     stdlib::{RuntimeRepresentation, StandardLibrary},
+    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType},
 };
 
 use super::{
     EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, Type, action_result_val_type,
-    dependencies::BackendDependencies, function_result, reachability, runtime_helper_registry,
-    semantic_type, value_type,
+    dependencies::BackendDependencies, reachability, runtime_helper_registry, semantic_type,
 };
 
 /// The complete, deterministic assignment of generated function signatures
@@ -24,12 +22,12 @@ pub(super) struct FunctionPlan<'a> {
     pub section: FunctionSection,
     pub runtime_helpers: RuntimeHelperPlan,
     pub equality: EqualityFunctions,
-    pub users: HashMap<FunctionId, u32>,
+    pub users: HashMap<FunctionInstance, u32>,
     pub reads: Vec<u32>,
     pub actions: HashMap<ActionKind, u32>,
     pub start: u32,
     pub update: u32,
-    pub arrays: &'a [ArrayTypeDecl],
+    pub arrays: &'a [ResolvedArrayType],
 }
 
 pub(super) struct Inputs<'a> {
@@ -37,9 +35,9 @@ pub(super) struct Inputs<'a> {
     pub program: &'a Program,
     pub semantics: &'a SemanticModel,
     pub enums: &'a [EnumDecl],
-    pub arrays: &'a [ArrayTypeDecl],
-    pub options: &'a [OptionTypeDecl],
-    pub results: &'a [ResultTypeDecl],
+    pub arrays: &'a [ResolvedArrayType],
+    pub options: &'a [ResolvedOptionType],
+    pub results: &'a [ResolvedResultType],
     pub equality: &'a EqualityCapabilities,
     pub dependencies: &'a BackendDependencies,
     pub reachability: &'a reachability::Reachability,
@@ -141,23 +139,43 @@ pub(super) fn encode<'a>(
     };
 
     let mut users = HashMap::new();
-    for function in &program.functions {
-        if !reachability.contains_function(function.id) {
-            continue;
-        }
-        let result = function_result(function.id, semantics);
+    for instance in reachability.functions() {
+        let function = program
+            .functions
+            .iter()
+            .find(|function| function.id == instance.function)
+            .expect("reachable function instances have source declarations");
+        let result = semantic_type(
+            semantics.specialize_type(
+                instance,
+                semantics
+                    .function_result(instance.function)
+                    .expect("checked functions have result types"),
+            ),
+            semantics,
+        );
         let index = declare(
             function
                 .params
                 .iter()
-                .map(|parameter| gc.val_type(value_type(parameter.id, semantics)))
+                .map(|parameter| {
+                    gc.val_type(semantic_type(
+                        semantics.specialize_type(
+                            instance,
+                            semantics
+                                .value_type(parameter.id)
+                                .expect("checked parameters have types"),
+                        ),
+                        semantics,
+                    ))
+                })
                 .collect(),
             (result != Type::Void)
                 .then(|| gc.val_type(result))
                 .into_iter()
                 .collect(),
         );
-        users.insert(function.id, index);
+        users.insert(instance.clone(), index);
     }
 
     let mut reads =

@@ -62,6 +62,8 @@ pub trait Visitor<'ast>: Sized {
         }
     }
 
+    fn visit_for_binding(&mut self, _binding: &'ast ForBinding) {}
+
     fn visit_block(&mut self, block: &'ast Block) {
         walk_block(self, block);
     }
@@ -200,6 +202,16 @@ pub fn walk_stmt<'ast, V: Visitor<'ast>>(visitor: &mut V, statement: &'ast Stmt)
             visitor.visit_expr(condition);
             visitor.visit_block(body);
         }
+        Stmt::For {
+            binding,
+            iterable,
+            body,
+            ..
+        } => {
+            visitor.visit_expr(iterable);
+            visitor.visit_for_binding(binding);
+            visitor.visit_block(body);
+        }
         Stmt::Break { .. } | Stmt::Continue { .. } => {}
         Stmt::Return { value, .. } => {
             if let Some(value) = value {
@@ -233,11 +245,6 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
         ExprKind::Record { fields, .. } => {
             for (_, value) in fields {
                 visitor.visit_expr(value);
-            }
-        }
-        ExprKind::Enum { payload, .. } => {
-            if let Some(payload) = payload {
-                visitor.visit_expr(payload);
             }
         }
         ExprKind::Match { value, arms } => {
@@ -362,6 +369,8 @@ pub trait Folder: Sized {
             self.fold_type_ref(annotation);
         }
     }
+
+    fn fold_for_binding(&mut self, _binding: &mut ForBinding) {}
 
     fn fold_block(&mut self, block: &mut Block) {
         walk_block_mut(self, block);
@@ -501,6 +510,16 @@ pub fn walk_stmt_mut<F: Folder>(folder: &mut F, statement: &mut Stmt) {
             folder.fold_expr(condition);
             folder.fold_block(body);
         }
+        Stmt::For {
+            binding,
+            iterable,
+            body,
+            ..
+        } => {
+            folder.fold_expr(iterable);
+            folder.fold_for_binding(binding);
+            folder.fold_block(body);
+        }
         Stmt::Break { .. } | Stmt::Continue { .. } => {}
         Stmt::Return { value, .. } => {
             if let Some(value) = value {
@@ -534,11 +553,6 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
         ExprKind::Record { fields, .. } => {
             for (_, value) in fields {
                 folder.fold_expr(value);
-            }
-        }
-        ExprKind::Enum { payload, .. } => {
-            if let Some(payload) = payload {
-                folder.fold_expr(payload);
             }
         }
         ExprKind::Match { value, arms } => {
@@ -649,9 +663,10 @@ mod tests {
 
     #[test]
     fn visitor_reaches_every_nested_expression_once() {
-        let parsed = crate::parse(NESTED_SOURCE).unwrap();
+        let tokens = crate::lex(NESTED_SOURCE, crate::SyntaxMode::Program).unwrap();
+        let parsed = crate::parser::parse(NESTED_SOURCE, tokens).unwrap();
         let mut visitor = ExpressionIds::default();
-        visitor.visit_program(parsed.syntax());
+        visitor.visit_program(&parsed);
 
         assert_eq!(visitor.ids.len(), 10);
         assert_eq!(
@@ -703,7 +718,8 @@ mod tests {
 
     #[test]
     fn folder_rewrites_nested_nodes_with_the_same_child_order() {
-        let mut syntax = crate::parse(NESTED_SOURCE).unwrap().into_syntax();
+        let tokens = crate::lex(NESTED_SOURCE, crate::SyntaxMode::Program).unwrap();
+        let mut syntax = crate::parser::parse(NESTED_SOURCE, tokens).unwrap();
         PrefixStrings.fold_program(&mut syntax);
 
         let mut strings = StringValues::default();

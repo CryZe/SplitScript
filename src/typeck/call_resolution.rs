@@ -129,19 +129,25 @@ impl Checker {
             return Some(result);
         }
 
-        if self.provider_value.is_some() && callee.first().is_some_and(|root| root == "process") {
-            let provider = self
-                .standard_library
-                .state_provider(self.provider_value.unwrap().0);
+        if let Some((active_provider, _)) = self.provider_value
+            && !matches!(self.callable, CallableContext::LibraryFunction(_))
+            && let Some(native_provider) = self.standard_library.source_state_provider()
+            && active_provider != native_provider.id
+            && callee
+                .first()
+                .is_some_and(|root| root == native_provider.value_name)
+        {
+            let provider = self.standard_library.state_provider(active_provider);
             self.error(
                 format!(
-                    "`process` is unavailable under `state {}`; use `{}` instead",
-                    provider.name, provider.value_name
+                    "`{}` is unavailable under `state {}`; use `{}` instead",
+                    native_provider.value_name, provider.name, provider.value_name
                 ),
                 span,
             );
             return None;
         }
+
         let standard_library = self.standard_library.clone();
         let mut function_candidates = standard_library.function_candidates(callee);
         if function_candidates.len() > 1 {
@@ -151,87 +157,135 @@ impl Checker {
         if let Some(candidate) = function_candidates.pop() {
             return self.catalog_call(&candidate, None, args, expected, expression, span);
         }
-        let (display_name, signature, parameters, resolved_call) = if let [name] = callee {
-            let Some(signature) = self.declarations.functions.get(name).cloned() else {
-                let suggestion = self.function_name_suggestion(callee);
-                self.unknown_function(callee, name_span, span, suggestion.as_deref());
-                return None;
+        let (display_name, signature_id, signature_result, parameters, resolved_call) =
+            if let [name] = callee {
+                let Some(signature) = self.declarations.functions.get(name).cloned() else {
+                    let suggestion = self.function_name_suggestion(callee);
+                    self.unknown_function(callee, name_span, span, suggestion.as_deref());
+                    return None;
+                };
+                let signature = if self.active_function_component.contains(&signature.id) {
+                    signature.monomorphic_call()
+                } else {
+                    signature.instantiate(&mut self.inference)
+                };
+                let concrete_signature = signature
+                    .params
+                    .iter()
+                    .copied()
+                    .chain([signature.result])
+                    .collect();
+                (
+                    name.clone(),
+                    signature.id,
+                    signature.result,
+                    signature.params,
+                    PendingResolvedCall::UserFunction {
+                        function: signature.id,
+                        type_arguments: signature.type_arguments,
+                        signature: concrete_signature,
+                    },
+                )
+            } else {
+                if let Some(suggestion) = self.function_name_suggestion(callee) {
+                    self.unknown_function(callee, name_span, span, Some(&suggestion));
+                    return None;
+                }
+                let typed_method = if callee.len() >= 3 {
+                    let selector = callee.last().unwrap();
+                    let method = &callee[callee.len() - 2];
+                    let candidates =
+                        standard_library.method_candidates_with_selector(method, Some(selector));
+                    (!candidates.is_empty()).then_some((
+                        method,
+                        selector,
+                        &callee[..callee.len() - 2],
+                    ))
+                } else {
+                    None
+                };
+                let (method, receiver_path, selector) =
+                    if let Some((method, selector, receiver)) = typed_method {
+                        (method, receiver, Some(selector.as_str()))
+                    } else {
+                        let (method, receiver) = callee.split_last().unwrap();
+                        (method, receiver, None)
+                    };
+                let receiver = self.path(receiver_path, span, None)?;
+                let receiver_value = receiver
+                    .value
+                    .expect("method receiver paths resolve to a declaration or snapshot value");
+                let receiver_members = receiver
+                    .members
+                    .expect("method receiver types must be known while resolving a call");
+                let receiver_type = self.shallow_type(receiver.ty);
+                let mut candidates = standard_library
+                    .method_candidates_with_selector(method, selector)
+                    .into_iter()
+                    .filter(|candidate| self.catalog_candidate_may_apply(candidate, receiver_type))
+                    .collect::<Vec<_>>();
+                if candidates.len() > 1 {
+                    self.ambiguous_catalog_call(callee, &candidates, span);
+                    return None;
+                }
+                if let Some(candidate) = candidates.pop() {
+                    return self.catalog_call(
+                        &candidate,
+                        Some(MethodReceiver {
+                            ty: receiver_type,
+                            value: receiver_value,
+                            members: receiver_members,
+                        }),
+                        args,
+                        expected,
+                        expression,
+                        span,
+                    );
+                }
+                let Some(signature) = self
+                    .declarations
+                    .methods
+                    .get(&(receiver_type, method.clone()))
+                    .cloned()
+                else {
+                    let suggestion = self.method_name_suggestion(receiver_type, method);
+                    self.unknown_method(
+                        receiver_type,
+                        method,
+                        name_span,
+                        span,
+                        suggestion.as_deref(),
+                    );
+                    return None;
+                };
+                let signature = if self.active_function_component.contains(&signature.id) {
+                    signature.monomorphic_call()
+                } else {
+                    signature.instantiate(&mut self.inference)
+                };
+                let receiver_name = self.type_name(receiver_type);
+                let concrete_signature = signature
+                    .params
+                    .iter()
+                    .copied()
+                    .chain([signature.result])
+                    .collect();
+                (
+                    format!("{receiver_name}.{method}"),
+                    signature.id,
+                    signature.result,
+                    signature.params.into_iter().skip(1).collect(),
+                    PendingResolvedCall::UserMethod {
+                        function: signature.id,
+                        type_arguments: signature.type_arguments,
+                        signature: concrete_signature,
+                        receiver: receiver_value,
+                        receiver_type,
+                        receiver_members,
+                    },
+                )
             };
-            (
-                name.clone(),
-                signature.clone(),
-                signature.params,
-                PendingResolvedCall::UserFunction {
-                    function: signature.id,
-                },
-            )
-        } else {
-            if let Some(suggestion) = self.function_name_suggestion(callee) {
-                self.unknown_function(callee, name_span, span, Some(&suggestion));
-                return None;
-            }
-            let (method, receiver_path) = callee.split_last().unwrap();
-            let receiver = self.path(receiver_path, span, None)?;
-            let receiver_value = receiver
-                .value
-                .expect("method receiver paths resolve to a declaration or snapshot value");
-            let receiver_members = receiver
-                .members
-                .expect("method receiver types must be known while resolving a call");
-            let receiver_type = self.shallow_type(receiver.ty);
-            let mut candidates = standard_library
-                .method_candidates(method)
-                .into_iter()
-                .filter(|candidate| self.catalog_candidate_may_apply(candidate, receiver_type))
-                .collect::<Vec<_>>();
-            if candidates.len() > 1 {
-                self.ambiguous_catalog_call(callee, &candidates, span);
-                return None;
-            }
-            if let Some(candidate) = candidates.pop() {
-                return self.catalog_call(
-                    &candidate,
-                    Some(MethodReceiver {
-                        ty: receiver_type,
-                        value: receiver_value,
-                        members: receiver_members,
-                    }),
-                    args,
-                    expected,
-                    expression,
-                    span,
-                );
-            }
-            let Some(signature) = self
-                .declarations
-                .methods
-                .get(&(receiver_type, method.clone()))
-                .cloned()
-            else {
-                let suggestion = self.method_name_suggestion(receiver_type, method);
-                self.unknown_method(
-                    receiver_type,
-                    method,
-                    name_span,
-                    span,
-                    suggestion.as_deref(),
-                );
-                return None;
-            };
-            let receiver_name = self.type_name(receiver_type);
-            (
-                format!("{receiver_name}.{method}"),
-                signature.clone(),
-                signature.params.into_iter().skip(1).collect(),
-                PendingResolvedCall::UserMethod {
-                    function: signature.id,
-                    receiver: receiver_value,
-                    receiver_type,
-                    receiver_members,
-                },
-            )
-        };
-        if self.declarations.debug_functions.contains(&signature.id)
+        if self.declarations.debug_functions.contains(&signature_id)
             && !self.debug_context.is_debug()
         {
             self.error(
@@ -253,7 +307,7 @@ impl Checker {
         for (argument, parameter) in args.iter().zip(parameters) {
             self.expr(argument, Some(parameter));
         }
-        let result = self.expect_expression(expression, signature.result, expected, span)?;
+        let result = self.expect_expression(expression, signature_result, expected, span)?;
         self.semantics.resolve_call(expression, resolved_call);
         Some(result)
     }
@@ -290,7 +344,7 @@ impl Checker {
         let standard_library = self.standard_library.clone();
         let mut candidates = Vec::new();
         for item in standard_library.items() {
-            let ItemKind::Method { .. } = item.kind else {
+            let (ItemKind::Method { .. } | ItemKind::TypedMethod { .. }) = item.kind else {
                 continue;
             };
             let candidate = CallCandidate {
@@ -402,6 +456,7 @@ impl Checker {
         if item.id == StdlibItemId::ProcessRead && candidate.type_arguments.is_empty() {
             self.inferred_process_reads.push((variables["T"], span));
         }
+        let mut concrete_signature = Vec::new();
         if let Some(receiver) = &receiver {
             let declared_receiver = self.catalog_type(
                 candidate
@@ -410,6 +465,7 @@ impl Checker {
                 &variables,
             );
             self.unify(receiver.ty, declared_receiver, span)?;
+            concrete_signature.push(declared_receiver);
         }
         let expected_result = expected.map(|ty| self.shallow_type(ty));
         let result_type = if let (Some(value), Some(Type::Result(result))) = (
@@ -440,8 +496,10 @@ impl Checker {
             let parameter_type = self.catalog_type(parameter.ty, &variables);
             self.expr(argument, Some(parameter_type));
             self.validate_catalog_argument(argument, parameter.rule, item);
+            concrete_signature.push(parameter_type);
         }
-        let operation = item.operation_semantics();
+        concrete_signature.push(result_type);
+        let operation = self.standard_library.operation_semantics(item.id);
         if operation.availability == Availability::OnAttach
             && !(self.expression_mode == ExpressionMode::SuspensionOperand
                 && matches!(self.callable, CallableContext::Action(ActionKind::OnAttach)))
@@ -462,6 +520,7 @@ impl Checker {
             PendingResolvedCall::StandardLibrary {
                 item: item.id,
                 type_arguments,
+                signature: concrete_signature,
                 receiver: receiver.as_ref().map(|receiver| receiver.value),
                 receiver_type: receiver.as_ref().map(|receiver| receiver.ty),
                 receiver_members: receiver
@@ -674,6 +733,29 @@ impl Checker {
                 Some(PathResolution {
                     ty,
                     value: Some(ResolvedValue::ProviderValue(provider)),
+                    members,
+                })
+            }
+            [name, fields @ ..]
+                if matches!(self.callable, CallableContext::LibraryFunction(_))
+                    && self
+                        .standard_library
+                        .state_providers()
+                        .iter()
+                        .any(|provider| provider.value_name == name) =>
+            {
+                let provider = self
+                    .standard_library
+                    .state_providers()
+                    .iter()
+                    .find(|provider| provider.value_name == name)
+                    .expect("provider value name was discovered above");
+                let provider_type = self.standard_type(provider.process_type);
+                let (ty, members) =
+                    self.resolve_members_or_defer(provider_type, fields, span, expression)?;
+                Some(PathResolution {
+                    ty,
+                    value: Some(ResolvedValue::ProviderValue(provider.id)),
                     members,
                 })
             }
@@ -942,7 +1024,11 @@ impl Checker {
         match ty {
             Type::Array(array) => {
                 let element = self.inference.array_element(array);
-                format!("Array<{}>", self.type_name(element))
+                let element = self.type_name(element);
+                match self.inference.array_length(array) {
+                    Some(length) => format!("[{element}; {length}]"),
+                    None => format!("[{element}]"),
+                }
             }
             Type::Option(option) => {
                 let value = self.inference.option_value(option);

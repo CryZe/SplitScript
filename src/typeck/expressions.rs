@@ -8,9 +8,10 @@ use crate::{
         UnaryOp,
     },
     inference::{Requirements, Type},
-    semantic::ResolvedWrapperPattern,
+    semantic::{ResolvedRecordFieldId, ResolvedRecordId, ResolvedWrapperPattern},
     signature::parse_signature,
-    stdlib::{StdlibCapabilityId, StdlibTypeId},
+    stdlib::{RuntimeRepresentation, StdlibCapabilityId, StdlibOwner, StdlibTypeId},
+    types::EnumTypeId,
 };
 
 use super::{Checker, context::NonePolicy, declarations::Binding};
@@ -121,112 +122,148 @@ impl Checker {
                     let id = self.array_type_id(element);
                     (id, element)
                 } else {
-                    self.error(
-                        "an empty array needs an `Array<T>` type annotation",
-                        expr.span,
-                    );
+                    self.error("an empty array needs a `[T]` type annotation", expr.span);
                     return None;
                 };
+                if let Some(expected_length) = self.inference.array_length(id)
+                    && elements.len() != expected_length as usize
+                {
+                    self.error(
+                        format!(
+                            "expected {expected_length} array elements, found {}",
+                            elements.len()
+                        ),
+                        expr.span,
+                    );
+                }
                 for element in elements {
                     self.expr(element, Some(element_type));
                 }
                 self.expect_expression(expr.id, Type::Array(id), expected, expr.span)?
             }
             ExprKind::Record { name, fields, .. } => {
-                let Some(declaration) = self
+                let declaration = self
                     .declarations
                     .records
                     .iter()
                     .find(|declaration| declaration.name == *name)
-                    .cloned()
-                else {
-                    self.error(format!("unknown record type `{name}`"), expr.span);
-                    return None;
-                };
-                self.semantics
-                    .resolve_record_literal(expr.id, declaration.id);
-                let mut seen = HashSet::new();
-                let mut resolved_fields = Vec::with_capacity(fields.len());
-                for (name, value) in fields {
-                    if !seen.insert(name.clone()) {
-                        self.error(format!("duplicate record field `{name}`"), value.span);
-                        continue;
+                    .cloned();
+                if let Some(declaration) = declaration {
+                    self.semantics
+                        .resolve_record_literal(expr.id, ResolvedRecordId::Source(declaration.id));
+                    let mut seen = HashSet::new();
+                    let mut resolved_fields = Vec::with_capacity(fields.len());
+                    for (name, value) in fields {
+                        if !seen.insert(name.clone()) {
+                            self.error(format!("duplicate record field `{name}`"), value.span);
+                            continue;
+                        }
+                        if let Some(field) =
+                            declaration.fields.iter().find(|field| field.name == *name)
+                        {
+                            self.expr(value, Some(self.syntax_type(field.ty)));
+                            resolved_fields.push(ResolvedRecordFieldId::Source(field.id));
+                        } else {
+                            self.expr(value, None);
+                            self.error(
+                                format!("record `{}` has no field `{name}`", declaration.name),
+                                value.span,
+                            );
+                        }
                     }
-                    if let Some(field) = declaration.fields.iter().find(|field| field.name == *name)
+                    self.semantics
+                        .resolve_record_literal_fields(expr.id, resolved_fields);
+                    for field in &declaration.fields {
+                        if !seen.contains(&field.name) {
+                            self.error(
+                                format!(
+                                    "record `{}` initializer is missing field `{}`",
+                                    declaration.name, field.name
+                                ),
+                                expr.span,
+                            );
+                        }
+                    }
+                    self.expect_expression(
+                        expr.id,
+                        self.record_type(declaration.id),
+                        expected,
+                        expr.span,
+                    )?
+                } else if let Some(declaration) = self.standard_library.type_by_name(name).copied()
+                {
+                    let owns_type = matches!(
+                        &self.callable,
+                        super::context::CallableContext::LibraryFunction(item)
+                            if self.standard_library.item(*item).owner
+                                == StdlibOwner::Type(declaration.id)
+                    );
+                    if !owns_type
+                        || !matches!(
+                            declaration.representation,
+                            RuntimeRepresentation::GcStruct { .. }
+                        )
                     {
-                        self.expr(value, Some(self.syntax_type(field.ty)));
-                        resolved_fields.push(field.id);
-                    } else {
-                        self.expr(value, None);
-                        self.error(
-                            format!("record `{}` has no field `{name}`", declaration.name),
-                            value.span,
-                        );
-                    }
-                }
-                self.semantics
-                    .resolve_record_literal_fields(expr.id, resolved_fields);
-                for field in &declaration.fields {
-                    if !seen.contains(&field.name) {
                         self.error(
                             format!(
-                                "record `{}` initializer is missing field `{}`",
-                                declaration.name, field.name
+                                "standard-library type `{name}` can only be constructed by its own library methods"
                             ),
                             expr.span,
                         );
+                        return None;
                     }
-                }
-                self.expect_expression(
-                    expr.id,
-                    self.record_type(declaration.id),
-                    expected,
-                    expr.span,
-                )?
-            }
-            ExprKind::Enum {
-                enumeration,
-                variant,
-                payload,
-            } => {
-                let Some(enumeration) = enumeration.resolved() else {
-                    self.error("unresolved enum type", expr.span);
-                    return None;
-                };
-                let Some(declaration) = self.enum_info(enumeration) else {
-                    self.error("unknown enum type", expr.span);
-                    return None;
-                };
-                let Some(declared_variant) = declaration
-                    .variants
-                    .iter()
-                    .find(|declared| declared.name == *variant)
-                else {
-                    self.error(
-                        format!("enum `{}` has no variant `{variant}`", declaration.name),
-                        expr.span,
+                    self.semantics.resolve_record_literal(
+                        expr.id,
+                        ResolvedRecordId::Standard(declaration.id),
                     );
+                    let declared_fields = self
+                        .standard_library
+                        .fields_of(declaration.id)
+                        .copied()
+                        .collect::<Vec<_>>();
+                    let mut seen = HashSet::new();
+                    let mut resolved_fields = Vec::with_capacity(fields.len());
+                    for (name, value) in fields {
+                        if !seen.insert(name.clone()) {
+                            self.error(format!("duplicate record field `{name}`"), value.span);
+                            continue;
+                        }
+                        if let Some(field) =
+                            declared_fields.iter().find(|field| field.name == *name)
+                        {
+                            self.expr(value, Some(self.declared_type(field.ty)));
+                            resolved_fields.push(ResolvedRecordFieldId::Standard(field.id));
+                        } else {
+                            self.expr(value, None);
+                            self.error(
+                                format!("record `{}` has no field `{name}`", declaration.name),
+                                value.span,
+                            );
+                        }
+                    }
+                    self.semantics
+                        .resolve_record_literal_fields(expr.id, resolved_fields);
+                    for field in &declared_fields {
+                        if !seen.contains(field.name) {
+                            self.error(
+                                format!(
+                                    "record `{}` initializer is missing field `{}`",
+                                    declaration.name, field.name
+                                ),
+                                expr.span,
+                            );
+                        }
+                    }
+                    self.expect_expression(
+                        expr.id,
+                        self.standard_type(declaration.id),
+                        expected,
+                        expr.span,
+                    )?
+                } else {
+                    self.error(format!("unknown record type `{name}`"), expr.span);
                     return None;
-                };
-                self.semantics
-                    .resolve_enum_variant(expr.id, declared_variant.id);
-                match (declared_variant.payload, payload) {
-                    (Some(payload_type), Some(payload)) => {
-                        self.expr(payload, Some(payload_type));
-                    }
-                    (Some(_), None) => {
-                        self.error(format!("variant `{variant}` requires a payload"), expr.span)
-                    }
-                    (None, Some(payload)) => {
-                        self.expr(payload, None);
-                        self.error(
-                            format!("variant `{variant}` does not accept a payload"),
-                            expr.span,
-                        );
-                    }
-                    (None, None) => {}
                 }
-                self.expect_expression(expr.id, self.enum_type(enumeration), expected, expr.span)?
             }
             ExprKind::Match { value, arms } => {
                 let value_type = self.expr(value, None)?;
@@ -240,11 +277,10 @@ impl Checker {
                     self.scopes.push(HashMap::new());
                     let pattern_key = match &arm.pattern {
                         MatchPattern::Enum {
-                            enumeration,
-                            variant,
-                            binding,
+                            variant, binding, ..
                         } => {
-                            let Some(enumeration) = enumeration.resolved() else {
+                            let Some(enumeration) = self.resolutions.pattern_enum(arm.pattern_id)
+                            else {
                                 self.error("unresolved enum type", arm.span);
                                 self.scopes.pop();
                                 continue;
@@ -586,14 +622,21 @@ impl Checker {
                 self.expect_expression(expr.id, value_type, expected, expr.span)?
             }
             ExprKind::Path(path) => {
-                let resolution = self.path(path, expr.span, Some(expr.id))?;
-                if let Some(value) = resolution.value {
-                    self.semantics.resolve_value(expr.id, value);
+                if let Some(enumeration) = self.resolutions.expression_enum(expr.id) {
+                    let [_, variant] = path.as_slice() else {
+                        unreachable!("resolved enum paths have two segments")
+                    };
+                    self.enum_constructor(expr.id, enumeration, variant, &[], expected, expr.span)?
+                } else {
+                    let resolution = self.path(path, expr.span, Some(expr.id))?;
+                    if let Some(value) = resolution.value {
+                        self.semantics.resolve_value(expr.id, value);
+                    }
+                    if let Some(members) = resolution.members {
+                        self.semantics.resolve_path_members(expr.id, members);
+                    }
+                    self.expect_expression(expr.id, resolution.ty, expected, expr.span)?
                 }
-                if let Some(members) = resolution.members {
-                    self.semantics.resolve_path_members(expr.id, members);
-                }
-                self.expect_expression(expr.id, resolution.ty, expected, expr.span)?
             }
             ExprKind::Member {
                 receiver,
@@ -667,10 +710,65 @@ impl Checker {
                 callee,
                 name_span,
                 args,
-            } => self.call(callee, *name_span, args, expected, expr.id, expr.span)?,
+            } => {
+                if let Some(enumeration) = self.resolutions.expression_enum(expr.id) {
+                    let [_, variant] = callee.as_slice() else {
+                        unreachable!("resolved enum constructors have two segments")
+                    };
+                    self.enum_constructor(expr.id, enumeration, variant, args, expected, expr.span)?
+                } else {
+                    self.call(callee, *name_span, args, expected, expr.id, expr.span)?
+                }
+            }
         };
         self.semantics.resolve_expression_type(expr.id, ty);
         Some(ty)
+    }
+
+    fn enum_constructor(
+        &mut self,
+        expression: ExprId,
+        enumeration: EnumTypeId,
+        variant: &str,
+        arguments: &[Expr],
+        expected: Option<Type>,
+        span: Span,
+    ) -> Option<Type> {
+        let Some(declaration) = self.enum_info(enumeration) else {
+            self.error("unknown enum type", span);
+            return None;
+        };
+        let Some(declared_variant) = declaration
+            .variants
+            .iter()
+            .find(|declared| declared.name == variant)
+        else {
+            self.error(
+                format!("enum `{}` has no variant `{variant}`", declaration.name),
+                span,
+            );
+            return None;
+        };
+        self.semantics
+            .resolve_enum_variant(expression, declared_variant.id);
+        match (declared_variant.payload, arguments.first()) {
+            (Some(payload_type), Some(payload)) => {
+                self.expr(payload, Some(payload_type));
+            }
+            (Some(_), None) => self.error(format!("variant `{variant}` requires a payload"), span),
+            (None, Some(payload)) => {
+                self.expr(payload, None);
+                self.error(
+                    format!("variant `{variant}` does not accept a payload"),
+                    span,
+                );
+            }
+            (None, None) => {}
+        }
+        for extra in arguments.iter().skip(1) {
+            self.expr(extra, None);
+        }
+        self.expect_expression(expression, self.enum_type(enumeration), expected, span)
     }
 
     pub(super) fn binary(

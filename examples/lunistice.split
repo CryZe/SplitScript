@@ -17,7 +17,7 @@ state ["Lunistice.exe", "Lunistice-Demo.exe"] {
     points = process.read(gameManagerInstance.offset(pointsOffset))
     deaths = process.read(gameManagerInstance.offset(deathsOffset))
     levelOrScene = if isDlcDemo {
-        LevelOrScene.Scene(process.read.managedString(
+        LevelOrScene.Scene(process.readManagedString(
             process.read(gameManagerInstance.offset(levelOrSceneOffset))?,
             16
         )?)
@@ -124,7 +124,6 @@ fn characterName(character, dlcDemo) {
         _ => "Unknown"
     }
 }
-
 
 onDetached {
     setTickRate(1.0)

@@ -1,8 +1,11 @@
 //! Blocks, statements, bindings, and statement-local control flow.
 
+//! Statement grammar.
+
 use super::{
-    Block, Diagnostic, Parser, RecoveryNode, RecoveryNodeKind, Span, Stmt, SuspensionBinding,
-    SuspensionMode, TokenKind, VariableDecl, assignment_operator, statement_span,
+    Block, Diagnostic, ForBinding, Parser, RecoveryNode, RecoveryNodeKind, Span, Stmt,
+    SuspensionBinding, SuspensionMode, TokenKind, VariableDecl, assignment_operator,
+    statement_span,
 };
 
 impl Parser<'_> {
@@ -10,7 +13,7 @@ impl Parser<'_> {
         let start = self
             .expect(TokenKind::LBrace, "expected `{` to start a block")?
             .start;
-        let block_depth = self.brace_depth_before(self.pos);
+        let block_depth = self.brace_depth_before(self.cursor.position());
         let mut statements = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -28,7 +31,7 @@ impl Parser<'_> {
                     },
                 });
             }
-            let statement_start = self.pos;
+            let statement_start = self.cursor.position();
             match self.statement() {
                 Ok(statement) => {
                     // Error expressions can deliberately stop before a token
@@ -38,10 +41,10 @@ impl Parser<'_> {
                     // allow a successfully recovered statement to leave the
                     // block parser at the same token: doing so would append
                     // error nodes forever.
-                    if self.pos == statement_start {
+                    if self.cursor.position() == statement_start {
                         let skipped_start = self.current().span.start;
                         self.synchronize_statement(statement_start, block_depth);
-                        if self.pos == statement_start
+                        if self.cursor.position() == statement_start
                             && !self.at(&TokenKind::Eof)
                             && !self.at(&TokenKind::RBrace)
                         {
@@ -62,7 +65,7 @@ impl Parser<'_> {
                         });
                     }
                     self.diagnostics.push(error);
-                    let skipped_start = self.tokens[statement_start].span.start;
+                    let skipped_start = self.cursor.tokens()[statement_start].span.start;
                     self.synchronize_statement(statement_start, block_depth);
                     let skipped_end = self.current().span.start.max(skipped_start);
                     if skipped_end != skipped_start {
@@ -119,6 +122,26 @@ impl Parser<'_> {
             let end = body.span.end;
             return Ok(Stmt::While {
                 condition,
+                body,
+                span: Span { start, end },
+            });
+        }
+        if self.eat_ident("for").is_some() {
+            let start = self.previous().span.start;
+            let (name, name_span) = self.expect_any_ident("expected a binding after `for`")?;
+            self.expect_ident("in")?;
+            let iterable = self.root_expression();
+            let body = self.block()?;
+            let end = body.span.end;
+            return Ok(Stmt::For {
+                binding: ForBinding {
+                    id: self.new_value_id(),
+                    name,
+                    span: name_span,
+                },
+                iterable_value: self.new_value_id(),
+                index_value: self.new_value_id(),
+                iterable,
                 body,
                 span: Span { start, end },
             });

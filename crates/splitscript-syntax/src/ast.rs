@@ -1,12 +1,6 @@
 use std::fmt;
 
-use crate::stdlib::{CoreTypeId, StandardLibrary, StdlibStateProviderId, StdlibTypeId};
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
-}
+pub use crate::{PrimitiveType, Span};
 
 /// Stable identity for an expression in one parsed program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -92,45 +86,11 @@ impl EnumId {
     }
 }
 
-/// Identity of an enum referenced by source syntax. Source enums use their
-/// per-program declaration ID, while standard-library enums retain their
-/// catalog identity without synthesizing an AST declaration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum EnumTypeId {
-    Source(EnumId),
-    Standard(StdlibTypeId),
-}
-
-/// An enum name as it moves from syntax into declaration resolution.
+/// An enum name written in source syntax.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EnumReference {
-    Named { name: String, span: Span },
-    Resolved(EnumTypeId),
-}
-
-impl EnumReference {
-    pub fn resolved(&self) -> Option<EnumTypeId> {
-        match self {
-            Self::Named { .. } => None,
-            Self::Resolved(enumeration) => Some(*enumeration),
-        }
-    }
-
-    pub fn source(&self) -> Option<EnumId> {
-        match self.resolved() {
-            Some(EnumTypeId::Source(enumeration)) => Some(enumeration),
-            Some(EnumTypeId::Standard(_)) | None => None,
-        }
-    }
-}
-
-impl fmt::Display for EnumTypeId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Source(id) => id.fmt(formatter),
-            Self::Standard(id) => StandardLibrary::new().type_decl(*id).name.fmt(formatter),
-        }
-    }
+pub struct EnumReference {
+    pub name: String,
+    pub span: Span,
 }
 
 /// Stable identity for an array layout in one parsed program.
@@ -271,15 +231,6 @@ impl TypeNameId {
 
 display_stable_id!(TypeNameId);
 
-impl Span {
-    pub fn join(self, other: Self) -> Self {
-        Self {
-            start: self.start.min(other.start),
-            end: self.end.max(other.end),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct Program {
     pub type_names: Vec<String>,
@@ -302,6 +253,18 @@ pub struct Program {
 }
 
 impl Program {
+    /// Iterates nominal type names together with their stable syntax identity
+    /// and source span.
+    pub fn type_names(&self) -> impl Iterator<Item = (TypeNameId, &str, Span)> {
+        self.type_names
+            .iter()
+            .zip(&self.type_name_spans)
+            .enumerate()
+            .map(|(index, (name, span))| {
+                (TypeNameId::from_index(index as u32), name.as_str(), *span)
+            })
+    }
+
     pub fn type_name(&self, id: TypeNameId) -> &str {
         &self.type_names[id.index()]
     }
@@ -311,10 +274,55 @@ impl Program {
     }
 }
 
+/// Allocates constructed-type identities in the shared per-program ID space.
+///
+/// Parsing reserves identities for written type expressions. Type inference
+/// may then append layouts that arise only through inference. Keeping this
+/// allocation behind one owner prevents compiler stages from fabricating raw
+/// syntax IDs independently.
+#[derive(Debug, Clone)]
+pub struct ConstructedTypeIdAllocator {
+    next: u32,
+}
+
+impl ConstructedTypeIdAllocator {
+    pub fn starting_at(next: u32) -> Self {
+        Self { next }
+    }
+
+    pub fn array(&mut self) -> ArrayTypeId {
+        ArrayTypeId::from_index(self.take())
+    }
+
+    pub fn option(&mut self) -> OptionTypeId {
+        OptionTypeId::from_index(self.take())
+    }
+
+    pub fn result(&mut self) -> ResultTypeId {
+        ResultTypeId::from_index(self.take())
+    }
+
+    pub fn next_index(&self) -> u32 {
+        self.next
+    }
+
+    fn take(&mut self) -> u32 {
+        let current = self.next;
+        self.next = self
+            .next
+            .checked_add(1)
+            .expect("a program cannot contain more than u32::MAX constructed types");
+        current
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ArrayTypeDecl {
     pub id: ArrayTypeId,
     pub element: TypeRef,
+    /// An exact element count for `[T; N]`, or `None` for the general `[T]`
+    /// array type.
+    pub length: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -400,7 +408,6 @@ pub struct StateDecl {
 pub struct StateProviderRef {
     pub name: String,
     pub span: Span,
-    pub resolved: Option<StdlibStateProviderId>,
 }
 
 #[derive(Debug, Clone)]
@@ -423,6 +430,18 @@ pub enum StateSource {
 pub struct PointerPath {
     pub module: Option<String>,
     pub offsets: Vec<u64>,
+    pub decoder: Option<StateMemoryDecoder>,
+}
+
+/// A bounded interpretation applied after resolving a state pointer path.
+///
+/// The ordinary expression API exposes the same operation directly. This is
+/// only compact state-layout syntax; it is not a separate string type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateMemoryDecoder {
+    /// Reads at most `max_bytes`, stops at the first NUL byte, and requires
+    /// the resulting bytes to be valid UTF-8.
+    Utf8 { max_bytes: u32, span: Span },
 }
 
 #[derive(Debug, Clone)]
@@ -433,20 +452,6 @@ pub struct SettingDecl {
     pub tooltip: Option<String>,
     pub kind: SettingKind,
     pub span: Span,
-}
-
-impl SettingDecl {
-    pub fn value_type(&self) -> Option<TypeRef> {
-        match &self.kind {
-            SettingKind::Bool { .. } => Some(TypeRef::core(CoreTypeId::Bool)),
-            SettingKind::Choice { enumeration, .. } => match enumeration.resolved()? {
-                EnumTypeId::Source(enumeration) => Some(TypeRef::Enum(enumeration)),
-                EnumTypeId::Standard(enumeration) => Some(TypeRef::Standard(enumeration)),
-            },
-            SettingKind::File { .. } => Some(TypeRef::Standard(StdlibTypeId::String)),
-            SettingKind::Title { .. } => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -535,18 +540,6 @@ impl ActionKind {
             Self::GameTime => "gameTime",
         }
     }
-
-    pub fn return_type(self) -> TypeRef {
-        match self {
-            Self::OnDetached | Self::OnAttach | Self::WhileAttached => {
-                TypeRef::core(CoreTypeId::Void)
-            }
-            Self::Start | Self::Split | Self::Reset | Self::IsLoading => {
-                TypeRef::core(CoreTypeId::Bool)
-            }
-            Self::GameTime => TypeRef::Standard(StdlibTypeId::Duration),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -584,6 +577,17 @@ pub enum Stmt {
     },
     While {
         condition: Expr,
+        body: Block,
+        span: Span,
+    },
+    For {
+        binding: ForBinding,
+        /// Compiler-owned storage for the iterable, which guarantees that the
+        /// source expression is evaluated exactly once.
+        iterable_value: ValueId,
+        /// Compiler-owned `u32` index storage used by lowering.
+        index_value: ValueId,
+        iterable: Expr,
         body: Block,
         span: Span,
     },
@@ -625,6 +629,13 @@ pub struct SuspensionBinding {
 }
 
 #[derive(Debug, Clone)]
+pub struct ForBinding {
+    pub id: ValueId,
+    pub name: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
 pub struct Expr {
     pub id: ExprId,
     pub kind: ExprKind,
@@ -656,11 +667,6 @@ pub enum ExprKind {
         name: String,
         name_span: Span,
         fields: Vec<(String, Expr)>,
-    },
-    Enum {
-        enumeration: EnumReference,
-        variant: String,
-        payload: Option<Box<Expr>>,
     },
     Match {
         value: Box<Expr>,
@@ -789,13 +795,10 @@ pub enum BinaryOp {
 /// inference variables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TypeRef {
-    Core(CoreTypeId),
+    Core(PrimitiveType),
     /// A source-written nominal type name. Standard-library identity is
     /// resolved after parsing rather than embedded into syntax.
     Named(TypeNameId),
-    Standard(StdlibTypeId),
-    Record(RecordId),
-    Enum(EnumId),
     /// IDs into the parsed program's interned constructed type-expression
     /// tables. Allocating these while parsing preserves syntax sharing without
     /// performing semantic type inference or layout allocation.
@@ -805,11 +808,11 @@ pub enum TypeRef {
 }
 
 impl TypeRef {
-    pub const fn core(core: CoreTypeId) -> Self {
+    pub const fn core(core: PrimitiveType) -> Self {
         Self::Core(core)
     }
 
-    pub fn core_type(self) -> Option<CoreTypeId> {
+    pub fn core_type(self) -> Option<PrimitiveType> {
         match self {
             Self::Core(core) => Some(core),
             _ => None,
@@ -817,18 +820,11 @@ impl TypeRef {
     }
 
     pub fn parse(name: &str) -> Option<Self> {
-        CoreTypeId::parse(name).map(Self::Core)
+        PrimitiveType::parse(name).map(Self::Core)
     }
 
     pub fn is_integer(self) -> bool {
-        self.core_type().is_some_and(CoreTypeId::is_integer)
-    }
-
-    pub fn standard_type(self) -> Option<StdlibTypeId> {
-        match self {
-            Self::Standard(id) => Some(id),
-            _ => None,
-        }
+        self.core_type().is_some_and(PrimitiveType::is_integer)
     }
 }
 
@@ -837,11 +833,6 @@ impl fmt::Display for TypeRef {
         match self {
             Self::Core(core) => core.fmt(f),
             Self::Named(id) => write!(f, "type-name#{id}"),
-            Self::Standard(standard) => {
-                f.write_str(StandardLibrary::new().type_decl(*standard).name)
-            }
-            Self::Record(id) => write!(f, "record#{id}"),
-            Self::Enum(id) => write!(f, "enum#{id}"),
             Self::Array(id) => write!(f, "Array#{id}"),
             Self::Option(id) => write!(f, "Option#{id}"),
             Self::Result(id) => write!(f, "Result#{id}"),

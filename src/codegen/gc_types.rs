@@ -6,9 +6,10 @@ use wasm_encoder::{
 };
 
 use crate::{
-    ast::{ArrayTypeDecl, EnumDecl, OptionTypeDecl, Program, ResultTypeDecl},
+    ast::{EnumDecl, Program},
     semantic::SemanticModel,
     stdlib::{DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibTypeId},
+    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType},
 };
 
 use super::{
@@ -28,9 +29,9 @@ pub(super) struct Inputs<'a> {
     pub semantics: &'a SemanticModel,
     pub async_layout: Option<&'a AsyncFrameLayout>,
     pub enums: &'a [EnumDecl],
-    pub array_types: &'a [ArrayTypeDecl],
-    pub option_types: &'a [OptionTypeDecl],
-    pub result_types: &'a [ResultTypeDecl],
+    pub array_types: &'a [ResolvedArrayType],
+    pub option_types: &'a [ResolvedOptionType],
+    pub result_types: &'a [ResolvedResultType],
     pub reachability: &'a reachability::Reachability,
 }
 
@@ -152,82 +153,116 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         },
     });
     for ty in layout.dynamic_types() {
-        let inner = match ty {
+        let (inner, is_final, supertype_idx) = match ty {
             Type::Record(id) => {
                 let record = program
                     .records
                     .iter()
                     .find(|record| record.id == id)
                     .expect("reachable record layouts have declarations");
-                CompositeInnerType::Struct(StructType {
-                    fields: record
-                        .fields
-                        .iter()
-                        .map(|field| FieldType {
-                            element_type: layout
-                                .storage_type(record_field_type(field.id, semantics)),
-                            mutable: false,
-                        })
-                        .collect(),
-                })
+                (
+                    CompositeInnerType::Struct(StructType {
+                        fields: record
+                            .fields
+                            .iter()
+                            .map(|field| FieldType {
+                                element_type: layout
+                                    .storage_type(record_field_type(field.id, semantics)),
+                                mutable: false,
+                            })
+                            .collect(),
+                    }),
+                    true,
+                    None,
+                )
             }
             Type::Enum(id) => {
                 let enumeration = enums
                     .iter()
                     .find(|enumeration| enumeration.id == id)
                     .expect("reachable enum layouts have declarations");
-                CompositeInnerType::Struct(StructType {
-                    fields: std::iter::once(FieldType {
-                        element_type: StorageType::Val(ValType::I32),
-                        mutable: false,
-                    })
-                    .chain(enumeration.variants.iter().map(|variant| {
-                        FieldType {
-                            element_type: enum_variant_payload(variant.id, semantics)
-                                .map_or(StorageType::Val(ValType::I32), |ty| {
-                                    layout.storage_type(ty)
-                                }),
+                (
+                    CompositeInnerType::Struct(StructType {
+                        fields: std::iter::once(FieldType {
+                            element_type: StorageType::Val(ValType::I32),
                             mutable: false,
-                        }
-                    }))
-                    .collect(),
-                })
+                        })
+                        .chain(enumeration.variants.iter().map(|variant| {
+                            FieldType {
+                                element_type: enum_variant_payload(variant.id, semantics)
+                                    .map_or(StorageType::Val(ValType::I32), |ty| {
+                                        layout.storage_type(ty)
+                                    }),
+                                mutable: false,
+                            }
+                        }))
+                        .collect(),
+                    }),
+                    true,
+                    None,
+                )
             }
-            Type::Array(id) => CompositeInnerType::Array(ArrayType(FieldType {
-                element_type: layout.storage_type(array_element_type(id, semantics)),
-                mutable: true,
-            })),
-            Type::Option(id) => CompositeInnerType::Struct(StructType {
-                fields: vec![FieldType {
-                    element_type: layout.storage_type(option_value_type(id, semantics)),
-                    mutable: false,
-                }]
-                .into(),
-            }),
-            Type::Result(id) => CompositeInnerType::Struct(StructType {
-                fields: vec![
-                    FieldType {
-                        element_type: layout.storage_type(result_value_type(id, semantics)),
+            Type::Array(id) => {
+                let declaration = array_types
+                    .iter()
+                    .find(|array| array.id == id)
+                    .expect("reachable arrays have resolved declarations");
+                let supertype_idx = declaration.length.and_then(|_| {
+                    array_types
+                        .iter()
+                        .find(|array| {
+                            array.length.is_none() && array.element == declaration.element
+                        })
+                        .map(|array| layout.index(Type::Array(array.id)))
+                });
+                (
+                    CompositeInnerType::Array(ArrayType(FieldType {
+                        element_type: layout.storage_type(array_element_type(id, semantics)),
+                        mutable: true,
+                    })),
+                    declaration.length.is_some(),
+                    supertype_idx,
+                )
+            }
+            Type::Option(id) => (
+                CompositeInnerType::Struct(StructType {
+                    fields: vec![FieldType {
+                        element_type: layout.storage_type(option_value_type(id, semantics)),
                         mutable: false,
-                    },
-                    FieldType {
-                        element_type: StorageType::Val(ValType::I32),
-                        mutable: false,
-                    },
-                    FieldType {
-                        element_type: StorageType::Val(
-                            layout.val_type(Type::Standard(StdlibTypeId::String)),
-                        ),
-                        mutable: false,
-                    },
-                ]
-                .into(),
-            }),
+                    }]
+                    .into(),
+                }),
+                true,
+                None,
+            ),
+            Type::Result(id) => (
+                CompositeInnerType::Struct(StructType {
+                    fields: vec![
+                        FieldType {
+                            element_type: layout.storage_type(result_value_type(id, semantics)),
+                            mutable: false,
+                        },
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I32),
+                            mutable: false,
+                        },
+                        FieldType {
+                            element_type: StorageType::Val(
+                                layout.val_type(Type::Standard(StdlibTypeId::String)),
+                            ),
+                            mutable: false,
+                        },
+                    ]
+                    .into(),
+                }),
+                true,
+                None,
+            ),
             _ => unreachable!("only dynamic GC types are ordered by GcLayout"),
         };
         recursive_types.push(SubType {
-            is_final: true,
-            supertype_idx: None,
+            is_final,
+            supertype_idx,
             composite_type: CompositeType {
                 inner,
                 shared: false,

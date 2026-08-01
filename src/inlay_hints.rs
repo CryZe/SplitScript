@@ -1,7 +1,7 @@
 //! Compiler-owned inferred-type hints shared by LSP clients.
 
 use crate::{
-    ast::{FunctionDecl, Span, StateField, SuspensionBinding, VariableDecl},
+    ast::{ForBinding, FunctionDecl, Span, StateField, SuspensionBinding, VariableDecl},
     database::SemanticSnapshot,
     lexer::{Token, TokenKind},
     type_display::display_type,
@@ -124,6 +124,10 @@ impl<'ast> Visitor<'ast> for InlayHintCollector<'_> {
             self.visit_type_ref(annotation);
         }
     }
+
+    fn visit_for_binding(&mut self, binding: &'ast ForBinding) {
+        self.add_inferred_value(binding.id, &binding.name, binding.span);
+    }
 }
 
 #[cfg(test)]
@@ -145,6 +149,9 @@ fn annotatedReturn() -> i32 {
 whileAttached {
     let local = identity(global)
     let annotated: i32 = local
+    for item in [1, 2] {
+        print(item as String)
+    }
 }"#;
         let mut database = CompilerDatabase::new(source);
         let snapshot = database.semantic_snapshot().unwrap();
@@ -160,9 +167,10 @@ whileAttached {
                 .map(|(before, label)| (before.split_whitespace().last().unwrap(), label))
                 .collect::<Vec<_>>(),
             [
-                ("identity(value", ": i32"),
-                ("identity(value)", " -> i32"),
-                ("local", ": i32")
+                ("identity(value", ": T"),
+                ("identity(value)", " -> T"),
+                ("local", ": i32"),
+                ("item", ": i32")
             ]
         );
     }

@@ -10,8 +10,8 @@ use crate::{
     catalog::Documentation,
     database::{CompilerDatabase, SemanticQueryResult},
     documentation::StandardLibraryDocumentation,
-    language::{LanguageCatalog, LanguageItem, LanguageItemKind},
-    stdlib::{ItemKind, StandardLibrary, StdlibItem, StdlibNamespace},
+    language::{LanguageCatalog, LanguageItem, LanguageItemId, LanguageItemKind},
+    stdlib::{ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibNamespace, TypeRef},
     stdlib_semantic::StandardLibrarySemanticExt,
     types::TypeKind,
 };
@@ -58,11 +58,45 @@ pub(crate) fn complete(
     let standard_library = compiler_context.standard_library();
     let offset = floor_char_boundary(&source, offset.min(source.len()));
     let syntax = database.recovering_parse()?.syntax().clone();
-    if let Some(context) = member_context(&source, offset) {
+    if let Some(completions) = complete_state_decoder(&source, offset) {
+        Ok(completions)
+    } else if let Some(context) = member_context(&source, offset) {
         Ok(complete_member(&source, &syntax, context, compiler_context))
     } else {
         Ok(complete_root(&source, &syntax, offset, standard_library))
     }
+}
+
+fn complete_state_decoder(source: &str, offset: usize) -> Option<CompletionList> {
+    let replacement = identifier_span(source, offset);
+    let before = source[..replacement.start].trim_end();
+    let before_as = before.strip_suffix("as")?;
+    if before_as
+        .chars()
+        .next_back()
+        .is_some_and(|character| character.is_alphanumeric() || character == '_')
+    {
+        return None;
+    }
+    let field_fragment = before_as
+        .rsplit_once(['\n', '{', ';'])
+        .map_or(before_as, |(_, fragment)| fragment);
+    if !field_fragment.split_whitespace().any(|token| token == "at") {
+        return None;
+    }
+
+    let prefix = source[replacement.start..offset].to_owned();
+    let mut builder = CompletionBuilder::new(prefix, replacement);
+    let language = LanguageCatalog::new();
+    let item = language.item(LanguageItemId::NativeStringDecoder);
+    builder.add(catalog_language_completion(
+        item.name,
+        CompletionKind::Function,
+        item,
+        "utf8(${1:maxBytes})".to_owned(),
+        true,
+    ));
+    Some(builder.finish())
 }
 
 #[derive(Debug, Clone)]
@@ -133,12 +167,8 @@ fn complete_root(
             builder.add(completion);
         }
     }
-    let provider = syntax
-        .state
-        .as_ref()
-        .and_then(|state| state.provider.as_ref())
-        .and_then(|provider| standard_library.state_provider_by_name(&provider.name));
-    add_root_standard_library(&mut builder, &standard_library, provider.is_some());
+    let provider = selected_provider(syntax, &standard_library);
+    add_root_standard_library(&mut builder, &standard_library);
     if let Some(provider) = provider {
         let ty = standard_library.type_decl(provider.process_type);
         builder.add(CompletionItem {
@@ -168,6 +198,41 @@ fn complete_member(
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>();
+
+    if let Some((method_name, receiver_path)) = path.split_last()
+        && !receiver_path.is_empty()
+        && let Some(previous_dot) = source[..context.dot].rfind('.')
+    {
+        let receiver_context = MemberContext {
+            receiver_path: receiver_path
+                .iter()
+                .map(|segment| (*segment).to_owned())
+                .collect(),
+            dot: previous_dot,
+            prefix: String::new(),
+            replacement: Span {
+                start: previous_dot + 1,
+                end: context.replacement.end,
+            },
+        };
+        if let Some((receiver, _, _)) =
+            infer_receiver(source, &receiver_context, compiler_context.clone())
+            && standard_library
+                .methods_for_type(&receiver)
+                .into_iter()
+                .any(|item| {
+                    item.name == *method_name && matches!(item.kind, ItemKind::TypedMethod { .. })
+                })
+        {
+            for ty in memory_read_type_names() {
+                builder.add(simple_completion(
+                    ty,
+                    CompletionKind::Type,
+                    "memory read type",
+                ));
+            }
+        }
+    }
 
     match path.as_slice() {
         ["current"] | ["old"] => {
@@ -212,20 +277,87 @@ fn complete_member(
                     });
                 }
             }
+            if let Some(provider) = selected_provider(syntax, &standard_library)
+                && provider.value_name == *name
+            {
+                add_inferred_fields(
+                    &mut builder,
+                    syntax,
+                    &TypeKind::Standard(provider.process_type),
+                    &standard_library,
+                );
+                add_inferred_methods(
+                    &mut builder,
+                    syntax,
+                    &TypeKind::Standard(provider.process_type),
+                    &[],
+                    &standard_library,
+                );
+            }
+        }
+        [provider_name, method_name] => {
+            if let Some(provider) = selected_provider(syntax, &standard_library)
+                && provider.value_name == *provider_name
+                && standard_library
+                    .method_candidates_with_selector(method_name, None)
+                    .iter()
+                    .any(|candidate| {
+                        matches!(candidate.item.kind, ItemKind::TypedMethod {
+                            receiver: TypeRef::Standard(receiver), ..
+                        } if receiver == provider.process_type)
+                    })
+            {
+                for ty in memory_read_type_names() {
+                    builder.add(simple_completion(
+                        ty,
+                        CompletionKind::Type,
+                        "memory read type",
+                    ));
+                }
+            }
         }
         _ => {}
     }
 
     add_standard_library_path_members(&mut builder, &path, &standard_library);
 
-    if let Some((receiver, probe_syntax)) = infer_receiver(source, &context, compiler_context) {
+    if let Some((receiver, constraints, probe_syntax)) =
+        infer_receiver(source, &context, compiler_context)
+    {
         add_inferred_fields(&mut builder, &probe_syntax, &receiver, &standard_library);
-        add_inferred_methods(&mut builder, &probe_syntax, &receiver, &standard_library);
+        add_inferred_methods(
+            &mut builder,
+            &probe_syntax,
+            &receiver,
+            &constraints,
+            &standard_library,
+        );
     }
     builder.finish()
 }
 
+fn selected_provider(
+    syntax: &Program,
+    standard_library: &StandardLibrary,
+) -> Option<&'static crate::stdlib::StdlibStateProvider> {
+    let state = syntax.state.as_ref()?;
+    state
+        .provider
+        .as_ref()
+        .and_then(|provider| standard_library.state_provider_by_name(&provider.name))
+        .or_else(|| {
+            state
+                .provider
+                .is_none()
+                .then(|| standard_library.source_state_provider())
+                .flatten()
+        })
+}
+
 fn language_completion(item: &LanguageItem) -> Option<CompletionItem> {
+    if item.id == LanguageItemId::NativeStringDecoder {
+        return None;
+    }
     let (kind, insert_text, is_snippet) = match item.kind {
         LanguageItemKind::Action(_) => (
             CompletionKind::Snippet,
@@ -234,9 +366,14 @@ fn language_completion(item: &LanguageItem) -> Option<CompletionItem> {
         ),
         LanguageItemKind::BuiltinType(_) => (CompletionKind::Type, item.name.to_owned(), false),
         LanguageItemKind::SnapshotRoot => (CompletionKind::Variable, item.name.to_owned(), false),
-        LanguageItemKind::Keyword | LanguageItemKind::Declaration => {
-            (CompletionKind::Keyword, item.name.to_owned(), false)
-        }
+        LanguageItemKind::Keyword | LanguageItemKind::Declaration => match item.name {
+            "for" => (
+                CompletionKind::Snippet,
+                "for ${1:value} in ${2:values} {\n    $0\n}".to_owned(),
+                true,
+            ),
+            _ => (CompletionKind::Keyword, item.name.to_owned(), false),
+        },
         LanguageItemKind::Syntax if is_identifier(item.name) => {
             let (insert, snippet) = match item.name {
                 "Some" | "Ok" | "Err" => (format!("{}(${{1:value}})", item.name), true),
@@ -273,14 +410,12 @@ fn catalog_language_completion(
     }
 }
 
-fn add_root_standard_library(
-    builder: &mut CompletionBuilder,
-    library: &StandardLibrary,
-    hide_process: bool,
-) {
-    for namespace in library.namespaces().iter().filter(|namespace| {
-        namespace.path.len() == 1 && !(hide_process && namespace.path == ["process"])
-    }) {
+fn add_root_standard_library(builder: &mut CompletionBuilder, library: &StandardLibrary) {
+    for namespace in library
+        .namespaces()
+        .iter()
+        .filter(|namespace| namespace.path.len() == 1)
+    {
         builder.add(stdlib_namespace_completion(namespace));
     }
     for ty in library.types() {
@@ -512,6 +647,7 @@ fn add_completed_statement_binding(builder: &mut CompletionBuilder, statement: &
         Stmt::Assign { .. }
         | Stmt::If { .. }
         | Stmt::While { .. }
+        | Stmt::For { .. }
         | Stmt::Break { .. }
         | Stmt::Continue { .. }
         | Stmt::Return { .. }
@@ -562,6 +698,19 @@ fn add_statement_inner_bindings(builder: &mut CompletionBuilder, statement: &Stm
                 add_block_bindings(builder, body, offset);
             }
         }
+        Stmt::For {
+            binding,
+            iterable,
+            body,
+            ..
+        } => {
+            if contains_offset(iterable.span, offset) {
+                add_expression_bindings(builder, iterable, offset);
+            } else if contains_offset(body.span, offset) {
+                add_scoped_variable(builder, &binding.name, "loop binding");
+                add_block_bindings(builder, body, offset);
+            }
+        }
         Stmt::Return {
             value: Some(value), ..
         } => {
@@ -605,11 +754,6 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
         ExprKind::Record { fields, .. } => {
             for (_, value) in fields {
                 add_expression_bindings(builder, value, offset);
-            }
-        }
-        ExprKind::Enum { payload, .. } => {
-            if let Some(payload) = payload {
-                add_expression_bindings(builder, payload, offset);
             }
         }
         ExprKind::If {
@@ -697,6 +841,7 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::Assign { span, .. }
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
+        | Stmt::For { span, .. }
         | Stmt::Break { span }
         | Stmt::Continue { span }
         | Stmt::Return { span, .. }
@@ -743,6 +888,7 @@ fn add_inferred_fields(
         }
         TypeKind::Builtin(_)
         | TypeKind::Enum(_)
+        | TypeKind::GenericParameter { .. }
         | TypeKind::Array { .. }
         | TypeKind::Option { .. }
         | TypeKind::Result { .. } => {}
@@ -753,10 +899,45 @@ fn add_inferred_methods(
     builder: &mut CompletionBuilder,
     syntax: &Program,
     receiver: &TypeKind,
+    generic_constraints: &[StdlibCapabilityId],
     standard_library: &StandardLibrary,
 ) {
-    for item in standard_library.methods_for_type(receiver) {
-        let ItemKind::Method { .. } = item.kind else {
+    let methods = standard_library
+        .methods_for_type(receiver)
+        .into_iter()
+        .chain(
+            matches!(receiver, TypeKind::GenericParameter { .. })
+                .then(|| {
+                    standard_library
+                        .methods()
+                        .filter(|item| {
+                            let receiver = match item.kind {
+                                ItemKind::Method { receiver }
+                                | ItemKind::TypedMethod { receiver, .. } => receiver,
+                                ItemKind::Function | ItemKind::TypedFunction { .. } => {
+                                    return false;
+                                }
+                            };
+                            let TypeRef::Parameter(parameter) = receiver else {
+                                return false;
+                            };
+                            item.signature
+                                .type_parameters
+                                .iter()
+                                .find(|candidate| candidate.name == parameter)
+                                .is_some_and(|parameter| {
+                                    parameter
+                                        .constraints
+                                        .iter()
+                                        .all(|constraint| generic_constraints.contains(constraint))
+                                })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+        );
+    for item in methods {
+        let (ItemKind::Method { .. } | ItemKind::TypedMethod { .. }) = item.kind else {
             unreachable!()
         };
         builder.add(stdlib_completion(
@@ -796,8 +977,6 @@ fn syntax_receiver_matches(
     standard_library: &StandardLibrary,
 ) -> bool {
     match (declared, receiver) {
-        (SyntaxTypeRef::Record(expected), TypeKind::Record(actual)) => expected == *actual,
-        (SyntaxTypeRef::Enum(expected), TypeKind::Enum(actual)) => expected == *actual,
         (SyntaxTypeRef::Array(expected), TypeKind::Array { layout, .. }) => expected == *layout,
         (SyntaxTypeRef::Option(expected), TypeKind::Option { layout, .. }) => expected == *layout,
         (SyntaxTypeRef::Result(expected), TypeKind::Result { layout, .. }) => expected == *layout,
@@ -812,7 +991,6 @@ fn syntax_receiver_matches(
             .enums
             .iter()
             .any(|item| item.name == syntax.type_name(name) && item.id == *actual),
-        (SyntaxTypeRef::Standard(expected), TypeKind::Standard(actual)) => expected == *actual,
         (syntax, TypeKind::Builtin(actual)) => syntax.core_type() == Some(*actual),
         _ => false,
     }
@@ -822,15 +1000,22 @@ fn infer_receiver(
     source: &str,
     context: &MemberContext,
     compiler_context: crate::CompilerContext,
-) -> Option<(TypeKind, Program)> {
+) -> Option<(TypeKind, Vec<StdlibCapabilityId>, Program)> {
     let mut probe_source = String::with_capacity(source.len());
     probe_source.push_str(&source[..context.dot]);
     probe_source.push_str(&source[context.replacement.end..]);
     let mut probe = CompilerDatabase::with_context(compiler_context, probe_source);
     let receiver_offset = context.dot.checked_sub(1)?;
-    let receiver = probe.analysis_at(receiver_offset).ok()??.type_kind;
+    let analysis = probe.analysis_at(receiver_offset).ok()??;
+    let constraints = probe
+        .semantic_snapshot()
+        .ok()?
+        .semantics()
+        .generic_parameter_constraints(analysis.ty)
+        .to_vec();
+    let receiver = analysis.type_kind;
     let syntax = probe.recovering_parse().ok()?.syntax().clone();
-    Some((receiver, syntax))
+    Some((receiver, constraints, syntax))
 }
 
 fn member_context(source: &str, offset: usize) -> Option<MemberContext> {
@@ -988,6 +1173,39 @@ whileAttached {
     }
 
     #[test]
+    fn typed_method_selectors_complete_on_captured_process_values() {
+        let source = r#"
+state "game.exe" {}
+whileAttached {
+    let attached = process
+    attached.read.i
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let completions = labels(&mut database, "attached.read.i");
+        assert!(completions.contains(&"i32".to_owned()));
+        assert!(completions.contains(&"i64".to_owned()));
+    }
+
+    #[test]
+    fn constrained_generic_parameters_complete_their_available_methods() {
+        let source = r#"
+state "game.exe" {}
+fn smaller(value, other) {
+    let result = value.min(other)
+    value.
+    return result
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let completions = labels(&mut database, "\n    value.");
+        assert!(completions.contains(&"min".to_owned()));
+        assert!(completions.contains(&"max".to_owned()));
+        assert!(completions.contains(&"clamp".to_owned()));
+        assert!(!completions.contains(&"length".to_owned()));
+    }
+
+    #[test]
     fn gba_states_expose_only_the_typed_provider_value() {
         let source = "state GBA { room: u8 = gba.re }";
         let mut database = CompilerDatabase::new(source);
@@ -1021,6 +1239,35 @@ whileAttached {
         let empty_prefix = source.find(" pri").unwrap() + 1;
         let all = database.completions(empty_prefix).unwrap();
         assert!(all.items.iter().any(|item| item.label == "whileAttached"));
+        assert!(all.items.iter().all(|item| item.label != "utf8"));
+    }
+
+    #[test]
+    fn state_decoder_completion_is_contextual_and_inserts_its_bound() {
+        let source = "state \"game.exe\" { mapName at 0x100 as ut }";
+        let mut database = CompilerDatabase::new(source);
+        let offset = source.find("ut }").unwrap() + 2;
+        let completions = database.completions(offset).unwrap();
+        let decoder = completions
+            .items
+            .iter()
+            .find(|item| item.label == "utf8")
+            .expect("the pointer-state decoder should complete after `as`");
+        assert_eq!(decoder.kind, CompletionKind::Function);
+        assert_eq!(decoder.insert_text, "utf8(${1:maxBytes})");
+        assert!(decoder.is_snippet);
+
+        let cast_source = "state \"game.exe\" {} whileAttached { let value = 1 as ut }";
+        let mut database = CompilerDatabase::new(cast_source);
+        let offset = cast_source.find("ut }").unwrap() + 2;
+        assert!(
+            database
+                .completions(offset)
+                .unwrap()
+                .items
+                .iter()
+                .all(|item| item.label != "utf8")
+        );
     }
 
     #[test]
@@ -1055,5 +1302,22 @@ onAttach {
                 |item| item.label == "parameter" && item.detail.as_deref() == Some("parameter")
             )
         );
+    }
+
+    #[test]
+    fn for_bindings_complete_only_inside_the_loop_body() {
+        let source = r#"
+state "game.exe" {}
+whileAttached {
+    let values = [1, 2]
+    for element in values {
+        ele
+    }
+    ele
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        assert!(labels(&mut database, "        ele").contains(&"element".to_owned()));
+        assert!(!labels(&mut database, "    ele\n}").contains(&"element".to_owned()));
     }
 }

@@ -21,7 +21,9 @@ pub struct CallCandidate {
 impl CallCandidate {
     pub const fn receiver(&self) -> Option<TypeRef> {
         match self.item.kind {
-            ItemKind::Method { receiver } => Some(receiver),
+            ItemKind::Method { receiver } | ItemKind::TypedMethod { receiver, .. } => {
+                Some(receiver)
+            }
             ItemKind::Function | ItemKind::TypedFunction { .. } => None,
         }
     }
@@ -31,6 +33,11 @@ impl CallCandidate {
 pub trait StandardLibrarySemanticExt {
     fn function_candidates(&self, path: &[String]) -> Vec<CallCandidate>;
     fn method_candidates(&self, name: &str) -> Vec<CallCandidate>;
+    fn method_candidates_with_selector(
+        &self,
+        name: &str,
+        selector: Option<&str>,
+    ) -> Vec<CallCandidate>;
     fn methods_for_type(&self, receiver: &TypeKind) -> Vec<&'static StdlibItem>;
     fn resolve_path(&self, path: &[String]) -> Option<CallCandidate>;
 }
@@ -44,7 +51,7 @@ impl StandardLibrarySemanticExt for StandardLibrary {
                     item,
                     type_arguments: Vec::new(),
                 }],
-                ItemKind::Method { .. } => Vec::new(),
+                ItemKind::Method { .. } | ItemKind::TypedMethod { .. } => Vec::new(),
             };
         }
 
@@ -67,10 +74,29 @@ impl StandardLibrarySemanticExt for StandardLibrary {
     }
 
     fn method_candidates(&self, name: &str) -> Vec<CallCandidate> {
+        self.method_candidates_with_selector(name, None)
+    }
+
+    fn method_candidates_with_selector(
+        &self,
+        name: &str,
+        selector: Option<&str>,
+    ) -> Vec<CallCandidate> {
         self.method_items_named(name)
-            .map(|item| CallCandidate {
-                item,
-                type_arguments: Vec::new(),
+            .filter_map(|item| {
+                let type_arguments = match (item.kind, selector) {
+                    (ItemKind::Method { .. }, None) => Vec::new(),
+                    (ItemKind::TypedMethod { .. }, None) => Vec::new(),
+                    (ItemKind::TypedMethod { type_parameter, .. }, Some(selector)) => {
+                        vec![(type_parameter, memory_type(self, selector)?)]
+                    }
+                    (ItemKind::Method { .. }, Some(_))
+                    | (ItemKind::Function | ItemKind::TypedFunction { .. }, _) => return None,
+                };
+                Some(CallCandidate {
+                    item,
+                    type_arguments,
+                })
             })
             .collect()
     }
@@ -91,8 +117,9 @@ fn catalog_method_accepts(
     item: &StdlibItem,
     receiver: &TypeKind,
 ) -> bool {
-    let ItemKind::Method { receiver: declared } = item.kind else {
-        return false;
+    let declared = match item.kind {
+        ItemKind::Method { receiver } | ItemKind::TypedMethod { receiver, .. } => receiver,
+        ItemKind::Function | ItemKind::TypedFunction { .. } => return false,
     };
     match declared {
         TypeRef::Core(expected) => {
@@ -140,7 +167,10 @@ fn semantic_type_may_have_capability(
         TypeKind::Enum(_) | TypeKind::Option { .. } | TypeKind::Result { .. } => {
             behavior == CapabilityBehavior::StructuralEquality
         }
-        TypeKind::Array { .. } => false,
+        TypeKind::Array { length, .. } => {
+            behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
+        }
+        TypeKind::GenericParameter { .. } => false,
     }
 }
 
@@ -169,7 +199,10 @@ mod tests {
             ("stdlib/graph.rs", include_str!("stdlib/graph.rs")),
             ("stdlib/ids.rs", include_str!("stdlib/ids.rs")),
             ("stdlib/schema.rs", include_str!("stdlib/schema.rs")),
-            ("stdlib/source.rs", include_str!("stdlib/source.rs")),
+            (
+                "stdlib/standard.split",
+                include_str!("../stdlib/standard.split"),
+            ),
             ("stdlib/validation.rs", include_str!("stdlib/validation.rs")),
         ] {
             assert!(

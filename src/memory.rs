@@ -15,6 +15,11 @@ use crate::{
     types::{BuiltinType, TypeId, TypeKind},
 };
 
+/// Fixed arrays are expanded into statically typed GC construction code.
+/// These limits bound both the host read and compiler/module growth.
+pub const MAX_FIXED_ARRAY_ELEMENTS: u32 = 4_096;
+pub const MAX_FIXED_ARRAY_BYTES: u32 = 65_536;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryFieldId {
     Source(RecordFieldId),
@@ -36,10 +41,21 @@ pub struct RecordMemoryLayout {
     pub fields: Vec<MemoryFieldLayout>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FixedArrayMemoryLayout {
+    pub ty: TypeId,
+    pub element: TypeId,
+    pub length: u32,
+    pub stride: u32,
+    pub size: u32,
+    pub alignment: u32,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryTypeLayout<'a> {
     Scalar { size: u32, alignment: u32 },
     Record(&'a RecordMemoryLayout),
+    FixedArray(&'a FixedArrayMemoryLayout),
 }
 
 impl MemoryTypeLayout<'_> {
@@ -47,6 +63,7 @@ impl MemoryTypeLayout<'_> {
         match self {
             Self::Scalar { size, .. } => size,
             Self::Record(layout) => layout.size,
+            Self::FixedArray(layout) => layout.size,
         }
     }
 
@@ -54,6 +71,7 @@ impl MemoryTypeLayout<'_> {
         match self {
             Self::Scalar { alignment, .. } => alignment,
             Self::Record(layout) => layout.alignment,
+            Self::FixedArray(layout) => layout.alignment,
         }
     }
 }
@@ -62,6 +80,7 @@ impl MemoryTypeLayout<'_> {
 pub struct MemoryLayouts {
     standard_library: StandardLibrary,
     records: HashMap<TypeId, Result<RecordMemoryLayout, String>>,
+    arrays: HashMap<TypeId, Result<FixedArrayMemoryLayout, String>>,
     source_records: HashMap<RecordId, TypeId>,
 }
 
@@ -78,6 +97,7 @@ impl MemoryLayouts {
         let mut layouts = Self {
             standard_library,
             records: HashMap::new(),
+            arrays: HashMap::new(),
             source_records: HashMap::new(),
         };
         for record in records {
@@ -101,6 +121,24 @@ impl MemoryLayouts {
                 semantics,
                 &mut visiting,
             );
+        }
+        let fixed_arrays = semantics
+            .types()
+            .iter()
+            .filter_map(|(ty, kind)| {
+                matches!(
+                    kind,
+                    TypeKind::Array {
+                        length: Some(_),
+                        ..
+                    }
+                )
+                .then_some(ty)
+            })
+            .collect::<Vec<_>>();
+        for ty in fixed_arrays {
+            let mut visiting = HashSet::new();
+            let _ = layouts.build_array(ty, records, semantics, &mut visiting);
         }
         layouts
     }
@@ -150,6 +188,19 @@ impl MemoryLayouts {
                     }
                 }
             }
+            TypeKind::Array {
+                length: Some(_), ..
+            } => self
+                .arrays
+                .get(&ty)
+                .expect("every fixed array has a memory-layout result")
+                .as_ref()
+                .map(MemoryTypeLayout::FixedArray)
+                .map_err(Clone::clone),
+            TypeKind::Array { length: None, .. } => Err(
+                "an unsized `[T]` array has no fixed process-memory layout; use `[T; N]`"
+                    .to_owned(),
+            ),
             kind => Err(format!("type `{kind:?}` is not MemoryReadable")),
         }
     }
@@ -174,9 +225,72 @@ impl MemoryLayouts {
             .values()
             .filter_map(|layout| layout.as_ref().ok())
             .map(|layout| layout.size)
+            .chain(
+                self.arrays
+                    .values()
+                    .filter_map(|layout| layout.as_ref().ok())
+                    .map(|layout| layout.size),
+            )
             .max()
             .unwrap_or(0)
             .max(8)
+    }
+
+    fn build_array(
+        &mut self,
+        ty: TypeId,
+        records: &[RecordDecl],
+        semantics: &SemanticModel,
+        visiting: &mut HashSet<TypeId>,
+    ) -> Result<FixedArrayMemoryLayout, String> {
+        if let Some(layout) = self.arrays.get(&ty) {
+            return layout.clone();
+        }
+        if !visiting.insert(ty) {
+            return Err("recursive arrays do not have a finite process-memory layout".to_owned());
+        }
+        let result = (|| {
+            let TypeKind::Array {
+                element,
+                length: Some(length),
+                ..
+            } = semantics.types().kind(ty)
+            else {
+                return Err("an unsized `[T]` array has no fixed process-memory layout".to_owned());
+            };
+            if *length == 0 {
+                return Err(
+                    "a zero-length array does not represent a process-memory read".to_owned(),
+                );
+            }
+            if *length > MAX_FIXED_ARRAY_ELEMENTS {
+                return Err(format!(
+                    "fixed arrays are limited to {MAX_FIXED_ARRAY_ELEMENTS} elements"
+                ));
+            }
+            let (element_size, alignment) =
+                self.fixed_layout(*element, records, semantics, visiting)?;
+            let stride = align_up(element_size, alignment);
+            let size = stride
+                .checked_mul(*length)
+                .ok_or_else(|| "fixed array byte size overflows `u32`".to_owned())?;
+            if size > MAX_FIXED_ARRAY_BYTES {
+                return Err(format!(
+                    "fixed process arrays are limited to {MAX_FIXED_ARRAY_BYTES} bytes"
+                ));
+            }
+            Ok(FixedArrayMemoryLayout {
+                ty,
+                element: *element,
+                length: *length,
+                stride,
+                size,
+                alignment,
+            })
+        })();
+        visiting.remove(&ty);
+        self.arrays.insert(ty, result.clone());
+        result
     }
 
     fn build_record(
@@ -321,6 +435,15 @@ impl MemoryLayouts {
                     }
                 }
             }
+            TypeKind::Array {
+                length: Some(_), ..
+            } => self
+                .build_array(ty, records, semantics, visiting)
+                .map(|layout| (layout.size, layout.alignment)),
+            TypeKind::Array { length: None, .. } => Err(
+                "an unsized `[T]` array has no fixed process-memory layout; use `[T; N]`"
+                    .to_owned(),
+            ),
             kind => Err(format!("`{kind:?}` has no fixed process-memory layout")),
         }
     }

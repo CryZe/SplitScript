@@ -162,17 +162,21 @@ impl CompilerDatabase {
         if self.cache.recovering_lowered.is_none() {
             self.cache.recovering_lowered = Some(match self.recovering_parse() {
                 Ok(recovered) => {
-                    let mut syntax = recovered.syntax().clone();
+                    let syntax = recovered.syntax().clone();
                     let mut resolution_diagnostics = recovered.resolution_diagnostics().to_vec();
+                    let mut resolutions = crate::resolution::ProgramResolutions::default();
                     resolution_diagnostics.extend(crate::resolution::resolve_program(
-                        &mut syntax,
+                        &syntax,
                         &recovered.context().standard_library(),
+                        &mut resolutions,
                     ));
                     Ok(Arc::new(LoweredProgram {
                         context: recovered.context(),
                         document: recovered.source_document().clone(),
                         hir: crate::hir::DeclarationIndex::lower(&syntax),
+                        compilation_syntax: syntax.clone(),
                         syntax,
+                        resolutions,
                         resolution_diagnostics,
                     }))
                 }
@@ -405,12 +409,7 @@ impl CompilerDatabase {
             Ok(Some(PositionAnalysis {
                 expression: expression.id,
                 span: expression.span,
-                segments: syntax_expression_segments(
-                    snapshot.source_document(),
-                    snapshot.enum_types(),
-                    expression,
-                    &self.context.standard_library(),
-                ),
+                segments: syntax_expression_segments(snapshot.source_document(), expression),
                 ty,
                 type_kind: semantics.types().kind(ty).clone(),
                 resolution: syntax_expression_resolution(semantics, expression),
@@ -493,6 +492,27 @@ impl CompilerDatabase {
                     StdlibSymbolId::StateProvider(provider.id),
                 )));
             }
+            if name == "utf8"
+                && recovered
+                    .syntax()
+                    .state
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|state| &state.fields)
+                    .filter_map(|field| match &field.source {
+                        crate::ast::StateSource::Pointer(path) => path.decoder,
+                        crate::ast::StateSource::Expression(_) => None,
+                    })
+                    .any(|decoder| match decoder {
+                        crate::ast::StateMemoryDecoder::Utf8 { span, .. } => {
+                            span.start <= offset && offset < span.end
+                        }
+                    })
+            {
+                return Ok(Some(DefinitionTarget::Language(
+                    LanguageItemId::NativeStringDecoder,
+                )));
+            }
         }
         if let TokenKind::Ident(name) = &token.kind
             && let Some(ty) = self.context.standard_library().type_by_name(name)
@@ -528,6 +548,7 @@ impl CompilerDatabase {
                 }))
             }
             TokenKind::Bang => Some(language.item(LanguageItemId::ResultType)),
+            TokenKind::LBracket => Some(language.item(LanguageItemId::ArrayType)),
             TokenKind::DocComment(_) => Some(language.item(LanguageItemId::DocumentationComment)),
             TokenKind::TemplateStart | TokenKind::TemplateChunk(_) | TokenKind::TemplateEnd => {
                 Some(language.item(LanguageItemId::TemplateString))

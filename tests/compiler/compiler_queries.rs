@@ -336,7 +336,7 @@ fn record_literals_resolve_their_nominal_identity_after_parsing() {
 }
 
 #[test]
-fn enum_syntax_is_named_during_parsing_and_resolved_during_lowering() {
+fn enum_syntax_stays_named_while_semantics_publish_resolved_variants() {
     use splitscript::compiler::ast::{EnumReference, ExprKind, MatchPattern, StateSource, Stmt};
 
     let source = r#"
@@ -376,7 +376,7 @@ fn enum_syntax_is_named_during_parsing_and_resolved_during_lowering() {
     assert!(matches!(
         &arms[0].pattern,
         MatchPattern::Enum {
-            enumeration: EnumReference::Named { .. },
+            enumeration: EnumReference { .. },
             ..
         }
     ));
@@ -384,20 +384,14 @@ fn enum_syntax_is_named_during_parsing_and_resolved_during_lowering() {
     let lowered = splitscript::lower(parsed);
     assert!(matches!(
         lowered.syntax().functions[0].params[0].annotation,
-        Some(splitscript::compiler::ast::TypeRef::Enum(_))
+        Some(splitscript::compiler::ast::TypeRef::Named(_))
     ));
     let StateSource::Expression(initializer) =
         &lowered.syntax().state.as_ref().unwrap().fields[0].source
     else {
         unreachable!();
     };
-    assert!(matches!(
-        &initializer.kind,
-        ExprKind::Enum {
-            enumeration: EnumReference::Resolved(_),
-            ..
-        }
-    ));
+    assert!(matches!(&initializer.kind, ExprKind::Path(_)));
     let Stmt::Return {
         value: Some(matched),
         ..
@@ -411,10 +405,33 @@ fn enum_syntax_is_named_during_parsing_and_resolved_during_lowering() {
     assert!(matches!(
         &arms[0].pattern,
         MatchPattern::Enum {
-            enumeration: EnumReference::Resolved(_),
+            enumeration: EnumReference { .. },
             ..
         }
     ));
+    let checked = splitscript::check(lowered).unwrap();
+    let StateSource::Expression(initializer) =
+        &checked.syntax().state.as_ref().unwrap().fields[0].source
+    else {
+        unreachable!();
+    };
+    assert!(checked.semantics().enum_variant(initializer.id).is_some());
+    let Stmt::Return {
+        value: Some(matched),
+        ..
+    } = &checked.syntax().functions[0].body.statements[0]
+    else {
+        unreachable!();
+    };
+    let ExprKind::Match { arms, .. } = &matched.kind else {
+        unreachable!();
+    };
+    assert!(
+        checked
+            .semantics()
+            .pattern_variant(arms[0].pattern_id)
+            .is_some()
+    );
 }
 
 #[test]
@@ -516,7 +533,9 @@ fn compiler_database_exposes_types_resolutions_and_references() {
 
     assert!(matches!(
         database.resolved_call(bump_call).unwrap(),
-        Some(ResolvedCall::UserFunction { function: target }) if target == function.id
+        Some(ResolvedCall::UserFunction {
+            function: target, ..
+        }) if target == function.id
     ));
     assert!(matches!(
         database.resolved_call(min_call).unwrap(),
@@ -884,7 +903,9 @@ fn compiler_database_preserves_semantics_around_type_errors() {
     );
     assert!(matches!(
         database.resolved_call(answer.value.id).unwrap(),
-        Some(ResolvedCall::UserFunction { function: target }) if target == function
+        Some(ResolvedCall::UserFunction {
+            function: target, ..
+        }) if target == function
     ));
 
     let call_position = source.rfind("readCounter").unwrap() + 1;
@@ -894,6 +915,7 @@ fn compiler_database_preserves_semantics_around_type_errors() {
         analysis.resolution,
         Some(ExpressionResolution::Call(ResolvedCall::UserFunction {
             function: target,
+            ..
         })) if target == function
     ));
     assert!(matches!(
@@ -1083,6 +1105,34 @@ fn choice_setting_enum_paths_use_resolved_source_identities() {
     ));
     assert_eq!(database.references_at(option, true).unwrap().len(), 3);
     assert_eq!(database.references_at(variant, true).unwrap().len(), 2);
+}
+
+#[test]
+fn for_binding_references_navigate_to_the_loop_header() {
+    use splitscript::{
+        compiler::ast::Stmt,
+        tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId},
+    };
+
+    let source = r#"state "game.exe" {}
+whileAttached {
+    for element in [1, 2] {
+        print(element as String)
+    }
+}"#;
+    let mut database = CompilerDatabase::new(source);
+    let checked = database.check().unwrap();
+    let Stmt::For { binding, .. } = &checked.syntax().actions[0].body.statements[0] else {
+        panic!("expected a for loop")
+    };
+    let use_offset = source.rfind("element").unwrap();
+    assert!(matches!(
+        database.definition_at(use_offset).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if definition.id == SourceDefinitionId::Value(binding.id)
+                && &source[definition.span.start..definition.span.end] == "element"
+    ));
+    assert_eq!(database.references_at(use_offset, true).unwrap().len(), 2);
 }
 
 #[test]

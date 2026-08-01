@@ -1046,3 +1046,31 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
     let strict_errors = splitscript::parse(source).expect_err("batch parsing remains strict");
     assert_eq!(strict_errors.len(), 10);
 }
+
+#[test]
+fn malformed_for_header_recovers_without_losing_the_following_statement() {
+    use splitscript::compiler::ast::Stmt;
+
+    let source = r#"state "game.exe" {}
+whileAttached {
+    for value [1, 2] {
+        print(value as String)
+    }
+    print("after")
+}"#;
+    let recovered = splitscript::parse_recovering(source).unwrap();
+    assert!(
+        recovered
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("expected `in`"))
+    );
+    assert!(
+        recovered.syntax().actions[0]
+            .body
+            .statements
+            .iter()
+            .any(|statement| matches!(statement, Stmt::Expression(_)))
+    );
+    assert_eq!(recovered.source_document().reconstruct(), source);
+}

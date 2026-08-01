@@ -1,0 +1,983 @@
+/// Attaches to one of the native processes named by the state declaration.
+///
+/// The read-only `process` value is a typed handle to the attached game process.
+///
+/// # Example
+///
+/// Read native process memory
+///
+/// ```splitscript
+/// state "game.exe" {}
+/// whileAttached {
+///     let health = process.read.i32(0x1234) else 0
+/// }
+/// ```
+@processType(Process)
+@processes(source)
+@attachment(identity)
+@directRead(ProcessRead)
+stateProvider Native as process {}
+
+/// Attaches to a supported Game Boy Advance emulator.
+///
+/// The provider discovers emulated EWRAM and IWRAM and exposes original GBA hardware addresses through its read-only `gba` value.
+///
+/// # Example
+///
+/// Read GBA work RAM
+///
+/// ```splitscript
+/// state GBA {
+///     room: u8 at 0x03000010
+/// }
+/// ```
+@processType(GbaEmulator)
+@attachment(GbaAttach)
+@directRead(GbaEmulatorRead)
+stateProvider GBA as gba {
+    "visualboyadvance-m.exe",
+    "VisualBoyAdvance.exe",
+    "mGBA.exe",
+    "mGBA",
+    "NO$GBA.EXE",
+    "retroarch.exe",
+    "EmuHawk.exe",
+    "mednafen.exe",
+}
+
+root {
+    /// Prints a diagnostic message.
+    ///
+    /// The message is forwarded to the autosplitting runtime.
+    ///
+    /// # Example
+    ///
+    /// Write to the runtime log
+    ///
+    /// ```splitscript
+    /// print("Attached to the game")
+    /// ```
+    @intrinsic(Print)
+    fn print(
+        /// The message to write to the runtime log.
+        message: String,
+    ) -> void;
+
+    /// Sets a LiveSplit custom variable.
+    ///
+    /// The value is visible to layouts that display autosplitter variables.
+    ///
+    /// # Example
+    ///
+    /// Expose a layout variable
+    ///
+    /// ```splitscript
+    /// setVariable("Level", levelName)
+    /// ```
+    @intrinsic(TimerSetVariable)
+    fn setVariable(
+        /// The variable name.
+        name: String,
+        /// The displayed value.
+        value: String,
+    ) -> void;
+
+    /// Changes the autosplitter tick rate.
+    ///
+    /// The runtime applies the requested polling frequency.
+    ///
+    /// # Example
+    ///
+    /// Poll more frequently
+    ///
+    /// ```splitscript
+    /// setTickRate(120.0)
+    /// ```
+    @intrinsic(RuntimeSetTickRate)
+    fn setTickRate(
+        /// The requested updates per second.
+        hz: f64,
+    ) -> void;
+
+    /// Continues attachment on the next runtime update.
+    ///
+    /// Always suspends once. The continuation resumes on the following attached-process tick and is cancelled if that process closes first.
+    ///
+    /// # Example
+    ///
+    /// Resume on the next update
+    ///
+    /// ```splitscript
+    /// await nextTick()
+    /// ```
+    @intrinsic(NextTick)
+    fn nextTick() -> void;
+}
+
+/// Accesses the attached game process.
+///
+/// Process operations discover modules, read memory, follow pointers, and scan signatures.
+@representation(scalar, i64)
+@valueUsage(localVariable, globalVariable)
+intrinsic type Process {
+    /// Waits for a process module.
+    ///
+    /// Suspends attachment until both module address and size are available.
+    ///
+    /// # Example
+    ///
+    /// Wait for a module
+    ///
+    /// ```splitscript
+    /// let gameAssembly = await process.module("GameAssembly.dll")
+    /// ```
+    @intrinsic(ProcessModule)
+    fn module(
+        /// The exact module name.
+        @literal(string)
+        name: String,
+    ) -> Module;
+
+    /// Reads a fixed-layout value from process memory.
+    ///
+    /// The expected MemoryReadable type selects a fixed-size primitive or record layout. A synchronous read returns T!; retry polls until a value is available and yields T. Use a suffix such as process.read.i32 when context cannot determine a primitive type.
+    ///
+    /// # Example
+    ///
+    /// Read a typed value
+    ///
+    /// ```splitscript
+    /// let health = process.read.i32(player.offset(0x20)) else 0
+    /// ```
+    @intrinsic(ProcessRead)
+    @selector(T)
+    fn read<T: MemoryReadable>(
+        /// The target address to read.
+        address: address,
+    ) -> T!;
+
+    /// Follows a pointer path.
+    ///
+    /// Each intermediate address is read as a 64-bit target pointer. A failed or null pointer read returns an error; use retry in onAttach to wait for success.
+    ///
+    /// # Example
+    ///
+    /// Follow a pointer path
+    ///
+    /// ```splitscript
+    /// let player = retry process.follow(module.address, [0x100, 0x20])
+    /// ```
+    @intrinsic(ProcessFollow)
+    fn follow(
+        /// The initial address.
+        base: address,
+        /// Pointer offsets to follow.
+        offsets: [u64],
+    ) -> address!;
+
+    /// Scans a process-memory range.
+    ///
+    /// Suspends until the signature is found in the requested range.
+    ///
+    /// # Example
+    ///
+    /// Scan a memory range
+    ///
+    /// ```splitscript
+    /// let marker = await process.scan(module.address, module.size, sig"48 8B ?? 89")
+    /// ```
+    @intrinsic(ProcessScan)
+    fn scan(
+        /// The beginning of the range.
+        address: address,
+        /// The number of bytes to scan.
+        size: u64,
+        /// The compile-time signature pattern.
+        @literal(signature)
+        signature: Signature,
+    ) -> address;
+
+    /// Resolves a 32-bit relative address.
+    ///
+    /// Reads a signed displacement and adds it to the address following the displacement. A failed or null target returns an error; use retry in onAttach to wait for success.
+    ///
+    /// # Example
+    ///
+    /// Resolve a relative target
+    ///
+    /// ```splitscript
+    /// let target = retry process.readRelative32(instruction.offset(3))
+    /// ```
+    @intrinsic(ProcessReadRelative32)
+    fn readRelative32(
+        /// The address of a signed relative displacement.
+        address: address,
+    ) -> address!;
+    /// Reads a bounded NUL-terminated UTF-8 string.
+    ///
+    /// At most `maxBytes` are read in one host operation. Decoding stops at
+    /// the first NUL byte. Failed memory access, an excessive bound, or invalid
+    /// UTF-8 returns an error.
+    ///
+    /// # Example
+    ///
+    /// Read a native map name
+    ///
+    /// ```splitscript
+    /// let map = process.readUtf8(mapAddress, 32) else "Unknown"
+    /// ```
+    @intrinsic(ProcessReadUtf8)
+    fn readUtf8(
+        /// The address of the first UTF-8 byte.
+        address: address,
+        /// The maximum number of bytes to read, up to 4096.
+        maxBytes: u32,
+    ) -> String!;
+
+    /// Reads a Unity managed string.
+    ///
+    /// The bounded UTF-16 payload is decoded into an immutable SplitScript string. Memory-access failure returns an error; malformed surrogate sequences decode as the replacement character.
+    ///
+    /// # Example
+    ///
+    /// Read a Unity string
+    ///
+    /// ```splitscript
+    /// let scene = process.readManagedString(sceneAddress, 64) else "Unknown"
+    /// ```
+    @intrinsic(ProcessReadManagedString)
+    fn readManagedString(
+        /// The managed string object address.
+        address: address,
+        /// The maximum UTF-16 code units to decode.
+        maxUtf16Units: u32,
+    ) -> String!;
+}
+
+/// Reads information from the LiveSplit timer.
+///
+/// Timer operations expose runtime state used by autosplitter decisions.
+namespace timer {
+    /// Returns the current timer state.
+    ///
+    /// Host states are converted to NotRunning, Running, Paused, Ended, or Unknown at the ABI boundary.
+    ///
+    /// # Example
+    ///
+    /// Check whether the timer is running
+    ///
+    /// ```splitscript
+    /// let isRunning = timer.state() == TimerState.Running
+    /// ```
+    @intrinsic(TimerState)
+    fn state() -> TimerState;
+
+    /// Reports whether the LiveSplit timer is currently running.
+    ///
+    /// This is a convenience check over the exhaustive timer state.
+    ///
+    /// # Example
+    ///
+    /// Check whether a run is active
+    ///
+    /// ```splitscript
+    /// if timer.isRunning() {
+    ///     print("The timer is running")
+    /// }
+    /// ```
+    fn isRunning() -> bool {
+        return timer.state() == TimerState.Running
+    }
+}
+
+/// Discovers and inspects Unity runtimes.
+///
+/// Unity operations attach to IL2CPP metadata and produce typed images, classes, and fields.
+namespace Unity {
+    /// Discovers an IL2CPP runtime.
+    ///
+    /// Suspends until GameAssembly and the IL2CPP metadata structures are available.
+    ///
+    /// # Example
+    ///
+    /// Discover IL2CPP metadata
+    ///
+    /// ```splitscript
+    /// let unity = await Unity.il2cpp(2020)
+    /// ```
+    @intrinsic(UnityIl2Cpp)
+    fn il2cpp(
+        /// The Unity metadata layout version.
+        version: u32,
+    ) -> UnityModule;
+}
+
+/// Supports ordered numeric operations.
+///
+/// Numeric values provide minimum, maximum, and clamping operations while preserving their inferred type.
+@behavior(declared)
+capability Numeric<T> {
+    /// Returns the smaller of two numeric values.
+    ///
+    /// Both values have the same inferred numeric type and are evaluated once.
+    ///
+    /// # Example
+    ///
+    /// Keep the smaller value
+    ///
+    /// ```splitscript
+    /// let visibleStage = stage.min(7)
+    /// ```
+    @intrinsic(NumericMin)
+    fn min(
+        /// The other value to compare with the receiver.
+        other: T,
+    ) -> T;
+
+    /// Returns the larger of two numeric values.
+    ///
+    /// Both values have the same inferred numeric type and are evaluated once.
+    ///
+    /// # Example
+    ///
+    /// Keep the larger value
+    ///
+    /// ```splitscript
+    /// let nonNegativeScore = score.max(0)
+    /// ```
+    @intrinsic(NumericMax)
+    fn max(
+        /// The other value to compare with the receiver.
+        other: T,
+    ) -> T;
+
+    /// Restricts a numeric value to an inclusive range.
+    ///
+    /// The receiver and bounds have one inferred numeric type and are evaluated once.
+    ///
+    /// # Example
+    ///
+    /// Restrict a value to a range
+    ///
+    /// ```splitscript
+    /// let visibleStage = stage.clamp(1, 7)
+    /// ```
+    fn clamp(
+        /// The inclusive lower bound.
+        minimum: T,
+        /// The inclusive upper bound.
+        maximum: T,
+    ) -> T {
+        let lowerBounded = self.max(minimum)
+        return lowerBounded.min(maximum)
+    }
+}
+
+/// Identifies integral numeric types.
+///
+/// Integer operations and inference constraints accept only whole-number representations.
+@behavior(declared)
+capability Integer<T> {}
+
+/// Identifies signed numeric types.
+///
+/// Signed values can represent numbers below zero.
+@behavior(declared)
+capability Signed<T> {}
+
+/// Identifies floating-point types.
+///
+/// Floating-point constraints accept f32 and f64 values.
+@behavior(declared)
+capability Float<T> {}
+
+/// Supports equality comparison.
+///
+/// Equality is available for values whose representation can be compared safely.
+@behavior(structuralEquality)
+capability Equatable<T> {}
+
+/// Supports explicit conversion to String.
+///
+/// Values with this capability may be converted with an `as String` cast.
+@behavior(declared)
+capability StringCast<T> {}
+
+/// Supports insertion into interpolated strings.
+///
+/// Interpolated strings convert values with this capability into their textual representation.
+@behavior(declared)
+capability Interpolatable<T> {}
+
+/// Supports deserialization from process memory.
+///
+/// Primitive and record layouts with this capability can be selected by `process.read`.
+@behavior(structuralMemoryLayout)
+capability MemoryReadable<T> {}
+
+/// Stores an indexed sequence of values.
+///
+/// `[T]` accepts any length, while `[T; N]` carries an exact length and can
+/// provide a fixed process-memory layout. Both forms use WebAssembly GC storage
+/// and expose the same generic length, access, and mutation operations.
+typeConstructor Array<T> {
+    /// Returns the number of array elements.
+    ///
+    /// The result is the WebAssembly GC array length.
+    ///
+    /// # Example
+    ///
+    /// Count array elements
+    ///
+    /// ```splitscript
+    /// let fieldCount = fieldNames.length()
+    /// ```
+    @intrinsic(ArrayLength)
+    fn length() -> u32;
+
+    /// Reports whether the array contains no elements.
+    ///
+    /// This is ordinary library composition over `length`; it does not require
+    /// a separate runtime intrinsic.
+    ///
+    /// # Example
+    ///
+    /// Check for an empty array
+    ///
+    /// ```splitscript
+    /// let hasNoFields = fieldNames.isEmpty()
+    /// ```
+    fn isEmpty() -> bool {
+        return self.length() == 0
+    }
+
+    /// Returns an array element.
+    ///
+    /// Indexing uses WebAssembly's bounds checks.
+    ///
+    /// # Example
+    ///
+    /// Read an array element
+    ///
+    /// ```splitscript
+    /// let firstField = fieldNames.get(0)
+    /// ```
+    @intrinsic(ArrayGet)
+    fn get(
+        /// The zero-based element index.
+        index: u32,
+    ) -> T;
+
+    /// Updates an array element.
+    ///
+    /// The array is evaluated once and updated in place.
+    ///
+    /// # Example
+    ///
+    /// Replace an array element
+    ///
+    /// ```splitscript
+    /// fieldNames.set(0, "health")
+    /// ```
+    @intrinsic(ArraySet)
+    fn set(
+        /// The zero-based element index.
+        index: u32,
+        /// The new element value.
+        value: T,
+    ) -> void;
+}
+
+/// Represents a value that may be absent.
+///
+/// The postfix `?` type syntax constructs an Option value.
+typeConstructor Option<T> {}
+
+/// Represents a value or an error.
+///
+/// The postfix `!` type syntax constructs a Result value.
+typeConstructor Result<T> {}
+
+extend address {
+    /// Adds a field offset to an address.
+    ///
+    /// The offset is widened to the target address width.
+    ///
+    /// # Example
+    ///
+    /// Add a field offset
+    ///
+    /// ```splitscript
+    /// let healthAddress = player.offset(0x20)
+    /// ```
+    fn offset(
+        /// The unsigned field offset.
+        offset: u32,
+    ) -> address {
+        return self.add(offset as u64)
+    }
+
+    /// Adds a full-width offset to an address.
+    ///
+    /// This is useful for offsets that are already represented as u64.
+    ///
+    /// # Example
+    ///
+    /// Add a full-width offset
+    ///
+    /// ```splitscript
+    /// let target = module.address.add(sectionOffset)
+    /// ```
+    @intrinsic(AddressAdd)
+    fn add(
+        /// The full-width address offset.
+        offset: u64,
+    ) -> address;
+}
+
+/// Stores immutable UTF-8 text.
+///
+/// String literals, interpolation, process decoders, and timer variables use garbage-collected strings.
+@representation(gcArray, u8, mutable, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+@capabilities(Equatable, Interpolatable)
+intrinsic type String {
+    /// Returns a string's UTF-8 byte length.
+    ///
+    /// The result counts UTF-8 bytes in the current string representation.
+    ///
+    /// # Example
+    ///
+    /// Measure UTF-8 text
+    ///
+    /// ```splitscript
+    /// let byteLength = String.length(levelName)
+    /// ```
+    @intrinsic(StringLength)
+    static fn length(
+        /// The string whose UTF-8 byte length is returned.
+        value: String,
+    ) -> u32;
+
+    /// Concatenates an array of strings.
+    ///
+    /// A new WebAssembly GC string is allocated.
+    ///
+    /// # Example
+    ///
+    /// Join strings
+    ///
+    /// ```splitscript
+    /// let label = String.concat(["Stage ", stageName])
+    /// ```
+    @intrinsic(StringConcat)
+    static fn concat(
+        /// The strings to concatenate in order.
+        values: [String],
+    ) -> String;
+}
+
+/// Stores a compiled process-memory signature.
+///
+/// Signature values are created by signature literals and consumed by scanning operations.
+@representation(scalar, i64)
+@valueUsage()
+intrinsic type Signature {}
+
+/// Represents a precise span of time.
+///
+/// Durations carry whole seconds and nanoseconds and are used for LiveSplit game time.
+@representation(gcStruct)
+@valueUsage(recordField)
+struct Duration {
+    /// Stores the whole-second component.
+    private seconds: i64,
+
+    /// Stores the fractional nanosecond component.
+    private nanoseconds: i32,
+
+    /// Constructs a zero-length duration.
+    ///
+    /// This is the neutral value for accumulated game time.
+    ///
+    /// # Example
+    ///
+    /// Initialize accumulated time
+    ///
+    /// ```splitscript
+    /// let accumulated = Duration.zero()
+    /// ```
+    static fn zero() -> Duration {
+        return Duration.fromParts(0, 0)
+    }
+
+    /// Constructs a duration from whole milliseconds.
+    ///
+    /// Negative values are preserved and the remainder is represented as
+    /// nanoseconds without losing sub-second precision.
+    ///
+    /// # Example
+    ///
+    /// Convert milliseconds to game time
+    ///
+    /// ```splitscript
+    /// return Duration.fromMilliseconds(elapsedMilliseconds)
+    /// ```
+    static fn fromMilliseconds(
+        /// The signed number of elapsed milliseconds.
+        milliseconds: i64,
+    ) -> Duration {
+        let seconds = milliseconds / 1_000
+        let nanoseconds = ((milliseconds % 1_000) * 1_000_000) as i32
+        return Duration.fromParts(seconds, nanoseconds)
+    }
+
+    /// Constructs a duration from frames.
+    ///
+    /// The conversion preserves whole seconds and nanoseconds.
+    ///
+    /// # Example
+    ///
+    /// Convert frames to game time
+    ///
+    /// ```splitscript
+    /// return Duration.fromFrames(frameCount, 60)
+    /// ```
+    static fn fromFrames(
+        /// The elapsed frame count.
+        frames: i64,
+        /// The frame rate.
+        framesPerSecond: i64,
+    ) -> Duration {
+        let seconds = frames / framesPerSecond
+        let nanoseconds = ((frames % framesPerSecond) * 1_000_000_000 / framesPerSecond) as i32
+        return Duration.fromParts(seconds, nanoseconds)
+    }
+
+    /// Constructs a duration from seconds and nanoseconds.
+    ///
+    /// The two components become the runtime duration representation.
+    ///
+    /// # Example
+    ///
+    /// Construct an exact duration
+    ///
+    /// ```splitscript
+    /// return Duration.fromParts(seconds, nanoseconds)
+    /// ```
+    static fn fromParts(
+        /// Whole seconds.
+        seconds: i64,
+        /// The fractional nanoseconds.
+        nanoseconds: i32,
+    ) -> Duration {
+        return Duration {
+            seconds: seconds,
+            nanoseconds: nanoseconds,
+        }
+    }
+
+    /// Constructs a duration from floating-point seconds.
+    ///
+    /// Finite values are converted to the runtime duration representation; values outside its range are safely clamped.
+    ///
+    /// # Example
+    ///
+    /// Convert seconds to game time
+    ///
+    /// ```splitscript
+    /// return Duration.fromSeconds(elapsedSeconds)
+    /// ```
+    static fn fromSeconds(
+        /// Floating-point seconds.
+        seconds: f32,
+    ) -> Duration {
+        let wholeSeconds = seconds as i64
+        let nanoseconds = ((seconds - wholeSeconds as f32) * 1_000_000_000.0) as i32
+        return Duration.fromParts(wholeSeconds, nanoseconds)
+    }
+}
+
+/// Describes a module loaded in the attached process.
+///
+/// A module exposes its base address and mapped size for bounded memory discovery.
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct Module {
+    /// Returns the module base address.
+    address: address,
+
+    /// Returns the mapped module size.
+    size: u64,
+
+    /// Scans a module for a signature.
+    ///
+    /// The module's address and size define the scanned range.
+    ///
+    /// # Example
+    ///
+    /// Scan an entire module
+    ///
+    /// ```splitscript
+    /// let marker = await gameAssembly.scan(sig"48 8B ?? 89")
+    /// ```
+    @intrinsic(ModuleScan)
+    fn scan(
+        /// The compile-time signature pattern.
+        @literal(signature)
+        signature: Signature,
+    ) -> address;
+
+    /// Reads a 32-bit relative address at an offset from this module.
+    ///
+    /// The encoded displacement is resolved relative to the instruction that
+    /// follows it. Read failures are returned to the caller.
+    ///
+    /// # Example
+    ///
+    /// Resolve a module-relative address
+    ///
+    /// ```splitscript
+    /// let target = retry gameAssembly.readRelative32(0x400)
+    /// ```
+    fn readRelative32(
+        /// Byte offset from the module base.
+        offset: u64,
+    ) -> address! {
+        return process.readRelative32(self.address.add(offset))
+    }
+}
+
+/// Describes the current LiveSplit timer state.
+///
+/// Timer state is an exhaustive enum returned by timer.state().
+@representation(enum, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@capabilities(Equatable)
+enum TimerState {
+    /// The timer has not started.
+    NotRunning,
+
+    /// The timer is running.
+    Running,
+
+    /// The timer is paused.
+    Paused,
+
+    /// The timer has ended.
+    Ended,
+
+    /// The host returned an unknown timer state.
+    Unknown,
+}
+
+/// Describes an attached Unity IL2CPP runtime.
+///
+/// The runtime stores resolved metadata roots, its version, and pointer size.
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct UnityModule {
+    /// Returns the IL2CPP assemblies metadata address.
+    assemblies: address,
+
+    /// Returns the IL2CPP type-information table address.
+    typeInfoTable: address,
+
+    /// Returns the detected Unity metadata version.
+    version: u32,
+
+    /// Returns the attached process pointer size.
+    pointerSize: u32,
+
+    /// Finds an IL2CPP image.
+    ///
+    /// Suspends until the named image is discoverable.
+    ///
+    /// # Example
+    ///
+    /// Find a managed assembly
+    ///
+    /// ```splitscript
+    /// let image = await unity.image("Assembly-CSharp")
+    /// ```
+    @intrinsic(UnityModuleImage)
+    fn image(
+        /// The managed assembly name.
+        name: String,
+    ) -> UnityImage;
+}
+
+/// Describes a Unity assembly image.
+///
+/// An image retains its owning Unity runtime for subsequent class lookup.
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct UnityImage {
+    /// Returns the Unity image address.
+    address: address,
+
+    /// Retains the owning Unity runtime.
+    private module: UnityModule,
+
+    /// Finds a class in an IL2CPP image.
+    ///
+    /// Suspends until the named class is discoverable.
+    ///
+    /// # Example
+    ///
+    /// Find a managed class
+    ///
+    /// ```splitscript
+    /// let gameManager = await image.class("GameManager")
+    /// ```
+    @intrinsic(UnityImageClass)
+    fn class(
+        /// The managed class name.
+        name: String,
+    ) -> UnityClass;
+}
+
+/// Describes a Unity runtime class.
+///
+/// A class retains its owning Unity runtime for field and static-data discovery.
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct UnityClass {
+    /// Returns the Unity class address.
+    address: address,
+
+    /// Retains the owning Unity runtime.
+    private module: UnityModule,
+
+    /// Finds a managed field offset.
+    ///
+    /// Searches the class hierarchy and recognizes backing fields.
+    ///
+    /// # Example
+    ///
+    /// Find a field offset
+    ///
+    /// ```splitscript
+    /// let healthOffset = await gameManager.field("health")
+    /// ```
+    @intrinsic(UnityClassField)
+    fn field(
+        /// The managed field name.
+        name: String,
+    ) -> u32;
+
+    /// Finds the first matching field.
+    ///
+    /// Returns both the field offset and selected candidate index.
+    ///
+    /// # Example
+    ///
+    /// Try multiple field names
+    ///
+    /// ```splitscript
+    /// let levelField = await gameManager.fieldAny(["currentLevel", "level"])
+    /// ```
+    @intrinsic(UnityClassFieldAny)
+    fn fieldAny(
+        /// Candidate field names in priority order.
+        names: [String],
+    ) -> UnityField;
+
+    /// Finds a class's static-field table.
+    ///
+    /// Suspends until the static storage pointer is non-null.
+    ///
+    /// # Example
+    ///
+    /// Find static storage
+    ///
+    /// ```splitscript
+    /// let staticTable = await gameManager.staticTable()
+    /// ```
+    @intrinsic(UnityClassStaticTable)
+    fn staticTable() -> address;
+
+    /// Finds a static singleton instance.
+    ///
+    /// Combines field discovery, static-table lookup, and a non-null pointer read.
+    ///
+    /// # Example
+    ///
+    /// Find a singleton instance
+    ///
+    /// ```splitscript
+    /// let instance = await gameManager.staticInstance(["Instance", "_instance"])
+    /// ```
+    @intrinsic(UnityClassStaticInstance)
+    fn staticInstance(
+        /// Candidate singleton field names.
+        names: [String],
+    ) -> address;
+}
+
+/// Describes a Unity runtime field.
+///
+/// A field exposes its byte offset and metadata index.
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct UnityField {
+    /// Returns the instance-field byte offset.
+    offset: u32,
+
+    /// Returns the metadata field index.
+    index: u32,
+}
+
+/// Retains a discovered GBA emulator memory mapping.
+///
+/// The runtime-private mapping identifies the emulator backend and translates EWRAM and IWRAM addresses before each read.
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct GbaEmulator {
+    /// Identifies the emulator-specific memory layout.
+    private backend: u32,
+
+    /// Stores the discovered EWRAM base when it is stable.
+    private ewram: address,
+
+    /// Stores the discovered IWRAM base when it is stable.
+    private iwram: address,
+
+    /// Stores backend-specific discovery state.
+    private aux1: address,
+
+    /// Stores backend-specific discovery state.
+    private aux2: address,
+
+    /// Stores backend-specific discovery state.
+    private aux3: address,
+
+    /// Reads a typed value from emulated GBA memory.
+    ///
+    /// The expected MemoryReadable type determines the byte layout. Valid reads lie entirely within EWRAM (0x02000000..0x02040000) or IWRAM (0x03000000..0x03008000).
+    ///
+    /// # Example
+    ///
+    /// Read an emulated value
+    ///
+    /// ```splitscript
+    /// let room: u8 = gba.read(0x03000010) else 0
+    /// ```
+    @intrinsic(GbaEmulatorRead)
+    fn read<T: MemoryReadable>(
+        /// The original GBA hardware address.
+        address: u32,
+    ) -> T!;
+}
+
+/// Exercises the generic standard-library record pipeline.
+///
+/// This declaration exists only in tests and deliberately has no intrinsic implementation.
+@testOnly
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+@capabilities(Equatable, MemoryReadable)
+struct CatalogRecordProbe {
+    /// Returns the probe value.
+    value: u32,
+}

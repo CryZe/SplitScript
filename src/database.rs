@@ -20,8 +20,8 @@ use position::{syntax_expression_resolution, syntax_expression_segments};
 use crate::{
     CheckedProgram, Diagnostic, RecoveredCheck,
     ast::{
-        EnumId, EnumTypeId, EnumVariantId, ExprKind, FunctionId, MatchPattern, RecordFieldId,
-        RecordId, Span, Stmt, TypeRef as SyntaxTypeRef, ValueId,
+        EnumId, EnumVariantId, ExprKind, FunctionId, MatchPattern, RecordFieldId, RecordId, Span,
+        Stmt, TypeRef as SyntaxTypeRef, ValueId,
     },
     hir::ExpressionResolution,
     language::LanguageItemId,
@@ -94,7 +94,6 @@ impl DefinitionIndex {
             checked.source_document(),
             checked.syntax(),
             checked.semantics(),
-            checked.context().standard_library(),
         )
     }
 
@@ -103,7 +102,6 @@ impl DefinitionIndex {
             checked.source_document(),
             checked.syntax(),
             checked.semantics(),
-            checked.context().standard_library(),
         )
     }
 
@@ -111,13 +109,11 @@ impl DefinitionIndex {
         document: &SourceDocument,
         syntax: &crate::ast::Program,
         semantics: &SemanticModel,
-        standard_library: StandardLibrary,
     ) -> Self {
         let mut collector = DefinitionCollector {
             document,
             syntax,
             semantics,
-            standard_library,
             index: Self::default(),
         };
         collector.visit_program(syntax);
@@ -180,7 +176,7 @@ fn definition_for_resolution(
             let callable_segment = analysis.segments.len().checked_sub(1)?;
             if segment == callable_segment {
                 return match call {
-                    ResolvedCall::UserFunction { function }
+                    ResolvedCall::UserFunction { function, .. }
                     | ResolvedCall::UserMethod { function, .. } => definitions
                         .get(SourceDefinitionId::Function(*function))
                         .cloned()
@@ -270,7 +266,7 @@ fn source_definition_for_resolution(
             let callable_segment = segment_count.checked_sub(1)?;
             if segment == callable_segment {
                 return match call {
-                    ResolvedCall::UserFunction { function }
+                    ResolvedCall::UserFunction { function, .. }
                     | ResolvedCall::UserMethod { function, .. } => {
                         Some(SourceDefinitionId::Function(*function))
                     }
@@ -425,7 +421,6 @@ struct DefinitionCollector<'a> {
     document: &'a SourceDocument,
     syntax: &'a crate::ast::Program,
     semantics: &'a SemanticModel,
-    standard_library: StandardLibrary,
     index: DefinitionIndex,
 }
 
@@ -739,6 +734,10 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
         }
     }
 
+    fn visit_for_binding(&mut self, binding: &'ast crate::ast::ForBinding) {
+        self.insert_value(binding.id, &binding.name, binding.span);
+    }
+
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
         let binding = match &arm.pattern {
             MatchPattern::Enum {
@@ -760,7 +759,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
         if let Some(binding) = binding {
             self.insert_value(binding.id, &binding.name, arm.span);
         }
-        if let MatchPattern::Enum { enumeration, .. } = &arm.pattern {
+        if matches!(arm.pattern, MatchPattern::Enum { .. }) {
             let pattern_end = arm
                 .guard
                 .as_ref()
@@ -769,10 +768,17 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                 start: arm.span.start,
                 end: pattern_end,
             };
-            if let Some(EnumTypeId::Source(enumeration)) = enumeration.resolved()
+            if let Some(ResolvedEnumVariantId::Source(variant)) =
+                self.semantics.pattern_variant(arm.pattern_id)
+                && let Some(enumeration) = self.syntax.enums.iter().find(|enumeration| {
+                    enumeration
+                        .variants
+                        .iter()
+                        .any(|candidate| candidate.id == variant)
+                })
                 && let Some(enumeration_definition) = self
                     .index
-                    .get(SourceDefinitionId::Enum(enumeration))
+                    .get(SourceDefinitionId::Enum(enumeration.id))
                     .cloned()
                 && let Some(span) = self.tokens_in(pattern_span).iter().find_map(|token| {
                     matches!(&token.kind, TokenKind::Ident(spelling) if spelling == &enumeration_definition.name)
@@ -828,7 +834,9 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             ExprKind::Record {
                 name_span, fields, ..
             } => {
-                if let Some(record) = self.semantics.record_literal(expression.id) {
+                if let Some(crate::semantic::ResolvedRecordId::Source(record)) =
+                    self.semantics.record_literal(expression.id)
+                {
                     self.add_reference(SourceDefinitionId::Record(record), *name_span);
                 }
                 let resolved = self
@@ -844,7 +852,8 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                     if let Some(span) = self.tokens_in(label_span).iter().rev().find_map(|token| {
                         matches!(&token.kind, TokenKind::Ident(spelling) if spelling == name)
                             .then_some(token.span)
-                    }) {
+                    }) && let crate::semantic::ResolvedRecordFieldId::Source(field) = field
+                    {
                         self.add_reference(SourceDefinitionId::RecordField(*field), span);
                     }
                     start = value.span.end;
@@ -854,13 +863,24 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                 self.add_type_after_ident(*target, expression.span, "as");
             }
             ExprKind::Path(_) | ExprKind::Call { .. } => {
-                let segments = syntax_expression_segments(
-                    self.document,
-                    &self.syntax.enums,
-                    expression,
-                    &self.standard_library,
-                );
+                let segments = syntax_expression_segments(self.document, expression);
                 if let Some(resolution) = syntax_expression_resolution(self.semantics, expression) {
+                    if let ExpressionResolution::EnumConstructor {
+                        variant: ResolvedEnumVariantId::Source(variant),
+                    } = resolution
+                        && let Some(identifier) = segments.first()
+                        && let Some(enumeration) = self.syntax.enums.iter().find(|enumeration| {
+                            enumeration
+                                .variants
+                                .iter()
+                                .any(|candidate| candidate.id == variant)
+                        })
+                    {
+                        self.add_reference(
+                            SourceDefinitionId::Enum(enumeration.id),
+                            identifier.span,
+                        );
+                    }
                     for (segment, identifier) in segments.iter().enumerate() {
                         if let Some(target) =
                             source_definition_for_resolution(segments.len(), &resolution, segment)
@@ -878,25 +898,6 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                     && let Some(target) = source_definition_for_member(member)
                 {
                     self.add_reference(target, *name_span);
-                }
-            }
-            ExprKind::Enum { enumeration, .. } => {
-                let segments = syntax_expression_segments(
-                    self.document,
-                    &self.syntax.enums,
-                    expression,
-                    &self.standard_library,
-                );
-                if let Some(EnumTypeId::Source(enumeration)) = enumeration.resolved()
-                    && let Some(identifier) = segments.first()
-                {
-                    self.add_reference(SourceDefinitionId::Enum(enumeration), identifier.span);
-                }
-                if let Some(ResolvedEnumVariantId::Source(variant)) =
-                    self.semantics.enum_variant(expression.id)
-                    && let Some(identifier) = segments.get(1)
-                {
-                    self.add_reference(SourceDefinitionId::EnumVariant(variant), identifier.span);
                 }
             }
             ExprKind::Error
@@ -924,16 +925,6 @@ fn named_type(
     ty: SyntaxTypeRef,
 ) -> Option<(SourceDefinitionId, &str)> {
     match ty {
-        SyntaxTypeRef::Record(id) => syntax
-            .records
-            .iter()
-            .find(|record| record.id == id)
-            .map(|record| (SourceDefinitionId::Record(id), record.name.as_str())),
-        SyntaxTypeRef::Enum(id) => syntax
-            .enums
-            .iter()
-            .find(|enumeration| enumeration.id == id)
-            .map(|enumeration| (SourceDefinitionId::Enum(id), enumeration.name.as_str())),
         SyntaxTypeRef::Array(id) => syntax
             .array_types
             .iter()
@@ -969,6 +960,6 @@ fn named_type(
                         })
                 })
         }
-        SyntaxTypeRef::Core(_) | SyntaxTypeRef::Standard(_) => None,
+        SyntaxTypeRef::Core(_) => None,
     }
 }

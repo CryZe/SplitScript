@@ -14,7 +14,7 @@ use crate::{
 };
 
 use super::{
-    GcLayout, Type,
+    GcLayout, LocalPlanOptions, Type,
     async_frame::AsyncFrameLayout,
     call_target,
     context::AttachContext,
@@ -22,7 +22,7 @@ use super::{
     emit_async_frame_ref, emit_memory_value, emit_typed_struct_get,
     expression::{
         ExprContext, LocalStorage, LoopControl, MatchLayout, compile_assignment, compile_expr,
-        compile_receiver,
+        compile_for_bind_and_advance, compile_for_has_next, compile_for_init, compile_receiver,
     },
     global_plan::RuntimeGlobals,
     imports::Abi,
@@ -50,9 +50,12 @@ pub(super) fn compile_async_attach(
         &mut planned_locals,
         &mut matches,
         &mut local_types,
-        1,
-        runtime.lowering.semantics,
-        true,
+        LocalPlanOptions {
+            parameter_count: 1,
+            semantics: runtime.lowering.semantics,
+            instance: None,
+            include_values: true,
+        },
     );
     let mut function = Function::new(
         local_types
@@ -85,6 +88,7 @@ pub(super) fn compile_async_attach(
         semantics: runtime.lowering.semantics,
         wasm_ir: runtime.lowering.wasm_ir,
         gc: runtime.lowering.gc,
+        function_instance: None,
         loop_control: None,
     };
 
@@ -132,6 +136,50 @@ pub(super) fn compile_async_attach(
             } => {
                 compile_expr(&mut function, condition, &context);
                 function.instruction(&Instruction::If(BlockType::Empty));
+                compile_async_flow(
+                    &mut function,
+                    body,
+                    2,
+                    Some(
+                        AsyncLoopTargets {
+                            break_state: exit_state,
+                            continue_state: header_state,
+                        }
+                        .control(2),
+                    ),
+                    cancellation_region,
+                    runtime,
+                    layout,
+                    &context,
+                );
+                function.instruction(&Instruction::Else);
+                set_async_state(
+                    &mut function,
+                    exit_state,
+                    runtime.lowering.gc,
+                    runtime.lowering.runtime_globals,
+                );
+                function
+                    .instruction(&Instruction::Br(2))
+                    .instruction(&Instruction::End);
+            }
+            AsyncState::ForHeader {
+                binding,
+                iterable_value,
+                index_value,
+                body,
+                header_state,
+                exit_state,
+            } => {
+                compile_for_has_next(&mut function, iterable_value, index_value, &context);
+                function.instruction(&Instruction::If(BlockType::Empty));
+                compile_for_bind_and_advance(
+                    &mut function,
+                    binding,
+                    iterable_value,
+                    index_value,
+                    &context,
+                );
                 compile_async_flow(
                     &mut function,
                     body,
@@ -257,8 +305,8 @@ fn compile_suspension_poll(
                 unreachable!();
             };
             let (ptr, len) = strings.get(name);
+            compile_receiver(function, target, context);
             function
-                .instruction(&Instruction::LocalGet(0))
                 .instruction(&Instruction::I32Const(ptr as i32))
                 .instruction(&Instruction::I32Const(len as i32))
                 .instruction(&Instruction::Call(
@@ -270,8 +318,8 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
+            compile_receiver(function, target, context);
             function
-                .instruction(&Instruction::LocalGet(0))
                 .instruction(&Instruction::I32Const(ptr as i32))
                 .instruction(&Instruction::I32Const(len as i32))
                 .instruction(&Instruction::Call(
@@ -312,7 +360,7 @@ fn compile_suspension_poll(
                 emit_async_frame_ref(function, context.runtime_globals);
                 debug_assert_eq!(stored_type, read_type);
             }
-            function.instruction(&Instruction::LocalGet(0));
+            compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             function
                 .instruction(&Instruction::I32Const(
@@ -352,7 +400,7 @@ fn compile_suspension_poll(
             }
         }
         Some(IntrinsicId::ProcessFollow) => {
-            function.instruction(&Instruction::LocalGet(0));
+            compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             compile_expr(function, args[1], context);
             function
@@ -387,7 +435,7 @@ fn compile_suspension_poll(
                 unreachable!();
             };
             let entry = signatures.get(signature);
-            function.instruction(&Instruction::LocalGet(0));
+            compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             compile_expr(function, args[1], context);
             function
@@ -416,7 +464,7 @@ fn compile_suspension_poll(
             }
         }
         Some(IntrinsicId::ProcessReadRelative32) => {
-            function.instruction(&Instruction::LocalGet(0));
+            compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             function
                 .instruction(&Instruction::Call(
@@ -785,6 +833,14 @@ enum AsyncState<'a> {
         header_state: wasm_ir::AsyncStateId,
         exit_state: wasm_ir::AsyncStateId,
     },
+    ForHeader {
+        binding: ValueId,
+        iterable_value: ValueId,
+        index_value: ValueId,
+        body: &'a wasm_ir::Block,
+        header_state: wasm_ir::AsyncStateId,
+        exit_state: wasm_ir::AsyncStateId,
+    },
     Poll {
         mode: SuspensionMode,
         binding: Option<ValueId>,
@@ -828,7 +884,12 @@ fn collect_async_states<'a>(
             wasm_ir::Statement::While { body, .. } => {
                 collect_async_states(body, states, loop_targets)
             }
-            wasm_ir::Statement::Store { .. } | wasm_ir::Statement::Evaluate { .. } => {}
+            wasm_ir::Statement::For { body, .. } => {
+                collect_async_states(body, states, loop_targets)
+            }
+            wasm_ir::Statement::Store { .. }
+            | wasm_ir::Statement::Evaluate { .. }
+            | wasm_ir::Statement::ForInit { .. } => {}
         }
     }
     match &block.terminator {
@@ -868,6 +929,34 @@ fn collect_async_states<'a>(
             };
             states[header_state.index() as usize] = Some(AsyncState::LoopHeader {
                 condition: *condition,
+                body,
+                header_state: *header_state,
+                exit_state: *exit_state,
+            });
+            states[exit_state.index() as usize] = Some(AsyncState::Block {
+                block: continuation,
+                loop_targets,
+            });
+            collect_async_states(body, states, Some(inner_targets));
+            collect_async_states(continuation, states, loop_targets);
+        }
+        wasm_ir::Terminator::AsyncFor {
+            binding,
+            iterable_value,
+            index_value,
+            body,
+            continuation,
+            header_state,
+            exit_state,
+        } => {
+            let inner_targets = AsyncLoopTargets {
+                break_state: *exit_state,
+                continue_state: *header_state,
+            };
+            states[header_state.index() as usize] = Some(AsyncState::ForHeader {
+                binding: *binding,
+                iterable_value: *iterable_value,
+                index_value: *index_value,
                 body,
                 header_state: *header_state,
                 exit_state: *exit_state,
@@ -981,6 +1070,52 @@ fn compile_async_flow(
                     .instruction(&Instruction::End)
                     .instruction(&Instruction::End);
             }
+            wasm_ir::Statement::For {
+                binding,
+                iterable_value,
+                index_value,
+                iterable,
+                body,
+            } => {
+                compile_for_init(function, *iterable_value, *index_value, *iterable, context);
+                function
+                    .instruction(&Instruction::Block(BlockType::Empty))
+                    .instruction(&Instruction::Loop(BlockType::Empty));
+                compile_for_has_next(function, *iterable_value, *index_value, context);
+                function
+                    .instruction(&Instruction::I32Eqz)
+                    .instruction(&Instruction::BrIf(1));
+                compile_for_bind_and_advance(
+                    function,
+                    *binding,
+                    *iterable_value,
+                    *index_value,
+                    context,
+                );
+                compile_async_flow(
+                    function,
+                    body,
+                    loop_depth + 2,
+                    Some(LoopControl::Branch {
+                        break_depth: 1,
+                        continue_depth: 0,
+                    }),
+                    cancellation_region,
+                    runtime,
+                    layout,
+                    context,
+                );
+                function
+                    .instruction(&Instruction::Br(0))
+                    .instruction(&Instruction::End)
+                    .instruction(&Instruction::End);
+            }
+            wasm_ir::Statement::ForInit {
+                iterable_value,
+                index_value,
+                iterable,
+                ..
+            } => compile_for_init(function, *iterable_value, *index_value, *iterable, context),
             wasm_ir::Statement::Evaluate {
                 expression,
                 discard_result,
@@ -1005,6 +1140,10 @@ fn compile_async_flow(
                 .emit_continue(function, context.gc, context.runtime_globals);
         }
         wasm_ir::Terminator::AsyncWhile { header_state, .. } => {
+            set_async_state(function, *header_state, context.gc, context.runtime_globals);
+            function.instruction(&Instruction::Br(loop_depth));
+        }
+        wasm_ir::Terminator::AsyncFor { header_state, .. } => {
             set_async_state(function, *header_state, context.gc, context.runtime_globals);
             function.instruction(&Instruction::Br(loop_depth));
         }

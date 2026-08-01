@@ -24,6 +24,8 @@ let timerStarts = 0;
 let timerSplits = 0;
 let invalidReads = 0;
 let pauseCalls = 0;
+let inventoryBlockReads = 0;
+let inventoryByteReads = 0;
 
 function gbaOffset(address) {
     if (address >= 0x02000000 && address < 0x02040000) return address - 0x02000000;
@@ -105,6 +107,16 @@ const env = {
     process_is_open: () => 1,
     process_read(_process, address, pointer, length) {
         const offset = Number(address);
+        const inventoryAddress = activeBase + gbaOffset(0x02002b32);
+        if (offset === inventoryAddress && length === 6) {
+            inventoryBlockReads += 1;
+        } else if (
+            inventoryAddress <= offset &&
+            offset < inventoryAddress + 6 &&
+            length === 1
+        ) {
+            inventoryByteReads += 1;
+        }
         if (offset < 0 || offset + length > processMemory.length) {
             invalidReads += 1;
             return 0;
@@ -177,6 +189,12 @@ if (timerStarts !== 1 || timerSplits !== 1) {
     );
 }
 if (invalidReads !== 0) throw new Error(`GBA translation produced ${invalidReads} invalid reads`);
+if (inventoryBlockReads === 0 || inventoryByteReads !== 0) {
+    throw new Error(
+        `expected transactional inventory reads, got blocks=${inventoryBlockReads} ` +
+            `individualBytes=${inventoryByteReads}`,
+    );
+}
 if (variables.get("Hearts") !== "4½" || variables.get("Rupees") !== "123") {
     throw new Error(`unexpected timer variables: ${JSON.stringify(Object.fromEntries(variables))}`);
 }
@@ -184,4 +202,11 @@ if (pauseCalls === 0 || gameTimes.length === 0) {
     throw new Error("load removal did not supply paused game time");
 }
 
-console.log(JSON.stringify({ attachNames, timerStarts, timerSplits, variables: Object.fromEntries(variables) }));
+console.log(JSON.stringify({
+    attachNames,
+    timerStarts,
+    timerSplits,
+    inventoryBlockReads,
+    inventoryByteReads,
+    variables: Object.fromEntries(variables),
+}));

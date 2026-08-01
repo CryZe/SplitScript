@@ -102,7 +102,9 @@ impl<'ast> Visitor<'ast> for HeaderCollector {
                     self.push(then_block.span.end, else_block.span.start);
                 }
             }
-            Stmt::While { body, span, .. } => self.push(span.start, body.span.start),
+            Stmt::While { body, span, .. } | Stmt::For { body, span, .. } => {
+                self.push(span.start, body.span.start)
+            }
             _ => {}
         }
         visit::walk_stmt(self, statement);
@@ -237,12 +239,11 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             Stmt::Expression(expression) => {
                 self.continuation_before_block(expression.span.start, expression.span.end);
             }
-            Stmt::Debug { .. }
-            | Stmt::Variable(_)
-            | Stmt::If { .. }
-            | Stmt::While { .. }
-            | Stmt::Break { .. }
-            | Stmt::Continue { .. } => {}
+            Stmt::If { span, .. } | Stmt::While { span, .. } | Stmt::For { span, .. } => {
+                self.break_after.insert(span.end);
+            }
+            Stmt::Debug { .. } | Stmt::Variable(_) | Stmt::Break { .. } | Stmt::Continue { .. } => {
+            }
         }
         visit::walk_stmt(self, statement);
     }
@@ -308,6 +309,7 @@ struct Formatter<'a> {
     previous_was_generic_close: bool,
     gap_line_breaks: usize,
     generic_depth: usize,
+    bracket_depth: usize,
     multiline_headers: Vec<HeaderRange>,
     continuations: Vec<ContinuationRange>,
     delimiters: Vec<DelimiterRange>,
@@ -343,6 +345,7 @@ impl<'a> Formatter<'a> {
             previous_was_generic_close: false,
             gap_line_breaks: 0,
             generic_depth: 0,
+            bracket_depth: 0,
             multiline_headers,
             continuations: layout.continuations,
             delimiters: delimiter_ranges(document),
@@ -398,6 +401,11 @@ impl<'a> Formatter<'a> {
             self.generic_depth += 1;
         } else if current_is_generic_close {
             self.generic_depth -= 1;
+        }
+        if matches!(current_token, Some(TokenKind::LBracket)) {
+            self.bracket_depth += 1;
+        } else if matches!(current_token, Some(TokenKind::RBracket)) {
+            self.bracket_depth = self.bracket_depth.saturating_sub(1);
         }
 
         self.previous_was_prefix = current_token
@@ -465,7 +473,11 @@ impl<'a> Formatter<'a> {
             return Separation::Newline;
         }
         if matches!(previous_token, Some(TokenKind::Semicolon)) {
-            return Separation::Newline;
+            return if self.bracket_depth > 0 {
+                Separation::Space
+            } else {
+                Separation::Newline
+            };
         }
         if matches!(previous_token, Some(TokenKind::RBrace))
             && matches!(current_token, Some(TokenKind::Ident(name)) if name == "else")
@@ -705,11 +717,6 @@ fn needs_space(
     {
         return false;
     }
-    if matches!(previous, TokenKind::Ident(name) if name == "Array")
-        && matches!(current, TokenKind::Lt)
-    {
-        return false;
-    }
     if generic_depth > 0 && (matches!(previous, TokenKind::Lt) || matches!(current, TokenKind::Gt))
     {
         return false;
@@ -758,7 +765,7 @@ fn needs_space(
         return matches!(previous, TokenKind::Ident(name) if matches!(name.as_str(), "if" | "while" | "match"));
     }
     if matches!(current, TokenKind::LBracket) {
-        return matches!(previous, TokenKind::Ident(name) if name == "state");
+        return true;
     }
     if matches!(previous, TokenKind::Comma | TokenKind::Colon) {
         return true;
@@ -907,20 +914,40 @@ whileAttached {
 
     #[test]
     fn keeps_literal_spellings_templates_signatures_and_type_postfixes() {
-        let source = r#"state "game.exe"{}
-fn probe(value:Array<u8>!)->String{let missing:Array<u8>?=None;let sigValue=sig"48 8B ??";return `{value.length()}:{missing==None}:{sigValue as String}`}
+        let source = r#"state "game.exe"{bytes:[u8;6] at 0x100}
+fn probe(value:[u8]!)->String{let missing:[u8]?=None;let fixed:[u8;3]=[1,2,3];let sigValue=sig"48 8B ??";return `{value.length()}:{fixed.length()}:{missing==None}:{sigValue as String}`}
+fn nested()->[[u8]]{return [[1]]}
 fn fallible()->f32!{return Err("missing")}
 fn optional()->f32?{return None}"#;
         let formatted = format_source(source).unwrap();
 
-        assert!(formatted.contains("value: Array<u8>!"), "{formatted}");
-        assert!(formatted.contains("missing: Array<u8>? = None"));
+        assert!(formatted.contains("bytes: [u8; 6] at 0x100"), "{formatted}");
+        assert!(
+            formatted.contains("fixed: [u8; 3] = [1, 2, 3]"),
+            "{formatted}"
+        );
+        assert!(formatted.contains("value: [u8]!"), "{formatted}");
+        assert!(formatted.contains("missing: [u8]? = None"));
+        assert!(formatted.contains("fn nested() -> [[u8]] {"), "{formatted}");
         assert!(formatted.contains("fn fallible() -> f32! {"), "{formatted}");
         assert!(formatted.contains("fn optional() -> f32? {"), "{formatted}");
         assert!(!formatted.contains("f32!{"), "{formatted}");
         assert!(!formatted.contains("f32?{"), "{formatted}");
         assert!(formatted.contains("sig\"48 8B ??\""));
         assert!(formatted.contains("`{value.length()}:"));
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn formats_bounded_state_string_decoders_as_part_of_the_pointer_path() {
+        let source = r#"state "game.exe"{mapName at "game.dll",0x100,0x20 as utf8(64)}"#;
+        let expected = r#"state "game.exe" {
+    mapName at "game.dll", 0x100, 0x20 as utf8(64)
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
         assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
 
@@ -995,6 +1022,7 @@ split {
         && isFirstLevel(current.levelOrScene) {
         return true
     }
+
 }"#;
         let expected = r#"state "game.exe" {}
 split {
@@ -1007,6 +1035,25 @@ split {
 }
 "#;
 
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn formats_for_headers_and_bodies_idempotently() {
+        let source = r#"state "game.exe"{}
+whileAttached{for value in [1,2,3]{if value==2{continue}print(value as String)}}"#;
+        let expected = r#"state "game.exe" {}
+whileAttached {
+    for value in [1, 2, 3] {
+        if value == 2 {
+            continue
+        }
+        print(value as String)
+    }
+}
+"#;
         let formatted = format_source(source).unwrap();
         assert_eq!(formatted, expected);
         assert_eq!(format_source(&formatted).unwrap(), formatted);

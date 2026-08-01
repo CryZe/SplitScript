@@ -74,6 +74,14 @@ validates the release/debug fixture modules, and executes every Node host
 runtime—including both Lunistice layouts. Generated modules stay under the
 ignored `target/verify` directory.
 
+The public standard library is authored in
+[`stdlib/standard.split`](stdlib/standard.split). A small privileged loader
+uses the same syntax crate and lexer as ordinary programs, then generates the
+stable symbol IDs and typed catalog consumed by the compiler, documentation,
+and editor tooling. Rust owns
+only core representations and the closed intrinsic/runtime trust contracts;
+ordinary `.split` programs cannot enable the privileged decorators.
+
 After installation, the CLI is `splitc`:
 
 ```console
@@ -185,8 +193,10 @@ compile-time and output-size measurements are recorded in
 - A small scripting expression language with optional semicolons at line endings.
 - `bool`, `i8`/`u8`, `i16`/`u16`, `i32`/`u32`, `i64`/`u64`, `f32`, and `f64`.
 - Contextual inference for integer literals and local variables.
-- Reusable typed functions with forward calls and calls from actions or other
-  functions.
+- Reusable functions with forward calls and calls from actions or other
+  functions. Unannotated parameters and returns form inferred generic schemes,
+  so one function can be instantiated independently for different caller types;
+  inferred numeric and memory-reading constraints are checked at every call.
 - Named immutable GC records with nested field access, checked literals,
   function parameters and returns, and persistence across suspension.
 - Exhaustive `match` expressions for enums, Options, and Results, plus
@@ -195,8 +205,13 @@ compile-time and output-size measurements are recorded in
 - Explicit `None`/`Some(value)` and `Ok(value)`/`Err(error)` wrapper syntax,
   while plain values still lift automatically when `T?` or `T!` is expected.
 - Type-directed methods with an implicit `self` and nested receiver calls.
-- Monomorphized generic GC arrays with inferred literals and typed
-  `length`/`get`/`set` methods.
+- Demand-monomorphized generic function bodies and GC arrays, including the
+  general `[T]` and exact-length `[T; N]` forms, inferred literals, and typed
+  `length`/`get`/`set` methods. Fixed arrays of readable elements support one
+  transactional typed process-memory read.
+- Inferred `for value in array` loops over `[T]` and `[T; N]`, with read-only
+  scoped bindings, `break`/`continue`, single evaluation of the iterable, and
+  suspension-safe `await`/`retry` bodies in `onAttach`.
 - Strict width checking: a `u16` is never silently treated as a `u32`.
 - Module-relative and absolute 64-bit pointer paths.
 - Ordered fallback process attachment with one or more executable names.

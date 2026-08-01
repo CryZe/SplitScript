@@ -13,42 +13,209 @@ Priority meanings:
 - **P2** — tooling, documentation, migration, and ecosystem scaling.
 - **Ongoing** — evidence that must accompany changes in every priority.
 
-## P0 — Finish the source-defined standard-library boundary
+## P0 — Extend the completed source-defined standard-library boundary
 
-The normalized graph, stable data-backed IDs, hierarchical declarations,
-semantic adapter, compiler context, trusted intrinsic registry, runtime-helper
-registry, generated ABI/language catalogs, and catalog-derived backend layouts
-are in place. Ordinary compiler and tooling consumers no longer need to know
-how the bundled library is authored.
-
-The remaining maintainability problem is ownership: `StandardLibrary` still
-borrows one process-global graph made from Rust declarations. That prevents an
-alternate catalog from proving that the boundaries are real, and it is not the
-desired long-term authoring experience.
+The bundled public surface now has one canonical authoring source:
+`stdlib/standard.split`. The dependency-light syntax crate parses it in an
+explicit privileged mode, the build-only loader validates and generates typed
+catalog data and stable IDs, and the compiler validates the generated graph
+against its closed intrinsic/runtime trust boundary. Ordinary compiler and
+tooling consumers only see the normalized immutable graph.
 
 - [x] Make `CompilerContext` own an immutable, shareable validated catalog
   graph rather than a copyable handle to a `'static` singleton. `StandardLibrary`
   now owns an `Arc` to its indexed graph, context/stage products are `Clone`
   rather than `Copy`, and algorithms borrow the library while explicit product
-  boundaries clone the owner. A separately built validated graph is injected
+    boundaries clone the owner. A separately built validated graph is injected
   through context and tested across parsing, checking, typed HIR, Wasm IR, and
-  binary generation. The source-loader task below will generalize the graph's
-  declaration storage beyond the currently bundled static data.
-- [ ] Define the ordinary standard-library surface in privileged SplitScript
+  binary generation.
+- [x] Define the ordinary standard-library surface in privileged SplitScript
   source. Its declarations should co-locate namespaces, types, capabilities,
   fields, variants, methods/functions, documentation, and focused examples.
-- [ ] Add an explicit standard-library compilation mode. It may use reserved
+  - [x] Establish the dependency-light privileged source parser and migrate the
+    complete bundled surface. Structs, enums, fields,
+    variants, static functions, parameter documentation, focused examples,
+    representations, value-usage rules, capabilities, and intrinsic binding
+    names now have an owned source model.
+    - [x] Move spans, tokens, lexical rules, and the privileged declaration
+      grammar into `splitscript-syntax`. Ordinary and standard-library parsing
+      now select explicit modes of one lexer; the build-time loader owns only
+      catalog/ID generation rather than a second parser stack.
+    - [x] Move token position, lookahead, exact/variant matching, EOF behavior,
+      and documentation-comment collection into one shared `TokenCursor` used
+      by both grammars. Parser recovery retains policy, not token mechanics.
+    - [x] Move the ordinary program AST, parser cursor, recovery,
+      and grammar into `splitscript-syntax`, then expose ordinary and privileged
+      parsing as modes of that shared parser. First replace parser-time
+      dependencies on compiler semantic/catalog identities with unresolved
+      syntax identities; the syntax crate must not depend back on the compiler.
+      - [x] Move `SettingDecl::value_type`, `ActionKind::return_type`, and
+        resolved type display out of the syntax AST and into semantic adapters.
+      - [x] Keep state-provider names and process syntax immutable. Lowering now
+        records `StdlibStateProviderId` in `ProgramResolutions`, checking
+        publishes it in `SemanticModel`, and backend attachment derives the
+        provider process list from that semantic fact.
+      - [x] Keep source-written nominal type references immutable. Lowering maps
+        `TypeNameId` to source/catalog identities in `ProgramResolutions`, and
+        type checking consumes that side table without replacing `TypeRef::Named`
+        nodes in annotations, casts, or constructed type syntax.
+      - [x] Stop rewriting enum-qualified paths, calls, match patterns, and
+        choice settings into resolved AST forms. Their source/catalog enum
+        identities are keyed by stable expression, pattern, and setting IDs in
+        `ProgramResolutions`; checked variants flow through `SemanticModel` and
+        typed HIR. The synthetic `ExprKind::Enum` and
+        `EnumReference::Resolved` forms have been deleted.
+      - [x] Split source `TypeRef` from resolved semantic/layout type
+        references. Primitive spellings now live in `splitscript-syntax`;
+        parsed references contain only those spellings, `TypeNameId`, and
+        constructed-syntax IDs. `ResolvedTypeRef`, checked constructed layouts,
+        and `EnumTypeId` live in the semantic type layer, and `ast.rs` no longer
+        imports `crate::stdlib`.
+      - [x] Move stable syntax IDs and nodes, structured syntax diagnostics,
+        recovery nodes, the lossless source document, and the complete ordinary
+        parser into `splitscript-syntax` without maintaining conversion copies.
+        The compiler crate now re-exports these products and only adapts lexer
+        failures into the common diagnostic model.
+      - [x] Move the generic immutable visitor and mutable folder beside the
+        AST. Raw stable-ID constructors are crate-private; nominal type-name
+        iteration and the shared constructed-type allocator are the explicit
+        APIs used by later stages instead of fabricating syntax IDs.
+  - [x] Generate the normalized typed catalog and every ordinary stable symbol
+    ID directly from that source during the Cargo build. Capabilities,
+    providers, constructors, namespaces, types, fields, variants, callables,
+    signatures, and documentation now have one canonical authoring source.
+  - [x] Represent privileged type expressions structurally rather than as
+    strings reparsed by the generator. The loader validates nested constructor
+    references and arity, nominal field types, capabilities, representations,
+    value-usage rules, selectors, literal rules, providers, attributes, and
+    focused callable examples before emission.
+  - [x] Remove the compiler-side 1,200-line source mirror validator and the
+    runtime reparse of `standard.split`. Source-shape errors are build-time
+    loader diagnostics; generated graph integrity and trusted intrinsic
+    contracts are checked directly by the compiler. The loader is now a build
+    dependency only.
+- [x] Add an explicit standard-library compilation mode. It may use reserved
   declaration forms and intrinsic bindings that user programs cannot spell;
   loading untrusted source must never grant host or compiler privileges.
-- [ ] Keep a small Rust trust boundary for core primitives, compiler-provided
+  - [x] Reserve `@representation`, `@valueUsage`, `@capabilities`, and
+    `@intrinsic` to the bundled loader. Ordinary parsing rejects the decorator
+    syntax, and tests prove that changing an intrinsic name cannot select a
+    different trusted implementation.
+- [x] Keep a small Rust trust boundary for core primitives, compiler-provided
   representations, intrinsics, runtime helpers, and ABI imports. Validate every
   privileged source binding against that registry before the graph is usable.
-- [ ] Once the source loader covers the bundled library, delete the Rust
+  - [x] Move `IntrinsicId` and name resolution into a closed Rust-owned trust
+    registry. Source bindings resolve through the registry and are then checked
+    against its exact callable shape, signature, effects, availability, lowering,
+    dependencies, and scratch requirements.
+- [x] Once the source loader covers the bundled library, delete the Rust
   authoring macro and generated declaration duplication in one change. Do not
-  maintain two canonical sources or compatibility aliases.
-- [ ] After modules and ordinary generic library functions exist, move
-  non-intrinsic behavior such as numeric helpers out of compiler dispatch and
-  into library source.
+  maintain two canonical sources or compatibility aliases. The loader now
+  emits final typed arrays; the former 1,000-line declaration macro and its
+  normalization macro have both been removed.
+- [ ] Extend ordinary standard-library function bodies beyond the completed
+  synchronous, effect-aware and catalog-nominal generic tiers.
+  Intrinsics should be the minimal trusted leaf operations; composition,
+  validation, convenience APIs, and other high-level behavior should normally
+  be library source rather than compiler dispatch.
+  - [x] Extend privileged callable syntax so a declaration has exactly one
+    implementation: `@intrinsic(Name) fn ...;` or `fn ... { ... }`. Reject a
+    body plus intrinsic binding, and reject a bodyless non-intrinsic function.
+  - [x] Reuse the ordinary expression/statement AST, resolver, type checker,
+    typed HIR, effect inference, and Wasm-IR lowering for library bodies. Do not
+    create a smaller second body language or a parallel evaluator in the
+    loader. The privileged parser should only add declaration/binding forms.
+  - [x] Give body-defined functions stable catalog item IDs and a distinct
+    implementation target such as `Implementation::LibraryBody`. Calls from
+    user code and other library bodies should use the same overload,
+    capability, documentation, and reachability machinery as intrinsic-backed
+    items; only the final call target differs.
+  - [x] Infer effects and dependencies transitively through the ordinary body
+    call graph. Source bodies carry no authored or generated placeholder
+    effects: a standalone compiler pass over the bundled library derives their
+    canonical `EffectSet`, availability, attachment requirement, suspension,
+    and cancellation metadata once per catalog graph. Every user compilation
+    rechecks its injected bodies against that cached result.
+  - [x] Publish compiler-derived source-body operation semantics through the
+    same catalog queries used by checking, detached-call validation,
+    documentation, completion, signature help, and hover. `timer.isRunning`
+    and `Module.readRelative32` exercise timer-read and attached-process call
+    graphs without adding compiler dispatch.
+  - [x] Feed library bodies through ordinary reachability and dead stripping.
+    The compiler-owned functions are hidden from public syntax, HIR, and
+    semantic iterators even though the backend sees the complete unit.
+  - [x] Establish the first bounded generic-body specialization tier as a
+    bridge for single-parameter capability methods over eligible catalog
+    nominal types. This proved source-defined `Numeric.clamp` and reachable
+    concrete emission before ordinary inferred generics existed; the temporary
+    eager instance generator has since been removed in favor of the shared
+    demand-driven machinery below.
+  - [x] Add demand-driven monomorphization for ordinary inferred generic
+    functions. It supports source-owned types and constructed nominal GC
+    layouts without recreating type spellings, recursive components, debug
+    erasure, and deterministic diagnostics for excessively large instance
+    graphs. Catalog-owned source bodies now use this same machinery instead of
+    maintaining a second bounded specialization tier.
+    - [x] Establish one concrete `FunctionInstance` identity at the semantic
+      boundary and carry it through resolved calls, typed function bodies,
+      Wasm IR, reachability, function-index planning, and emission. Ordinary
+      monomorphic functions use an empty type-argument vector; backend data
+      structures no longer assume that one `FunctionId` means one Wasm body.
+    - [x] Introduce ordinary function type schemes. Infer and generalize
+      declaration-local type variables without leaking inference variables
+      into semantic products; instantiate a fresh copy at every call and
+      retain both inferred type arguments and the exact concrete signature on
+      `ResolvedCall`. Capability requirements are published with each semantic
+      type parameter for diagnostics, hover, completion, and validation.
+      - [x] Add a constraint-preserving signature-instantiation boundary.
+        Per-call substitution preserves shared variables and recursively
+        rebuilds `[T]`, `T?`, and `T!` layouts while copying capability
+        and numeric-literal requirements. Resolved user calls now receive their
+        type arguments from this path; monomorphic schemes supply none.
+    - [x] Infer mutually recursive functions by call-graph strongly connected
+      component. Calls within an SCC remain monomorphic until the component is
+      solved; only the completed boundary is generalized. Diagnose polymorphic
+      recursion explicitly rather than depending on source order. Recursive
+      calls are patched to the component's generalized roots after solving.
+      - [x] Build a deterministic source-function dependency graph, collapse it
+        into strongly connected components, and check components in callee-first
+        order. Free calls use exact declaration names; method calls add
+        conservative edges to source methods with the written member name.
+    - [x] Represent a checked generic body once, then substitute semantic types,
+      constructed GC layouts, locals, conversions, and nested calls for every
+      reachable `FunctionInstance`. Syntax-keyed semantic and typed-HIR facts
+      remain a single editor-facing template; backend lowering carries the
+      owning instance and specializes every fact through it. A backend-private
+      cloned semantic/layout arena materializes local `Array`, `Option`, and
+      `Result` layouts without corrupting source tooling identities.
+    - [x] Make reachability discover instances demand-first from actions, state
+      expressions, globals, and already-specialized bodies. Deduplicate by the
+      structural function, type-argument, and concrete-signature key. Generic
+      expansion has deterministic depth and total-instance limits with focused
+      source diagnostics; ordinary monomorphic call depth does not consume
+      those limits.
+    - [x] Route catalog-owned generic bodies through the same inferred template
+      and `FunctionInstance` pipeline. Each library body is parsed and checked
+      once; the catalog call boundary supplies its exact concrete signature,
+      including constructed and source-owned shapes, and backend reachability
+      materializes only used instances. `[T].isEmpty()` exercises two array
+      element types without an intrinsic or an eager catalog substitution set.
+  - [x] Keep privilege capability-based: a library body gains no direct host,
+    Wasm, runtime-helper, or memory access merely because it lives in
+    `standard.split`; it can only reach those operations through validated
+    intrinsic declarations. Ordinary user source must still be unable to spell
+    privileged decorators or inject library declarations.
+  - [x] Establish the pipeline with non-generic synchronous bodies and
+    migrate every `Duration` constructor out of intrinsic dispatch. Catalog
+    GC-record literals let `Duration` construct its own private representation
+    in `standard.split` without exposing those fields to user code.
+  - [x] Add generic array-like and source-type-compatible bodies after ordinary
+    generic functions exist. `[T].isEmpty()` is the first constructed-type
+    helper and uses the shared demand-driven specialization pipeline.
+  - [ ] Add suspending standard-library bodies after their required language
+    and lowering model is designed. Continue migrating high-level helpers as
+    each required language feature becomes available; retain only true
+    representation, host-ABI, runtime, or lowering primitives as intrinsics.
 
 ### Catalog completeness
 
@@ -119,14 +286,25 @@ type `GbaEmulator`; scripts never retain or attach the emulator themselves.
   0x03000010`; computed addresses can still use `gba.read(...)`.
 - [x] Give each selected provider one implicit typed value with a catalog-owned
   name. Under `state GBA`, `gba.read` accepts original GBA hardware addresses
-  and performs emulator translation; native states instead expose the
-  `process` namespace. Completion hides the unavailable root, and diagnostics
+  and performs emulator translation; native states expose a typed, read-only
+  `process: Process` provider value. Completion hides the unavailable root, and diagnostics
   explain the correct one. Preserve generic typed reads and the same
   Result/failure-boundary behavior as native process reads.
-- [ ] Generalize the model for future emulator families without reserving one
-  parser keyword per platform. Revisit ordinary native process attachment as
-  a provider too, eliminating the current mismatch where `process` is only a
-  namespace while Unity and emulator abstractions are nominal types.
+- [x] Generalize ordinary native process attachment into the same provider
+  model without reserving a parser keyword per platform. The catalog declares
+  a source-process provider whose executable names come from `state "..."`,
+  whose identity attachment exposes the raw handle as nominal `Process`, and
+  whose direct-read operation drives ordinary `at` fields. `Process` owns its
+  module/read/follow/scan/string-decoder methods, including inferred and
+  explicitly selected generic reads; values can flow through locals,
+  parameters, returns, and globals. GBA remains a transformed provider with a
+  catalog-owned executable list and attachment intrinsic. Type checking,
+  codegen, completion, hover, definitions, effects, and documentation consume
+  these provider/callable facts rather than a `process` namespace exception.
+- [ ] Use the same provider declaration shape for future emulator and engine
+  families. Add another provider only when a real port supplies its process
+  discovery, address domain, and direct-read semantics; do not add parser
+  keywords or backend switches for each platform.
 - [x] Remove the temporary explicit GBA attachment API. The Minish Cap port now
   uses only `state GBA` and `gba`; compiler, runtime, formatter, hover,
   completion, definition, highlighting, and documentation paths consume the
@@ -134,16 +312,32 @@ type `GbaEmulator`; scripts never retain or attach the emulator themselves.
 
 ## P0 — Complete typed process deserialization
 
-- [ ] Add bounded native string state reads. Cover fixed-size ASL-style
-  `string4`/`string32`/`string150` fields, null-terminated and fixed-length
-  byte strings, explicit UTF-8/ASCII/UTF-16 decoding, embedded nulls, invalid
-  input, and failed reads. Keep these distinct from IL2CPP managed strings and
-  return `Result`/`Option` where absence or decoding failure is meaningful.
-- [ ] Add fixed-length memory-readable arrays/buffers so indexed ASL state such
-  as flags, inventory slots, and mission arrays can be read transactionally.
-  Reuse `Array<T>` and `MemoryReadable` instead of introducing special
-  `byte255`-style nominal types; require an explicit length at the read site or
-  in a declared layout and diagnose unreasonable allocations.
+- [ ] Complete bounded native string reads without introducing ASL-style
+  `string4`/`string32`/`string150` pseudo-types.
+  - [x] Add `process.readUtf8(address, maxBytes) -> String!` and concise
+    pointer-state sugar `name at ... as utf8(maxBytes)`. The decoder applies
+    after the complete pointer path, performs one bounded host read, stops at
+    NUL, validates strict UTF-8, and participates in transactional state
+    failure. Infer the state field as `String`, cap reads at 4096 bytes, and
+    document/highlight/hover/format the contextual syntax.
+  - [ ] Add explicit ASCII and UTF-16 decoders when ports require them. Decide
+    malformed-input policy per encoding rather than silently sharing the
+    managed-string replacement behavior.
+  - [ ] Add an explicit fixed-length mode for data where embedded NUL bytes are
+    meaningful. Keep null-terminated and fixed-length semantics visibly
+    distinct at the call site and cover missing terminators, invalid input,
+    failed reads, and empty values in runtime fixtures.
+  - [ ] Generalize decoder declarations into catalog/source-owned metadata if
+    the family grows, so parser, checker, editor tooling, and codegen do not
+    accumulate one handwritten branch per encoding.
+- [x] Add exact-length `[T; N]` arrays for transactional indexed process state.
+  `[T]` remains the general array type, while `[T; N]` carries its length,
+  widens to `[T]`, checks literal element counts, and derives `MemoryReadable`
+  recursively. Typed process/state reads fetch one contiguous byte range before
+  constructing the GC array. Reject zero-length process reads, unsized `[T]`
+  reads, non-readable elements, more than 4096 elements, and layouts over 65536
+  bytes. The Minish Cap inventory now exercises one `[u8; 6]` GBA read in both
+  mGBA and VBA runtime fixtures.
 - [ ] Add declarative record-layout controls when a real target requires them:
   exact offsets, padding/alignment, packing, and per-field endianness. Preserve
   field-order native-endian layout as the ergonomic default and diagnose
@@ -209,10 +403,20 @@ executable name.
 
 ## P1 — Add port-driven collections, text, math, and time
 
-- [ ] Add `for`/`for ... in` iteration over arrays and future iterable types,
-  with `break`/`continue`, inference for the element binding, async restrictions,
-  formatter support, and lowering tests. `while` remains the primitive loop,
-  but large coordinate/mission tables should not require hand-written indices.
+- [x] Use bracket syntax as the sole source spelling for arrays: `[T]` when the
+  length is not part of the type and `[T; N]` when it is exact. Both compose
+  directly with wrapper postfixes and nesting; the unreleased `Array<T>`
+  prototype syntax has no compatibility alias. The privileged
+  `typeConstructor Array<T>` declaration remains an internal standard-library
+  schema construct rather than public source syntax.
+- [x] Add `for value in array` iteration over `[T]` and `[T; N]`, with a
+  read-only inferred element binding, lexical scope, `break`/`continue`, and
+  exactly-once iterable evaluation. Ordinary loops lower to structured Wasm;
+  suspending `onAttach` bodies preserve iterable/index/binding state across
+  `await` and `retry`. Formatter, hover, semantic highlighting, inlay hints,
+  completion, navigation, checked catalog docs, Wasm validation, and runtime
+  fixtures cover the feature. Generalize this protocol when the first
+  non-array iterable collection is added.
 - [ ] Add growable typed collections after the source-defined standard-library
   boundary is ready: `List<T>`/`Vec<T>`, `Map<K, V>`, and `Set<T>`, including
   indexing or lookup, insertion/removal, containment, clearing, and iteration.
@@ -229,10 +433,15 @@ executable name.
   numeric-literal inference so an exact integer-looking literal can satisfy an
   `f32`/`f64` expectation without requiring a cosmetic `.0`, while retaining
   range and precision diagnostics.
-- [ ] Complete `Duration` arithmetic and constructors (`zero`, milliseconds,
-  seconds, and appropriate integer/floating inputs), then add a monotonic
+- [ ] Complete `Duration` arithmetic and constructors, then add a monotonic
   `Instant`/elapsed-time API for debounce and delayed-split logic. Wall-clock
   calendar time should not be used where a monotonic clock is intended.
+  - [x] Define `Duration.zero()` and signed integer
+    `Duration.fromMilliseconds(i64)` in standard-library source, alongside the
+    existing source-defined frames, parts, and floating-seconds constructors.
+  - [ ] Add integer-seconds and any additional floating-point inputs based on
+    real call sites. Design arithmetic together with the user-facing operator
+    capability model rather than hard-coding `Duration` into binary typing.
 
 ## P1 — Model polling, settings, and timer integration explicitly
 

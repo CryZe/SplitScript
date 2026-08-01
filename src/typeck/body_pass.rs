@@ -3,8 +3,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{Program, StateSource},
+    ast::{ActionKind, FunctionId, Program, StateSource},
     inference::Type,
+    stdlib::{CoreTypeId, StdlibTypeId},
 };
 
 use super::{
@@ -16,8 +17,8 @@ use super::{
 
 pub(super) fn check(checker: &mut Checker, program: &Program) {
     check_global_initializers(checker, program);
-    check_state_expressions(checker, program);
     check_function_bodies(checker, program);
+    check_state_expressions(checker, program);
     check_action_bodies(checker, program);
 }
 
@@ -37,7 +38,7 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
             );
             continue;
         }
-        if !is_constant(&global.value) {
+        if !is_constant(&global.value, &checker.resolutions) {
             checker.error(
                 "global initializers must be None, numeric, boolean, or payload-free enum constants",
                 global.value.span,
@@ -138,66 +139,137 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
 }
 
 fn check_function_bodies(checker: &mut Checker, program: &Program) {
-    for function in &program.functions {
-        checker.with_debug_context(
-            DebugContext::from_declaration(function.debug_only),
-            |checker| {
-                let signature = checker.declarations.function_signatures[&function.id].clone();
-                let failure = match checker.shallow_type(signature.result) {
-                    result @ Type::Result(_) => FailureContext::boundary(result),
-                    _ => FailureContext::None,
-                };
-                let callable = CallableContext::Function(function.method_of.map_or_else(
-                    || format!("function `{}`", function.name),
-                    |receiver| format!("method `{receiver}.{}`", function.name),
-                ));
-                checker.with_callable_context(callable, signature.result, failure, |checker| {
-                    checker.scopes.clear();
-                    checker.scopes.push(HashMap::new());
-                    for (parameter, ty) in
-                        function.params.iter().zip(signature.params.iter().copied())
+    for component in super::function_graph::dependency_order(program) {
+        checker.active_function_component = component.functions.iter().copied().collect();
+        for function_id in &component.functions {
+            let function = program
+                .functions
+                .iter()
+                .find(|function| function.id == *function_id)
+                .expect("function graph identities belong to source declarations");
+            check_function_body(checker, function);
+        }
+        // Member paths participate in signature inference. Resolve them while
+        // this component's inference variables are still ordinary unbound
+        // roots; once generalized they deliberately stop accepting concrete
+        // bindings from later call sites.
+        checker.resolve_deferred_member_paths();
+        generalize_component(checker, &component.functions);
+        checker.active_function_component.clear();
+    }
+}
+
+fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDecl) {
+    checker.with_debug_context(
+        DebugContext::from_declaration(function.debug_only),
+        |checker| {
+            let signature = checker.declarations.function_signatures[&function.id].clone();
+            let failure = match checker.shallow_type(signature.result) {
+                result @ Type::Result(_) => FailureContext::boundary(result),
+                _ => FailureContext::None,
+            };
+            let callable = checker
+                .standard_library
+                .items()
+                .iter()
+                .find_map(|item| match item.implementation {
+                    crate::stdlib::Implementation::LibraryBody { function_name, .. }
+                        if function_name == function.name =>
                     {
-                        if checker.is_provider_value_name(&parameter.name) {
-                            checker.error(
-                                format!("`{}` is reserved by the state provider", parameter.name),
-                                parameter.span,
-                            );
-                        }
-                        let duplicate = checker.scopes[0]
-                            .insert(
-                                parameter.name.clone(),
-                                Binding {
-                                    id: Some(parameter.id),
-                                    ty,
-                                    mutable: true,
-                                    debug_only: checker.debug_context.is_debug(),
-                                },
-                            )
-                            .is_some();
-                        if duplicate {
-                            checker.error(
-                                format!("duplicate parameter `{}`", parameter.name),
-                                parameter.span,
-                            );
-                        }
+                        Some(CallableContext::LibraryFunction(item.id))
                     }
-                    checker.block(&function.body, false);
-                    if signature.result != checker.core_type(crate::stdlib::CoreTypeId::Void)
-                        && !definitely_returns(&function.body)
-                    {
-                        let result = checker.type_name(signature.result);
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    CallableContext::Function(function.method_of.map_or_else(
+                        || format!("function `{}`", function.name),
+                        |receiver| format!("method `{receiver}.{}`", function.name),
+                    ))
+                });
+            checker.with_callable_context(callable, signature.result, failure, |checker| {
+                checker.scopes.clear();
+                checker.scopes.push(HashMap::new());
+                for (parameter, ty) in function.params.iter().zip(signature.params.iter().copied())
+                {
+                    if checker.is_provider_value_name(&parameter.name) {
                         checker.error(
-                            format!(
-                                "function `{}` must return `{}` on every path",
-                                function.name, result
-                            ),
-                            function.body.span,
+                            format!("`{}` is reserved by the state provider", parameter.name),
+                            parameter.span,
                         );
                     }
-                });
-            },
+                    let duplicate = checker.scopes[0]
+                        .insert(
+                            parameter.name.clone(),
+                            Binding {
+                                id: Some(parameter.id),
+                                ty,
+                                mutable: true,
+                                debug_only: checker.debug_context.is_debug(),
+                            },
+                        )
+                        .is_some();
+                    if duplicate {
+                        checker.error(
+                            format!("duplicate parameter `{}`", parameter.name),
+                            parameter.span,
+                        );
+                    }
+                }
+                checker.block(&function.body, false);
+                if signature.result != checker.core_type(crate::stdlib::CoreTypeId::Void)
+                    && !definitely_returns(&function.body)
+                {
+                    let result = checker.type_name(signature.result);
+                    checker.error(
+                        format!(
+                            "function `{}` must return `{}` on every path",
+                            function.name, result
+                        ),
+                        function.body.span,
+                    );
+                }
+            });
+        },
+    );
+}
+
+fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {
+    let environment_types = checker
+        .declarations
+        .state_fields
+        .values()
+        .map(|(_, ty)| *ty)
+        .chain(checker.declarations.settings.values().map(|(_, ty)| *ty))
+        .chain(
+            checker
+                .declarations
+                .globals
+                .values()
+                .map(|binding| binding.ty),
+        )
+        .collect::<Vec<_>>();
+    let environment = checker.inference.unbound_variables_in(environment_types);
+    let mut recursive_arguments = HashMap::new();
+
+    for function in functions {
+        let signature = checker.declarations.function_signatures[function].clone();
+        let generalized = checker
+            .inference
+            .unbound_variables_in(signature.params.iter().copied().chain([signature.result]))
+            .into_iter()
+            .filter(|variable| !environment.contains(variable))
+            .collect::<Vec<_>>();
+        recursive_arguments.insert(
+            *function,
+            generalized.iter().copied().map(Type::Variable).collect(),
         );
+        checker
+            .declarations
+            .set_function_generics(*function, generalized);
     }
+    checker
+        .semantics
+        .resolve_recursive_call_type_arguments(&recursive_arguments);
 }
 
 fn check_action_bodies(checker: &mut Checker, program: &Program) {
@@ -210,7 +282,7 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
             );
             continue;
         }
-        let return_ty = checker.syntax_type(action.kind.return_type());
+        let return_ty = action_return_type(checker, action.kind);
         checker.with_callable_context(
             CallableContext::Action(action.kind),
             return_ty,
@@ -221,5 +293,17 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
                 checker.block(&action.body, false);
             },
         );
+    }
+}
+
+fn action_return_type(checker: &Checker, action: ActionKind) -> Type {
+    match action {
+        ActionKind::OnDetached | ActionKind::OnAttach | ActionKind::WhileAttached => {
+            checker.core_type(CoreTypeId::Void)
+        }
+        ActionKind::Start | ActionKind::Split | ActionKind::Reset | ActionKind::IsLoading => {
+            checker.core_type(CoreTypeId::Bool)
+        }
+        ActionKind::GameTime => checker.standard_type(StdlibTypeId::Duration),
     }
 }

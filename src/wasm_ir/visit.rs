@@ -78,6 +78,11 @@ pub fn walk_statement(
             visitor.visit_expression_id(*condition, program);
             visitor.visit_block(body, program);
         }
+        Statement::For { iterable, body, .. } => {
+            visitor.visit_expression_id(*iterable, program);
+            visitor.visit_block(body, program);
+        }
+        Statement::ForInit { iterable, .. } => visitor.visit_expression_id(*iterable, program),
     }
 }
 
@@ -95,6 +100,12 @@ pub fn walk_terminator(
             ..
         } => {
             visitor.visit_expression_id(*condition, program);
+            visitor.visit_block(body, program);
+            visitor.visit_block(continuation, program);
+        }
+        Terminator::AsyncFor {
+            body, continuation, ..
+        } => {
             visitor.visit_block(body, program);
             visitor.visit_block(continuation, program);
         }
@@ -190,38 +201,48 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::{ExprId, PatternId};
+    use crate::ast::{ExprKind, Stmt};
 
-    use super::{super::LoweredPattern, *};
-
-    fn expression(index: u32) -> ExprId {
-        ExprId::from_index(index)
-    }
+    use super::*;
 
     #[test]
     fn child_edges_follow_deterministic_evaluation_order() {
-        let kind = ExpressionKind::Match {
-            value: expression(1),
-            arms: vec![
-                super::super::MatchArm {
-                    pattern_id: PatternId::from_index(0),
-                    pattern: LoweredPattern::Wildcard,
-                    guard: Some(expression(2)),
-                    value: expression(3),
-                },
-                super::super::MatchArm {
-                    pattern_id: PatternId::from_index(1),
-                    pattern: LoweredPattern::Wildcard,
-                    guard: None,
-                    value: expression(4),
-                },
-            ],
+        let parsed = crate::parse(
+            r#"
+                state "game.exe" {}
+
+                fn choose(value: i32) {
+                    let selected = match value {
+                        1 if true => 2,
+                        _ => 3
+                    }
+                }
+            "#,
+        )
+        .unwrap();
+        let Stmt::Variable(variable) = &parsed.syntax().functions[0].body.statements[0] else {
+            panic!("expected a variable declaration")
         };
+        let ExprKind::Match { value, arms } = &variable.value.kind else {
+            panic!("expected a match expression")
+        };
+        let expected = [
+            value.id,
+            arms[0].guard.as_ref().unwrap().id,
+            arms[0].value.id,
+            arms[1].value.id,
+        ];
+        let match_id = variable.value.id;
+        let lowered = crate::lower(parsed);
+        let checked = crate::check(lowered).unwrap();
+        let program = crate::lower_wasm(&checked);
+        let kind = program
+            .expression(match_id)
+            .expect("the match expression is lowered")
+            .kind
+            .clone();
         let mut visited = Vec::new();
         visit_expression_children(&kind, |child| visited.push(child));
-        assert_eq!(
-            visited,
-            [expression(1), expression(2), expression(3), expression(4)]
-        );
+        assert_eq!(visited, expected);
     }
 }

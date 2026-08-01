@@ -5,7 +5,7 @@ SplitScript exposes its front-end stages as separate inspectable products:
 ```text
 CompilerContext (immutable compiler services and catalog graph) + source
   -> parse -> ParsedProgram (syntax AST)
-  -> lower -> LoweredProgram (resolved syntax + DeclarationIndex + diagnostics)
+  -> lower -> LoweredProgram (syntax + resolution tables + DeclarationIndex + diagnostics)
   -> type check -> typed HIR + inferred layouts
   -> validate -> capabilities + effects + semantic diagnostics
   -> check -> CheckedProgram
@@ -40,18 +40,39 @@ an active compilation never changes catalogs between stages.
 `lower` establishes a deterministic `hir::DeclarationIndex` with stable
 IDs for named types, functions, values, and lifecycle actions. Tools can query
 this deliberately narrow index even when type checking would fail; it is not
-presented as a resolved body HIR. `LoweredProgram` itself is the resolution
-product. Nominal declaration conflicts and
+presented as a resolved body HIR. `LoweredProgram` also owns
+`resolution::ProgramResolutions`, a side table for catalog and nominal
+identities that must not be written into source syntax. State-provider names
+and source-written nominal type references therefore remain unchanged across
+lowering; checking publishes the selected provider in `SemanticModel`, and the
+backend derives its attachment process list from the provider declaration.
+`LoweredProgram` as a whole is the resolution product. Nominal declaration conflicts and
 unknown type names are retained separately from parser recovery diagnostics:
 they do not invalidate the syntax tree or prevent formatting, but strict
 checking reports them before inference. Record literals retain their written
 name in syntax and publish their resolved `RecordId` through the semantic
 model instead of requiring parser-time nominal lookup. Enum-qualified paths,
-calls, match patterns, and choice settings likewise remain named syntax until
-`resolution::resolve_program` runs during lowering. That pass resolves source
-and catalog enum identities and rewrites constructors; typed HIR then owns a
-separate resolved pattern representation. The parser performs no declaration
-pre-scan and has no standard-library dependency.
+calls, match patterns, and choice settings also remain in their original
+path/reference syntax. `resolution::resolve_program` records their enum
+identities by stable expression, pattern, and setting IDs; checking publishes
+the selected variants in `SemanticModel`, and typed HIR owns the resolved enum
+constructor and pattern forms. The parser performs no declaration pre-scan and
+has no standard-library dependency.
+
+Source `TypeRef` is likewise syntax-only: it contains primitive spellings,
+unresolved nominal `TypeNameId`s, and IDs for source-written constructed type
+expressions. Lowering maps nominal names to `ResolvedTypeRef` values in
+`ProgramResolutions`; inference and checked GC layouts use that semantic form.
+Consequently parsed nodes cannot contain `StdlibTypeId`, resolved record/enum
+identities, or the cross-source `EnumTypeId` union. Primitive spellings and
+their stable identity are owned by the dependency-light syntax crate, while
+the standard-library graph attaches capabilities and runtime layout facts.
+
+The complete ordinary AST, its stable IDs, generic visitor/folder,
+parser/recovery grammar, structured syntax diagnostics, and lossless source document are owned by
+`splitscript-syntax`. The compiler facade re-exports those exact types; there
+is no mirrored compiler AST or conversion layer. The privileged library parser
+uses the same lexer and cursor infrastructure under an explicit syntax mode.
 
 Every successful compiler stage also retains a `SourceDocument` produced by
 the same lexer pass used by the parser. Its ordered lexeme stream includes
@@ -114,7 +135,8 @@ not require the next token itself to look valid, so consecutive malformed
 statements remain distinct syntax nodes and diagnostics.
 
 Diagnostics are backend-independent values defined in
-[`src/diagnostic.rs`](../src/diagnostic.rs). They carry a stable category code
+[`crates/splitscript-syntax/src/diagnostic.rs`](../crates/splitscript-syntax/src/diagnostic.rs).
+They carry a stable category code
 and severity: `SS0001` for lexical errors, `SS0002` for syntax errors, `SS0003`
 for type errors, and `SS0004` for semantic validation after type checking. The
 same value owns its primary and secondary labels, notes, and fixes. Fixes have
@@ -132,6 +154,51 @@ operation-effect facts and owns detached-call, equality, memory-readability,
 and generic-capability diagnostics. Strict and recovering checks invoke this
 same stage; recovery retains derived effects when validation reports an error,
 so hover and other editor features do not reconstruct a weaker analysis path.
+
+Catalog-owned SplitScript bodies enter the same typed-function pipeline through
+a private compilation view. Each source-defined catalog item contributes one
+hidden function template, indexed in typed HIR by its stable catalog item ID
+rather than by its generated source name. Concrete catalog calls retain their
+exact declared receiver, parameter, and result signature. Wasm lowering maps
+that signature onto the hidden function's inferred type scheme and creates the
+same `FunctionInstance` used by ordinary source functions. Reachability thus
+materializes only the concrete instances selected by user or library calls,
+including constructed types such as `[T]` and `[T; N]`, without an eager
+catalog-specific substitution tier.
+
+Ordinary source functions have inferred Hindley-Milner-style type schemes with
+capability constraints. The type checker builds a deterministic declaration
+dependency graph: free calls add exact edges and method syntax conservatively
+adds edges to source methods with the selected member name. Tarjan components
+are checked callee-first. Calls inside one component remain monomorphic while
+it is solved, then declaration-local roots are generalized at the component
+boundary. Each external call instantiates fresh roots while preserving shared
+variables, numeric-literal constraints, capability requirements, and nested
+`Array`, `Option`, and `Result` shapes. Mutually recursive generic functions are
+supported; an occurs check rejects polymorphic recursion that would require an
+infinite type with a focused diagnostic.
+
+`semantic::FunctionInstance` separates a declaration from a concrete body. Its
+structural identity contains the `FunctionId`, inferred type arguments, and the
+exact concrete parameter/result signature. The signature is required because
+nominal GC layouts such as two independently interned `[String]` types
+cannot be reconstructed from generic arguments alone. Resolved calls, typed
+function owners, Wasm body owners, reachability, function-index planning, and
+emission all carry this same identity.
+
+The checked semantic model and typed HIR retain one syntax-keyed template body
+for editor stability. Demand-driven backend reachability traverses that body in
+the context of each concrete owner and specializes expression types, locals,
+conversions, nested calls, wrappers, matches, and intrinsic arguments without
+overwriting source facts. Before layout planning, a backend-private clone of
+the semantic and constructed-type arenas materializes any concrete
+`Array`/`Option`/`Result` layouts that occur only inside a generic body. Roots
+come from actions, states, globals, and their transitive concrete calls. The
+instance graph is structurally deduplicated and imposes deterministic generic
+expansion-depth and total-instance limits; ordinary monomorphic call chains do
+not consume those limits. Function effects remain definition-level because
+they are independent of type instantiation, while inferred capability bounds
+remain visible to validation, hover, and completion.
 
 The [`src/database`](../src/database) module family provides the revisioned
 single-source query facade used as the foundation for editor tooling.
@@ -217,20 +284,29 @@ IDs remain distinct, but both use the shared `catalog::Documentation` and
 integrity, and the compiler test suite parses, checks, and lowers every embedded
 example before editor or generated-documentation clients can expose it.
 
-The bundled standard library is authored hierarchically once in
-[`src/stdlib/source.rs`](../src/stdlib/source.rs). Each namespace, nominal type,
-capability, and type constructor owns its fields, variants, associated
-functions, and methods. Every callable uses one named declaration containing
-its kind, generic and value parameters, result, effects, availability,
-documentation, focused public example, and intrinsic binding; there are no
-separate function/method factory grammars. Independent macro consumers derive opaque catalog IDs
-in [`src/stdlib/ids.rs`](../src/stdlib/ids.rs) and normalized declarations in
-[`src/stdlib/catalog.rs`](../src/stdlib/catalog.rs), so neither consumer is a
-second authoring registry. Catalog IDs are open `u32` newtypes with generated
-well-known constants; this permits a future trusted loader to allocate IDs for
-source declarations, while the closed `IntrinsicId` enum remains the compiler
-trust boundary. Dependency-light public shapes live in `declarations.rs` and
-`schema.rs`, while cross-declaration checks live above them in `validation.rs`.
+The bundled standard library is authored hierarchically once in privileged
+SplitScript source at
+[`stdlib/standard.split`](../stdlib/standard.split). Each namespace, nominal
+type, capability, and type constructor owns its fields, variants, associated
+functions, methods, documentation, focused examples, and trusted binding name.
+The dependency-light [`splitscript-syntax`](../crates/splitscript-syntax)
+crate owns the shared lexer, spans, tokens, explicit ordinary/privileged modes,
+token cursor, documentation-comment collection, and privileged declaration
+grammar. Both grammars therefore share position, lookahead, EOF, and token
+matching behavior while retaining their domain-specific recovery policies. The
+[`splitscript-stdlib-loader`](../crates/splitscript-stdlib-loader) consumes that
+syntax tree during the Cargo build and directly generates both opaque catalog
+IDs and the final typed declaration arrays. Privileged type expressions are a
+structured syntax tree, so generation never recovers `T!`, `[T]`, or generic
+applications by parsing strings. The loader validates source-level names,
+constructor arity, attributes, layouts, capabilities, providers, and examples
+before emission. There is no parallel lexer, Rust declaration grammar,
+normalization macro, or compiler-side runtime reparse of the same source.
+Catalog IDs remain open `u32` newtypes with
+generated well-known constants, while the closed Rust-owned `IntrinsicId`
+registry remains the trust boundary. Dependency-light normalized shapes live
+in `declarations.rs` and `schema.rs`, while cross-declaration checks live above
+them in `validation.rs`.
 [`src/stdlib/graph.rs`](../src/stdlib/graph.rs) validates identity, names,
 paths, referenced owners, and namespace parents once, then indexes declarations
 by identity/name/path plus owner-to-child, field, variant, and method edges.
@@ -238,6 +314,12 @@ Compiler and tooling queries consume this immutable graph; flat tables remain
 deterministic iteration views. Architecture tests enforce the one-way producer
 layers and reject reintroduction of retired parallel registries or positional
 callable factories.
+
+The loader is only a build dependency of the compiler. At runtime the compiler
+loads the generated declarations, builds the indexed graph once, and validates
+that graph directly against trusted intrinsic contracts. This keeps malformed
+source diagnostics at the build boundary and avoids maintaining a second
+source-to-catalog comparison implementation inside the compiler.
 
 Callable signatures use a backend-neutral declaration type expression. Core
 types, nominal library types, and type parameters are atomic references; every
@@ -248,13 +330,17 @@ variant. Catalog validation resolves constructor IDs, checks arity and nested
 arguments, and rejects references to undeclared type parameters before the
 semantic adapter instantiates the supported constructors.
 
-The magical scalar types have one separate declaration stream in
-`stdlib/declarations.rs`. `with_core_types!` generates their `CoreTypeId`s,
-canonical names, capability sets, scalar memory layouts, and the backend's
-physical primitive variants/conversion. Syntax stores `TypeRef::Core(CoreTypeId)`
-directly. The semantic `BuiltinType` name is only an alias for `CoreTypeId`, not
-a parallel enum; constructed syntax, semantic, and physical types remain
-separate because they carry genuinely different stage-specific facts.
+The magical scalar spellings and identities are defined once as
+`splitscript_syntax::PrimitiveType`. `CoreTypeId` and semantic `BuiltinType`
+are aliases of that identity rather than parallel enums. The standard-library
+core table attaches capability and scalar-memory facts, while
+`with_core_types!` mechanically derives the backend's deliberately physical
+primitive variants/conversion. Constructed syntax, semantic, and physical
+types remain separate because they carry genuinely different stage-specific
+facts. Stable syntax ID constructors are private to the syntax crate.
+Parser-written and inference-created constructed layouts share one explicit
+per-program allocator, and nominal type-name resolution consumes AST-owned
+identity iteration rather than recreating IDs from vector positions.
 
 Generic bounds store catalog capability IDs directly. Inference accumulates a
 deduplicated set of those IDs rather than maintaining a fixed bit assignment.
@@ -265,14 +351,22 @@ so adding a marker capability does not add a compiler switch. A future
 privileged custom behavior will be registered at the same trust boundary as
 intrinsics when a real standard-library use case requires one.
 
-Callable effects are stored as a canonical `EffectSet`, not declaration-order
+Callable effects are exposed as a canonical `EffectSet`, not declaration-order
 slices. Iteration is deterministic and duplicate effects are impossible.
+Intrinsic effects come only from the closed trust registry. Source-defined
+standard-library bodies contain no placeholder metadata: the compiler checks
+the library as a standalone synthetic unit once per catalog graph, derives
+transitive operation metadata through the ordinary typed call graph, and
+caches that immutable overlay. User compilations recheck injected bodies
+against the cached result, so metadata is user-independent without creating a
+second effect language in the loader.
 Catalog validation rejects empty sets, purity mixed with observable behavior,
 retry/suspend contradictions, cancellation without suspension/attachment,
 process reads without attachment, and non-suspending onAttach-only calls.
 `OperationSemantics` is the shared normalized view used by checking, hover,
-async planning, and documentation. The trusted intrinsic registry will add the
-remaining implementation-to-declaration effect conformance check.
+async planning, and documentation. The trusted intrinsic registry enforces the
+intrinsic implementation contract; source-body conformance is enforced against
+the standalone compiler-derived result.
 
 Compiler-implemented calls also have an independent trusted registry in
 `intrinsic_registry.rs`. `IntrinsicId::ALL` is generated with the public IDs,
@@ -312,19 +406,17 @@ completion, and hover opt into that adapter; documentation, graph validation,
 and future catalog loaders remain independent of compiler-semantic types. An
 architecture test guards this dependency direction.
 
-That Rust macro is intentionally an interim producer for the normalized graph.
-The long-term producer will load bundled standard-library modules written in
-SplitScript once the language can express modules, generics and capability
-bounds, private runtime representation, effect declarations, and reusable
-library bodies. Those sources will be split by runtime domain instead of
-recreating the interim monolithic token stream. Such modules are trusted compiler inputs, not ordinary project
-files: only a compiler-created privileged loading path may declare intrinsic
-or host bindings, representation hooks, runtime-private fields, or trusted
-effects. There is no source directive, CLI switch, import, or shadowable module
-name that can grant this authority to user code. A small Rust registry remains
-the trust boundary and must validate every privileged binding's signature,
-effects, availability, suspension and cancellation behavior, and physical
-representation before any user program is checked.
+Privileged parsing is an explicit mode of the shared syntax layer. Only the
+compiler-created build path may use reserved declarations and
+decorators for intrinsic bindings, representation hooks, runtime-private
+fields, state-provider attachment, or literal/selector rules. Ordinary source
+rejects that decorator syntax; there is no CLI switch, import, or shadowable
+module name that grants this authority. Before the default graph is exposed,
+the compiler validates every privileged binding's callable shape, signature,
+effects, availability, suspension and cancellation behavior against the small
+Rust trust registry. Future modules and ordinary generic function bodies can
+split the currently monolithic source by runtime domain without changing this
+security boundary.
 
 The lower-level host boundary has a separate `AbiCatalog`. It is intentionally
 not an LSP or public standard-library input. Each host import records its stable
@@ -507,7 +599,7 @@ only when a live comparison can call them. The same analysis
 collects GC-type roots from state and poll storage, globals, settings, emitted
 function signatures/locals, async frames, and live expressions, then closes
 over every aggregate member. Compiler-generated layouts such as interpolation's
-`Array<String>` are explicit roots rather than accidental side effects.
+`[String]` are explicit roots rather than accidental side effects.
 
 [`src/codegen/global_plan.rs`](../src/codegen/global_plan.rs) assigns runtime,
 source-global, and current/old settings storage. Its result contains the global
@@ -585,6 +677,15 @@ or side effects. A successful poll selects its continuation and redispatches in
 the same runtime tick. Conditional branches use continuation-style lowered
 tails, allowing a suspension inside either branch to rejoin code after the
 conditional without source-level special cases.
+
+Array `for` loops lower through compiler-owned iterable, `u32` index, and
+element-binding values. Ordinary bodies become structured Wasm block/loop
+control flow; the iterable is evaluated once and the index advances before the
+body so `continue` cannot repeat an element. A body containing suspension uses
+dedicated async header and exit states. Liveness retains the iterable and index
+across every poll and retains the current binding only when a suspended
+continuation needs it, so an `await` neither reconstructs nor restarts the
+iteration.
 
 `nextTick()` is a lowering intrinsic rather than a host call. Reaching it stores
 its poll state and returns pending immediately; dispatching that poll state on

@@ -9,6 +9,7 @@ mod declarations;
 mod driver;
 mod expressions;
 mod finalization;
+mod function_graph;
 mod statements;
 
 use context::{
@@ -18,11 +19,9 @@ use declarations::{Binding, DeclarationEnvironment};
 
 use crate::{
     Diagnostic,
-    ast::{
-        ArrayTypeDecl, EnumDecl, EnumTypeId, ExprId, OptionTypeDecl, Program, ResultTypeDecl, Span,
-        TypeRef,
-    },
+    ast::{EnumDecl, ExprId, FunctionId, Program, Span, TypeRef},
     inference::{InferenceContext, Requirements, Type},
+    resolution::ProgramResolutions,
     semantic::{
         ResolvedEnumVariantId, ResolvedMember, ResolvedValue, SemanticBuilder, SemanticModel,
         ValueConversionKind,
@@ -31,7 +30,10 @@ use crate::{
         DeclaredTypeRef, StandardLibrary, StdlibStateProviderId, StdlibTypeConstructorId,
         StdlibTypeId, TypeRef as CatalogTypeRef,
     },
-    types::{TypeKind, TypeStore},
+    types::{
+        EnumTypeId, ResolvedArrayType, ResolvedOptionType, ResolvedResultType, ResolvedTypeRef,
+        TypeKind, TypeStore,
+    },
 };
 
 struct PathResolution {
@@ -58,9 +60,9 @@ struct MethodReceiver {
 pub struct CheckOutput {
     pub semantics: SemanticModel,
     pub enum_types: Vec<EnumDecl>,
-    pub array_types: Vec<ArrayTypeDecl>,
-    pub option_types: Vec<OptionTypeDecl>,
-    pub result_types: Vec<ResultTypeDecl>,
+    pub array_types: Vec<ResolvedArrayType>,
+    pub option_types: Vec<ResolvedOptionType>,
+    pub result_types: Vec<ResolvedResultType>,
 }
 
 pub struct RecoveringCheckOutput {
@@ -81,14 +83,15 @@ pub fn check(program: &Program) -> Result<CheckOutput, Vec<Diagnostic>> {
 #[cfg(test)]
 pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
     let standard_library = StandardLibrary::new();
-    let mut program = program.clone();
+    let mut resolutions = crate::resolution::ProgramResolutions::default();
     let mut resolution_diagnostics =
-        crate::resolution::validate_declarations(&program, &standard_library);
+        crate::resolution::validate_declarations(program, &standard_library);
     resolution_diagnostics.extend(crate::resolution::resolve_program(
-        &mut program,
+        program,
         &standard_library,
+        &mut resolutions,
     ));
-    let mut recovered = check_recovering_with_library(&program, standard_library);
+    let mut recovered = check_recovering_with_library(program, &resolutions, standard_library);
     resolution_diagnostics.append(&mut recovered.diagnostics);
     recovered.diagnostics = resolution_diagnostics;
     recovered
@@ -96,9 +99,10 @@ pub fn check_recovering(program: &Program) -> RecoveringCheckOutput {
 
 pub(crate) fn check_with_library(
     program: &Program,
+    resolutions: &crate::resolution::ProgramResolutions,
     standard_library: StandardLibrary,
 ) -> Result<CheckOutput, Vec<Diagnostic>> {
-    let recovered = check_recovering_with_library(program, standard_library);
+    let recovered = check_recovering_with_library(program, resolutions, standard_library);
     if recovered.diagnostics.is_empty() {
         Ok(recovered.output)
     } else {
@@ -108,9 +112,10 @@ pub(crate) fn check_with_library(
 
 pub(crate) fn check_recovering_with_library(
     program: &Program,
+    resolutions: &crate::resolution::ProgramResolutions,
     standard_library: StandardLibrary,
 ) -> RecoveringCheckOutput {
-    driver::check_recovering(program, standard_library)
+    driver::check_recovering(program, resolutions, standard_library)
 }
 
 #[derive(Clone)]
@@ -128,6 +133,7 @@ struct EnumInfo {
 
 struct Checker {
     standard_library: StandardLibrary,
+    resolutions: ProgramResolutions,
     errors: Vec<Diagnostic>,
     declarations: DeclarationEnvironment,
     inference: InferenceContext,
@@ -143,6 +149,7 @@ struct Checker {
     deferred_member_paths: Vec<DeferredMemberPath>,
     none_policy: NonePolicy,
     semantics: SemanticBuilder,
+    active_function_component: HashSet<FunctionId>,
 }
 
 impl Checker {
@@ -221,7 +228,11 @@ impl Checker {
     }
 
     fn syntax_type(&self, ty: TypeRef) -> Type {
-        syntax_type(ty, self.inference.type_store())
+        syntax_type(ty, self.inference.type_store(), &self.resolutions)
+    }
+
+    fn resolved_type_ref(&self, ty: ResolvedTypeRef) -> Type {
+        resolved_type_ref(ty, self.inference.type_store())
     }
 
     fn standard_type(&self, standard: StdlibTypeId) -> Type {
@@ -450,19 +461,23 @@ fn catalog_type_argument(
     (constructor == expected_constructor).then_some(*argument)
 }
 
-fn syntax_type(ty: TypeRef, types: &TypeStore) -> Type {
-    if let Some(core) = ty.core_type() {
-        return Type::Known(types.id_for_core(core));
-    }
+fn syntax_type(ty: TypeRef, types: &TypeStore, resolutions: &ProgramResolutions) -> Type {
+    let ty = resolutions
+        .type_ref(ty)
+        .unwrap_or(ResolvedTypeRef::Core(crate::stdlib::CoreTypeId::Void));
+    resolved_type_ref(ty, types)
+}
+
+fn resolved_type_ref(ty: ResolvedTypeRef, types: &TypeStore) -> Type {
     match ty {
-        TypeRef::Named(_) => Type::Known(types.id_for_core(crate::stdlib::CoreTypeId::Void)),
-        TypeRef::Standard(standard) => Type::Known(types.id_for_standard(standard)),
-        TypeRef::Record(record) => Type::Known(types.id_for_record(record)),
-        TypeRef::Enum(enumeration) => Type::Known(types.id_for_enum(enumeration)),
-        TypeRef::Array(id) => Type::Array(id),
-        TypeRef::Option(id) => Type::Option(id),
-        TypeRef::Result(id) => Type::Result(id),
-        _ => unreachable!("core and nominal syntax types were handled before constructors"),
+        ResolvedTypeRef::Core(core) => Type::Known(types.id_for_core(core)),
+        ResolvedTypeRef::Standard(standard) => Type::Known(types.id_for_standard(standard)),
+        ResolvedTypeRef::Record(record) => Type::Known(types.id_for_record(record)),
+        ResolvedTypeRef::Enum(enumeration) => Type::Known(types.id_for_enum(enumeration)),
+        ResolvedTypeRef::GenericParameter(parameter) => Type::Known(parameter),
+        ResolvedTypeRef::Array(id) => Type::Array(id),
+        ResolvedTypeRef::Option(id) => Type::Option(id),
+        ResolvedTypeRef::Result(id) => Type::Result(id),
     }
 }
 

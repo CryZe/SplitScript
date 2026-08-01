@@ -1,5 +1,7 @@
 //! Expressions, patterns, precedence, and expression-local recovery.
 
+//! Expression grammar.
+
 use super::{
     BinaryOp, DelimiterDepth, Diagnostic, EnumReference, Expr, ExprKind, FallbackBranch,
     InterpolatedPart, MatchArm, MatchPattern, Parser, PatternBinding, Span, TokenKind, UnaryOp,
@@ -138,14 +140,14 @@ impl Parser<'_> {
             let start = self.previous().span;
             let value = self.required_expression(0)?;
             self.expect(TokenKind::LBrace, "expected `{` after the matched value")?;
-            let body_depth = self.brace_depth_before(self.pos);
+            let body_depth = self.brace_depth_before(self.cursor.position());
             let mut arms = Vec::new();
             while !self.at(&TokenKind::RBrace) {
                 if self.at(&TokenKind::Eof) {
                     self.record_missing_closing("unterminated match expression");
                     break;
                 }
-                let item_start = self.pos;
+                let item_start = self.cursor.position();
                 let parsed = self.match_arm();
                 if let Some(arm) = self.recover_delimited_item(parsed, item_start, body_depth) {
                     arms.push(arm);
@@ -186,7 +188,7 @@ impl Parser<'_> {
         }
         if self.eat(&TokenKind::LParen).is_some() {
             let start = self.previous().span;
-            let target_depth = self.delimiter_depth_before(self.pos);
+            let target_depth = self.delimiter_depth_before(self.cursor.position());
             let mut expr = self.required_expression(0)?;
             let end = if let Some(end) = self.eat(&TokenKind::RParen) {
                 end
@@ -222,7 +224,7 @@ impl Parser<'_> {
                     }
                     TokenKind::TemplateExprStart => {
                         self.bump();
-                        let expression_start = self.pos;
+                        let expression_start = self.cursor.position();
                         if let Some(value) = self.interpolated_expression(expression_start) {
                             has_expression = true;
                             parts.push(InterpolatedPart::Expr(value));
@@ -301,14 +303,14 @@ impl Parser<'_> {
                             (TokenKind::Ident(_), TokenKind::Colon)
                         ));
                 if begins_record_literal && self.eat(&TokenKind::LBrace).is_some() {
-                    let body_depth = self.brace_depth_before(self.pos);
+                    let body_depth = self.brace_depth_before(self.cursor.position());
                     let mut fields = Vec::new();
                     while !self.at(&TokenKind::RBrace) {
                         if self.at(&TokenKind::Eof) {
                             self.record_missing_closing("unterminated record literal");
                             break;
                         }
-                        let item_start = self.pos;
+                        let item_start = self.cursor.position();
                         let parsed = self.record_literal_field();
                         if let Some(field) =
                             self.recover_delimited_item(parsed, item_start, body_depth)
@@ -410,7 +412,7 @@ impl Parser<'_> {
             }
             Err(error) => {
                 self.record_recovery_diagnostic(error);
-                let skipped_start = self.tokens[expression_start].span.start;
+                let skipped_start = self.cursor.tokens()[expression_start].span.start;
                 self.synchronize_interpolation();
                 self.record_error_region(skipped_start, self.current().span.start);
                 self.eat(&TokenKind::TemplateExprEnd);
@@ -450,7 +452,7 @@ impl Parser<'_> {
             Err(error) if self.is_expression_recovery_boundary() => {
                 let error_span = error.span;
                 self.record_recovery_diagnostic(error);
-                let skipped_start = self.tokens[expression_start].span.start;
+                let skipped_start = self.cursor.tokens()[expression_start].span.start;
                 let skipped_end = self.current().span.start.max(skipped_start);
                 self.record_error_region(skipped_start, skipped_end);
                 let span = if skipped_end == skipped_start {
@@ -471,7 +473,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn root_expression(&mut self) -> Expr {
-        let expression_start = self.pos;
+        let expression_start = self.cursor.position();
         let parsed = if self.expression_is_missing_before_statement() {
             Err(self.error("expected an expression"))
         } else {
@@ -481,7 +483,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn missing_root_expression(&mut self, message: &'static str) -> Expr {
-        let expression_start = self.pos;
+        let expression_start = self.cursor.position();
         let error = self.error(message);
         self.recover_root_expression(Err(error), expression_start)
     }
@@ -496,7 +498,7 @@ impl Parser<'_> {
             Err(error) => {
                 let error_span = error.span;
                 self.record_recovery_diagnostic(error);
-                let skipped_start = self.tokens[expression_start].span.start;
+                let skipped_start = self.cursor.tokens()[expression_start].span.start;
                 self.synchronize_root_expression(expression_start);
                 let skipped_end = self.current().span.start.max(skipped_start);
                 self.record_error_region(skipped_start, skipped_end);
@@ -518,7 +520,7 @@ impl Parser<'_> {
 
     pub(super) fn synchronize_root_expression(&mut self, expression_start: usize) {
         let target_depth = self.delimiter_depth_before(expression_start);
-        let mut depth = self.delimiter_depth_before(self.pos);
+        let mut depth = self.delimiter_depth_before(self.cursor.position());
         loop {
             let at_same_brace_depth = depth.braces == target_depth.braces;
             if self.at(&TokenKind::Eof)
@@ -533,8 +535,8 @@ impl Parser<'_> {
                     && depth.brackets <= target_depth.brackets)
                 || (at_same_brace_depth
                     && self.line_break_before_current()
-                    && (self.pos > expression_start || self.is_statement_start()))
-                || (self.pos > expression_start
+                    && (self.cursor.position() > expression_start || self.is_statement_start()))
+                || (self.cursor.position() > expression_start
                     && depth == target_depth
                     && self.is_top_level_start())
             {
@@ -546,7 +548,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn required_expression(&mut self, min_precedence: u8) -> Result<Expr, Diagnostic> {
-        let expression_start = self.pos;
+        let expression_start = self.cursor.position();
         let parsed = if self.expression_is_missing_before_statement() {
             Err(self.error("expected an expression"))
         } else {
@@ -556,7 +558,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn required_prefix(&mut self) -> Result<Expr, Diagnostic> {
-        let expression_start = self.pos;
+        let expression_start = self.cursor.position();
         let parsed = if self.expression_is_missing_before_statement() {
             Err(self.error("expected an expression"))
         } else {
@@ -578,6 +580,7 @@ impl Parser<'_> {
                         | "const"
                         | "var"
                         | "while"
+                        | "for"
                         | "break"
                         | "continue"
                         | "return"
@@ -610,7 +613,7 @@ impl Parser<'_> {
         closing: &TokenKind,
         target_depth: DelimiterDepth,
     ) {
-        let mut depth = self.delimiter_depth_before(self.pos);
+        let mut depth = self.delimiter_depth_before(self.cursor.position());
         loop {
             if self.at(&TokenKind::Eof)
                 || (self.at(closing) && depth == target_depth)
@@ -690,7 +693,7 @@ impl Parser<'_> {
                         None
                     };
                     MatchPattern::Enum {
-                        enumeration: EnumReference::Named {
+                        enumeration: EnumReference {
                             name: enum_name,
                             span: pattern_start,
                         },
@@ -746,10 +749,10 @@ impl Parser<'_> {
         missing_closing_message: &'static str,
         allow_trailing_comma: bool,
     ) -> (Vec<Expr>, Span) {
-        let target_depth = self.delimiter_depth_before(self.pos);
+        let target_depth = self.delimiter_depth_before(self.cursor.position());
         let mut expressions = Vec::new();
         loop {
-            let depth = self.delimiter_depth_before(self.pos);
+            let depth = self.delimiter_depth_before(self.cursor.position());
             if self.at(&closing) && depth == target_depth {
                 return (expressions, self.bump().span);
             }
@@ -761,7 +764,7 @@ impl Parser<'_> {
                 return (expressions, self.previous().span);
             }
 
-            let item_start = self.pos;
+            let item_start = self.cursor.position();
             let parsed = self.expression(0);
             if let Some(expression) =
                 self.recover_expression_list_item(parsed, item_start, target_depth, &closing)
@@ -770,7 +773,7 @@ impl Parser<'_> {
                 if self.eat(&TokenKind::Comma).is_some() {
                     if !allow_trailing_comma
                         && self.at(&closing)
-                        && self.delimiter_depth_before(self.pos) == target_depth
+                        && self.delimiter_depth_before(self.cursor.position()) == target_depth
                     {
                         self.record_missing(Diagnostic::new(
                             "expected an expression after `,`",
@@ -779,7 +782,9 @@ impl Parser<'_> {
                     }
                     continue;
                 }
-                if self.at(&closing) && self.delimiter_depth_before(self.pos) == target_depth {
+                if self.at(&closing)
+                    && self.delimiter_depth_before(self.cursor.position()) == target_depth
+                {
                     continue;
                 }
                 self.record_missing(Diagnostic::new(
@@ -805,7 +810,7 @@ impl Parser<'_> {
             Ok(expression) => Some(expression),
             Err(error) => {
                 self.record_recovery_diagnostic(error);
-                let skipped_start = self.tokens[item_start].span.start;
+                let skipped_start = self.cursor.tokens()[item_start].span.start;
                 self.synchronize_expression_list_item(target_depth, closing);
                 self.record_error_region(skipped_start, self.current().span.start);
                 None
@@ -818,7 +823,7 @@ impl Parser<'_> {
         target_depth: DelimiterDepth,
         closing: &TokenKind,
     ) {
-        let mut depth = self.delimiter_depth_before(self.pos);
+        let mut depth = self.delimiter_depth_before(self.cursor.position());
         loop {
             if self.at(&TokenKind::Eof)
                 || (self.at(closing) && depth == target_depth)
@@ -856,7 +861,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn delimiter_depth_before(&self, position: usize) -> DelimiterDepth {
-        self.tokens[..position].iter().fold(
+        self.cursor.tokens()[..position].iter().fold(
             DelimiterDepth {
                 parentheses: 0,
                 brackets: 0,
@@ -910,15 +915,15 @@ impl Parser<'_> {
             self.record_missing(error);
             return Ok(self.new_expr(ExprKind::Error, span));
         };
-        let target_depth = self.delimiter_depth_before(self.pos);
-        let expression_start = self.pos;
+        let target_depth = self.delimiter_depth_before(self.cursor.position());
+        let expression_start = self.cursor.position();
         let parsed = self.expression(0);
         let mut expression = match parsed {
             Ok(expression) => expression,
             Err(error) => {
                 let error_span = error.span;
                 self.record_recovery_diagnostic(error);
-                let skipped_start = self.tokens[expression_start].span.start;
+                let skipped_start = self.cursor.tokens()[expression_start].span.start;
                 self.synchronize_delimited_expression(&TokenKind::RBrace, target_depth);
                 let skipped_end = self.current().span.start.max(skipped_start);
                 self.record_error_region(skipped_start, skipped_end);

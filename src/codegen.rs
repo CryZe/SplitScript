@@ -3,16 +3,17 @@ use wasm_encoder::{
 };
 
 use crate::ast::{
-    ActionKind, ArrayTypeDecl, ArrayTypeId, EnumDecl, EnumVariantId, ExprId, FunctionId,
-    OptionTypeDecl, OptionTypeId, Program, RecordFieldId, ResultTypeDecl, ResultTypeId, UnaryOp,
-    ValueId,
+    ActionKind, ArrayTypeId, EnumDecl, EnumVariantId, ExprId, OptionTypeId, Program, RecordFieldId,
+    ResultTypeId, UnaryOp, ValueId,
 };
 use crate::equality::EqualityCapabilities;
 use crate::intrinsic_registry;
 use crate::memory::{MemoryLayouts, MemoryTypeLayout};
 use crate::semantic::SemanticModel;
-use crate::stdlib::{IntrinsicId, StandardLibrary, StdlibTypeId};
-use crate::types::{TypeId, TypeKind};
+use crate::stdlib::{
+    IntrinsicId, StandardLibrary, StateProviderAttachment, StateProviderProcesses, StdlibTypeId,
+};
+use crate::types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, TypeId, TypeKind};
 use crate::wasm_ir::{self, BodyOwner};
 
 mod async_frame;
@@ -36,6 +37,7 @@ mod runtime_helper_registry;
 mod runtime_helpers;
 mod script_functions;
 mod settings;
+mod specialization;
 mod unity_layout;
 mod update;
 
@@ -50,7 +52,7 @@ use self::gc_layout::GcLayout;
 use self::global_plan::SettingStorage;
 use self::runtime_helper_registry::RuntimeHelperPlan;
 use self::script_functions::{
-    compile_action, compile_read, compile_user_function, plan_wasm_locals,
+    LocalPlanOptions, compile_action, compile_read, compile_user_function, plan_wasm_locals,
 };
 use self::settings::compile_start;
 use self::update::compile_update;
@@ -58,11 +60,11 @@ use crate::intrinsic_registry::RuntimeHelperId;
 
 const STATE_TYPE: u32 = 0;
 
-struct ConstructedTypes<'a> {
-    enums: &'a [EnumDecl],
-    arrays: &'a [ArrayTypeDecl],
-    options: &'a [OptionTypeDecl],
-    results: &'a [ResultTypeDecl],
+struct ConstructedTypes {
+    enums: Vec<EnumDecl>,
+    arrays: Vec<ResolvedArrayType>,
+    options: Vec<ResolvedOptionType>,
+    results: Vec<ResolvedResultType>,
 }
 
 /// Complete, immutable input to backend planning and Wasm encoding.
@@ -73,26 +75,35 @@ struct ConstructedTypes<'a> {
 pub struct BackendProgram<'a> {
     standard_library: StandardLibrary,
     program: &'a Program,
-    semantics: &'a SemanticModel,
+    semantics: SemanticModel,
     wasm_ir: wasm_ir::Program,
-    constructed_types: ConstructedTypes<'a>,
+    constructed_types: ConstructedTypes,
     memory_layouts: &'a MemoryLayouts,
     equality: &'a EqualityCapabilities,
 }
 
 impl<'a> BackendProgram<'a> {
     pub(crate) fn new(checked: &'a crate::CheckedProgram, wasm_ir: wasm_ir::Program) -> Self {
+        let mut semantics = checked.semantics.clone();
+        let mut constructed_types = ConstructedTypes {
+            enums: checked.enum_types.clone(),
+            arrays: checked.array_types.clone(),
+            options: checked.option_types.clone(),
+            results: checked.result_types.clone(),
+        };
+        specialization::materialize(
+            &wasm_ir,
+            &mut semantics,
+            &mut constructed_types.arrays,
+            &mut constructed_types.options,
+            &mut constructed_types.results,
+        );
         Self {
             standard_library: checked.context.standard_library(),
-            program: &checked.syntax,
-            semantics: &checked.semantics,
+            program: &checked.compilation_syntax,
+            semantics,
             wasm_ir,
-            constructed_types: ConstructedTypes {
-                enums: &checked.enum_types,
-                arrays: &checked.array_types,
-                options: &checked.option_types,
-                results: &checked.result_types,
-            },
+            constructed_types,
             memory_layouts: checked.capabilities.memory(),
             equality: checked.capabilities.equality(),
         }
@@ -139,8 +150,21 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         options: option_types,
         results: result_types,
     } = constructed_types;
+    let semantics = &semantics;
+    let enums = &enums;
+    let array_types = &array_types;
+    let option_types = &option_types;
+    let result_types = &result_types;
     let wasm_ir = &wasm_ir;
     let state = program.state.as_ref().unwrap();
+    let provider = semantics
+        .state_provider()
+        .map(|provider| standard_library.state_provider(provider))
+        .expect("checked state declarations resolve a standard-library provider");
+    let process_names = match provider.processes {
+        StateProviderProcesses::Declared(processes) => processes.to_vec(),
+        StateProviderProcesses::SourceState => state.processes.iter().map(String::as_str).collect(),
+    };
     let on_attach = program
         .actions
         .iter()
@@ -157,6 +181,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let dependencies = BackendDependencies::analyze(program, semantics, wasm_ir, &reachability);
     let static_data = StaticData::collect(
         program,
+        &process_names,
         wasm_ir,
         &reachability,
         &dependencies,
@@ -260,31 +285,25 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         semantics,
         wasm_ir,
     };
-    let provider_attach = state
-        .provider
-        .as_ref()
-        .and_then(|provider| provider.resolved)
-        .and_then(|provider| {
-            let intrinsic = wasm_ir
-                .standard_library()
-                .state_provider(provider)
-                .attachment;
-            intrinsic_registry::contract(intrinsic)
-                .dependency_roots
-                .iter()
-                .find_map(|root| match root {
-                    crate::intrinsic_registry::DependencyRoot::Helper(helper) => {
-                        runtime_helpers.optional_function(*helper)
-                    }
-                    crate::intrinsic_registry::DependencyRoot::HostImport(_) => None,
-                })
-        });
+    let provider_attach = match provider.attachment {
+        StateProviderAttachment::Identity => None,
+        StateProviderAttachment::Intrinsic(intrinsic) => intrinsic_registry::contract(intrinsic)
+            .dependency_roots
+            .iter()
+            .find_map(|root| match root {
+                crate::intrinsic_registry::DependencyRoot::Helper(helper) => {
+                    runtime_helpers.optional_function(*helper)
+                }
+                crate::intrinsic_registry::DependencyRoot::HostImport(_) => None,
+            }),
+    };
     let update_context = update::UpdateContext {
         standard_library: &standard_library,
         abi: &abi,
         gc: &gc,
         runtime_globals,
         semantics,
+        process_names: &process_names,
         provider_attach,
     };
 
@@ -319,10 +338,13 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     for body in equality_bodies {
         codes.function(&body);
     }
-    for function in &program.functions {
-        if reachability.contains_function(function.id) {
-            codes.function(&compile_user_function(function, &lowering));
-        }
+    for instance in reachability.functions() {
+        let function = program
+            .functions
+            .iter()
+            .find(|function| function.id == instance.function)
+            .expect("reachable function instances have source declarations");
+        codes.function(&compile_user_function(function, instance, &lowering));
     }
     for field in &state.fields {
         codes.function(&compile_read(field, &abi, strings, &lowering));
@@ -398,24 +420,13 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
         TypeKind::Standard(standard) => Type::Standard(*standard),
         TypeKind::Record(record) => Type::Record(*record),
         TypeKind::Enum(enumeration) => Type::Enum(*enumeration),
+        TypeKind::GenericParameter { .. } => {
+            unreachable!("generic template types must be substituted before code generation")
+        }
         TypeKind::Array { layout, .. } => Type::Array(*layout),
         TypeKind::Option { layout, .. } => Type::Option(*layout),
         TypeKind::Result { layout, .. } => Type::Result(*layout),
     }
-}
-
-fn expression_type(
-    expression: ExprId,
-    wasm_ir: &wasm_ir::Program,
-    semantics: &SemanticModel,
-) -> Type {
-    semantic_type(
-        wasm_ir
-            .expression(expression)
-            .expect("checked expressions belong to Wasm IR")
-            .ty,
-        semantics,
-    )
 }
 
 fn value_type(value: ValueId, semantics: &SemanticModel) -> Type {
@@ -423,15 +434,6 @@ fn value_type(value: ValueId, semantics: &SemanticModel) -> Type {
         semantics
             .value_type(value)
             .expect("checked value declarations have semantic types"),
-        semantics,
-    )
-}
-
-fn function_result(function: FunctionId, semantics: &SemanticModel) -> Type {
-    semantic_type(
-        semantics
-            .function_result(function)
-            .expect("checked functions have semantic result types"),
         semantics,
     )
 }
@@ -452,12 +454,19 @@ fn enum_variant_payload(variant: EnumVariantId, semantics: &SemanticModel) -> Op
 }
 
 fn array_element_type(array: ArrayTypeId, semantics: &SemanticModel) -> Type {
-    semantic_type(
-        semantics
-            .array_element_type(array)
-            .expect("checked array layouts have semantic element types"),
-        semantics,
-    )
+    try_array_element_type(array, semantics)
+        .expect("concrete array layouts have backend-representable element types")
+}
+
+fn try_array_element_type(array: ArrayTypeId, semantics: &SemanticModel) -> Option<Type> {
+    let element = semantics
+        .array_element_type(array)
+        .expect("checked array layouts have semantic element types");
+    (!matches!(
+        semantics.types().kind(element),
+        TypeKind::GenericParameter { .. }
+    ))
+    .then(|| semantic_type(element, semantics))
 }
 
 fn option_value_type(option: OptionTypeId, semantics: &SemanticModel) -> Type {
@@ -559,6 +568,23 @@ fn emit_memory_value(
             function.instruction(&Instruction::StructNew(
                 gc.index(semantic_type(layout.ty, semantics)),
             ));
+        }
+        MemoryTypeLayout::FixedArray(layout) => {
+            for index in 0..layout.length {
+                emit_memory_value(
+                    function,
+                    layout.element,
+                    scratch,
+                    offset + index * layout.stride,
+                    memory,
+                    semantics,
+                    gc,
+                );
+            }
+            function.instruction(&Instruction::ArrayNewFixed {
+                array_type_index: gc.index(semantic_type(layout.ty, semantics)),
+                array_size: layout.length,
+            });
         }
     }
 }

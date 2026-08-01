@@ -146,11 +146,13 @@ pub(super) fn compile_refresh_settings(
                     .instruction(&Instruction::GlobalSet(storage.current))
                     .instruction(&Instruction::End);
             }
-            SettingKind::Choice {
-                enumeration,
-                options,
-                ..
-            } => {
+            SettingKind::Choice { options, .. } => {
+                let setting_type = semantics
+                    .value_type(setting.id)
+                    .expect("checked choice settings have value types");
+                let TypeKind::Enum(enumeration) = semantics.types().kind(setting_type) else {
+                    unreachable!("checked choice settings use source enums")
+                };
                 emit_load_setting_string(
                     &mut function,
                     abi,
@@ -168,9 +170,7 @@ pub(super) fn compile_refresh_settings(
                         .instruction(&Instruction::If(BlockType::Empty));
                     emit_enum_variant(
                         &mut function,
-                        enumeration
-                            .source()
-                            .expect("checked choice settings use source enums"),
+                        *enumeration,
                         semantics
                             .setting_choice_option(option.id)
                             .expect("checked choice options have resolved variants"),
@@ -262,18 +262,24 @@ fn emit_setting_default(
         SettingKind::Bool { default } => {
             function.instruction(&Instruction::I32Const(*default as i32));
         }
-        SettingKind::Choice { enumeration, .. } => emit_enum_variant(
-            function,
-            enumeration
-                .source()
-                .expect("checked choice settings use source enums"),
-            semantics
-                .setting_choice_default(setting.id)
-                .expect("checked choice settings have resolved defaults"),
-            enums,
-            semantics,
-            gc,
-        ),
+        SettingKind::Choice { .. } => {
+            let setting_type = semantics
+                .value_type(setting.id)
+                .expect("checked choice settings have value types");
+            let TypeKind::Enum(enumeration) = semantics.types().kind(setting_type) else {
+                unreachable!("checked choice settings use source enums")
+            };
+            emit_enum_variant(
+                function,
+                *enumeration,
+                semantics
+                    .setting_choice_default(setting.id)
+                    .expect("checked choice settings have resolved defaults"),
+                enums,
+                semantics,
+                gc,
+            );
+        }
         SettingKind::File { .. } => emit_string_literal(function, "", gc),
         SettingKind::Title { .. } => return,
     }
@@ -321,16 +327,20 @@ fn emit_setting_registration(
                 ));
         }
         SettingKind::Choice {
-            enumeration,
             default_variant,
             options,
+            ..
         } => {
             let storage = storage.unwrap();
+            let setting_type = semantics
+                .value_type(setting.id)
+                .expect("checked choice settings have value types");
+            let TypeKind::Enum(enumeration) = semantics.types().kind(setting_type) else {
+                unreachable!("checked choice settings use source enums")
+            };
             emit_enum_variant(
                 function,
-                enumeration
-                    .source()
-                    .expect("checked choice settings use source enums"),
+                *enumeration,
                 semantics
                     .setting_choice_default(setting.id)
                     .expect("checked choice settings have resolved defaults"),

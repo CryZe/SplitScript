@@ -5,11 +5,11 @@
 //! inference-free boundary for later compiler stages and tooling.
 
 use std::collections::HashMap;
+use std::fmt;
 
 use crate::{
     ast::{
-        ArrayTypeDecl, ArrayTypeId, EnumDecl, EnumId, OptionTypeDecl, OptionTypeId, RecordDecl,
-        RecordId, ResultTypeDecl, ResultTypeId,
+        ArrayTypeId, EnumDecl, EnumId, FunctionId, OptionTypeId, RecordDecl, RecordId, ResultTypeId,
     },
     inference::Type,
     stdlib::{CoreTypeId, StandardLibrary, StdlibTypeId},
@@ -23,6 +23,65 @@ impl TypeId {
     pub fn index(self) -> usize {
         self.0 as usize
     }
+}
+
+/// Fully resolved nominal identity for an enum type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum EnumTypeId {
+    Source(EnumId),
+    Standard(StdlibTypeId),
+}
+
+impl fmt::Display for EnumTypeId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Source(id) => id.fmt(formatter),
+            Self::Standard(id) => write!(formatter, "{id:?}"),
+        }
+    }
+}
+
+/// A resolved, inference-free type reference used by semantic layout tables.
+/// Source syntax has a deliberately smaller [`crate::ast::TypeRef`] that never
+/// contains compiler or standard-library identities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResolvedTypeRef {
+    Core(CoreTypeId),
+    Standard(StdlibTypeId),
+    Record(RecordId),
+    Enum(EnumId),
+    GenericParameter(TypeId),
+    Array(ArrayTypeId),
+    Option(OptionTypeId),
+    Result(ResultTypeId),
+}
+
+pub(crate) fn generic_parameter_name(index: u32) -> String {
+    match index {
+        0..=25 => char::from_u32('T' as u32 + index)
+            .expect("ASCII generic parameter names are valid")
+            .to_string(),
+        _ => format!("T{}", index + 1),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedArrayType {
+    pub id: ArrayTypeId,
+    pub element: ResolvedTypeRef,
+    pub length: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedOptionType {
+    pub id: OptionTypeId,
+    pub value: ResolvedTypeRef,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedResultType {
+    pub id: ResultTypeId,
+    pub value: ResolvedTypeRef,
 }
 
 /// Semantic name for a core, non-constructed SplitScript type.
@@ -39,9 +98,14 @@ pub enum TypeKind {
     Standard(StdlibTypeId),
     Record(RecordId),
     Enum(EnumId),
+    GenericParameter {
+        owner: FunctionId,
+        index: u32,
+    },
     Array {
         layout: ArrayTypeId,
         element: TypeId,
+        length: Option<u32>,
     },
     Option {
         layout: OptionTypeId,
@@ -132,6 +196,10 @@ impl TypeStore {
         self.interned[&TypeKind::Enum(enumeration)]
     }
 
+    pub(crate) fn intern_generic_parameter(&mut self, owner: FunctionId, index: u32) -> TypeId {
+        self.intern(TypeKind::GenericParameter { owner, index })
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (TypeId, &TypeKind)> {
         self.kinds
             .iter()
@@ -142,9 +210,9 @@ impl TypeStore {
     pub(crate) fn intern_inferred(
         &mut self,
         ty: Type,
-        arrays: &[ArrayTypeDecl],
-        options: &[OptionTypeDecl],
-        results: &[ResultTypeDecl],
+        arrays: &[ResolvedArrayType],
+        options: &[ResolvedOptionType],
+        results: &[ResolvedResultType],
     ) -> TypeId {
         if let Type::Known(id) = ty {
             debug_assert!(
@@ -156,15 +224,15 @@ impl TypeStore {
         let kind = match ty {
             Type::Known(_) => unreachable!("known types return before semantic interning"),
             Type::Array(id) => {
-                let element = arrays
+                let array = arrays
                     .iter()
                     .find(|array| array.id == id)
-                    .unwrap_or_else(|| panic!("missing checked array type {id}"))
-                    .element;
-                let element = self.intern_type_ref(element, arrays, options, results);
+                    .unwrap_or_else(|| panic!("missing checked array type {id}"));
+                let element = self.intern_type_ref(array.element, arrays, options, results);
                 TypeKind::Array {
                     layout: id,
                     element,
+                    length: array.length,
                 }
             }
             Type::Option(id) => {
@@ -194,26 +262,24 @@ impl TypeStore {
 
     fn intern_type_ref(
         &mut self,
-        ty: crate::ast::TypeRef,
-        arrays: &[ArrayTypeDecl],
-        options: &[OptionTypeDecl],
-        results: &[ResultTypeDecl],
+        ty: ResolvedTypeRef,
+        arrays: &[ResolvedArrayType],
+        options: &[ResolvedOptionType],
+        results: &[ResolvedResultType],
     ) -> TypeId {
         match ty {
-            crate::ast::TypeRef::Core(core) => self.id_for_core(core),
-            crate::ast::TypeRef::Standard(standard) => self.id_for_standard(standard),
-            crate::ast::TypeRef::Record(record) => self.id_for_record(record),
-            crate::ast::TypeRef::Enum(enumeration) => self.id_for_enum(enumeration),
-            crate::ast::TypeRef::Named(name) => {
-                unreachable!("unresolved nominal type name {name} reached semantic interning")
-            }
-            crate::ast::TypeRef::Array(id) => {
+            ResolvedTypeRef::Core(core) => self.id_for_core(core),
+            ResolvedTypeRef::Standard(standard) => self.id_for_standard(standard),
+            ResolvedTypeRef::Record(record) => self.id_for_record(record),
+            ResolvedTypeRef::Enum(enumeration) => self.id_for_enum(enumeration),
+            ResolvedTypeRef::GenericParameter(parameter) => parameter,
+            ResolvedTypeRef::Array(id) => {
                 self.intern_inferred(Type::Array(id), arrays, options, results)
             }
-            crate::ast::TypeRef::Option(id) => {
+            ResolvedTypeRef::Option(id) => {
                 self.intern_inferred(Type::Option(id), arrays, options, results)
             }
-            crate::ast::TypeRef::Result(id) => {
+            ResolvedTypeRef::Result(id) => {
                 self.intern_inferred(Type::Result(id), arrays, options, results)
             }
         }

@@ -28,9 +28,13 @@ pub(crate) fn display_type(ty: TypeId, snapshot: &SemanticSnapshot) -> String {
             .find(|enumeration| enumeration.id == *id)
             .map(|enumeration| enumeration.name.clone())
             .unwrap_or_else(|| format!("enum#{}", id.index())),
-        TypeKind::Array { element, .. } => {
-            format!("Array<{}>", display_type(*element, snapshot))
-        }
+        TypeKind::GenericParameter { index, .. } => crate::types::generic_parameter_name(*index),
+        TypeKind::Array {
+            element, length, ..
+        } => match length {
+            Some(length) => format!("[{}; {length}]", display_type(*element, snapshot)),
+            None => format!("[{}]", display_type(*element, snapshot)),
+        },
         TypeKind::Option { value, .. } => format!("{}?", display_type(*value, snapshot)),
         TypeKind::Result { value, .. } => format!("{}!", display_type(*value, snapshot)),
     }

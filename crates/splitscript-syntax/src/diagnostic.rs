@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::ast::Span;
+use crate::Span;
 
 /// Stable identifier for a class of compiler diagnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

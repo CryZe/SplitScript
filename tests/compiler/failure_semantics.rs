@@ -3,6 +3,64 @@
 use super::*;
 
 #[test]
+fn bounded_utf8_reads_are_fallible_strings_and_state_sugar_infers_string() {
+    use splitscript::compiler::{
+        ast::{StateMemoryDecoder, StateSource},
+        stdlib::StdlibTypeId,
+        types::TypeKind,
+    };
+
+    let source = r#"
+        state "game.exe" {
+            mapName at "game.dll", 0x100, 0x20 as utf8(32)
+        }
+
+        whileAttached {
+            let direct: String! = process.readUtf8(0x2000, 32)
+            print(current.mapName)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
+    let field = &checked.syntax().state.as_ref().unwrap().fields[0];
+    let StateSource::Pointer(path) = &field.source else {
+        panic!("expected a pointer-backed state field");
+    };
+    assert!(matches!(
+        path.decoder,
+        Some(StateMemoryDecoder::Utf8 { max_bytes: 32, .. })
+    ));
+    let field_type = checked.semantics().value_type(field.id).unwrap();
+    assert_eq!(
+        checked.semantics().types().kind(field_type),
+        &TypeKind::Standard(StdlibTypeId::String)
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("bounded UTF-8 state and expression reads should validate");
+
+    for (source, expected) in [
+        (
+            "state \"game.exe\" { name at 0x100 as utf8(0) }",
+            "must allow at least one byte",
+        ),
+        (
+            "state \"game.exe\" { name at 0x100 as utf8(4097) }",
+            "limited to 4096 bytes",
+        ),
+        (
+            "state GBA { name at 0x02000000 as utf8(32) }",
+            "does not yet support decoded string fields",
+        ),
+    ] {
+        let errors = splitscript::check(splitscript::parse(source).unwrap()).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error.message.contains(expected)),
+            "missing `{expected}` diagnostic in {errors:#?}"
+        );
+    }
+}
+
+#[test]
 fn option_and_result_values_use_explicit_typed_hir_conversions() {
     use splitscript::compiler::semantic::{ResolvedCall, ValueConversionKind};
 
@@ -244,18 +302,26 @@ fn wasm_ir_owns_backend_call_targets_intrinsics_and_arguments() {
         match (target, expected_target) {
             (
                 CallTarget::UserFunction { function },
-                ResolvedCall::UserFunction { function: expected },
+                ResolvedCall::UserFunction {
+                    function: expected,
+                    type_arguments,
+                    ..
+                },
             ) => {
-                assert_eq!(function, expected);
+                assert_eq!(function.function, *expected);
+                assert_eq!(&function.type_arguments, type_arguments);
                 saw[0] = true;
             }
             (
                 CallTarget::UserMethod { function, .. },
                 ResolvedCall::UserMethod {
-                    function: expected, ..
+                    function: expected,
+                    type_arguments,
+                    ..
                 },
             ) => {
-                assert_eq!(function, expected);
+                assert_eq!(function.function, *expected);
+                assert_eq!(&function.type_arguments, type_arguments);
                 saw[1] = true;
             }
             (
@@ -516,7 +582,7 @@ fn declared_record_enum_and_array_layouts_are_semantic_facts() {
         state "game.exe" {}
 
         record Inventory {
-            names: Array<String>
+            names: [String]
             code: u16
         }
 
@@ -543,6 +609,7 @@ fn declared_record_enum_and_array_layouts_are_semantic_facts() {
     let TypeKind::Array {
         layout,
         element: names_element,
+        ..
     } = semantics.types().kind(names_type)
     else {
         panic!("the names field should have a constructed array type");
@@ -589,15 +656,12 @@ fn declared_record_enum_and_array_layouts_are_semantic_facts() {
 #[test]
 fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
     let library = StandardLibrary::new();
-    let process_namespace = library
-        .namespace_by_name("process")
-        .expect("process should be an explicit namespace declaration");
-    assert_eq!(
-        process_namespace.id,
-        splitscript::compiler::stdlib::StdlibNamespaceId::Process
-    );
+    let process_type = library
+        .type_by_name("Process")
+        .expect("Process should be an explicit standard-library type");
+    assert_eq!(process_type.id, StdlibTypeId::Process);
     assert!(
-        process_namespace
+        process_type
             .documentation
             .summary
             .contains("attached game process")
@@ -622,9 +686,10 @@ fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
         library.public_field(unity_image.id, "module").is_none(),
         "runtime ownership slots must not leak into the public member surface"
     );
-    let read_path = ["process", "read", "u16"].map(str::to_owned);
     let read = library
-        .resolve_path(&read_path)
+        .method_candidates_with_selector("read", Some("u16"))
+        .into_iter()
+        .next()
         .expect("typed process reads should resolve through the catalog");
     assert_eq!(read.item.id, StdlibItemId::ProcessRead);
     assert_eq!(read.type_arguments, [("T", BuiltinType::U16)]);
@@ -649,25 +714,20 @@ fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
     assert!(library.method_candidates("missing").is_empty());
     assert_eq!(
         library.render_signature(read.item.id),
-        "process.read(address: address) -> T! where T: MemoryReadable"
+        "Process.read(address: address) -> T! where T: MemoryReadable"
     );
-    let managed_string_path = ["process", "read", "managedString"].map(str::to_owned);
     let managed_string = library
-        .resolve_path(&managed_string_path)
-        .expect("specialized readers should share the process.read namespace");
+        .method_candidates("readManagedString")
+        .into_iter()
+        .next()
+        .expect("managed strings should be a Process method");
     assert_eq!(
         managed_string.item.id,
         StdlibItemId::ProcessReadManagedString
     );
-    assert!(
-        library
-            .resolve_path(&["process", "readManagedString"].map(str::to_owned))
-            .is_none(),
-        "the inconsistent legacy path should not remain in the catalog"
-    );
     assert_eq!(
         library.render_signature(managed_string.item.id),
-        "process.read.managedString(address: address, maxUtf16Units: u32) -> String!"
+        "Process.readManagedString(address: address, maxUtf16Units: u32) -> String!"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::TimerState),
@@ -678,22 +738,33 @@ fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
         .expect("nextTick should be catalog-backed");
     assert_eq!(library.render_signature(next_tick.id), "nextTick() -> void");
     assert_eq!(
-        next_tick.operation_semantics().suspension,
+        library.operation_semantics(next_tick.id).suspension,
         SuspensionKind::Suspends
     );
     assert_eq!(
-        next_tick.operation_semantics().cancellation,
+        library.operation_semantics(next_tick.id).cancellation,
         CancellationKind::ProcessClose
     );
 
     let field_any = library
         .item_by_name("UnityClass.fieldAny")
         .expect("UnityClass.fieldAny should have a documented catalog entry");
-    assert_eq!(field_any.availability, Availability::OnAttach);
-    assert!(field_any.effects.contains(&Effect::Suspends));
-    assert!(field_any.effects.contains(&Effect::RequiresAttachedProcess));
-    assert!(field_any.effects.contains(&Effect::CancelsOnProcessClose));
-    let operation = field_any.operation_semantics();
+    assert_eq!(
+        library.operation_metadata(field_any.id).availability,
+        Availability::OnAttach
+    );
+    assert!(library.effects(field_any.id).contains(&Effect::Suspends));
+    assert!(
+        library
+            .effects(field_any.id)
+            .contains(&Effect::RequiresAttachedProcess)
+    );
+    assert!(
+        library
+            .effects(field_any.id)
+            .contains(&Effect::CancelsOnProcessClose)
+    );
+    let operation = library.operation_semantics(field_any.id);
     assert_eq!(operation.availability, Availability::OnAttach);
     assert_eq!(operation.suspension, SuspensionKind::Suspends);
     assert!(operation.requires_attached_process);
@@ -703,16 +774,16 @@ fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
         "available in onAttach; suspends; requires an attached process; cancels when the process closes"
     );
     assert_eq!(
-        read.item.operation_semantics().suspension,
+        library.operation_semantics(read.item.id).suspension,
         SuspensionKind::None
     );
     assert_eq!(
         library.render_signature(StdlibItemId::ProcessFollow),
-        "process.follow(base: address, offsets: [u64]) -> address!"
+        "Process.follow(base: address, offsets: [u64]) -> address!"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::ProcessReadRelative32),
-        "process.readRelative32(address: address) -> address!"
+        "Process.readRelative32(address: address) -> address!"
     );
     assert!(!field_any.documentation.summary.is_empty());
     assert_eq!(
@@ -735,7 +806,7 @@ fn process_operations_reject_detached_lifecycle_use() {
     .expect_err("process access should not be available before attachment");
     assert!(errors.iter().any(|error| {
         error.message
-            == "`process.read` requires an attached process and is unavailable in `onDetached`"
+            == "`Process.read` requires an attached process and is unavailable in `onDetached`"
     }));
 }
 

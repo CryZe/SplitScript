@@ -2,14 +2,18 @@
 
 use crate::{
     ast::{Block, Expr, ExprKind, Stmt},
+    resolution::ProgramResolutions,
     visit::{self, Visitor},
 };
 
-pub(super) fn is_constant(expression: &Expr) -> bool {
+pub(super) fn is_constant(expression: &Expr, resolutions: &ProgramResolutions) -> bool {
     match &expression.kind {
         ExprKind::None | ExprKind::Bool(_) | ExprKind::Int { .. } | ExprKind::Float(_) => true,
-        ExprKind::Enum { payload: None, .. } => true,
-        ExprKind::Unary { expr, .. } => is_constant(expr),
+        ExprKind::Path(_) => resolutions.expression_enum(expression.id).is_some(),
+        ExprKind::Call { args, .. } => {
+            args.is_empty() && resolutions.expression_enum(expression.id).is_some()
+        }
+        ExprKind::Unary { expr, .. } => is_constant(expr, resolutions),
         _ => false,
     }
 }

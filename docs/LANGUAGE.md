@@ -110,6 +110,8 @@ Supported value types are:
 - `address`, a nominal 64-bit target-process address
 - `f32`, `f64`
 - `String`, an immutable UTF-8 WebAssembly GC array
+- `[T]`, a mutable array whose length is not encoded in its type
+- `[T; N]`, a mutable array with exactly `N` elements
 - `T?`, an optional value containing either `Some(T)` or `None`
 - `T!`, a result containing either `T` or a standard string error
 - the built-in GC reference types `Duration` and `Module`
@@ -177,6 +179,25 @@ while index < 5 {
     total += index
 }
 ```
+
+`for name in array` visits each element of a general `[T]` or exact-length
+`[T; N]` array. The array expression is evaluated once, the element type is
+inferred in both directions, and the read-only element binding is scoped to the
+loop body.
+
+```text
+for item in inventory {
+    if item == ignoredItem {
+        continue
+    }
+    inspect(item)
+}
+```
+
+`for` supports the same `break`, `continue`, and fallback control flow as
+`while`. A `for` body in `onAttach` may also use `await` or `retry`; the array,
+next index, and current element are retained across suspension without
+evaluating the array expression again.
 
 `break` exits the nearest enclosing loop. `continue` skips the rest of the
 current iteration and evaluates that loop's condition again. Both are
@@ -268,7 +289,7 @@ boundary, so `?` can propagate a read error directly out of the selected branch:
 
 ```text
 levelOrScene = if isDlcDemo {
-    LevelOrScene.Scene(process.read.managedString(
+    LevelOrScene.Scene(process.readManagedString(
         process.read(gameManager.offset(levelOrSceneOffset))?,
         16
     )?)
@@ -568,14 +589,22 @@ receiver.
 
 ## Arrays
 
-`Array<T>` is a mutable, fixed-length WebAssembly GC array. Each element type is
-monomorphized into a concrete GC array type. Non-empty literals infer their
-element type, while empty literals need an annotation or another expected type.
+Arrays use mutable WebAssembly GC storage. `[T]` is the general array type: each
+value keeps its creation-time length, but that length is not part of the type.
+`[T; N]` additionally records an exact compile-time element count. A sized
+array can be passed anywhere `[T]` is expected, while a general `[T]` cannot be
+narrowed to a particular length without proof. Each element type is
+monomorphized into a concrete GC array representation.
+
+Non-empty literals infer their element type. An expected `[T; N]` also checks
+the literal's exact element count, while empty literals need an annotation or
+another expected type.
 
 ```text
-let bytes: Array<u8> = [0x48, 0x00, 0x01]
-let inferred = [1, 2, 3] // Array<i32>
-let empty: Array<u16> = []
+let bytes: [u8] = [0x48, 0x00, 0x01]
+let header: [u8; 3] = [0x48, 0x00, 0x01]
+let inferred = [1, 2, 3] // [i32]
+let empty: [u16] = []
 
 bytes.set(1, 0x8b)
 let opcode = bytes.get(1)
@@ -585,8 +614,26 @@ let count = bytes.length()
 `length()` returns `u32`, `get(index)` returns `T`, and `set(index, value)`
 mutates the selected element. Wasm performs bounds checks. Arrays can contain
 records, enums, strings, and other arrays, and can themselves be stored in
-records or continuation frames. This is the standard buffer representation for
-process reads, signature patterns, UTF-16 units, and metadata collections.
+records or continuation frames.
+
+Arrays can be traversed directly without manually managing an index:
+
+```text
+for byte in header {
+    print(byte as String)
+}
+```
+
+A non-empty `[T; N]` is `MemoryReadable` when `T` has a fixed readable layout.
+`process.read` and `state ... at` then fetch the complete `N * stride(T)` byte
+range once and only publish the newly constructed array if that read succeeds.
+This makes indexed flags and inventories transactional rather than a collection
+of independently failing state fields. Reads are currently limited to 4096
+elements and 65536 bytes to bound generated code and host-memory traffic.
+
+Nested arrays can combine both forms, for example `[[u8; 4]; 2]`. Wrapper
+postfixes apply to the complete array type, so `[T; N]?` is an optional sized
+array and `[T!; N]` is a sized array of fallible values.
 
 ## Settings
 
@@ -691,8 +738,9 @@ domain default:
 `None` is an explicit return value only for `isLoading` and `gameTime`, where it
 represents a real third state. It is deliberately rejected in `start`, `split`,
 and `reset`; those blocks are simply boolean and default to `false`.
-`gameTime` otherwise returns a `Duration`, constructed with either
-`Duration.fromFrames(i64, i64)` or `Duration.fromParts(i64, i32)`.
+`gameTime` otherwise returns a `Duration`. Source-defined constructors include
+`Duration.zero()`, `Duration.fromMilliseconds(i64)`,
+`Duration.fromFrames(i64, i64)`, and `Duration.fromParts(i64, i32)`.
 `Duration.fromSeconds(f32)` performs the safe game-time conversion used by
 Unity timers. `whileAttached` returns nothing and runs before timer actions on
 every attached tick. `onDetached` also returns nothing.
@@ -829,6 +877,29 @@ state "game.exe" {
 }
 ```
 
+Native strings are read as bounded decoding operations rather than synthetic
+types such as `string32`. `process.readUtf8(address, maxBytes)` reads at most
+4096 bytes in one host call, stops at the first NUL byte (or at the bound), and
+returns `String!`. An inaccessible range, a zero or excessive bound, or invalid
+UTF-8 is an ordinary error. This is intentionally different from
+`managedString`, which understands the in-memory layout of a Unity managed
+string.
+
+Pointer-backed state fields have compact sugar for the same operation. The
+decoder applies after the complete module-relative pointer path has been
+resolved, and it infers the field as `String`:
+
+```text
+state "game.exe" {
+    mapName at "game.dll", 0x1234, 0x20 as utf8(64)
+}
+```
+
+The bound describes a read operation, not the resulting value's type. All
+decoded values are ordinary `String` values; there are no `string64`-style
+pseudo-types. This leaves room for explicit `utf16(...)` or fixed-length
+decoders when real ports require their distinct semantics.
+
 When no context determines the representation, add an annotation or use an
 explicit suffix such as `process.read.u8(address)`. The supported suffixes are
 `bool`, all fixed-width integer types, `f32`, `f64`, and `address`. Named records
@@ -856,7 +927,7 @@ not only a literal. Strings use content equality with `==` and `!=`, and
 `onAttach` therefore prints once per successful process attachment, while a
 message in `whileAttached` prints every attached tick.
 
-`process.read.managedString(address, maxLength)` reads a bounded IL2CPP managed
+`process.readManagedString(address, maxLength)` reads a bounded IL2CPP managed
 string, decodes UTF-16 (including surrogate pairs), and returns a GC UTF-8
 `String!`. Memory-access failures are ordinary errors that can be handled with
 `else` or `?`, or polled with `retry` during attachment. The unit limit bounds

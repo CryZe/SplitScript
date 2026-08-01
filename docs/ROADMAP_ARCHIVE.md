@@ -860,7 +860,7 @@ model mirrors the API hierarchy as cleanly as the consumer model does.
 
   ```text
   levelOrScene = if isDlcDemo {
-      LevelOrScene.Scene(process.read.managedString(
+      LevelOrScene.Scene(process.readManagedString(
           process.read(gameManagerInstance.offset(levelOrSceneOffset)),
           128
       ))
@@ -1216,7 +1216,7 @@ lowering IR from the architecture checkpoint are prerequisites for this work.
   expected-type context when `Err` has no constraint on its success type.
 - [x] Reject adjacent repeated postfix constructors (`T??`, `T!!`, `T?!`, and
   `T!?`) with a focused diagnostic. Nested constructed types remain possible
-  through an enclosing type, such as `Array<T?>!`, without giving adjacent
+  through an enclosing type, such as `[T?]!`, without giving adjacent
   punctuation an ambiguous meaning.
 - [x] Record optional/successful lifts explicitly on typed-HIR expression edges
   with source and target `TypeId`s, and lower empty, successful, and failed
@@ -1335,7 +1335,7 @@ not another collection of `process.read` branches inside code generation.
 - [x] Remove the naming inconsistency of the standalone
   `process.readManagedString` function.
 - [x] Initially place specialized readers in the same namespace, for example
-  `process.read.managedString(address, maxUtf16Units)`, because a managed string
+  `process.readManagedString(address, maxUtf16Units)`, because a managed string
   is a pointer-based runtime object rather than a fixed inline memory layout.
 - [ ] Explore representing Unity managed strings as a `Deserializable` wrapper
   once custom deserialization exists. Do not pretend they are ordinary inline

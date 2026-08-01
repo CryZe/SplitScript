@@ -187,14 +187,14 @@ fn debug_statements_are_checked_but_erased_from_release_lowering() {
         assert!(
             debug_lowering
                 .body(splitscript::compiler::wasm_ir::BodyOwner::Function(
-                    function.id
+                    splitscript::compiler::semantic::FunctionInstance::monomorphic(function.id),
                 ))
                 .is_some()
         );
         assert!(
             release_lowering
                 .body(splitscript::compiler::wasm_ir::BodyOwner::Function(
-                    function.id
+                    splitscript::compiler::semantic::FunctionInstance::monomorphic(function.id),
                 ))
                 .is_none()
         );
@@ -512,11 +512,12 @@ fn compiles_the_complete_settings_showcase() {
     else {
         unreachable!();
     };
+    let name = &enumeration.name;
     let declaration = checked
         .syntax()
         .enums
         .iter()
-        .find(|item| Some(item.id) == enumeration.source())
+        .find(|item| item.name == *name)
         .unwrap();
     let expected_default = declaration
         .variants

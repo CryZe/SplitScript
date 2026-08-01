@@ -9,7 +9,7 @@ record Greeting {
     version: u32
     message: String
     location: LevelOrScene
-    signature: Array<u8>
+    signature: [u8]
 }
 
 fn LevelOrScene.isFirst() {
@@ -50,7 +50,7 @@ onAttach {
     let image = await unity.image("Assembly-CSharp")
     let gameManager = await image.class("GameManager")
     let gameManagerInstance = await gameManager.staticInstance(["Instance", "_instance"])
-    let managedScene = retry process.read.managedString(0x2800, 16)
+    let managedScene = retry process.readManagedString(0x2800, 16)
     let formatted = `{-42}:{7.9 as u32}`
     setTickRate(120.0)
     setVariable("Probe", formatted)

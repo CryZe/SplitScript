@@ -1,0 +1,40 @@
+state "game.exe" {}
+
+let evaluations = 0
+
+fn values() -> [i32; 5] {
+    evaluations += 1
+    return [1, 2, 3, 4, 5]
+}
+
+fn selectedSum(values: [i32]) -> i32 {
+    let total = 0
+    for value in values {
+        if value == 2 {
+            continue
+        }
+        if value == 5 {
+            break
+        }
+        total += value
+    }
+    return total
+}
+
+onAttach {
+    for name in ["first", "skip", "last"] {
+        await nextTick()
+        if name == "skip" {
+            continue
+        }
+        print(name)
+        if name == "last" {
+            break
+        }
+    }
+    print("async done")
+}
+
+whileAttached {
+    setVariable("For Loop", `{selectedSum(values())},{evaluations}`)
+}

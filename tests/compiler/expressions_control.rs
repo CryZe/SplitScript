@@ -175,6 +175,112 @@ fn on_attach_loops_lower_suspending_back_edges_to_async_states() {
 }
 
 #[test]
+fn for_loops_infer_elements_lower_and_validate() {
+    let source = include_str!("../for_loop.split");
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("fixed and general arrays should be iterable");
+    let lowered = splitscript::lower_wasm(&checked);
+
+    assert!(lowered.bodies().any(|body| {
+        body.entry.statements.iter().any(|statement| {
+            matches!(
+                statement,
+                splitscript::compiler::wasm_ir::Statement::For { .. }
+            )
+        })
+    }));
+
+    let on_attach = lowered
+        .body(splitscript::compiler::wasm_ir::BodyOwner::Action(
+            splitscript::compiler::ast::ActionKind::OnAttach,
+        ))
+        .expect("the fixture has an onAttach body");
+    assert!(matches!(
+        on_attach.entry.terminator,
+        splitscript::compiler::wasm_ir::Terminator::AsyncFor { .. }
+    ));
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("sync and suspending for loops should produce valid WebAssembly GC");
+}
+
+#[test]
+fn for_loops_require_arrays_and_keep_bindings_scoped_and_read_only() {
+    let not_array =
+        splitscript::compile(r#"state "game.exe" {} whileAttached { for value in 42 {} }"#)
+            .expect_err("non-arrays are not iterable");
+    assert!(
+        not_array
+            .iter()
+            .any(|error| error.message.contains("expects an array"))
+    );
+
+    let assignment = splitscript::compile(
+        r#"state "game.exe" {} whileAttached { for value in [1] { value = 2 } }"#,
+    )
+    .expect_err("loop bindings are read-only");
+    assert!(
+        assignment
+            .iter()
+            .any(|error| error.message.contains("cannot assign")
+                || error.message.contains("constant"))
+    );
+
+    let outside = splitscript::compile(
+        r#"state "game.exe" {} whileAttached { for value in [1] {} print(value) }"#,
+    )
+    .expect_err("loop bindings are lexically scoped");
+    assert!(
+        outside
+            .iter()
+            .any(|error| error.message.contains("unknown variable `value`"))
+    );
+}
+
+#[test]
+fn for_loops_infer_array_and_element_types_from_the_body() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn sum(values) -> u16 {
+            let total = 0u16
+            for value in values {
+                total += value
+            }
+            return total
+        }
+
+        fn emptySum() -> u16 {
+            let total = 0u16
+            for value in [] {
+                total += value
+            }
+            return total
+        }
+
+        fn exactSum(values: [u16; 2]) -> u16 {
+            let total = 0u16
+            for value in values {
+                total += value
+            }
+            return total
+        }
+
+        whileAttached {
+            print(sum([1u16, 2u16]) as String)
+            print(emptySum() as String)
+            print(exactSum([1u16, 2u16]) as String)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("loop-body uses should infer both named and empty-array element types");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("backward-inferred for loops should produce valid Wasm");
+}
+
+#[test]
 fn break_and_continue_require_loops() {
     for (keyword, expected) in [
         ("break", "`break` is only available inside a loop"),
@@ -464,13 +570,23 @@ fn user_function_and_method_calls_expose_stable_callable_ids() {
     assert_eq!(
         checked.semantics().call(direct.value.id),
         Some(&ResolvedCall::UserFunction {
-            function: direct_target
+            function: direct_target,
+            type_arguments: Vec::new(),
+            signature: vec![checked.semantics().function_result(direct_target).unwrap()],
         })
     );
     assert_eq!(
         checked.semantics().call(method.value.id),
         Some(&ResolvedCall::UserMethod {
             function: method_target,
+            type_arguments: Vec::new(),
+            signature: checked
+                .semantics()
+                .function_parameter_types(method_target)
+                .iter()
+                .copied()
+                .chain(checked.semantics().function_result(method_target))
+                .collect(),
             receiver: ResolvedValue::Variable(counter.id),
             receiver_type: checked
                 .semantics()
@@ -584,7 +700,7 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
     };
     assert_eq!(
         enumeration,
-        splitscript::compiler::ast::EnumTypeId::Source(checked.syntax().enums[0].id)
+        splitscript::compiler::types::EnumTypeId::Source(checked.syntax().enums[0].id)
     );
     assert_eq!(
         variant,
@@ -649,11 +765,11 @@ fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
     };
     assert_eq!(
         checked.semantics().record_literal_fields(outer.value.id),
-        Some([outer_inner].as_slice())
+        Some([ResolvedRecordFieldId::Source(outer_inner)].as_slice())
     );
     assert_eq!(
         checked.typed_hir().record_literal_fields(outer.value.id),
-        Some([outer_inner].as_slice())
+        Some([ResolvedRecordFieldId::Source(outer_inner)].as_slice())
     );
     let splitscript::compiler::ast::Stmt::Variable(nested) = &statements[2] else {
         panic!("expected the nested field binding");

@@ -6,12 +6,20 @@ description = "A statically typed autosplitter language targeting WebAssembly GC
 license = "MIT OR Apache-2.0"
 
 [workspace]
-members = ["crates/splitscript-vscode-wasm"]
+members = [
+    "crates/splitscript-syntax",
+    "crates/splitscript-stdlib-loader",
+    "crates/splitscript-vscode-wasm",
+]
 
 [dependencies]
+splitscript-syntax = { path = "crates/splitscript-syntax" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 wasm-encoder = "0.254.0"
+
+[build-dependencies]
+splitscript-stdlib-loader = { path = "crates/splitscript-stdlib-loader" }
 
 [dev-dependencies]
 wasmparser = "0.254.0"

@@ -60,7 +60,11 @@ impl StandardLibraryDocumentation {
                 .iter()
                 .map(|(name, ty)| ((*name).to_owned(), ty.clone()))
                 .collect(),
-            effects: item.effects.iter().map(|effect| effect.name()).collect(),
+            effects: library
+                .effects(id)
+                .iter()
+                .map(|effect| effect.name())
+                .collect(),
             runtime_behavior: library.render_operation_semantics(id),
             deprecation: item.deprecation.map(|deprecation| deprecation.message),
             examples: item.documentation.examples,
@@ -140,5 +144,24 @@ mod tests {
         assert!(resolved.signature.starts_with("i32.clamp"));
         assert_eq!(generic.summary_markdown(), resolved.summary_markdown());
         assert!(resolved.hover_markdown().contains("T = i32"));
+    }
+
+    #[test]
+    fn source_body_documentation_uses_compiler_derived_effects() {
+        let timer = StandardLibraryDocumentation::generate(StdlibItemId::TimerIsRunning, &[]);
+        assert_eq!(timer.effects, ["reads timer state"]);
+        assert_eq!(timer.runtime_behavior, "available everywhere; synchronous");
+
+        let relative =
+            StandardLibraryDocumentation::generate(StdlibItemId::ModuleReadRelative32, &[]);
+        assert_eq!(
+            relative.effects,
+            ["reads process memory", "requires an attached process"]
+        );
+        assert!(
+            relative
+                .runtime_behavior
+                .ends_with("requires an attached process")
+        );
     }
 }

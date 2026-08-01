@@ -5,7 +5,7 @@ use crate::{
     ast::{ActionKind, Program, SettingFileFilter, SettingKind, StateSource},
     intrinsic_registry::{self, DependencyRoot, RuntimeHelperId},
     semantic::SemanticModel,
-    stdlib::{Implementation, IntrinsicId, StdlibItemId, StdlibTypeId},
+    stdlib::{Implementation, IntrinsicId, StateProviderAttachment, StdlibItemId, StdlibTypeId},
     types::TypeKind,
     wasm_ir,
 };
@@ -33,13 +33,11 @@ impl BackendDependencies {
         dependencies.require_import(AbiImportId::ProcessIsOpen);
 
         if let Some(state) = &program.state {
-            if let Some(provider) = state
-                .provider
-                .as_ref()
-                .and_then(|provider| provider.resolved)
-            {
+            if let Some(provider) = semantics.state_provider() {
                 let provider = wasm_ir.standard_library().state_provider(provider);
-                dependencies.require_intrinsic(provider.attachment);
+                if let StateProviderAttachment::Intrinsic(attachment) = provider.attachment {
+                    dependencies.require_intrinsic(attachment);
+                }
                 if state
                     .fields
                     .iter()
@@ -48,13 +46,19 @@ impl BackendDependencies {
                     let Implementation::Intrinsic(direct_read) = wasm_ir
                         .standard_library()
                         .item(provider.direct_read)
-                        .implementation;
+                        .implementation
+                    else {
+                        unreachable!("validated state-provider reads are intrinsic")
+                    };
                     dependencies.require_intrinsic(direct_read);
                 }
             }
             for field in &state.fields {
                 if let StateSource::Pointer(path) = &field.source {
                     dependencies.require_import(AbiImportId::ProcessRead);
+                    if path.decoder.is_some() {
+                        dependencies.require_intrinsic(IntrinsicId::ProcessReadUtf8);
+                    }
                     if path.module.is_some() {
                         dependencies.require_import(AbiImportId::ProcessGetModuleAddress);
                     }

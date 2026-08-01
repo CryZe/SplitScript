@@ -3,10 +3,11 @@
 use wasm_encoder::{BlockType, Function, Instruction, ValType};
 
 use crate::{
-    ast::{EnumDecl, OptionTypeDecl, OptionTypeId, RecordDecl, ResultTypeDecl, ResultTypeId},
+    ast::{EnumDecl, OptionTypeId, RecordDecl, ResultTypeId},
     intrinsic_registry::RuntimeHelperId,
     semantic::SemanticModel,
     stdlib::{DeclaredTypeRef, RuntimeRepresentation, StdlibTypeId},
+    types::{ResolvedOptionType, ResolvedResultType},
 };
 
 use super::super::{
@@ -18,8 +19,8 @@ pub(in crate::codegen) fn compile_equality(
     plan: &RuntimeHelperPlan,
     records: &[RecordDecl],
     enums: &[EnumDecl],
-    options: &[OptionTypeDecl],
-    results: &[ResultTypeDecl],
+    options: &[ResolvedOptionType],
+    results: &[ResolvedResultType],
     semantics: &SemanticModel,
     equality_functions: &EqualityFunctions,
     gc: &GcLayout,

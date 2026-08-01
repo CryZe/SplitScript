@@ -5,7 +5,9 @@ use wasm_encoder::{ConstExpr, GlobalSection, GlobalType, HeapType, RefType, ValT
 use crate::{
     ast::{Program, ValueId},
     semantic::SemanticModel,
-    stdlib::{StandardLibrary, StdlibTypeId},
+    stdlib::{
+        CoreTypeId, RuntimeRepresentation, StandardLibrary, StateProviderAttachment, StdlibTypeId,
+    },
     wasm_ir,
 };
 
@@ -53,27 +55,43 @@ pub(super) fn encode(
         },
         &ConstExpr::i64_const(0),
     );
-    let provider_value = program
-        .state
-        .as_ref()
-        .and_then(|state| state.provider.as_ref())
-        .and_then(|provider| provider.resolved)
-        .map(|provider| {
-            let ty = wasm_ir
-                .standard_library()
-                .state_provider(provider)
-                .process_type;
-            let index = section.len();
-            section.global(
-                GlobalType {
-                    val_type: gc.val_type(Type::Standard(ty)),
-                    mutable: true,
-                    shared: false,
-                },
-                &ConstExpr::ref_null(HeapType::Concrete(gc.standard_index(ty))),
-            );
-            index
-        });
+    let provider_value = semantics.state_provider().and_then(|provider| {
+        let ty = wasm_ir
+            .standard_library()
+            .state_provider(provider)
+            .process_type;
+        if wasm_ir
+            .standard_library()
+            .state_provider(provider)
+            .attachment
+            == StateProviderAttachment::Identity
+        {
+            return None;
+        }
+        let index = section.len();
+        let initial = match wasm_ir.standard_library().type_decl(ty).representation {
+            RuntimeRepresentation::Scalar {
+                storage: CoreTypeId::I64,
+            } => ConstExpr::i64_const(0),
+            RuntimeRepresentation::GcStruct { .. }
+            | RuntimeRepresentation::GcArray { .. }
+            | RuntimeRepresentation::Enum { .. } => {
+                ConstExpr::ref_null(HeapType::Concrete(gc.standard_index(ty)))
+            }
+            representation => {
+                unreachable!("unsupported state-provider representation: {representation:?}")
+            }
+        };
+        section.global(
+            GlobalType {
+                val_type: gc.val_type(Type::Standard(ty)),
+                mutable: true,
+                shared: false,
+            },
+            &initial,
+        );
+        Some(index)
+    });
     let nullable_state = ValType::Ref(RefType {
         nullable: true,
         heap_type: HeapType::Concrete(STATE_TYPE),

@@ -4,13 +4,13 @@ use std::cmp::Reverse;
 
 use crate::{
     CheckedProgram,
-    ast::{EnumTypeId, ExprId, ExprKind, Span},
+    ast::{ExprId, ExprKind, Span},
     hir::{ExpressionResolution, TypedExpression, TypedExpressionKind},
     lexer::TokenKind,
     semantic::SemanticModel,
     stdlib::StandardLibrary,
     syntax::SourceDocument,
-    types::{TypeId, TypeKind},
+    types::{EnumTypeId, TypeId, TypeKind},
     visit::{self, Visitor},
 };
 
@@ -80,21 +80,12 @@ pub(super) fn expression_segments(
 
 pub(super) fn syntax_expression_segments(
     document: &SourceDocument,
-    enum_types: &[crate::ast::EnumDecl],
     expression: &crate::ast::Expr,
-    standard_library: &StandardLibrary,
 ) -> Vec<IdentifierSegment> {
     let names = match &expression.kind {
         ExprKind::Path(names) => names.clone(),
         ExprKind::Member { name, .. } => vec![name.clone()],
         ExprKind::Call { callee, .. } => callee.clone(),
-        ExprKind::Enum {
-            enumeration,
-            variant,
-            ..
-        } => enum_reference_name(enumeration, enum_types, standard_library)
-            .map(|enumeration| vec![enumeration, variant.clone()])
-            .unwrap_or_default(),
         _ => return Vec::new(),
     };
     let mut tokens = document.tokens().filter(|token| {
@@ -128,23 +119,13 @@ fn enum_type_name(
     }
 }
 
-fn enum_reference_name(
-    enumeration: &crate::ast::EnumReference,
-    enum_types: &[crate::ast::EnumDecl],
-    standard_library: &StandardLibrary,
-) -> Option<String> {
-    match enumeration {
-        crate::ast::EnumReference::Named { name, .. } => Some(name.clone()),
-        crate::ast::EnumReference::Resolved(enumeration) => {
-            enum_type_name(*enumeration, enum_types, standard_library)
-        }
-    }
-}
-
 pub(super) fn syntax_expression_resolution(
     semantics: &SemanticModel,
     expression: &crate::ast::Expr,
 ) -> Option<ExpressionResolution> {
+    if let Some(variant) = semantics.enum_variant(expression.id) {
+        return Some(ExpressionResolution::EnumConstructor { variant });
+    }
     match &expression.kind {
         ExprKind::Path(_) => Some(ExpressionResolution::ValuePath {
             root: semantics.value(expression.id),
@@ -166,11 +147,11 @@ pub(super) fn syntax_expression_resolution(
         ExprKind::Record { .. } => semantics
             .record_literal_fields(expression.id)
             .map(|fields| ExpressionResolution::RecordLiteral {
+                record: semantics
+                    .record_literal(expression.id)
+                    .expect("resolved record fields have a nominal record"),
                 fields: fields.to_vec(),
             }),
-        ExprKind::Enum { .. } => semantics
-            .enum_variant(expression.id)
-            .map(|variant| ExpressionResolution::EnumConstructor { variant }),
         _ => None,
     }
 }

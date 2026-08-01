@@ -76,18 +76,8 @@ settings {
 }
 
 state GBA {
-    /// Raw inventory flags for swords and related equipment.
-    inventory0: u8 at 0x02002B32
-    /// Raw inventory flags containing the Four Sword state.
-    inventory1: u8 at 0x02002B33
-    /// Raw inventory flags containing the Bow state.
-    inventory2: u8 at 0x02002B34
-    /// Raw inventory flags for the Boomerang and Flame Lantern.
-    inventory3: u8 at 0x02002B35
-    /// Raw inventory flags for the Gust Jar, Cane of Pacci, and Mole Mitts.
-    inventory4: u8 at 0x02002B36
-    /// Raw inventory flags for Roc's Cape, the Pegasus Boots, and the Ocarina.
-    inventory5: u8 at 0x02002B37
+    /// Six contiguous inventory-flag bytes, read as one snapshot.
+    inventory: [u8; 6] at 0x02002B32
     /// Bit set containing the four collected elements.
     elements: u8 at 0x02002B42
     /// Bit set containing permanent equipment such as the Grip Ring.
@@ -230,7 +220,9 @@ split {
         return true
     }
 
-    if acquired(old.inventory0, current.inventory0, 1 << 2) && settings.getSmithsSword {
+    if acquired(old.inventory.get(0), current.inventory.get(0), 1 << 2)
+        && settings.getSmithsSword
+    {
         debug print("Get Smith's Sword")
         return true
     }
@@ -250,7 +242,9 @@ split {
         debug print("Enter Deepwood Shrine")
         return true
     }
-    if acquired(old.inventory4, current.inventory4, 1 << 2) && settings.getGustJar {
+    if acquired(old.inventory.get(4), current.inventory.get(4), 1 << 2)
+        && settings.getGustJar
+    {
         debug print("Get Gust Jar")
         return true
     }
@@ -282,7 +276,9 @@ split {
         debug print("Enter Cave of Flames")
         return true
     }
-    if acquired(old.inventory4, current.inventory4, 1 << 4) && settings.getCaneOfPacci {
+    if acquired(old.inventory.get(4), current.inventory.get(4), 1 << 4)
+        && settings.getCaneOfPacci
+    {
         debug print("Get Cane of Pacci")
         return true
     }
@@ -298,11 +294,13 @@ split {
         debug print("Get Fire Element")
         return true
     }
-    if acquired(old.inventory5, current.inventory5, 1 << 2) && settings.getPegasusBoots {
+    if acquired(old.inventory.get(5), current.inventory.get(5), 1 << 2)
+        && settings.getPegasusBoots
+    {
         debug print("Get Pegasus Boots")
         return true
     }
-    if acquired(old.inventory2, current.inventory2, 1 << 2) && settings.getBow {
+    if acquired(old.inventory.get(2), current.inventory.get(2), 1 << 2) && settings.getBow {
         debug print("Get Bow")
         return true
     }
@@ -311,7 +309,9 @@ split {
         debug print("Enter Fortress of Winds")
         return true
     }
-    if acquired(old.inventory4, current.inventory4, 1 << 6) && settings.getMoleMitts {
+    if acquired(old.inventory.get(4), current.inventory.get(4), 1 << 6)
+        && settings.getMoleMitts
+    {
         debug print("Get Mole Mitts")
         return true
     }
@@ -324,11 +324,11 @@ split {
         debug print("Enter Fortress of Winds Boss Room")
         return true
     }
-    if acquired(old.inventory5, current.inventory5, 1 << 6) && settings.getOcarina {
+    if acquired(old.inventory.get(5), current.inventory.get(5), 1 << 6) && settings.getOcarina {
         debug print("Get Ocarina")
         return true
     }
-    if acquired(old.inventory3, current.inventory3, 1 << 0)
+    if acquired(old.inventory.get(3), current.inventory.get(3), 1 << 0)
         && settings.getMagicalBoomerang
     {
         debug print("Get Magical Boomerang")
@@ -351,7 +351,9 @@ split {
         debug print("Enter Temple of Droplets")
         return true
     }
-    if acquired(old.inventory3, current.inventory3, 1 << 6) && settings.getFlameLantern {
+    if acquired(old.inventory.get(3), current.inventory.get(3), 1 << 6)
+        && settings.getFlameLantern
+    {
         debug print("Get Flame Lantern")
         return true
     }
@@ -365,7 +367,7 @@ split {
         debug print("Enter Palace of Winds")
         return true
     }
-    if acquired(old.inventory5, current.inventory5, 1 << 0) && settings.getRocsCape {
+    if acquired(old.inventory.get(5), current.inventory.get(5), 1 << 0) && settings.getRocsCape {
         debug print("Get Roc's Cape")
         return true
     }
@@ -374,7 +376,9 @@ split {
         debug print("Get Wind Element")
         return true
     }
-    if acquired(old.inventory1, current.inventory1, 1 << 4) && settings.getFourSword {
+    if acquired(old.inventory.get(1), current.inventory.get(1), 1 << 4)
+        && settings.getFourSword
+    {
         delayedSplit = DelayedSplit.GetFourSword
         delayedSplitAt = totalFrameCount(current.frameCount) + 244
         return false

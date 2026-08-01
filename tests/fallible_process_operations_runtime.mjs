@@ -7,6 +7,7 @@ if (!wasmPath) {
 
 const bytes = fs.readFileSync(wasmPath);
 const decoder = new TextDecoder();
+const encoder = new TextEncoder();
 let instance;
 let observed;
 
@@ -39,6 +40,18 @@ const env = {
             view.setUint16(destination + 2, "i".charCodeAt(0), true);
             return 1;
         }
+        if (source === 0x7000 && size === 16) {
+            const output = new Uint8Array(instance.exports.memory.buffer, destination, size);
+            output.fill(0);
+            output.set(encoder.encode("Café"));
+            return 1;
+        }
+        if (source === 0x7100 && size === 16) {
+            const output = new Uint8Array(instance.exports.memory.buffer, destination, size);
+            output.fill(0);
+            output.set([0xc0, 0xaf]);
+            return 1;
+        }
         return 0;
     },
     timer_set_variable(keyPointer, keyLength, valuePointer, valueLength) {
@@ -54,7 +67,7 @@ for (let tick = 0; tick < 3 && observed === undefined; tick += 1) {
     instance.exports.update();
 }
 
-const expected = "4369,12308,Hi,error,error,error";
+const expected = "4369,12308,Hi,error,error,error,Café,Café,error,error";
 if (observed !== expected) {
     throw new Error(`unexpected process operation output: ${JSON.stringify({ expected, observed })}`);
 }

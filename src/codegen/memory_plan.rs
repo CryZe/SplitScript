@@ -6,6 +6,8 @@
 //! long signatures can silently overlap static data.
 
 pub(super) const WASM_PAGE_SIZE: u64 = 65_536;
+use crate::intrinsic_registry::MAX_NATIVE_STRING_BYTES;
+
 const SETTINGS_STRING_CAPACITY: u32 = 16_384;
 const C_STRING_CAPACITY: u32 = 8_192;
 const MANAGED_UTF16_CAPACITY: u32 = 4_096;
@@ -59,6 +61,18 @@ impl ScratchRegion {
         self.start + offset
     }
 
+    /// Returns the host-write destination after proving its maximum size fits
+    /// this named scratch role. A runtime length may be smaller, but cannot be
+    /// allowed to exceed `maximum_size` before the host call.
+    pub(super) fn destination(self, maximum_size: u32) -> i32 {
+        assert!(
+            u32::try_from(self.capacity).is_ok_and(|capacity| maximum_size <= capacity),
+            "a {maximum_size}-byte host write exceeds the {}-byte scratch region",
+            self.capacity
+        );
+        self.start
+    }
+
     const fn end(self) -> i32 {
         self.start + self.capacity
     }
@@ -110,6 +124,7 @@ pub(super) struct RuntimeScratch {
     pub settings_string: ScratchRegion,
     pub scan: ScratchRegion,
     pub c_string: ScratchRegion,
+    pub native_utf8: ScratchRegion,
     pub managed_utf16: ScratchRegion,
     pub managed_utf8: ScratchRegion,
     /// Unbounded host-call staging starts after all immutable data. Helpers
@@ -143,6 +158,7 @@ impl LinearMemoryLayout {
             .max(SETTINGS_STRING_CAPACITY)
             .max(scan_capacity)
             .max(C_STRING_CAPACITY)
+            .max(MAX_NATIVE_STRING_BYTES)
             .max(MANAGED_UTF16_CAPACITY);
         let bank_1_start = align_up(u64::from(bank_0_capacity), 8);
         let bank_1_capacity = MANAGED_UTF8_CAPACITY.max(4);
@@ -195,6 +211,11 @@ impl LinearMemoryLayout {
                     .expect("signature scan scratch must fit wasm32 signed arithmetic"),
             ),
             c_string: ScratchRegion::new(ScratchAliasClass::Primary, 0, C_STRING_CAPACITY as i32),
+            native_utf8: ScratchRegion::new(
+                ScratchAliasClass::Primary,
+                0,
+                MAX_NATIVE_STRING_BYTES as i32,
+            ),
             managed_utf16: ScratchRegion::new(
                 ScratchAliasClass::Primary,
                 0,
@@ -213,6 +234,7 @@ impl LinearMemoryLayout {
             scratch.settings_string,
             scratch.scan,
             scratch.c_string,
+            scratch.native_utf8,
             scratch.managed_utf16,
         ] {
             assert_eq!(region.alias_class(), ScratchAliasClass::Primary);
@@ -226,6 +248,7 @@ impl LinearMemoryLayout {
         assert!(scratch.settings_string.end() <= bank_0_capacity);
         assert!(scratch.scan.end() <= bank_0_capacity);
         assert!(scratch.c_string.end() <= bank_0_capacity);
+        assert!(scratch.native_utf8.end() <= bank_0_capacity);
         assert!(scratch.managed_utf16.end() <= bank_0_capacity);
         assert_eq!(
             scratch.settings_length.start(),
@@ -340,9 +363,15 @@ mod tests {
                 let start = index.saturating_sub(12);
                 let prefix = lines[start..index].join("\n");
                 assert!(
-                    ["abi_read", "scan_start", "c_string_start", "utf16_start"]
-                        .iter()
-                        .any(|name| prefix.contains(name)),
+                    [
+                        "abi_read",
+                        "scan_start",
+                        "c_string_start",
+                        "native_utf8_start",
+                        "utf16_start",
+                    ]
+                    .iter()
+                    .any(|name| prefix.contains(name)),
                     "{name} has a process read without a named scratch destination near line {}",
                     index + 1
                 );

@@ -5,16 +5,17 @@ use std::collections::HashMap;
 use wasm_encoder::Function;
 
 use crate::{
-    ast::{ArrayTypeDecl, Program, ValueId},
+    ast::{Program, ValueId},
     intrinsic_registry::RuntimeHelperId,
     stdlib::StdlibTypeId,
+    types::ResolvedArrayType,
 };
 
 use super::data_plan::{SignaturePool, StringPool};
 use super::imports::Abi;
 use super::memory_plan::LinearMemoryLayout;
 use super::runtime_helper_registry;
-use super::{GcLayout, RuntimeHelperPlan, SettingStorage, Type, array_element_type, settings};
+use super::{GcLayout, RuntimeHelperPlan, SettingStorage, Type, settings, try_array_element_type};
 
 mod equality;
 mod gba;
@@ -29,7 +30,7 @@ pub(super) struct RuntimeHelperInputs<'a> {
     pub strings: &'a StringPool,
     pub signatures: &'a SignaturePool,
     pub plan: &'a RuntimeHelperPlan,
-    pub arrays: &'a [ArrayTypeDecl],
+    pub arrays: &'a [ResolvedArrayType],
     pub program: &'a Program,
     pub semantics: &'a crate::semantic::SemanticModel,
     pub settings: &'a settings::SettingsContext<'a>,
@@ -52,7 +53,7 @@ fn array_layout(inputs: &RuntimeHelperInputs<'_>, element: Type) -> u32 {
         inputs
             .arrays
             .iter()
-            .find(|array| array_element_type(array.id, inputs.semantics) == element)
+            .find(|array| try_array_element_type(array.id, inputs.semantics) == Some(element))
             .expect("runtime helper has its required reachable array layout")
             .id,
     ))
@@ -80,6 +81,15 @@ pub(super) fn build_scan_process_range(inputs: &RuntimeHelperInputs<'_>) -> Func
 
 pub(super) fn build_read_relative32(inputs: &RuntimeHelperInputs<'_>) -> Function {
     process::compile_read_relative32(inputs.abi, inputs.memory.scratch().abi_read)
+}
+
+pub(super) fn build_read_utf8_string(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_read_utf8_string(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::StringFromMemory),
+        inputs.gc,
+        inputs.memory.scratch().native_utf8,
+    )
 }
 
 pub(super) fn build_read_managed_string(inputs: &RuntimeHelperInputs<'_>) -> Function {

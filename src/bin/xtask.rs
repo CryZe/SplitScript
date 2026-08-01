@@ -86,6 +86,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/for_loop.split",
+        output: "for_loop.wasm",
+        profile: "release",
+        harness: "tests/for_loop_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/process_results.split",
         output: "process_results.wasm",
         profile: "release",
@@ -146,6 +153,17 @@ fn check() -> Result<(), String> {
         &root,
         "cargo",
         &["clippy", "--all-targets", "--", "-D", "warnings"],
+    )?;
+    run(
+        &root,
+        "cargo",
+        &[
+            "test",
+            "--package",
+            "splitscript-syntax",
+            "--package",
+            "splitscript-stdlib-loader",
+        ],
     )?;
     // Do not ask Cargo to build the currently running xtask as a test harness:
     // Windows cannot replace its locked executable. These targets are the

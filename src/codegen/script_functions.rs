@@ -22,9 +22,12 @@ pub(super) fn compile_read(
             &mut planned_locals,
             &mut matches,
             &mut local_types,
-            1,
-            lowering.semantics,
-            false,
+            LocalPlanOptions {
+                parameter_count: 1,
+                semantics: lowering.semantics,
+                instance: None,
+                include_values: false,
+            },
         );
         let mut function = Function::new(
             local_types
@@ -55,6 +58,7 @@ pub(super) fn compile_read(
             semantics: lowering.semantics,
             wasm_ir: lowering.wasm_ir,
             gc: lowering.gc,
+            function_instance: None,
             loop_control: None,
         };
         compile_expr(&mut function, planned.expression, &context);
@@ -66,11 +70,6 @@ pub(super) fn compile_read(
         .value_type(field.id)
         .expect("checked state fields have semantic types");
     let field_type = value_type(field.id, lowering.semantics);
-    let field_size = lowering
-        .memory
-        .layout(field_type_id, lowering.semantics)
-        .expect("checked pointer fields are MemoryReadable")
-        .size();
     let poll_result = semantic_type(
         lowering
             .semantics
@@ -81,30 +80,41 @@ pub(super) fn compile_read(
     let Type::Result(result_type) = poll_result else {
         unreachable!("state poll-result types are Result layouts")
     };
-    if let Some(provider) = lowering
-        .state
-        .provider
-        .as_ref()
-        .and_then(|provider| provider.resolved)
-    {
+    if let Some(provider) = lowering.semantics.state_provider() {
         let provider = lowering.standard_library.state_provider(provider);
         let Implementation::Intrinsic(direct_read) = lowering
             .standard_library
             .item(provider.direct_read)
-            .implementation;
-        return match direct_read {
-            IntrinsicId::GbaEmulatorRead => compile_gba_direct_read(
+            .implementation
+        else {
+            unreachable!("validated state-provider reads are intrinsic")
+        };
+        if direct_read == IntrinsicId::GbaEmulatorRead {
+            let field_size = lowering
+                .memory
+                .layout(field_type_id, lowering.semantics)
+                .expect("provider pointer fields are MemoryReadable")
+                .size();
+            return compile_gba_direct_read(
                 path.offsets[0] as u32,
                 field_type_id,
                 field_type,
                 field_size,
                 result_type,
                 lowering,
-            ),
-            _ => unreachable!("validated state-provider direct reads have backend lowering"),
-        };
+            );
+        }
+        debug_assert_eq!(direct_read, IntrinsicId::ProcessRead);
     }
-    let mut function = Function::new([(1, ValType::I64)]);
+    let decoded_string = path.decoder.is_some();
+    let mut locals = vec![(1, ValType::I64)];
+    if decoded_string {
+        locals.push((
+            1,
+            lowering.gc.val_type(Type::Standard(StdlibTypeId::String)),
+        ));
+    }
+    let mut function = Function::new(locals);
     let address_local = 1;
     let offsets = &path.offsets;
     if let Some(module) = &path.module {
@@ -138,6 +148,42 @@ pub(super) fn compile_read(
             .instruction(&Instruction::I64Const(offsets[0] as i64))
             .instruction(&Instruction::LocalSet(address_local));
     }
+
+    if let Some(crate::ast::StateMemoryDecoder::Utf8 { max_bytes, .. }) = path.decoder {
+        let string_local = 2;
+        function
+            .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
+            .instruction(&Instruction::LocalGet(address_local))
+            .instruction(&Instruction::I32Const(max_bytes as i32))
+            .instruction(&Instruction::Call(
+                lowering
+                    .runtime_helpers
+                    .function(RuntimeHelperId::ReadUtf8String),
+            ))
+            .instruction(&Instruction::LocalTee(string_local))
+            .instruction(&Instruction::RefIsNull)
+            .instruction(&Instruction::If(BlockType::Empty));
+        emit_result_error(
+            &mut function,
+            result_type,
+            field_type,
+            "UTF-8 string could not be read",
+            lowering.gc,
+        );
+        function
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::LocalGet(string_local));
+        emit_result_success(&mut function, result_type, lowering.gc);
+        function.instruction(&Instruction::End);
+        return function;
+    }
+
+    let field_size = lowering
+        .memory
+        .layout(field_type_id, lowering.semantics)
+        .expect("checked undecoded pointer fields are MemoryReadable")
+        .size();
 
     let process_read = ProcessReadEmission {
         abi,
@@ -270,11 +316,12 @@ fn emit_process_read(function: &mut Function, emission: &ProcessReadEmission<'_>
 
 pub(super) fn compile_user_function(
     declaration: &FunctionDecl,
+    instance: &crate::semantic::FunctionInstance,
     lowering: &EmissionContext<'_>,
 ) -> Function {
     let wasm_body = lowering
         .wasm_ir
-        .body(BodyOwner::Function(declaration.id))
+        .body(BodyOwner::Function(instance.clone()))
         .expect("checked functions have Wasm IR bodies");
     let mut locals = declaration
         .params
@@ -283,7 +330,19 @@ pub(super) fn compile_user_function(
         .map(|(index, parameter)| {
             (
                 parameter.id,
-                (index as u32, value_type(parameter.id, lowering.semantics)),
+                (
+                    index as u32,
+                    semantic_type(
+                        lowering.semantics.specialize_type(
+                            instance,
+                            lowering
+                                .semantics
+                                .value_type(parameter.id)
+                                .expect("checked parameters have types"),
+                        ),
+                        lowering.semantics,
+                    ),
+                ),
             )
         })
         .collect::<HashMap<_, _>>();
@@ -294,9 +353,12 @@ pub(super) fn compile_user_function(
         &mut locals,
         &mut matches,
         &mut local_types,
-        declaration.params.len() as u32,
-        lowering.semantics,
-        true,
+        LocalPlanOptions {
+            parameter_count: declaration.params.len() as u32,
+            semantics: lowering.semantics,
+            instance: Some(instance),
+            include_values: true,
+        },
     );
     let mut function = Function::new(
         local_types
@@ -326,10 +388,21 @@ pub(super) fn compile_user_function(
         semantics: lowering.semantics,
         wasm_ir: lowering.wasm_ir,
         gc: lowering.gc,
+        function_instance: Some(instance),
         loop_control: None,
     };
     compile_block(&mut function, &wasm_body.entry, &context, None);
-    if function_result(declaration.id, lowering.semantics) != Type::Void {
+    if semantic_type(
+        lowering.semantics.specialize_type(
+            instance,
+            lowering
+                .semantics
+                .function_result(declaration.id)
+                .expect("checked functions have result types"),
+        ),
+        lowering.semantics,
+    ) != Type::Void
+    {
         function.instruction(&Instruction::Unreachable);
     }
     function.instruction(&Instruction::End);
@@ -349,9 +422,12 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
         &mut locals,
         &mut matches,
         &mut local_types,
-        2,
-        lowering.semantics,
-        true,
+        LocalPlanOptions {
+            parameter_count: 2,
+            semantics: lowering.semantics,
+            instance: None,
+            include_values: true,
+        },
     );
     let mut function = Function::new(
         local_types
@@ -381,6 +457,7 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
         semantics: lowering.semantics,
         wasm_ir: lowering.wasm_ir,
         gc: lowering.gc,
+        function_instance: None,
         loop_control: None,
     };
     compile_block(&mut function, &wasm_body.entry, &context, Some(action.kind));
@@ -406,21 +483,31 @@ pub(super) fn emit_action_default(function: &mut Function, action: ActionKind, g
     }
 }
 
+pub(super) struct LocalPlanOptions<'a> {
+    pub(super) parameter_count: u32,
+    pub(super) semantics: &'a SemanticModel,
+    pub(super) instance: Option<&'a crate::semantic::FunctionInstance>,
+    pub(super) include_values: bool,
+}
+
 pub(super) fn plan_wasm_locals(
     planned: &[wasm_ir::Local],
     locals: &mut HashMap<ValueId, (u32, Type)>,
     matches: &mut MatchLayout,
     types: &mut Vec<Type>,
-    parameter_count: u32,
-    semantics: &SemanticModel,
-    include_values: bool,
+    options: LocalPlanOptions<'_>,
 ) {
     for local in planned {
-        if matches!(local.purpose, LocalPurpose::Value(_)) && !include_values {
+        if matches!(local.purpose, LocalPurpose::Value(_)) && !options.include_values {
             continue;
         }
-        let index = parameter_count + types.len() as u32;
-        let ty = semantic_type(local.ty, semantics);
+        let index = options.parameter_count + types.len() as u32;
+        let ty = semantic_type(
+            options.instance.map_or(local.ty, |instance| {
+                options.semantics.specialize_type(instance, local.ty)
+            }),
+            options.semantics,
+        );
         types.push(ty);
         match local.purpose {
             LocalPurpose::Value(value) => {
@@ -467,7 +554,6 @@ use super::{
     data_plan::StringPool,
     emit_memory_value, emit_result_error, emit_result_success,
     expression::{ExprContext, LocalStorage, MatchLayout, compile_block, compile_expr},
-    function_result,
     imports::Abi,
     memarg, memory_plan, semantic_type, value_type,
 };

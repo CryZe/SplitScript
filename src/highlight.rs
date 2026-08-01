@@ -4,11 +4,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
     ast::{
-        Action, EnumTypeId, Expr, ExprKind, FunctionDecl, MatchPattern, Program, SettingKind, Span,
-        Stmt, TypeRef, ValueId, VariableDecl,
+        Action, Expr, ExprKind, FunctionDecl, MatchPattern, Program, SettingKind, Span, Stmt,
+        TypeRef, ValueId, VariableDecl,
     },
     lexer::{Lexeme, Token, TokenKind, TriviaKind},
-    semantic::{ResolvedCall, ResolvedValue, SemanticModel},
+    semantic::{ResolvedCall, ResolvedMember, ResolvedValue, SemanticModel},
     stdlib::StandardLibrary,
     syntax::SourceDocument,
     visit::{self, Visitor},
@@ -207,6 +207,10 @@ impl<'ast> Visitor<'ast> for ValueKindCollector {
         }
     }
 
+    fn visit_for_binding(&mut self, binding: &'ast crate::ast::ForBinding) {
+        self.kinds.insert(binding.id, SemanticTokenKind::Variable);
+    }
+
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
         let binding = match &arm.pattern {
             MatchPattern::Enum {
@@ -401,7 +405,19 @@ impl HighlightCollector<'_> {
             return;
         }
 
-        if let Some(value) = self.semantics.and_then(|model| model.value(expression.id)) {
+        let resolved_value = self.semantics.and_then(|model| {
+            model.value(expression.id).or_else(|| {
+                model.call(expression.id).and_then(|call| match call {
+                    ResolvedCall::StandardLibrary { receiver, .. } => *receiver,
+                    ResolvedCall::UserMethod { receiver, .. } => Some(*receiver),
+                    ResolvedCall::UserFunction { .. }
+                    | ResolvedCall::OptionSome { .. }
+                    | ResolvedCall::ResultSuccess { .. }
+                    | ResolvedCall::ResultError { .. } => None,
+                })
+            })
+        });
+        if let Some(value) = resolved_value {
             match value {
                 ResolvedValue::ProviderValue(_) => {
                     self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
@@ -434,6 +450,26 @@ impl HighlightCollector<'_> {
             self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
             if let Some(span) = spans.get(1) {
                 self.insert(*span, SemanticTokenKind::Setting, MODIFIER_READONLY);
+            }
+        }
+
+        // Lexical highlighting cannot tell a builtin type spelling such as
+        // `address` from a field with the same name. Resolved member identities
+        // take precedence over those source-wide name heuristics. Members are
+        // a suffix because roots such as `current.field` can consume more than
+        // one written path segment before ordinary record/standard fields.
+        if let Some(members) = self
+            .semantics
+            .and_then(|model| model.path_members(expression.id))
+        {
+            for (span, member) in spans.iter().rev().take(members.len()).rev().zip(members) {
+                let modifiers = match member {
+                    ResolvedMember::StandardField(_) => {
+                        MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY
+                    }
+                    ResolvedMember::RecordField(_) => MODIFIER_READONLY,
+                };
+                self.insert(*span, SemanticTokenKind::Property, modifiers);
             }
         }
 
@@ -516,6 +552,16 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             SemanticTokenKind::StateField,
             MODIFIER_DECLARATION | MODIFIER_READONLY,
         );
+        if let crate::ast::StateSource::Pointer(path) = &field.source
+            && let Some(crate::ast::StateMemoryDecoder::Utf8 { span, .. }) = path.decoder
+        {
+            self.mark_ident(
+                span,
+                "utf8",
+                SemanticTokenKind::Function,
+                MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
+            );
+        }
         visit::walk_state_field(self, field);
     }
 
@@ -651,6 +697,15 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
         }
     }
 
+    fn visit_for_binding(&mut self, binding: &'ast crate::ast::ForBinding) {
+        self.mark_ident(
+            binding.span,
+            &binding.name,
+            SemanticTokenKind::Variable,
+            MODIFIER_DECLARATION | MODIFIER_READONLY,
+        );
+    }
+
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
         match &arm.pattern {
             MatchPattern::Enum {
@@ -658,11 +713,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 variant,
                 binding,
             } => {
-                if let Some(name) =
-                    enum_reference_name(self.syntax, enumeration, &self.standard_library)
-                {
-                    self.mark_ident(arm.span, name, SemanticTokenKind::Enum, 0);
-                }
+                self.mark_ident(arm.span, &enumeration.name, SemanticTokenKind::Enum, 0);
                 self.mark_ident(arm.span, variant, SemanticTokenKind::EnumMember, 0);
                 if let Some(binding) = binding {
                     self.mark_ident(
@@ -693,18 +744,6 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 self.insert(*name_span, SemanticTokenKind::Property, MODIFIER_READONLY)
             }
             ExprKind::Call { callee, .. } => self.mark_path(expression, callee, true),
-            ExprKind::Enum {
-                enumeration,
-                variant,
-                ..
-            } => {
-                if let Some(name) =
-                    enum_reference_name(self.syntax, enumeration, &self.standard_library)
-                {
-                    self.mark_ident(expression.span, name, SemanticTokenKind::Enum, 0);
-                }
-                self.mark_ident(expression.span, variant, SemanticTokenKind::EnumMember, 0);
-            }
             ExprKind::Record {
                 name: _,
                 name_span,
@@ -727,34 +766,6 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 }
 
-fn enum_name<'a>(
-    program: &'a Program,
-    enumeration: EnumTypeId,
-    standard_library: &StandardLibrary,
-) -> Option<&'a str> {
-    match enumeration {
-        EnumTypeId::Source(id) => program
-            .enums
-            .iter()
-            .find(|candidate| candidate.id == id)
-            .map(|declaration| declaration.name.as_str()),
-        EnumTypeId::Standard(id) => Some(standard_library.type_decl(id).name),
-    }
-}
-
-fn enum_reference_name<'a>(
-    program: &'a Program,
-    enumeration: &'a crate::ast::EnumReference,
-    standard_library: &StandardLibrary,
-) -> Option<&'a str> {
-    match enumeration {
-        crate::ast::EnumReference::Named { name, .. } => Some(name),
-        crate::ast::EnumReference::Resolved(enumeration) => {
-            enum_name(program, *enumeration, standard_library)
-        }
-    }
-}
-
 fn is_keyword(name: &str) -> bool {
     matches!(
         name,
@@ -767,6 +778,8 @@ fn is_keyword(name: &str) -> bool {
             | "if"
             | "else"
             | "while"
+            | "for"
+            | "in"
             | "break"
             | "continue"
             | "return"
@@ -864,6 +877,7 @@ enum Mode {
 
 state "game.exe" {
     level = process.read.i32(0)
+    mapName at 0x100 as utf8(32)
 }
 
 settings {
@@ -945,6 +959,13 @@ whileAttached {
         assert!(contains(
             source,
             &first,
+            "process",
+            SemanticTokenKind::Variable,
+            MODIFIER_READONLY
+        ));
+        assert!(contains(
+            source,
+            &first,
             "whileAttached",
             SemanticTokenKind::Lifecycle,
             MODIFIER_DECLARATION
@@ -1007,6 +1028,78 @@ whileAttached {
             SemanticTokenKind::Method,
             MODIFIER_DEFAULT_LIBRARY
         ));
+        assert!(contains(
+            source,
+            &first,
+            "utf8",
+            SemanticTokenKind::Function,
+            MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY
+        ));
+    }
+
+    #[test]
+    fn highlights_for_keywords_and_read_only_element_bindings() {
+        let source = r#"state "game.exe" {}
+whileAttached {
+    for value in [1, 2] {
+        print(value as String)
+    }
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let index = database.semantic_highlights().unwrap();
+        assert!(contains(
+            source,
+            &index,
+            "for",
+            SemanticTokenKind::Keyword,
+            0
+        ));
+        assert!(contains(
+            source,
+            &index,
+            "in",
+            SemanticTokenKind::Keyword,
+            0
+        ));
+        assert!(contains(
+            source,
+            &index,
+            "value",
+            SemanticTokenKind::Variable,
+            MODIFIER_DECLARATION | MODIFIER_READONLY
+        ));
+    }
+
+    #[test]
+    fn resolved_fields_override_builtin_type_name_highlighting() {
+        let source = r#"record Marker {
+    address: i32
+}
+state "game.exe" {}
+fn inspect(module: Module, marker: Marker) {
+    if module.address == 0x1000 && marker.address == 1 {
+        print("found")
+    }
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let index = database.semantic_highlights().unwrap();
+
+        for (path, expected_modifiers) in [
+            (
+                "module.address",
+                MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
+            ),
+            ("marker.address", MODIFIER_READONLY),
+        ] {
+            let start = source.find(path).unwrap() + path.find('.').unwrap() + 1;
+            let highlight = index
+                .highlights()
+                .iter()
+                .find(|highlight| highlight.span.start == start)
+                .expect("the resolved field should be highlighted");
+            assert_eq!(highlight.kind, SemanticTokenKind::Property);
+            assert_eq!(highlight.modifiers, expected_modifiers);
+        }
     }
 
     #[test]

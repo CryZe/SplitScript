@@ -13,11 +13,17 @@ use crate::{
     },
 };
 
+/// Hard upper bound for one native process-string read. Both direct calls and
+/// state-field decoder sugar fail before asking the host to exceed this size.
+pub(crate) const MAX_NATIVE_STRING_BYTES: u32 = 4_096;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CallableShape {
     Function,
+    #[allow(dead_code)]
     TypedFunction,
     Method,
+    TypedMethod,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +43,8 @@ pub(crate) enum RuntimeHelperId {
     StringEquality,
     ScanProcessRange,
     ReadRelative32,
+    StringFromMemory,
+    ReadUtf8String,
     ReadManagedString,
     UnityAttach,
     CStringEquality,
@@ -50,7 +58,6 @@ pub(crate) enum RuntimeHelperId {
     FollowAddress,
     GbaAttach,
     GbaTranslateAddress,
-    StringFromMemory,
     RefreshSettings,
 }
 
@@ -119,14 +126,17 @@ impl IntrinsicSignature {
             .map(|parameter| parameter.name)
             .collect::<Vec<_>>();
         let declared_receiver = match kind {
-            ItemKind::Method { receiver } => Some(receiver),
+            ItemKind::Method { receiver } | ItemKind::TypedMethod { receiver, .. } => {
+                Some(receiver)
+            }
             ItemKind::Function | ItemKind::TypedFunction { .. } => None,
         };
         if !matches_optional_type(self.receiver, declared_receiver, &names) {
             return false;
         }
         let declared_selector = match kind {
-            ItemKind::TypedFunction { type_parameter } => names
+            ItemKind::TypedFunction { type_parameter }
+            | ItemKind::TypedMethod { type_parameter, .. } => names
                 .iter()
                 .position(|name| *name == type_parameter)
                 .and_then(|index| u8::try_from(index).ok()),
@@ -232,6 +242,7 @@ impl IntrinsicContract {
             (CallableShape::Function, ItemKind::Function)
                 | (CallableShape::TypedFunction, ItemKind::TypedFunction { .. })
                 | (CallableShape::Method, ItemKind::Method { .. })
+                | (CallableShape::TypedMethod, ItemKind::TypedMethod { .. })
         )
     }
 }
@@ -260,11 +271,11 @@ const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
 
 const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
     match id {
-        IntrinsicId::NumericClamp => scratch(ScratchType::Expression, 4),
         IntrinsicId::NumericMin | IntrinsicId::NumericMax => scratch(ScratchType::Expression, 2),
         IntrinsicId::TimerState => scratch(ScratchType::Core(CoreTypeId::U32), 1),
         IntrinsicId::ProcessFollow
         | IntrinsicId::ProcessReadRelative32
+        | IntrinsicId::ProcessReadUtf8
         | IntrinsicId::ProcessReadManagedString
         | IntrinsicId::GbaAttach => scratch(ScratchType::ResultValue, 1),
         IntrinsicId::GbaEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
@@ -290,6 +301,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::ProcessFollow => &[Helper(Runtime::FollowAddress)],
         IntrinsicId::ProcessScan | IntrinsicId::ModuleScan => &[Helper(Runtime::ScanProcessRange)],
         IntrinsicId::ProcessReadRelative32 => &[Helper(Runtime::ReadRelative32)],
+        IntrinsicId::ProcessReadUtf8 => &[Helper(Runtime::ReadUtf8String)],
         IntrinsicId::ProcessReadManagedString => &[Helper(Runtime::ReadManagedString)],
         IntrinsicId::UnityIl2Cpp => &[Helper(Runtime::UnityAttach)],
         IntrinsicId::UnityModuleImage => &[Helper(Runtime::UnityGetImage)],
@@ -304,16 +316,11 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::NextTick
         | IntrinsicId::NumericMin
         | IntrinsicId::NumericMax
-        | IntrinsicId::NumericClamp
         | IntrinsicId::ArrayLength
         | IntrinsicId::ArrayGet
         | IntrinsicId::ArraySet
-        | IntrinsicId::AddressOffset
         | IntrinsicId::AddressAdd
-        | IntrinsicId::StringLength
-        | IntrinsicId::DurationFromFrames
-        | IntrinsicId::DurationFromParts
-        | IntrinsicId::DurationSaturatingSecondsF32 => &[],
+        | IntrinsicId::StringLength => &[],
     }
 }
 
@@ -334,15 +341,12 @@ const NEXT_TICK: EffectSet = EffectSet::one(Effect::RequiresAttachedProcess)
 
 const VOID: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Void);
 const U32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U32);
-const I32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::I32);
 const U64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U64);
-const I64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::I64);
-const F32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::F32);
 const F64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::F64);
 const ADDRESS: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Address);
 const STRING: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::String);
+const PROCESS_TYPE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Process);
 const SIGNATURE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Signature);
-const DURATION: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Duration);
 const MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Module);
 const TIMER_STATE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::TimerState);
 const UNITY_MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityModule);
@@ -499,14 +503,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             RepresentationPrimitive
         ),
-        IntrinsicId::NumericClamp => contract!(
-            NumericClamp,
-            Method,
-            signature(NUMERIC_T, None, Some(T), params![value(T), value(T)], T),
-            PURE,
-            Everywhere,
-            RepresentationPrimitive
-        ),
         IntrinsicId::ArrayLength => contract!(
             ArrayLength,
             Method,
@@ -537,20 +533,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             RepresentationPrimitive
         ),
-        IntrinsicId::AddressOffset => contract!(
-            AddressOffset,
-            Method,
-            signature(
-                NO_TYPE_PARAMETERS,
-                None,
-                Some(ADDRESS),
-                params![value(U32)],
-                ADDRESS,
-            ),
-            PURE,
-            Everywhere,
-            RepresentationPrimitive
-        ),
         IntrinsicId::AddressAdd => contract!(
             AddressAdd,
             Method,
@@ -567,11 +549,11 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::ProcessModule => contract!(
             ProcessModule,
-            Function,
+            Method,
             signature(
                 NO_TYPE_PARAMETERS,
                 None,
-                None,
+                Some(PROCESS_TYPE),
                 params![literal(STRING, ParameterRule::StringLiteral)],
                 MODULE,
             ),
@@ -581,19 +563,25 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::ProcessRead => contract!(
             ProcessRead,
-            TypedFunction,
-            signature(MEMORY_T, Some(0), None, params![value(ADDRESS)], T_RESULT),
+            TypedMethod,
+            signature(
+                MEMORY_T,
+                Some(0),
+                Some(PROCESS_TYPE),
+                params![value(ADDRESS)],
+                T_RESULT
+            ),
             PROCESS,
             Everywhere,
             Retryable
         ),
         IntrinsicId::ProcessFollow => contract!(
             ProcessFollow,
-            Function,
+            Method,
             signature(
                 NO_TYPE_PARAMETERS,
                 None,
-                None,
+                Some(PROCESS_TYPE),
                 params![value(ADDRESS), value(U64_ARRAY)],
                 ADDRESS_RESULT,
             ),
@@ -603,11 +591,11 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::ProcessScan => contract!(
             ProcessScan,
-            Function,
+            Method,
             signature(
                 NO_TYPE_PARAMETERS,
                 None,
-                None,
+                Some(PROCESS_TYPE),
                 params![
                     value(ADDRESS),
                     value(U64),
@@ -621,11 +609,11 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::ProcessReadRelative32 => contract!(
             ProcessReadRelative32,
-            Function,
+            Method,
             signature(
                 NO_TYPE_PARAMETERS,
                 None,
-                None,
+                Some(PROCESS_TYPE),
                 params![value(ADDRESS)],
                 ADDRESS_RESULT,
             ),
@@ -633,13 +621,27 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             Retryable
         ),
-        IntrinsicId::ProcessReadManagedString => contract!(
-            ProcessReadManagedString,
-            Function,
+        IntrinsicId::ProcessReadUtf8 => contract!(
+            ProcessReadUtf8,
+            Method,
             signature(
                 NO_TYPE_PARAMETERS,
                 None,
+                Some(PROCESS_TYPE),
+                params![value(ADDRESS), value(U32)],
+                STRING_RESULT,
+            ),
+            PROCESS,
+            Everywhere,
+            Retryable
+        ),
+        IntrinsicId::ProcessReadManagedString => contract!(
+            ProcessReadManagedString,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
                 None,
+                Some(PROCESS_TYPE),
                 params![value(ADDRESS), value(U32)],
                 STRING_RESULT,
             ),
@@ -688,48 +690,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 STRING,
             ),
             ALLOCATES,
-            Everywhere,
-            RepresentationPrimitive
-        ),
-        IntrinsicId::DurationFromFrames => contract!(
-            DurationFromFrames,
-            Function,
-            signature(
-                NO_TYPE_PARAMETERS,
-                None,
-                None,
-                params![value(I64), value(I64)],
-                DURATION,
-            ),
-            PURE,
-            Everywhere,
-            RepresentationPrimitive
-        ),
-        IntrinsicId::DurationFromParts => contract!(
-            DurationFromParts,
-            Function,
-            signature(
-                NO_TYPE_PARAMETERS,
-                None,
-                None,
-                params![value(I64), value(I32)],
-                DURATION,
-            ),
-            PURE,
-            Everywhere,
-            RepresentationPrimitive
-        ),
-        IntrinsicId::DurationSaturatingSecondsF32 => contract!(
-            DurationSaturatingSecondsF32,
-            Function,
-            signature(
-                NO_TYPE_PARAMETERS,
-                None,
-                None,
-                params![value(F32)],
-                DURATION
-            ),
-            PURE,
             Everywhere,
             RepresentationPrimitive
         ),
@@ -909,8 +869,9 @@ mod tests {
             result: result_of_value,
         };
         assert!(read.signature.matches(
-            ItemKind::TypedFunction {
-                type_parameter: "Value"
+            ItemKind::TypedMethod {
+                receiver: TypeRef::Standard(StdlibTypeId::Process),
+                type_parameter: "Value",
             },
             valid,
         ));
@@ -920,8 +881,9 @@ mod tests {
             ..valid
         };
         assert!(!read.signature.matches(
-            ItemKind::TypedFunction {
-                type_parameter: "Value"
+            ItemKind::TypedMethod {
+                receiver: TypeRef::Standard(StdlibTypeId::Process),
+                type_parameter: "Value",
             },
             wrong_result,
         ));

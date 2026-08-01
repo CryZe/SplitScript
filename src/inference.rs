@@ -6,9 +6,9 @@
 use std::{collections::HashMap, fmt, ops::BitOr};
 
 use crate::{
-    ast::{ArrayTypeId, OptionTypeId, ResultTypeId, TypeRef},
+    ast::{ArrayTypeId, ConstructedTypeIdAllocator, OptionTypeId, ResultTypeId},
     stdlib::{CapabilityBehavior, CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
-    types::{BuiltinType, TypeId, TypeKind, TypeStore},
+    types::{BuiltinType, ResolvedTypeRef, TypeId, TypeKind, TypeStore},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -21,20 +21,21 @@ pub(crate) enum Type {
 }
 
 impl Type {
-    pub(crate) fn to_ref(self, types: &TypeStore) -> TypeRef {
+    pub(crate) fn to_ref(self, types: &TypeStore) -> ResolvedTypeRef {
         match self {
             Self::Known(id) => match types.kind(id) {
-                TypeKind::Builtin(builtin) => TypeRef::core(*builtin),
-                TypeKind::Standard(standard) => TypeRef::Standard(*standard),
-                TypeKind::Record(record) => TypeRef::Record(*record),
-                TypeKind::Enum(enumeration) => TypeRef::Enum(*enumeration),
-                TypeKind::Array { layout, .. } => TypeRef::Array(*layout),
-                TypeKind::Option { layout, .. } => TypeRef::Option(*layout),
-                TypeKind::Result { layout, .. } => TypeRef::Result(*layout),
+                TypeKind::Builtin(builtin) => ResolvedTypeRef::Core(*builtin),
+                TypeKind::Standard(standard) => ResolvedTypeRef::Standard(*standard),
+                TypeKind::Record(record) => ResolvedTypeRef::Record(*record),
+                TypeKind::Enum(enumeration) => ResolvedTypeRef::Enum(*enumeration),
+                TypeKind::GenericParameter { .. } => ResolvedTypeRef::GenericParameter(id),
+                TypeKind::Array { layout, .. } => ResolvedTypeRef::Array(*layout),
+                TypeKind::Option { layout, .. } => ResolvedTypeRef::Option(*layout),
+                TypeKind::Result { layout, .. } => ResolvedTypeRef::Result(*layout),
             },
-            Self::Array(id) => TypeRef::Array(id),
-            Self::Option(id) => TypeRef::Option(id),
-            Self::Result(id) => TypeRef::Result(id),
+            Self::Array(id) => ResolvedTypeRef::Array(id),
+            Self::Option(id) => ResolvedTypeRef::Option(id),
+            Self::Result(id) => ResolvedTypeRef::Result(id),
             Self::Variable(variable) => {
                 unreachable!("inference variable ?{variable} cannot become a source type reference")
             }
@@ -78,6 +79,10 @@ impl Requirements {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    pub(crate) fn as_slice(&self) -> &[StdlibCapabilityId] {
+        &self.0
     }
 
     fn contains(&self, capability: StdlibCapabilityId) -> bool {
@@ -125,6 +130,7 @@ struct Variable {
 pub(crate) struct ArrayLayout {
     pub(crate) id: ArrayTypeId,
     pub(crate) element: Type,
+    pub(crate) length: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -149,7 +155,7 @@ pub(crate) struct InferenceContext {
     canonical_options: HashMap<OptionTypeId, OptionTypeId>,
     canonical_results: HashMap<ResultTypeId, ResultTypeId>,
     constructed_types: HashMap<Type, TypeId>,
-    next_constructed_type_index: u32,
+    constructed_type_ids: ConstructedTypeIdAllocator,
 }
 
 impl InferenceContext {
@@ -180,7 +186,9 @@ impl InferenceContext {
             canonical_options: HashMap::new(),
             canonical_results: HashMap::new(),
             constructed_types: HashMap::new(),
-            next_constructed_type_index,
+            constructed_type_ids: ConstructedTypeIdAllocator::starting_at(
+                next_constructed_type_index,
+            ),
         }
     }
 
@@ -236,6 +244,9 @@ impl InferenceContext {
             TypeKind::Standard(standard) => self.standard_library.type_decl(*standard).name.into(),
             TypeKind::Record(record) => format!("record#{record}"),
             TypeKind::Enum(enumeration) => format!("enum#{enumeration}"),
+            TypeKind::GenericParameter { index, .. } => {
+                crate::types::generic_parameter_name(*index)
+            }
             TypeKind::Array { .. } => "Array".into(),
             TypeKind::Option { .. } => "Option".into(),
             TypeKind::Result { .. } => "Result".into(),
@@ -269,6 +280,112 @@ impl InferenceContext {
         }
     }
 
+    /// Instantiates one type from a generalized function signature.
+    ///
+    /// Every generalized root receives one fresh variable per call. Reusing
+    /// `substitutions` across all parameters and the result preserves equality
+    /// relationships such as `(T, T) -> T`, including when `T` is nested in a
+    /// constructed GC type.
+    pub(crate) fn instantiate_type(
+        &mut self,
+        ty: Type,
+        generalized: &[u32],
+        substitutions: &mut HashMap<u32, Type>,
+    ) -> Type {
+        match self.shallow(ty) {
+            Type::Variable(variable) if generalized.contains(&variable) => {
+                if let Some(substitution) = substitutions.get(&variable) {
+                    return *substitution;
+                }
+                let template = self.variables[variable as usize].clone();
+                let substitution = self.fresh(template.requirements, template.largest_literal);
+                substitutions.insert(variable, substitution);
+                substitution
+            }
+            variable @ Type::Variable(_) => variable,
+            Type::Array(array) => {
+                let element = self.array_element(array);
+                let instantiated = self.instantiate_type(element, generalized, substitutions);
+                if instantiated == element {
+                    Type::Array(array)
+                } else {
+                    Type::Array(self.array_type_with_length(instantiated, self.array_length(array)))
+                }
+            }
+            Type::Option(option) => {
+                let value = self.option_value(option);
+                let instantiated = self.instantiate_type(value, generalized, substitutions);
+                if instantiated == value {
+                    Type::Option(option)
+                } else {
+                    Type::Option(self.option_type(instantiated))
+                }
+            }
+            Type::Result(result) => {
+                let value = self.result_value(result);
+                let instantiated = self.instantiate_type(value, generalized, substitutions);
+                if instantiated == value {
+                    Type::Result(result)
+                } else {
+                    Type::Result(self.result_type(instantiated))
+                }
+            }
+            known @ Type::Known(_) => known,
+        }
+    }
+
+    pub(crate) fn unbound_variables_in(
+        &mut self,
+        types: impl IntoIterator<Item = Type>,
+    ) -> Vec<u32> {
+        let mut variables = Vec::new();
+        for ty in types {
+            self.collect_unbound_variables(ty, &mut variables);
+        }
+        variables
+    }
+
+    fn collect_unbound_variables(&mut self, ty: Type, output: &mut Vec<u32>) {
+        match self.shallow(ty) {
+            Type::Variable(variable) => {
+                if !output.contains(&variable) {
+                    output.push(variable);
+                }
+            }
+            Type::Array(array) => self.collect_unbound_variables(self.array_element(array), output),
+            Type::Option(option) => {
+                self.collect_unbound_variables(self.option_value(option), output)
+            }
+            Type::Result(result) => {
+                self.collect_unbound_variables(self.result_value(result), output)
+            }
+            Type::Known(_) => {}
+        }
+    }
+
+    pub(crate) fn bind_generic_parameter(&mut self, variable: u32, parameter: TypeId) {
+        let root = self.root(variable);
+        debug_assert_eq!(root, variable, "generalized variables are canonical roots");
+        debug_assert!(
+            self.variables[root as usize].binding.is_none(),
+            "generalized variables remain unbound until semantic publication"
+        );
+        self.variables[root as usize].binding = Some(Type::Known(parameter));
+    }
+
+    pub(crate) fn variable_requirements(&mut self, variable: u32) -> Requirements {
+        let root = self.root(variable);
+        self.variables[root as usize].requirements.clone()
+    }
+
+    pub(crate) fn intern_generic_parameter(
+        &mut self,
+        owner: crate::ast::FunctionId,
+        index: u32,
+    ) -> TypeId {
+        self.types.intern_generic_parameter(owner, index)
+    }
+
     pub(crate) fn is_unbound_without_default(&mut self, ty: Type) -> bool {
         let Type::Variable(variable) = self.shallow(ty) else {
             return false;
@@ -293,6 +410,15 @@ impl InferenceContext {
                 self.bind(variable, ty)
             }
             (Type::Array(left), Type::Array(right)) => {
+                if matches!(
+                    (self.array_length(left), self.array_length(right)),
+                    (Some(left), Some(right)) if left != right
+                ) {
+                    return Err(InferenceError::TypeMismatch {
+                        left: Type::Array(left),
+                        right: Type::Array(right),
+                    });
+                }
                 let left_element = self.array_element(left);
                 let right_element = self.array_element(right);
                 self.unify(left_element, right_element)?;
@@ -440,12 +566,27 @@ impl InferenceContext {
     }
 
     pub(crate) fn array_type(&mut self, element: Type) -> ArrayTypeId {
-        if let Some(array) = self.arrays.iter().find(|array| array.element == element) {
+        self.array_type_with_length(element, None)
+    }
+
+    pub(crate) fn array_type_with_length(
+        &mut self,
+        element: Type,
+        length: Option<u32>,
+    ) -> ArrayTypeId {
+        if let Some(array) = self
+            .arrays
+            .iter()
+            .find(|array| array.element == element && array.length == length)
+        {
             return array.id;
         }
-        let id = ArrayTypeId::from_index(self.next_constructed_type_index);
-        self.next_constructed_type_index += 1;
-        self.arrays.push(ArrayLayout { id, element });
+        let id = self.constructed_type_ids.array();
+        self.arrays.push(ArrayLayout {
+            id,
+            element,
+            length,
+        });
         id
     }
 
@@ -455,6 +596,14 @@ impl InferenceContext {
             .find(|array| array.id == id)
             .expect("checked array type has a layout")
             .element
+    }
+
+    pub(crate) fn array_length(&self, id: ArrayTypeId) -> Option<u32> {
+        self.arrays
+            .iter()
+            .find(|array| array.id == id)
+            .expect("checked array type has a layout")
+            .length
     }
 
     pub(crate) fn option_value(&self, id: OptionTypeId) -> Type {
@@ -477,8 +626,7 @@ impl InferenceContext {
         if let Some(option) = self.options.iter().find(|option| option.value == value) {
             return option.id;
         }
-        let id = OptionTypeId::from_index(self.next_constructed_type_index);
-        self.next_constructed_type_index += 1;
+        let id = self.constructed_type_ids.option();
         self.options.push(OptionLayout { id, value });
         id
     }
@@ -487,8 +635,7 @@ impl InferenceContext {
         if let Some(result) = self.results.iter().find(|result| result.value == value) {
             return result.id;
         }
-        let id = ResultTypeId::from_index(self.next_constructed_type_index);
-        self.next_constructed_type_index += 1;
+        let id = self.constructed_type_ids.result();
         self.results.push(ResultLayout { id, value });
         id
     }
@@ -617,7 +764,11 @@ impl InferenceContext {
             Type::Array(layout) => {
                 let element = self.array_element(layout);
                 let element = self.intern_resolved_type(element);
-                TypeKind::Array { layout, element }
+                TypeKind::Array {
+                    layout,
+                    element,
+                    length: self.array_length(layout),
+                }
             }
             Type::Option(layout) => {
                 let value = self.option_value(layout);
@@ -696,9 +847,31 @@ impl InferenceContext {
         if let Some(binding) = self.variables[variable as usize].binding {
             return self.unify(binding, ty);
         }
+        if self.occurs_in(variable, ty, &mut Vec::new()) {
+            return Err(InferenceError::Message(
+                "polymorphic recursion is not supported because it would require an infinite recursive type"
+                    .to_owned(),
+            ));
+        }
         self.validate_binding(variable, ty)?;
         self.variables[variable as usize].binding = Some(ty);
         Ok(ty)
+    }
+
+    fn occurs_in(&mut self, variable: u32, ty: Type, visited: &mut Vec<Type>) -> bool {
+        let ty = self.shallow(ty);
+        if !visited.contains(&ty) {
+            visited.push(ty);
+        } else {
+            return false;
+        }
+        match ty {
+            Type::Variable(candidate) => self.root(candidate) == variable,
+            Type::Array(array) => self.occurs_in(variable, self.array_element(array), visited),
+            Type::Option(option) => self.occurs_in(variable, self.option_value(option), visited),
+            Type::Result(result) => self.occurs_in(variable, self.result_value(result), visited),
+            Type::Known(_) => false,
+        }
     }
 
     fn validate_binding(&self, variable: u32, ty: Type) -> Result<(), InferenceError> {
@@ -774,10 +947,14 @@ pub(crate) fn type_may_have_capability(
             TypeKind::Enum(_) | TypeKind::Option { .. } | TypeKind::Result { .. } => {
                 behavior == CapabilityBehavior::StructuralEquality
             }
-            TypeKind::Array { .. } => false,
+            TypeKind::Array { length, .. } => {
+                behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
+            }
+            TypeKind::GenericParameter { .. } => false,
         },
         Type::Option(_) | Type::Result(_) => behavior == CapabilityBehavior::StructuralEquality,
-        Type::Array(_) | Type::Variable(_) => false,
+        Type::Array(_) => behavior == CapabilityBehavior::StructuralMemoryLayout,
+        Type::Variable(_) => false,
     }
 }
 
@@ -867,10 +1044,48 @@ mod tests {
     }
 
     #[test]
+    fn scheme_instantiation_preserves_constraints_sharing_and_nested_shapes() {
+        let mut inference =
+            InferenceContext::new(StandardLibrary::new(), TypeStore::default(), 0, [], [], []);
+        let template = inference.fresh(Requirements::capability(StdlibCapabilityId::Numeric), None);
+        let Type::Variable(root) = template else {
+            unreachable!()
+        };
+        let array = inference.array_type(template);
+        let option = inference.option_type(Type::Array(array));
+        let result = inference.result_type(Type::Option(option));
+
+        let mut first_substitutions = HashMap::new();
+        let first_value = inference.instantiate_type(template, &[root], &mut first_substitutions);
+        let first_nested =
+            inference.instantiate_type(Type::Result(result), &[root], &mut first_substitutions);
+        let Type::Result(first_result) = first_nested else {
+            unreachable!()
+        };
+        let Type::Option(first_option) = inference.result_value(first_result) else {
+            unreachable!()
+        };
+        let Type::Array(first_array) = inference.option_value(first_option) else {
+            unreachable!()
+        };
+        assert_eq!(inference.array_element(first_array), first_value);
+
+        let mut second_substitutions = HashMap::new();
+        let second_value = inference.instantiate_type(template, &[root], &mut second_substitutions);
+        assert_ne!(first_value, second_value);
+
+        let i64_type = inference.known_builtin(BuiltinType::I64);
+        inference.unify(first_value, i64_type).unwrap();
+        let string_type = inference.known_standard(StdlibTypeId::String);
+        assert!(inference.unify(second_value, string_type).is_err());
+    }
+
+    #[test]
     fn interns_resolved_constructed_types_before_semantic_publication() {
-        let array = ArrayTypeId::from_index(0);
-        let option = OptionTypeId::from_index(1);
-        let result = ResultTypeId::from_index(2);
+        let mut ids = ConstructedTypeIdAllocator::starting_at(0);
+        let array = ids.array();
+        let option = ids.option();
+        let result = ids.result();
         let types = TypeStore::default();
         let u32_type = Type::Known(types.id_for_builtin(BuiltinType::U32));
         let mut inference = InferenceContext::new(
@@ -880,6 +1095,7 @@ mod tests {
             [ArrayLayout {
                 id: array,
                 element: u32_type,
+                length: None,
             }],
             [OptionLayout {
                 id: option,
@@ -913,6 +1129,7 @@ mod tests {
                     Type::Known(id) => id,
                     _ => unreachable!(),
                 },
+                length: None,
             }
         );
         assert_eq!(

@@ -1,9 +1,6 @@
 //! Lossless source text and token/trivia access for formatter and editor tools.
 
-use crate::{
-    ast::Span,
-    lexer::{Lexed, Lexeme, Token, Trivia},
-};
+use crate::{Lexed, Lexeme, Span, Token, Trivia};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SourceDocument {
@@ -24,7 +21,8 @@ pub struct RecoveryNode {
 }
 
 impl SourceDocument {
-    pub(crate) fn new(source: &str, lexed: Lexed) -> Self {
+    /// Builds a lossless document from source and its matching lexer output.
+    pub fn from_lexed(source: &str, lexed: Lexed) -> Self {
         Self {
             source: source.to_owned(),
             lexemes: lexed.into_lexemes(),
@@ -93,12 +91,13 @@ impl SourceDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lexer::{TokenKind, TriviaKind, lex_lossless};
+    use crate::{SyntaxMode, TokenKind, TriviaKind, lex_lossless};
 
     #[test]
     fn reconstructs_every_token_comment_and_whitespace_byte() {
         let source = "  // heading\r\n/// setting help\r\nname /* middle */ = `a {1 + 2}`\n";
-        let document = SourceDocument::new(source, lex_lossless(source).unwrap());
+        let document =
+            SourceDocument::from_lexed(source, lex_lossless(source, SyntaxMode::Program).unwrap());
 
         assert_eq!(document.reconstruct(), source);
         assert!(document.trivia().any(|trivia| {
@@ -124,7 +123,8 @@ mod tests {
     #[test]
     fn finds_only_the_token_directly_under_an_offset() {
         let source = "alpha /* gap */ . beta";
-        let document = SourceDocument::new(source, lex_lossless(source).unwrap());
+        let document =
+            SourceDocument::from_lexed(source, lex_lossless(source, SyntaxMode::Program).unwrap());
 
         let alpha = document.token_at(2).unwrap();
         assert!(matches!(&alpha.kind, TokenKind::Ident(name) if name == "alpha"));

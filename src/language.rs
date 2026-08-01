@@ -71,6 +71,14 @@ split {
     return current.score > old.score
 }"#;
 
+const NATIVE_STRING_STATE_SOURCE: &str = r#"state "game.exe" {
+    mapName at "game.dll", 0x1234, 0x20 as utf8(64)
+}
+
+whileAttached {
+    print(current.mapName)
+}"#;
+
 const SETTINGS_SOURCE: &str = include_str!("../examples/lso_desktop_settings.split");
 
 const DOCUMENTATION_COMMENT_SOURCE: &str = r#"state "game.exe" {}
@@ -119,6 +127,10 @@ whileAttached {
         }
         break
     }
+
+    for label in ["one", "two"] {
+        print(label)
+    }
 }"#;
 
 const FAILURE_SOURCE: &str = r#"state "game.exe" {}
@@ -150,6 +162,7 @@ fn readMarker() {
 }
 
 onAttach {
+    let offsets: [u64; 2] = [0x100, 0x20]
     let module = await process.module("GameAssembly.dll")
     let marker = retry readMarker()
     print(`ready {module.address}:{marker}`)
@@ -226,6 +239,12 @@ focused_example!(
     STATE_SOURCE
 );
 focused_example!(
+    NATIVE_STRING_DECODER_EXAMPLE,
+    "Decode a native string field",
+    "mapName at 0x1234 as utf8(64)",
+    NATIVE_STRING_STATE_SOURCE
+);
+focused_example!(
     SETTINGS_DECL_EXAMPLE,
     "Declare a toggle",
     "settings {\n    \"Split bosses\" => splitBosses: true\n}",
@@ -247,6 +266,12 @@ focused_example!(
     WHILE_EXAMPLE,
     "Repeat while attached",
     "while index < values.length() {\n    index += 1\n}",
+    CONTROL_FLOW_SOURCE
+);
+focused_example!(
+    FOR_EXAMPLE,
+    "Iterate over an array",
+    "for level in levels {\n    inspect(level)\n}",
     CONTROL_FLOW_SOURCE
 );
 focused_example!(
@@ -353,8 +378,8 @@ focused_example!(
 );
 focused_example!(
     ARRAY_TYPE_EXAMPLE,
-    "Annotate an array",
-    "let offsets: Array<u64> = [0x100, 0x20]",
+    "Annotate an exact-length array",
+    "let offsets: [u64; 2] = [0x100, 0x20]",
     TYPES_AND_LITERALS_SOURCE
 );
 focused_example!(
@@ -542,10 +567,19 @@ define_language_catalog! {
         State,
         "state",
         LanguageItemKind::Declaration,
-        "state process { field = expression }",
+        "state \"game.exe\" { field = expression } | state GBA { field at address }",
         "Declares process attachment and transactional watched state.",
         "Every state expression produces a Result. A tick commits a complete new snapshot only when all fields succeed.",
         STATE_DECL_EXAMPLE
+    ),
+    language_item!(
+        NativeStringDecoder,
+        "utf8",
+        LanguageItemKind::Syntax,
+        "field at address as utf8(maxBytes)",
+        "Decodes a bounded native UTF-8 string state field.",
+        "This is state-layout sugar for a bounded read-and-decode operation, not a string-size type. It follows the complete pointer path, reads at most 4096 bytes once, stops at the first NUL byte, and fails the transactional state update when memory cannot be read or the bytes are not valid UTF-8. The field type is inferred as String.",
+        NATIVE_STRING_DECODER_EXAMPLE
     ),
     language_item!(
         Settings,
@@ -582,6 +616,15 @@ define_language_catalog! {
         "Repeats a block while its condition is true.",
         "The condition must be Bool and is evaluated before every iteration. The loop body has its own lexical scope. In onAttach, await and retry resume through explicit loop-header and exit states without replaying completed iterations.",
         WHILE_EXAMPLE
+    ),
+    language_item!(
+        For,
+        "for",
+        LanguageItemKind::Keyword,
+        "for value in array { ... }",
+        "Iterates over every element of an array.",
+        "The array expression is evaluated exactly once. The element binding is read-only, lexically scoped to the body, and inferred from [T] or [T; N]. Break and continue target the nearest loop. In onAttach, a body containing await or retry preserves the array, index, and current binding across suspension.",
+        FOR_EXAMPLE
     ),
     language_item!(
         Break,
@@ -738,11 +781,11 @@ define_language_catalog! {
     ),
     language_item!(
         ArrayType,
-        "Array<T>",
+        "[T; N]",
         LanguageItemKind::Syntax,
-        "Array<Element>",
+        "[Element] or [Element; Length]",
         "Names a garbage-collected array type.",
-        "Arrays have one statically inferred element type and provide catalog-backed length, indexed read, and indexed write methods.",
+        "[T] accepts any length. [T; N] carries an exact compile-time length, can be used wherever [T] is expected, and has a fixed process-memory layout when T is MemoryReadable. Both forms provide the same catalog-backed array methods.",
         ARRAY_TYPE_EXAMPLE
     ),
     language_item!(
@@ -1008,10 +1051,11 @@ impl LanguageCatalog {
         self.item_by_name(token).or_else(|| {
             let id = match token {
                 "Address" => LanguageItemId::BuiltinType(BuiltinType::Address),
-                "Array" => LanguageItemId::ArrayType,
+                "[" => LanguageItemId::ArrayType,
                 "?" => LanguageItemId::OptionType,
                 "!" => LanguageItemId::ResultType,
                 "choice" | "default" => LanguageItemId::ChoiceSetting,
+                "in" => LanguageItemId::For,
                 "file" | "mime" => LanguageItemId::FileSetting,
                 "///" => LanguageItemId::DocumentationComment,
                 "`" => LanguageItemId::TemplateString,

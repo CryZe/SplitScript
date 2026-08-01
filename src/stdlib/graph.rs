@@ -6,10 +6,11 @@ use std::{
 };
 
 use super::{
-    CoreType, CoreTypeId, FieldVisibility, ItemKind, StdlibCapability, StdlibCapabilityId,
-    StdlibField, StdlibFieldId, StdlibItem, StdlibItemId, StdlibNamespace, StdlibNamespaceId,
-    StdlibOwner, StdlibStateProvider, StdlibStateProviderId, StdlibSymbolId, StdlibType,
-    StdlibTypeConstructor, StdlibTypeConstructorId, StdlibTypeId, StdlibVariant, StdlibVariantId,
+    CoreType, CoreTypeId, FieldVisibility, ItemKind, OperationMetadata, StdlibCapability,
+    StdlibCapabilityId, StdlibField, StdlibFieldId, StdlibItem, StdlibItemId, StdlibNamespace,
+    StdlibNamespaceId, StdlibOwner, StdlibStateProvider, StdlibStateProviderId, StdlibSymbolId,
+    StdlibType, StdlibTypeConstructor, StdlibTypeConstructorId, StdlibTypeId, StdlibVariant,
+    StdlibVariantId,
     catalog::{
         CAPABILITIES, FIELDS, ITEMS, NAMESPACES, STATE_PROVIDERS, TYPE_CONSTRUCTORS, TYPES,
         VARIANTS,
@@ -42,6 +43,7 @@ pub(super) struct StandardLibraryGraph {
     pub(super) methods: Vec<&'static StdlibItem>,
     pub(super) methods_by_name: HashMap<&'static str, Vec<&'static StdlibItem>>,
     pub(super) children_by_owner: HashMap<StdlibOwner, Vec<StdlibSymbolId>>,
+    source_body_operations: OnceLock<HashMap<StdlibItemId, OperationMetadata>>,
 }
 
 impl StandardLibraryGraph {
@@ -127,12 +129,20 @@ impl StandardLibraryGraph {
         let variants_by_owner = group(VARIANTS, |variant| variant.owner);
         let methods = ITEMS
             .iter()
-            .filter(|item| matches!(item.kind, ItemKind::Method { .. }))
+            .filter(|item| {
+                matches!(
+                    item.kind,
+                    ItemKind::Method { .. } | ItemKind::TypedMethod { .. }
+                )
+            })
             .collect();
         let methods_by_name = group(
-            ITEMS
-                .iter()
-                .filter(|item| matches!(item.kind, ItemKind::Method { .. })),
+            ITEMS.iter().filter(|item| {
+                matches!(
+                    item.kind,
+                    ItemKind::Method { .. } | ItemKind::TypedMethod { .. }
+                )
+            }),
             |item| item.name,
         );
 
@@ -157,9 +167,27 @@ impl StandardLibraryGraph {
             methods,
             methods_by_name,
             children_by_owner: HashMap::new(),
+            source_body_operations: OnceLock::new(),
         };
         graph.validate_references_and_index_ownership(&mut errors);
         errors.is_empty().then_some(graph).ok_or(errors)
+    }
+
+    pub(super) fn source_body_operation(&self, item: StdlibItemId) -> Option<OperationMetadata> {
+        self.source_body_operations
+            .get()
+            .and_then(|operations| operations.get(&item).copied())
+    }
+
+    pub(super) fn initialize_source_body_operations(
+        &self,
+        operations: HashMap<StdlibItemId, OperationMetadata>,
+    ) {
+        let _ = self.source_body_operations.set(operations);
+    }
+
+    pub(super) fn source_body_operations_are_initialized(&self) -> bool {
+        self.source_body_operations.get().is_some()
     }
 
     fn validate_references_and_index_ownership(&mut self, errors: &mut Vec<String>) {

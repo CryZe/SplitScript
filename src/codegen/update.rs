@@ -7,7 +7,7 @@ use wasm_encoder::{BlockType, Function, HeapType, Instruction, RefType, ValType}
 use crate::{
     abi::AbiImportId,
     ast::{ActionKind, Program},
-    stdlib::{StdlibFieldId, StdlibTypeId},
+    stdlib::{CoreTypeId, RuntimeRepresentation, StdlibFieldId, StdlibTypeId},
     wasm_ir,
 };
 
@@ -23,6 +23,7 @@ pub(super) struct UpdateContext<'a> {
     pub gc: &'a GcLayout,
     pub runtime_globals: RuntimeGlobals,
     pub semantics: &'a crate::semantic::SemanticModel,
+    pub process_names: &'a [&'a str],
     pub provider_attach: Option<u32>,
 }
 
@@ -92,7 +93,7 @@ pub(super) fn compile_update(
             .instruction(&Instruction::GlobalSet(globals.detached_entered))
             .instruction(&Instruction::End);
     }
-    for process in &state.processes {
+    for process in lowering.process_names {
         let (process_ptr, process_len) = strings.get(process);
         function
             .instruction(&Instruction::GlobalGet(globals.process))
@@ -122,10 +123,8 @@ pub(super) fn compile_update(
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::GlobalSet(globals.process));
     if let Some(provider_global) = globals.provider_value {
-        let provider_type = state
-            .provider
-            .as_ref()
-            .and_then(|provider| provider.resolved)
+        let provider_type = semantics
+            .state_provider()
             .map(|provider| {
                 lowering
                     .standard_library
@@ -133,11 +132,8 @@ pub(super) fn compile_update(
                     .process_type
             })
             .expect("provider storage requires a resolved provider");
-        function
-            .instruction(&Instruction::RefNull(HeapType::Concrete(
-                lowering.gc.standard_index(provider_type),
-            )))
-            .instruction(&Instruction::GlobalSet(provider_global));
+        emit_provider_default(&mut function, provider_type, lowering);
+        function.instruction(&Instruction::GlobalSet(provider_global));
     }
     if let Some(region) = cancellation_region {
         emit_cancel_region(&mut function, region, lowering.gc, globals);
@@ -156,16 +152,25 @@ pub(super) fn compile_update(
     if let (Some(provider_global), Some(provider_attach)) =
         (globals.provider_value, lowering.provider_attach)
     {
+        let provider_type = semantics
+            .state_provider()
+            .map(|provider| {
+                lowering
+                    .standard_library
+                    .state_provider(provider)
+                    .process_type
+            })
+            .expect("provider storage requires a resolved provider");
+        emit_provider_unavailable(&mut function, provider_global, provider_type, lowering);
         function
-            .instruction(&Instruction::GlobalGet(provider_global))
-            .instruction(&Instruction::RefIsNull)
             .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::GlobalGet(globals.process))
-            .instruction(&Instruction::Call(provider_attach))
+            .instruction(&Instruction::GlobalGet(globals.process));
+        function.instruction(&Instruction::Call(provider_attach));
+        function
             .instruction(&Instruction::GlobalSet(provider_global))
-            .instruction(&Instruction::End)
-            .instruction(&Instruction::GlobalGet(provider_global))
-            .instruction(&Instruction::RefIsNull)
+            .instruction(&Instruction::End);
+        emit_provider_unavailable(&mut function, provider_global, provider_type, lowering);
+        function
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End);
@@ -338,6 +343,50 @@ pub(super) fn compile_update(
         .instruction(&Instruction::End)
         .instruction(&Instruction::End);
     function
+}
+
+fn emit_provider_default(function: &mut Function, ty: StdlibTypeId, context: &UpdateContext<'_>) {
+    match context.standard_library.type_decl(ty).representation {
+        RuntimeRepresentation::Scalar {
+            storage: CoreTypeId::I64,
+        } => {
+            function.instruction(&Instruction::I64Const(0));
+        }
+        RuntimeRepresentation::GcStruct { .. }
+        | RuntimeRepresentation::GcArray { .. }
+        | RuntimeRepresentation::Enum { .. } => {
+            function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                context.gc.standard_index(ty),
+            )));
+        }
+        representation => {
+            unreachable!("unsupported state-provider representation: {representation:?}")
+        }
+    }
+}
+
+fn emit_provider_unavailable(
+    function: &mut Function,
+    global: u32,
+    ty: StdlibTypeId,
+    context: &UpdateContext<'_>,
+) {
+    function.instruction(&Instruction::GlobalGet(global));
+    match context.standard_library.type_decl(ty).representation {
+        RuntimeRepresentation::Scalar {
+            storage: CoreTypeId::I64,
+        } => {
+            function.instruction(&Instruction::I64Eqz);
+        }
+        RuntimeRepresentation::GcStruct { .. }
+        | RuntimeRepresentation::GcArray { .. }
+        | RuntimeRepresentation::Enum { .. } => {
+            function.instruction(&Instruction::RefIsNull);
+        }
+        representation => {
+            unreachable!("unsupported state-provider representation: {representation:?}")
+        }
+    }
 }
 
 fn emit_cancel_region(

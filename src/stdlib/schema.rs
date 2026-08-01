@@ -14,6 +14,17 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Implementation {
     Intrinsic(IntrinsicId),
+    /// An ordinary SplitScript function injected into the compilation unit.
+    /// The generated name is reserved and cannot be authored by user code.
+    LibraryBody {
+        function_name: &'static str,
+        /// The authored block, including its braces. The compiler injects one
+        /// hidden function template and infers any catalog-generic portions of
+        /// its signature through the ordinary function pipeline. A resolved
+        /// catalog call later supplies the exact concrete signature used for
+        /// demand-driven specialization.
+        body: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -83,6 +94,10 @@ impl EffectSet {
         Self(self.0 | effect.bit())
     }
 
+    pub const fn without(self, effect: Effect) -> Self {
+        Self(self.0 & !effect.bit())
+    }
+
     pub const fn contains(self, effect: &Effect) -> bool {
         self.0 & effect.bit() != 0
     }
@@ -133,8 +148,16 @@ pub struct Parameter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemKind {
     Function,
-    TypedFunction { type_parameter: &'static str },
-    Method { receiver: TypeRef },
+    TypedFunction {
+        type_parameter: &'static str,
+    },
+    Method {
+        receiver: TypeRef,
+    },
+    TypedMethod {
+        receiver: TypeRef,
+        type_parameter: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,29 +202,39 @@ pub struct OperationSemantics {
     pub cancellation: CancellationKind,
 }
 
+/// Complete catalog metadata from which normalized operation semantics are
+/// derived. Intrinsics declare this metadata at the trusted boundary, while
+/// source-defined functions receive it from compiler analysis of their bodies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Deprecation {
-    pub message: &'static str,
-    pub replacement: Option<StdlibItemId>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct StdlibItem {
-    pub id: StdlibItemId,
-    pub owner: StdlibOwner,
-    pub name: &'static str,
-    pub qualified_name: &'static str,
-    pub kind: ItemKind,
-    pub signature: Signature,
+pub struct OperationMetadata {
     pub effects: EffectSet,
     pub availability: Availability,
-    pub deprecation: Option<Deprecation>,
-    pub documentation: Documentation<StdlibSymbolId>,
-    pub implementation: Implementation,
 }
 
-impl StdlibItem {
-    pub fn operation_semantics(self) -> OperationSemantics {
+impl OperationMetadata {
+    /// Conservatively combines alternative implementations of one public
+    /// operation. `Pure` represents the absence of observable effects, so it
+    /// is retained only when every alternative is pure.
+    pub fn conservative_union(self, other: Self) -> Self {
+        let effects = EffectSet(self.effects.0 | other.effects.0).without(Effect::Pure);
+        let effects = if effects.is_empty() {
+            EffectSet::one(Effect::Pure)
+        } else {
+            effects
+        };
+        Self {
+            effects,
+            availability: if self.availability == Availability::OnAttach
+                || other.availability == Availability::OnAttach
+            {
+                Availability::OnAttach
+            } else {
+                Availability::Everywhere
+            },
+        }
+    }
+
+    pub fn semantics(self) -> OperationSemantics {
         let suspension = if self.effects.contains(&Effect::Suspends) {
             SuspensionKind::Suspends
         } else if self.effects.contains(&Effect::Retryable) {
@@ -220,6 +253,25 @@ impl StdlibItem {
             },
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Deprecation {
+    pub message: &'static str,
+    pub replacement: Option<StdlibItemId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StdlibItem {
+    pub id: StdlibItemId,
+    pub owner: StdlibOwner,
+    pub name: &'static str,
+    pub qualified_name: &'static str,
+    pub kind: ItemKind,
+    pub signature: Signature,
+    pub deprecation: Option<Deprecation>,
+    pub documentation: Documentation<StdlibSymbolId>,
+    pub implementation: Implementation,
 }
 
 #[cfg(test)]
@@ -241,5 +293,23 @@ mod tests {
                 Effect::WritesRuntime,
             ]
         );
+    }
+
+    #[test]
+    fn operation_unions_treat_pure_as_the_empty_effect_alternative() {
+        let pure = OperationMetadata {
+            effects: EffectSet::one(Effect::Pure),
+            availability: Availability::Everywhere,
+        };
+        let process = OperationMetadata {
+            effects: EffectSet::one(Effect::ReadsProcess),
+            availability: Availability::OnAttach,
+        };
+        let union = pure.conservative_union(process);
+        assert_eq!(
+            union.effects.iter().copied().collect::<Vec<_>>(),
+            [Effect::ReadsProcess]
+        );
+        assert_eq!(union.availability, Availability::OnAttach);
     }
 }

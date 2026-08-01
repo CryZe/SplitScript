@@ -1,0 +1,9 @@
+[package]
+name = "splitscript-syntax"
+version = "0.1.0"
+edition = "2024"
+description = "Dependency-light shared syntax infrastructure for SplitScript"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"

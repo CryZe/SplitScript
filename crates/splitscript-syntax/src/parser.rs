@@ -7,23 +7,22 @@ mod statements;
 mod types;
 
 use crate::{
-    Diagnostic,
+    PrimitiveType as CoreTypeId, Token, TokenCursor, TokenKind,
     ast::{
-        Action, ActionKind, ArrayTypeDecl, ArrayTypeId, AssignmentId, BinaryOp, Block, EnumDecl,
-        EnumId, EnumReference, EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, FallbackBranch,
-        FunctionDecl, FunctionId, InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl,
-        OptionTypeId, Parameter, PatternBinding, PatternId, PointerPath, Program, RecordDecl,
-        RecordField, RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
-        SettingChoiceOptionId, SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl,
-        StateField, StateProviderRef, StateSource, Stmt, SuspensionBinding, SuspensionMode,
+        Action, ActionKind, ArrayTypeDecl, ArrayTypeId, AssignmentId, BinaryOp, Block,
+        ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference, EnumVariant, EnumVariantId,
+        Expr, ExprId, ExprKind, FallbackBranch, ForBinding, FunctionDecl, FunctionId,
+        InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter,
+        PatternBinding, PatternId, PointerPath, Program, RecordDecl, RecordField, RecordFieldId,
+        RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption, SettingChoiceOptionId,
+        SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl, StateField,
+        StateMemoryDecoder, StateProviderRef, StateSource, Stmt, SuspensionBinding, SuspensionMode,
         TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
-    lexer::{Token, TokenKind},
-    stdlib::CoreTypeId,
-    syntax::{RecoveryNode, RecoveryNodeKind},
+    diagnostic::Diagnostic,
+    source::{RecoveryNode, RecoveryNodeKind},
 };
 
-#[cfg(test)]
 pub fn parse(source: &str, tokens: Vec<Token>) -> Result<Program, Diagnostic> {
     let output = parse_recovering(source, tokens);
     match output.diagnostics.into_iter().next() {
@@ -42,8 +41,7 @@ pub struct ParseOutput {
 pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
     Parser {
         source,
-        tokens,
-        pos: 0,
+        cursor: TokenCursor::new(tokens),
         array_types: Vec::new(),
         array_type_ids: HashMap::new(),
         option_types: Vec::new(),
@@ -53,7 +51,7 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         type_names: Vec::new(),
         type_name_spans: Vec::new(),
         type_name_ids: HashMap::new(),
-        next_constructed_type_id: 0,
+        constructed_type_ids: ConstructedTypeIdAllocator::starting_at(0),
         next_expression_id: 0,
         next_function_id: 0,
         next_record_id: 0,
@@ -72,10 +70,9 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
 
 struct Parser<'a> {
     source: &'a str,
-    tokens: Vec<Token>,
-    pos: usize,
+    cursor: TokenCursor,
     array_types: Vec<ArrayTypeDecl>,
-    array_type_ids: HashMap<TypeRef, ArrayTypeId>,
+    array_type_ids: HashMap<(TypeRef, Option<u32>), ArrayTypeId>,
     option_types: Vec<OptionTypeDecl>,
     option_type_ids: HashMap<TypeRef, OptionTypeId>,
     result_types: Vec<ResultTypeDecl>,
@@ -83,7 +80,7 @@ struct Parser<'a> {
     type_names: Vec<String>,
     type_name_spans: Vec<Span>,
     type_name_ids: HashMap<String, TypeNameId>,
-    next_constructed_type_id: u32,
+    constructed_type_ids: ConstructedTypeIdAllocator,
     next_expression_id: u32,
     next_function_id: u32,
     next_record_id: u32,
@@ -171,7 +168,7 @@ impl Parser<'_> {
     fn program(mut self) -> ParseOutput {
         let mut program = Program::default();
         while !self.at(&TokenKind::Eof) {
-            let declaration_start = self.pos;
+            let declaration_start = self.cursor.position();
             let mut documentation = self.take_source_documentation();
             if documentation.is_some() && self.at(&TokenKind::Eof) {
                 self.diagnostics.push(
@@ -301,7 +298,7 @@ impl Parser<'_> {
                     });
                 }
                 self.diagnostics.push(error);
-                let skipped_start = self.tokens[declaration_start].span.start;
+                let skipped_start = self.cursor.tokens()[declaration_start].span.start;
                 self.synchronize_top_level(declaration_start);
                 let skipped_end = self.current().span.start.max(skipped_start);
                 if skipped_end != skipped_start {
@@ -344,6 +341,7 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::Assign { span, .. }
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
+        | Stmt::For { span, .. }
         | Stmt::Break { span }
         | Stmt::Continue { span }
         | Stmt::Return { span, .. }
@@ -406,7 +404,7 @@ fn parse_integer(text: &str) -> Result<(u64, Option<TypeRef>), String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::lexer;
+    use crate::{SyntaxMode, lex};
 
     use super::*;
 
@@ -422,12 +420,130 @@ mod tests {
                 return settings.splitLevels && changed;
             }
         "#;
-        let program = parse(source, lexer::lex(source).unwrap()).unwrap();
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
         assert_eq!(
             program.state.unwrap().fields[0].annotation,
             Some(TypeRef::core(CoreTypeId::U32))
         );
         assert_eq!(program.actions[0].kind, ActionKind::Split);
+    }
+
+    #[test]
+    fn parses_bounded_utf8_state_decoder_without_a_pseudo_type() {
+        let source = r#"
+            state "game.exe" {
+                mapName at "game.dll", 0x1234, 0x20 as utf8(64)
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let field = &program.state.unwrap().fields[0];
+        assert_eq!(field.annotation, None);
+        let StateSource::Pointer(path) = &field.source else {
+            panic!("expected a pointer-backed state field");
+        };
+        assert_eq!(path.module.as_deref(), Some("game.dll"));
+        assert_eq!(path.offsets, [0x1234, 0x20]);
+        assert!(matches!(
+            path.decoder,
+            Some(StateMemoryDecoder::Utf8 { max_bytes: 64, .. })
+        ));
+    }
+
+    #[test]
+    fn array_types_use_brackets_and_compose_with_wrappers() {
+        let source = r#"
+            state "game.exe" {}
+            record Arrays {
+                bytes: [u8]
+                nested: [[String]]
+                optional: [i32]?
+                fallibleElements: [u16!]
+                fixedBytes: [u8; 6]
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let fields = &program.records[0].fields;
+
+        let TypeRef::Array(bytes) = fields[0].ty else {
+            panic!("expected [u8]");
+        };
+        assert_eq!(
+            program
+                .array_types
+                .iter()
+                .find(|array| array.id == bytes)
+                .unwrap()
+                .element,
+            TypeRef::core(CoreTypeId::U8)
+        );
+
+        let TypeRef::Array(nested) = fields[1].ty else {
+            panic!("expected [[String]]");
+        };
+        assert!(matches!(
+            program
+                .array_types
+                .iter()
+                .find(|array| array.id == nested)
+                .unwrap()
+                .element,
+            TypeRef::Array(_)
+        ));
+        assert!(matches!(fields[2].ty, TypeRef::Option(_)));
+
+        let TypeRef::Array(fallible_elements) = fields[3].ty else {
+            panic!("expected [u16!]");
+        };
+        assert!(matches!(
+            program
+                .array_types
+                .iter()
+                .find(|array| array.id == fallible_elements)
+                .unwrap()
+                .element,
+            TypeRef::Result(_)
+        ));
+        let TypeRef::Array(fixed_bytes) = fields[4].ty else {
+            panic!("expected [u8; 6]");
+        };
+        let fixed_bytes = program
+            .array_types
+            .iter()
+            .find(|array| array.id == fixed_bytes)
+            .unwrap();
+        assert_eq!(fixed_bytes.element, TypeRef::core(CoreTypeId::U8));
+        assert_eq!(fixed_bytes.length, Some(6));
+    }
+
+    #[test]
+    fn legacy_array_constructor_syntax_is_not_accepted() {
+        let source = "state \"game.exe\" {} record Legacy { values: Array<i32> }";
+        assert!(parse(source, lex(source, SyntaxMode::Program).unwrap()).is_err());
+    }
+
+    #[test]
+    fn parses_for_in_with_a_scoped_binding() {
+        let source = r#"
+            state "game.exe" {}
+            whileAttached {
+                for value in [1, 2, 3] {
+                    print(value as String)
+                }
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let Stmt::For {
+            binding,
+            iterable,
+            body,
+            ..
+        } = &program.actions[0].body.statements[0]
+        else {
+            panic!("expected a for statement")
+        };
+        assert_eq!(binding.name, "value");
+        assert!(matches!(iterable.kind, ExprKind::Array(_)));
+        assert_eq!(body.statements.len(), 1);
     }
 
     #[test]
@@ -442,7 +558,7 @@ mod tests {
                 "Enabled" => enabled: true
             }
         "#;
-        let program = parse(source, lexer::lex(source).unwrap()).unwrap();
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
         assert_eq!(
             program.settings[0].tooltip.as_deref(),
             Some("First line of the tooltip continues on this line.\nA second paragraph.")
@@ -475,7 +591,7 @@ mod tests {
                 return point.x as String
             }
         "#;
-        let program = parse(source, lexer::lex(source).unwrap()).unwrap();
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
         assert_eq!(
             program.globals[0].documentation.as_deref(),
             Some("Global first line.\n\nGlobal second paragraph.")

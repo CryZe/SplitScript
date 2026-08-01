@@ -4,22 +4,51 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{
-        ArrayTypeDecl, ArrayTypeId, AssignmentId, EnumVariantId, ExprId, FunctionId,
-        OptionTypeDecl, OptionTypeId, PatternId, RecordFieldId, RecordId, ResultTypeDecl,
-        ResultTypeId, SettingChoiceOptionId, ValueId,
+        ArrayTypeId, AssignmentId, EnumVariantId, ExprId, FunctionId, OptionTypeId, PatternId,
+        RecordFieldId, RecordId, ResultTypeId, SettingChoiceOptionId, ValueId,
     },
     inference::Type,
-    stdlib::{StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibVariantId},
-    types::{TypeId, TypeKind, TypeStore},
+    stdlib::{StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibTypeId, StdlibVariantId},
+    types::{
+        ResolvedArrayType, ResolvedOptionType, ResolvedResultType, TypeId, TypeKind, TypeStore,
+    },
 };
+
+/// A concrete instantiation of a source function.
+///
+/// Monomorphic functions use an empty argument vector. Generic instances also
+/// retain their exact concrete parameter/result signature because nominal GC
+/// layouts are not recoverable from type arguments alone. This identity lives
+/// at the semantic boundary so typed HIR, reachability, and Wasm emission agree
+/// on every concrete body without inventing backend-only function IDs.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FunctionInstance {
+    pub function: FunctionId,
+    pub type_arguments: Vec<TypeId>,
+    pub signature: Vec<TypeId>,
+}
+
+impl FunctionInstance {
+    pub fn monomorphic(function: FunctionId) -> Self {
+        Self {
+            function,
+            type_arguments: Vec::new(),
+            signature: Vec::new(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedCall {
     UserFunction {
         function: FunctionId,
+        type_arguments: Vec<TypeId>,
+        signature: Vec<TypeId>,
     },
     UserMethod {
         function: FunctionId,
+        type_arguments: Vec<TypeId>,
+        signature: Vec<TypeId>,
         receiver: ResolvedValue,
         receiver_type: TypeId,
         receiver_members: Vec<ResolvedMember>,
@@ -27,6 +56,10 @@ pub enum ResolvedCall {
     StandardLibrary {
         item: StdlibItemId,
         type_arguments: Vec<TypeId>,
+        /// Concrete receiver/parameter types followed by the declared result.
+        /// Library source bodies use this to instantiate their inferred hidden
+        /// function template without reconstructing catalog types downstream.
+        signature: Vec<TypeId>,
         receiver: Option<ResolvedValue>,
         receiver_type: Option<TypeId>,
         receiver_members: Vec<ResolvedMember>,
@@ -101,6 +134,29 @@ pub enum ResolvedEnumVariantId {
     Standard(StdlibVariantId),
 }
 
+/// Nominal record selected by a checked record literal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResolvedRecordId {
+    Source(RecordId),
+    Standard(StdlibTypeId),
+}
+
+impl std::fmt::Display for ResolvedRecordId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Source(record) => record.fmt(formatter),
+            Self::Standard(record) => write!(formatter, "{record:?}"),
+        }
+    }
+}
+
+/// Field selected by a checked record literal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResolvedRecordFieldId {
+    Source(RecordFieldId),
+    Standard(StdlibFieldId),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedWrapperPattern {
     OptionNone(OptionTypeId),
@@ -112,19 +168,24 @@ pub enum ResolvedWrapperPattern {
 #[derive(Debug, Clone, Default)]
 pub struct SemanticModel {
     types: TypeStore,
+    state_provider: Option<StdlibStateProviderId>,
     expression_types: HashMap<ExprId, TypeId>,
     calls: HashMap<ExprId, ResolvedCall>,
     values: HashMap<ExprId, ResolvedValue>,
     value_types: HashMap<ValueId, TypeId>,
     function_results: HashMap<FunctionId, TypeId>,
+    function_parameter_types: HashMap<FunctionId, Vec<TypeId>>,
+    function_type_parameters: HashMap<FunctionId, Vec<TypeId>>,
+    generic_parameter_constraints: HashMap<TypeId, Vec<crate::stdlib::StdlibCapabilityId>>,
+    specialized_types: HashMap<(FunctionInstance, TypeId), TypeId>,
     record_field_types: HashMap<RecordFieldId, TypeId>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<TypeId>>,
     array_element_types: HashMap<ArrayTypeId, TypeId>,
     state_poll_results: HashMap<ValueId, TypeId>,
     propagation_targets: HashMap<ExprId, TypeId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
-    record_literals: HashMap<ExprId, RecordId>,
-    record_literal_fields: HashMap<ExprId, Vec<RecordFieldId>>,
+    record_literals: HashMap<ExprId, ResolvedRecordId>,
+    record_literal_fields: HashMap<ExprId, Vec<ResolvedRecordFieldId>>,
     enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
     pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
     wrapper_patterns: HashMap<PatternId, ResolvedWrapperPattern>,
@@ -132,11 +193,17 @@ pub struct SemanticModel {
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
     assignments: HashMap<AssignmentId, ValueId>,
     value_conversions: HashMap<ExprId, ValueConversion>,
+    visible_expression_count: Option<usize>,
 }
 
 impl SemanticModel {
     pub fn types(&self) -> &TypeStore {
         &self.types
+    }
+
+    /// The catalog provider selected by `state ProviderName`, if present.
+    pub fn state_provider(&self) -> Option<StdlibStateProviderId> {
+        self.state_provider
     }
 
     pub fn expression_type(&self, expression: ExprId) -> Option<TypeId> {
@@ -146,6 +213,10 @@ impl SemanticModel {
     pub fn expression_types(&self) -> impl Iterator<Item = (ExprId, TypeId)> + '_ {
         self.expression_types
             .iter()
+            .filter(|(expression, _)| {
+                self.visible_expression_count
+                    .is_none_or(|count| expression.index() < count)
+            })
             .map(|(expression, ty)| (*expression, *ty))
     }
 
@@ -160,6 +231,10 @@ impl SemanticModel {
     pub fn values(&self) -> impl Iterator<Item = (ExprId, ResolvedValue)> + '_ {
         self.values
             .iter()
+            .filter(|(expression, _)| {
+                self.visible_expression_count
+                    .is_none_or(|count| expression.index() < count)
+            })
             .map(|(expression, value)| (*expression, *value))
     }
 
@@ -173,6 +248,327 @@ impl SemanticModel {
 
     pub fn function_result(&self, function: FunctionId) -> Option<TypeId> {
         self.function_results.get(&function).copied()
+    }
+
+    pub fn function_parameter_types(&self, function: FunctionId) -> &[TypeId] {
+        self.function_parameter_types
+            .get(&function)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    pub fn function_type_parameters(&self, function: FunctionId) -> &[TypeId] {
+        self.function_type_parameters
+            .get(&function)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// Constructs the canonical concrete identity for an inferred function
+    /// template from its exact call signature. This is also used when a
+    /// catalog call targets a hidden source body: the catalog owns the public
+    /// signature, while the hidden declaration may infer a differently shaped
+    /// but equivalent set of generalized roots.
+    pub fn function_instance(
+        &self,
+        function: FunctionId,
+        signature: Vec<TypeId>,
+    ) -> FunctionInstance {
+        let templates = self
+            .function_parameter_types(function)
+            .iter()
+            .copied()
+            .chain(self.function_result(function))
+            .collect::<Vec<_>>();
+        debug_assert_eq!(templates.len(), signature.len());
+        let type_arguments = self
+            .function_type_parameters(function)
+            .iter()
+            .map(|parameter| {
+                templates
+                    .iter()
+                    .copied()
+                    .zip(signature.iter().copied())
+                    .find_map(|(template, concrete)| {
+                        self.specialize_signature_node(template, concrete, *parameter)
+                    })
+                    .expect("generalized function roots occur in their signature")
+            })
+            .collect();
+        FunctionInstance {
+            function,
+            type_arguments,
+            signature,
+        }
+    }
+
+    pub fn generic_parameter_constraints(
+        &self,
+        parameter: TypeId,
+    ) -> &[crate::stdlib::StdlibCapabilityId] {
+        self.generic_parameter_constraints
+            .get(&parameter)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// Substitutes a function template's type parameters for one concrete
+    /// instance. Constructed instantiations are already interned by call-site
+    /// inference, so specialization preserves the checked program's canonical
+    /// type and layout identities.
+    pub fn specialize_type(&self, instance: &FunctionInstance, ty: TypeId) -> TypeId {
+        if let Some(specialized) = self.specialized_types.get(&(instance.clone(), ty)) {
+            return *specialized;
+        }
+        if let Some(specialized) = self.direct_specialization(instance, ty) {
+            return specialized;
+        }
+        let specialized_child = match self.types.kind(ty) {
+            TypeKind::Array { element, .. } => Some((0, self.specialize_type(instance, *element))),
+            TypeKind::Option { value, .. } => Some((1, self.specialize_type(instance, *value))),
+            TypeKind::Result { value, .. } => Some((2, self.specialize_type(instance, *value))),
+            TypeKind::Builtin(_)
+            | TypeKind::Standard(_)
+            | TypeKind::Record(_)
+            | TypeKind::Enum(_)
+            | TypeKind::GenericParameter { .. } => None,
+        };
+        let Some((constructor, child)) = specialized_child else {
+            return ty;
+        };
+        let original_array_length = match self.types.kind(ty) {
+            TypeKind::Array { length, .. } => *length,
+            _ => None,
+        };
+        let original_child = match self.types.kind(ty) {
+            TypeKind::Array { element, .. } => *element,
+            TypeKind::Option { value, .. } | TypeKind::Result { value, .. } => *value,
+            _ => unreachable!(),
+        };
+        if child == original_child {
+            return ty;
+        }
+        self.types
+            .iter()
+            .find_map(|(candidate, kind)| match (constructor, kind) {
+                (
+                    0,
+                    TypeKind::Array {
+                        element, length, ..
+                    },
+                ) if *element == child && *length == original_array_length => Some(candidate),
+                (1, TypeKind::Option { value, .. }) if *value == child => Some(candidate),
+                (2, TypeKind::Result { value, .. }) if *value == child => Some(candidate),
+                _ => None,
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "backend specialization did not materialize a concrete instance of {:?}",
+                    self.types.kind(ty)
+                )
+            })
+    }
+
+    fn direct_specialization(&self, instance: &FunctionInstance, ty: TypeId) -> Option<TypeId> {
+        let parameters = self.function_type_parameters(instance.function);
+        if let Some(index) = parameters.iter().position(|parameter| *parameter == ty) {
+            return instance.type_arguments.get(index).copied();
+        }
+        let templates = self
+            .function_parameter_types(instance.function)
+            .iter()
+            .copied()
+            .chain(self.function_result(instance.function));
+        for (template, concrete) in templates.zip(&instance.signature) {
+            if let Some(specialized) = self.specialize_signature_node(template, *concrete, ty) {
+                return Some(specialized);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn materialize_specialized_type(
+        &mut self,
+        instance: &FunctionInstance,
+        ty: TypeId,
+        ids: &mut crate::ast::ConstructedTypeIdAllocator,
+        arrays: &mut Vec<ResolvedArrayType>,
+        options: &mut Vec<ResolvedOptionType>,
+        results: &mut Vec<ResolvedResultType>,
+    ) -> TypeId {
+        if let Some(specialized) = self.specialized_types.get(&(instance.clone(), ty)) {
+            return *specialized;
+        }
+        if let Some(specialized) = self.direct_specialization(instance, ty) {
+            self.specialized_types
+                .insert((instance.clone(), ty), specialized);
+            return specialized;
+        }
+        let kind = self.types.kind(ty).clone();
+        let specialized = match kind {
+            TypeKind::Array {
+                element, length, ..
+            } => {
+                let element = self
+                    .materialize_specialized_type(instance, element, ids, arrays, options, results);
+                if element
+                    == match self.types.kind(ty) {
+                        TypeKind::Array { element, .. } => *element,
+                        _ => unreachable!(),
+                    }
+                {
+                    ty
+                } else {
+                    let layout = ids.array();
+                    arrays.push(ResolvedArrayType {
+                        id: layout,
+                        element: self.resolved_type_ref(element),
+                        length,
+                    });
+                    self.array_element_types.insert(layout, element);
+                    self.types.intern(TypeKind::Array {
+                        layout,
+                        element,
+                        length,
+                    })
+                }
+            }
+            TypeKind::Option { value, .. } => {
+                let value = self
+                    .materialize_specialized_type(instance, value, ids, arrays, options, results);
+                if value
+                    == match self.types.kind(ty) {
+                        TypeKind::Option { value, .. } => *value,
+                        _ => unreachable!(),
+                    }
+                {
+                    ty
+                } else {
+                    let layout = ids.option();
+                    options.push(ResolvedOptionType {
+                        id: layout,
+                        value: self.resolved_type_ref(value),
+                    });
+                    self.types.intern(TypeKind::Option { layout, value })
+                }
+            }
+            TypeKind::Result { value, .. } => {
+                let value = self
+                    .materialize_specialized_type(instance, value, ids, arrays, options, results);
+                if value
+                    == match self.types.kind(ty) {
+                        TypeKind::Result { value, .. } => *value,
+                        _ => unreachable!(),
+                    }
+                {
+                    ty
+                } else {
+                    let layout = ids.result();
+                    results.push(ResolvedResultType {
+                        id: layout,
+                        value: self.resolved_type_ref(value),
+                    });
+                    self.types.intern(TypeKind::Result { layout, value })
+                }
+            }
+            TypeKind::Builtin(_)
+            | TypeKind::Standard(_)
+            | TypeKind::Record(_)
+            | TypeKind::Enum(_)
+            | TypeKind::GenericParameter { .. } => ty,
+        };
+        self.specialized_types
+            .insert((instance.clone(), ty), specialized);
+        specialized
+    }
+
+    fn resolved_type_ref(&self, ty: TypeId) -> crate::types::ResolvedTypeRef {
+        match self.types.kind(ty) {
+            TypeKind::Builtin(core) => crate::types::ResolvedTypeRef::Core(*core),
+            TypeKind::Standard(standard) => crate::types::ResolvedTypeRef::Standard(*standard),
+            TypeKind::Record(record) => crate::types::ResolvedTypeRef::Record(*record),
+            TypeKind::Enum(enumeration) => crate::types::ResolvedTypeRef::Enum(*enumeration),
+            TypeKind::GenericParameter { .. } => {
+                crate::types::ResolvedTypeRef::GenericParameter(ty)
+            }
+            TypeKind::Array { layout, .. } => crate::types::ResolvedTypeRef::Array(*layout),
+            TypeKind::Option { layout, .. } => crate::types::ResolvedTypeRef::Option(*layout),
+            TypeKind::Result { layout, .. } => crate::types::ResolvedTypeRef::Result(*layout),
+        }
+    }
+
+    fn specialize_signature_node(
+        &self,
+        template: TypeId,
+        concrete: TypeId,
+        searched: TypeId,
+    ) -> Option<TypeId> {
+        if template == searched {
+            return Some(concrete);
+        }
+        match (self.types.kind(template), self.types.kind(concrete)) {
+            (
+                TypeKind::Array {
+                    element: template, ..
+                },
+                TypeKind::Array {
+                    element: concrete, ..
+                },
+            )
+            | (
+                TypeKind::Option {
+                    value: template, ..
+                },
+                TypeKind::Option {
+                    value: concrete, ..
+                },
+            )
+            | (
+                TypeKind::Result {
+                    value: template, ..
+                },
+                TypeKind::Result {
+                    value: concrete, ..
+                },
+            ) => self.specialize_signature_node(*template, *concrete, searched),
+            _ => None,
+        }
+    }
+
+    pub fn specialize_function_instance(
+        &self,
+        owner: &FunctionInstance,
+        called: &FunctionInstance,
+    ) -> FunctionInstance {
+        FunctionInstance {
+            function: called.function,
+            type_arguments: called
+                .type_arguments
+                .iter()
+                .map(|ty| self.specialize_type(owner, *ty))
+                .collect(),
+            signature: called
+                .signature
+                .iter()
+                .map(|ty| self.specialize_type(owner, *ty))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn set_function_type_parameters(
+        &mut self,
+        parameters: HashMap<FunctionId, Vec<TypeId>>,
+        constraints: HashMap<TypeId, Vec<crate::stdlib::StdlibCapabilityId>>,
+    ) {
+        self.function_type_parameters = parameters;
+        self.generic_parameter_constraints = constraints;
+    }
+
+    pub(crate) fn set_function_parameter_types(
+        &mut self,
+        parameters: HashMap<FunctionId, Vec<TypeId>>,
+    ) {
+        self.function_parameter_types = parameters;
     }
 
     pub fn record_field_type(&self, field: RecordFieldId) -> Option<TypeId> {
@@ -220,13 +616,13 @@ impl SemanticModel {
         self.path_members.get(&expression).map(Vec::as_slice)
     }
 
-    pub fn record_literal_fields(&self, expression: ExprId) -> Option<&[RecordFieldId]> {
+    pub fn record_literal_fields(&self, expression: ExprId) -> Option<&[ResolvedRecordFieldId]> {
         self.record_literal_fields
             .get(&expression)
             .map(Vec::as_slice)
     }
 
-    pub fn record_literal(&self, expression: ExprId) -> Option<RecordId> {
+    pub fn record_literal(&self, expression: ExprId) -> Option<ResolvedRecordId> {
         self.record_literals.get(&expression).copied()
     }
 
@@ -263,7 +659,15 @@ impl SemanticModel {
     pub fn calls(&self) -> impl Iterator<Item = (ExprId, &ResolvedCall)> {
         self.calls
             .iter()
+            .filter(|(expression, _)| {
+                self.visible_expression_count
+                    .is_none_or(|count| expression.index() < count)
+            })
             .map(|(expression, call)| (*expression, call))
+    }
+
+    pub(crate) fn set_visible_expression_count(&mut self, count: usize) {
+        self.visible_expression_count = Some(count);
     }
 
     pub fn value_conversion(&self, expression: ExprId) -> Option<ValueConversion> {
@@ -275,9 +679,13 @@ impl SemanticModel {
 pub(crate) enum PendingResolvedCall {
     UserFunction {
         function: FunctionId,
+        type_arguments: Vec<Type>,
+        signature: Vec<Type>,
     },
     UserMethod {
         function: FunctionId,
+        type_arguments: Vec<Type>,
+        signature: Vec<Type>,
         receiver: ResolvedValue,
         receiver_type: Type,
         receiver_members: Vec<ResolvedMember>,
@@ -285,6 +693,7 @@ pub(crate) enum PendingResolvedCall {
     StandardLibrary {
         item: StdlibItemId,
         type_arguments: Vec<Type>,
+        signature: Vec<Type>,
         receiver: Option<ResolvedValue>,
         receiver_type: Option<Type>,
         receiver_members: Vec<ResolvedMember>,
@@ -309,6 +718,7 @@ struct PendingValueConversion {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SemanticBuilder {
+    state_provider: Option<StdlibStateProviderId>,
     expression_types: HashMap<ExprId, Type>,
     calls: HashMap<ExprId, PendingResolvedCall>,
     values: HashMap<ExprId, ResolvedValue>,
@@ -320,8 +730,8 @@ pub(crate) struct SemanticBuilder {
     state_poll_results: HashMap<ValueId, Type>,
     propagation_targets: HashMap<ExprId, Type>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
-    record_literals: HashMap<ExprId, RecordId>,
-    record_literal_fields: HashMap<ExprId, Vec<RecordFieldId>>,
+    record_literals: HashMap<ExprId, ResolvedRecordId>,
+    record_literal_fields: HashMap<ExprId, Vec<ResolvedRecordFieldId>>,
     enum_variants: HashMap<ExprId, ResolvedEnumVariantId>,
     pattern_variants: HashMap<PatternId, ResolvedEnumVariantId>,
     wrapper_patterns: HashMap<PatternId, ResolvedWrapperPattern>,
@@ -332,6 +742,35 @@ pub(crate) struct SemanticBuilder {
 }
 
 impl SemanticBuilder {
+    pub(crate) fn resolve_recursive_call_type_arguments(
+        &mut self,
+        functions: &HashMap<FunctionId, Vec<Type>>,
+    ) {
+        for call in self.calls.values_mut() {
+            match call {
+                PendingResolvedCall::UserFunction {
+                    function,
+                    type_arguments,
+                    ..
+                }
+                | PendingResolvedCall::UserMethod {
+                    function,
+                    type_arguments,
+                    ..
+                } if functions.contains_key(function) && type_arguments.is_empty() => {
+                    *type_arguments = functions[function].clone();
+                }
+                _ => {}
+            }
+        }
+    }
+    pub(crate) fn with_state_provider(state_provider: Option<StdlibStateProviderId>) -> Self {
+        Self {
+            state_provider,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn resolve_expression_type(&mut self, expression: ExprId, ty: Type) {
         let previous = self.expression_types.insert(expression, ty);
         debug_assert!(previous.is_none(), "expression IDs must be unique");
@@ -401,13 +840,13 @@ impl SemanticBuilder {
     pub(crate) fn resolve_record_literal_fields(
         &mut self,
         expression: ExprId,
-        fields: Vec<RecordFieldId>,
+        fields: Vec<ResolvedRecordFieldId>,
     ) {
         let previous = self.record_literal_fields.insert(expression, fields);
         debug_assert!(previous.is_none(), "record expression IDs must be unique");
     }
 
-    pub(crate) fn resolve_record_literal(&mut self, expression: ExprId, record: RecordId) {
+    pub(crate) fn resolve_record_literal(&mut self, expression: ExprId, record: ResolvedRecordId) {
         let previous = self.record_literals.insert(expression, record);
         debug_assert!(previous.is_none(), "record expression IDs must be unique");
     }
@@ -494,12 +933,13 @@ impl SemanticBuilder {
     pub(crate) fn finish(
         self,
         mut types: TypeStore,
-        arrays: &[ArrayTypeDecl],
-        options: &[OptionTypeDecl],
-        results: &[ResultTypeDecl],
+        arrays: &[ResolvedArrayType],
+        options: &[ResolvedOptionType],
+        results: &[ResolvedResultType],
         mut resolve: impl FnMut(Type) -> Type,
     ) -> SemanticModel {
         let Self {
+            state_provider,
             expression_types,
             calls,
             values,
@@ -537,16 +977,38 @@ impl SemanticBuilder {
             .into_iter()
             .map(|(expression, call)| {
                 let call = match call {
-                    PendingResolvedCall::UserFunction { function } => {
-                        ResolvedCall::UserFunction { function }
-                    }
+                    PendingResolvedCall::UserFunction {
+                        function,
+                        type_arguments,
+                        signature,
+                    } => ResolvedCall::UserFunction {
+                        function,
+                        type_arguments: type_arguments
+                            .into_iter()
+                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                            .collect(),
+                        signature: signature
+                            .into_iter()
+                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                            .collect(),
+                    },
                     PendingResolvedCall::UserMethod {
                         function,
+                        type_arguments,
+                        signature,
                         receiver,
                         receiver_type,
                         receiver_members,
                     } => ResolvedCall::UserMethod {
                         function,
+                        type_arguments: type_arguments
+                            .into_iter()
+                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                            .collect(),
+                        signature: signature
+                            .into_iter()
+                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                            .collect(),
                         receiver,
                         receiver_type: types.intern_inferred(
                             resolve(receiver_type),
@@ -559,12 +1021,17 @@ impl SemanticBuilder {
                     PendingResolvedCall::StandardLibrary {
                         item,
                         type_arguments,
+                        signature,
                         receiver,
                         receiver_type,
                         receiver_members,
                     } => ResolvedCall::StandardLibrary {
                         item,
                         type_arguments: type_arguments
+                            .into_iter()
+                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                            .collect(),
+                        signature: signature
                             .into_iter()
                             .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
                             .collect(),
@@ -710,11 +1177,16 @@ impl SemanticBuilder {
             .collect();
         SemanticModel {
             types,
+            state_provider,
             expression_types,
             calls,
             values,
             value_types,
             function_results,
+            function_parameter_types: HashMap::new(),
+            function_type_parameters: HashMap::new(),
+            generic_parameter_constraints: HashMap::new(),
+            specialized_types: HashMap::new(),
             record_field_types,
             enum_variant_payloads,
             array_element_types,
@@ -730,6 +1202,7 @@ impl SemanticBuilder {
             setting_choice_options,
             assignments,
             value_conversions,
+            visible_expression_count: None,
         }
     }
 }

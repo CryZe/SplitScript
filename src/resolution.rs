@@ -1,7 +1,7 @@
 //! Declaration collection and nominal-name resolution.
 //!
 //! Parsing retains nominal spellings. This module validates declarations and
-//! rewrites name-shaped enum syntax into stable source/catalog identities
+//! records stable source/catalog identities beside the immutable syntax tree
 //! before type checking.
 
 use std::collections::HashMap;
@@ -9,12 +9,55 @@ use std::collections::HashMap;
 use crate::{
     Diagnostic,
     ast::{
-        EnumReference, EnumTypeId, ExprKind, MatchPattern, Program, SettingKind, Span, TypeNameId,
-        TypeRef,
+        EnumReference, ExprId, ExprKind, MatchPattern, PatternId, Program, SettingKind, Span,
+        TypeNameId, TypeRef, ValueId,
     },
-    stdlib::{StandardLibrary, StdlibTypeKind},
-    visit::{self, Folder},
+    stdlib::{StandardLibrary, StdlibStateProviderId, StdlibTypeKind},
+    types::{EnumTypeId, ResolvedTypeRef},
+    visit::{self, Visitor},
 };
+
+/// Catalog identities resolved from one parsed program before type checking.
+///
+/// These facts deliberately live beside the immutable syntax tree. Syntax
+/// retains the names and spans the author wrote, while later compiler stages
+/// consume stable catalog identities from this table.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProgramResolutions {
+    state_provider: Option<StdlibStateProviderId>,
+    type_names: HashMap<TypeNameId, ResolvedTypeRef>,
+    expression_enums: HashMap<ExprId, EnumTypeId>,
+    pattern_enums: HashMap<PatternId, EnumTypeId>,
+    setting_enums: HashMap<ValueId, EnumTypeId>,
+}
+
+impl ProgramResolutions {
+    pub(crate) fn state_provider(&self) -> Option<StdlibStateProviderId> {
+        self.state_provider
+    }
+
+    pub(crate) fn type_ref(&self, ty: TypeRef) -> Option<ResolvedTypeRef> {
+        match ty {
+            TypeRef::Named(name) => self.type_names.get(&name).copied(),
+            TypeRef::Core(core) => Some(ResolvedTypeRef::Core(core)),
+            TypeRef::Array(id) => Some(ResolvedTypeRef::Array(id)),
+            TypeRef::Option(id) => Some(ResolvedTypeRef::Option(id)),
+            TypeRef::Result(id) => Some(ResolvedTypeRef::Result(id)),
+        }
+    }
+
+    pub(crate) fn expression_enum(&self, expression: ExprId) -> Option<EnumTypeId> {
+        self.expression_enums.get(&expression).copied()
+    }
+
+    pub(crate) fn pattern_enum(&self, pattern: PatternId) -> Option<EnumTypeId> {
+        self.pattern_enums.get(&pattern).copied()
+    }
+
+    pub(crate) fn setting_enum(&self, setting: ValueId) -> Option<EnumTypeId> {
+        self.setting_enums.get(&setting).copied()
+    }
+}
 
 /// Validates nominal declarations after syntax construction. Keeping these
 /// diagnostics out of token collection is the first enforceable boundary
@@ -31,6 +74,18 @@ pub(crate) fn validate_declarations(
         .collect::<std::collections::HashSet<_>>();
     let mut declared = HashMap::<&str, Span>::new();
     let mut diagnostics = Vec::new();
+
+    for function in &program.functions {
+        if function
+            .name
+            .starts_with(crate::stdlib::RESERVED_FUNCTION_PREFIX)
+        {
+            diagnostics.push(Diagnostic::type_error(
+                "function names beginning with `__splitscript_stdlib_` are reserved",
+                function.span,
+            ));
+        }
+    }
 
     for (kind, name, span) in program
         .records
@@ -91,25 +146,25 @@ pub(crate) fn validate_declarations(
 /// Resolves syntax whose grammatical shape is independent of its nominal
 /// meaning. This is intentionally run by `lower`, never by the parser.
 pub(crate) fn resolve_program(
-    program: &mut Program,
+    program: &Program,
     standard_library: &StandardLibrary,
+    resolutions: &mut ProgramResolutions,
 ) -> Vec<Diagnostic> {
     let mut provider_diagnostics = Vec::new();
-    if let Some(state) = &mut program.state
-        && let Some(reference) = &mut state.provider
-    {
-        if let Some(provider) = standard_library.state_provider_by_name(&reference.name) {
-            reference.resolved = Some(provider.id);
-            state.processes = provider
-                .processes
-                .iter()
-                .map(|process| (*process).to_owned())
-                .collect();
+    if let Some(state) = &program.state {
+        if let Some(reference) = &state.provider {
+            if let Some(provider) = standard_library.state_provider_by_name(&reference.name) {
+                resolutions.state_provider = Some(provider.id);
+            } else {
+                provider_diagnostics.push(Diagnostic::type_error(
+                    format!("unknown state provider `{}`", reference.name),
+                    reference.span,
+                ));
+            }
         } else {
-            provider_diagnostics.push(Diagnostic::type_error(
-                format!("unknown state provider `{}`", reference.name),
-                reference.span,
-            ));
+            resolutions.state_provider = standard_library
+                .source_state_provider()
+                .map(|provider| provider.id);
         }
     }
 
@@ -127,126 +182,116 @@ pub(crate) fn resolve_program(
     }
 
     let type_names = program
-        .type_names
-        .iter()
-        .enumerate()
-        .filter_map(|(index, name)| {
+        .type_names()
+        .filter_map(|(id, name, _)| {
             let resolved = if let Some(record) =
                 program.records.iter().find(|item| item.name == *name)
             {
-                TypeRef::Record(record.id)
+                ResolvedTypeRef::Record(record.id)
             } else if let Some(enumeration) = program.enums.iter().find(|item| item.name == *name) {
-                TypeRef::Enum(enumeration.id)
+                ResolvedTypeRef::Enum(enumeration.id)
             } else {
-                TypeRef::Standard(standard_library.type_by_name(name)?.id)
+                ResolvedTypeRef::Standard(standard_library.type_by_name(name)?.id)
             };
-            Some((TypeNameId::from_index(index as u32), resolved))
+            Some((id, resolved))
         })
         .collect::<HashMap<_, _>>();
+    resolutions.type_names = type_names;
 
     let mut resolver = EnumResolver {
         enums: &enums,
-        type_names: &type_names,
+        resolutions,
         diagnostics: Vec::new(),
     };
-    for setting in &mut program.settings {
-        if let SettingKind::Choice { enumeration, .. } = &mut setting.kind {
-            resolver.resolve_reference(enumeration, true);
-        }
-    }
-    resolver.fold_program(program);
+    resolver.visit_program(program);
     provider_diagnostics.extend(resolver.diagnostics);
     provider_diagnostics
 }
 
 struct EnumResolver<'a> {
     enums: &'a HashMap<String, EnumTypeId>,
-    type_names: &'a HashMap<TypeNameId, TypeRef>,
+    resolutions: &'a mut ProgramResolutions,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl EnumResolver<'_> {
-    fn resolve_reference(&mut self, reference: &mut EnumReference, source_only: bool) {
-        let EnumReference::Named { name, span } = reference else {
-            return;
-        };
+    fn resolve_reference(
+        &mut self,
+        reference: &EnumReference,
+        source_only: bool,
+    ) -> Option<EnumTypeId> {
+        let EnumReference { name, span } = reference;
         let Some(enumeration) = self.enums.get(name).copied() else {
             self.diagnostics.push(Diagnostic::type_error(
                 format!("unknown enum `{name}`"),
                 *span,
             ));
-            return;
+            return None;
         };
         if source_only && matches!(enumeration, EnumTypeId::Standard(_)) {
             self.diagnostics.push(Diagnostic::type_error(
                 format!("choice settings require a source enum, found `{name}`"),
                 *span,
             ));
-            return;
+            return None;
         }
-        *reference = EnumReference::Resolved(enumeration);
+        Some(enumeration)
     }
 }
 
-impl Folder for EnumResolver<'_> {
-    fn fold_expr(&mut self, expression: &mut crate::ast::Expr) {
-        visit::walk_expr_mut(self, expression);
-        let replacement = match &mut expression.kind {
+impl<'ast> Visitor<'ast> for EnumResolver<'_> {
+    fn visit_setting(&mut self, setting: &'ast crate::ast::SettingDecl) {
+        if let SettingKind::Choice { enumeration, .. } = &setting.kind
+            && let Some(enumeration) = self.resolve_reference(enumeration, true)
+        {
+            self.resolutions
+                .setting_enums
+                .insert(setting.id, enumeration);
+        }
+    }
+
+    fn visit_expr(&mut self, expression: &'ast crate::ast::Expr) {
+        let enumeration = match &expression.kind {
             ExprKind::Path(path) => {
-                let [enum_name, variant] = path.as_slice() else {
+                let [enum_name, _] = path.as_slice() else {
+                    visit::walk_expr(self, expression);
                     return;
                 };
-                self.enums
-                    .get(enum_name)
-                    .copied()
-                    .map(|enumeration| ExprKind::Enum {
-                        enumeration: EnumReference::Resolved(enumeration),
-                        variant: variant.clone(),
-                        payload: None,
-                    })
+                self.enums.get(enum_name).copied()
             }
             ExprKind::Call { callee, args, .. } => {
-                let [enum_name, variant] = callee.as_slice() else {
+                let [enum_name, _] = callee.as_slice() else {
+                    visit::walk_expr(self, expression);
                     return;
                 };
-                self.enums.get(enum_name).copied().map(|enumeration| {
+                self.enums.get(enum_name).copied().inspect(|_| {
                     if args.len() > 1 {
                         self.diagnostics.push(Diagnostic::type_error(
                             "enum constructors accept at most one payload",
                             expression.span,
                         ));
                     }
-                    ExprKind::Enum {
-                        enumeration: EnumReference::Resolved(enumeration),
-                        variant: variant.clone(),
-                        payload: args.drain(..).next().map(Box::new),
-                    }
                 })
-            }
-            ExprKind::Enum { enumeration, .. } => {
-                self.resolve_reference(enumeration, false);
-                None
             }
             _ => None,
         };
-        if let Some(replacement) = replacement {
-            expression.kind = replacement;
+        if let Some(enumeration) = enumeration {
+            self.resolutions
+                .expression_enums
+                .insert(expression.id, enumeration);
         }
+        visit::walk_expr(self, expression);
     }
 
-    fn fold_pattern(&mut self, pattern: &mut MatchPattern) {
-        if let MatchPattern::Enum { enumeration, .. } = pattern {
-            self.resolve_reference(enumeration, false);
-        }
-        visit::walk_pattern_mut(self, pattern);
-    }
-
-    fn fold_type_ref(&mut self, ty: &mut TypeRef) {
-        if let TypeRef::Named(name) = ty
-            && let Some(resolved) = self.type_names.get(name)
+    fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
+        if let MatchPattern::Enum { enumeration, .. } = &arm.pattern
+            && let Some(enumeration) = self.resolve_reference(enumeration, false)
         {
-            *ty = *resolved;
+            self.resolutions
+                .pattern_enums
+                .insert(arm.pattern_id, enumeration);
         }
+        visit::walk_match_arm(self, arm);
     }
 }
 
@@ -279,6 +324,9 @@ mod tests {
                 Some(*target)
             })
             .expect("the print argument should contain the cast");
-        assert_eq!(cast, TypeRef::Standard(crate::stdlib::StdlibTypeId::String));
+        let TypeRef::Named(name) = cast else {
+            panic!("lowering should preserve the source-written nominal type");
+        };
+        assert_eq!(lowered.syntax().type_name(name), "String");
     }
 }

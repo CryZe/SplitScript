@@ -134,9 +134,22 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "splitscript-stdlib-loader",
+ "splitscript-syntax",
  "wasm-encoder",
  "wasmparser",
 ]
+
+[[package]]
+name = "splitscript-stdlib-loader"
+version = "0.1.0"
+dependencies = [
+ "splitscript-syntax",
+]
+
+[[package]]
+name = "splitscript-syntax"
+version = "0.1.0"
 
 [[package]]
 name = "splitscript-vscode-wasm"

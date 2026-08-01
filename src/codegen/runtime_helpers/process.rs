@@ -2,7 +2,7 @@
 
 use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
 
-use crate::{abi::AbiImportId, stdlib::StdlibTypeId};
+use crate::{abi::AbiImportId, intrinsic_registry::MAX_NATIVE_STRING_BYTES, stdlib::StdlibTypeId};
 
 use super::super::imports::Abi;
 use super::super::memory_plan::{AbiReadScratch, ScratchRegion};
@@ -252,6 +252,206 @@ pub(super) fn compile_read_relative32(abi: &Abi, abi_read: AbiReadScratch) -> Fu
     function
 }
 
+pub(super) fn compile_read_utf8_string(
+    abi: &Abi,
+    string_from_memory: u32,
+    gc: &GcLayout,
+    native_utf8: ScratchRegion,
+) -> Function {
+    let native_utf8_start = native_utf8.destination(MAX_NATIVE_STRING_BYTES);
+    let mut function = Function::new([(5, ValType::I32)]);
+    let process = 0;
+    let address = 1;
+    let max_bytes = 2;
+    let byte_len = 3;
+    let index = 4;
+    let byte = 5;
+    let width = 6;
+    let next = 7;
+
+    function
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::LocalGet(max_bytes))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalGet(max_bytes))
+        .instruction(&Instruction::I32Const(MAX_NATIVE_STRING_BYTES as i32))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::I32Const(native_utf8_start))
+        .instruction(&Instruction::LocalGet(max_bytes))
+        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
+        .instruction(&Instruction::I32Eqz);
+    emit_null_string_if(&mut function, gc);
+
+    // Find the first NUL byte. If none occurs within the bound, the complete
+    // bounded region is the string payload, matching ASR's ArrayCString.
+    function
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(max_bytes))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1));
+    emit_scratch_byte(&mut function, native_utf8_start, index, 0);
+    function
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalSet(byte_len))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalSet(index));
+
+    // Validate strictly before constructing a SplitScript String. The string
+    // representation contains UTF-8 bytes, so malformed process data is a
+    // Result failure rather than an invalid language value.
+    function
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(byte_len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1));
+    emit_scratch_byte(&mut function, native_utf8_start, index, 0);
+    function
+        .instruction(&Instruction::LocalTee(byte))
+        .instruction(&Instruction::I32Const(0x80))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xc2))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xdf))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xe0))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xef))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(3))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xf0))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xf4))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalTee(width))
+        .instruction(&Instruction::I32Eqz);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(width))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalGet(byte_len))
+        .instruction(&Instruction::I32GtU);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::LocalGet(width))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_scratch_byte(&mut function, native_utf8_start, index, 1);
+    function.instruction(&Instruction::LocalSet(next));
+    emit_invalid_continuation(&mut function, next);
+    function
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xe0))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalGet(next))
+        .instruction(&Instruction::I32Const(0xa0))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xed))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalGet(next))
+        .instruction(&Instruction::I32Const(0x9f))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xf0))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalGet(next))
+        .instruction(&Instruction::I32Const(0x90))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xf4))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalGet(next))
+        .instruction(&Instruction::I32Const(0x8f))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or);
+    emit_null_string_if(&mut function, gc);
+    function.instruction(&Instruction::End);
+
+    for (required_width, offset) in [(3, 2), (4, 3)] {
+        function
+            .instruction(&Instruction::LocalGet(width))
+            .instruction(&Instruction::I32Const(required_width))
+            .instruction(&Instruction::I32GeU)
+            .instruction(&Instruction::If(BlockType::Empty));
+        emit_scratch_byte(&mut function, native_utf8_start, index, offset);
+        function.instruction(&Instruction::LocalSet(next));
+        emit_invalid_continuation(&mut function, next);
+        emit_null_string_if(&mut function, gc);
+        function.instruction(&Instruction::End);
+    }
+
+    function
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(width))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(native_utf8_start))
+        .instruction(&Instruction::LocalGet(byte_len))
+        .instruction(&Instruction::Call(string_from_memory))
+        .instruction(&Instruction::End);
+    function
+}
+
 pub(super) fn compile_read_managed_string(
     abi: &Abi,
     gc: &GcLayout,
@@ -472,6 +672,36 @@ fn emit_null_string_return(function: &mut Function, gc: &GcLayout) {
             gc.standard_index(StdlibTypeId::String),
         )))
         .instruction(&Instruction::Return);
+}
+
+fn emit_null_string_if(function: &mut Function, gc: &GcLayout) {
+    function.instruction(&Instruction::If(BlockType::Empty));
+    emit_null_string_return(function, gc);
+    function.instruction(&Instruction::End);
+}
+
+fn emit_scratch_byte(function: &mut Function, start: i32, index: u32, offset: i32) {
+    function
+        .instruction(&Instruction::I32Const(start))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Load8U(wasm_encoder::MemArg {
+            offset: offset as u64,
+            ..memarg()
+        }));
+}
+
+/// Leaves true on the operand stack when `local` is not a UTF-8 continuation
+/// byte. The caller chooses the surrounding failure boundary.
+fn emit_invalid_continuation(function: &mut Function, local: u32) {
+    function
+        .instruction(&Instruction::LocalGet(local))
+        .instruction(&Instruction::I32Const(0x80))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::LocalGet(local))
+        .instruction(&Instruction::I32Const(0xbf))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or);
 }
 
 fn emit_utf16_load(function: &mut Function, index: u32, utf16_start: i32) {

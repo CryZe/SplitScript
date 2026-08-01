@@ -15,8 +15,8 @@ pub use visit::{
 
 use crate::{
     ast::{
-        ActionKind, BinaryOp, EnumTypeId, ExprId, FunctionId, OptionTypeId, PatternId,
-        RecordFieldId, RecordId, ResultTypeId, SuspensionMode, UnaryOp, ValueId,
+        ActionKind, BinaryOp, ExprId, OptionTypeId, PatternId, ResultTypeId, SuspensionMode,
+        UnaryOp, ValueId,
     },
     hir::{
         self, ExpressionResolution, ImplicitConversion, TypedExpression, TypedExpressionKind,
@@ -24,16 +24,17 @@ use crate::{
     },
     intrinsic_registry::{self, ScratchPolicy, ScratchType},
     semantic::{
-        ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue, ResolvedWrapperPattern,
+        FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember,
+        ResolvedRecordFieldId, ResolvedRecordId, ResolvedValue, ResolvedWrapperPattern,
         SemanticModel, ValueConversion,
     },
     stdlib::{CancellationKind, Implementation, IntrinsicId, StandardLibrary},
-    types::{BuiltinType, TypeId, TypeKind},
+    types::{BuiltinType, EnumTypeId, TypeId, TypeKind},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BodyOwner {
-    Function(FunctionId),
+    Function(FunctionInstance),
     Action(ActionKind),
 }
 
@@ -94,8 +95,8 @@ pub enum ExpressionKind {
     Signature(String),
     Array(Vec<ExprId>),
     Record {
-        record: RecordId,
-        fields: Vec<(RecordFieldId, ExprId)>,
+        record: ResolvedRecordId,
+        fields: Vec<(ResolvedRecordFieldId, ExprId)>,
     },
     Enum {
         enumeration: EnumTypeId,
@@ -148,10 +149,10 @@ pub enum ExpressionKind {
 #[derive(Debug, Clone)]
 pub enum CallTarget {
     UserFunction {
-        function: FunctionId,
+        function: FunctionInstance,
     },
     UserMethod {
-        function: FunctionId,
+        function: FunctionInstance,
         receiver: ResolvedValue,
         receiver_type: TypeId,
         receiver_members: Vec<ResolvedMember>,
@@ -274,6 +275,19 @@ pub enum Statement {
         condition: ExprId,
         body: Block,
     },
+    For {
+        binding: ValueId,
+        iterable_value: ValueId,
+        index_value: ValueId,
+        iterable: ExprId,
+        body: Block,
+    },
+    ForInit {
+        binding: ValueId,
+        iterable_value: ValueId,
+        index_value: ValueId,
+        iterable: ExprId,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -284,6 +298,15 @@ pub enum Terminator {
     Continue,
     AsyncWhile {
         condition: ExprId,
+        body: Box<Block>,
+        continuation: Box<Block>,
+        header_state: AsyncStateId,
+        exit_state: AsyncStateId,
+    },
+    AsyncFor {
+        binding: ValueId,
+        iterable_value: ValueId,
+        index_value: ValueId,
         body: Box<Block>,
         continuation: Box<Block>,
         header_state: AsyncStateId,
@@ -335,8 +358,8 @@ impl Program {
         profile: crate::BuildProfile,
     ) -> Self {
         let expressions = typed_hir
-            .expressions()
-            .map(|expression| lower_expression(expression, typed_hir.standard_library()))
+            .all_expressions()
+            .map(|expression| lower_expression(expression, typed_hir, semantics))
             .collect::<Vec<_>>();
         let global_initializers = typed_hir
             .global_initializers()
@@ -351,12 +374,12 @@ impl Program {
             state_expressions: Vec::new(),
             expressions,
         };
-        for function in typed_hir.function_bodies() {
+        for function in typed_hir.all_function_bodies() {
             if function.debug_only && profile == crate::BuildProfile::Release {
                 continue;
             }
             let body = lower_body(
-                BodyOwner::Function(function.function),
+                BodyOwner::Function(function.function.clone()),
                 &function.body,
                 typed_hir,
                 semantics,
@@ -410,7 +433,20 @@ impl Program {
     }
 
     pub fn body(&self, owner: BodyOwner) -> Option<&Body> {
-        self.bodies.iter().find(|body| body.owner == owner)
+        self.bodies
+            .iter()
+            .find(|body| body.owner == owner)
+            .or_else(|| match owner {
+                BodyOwner::Function(instance)
+                    if !instance.type_arguments.is_empty() || !instance.signature.is_empty() =>
+                {
+                    self.bodies.iter().find(|body| {
+                        body.owner
+                            == BodyOwner::Function(FunctionInstance::monomorphic(instance.function))
+                    })
+                }
+                BodyOwner::Function(_) | BodyOwner::Action(_) => None,
+            })
     }
 
     pub fn state_expressions(&self) -> impl Iterator<Item = &StateExpression> {
@@ -435,7 +471,11 @@ impl Program {
     }
 }
 
-fn lower_expression(expression: &TypedExpression, library: &StandardLibrary) -> Expression {
+fn lower_expression(
+    expression: &TypedExpression,
+    typed_hir: &TypedProgram,
+    semantics: &SemanticModel,
+) -> Expression {
     let kind = match &expression.kind {
         TypedExpressionKind::None => ExpressionKind::None,
         TypedExpressionKind::Bool(value) => ExpressionKind::Bool(*value),
@@ -463,14 +503,16 @@ fn lower_expression(expression: &TypedExpression, library: &StandardLibrary) -> 
         TypedExpressionKind::Array(elements) => ExpressionKind::Array(elements.clone()),
         TypedExpressionKind::Record { record, fields } => {
             let Some(ExpressionResolution::RecordLiteral {
+                record: resolved_record,
                 fields: resolved_fields,
             }) = &expression.resolution
             else {
                 unreachable!("checked record literals have resolved field IDs")
             };
+            debug_assert_eq!(record, resolved_record);
             debug_assert_eq!(fields.len(), resolved_fields.len());
             ExpressionKind::Record {
-                record: *record,
+                record: *resolved_record,
                 fields: resolved_fields
                     .iter()
                     .copied()
@@ -532,7 +574,7 @@ fn lower_expression(expression: &TypedExpression, library: &StandardLibrary) -> 
                 unreachable!("checked calls have a resolved target")
             };
             ExpressionKind::Call {
-                target: lower_call_target(target, library),
+                target: lower_call_target(target, typed_hir, semantics),
                 arguments: arguments.clone(),
             }
         }
@@ -636,18 +678,36 @@ fn lower_expression(expression: &TypedExpression, library: &StandardLibrary) -> 
     }
 }
 
-fn lower_call_target(target: &ResolvedCall, library: &StandardLibrary) -> CallTarget {
+fn lower_call_target(
+    target: &ResolvedCall,
+    typed_hir: &TypedProgram,
+    semantics: &SemanticModel,
+) -> CallTarget {
     match target {
-        ResolvedCall::UserFunction { function } => CallTarget::UserFunction {
-            function: *function,
+        ResolvedCall::UserFunction {
+            function,
+            type_arguments,
+            signature,
+        } => CallTarget::UserFunction {
+            function: FunctionInstance {
+                function: *function,
+                type_arguments: type_arguments.clone(),
+                signature: signature.clone(),
+            },
         },
         ResolvedCall::UserMethod {
             function,
+            type_arguments,
+            signature,
             receiver,
             receiver_type,
             receiver_members,
         } => CallTarget::UserMethod {
-            function: *function,
+            function: FunctionInstance {
+                function: *function,
+                type_arguments: type_arguments.clone(),
+                signature: signature.clone(),
+            },
             receiver: *receiver,
             receiver_type: *receiver_type,
             receiver_members: receiver_members.clone(),
@@ -655,20 +715,36 @@ fn lower_call_target(target: &ResolvedCall, library: &StandardLibrary) -> CallTa
         ResolvedCall::StandardLibrary {
             item,
             type_arguments,
+            signature,
             receiver,
             receiver_type,
             receiver_members,
-        } => {
-            let Implementation::Intrinsic(intrinsic) = library.item(*item).implementation;
-            CallTarget::Intrinsic {
+        } => match typed_hir.standard_library().item(*item).implementation {
+            Implementation::Intrinsic(intrinsic) => CallTarget::Intrinsic {
                 item: *item,
                 intrinsic,
                 type_arguments: type_arguments.clone(),
                 receiver: *receiver,
                 receiver_type: *receiver_type,
                 receiver_members: receiver_members.clone(),
+            },
+            Implementation::LibraryBody { .. } => {
+                let function = typed_hir
+                    .library_function(*item)
+                    .expect("catalog source bodies have injected functions");
+                let function = semantics.function_instance(function, signature.clone());
+                if receiver.is_some() {
+                    CallTarget::UserMethod {
+                        function,
+                        receiver: receiver.expect("method calls have receivers"),
+                        receiver_type: receiver_type.expect("method calls have receiver types"),
+                        receiver_members: receiver_members.clone(),
+                    }
+                } else {
+                    CallTarget::UserFunction { function }
+                }
             }
-        }
+        },
         ResolvedCall::ResultError { result } => CallTarget::ResultError { result: *result },
         ResolvedCall::OptionSome { option } => CallTarget::OptionSome { option: *option },
         ResolvedCall::ResultSuccess { result } => CallTarget::ResultSuccess { result: *result },
@@ -817,6 +893,43 @@ fn analyze_suspension_liveness(
             }
             loop_live
         }
+        Terminator::AsyncFor {
+            binding,
+            iterable_value,
+            index_value,
+            body,
+            continuation,
+            ..
+        } => {
+            let continuation_live = analyze_suspension_liveness(
+                continuation,
+                live_after,
+                local_values,
+                ordered_locals,
+                program,
+                frame_values,
+            );
+            let mut loop_live = continuation_live;
+            loop_live.insert(*iterable_value);
+            loop_live.insert(*index_value);
+            loop {
+                let body_live = analyze_suspension_liveness(
+                    body,
+                    loop_live.clone(),
+                    local_values,
+                    ordered_locals,
+                    program,
+                    frame_values,
+                );
+                let previous_len = loop_live.len();
+                loop_live.extend(body_live);
+                if loop_live.len() == previous_len {
+                    break;
+                }
+            }
+            loop_live.remove(binding);
+            loop_live
+        }
         Terminator::Throw { error, .. } => {
             let mut live = HashSet::new();
             collect_expression_values(*error, &mut live, local_values, program);
@@ -894,6 +1007,39 @@ fn analyze_statements_liveness(
                 body_live.extend(live.iter().copied());
                 collect_expression_values(*condition, &mut body_live, local_values, program);
                 *live = body_live;
+            }
+            Statement::For {
+                binding,
+                iterable_value,
+                index_value,
+                iterable,
+                body,
+            } => {
+                let mut body_live = analyze_suspension_liveness(
+                    body,
+                    live.clone(),
+                    local_values,
+                    ordered_locals,
+                    program,
+                    frame_values,
+                );
+                body_live.extend(live.iter().copied());
+                body_live.remove(binding);
+                body_live.remove(iterable_value);
+                body_live.remove(index_value);
+                collect_expression_values(*iterable, &mut body_live, local_values, program);
+                *live = body_live;
+            }
+            Statement::ForInit {
+                binding,
+                iterable_value,
+                index_value,
+                iterable,
+            } => {
+                live.remove(binding);
+                live.remove(iterable_value);
+                live.remove(index_value);
+                collect_expression_values(*iterable, live, local_values, program);
             }
         }
     }
@@ -1085,6 +1231,54 @@ fn lower_async_statements(
                     },
                 );
             }
+            TypedStatementKind::For {
+                binding,
+                iterable_value,
+                index_value,
+                iterable,
+                body,
+            } => {
+                if typed_block_contains_await(body, profile) {
+                    let body = lower_async_statements(
+                        &body.statements,
+                        Block {
+                            statements: Vec::new(),
+                            terminator: Terminator::Continue,
+                        },
+                        typed_hir,
+                        semantics,
+                        profile,
+                    );
+                    result = Block {
+                        statements: vec![Statement::ForInit {
+                            binding: *binding,
+                            iterable_value: *iterable_value,
+                            index_value: *index_value,
+                            iterable: *iterable,
+                        }],
+                        terminator: Terminator::AsyncFor {
+                            binding: *binding,
+                            iterable_value: *iterable_value,
+                            index_value: *index_value,
+                            body: Box::new(body),
+                            continuation: Box::new(result),
+                            header_state: AsyncStateId::ENTRY,
+                            exit_state: AsyncStateId::ENTRY,
+                        },
+                    };
+                    continue;
+                }
+                result.statements.insert(
+                    0,
+                    Statement::For {
+                        binding: *binding,
+                        iterable_value: *iterable_value,
+                        index_value: *index_value,
+                        iterable: *iterable,
+                        body: lower_block(body, typed_hir, semantics, profile),
+                    },
+                );
+            }
             TypedStatementKind::Break => {
                 result = Block {
                     statements: Vec::new(),
@@ -1170,6 +1364,7 @@ fn typed_block_contains_await(block: &hir::TypedBlock, profile: crate::BuildProf
                         .is_some_and(|block| typed_block_contains_await(block, profile))
             }
             TypedStatementKind::While { body, .. } => typed_block_contains_await(body, profile),
+            TypedStatementKind::For { body, .. } => typed_block_contains_await(body, profile),
             _ => false,
         }
     })
@@ -1186,8 +1381,10 @@ fn assign_async_states(block: &mut Block, next: &mut u32) {
                 assign_async_states(then_block, next);
                 assign_async_states(else_block, next);
             }
-            Statement::While { body, .. } => assign_async_states(body, next),
-            Statement::Store { .. } | Statement::Evaluate { .. } => {}
+            Statement::While { body, .. } | Statement::For { body, .. } => {
+                assign_async_states(body, next)
+            }
+            Statement::Store { .. } | Statement::Evaluate { .. } | Statement::ForInit { .. } => {}
         }
     }
     if let Terminator::Suspend {
@@ -1203,6 +1400,20 @@ fn assign_async_states(block: &mut Block, next: &mut u32) {
         *next += 1;
         assign_async_states(continuation, next);
     } else if let Terminator::AsyncWhile {
+        body,
+        continuation,
+        header_state,
+        exit_state,
+        ..
+    } = &mut block.terminator
+    {
+        *header_state = AsyncStateId(*next);
+        *next += 1;
+        *exit_state = AsyncStateId(*next);
+        *next += 1;
+        assign_async_states(body, next);
+        assign_async_states(continuation, next);
+    } else if let Terminator::AsyncFor {
         body,
         continuation,
         header_state,
@@ -1265,6 +1476,21 @@ fn lower_statements(
             TypedStatementKind::While { condition, body } => {
                 block.statements.push(Statement::While {
                     condition: *condition,
+                    body: lower_block(body, typed_hir, semantics, profile),
+                });
+            }
+            TypedStatementKind::For {
+                binding,
+                iterable_value,
+                index_value,
+                iterable,
+                body,
+            } => {
+                block.statements.push(Statement::For {
+                    binding: *binding,
+                    iterable_value: *iterable_value,
+                    index_value: *index_value,
+                    iterable: *iterable,
                     body: lower_block(body, typed_hir, semantics, profile),
                 });
             }
@@ -1340,8 +1566,7 @@ fn suspension_cancellation(
     };
     (typed_hir
         .standard_library()
-        .item(*item)
-        .operation_semantics()
+        .operation_semantics(*item)
         .cancellation
         == CancellationKind::ProcessClose)
         .then_some(CancellationRegion::ProcessLifetime)
@@ -1410,13 +1635,32 @@ impl<'a> LocalPlanner<'a> {
 
 impl Visitor for LocalPlanner<'_> {
     fn visit_statement(&mut self, statement: &Statement, program: &Program) {
-        if let Statement::Store {
-            target,
-            declaration: true,
-            ..
-        } = statement
-        {
-            self.value(*target);
+        match statement {
+            Statement::Store {
+                target,
+                declaration: true,
+                ..
+            } => self.value(*target),
+            Statement::For {
+                binding,
+                iterable_value,
+                index_value,
+                ..
+            }
+            | Statement::ForInit {
+                binding,
+                iterable_value,
+                index_value,
+                ..
+            } => {
+                self.value(*binding);
+                self.value(*iterable_value);
+                self.value(*index_value);
+            }
+            Statement::Store { .. }
+            | Statement::Evaluate { .. }
+            | Statement::If { .. }
+            | Statement::While { .. } => {}
         }
         walk_statement(self, statement, program);
     }

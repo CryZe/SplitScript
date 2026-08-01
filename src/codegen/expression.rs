@@ -6,15 +6,15 @@ use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
 
 use crate::{
     abi::AbiImportId,
-    ast::{
-        ActionKind, ArrayTypeDecl, BinaryOp, EnumDecl, EnumTypeId, ExprId, FunctionId, RecordDecl,
-        ResultTypeId, UnaryOp, ValueId,
-    },
+    ast::{ActionKind, BinaryOp, EnumDecl, ExprId, RecordDecl, ResultTypeId, UnaryOp, ValueId},
     intrinsic_registry::RuntimeHelperId,
     memory::MemoryLayouts,
-    semantic::{ResolvedMember, ResolvedValue, SemanticModel, ValueConversionKind},
+    semantic::{
+        FunctionInstance, ResolvedMember, ResolvedRecordFieldId, ResolvedRecordId, ResolvedValue,
+        SemanticModel, ValueConversionKind,
+    },
     stdlib::{IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibTypeId},
-    types::TypeId,
+    types::{EnumTypeId, ResolvedArrayType, TypeId},
     wasm_ir,
 };
 
@@ -22,10 +22,10 @@ use super::{
     EqualityFunctions, GcLayout, RuntimeHelperPlan, SettingStorage, Type, array_element_type,
     emit_array_get, emit_async_frame_ref, emit_default, emit_failure_transfer, emit_int,
     emit_memory_value, emit_result_error, emit_result_success, emit_string_literal,
-    emit_struct_get, emit_typed_struct_get, enum_variant_payload, expression_type,
-    global_plan::RuntimeGlobals, imports::Abi, memory_plan::AbiReadScratch, record_field_type,
-    resolved_intrinsic, result_value_type, runtime_helpers::emit_value_equality,
-    script_functions::emit_action_default, semantic_type, value_type,
+    emit_struct_get, emit_typed_struct_get, enum_variant_payload, global_plan::RuntimeGlobals,
+    imports::Abi, memory_plan::AbiReadScratch, record_field_type, resolved_intrinsic,
+    result_value_type, runtime_helpers::emit_value_equality, script_functions::emit_action_default,
+    semantic_type, try_array_element_type, value_type,
 };
 
 #[derive(Default)]
@@ -57,11 +57,11 @@ pub(super) struct ExprContext<'a> {
     pub settings: &'a HashMap<ValueId, SettingStorage>,
     pub runtime_globals: RuntimeGlobals,
     pub runtime_helpers: &'a RuntimeHelperPlan,
-    pub functions: &'a HashMap<FunctionId, u32>,
+    pub functions: &'a HashMap<FunctionInstance, u32>,
     pub equality_functions: &'a EqualityFunctions,
     pub records: &'a [RecordDecl],
     pub enums: &'a [EnumDecl],
-    pub arrays: &'a [ArrayTypeDecl],
+    pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,
     pub abi_read: AbiReadScratch,
     pub matches: &'a MatchLayout,
@@ -69,10 +69,36 @@ pub(super) struct ExprContext<'a> {
     pub semantics: &'a SemanticModel,
     pub wasm_ir: &'a wasm_ir::Program,
     pub gc: &'a GcLayout,
+    /// Concrete type arguments while emitting a generic function template.
+    pub function_instance: Option<&'a FunctionInstance>,
     pub loop_control: Option<LoopControl>,
 }
 
 impl ExprContext<'_> {
+    pub(super) fn type_id(&self, ty: TypeId) -> TypeId {
+        self.function_instance
+            .map_or(ty, |instance| self.semantics.specialize_type(instance, ty))
+    }
+
+    pub(super) fn ty(&self, ty: TypeId) -> Type {
+        semantic_type(self.type_id(ty), self.semantics)
+    }
+
+    pub(super) fn expression_type(&self, expression: ExprId) -> Type {
+        self.ty(self
+            .wasm_ir
+            .expression(expression)
+            .expect("typed expressions belong to Wasm IR")
+            .ty)
+    }
+
+    fn called_instance(&self, function: &FunctionInstance) -> FunctionInstance {
+        self.function_instance.map_or_else(
+            || function.clone(),
+            |owner| self.semantics.specialize_function_instance(owner, function),
+        )
+    }
+
     fn nested_loop_control(&self, depth: u32) -> Self {
         let mut nested = *self;
         nested.loop_control = nested.loop_control.map(|control| control.nested(depth));
@@ -243,6 +269,49 @@ fn compile_block_with_loop(
                     .instruction(&Instruction::End)
                     .instruction(&Instruction::End);
             }
+            wasm_ir::Statement::For {
+                binding,
+                iterable_value,
+                index_value,
+                iterable,
+                body,
+            } => {
+                compile_for_init(function, *iterable_value, *index_value, *iterable, context);
+                function
+                    .instruction(&Instruction::Block(BlockType::Empty))
+                    .instruction(&Instruction::Loop(BlockType::Empty));
+                compile_for_has_next(function, *iterable_value, *index_value, context);
+                function
+                    .instruction(&Instruction::I32Eqz)
+                    .instruction(&Instruction::BrIf(1));
+                compile_for_bind_and_advance(
+                    function,
+                    *binding,
+                    *iterable_value,
+                    *index_value,
+                    context,
+                );
+                compile_block_with_loop(
+                    function,
+                    body,
+                    context,
+                    action,
+                    Some(LoopControl::Branch {
+                        break_depth: 1,
+                        continue_depth: 0,
+                    }),
+                );
+                function
+                    .instruction(&Instruction::Br(0))
+                    .instruction(&Instruction::End)
+                    .instruction(&Instruction::End);
+            }
+            wasm_ir::Statement::ForInit {
+                iterable_value,
+                index_value,
+                iterable,
+                ..
+            } => compile_for_init(function, *iterable_value, *index_value, *iterable, context),
             wasm_ir::Statement::Evaluate {
                 expression,
                 discard_result,
@@ -266,7 +335,7 @@ fn compile_block_with_loop(
                 .expect("checked continue statements belong to loops")
                 .emit_continue(function, context.gc, context.runtime_globals);
         }
-        wasm_ir::Terminator::AsyncWhile { .. } => {
+        wasm_ir::Terminator::AsyncWhile { .. } | wasm_ir::Terminator::AsyncFor { .. } => {
             unreachable!("async loops are lowered by the async action compiler")
         }
         wasm_ir::Terminator::Return(value) => {
@@ -278,7 +347,7 @@ fn compile_block_with_loop(
             function.instruction(&Instruction::Return);
         }
         wasm_ir::Terminator::Throw { error, target } => {
-            let Type::Result(target_result) = semantic_type(*target, context.semantics) else {
+            let Type::Result(target_result) = context.ty(*target) else {
                 unreachable!("throw targets are result values")
             };
             emit_failure_transfer(
@@ -374,11 +443,7 @@ fn resolved_receiver(
         } => (*receiver, *receiver_type, receiver_members.clone()),
         _ => unreachable!("only method calls have receivers"),
     };
-    (
-        receiver,
-        semantic_type(receiver_type, context.semantics),
-        receiver_members,
-    )
+    (receiver, context.ty(receiver_type), receiver_members)
 }
 
 pub(super) fn compile_receiver(
@@ -400,19 +465,18 @@ fn compile_resolved_path(
 ) -> Type {
     let value_type = match value {
         ResolvedValue::ProviderValue(provider) => {
-            function.instruction(&Instruction::GlobalGet(
-                context
-                    .runtime_globals
-                    .provider_value
-                    .expect("provider value references require provider storage"),
-            ));
-            Type::Standard(
-                context
-                    .wasm_ir
-                    .standard_library()
-                    .state_provider(provider)
-                    .process_type,
-            )
+            let declaration = context.wasm_ir.standard_library().state_provider(provider);
+            if declaration.attachment == crate::stdlib::StateProviderAttachment::Identity {
+                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+            } else {
+                function.instruction(&Instruction::GlobalGet(
+                    context
+                        .runtime_globals
+                        .provider_value
+                        .expect("provider value references require provider storage"),
+                ));
+            }
+            Type::Standard(declaration.process_type)
         }
         ResolvedValue::CurrentState(field) | ResolvedValue::OldState(field) => {
             let snapshot = u32::from(matches!(value, ResolvedValue::OldState(_)));
@@ -471,6 +535,110 @@ fn compile_resolved_path(
         }
     };
     emit_path_fields(function, members, value_type, context)
+}
+
+pub(super) fn compile_value_get(
+    function: &mut Function,
+    value: ValueId,
+    context: &ExprContext<'_>,
+) -> Type {
+    compile_resolved_path(function, ResolvedValue::Variable(value), &[], context)
+}
+
+fn compile_value_set(
+    function: &mut Function,
+    value: ValueId,
+    context: &ExprContext<'_>,
+    emit_value: impl FnOnce(&mut Function),
+) {
+    match context.locals {
+        LocalStorage::Hybrid { frame, .. } if frame.contains_key(&value) => {
+            let (field, _) = frame[&value];
+            emit_async_frame_ref(function, context.runtime_globals);
+            emit_value(function);
+            function.instruction(&Instruction::StructSet {
+                struct_type_index: context.gc.async_frame_index(),
+                field_index: field,
+            });
+        }
+        LocalStorage::Hybrid { wasm, .. } if wasm.contains_key(&value) => {
+            emit_value(function);
+            function.instruction(&Instruction::LocalSet(wasm[&value].0));
+        }
+        LocalStorage::Wasm(locals) if locals.contains_key(&value) => {
+            emit_value(function);
+            function.instruction(&Instruction::LocalSet(locals[&value].0));
+        }
+        _ => unreachable!("compiler-owned for-loop values are local"),
+    }
+}
+
+fn for_array_type(
+    iterable_value: ValueId,
+    context: &ExprContext<'_>,
+) -> (crate::ast::ArrayTypeId, Type) {
+    let ty = context
+        .semantics
+        .value_type(iterable_value)
+        .expect("checked for-loop iterable storage has a type");
+    let Type::Array(array) = context.ty(ty) else {
+        unreachable!("checked for-loop iterables are arrays")
+    };
+    (array, array_element_type(array, context.semantics))
+}
+
+pub(super) fn compile_for_init(
+    function: &mut Function,
+    iterable_value: ValueId,
+    index_value: ValueId,
+    iterable: ExprId,
+    context: &ExprContext<'_>,
+) {
+    compile_value_set(function, iterable_value, context, |function| {
+        compile_expr(function, iterable, context);
+    });
+    compile_value_set(function, index_value, context, |function| {
+        function.instruction(&Instruction::I32Const(0));
+    });
+}
+
+/// Leaves whether another element exists on the stack.
+pub(super) fn compile_for_has_next(
+    function: &mut Function,
+    iterable_value: ValueId,
+    index_value: ValueId,
+    context: &ExprContext<'_>,
+) {
+    compile_value_get(function, index_value, context);
+    compile_value_get(function, iterable_value, context);
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::I32LtU);
+}
+
+/// Stores the current element in the source binding and advances before the
+/// body, so a `continue` cannot accidentally repeat the same element.
+pub(super) fn compile_for_bind_and_advance(
+    function: &mut Function,
+    binding: ValueId,
+    iterable_value: ValueId,
+    index_value: ValueId,
+    context: &ExprContext<'_>,
+) {
+    let (array, element) = for_array_type(iterable_value, context);
+    compile_value_set(function, binding, context, |function| {
+        compile_value_get(function, iterable_value, context);
+        function.instruction(&Instruction::RefAsNonNull);
+        compile_value_get(function, index_value, context);
+        emit_array_get(function, context.gc.index(Type::Array(array)), element);
+    });
+    compile_value_set(function, index_value, context, |function| {
+        compile_value_get(function, index_value, context);
+        function
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::I32Add);
+    });
 }
 
 fn emit_path_fields(
@@ -534,10 +702,10 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
         .wasm_ir
         .expression(expression)
         .expect("compiled expression belongs to Wasm IR");
-    let ty = semantic_type(expression_ir.ty, context.semantics);
+    let ty = context.ty(expression_ir.ty);
     if let Some(conversion) = expression_ir.conversion {
-        let source = semantic_type(conversion.source, context.semantics);
-        let target = semantic_type(conversion.target, context.semantics);
+        let source = context.ty(conversion.source);
+        let target = context.ty(conversion.target);
         compile_expr_unconverted(function, expression_ir, source, context);
         match (conversion.kind, target) {
             (ValueConversionKind::LiftOption, Type::Option(option)) => {
@@ -614,10 +782,7 @@ fn compile_expr_unconverted(
                         expression,
                         string_conversion_source: Some(source),
                     } => {
-                        debug_assert_eq!(
-                            semantic_type(*source, context.semantics),
-                            expression_type(*expression, context.wasm_ir, context.semantics)
-                        );
+                        debug_assert_eq!(context.ty(*source), context.expression_type(*expression));
                         emit_cast(
                             function,
                             *expression,
@@ -631,8 +796,8 @@ fn compile_expr_unconverted(
                 .arrays
                 .iter()
                 .find(|array| {
-                    array_element_type(array.id, context.semantics)
-                        == Type::Standard(StdlibTypeId::String)
+                    try_array_element_type(array.id, context.semantics)
+                        == Some(Type::Standard(StdlibTypeId::String))
                 })
                 .expect("interpolation creates its String array type");
             function.instruction(&Instruction::ArrayNewFixed {
@@ -660,23 +825,39 @@ fn compile_expr_unconverted(
                 array_size: elements.len() as u32,
             });
         }
-        wasm_ir::ExpressionKind::Record { record, fields } => {
-            let declaration = context
-                .records
-                .iter()
-                .find(|declaration| declaration.id == *record)
-                .unwrap();
-            for declared_field in &declaration.fields {
-                let (_, value) = fields
+        wasm_ir::ExpressionKind::Record { record, fields } => match record {
+            ResolvedRecordId::Source(record) => {
+                let declaration = context
+                    .records
                     .iter()
-                    .find(|(field, _)| *field == declared_field.id)
-                    .expect("checked record literals initialize every declared field");
-                compile_expr(function, *value, context);
+                    .find(|declaration| declaration.id == *record)
+                    .unwrap();
+                for declared_field in &declaration.fields {
+                    let (_, value) = fields
+                        .iter()
+                        .find(|(field, _)| {
+                            *field == ResolvedRecordFieldId::Source(declared_field.id)
+                        })
+                        .expect("checked record literals initialize every declared field");
+                    compile_expr(function, *value, context);
+                }
+                function.instruction(&Instruction::StructNew(
+                    context.gc.index(Type::Record(*record)),
+                ));
             }
-            function.instruction(&Instruction::StructNew(
-                context.gc.index(Type::Record(*record)),
-            ));
-        }
+            ResolvedRecordId::Standard(record) => {
+                for declared_field in context.standard_library.fields_of(*record) {
+                    let (_, value) = fields
+                        .iter()
+                        .find(|(field, _)| {
+                            *field == ResolvedRecordFieldId::Standard(declared_field.id)
+                        })
+                        .expect("checked library record literals initialize every field");
+                    compile_expr(function, *value, context);
+                }
+                function.instruction(&Instruction::StructNew(context.gc.standard_index(*record)));
+            }
+        },
         wasm_ir::ExpressionKind::Enum {
             enumeration,
             variant,
@@ -725,7 +906,7 @@ fn compile_expr_unconverted(
         }
         wasm_ir::ExpressionKind::Member { receiver, members } => {
             compile_expr(function, *receiver, context);
-            let receiver_type = expression_type(*receiver, context.wasm_ir, context.semantics);
+            let receiver_type = context.expression_type(*receiver);
             let lowered_type = emit_path_fields(function, members, receiver_type, context);
             debug_assert_eq!(lowered_type, ty);
         }
@@ -780,7 +961,7 @@ fn compile_expr_unconverted(
         }
         wasm_ir::ExpressionKind::Fallback { value, fallback } => {
             let input_local = context.matches.fallback_values[&expression];
-            let input_type = expression_type(*value, context.wasm_ir, context.semantics);
+            let input_type = context.expression_type(*value);
             compile_expr(function, *value, context);
             function.instruction(&Instruction::LocalSet(input_local));
             let result = BlockType::Result(context.gc.val_type(ty));
@@ -829,12 +1010,10 @@ fn compile_expr_unconverted(
         }
         wasm_ir::ExpressionKind::Propagate { value, target } => {
             let input_local = context.matches.fallback_values[&expression];
-            let Type::Result(input_result) =
-                expression_type(*value, context.wasm_ir, context.semantics)
-            else {
+            let Type::Result(input_result) = context.expression_type(*value) else {
                 unreachable!("typed propagation inputs are result values")
             };
-            let Type::Result(target_result) = semantic_type(*target, context.semantics) else {
+            let Type::Result(target_result) = context.ty(*target) else {
                 unreachable!("propagation targets are result values")
             };
             compile_expr(function, *value, context);
@@ -879,7 +1058,7 @@ fn compile_expr_unconverted(
         }
         wasm_ir::ExpressionKind::Match { value, arms } => {
             let value_local = context.matches.values[&expression];
-            let value_type = expression_type(*value, context.wasm_ir, context.semantics);
+            let value_type = context.expression_type(*value);
             compile_expr(function, *value, context);
             function.instruction(&Instruction::LocalSet(value_local));
             let block_type = if ty == Type::Void {
@@ -903,26 +1082,37 @@ fn compile_expr_unconverted(
                 } else {
                     None
                 };
-                let binding =
-                    match &arm.pattern {
-                        wasm_ir::LoweredPattern::Enum { .. } => {
-                            let (_, variant_index, binding) = enum_pattern.unwrap();
-                            binding.map(|binding| {
-                                (
-                                    binding,
-                                    context.gc.index(value_type),
-                                    variant_index as u32 + 1,
-                                )
-                            })
-                        }
-                        wasm_ir::LoweredPattern::OptionSome { option, binding } => binding
-                            .map(|binding| (binding, context.gc.index(Type::Option(*option)), 0)),
-                        wasm_ir::LoweredPattern::ResultSuccess { result, binding } => binding
-                            .map(|binding| (binding, context.gc.index(Type::Result(*result)), 0)),
-                        wasm_ir::LoweredPattern::ResultError { result, binding } => binding
-                            .map(|binding| (binding, context.gc.index(Type::Result(*result)), 2)),
-                        _ => None,
-                    };
+                let binding = match &arm.pattern {
+                    wasm_ir::LoweredPattern::Enum { .. } => {
+                        let (_, variant_index, binding) = enum_pattern.unwrap();
+                        binding.map(|binding| {
+                            (
+                                binding,
+                                context.gc.index(value_type),
+                                variant_index as u32 + 1,
+                            )
+                        })
+                    }
+                    wasm_ir::LoweredPattern::OptionSome { binding, .. } => {
+                        let Type::Option(option) = value_type else {
+                            unreachable!("Some patterns match Option values")
+                        };
+                        binding.map(|binding| (binding, context.gc.index(Type::Option(option)), 0))
+                    }
+                    wasm_ir::LoweredPattern::ResultSuccess { binding, .. } => {
+                        let Type::Result(result) = value_type else {
+                            unreachable!("Ok patterns match Result values")
+                        };
+                        binding.map(|binding| (binding, context.gc.index(Type::Result(result)), 0))
+                    }
+                    wasm_ir::LoweredPattern::ResultError { binding, .. } => {
+                        let Type::Result(result) = value_type else {
+                            unreachable!("Err patterns match Result values")
+                        };
+                        binding.map(|binding| (binding, context.gc.index(Type::Result(result)), 2))
+                    }
+                    _ => None,
+                };
                 let binding = binding.map(|(binding, struct_type, field_index)| {
                     let (binding_local, payload_type) = context.matches.bindings[&arm.pattern_id];
                     bindings.insert(binding, (binding_local, payload_type));
@@ -968,14 +1158,17 @@ fn compile_expr_unconverted(
                             .instruction(&Instruction::RefIsNull)
                             .instruction(&Instruction::I32Eqz);
                     }
-                    wasm_ir::LoweredPattern::ResultSuccess { result, .. }
-                    | wasm_ir::LoweredPattern::ResultError { result, .. } => {
+                    wasm_ir::LoweredPattern::ResultSuccess { .. }
+                    | wasm_ir::LoweredPattern::ResultError { .. } => {
+                        let Type::Result(result) = value_type else {
+                            unreachable!("result patterns match Result values")
+                        };
                         function
                             .instruction(&Instruction::LocalGet(value_local))
                             .instruction(&Instruction::RefAsNonNull);
                         emit_typed_struct_get(
                             function,
-                            context.gc.index(Type::Result(*result)),
+                            context.gc.index(Type::Result(result)),
                             1,
                             Type::I32,
                         );
@@ -1039,9 +1232,8 @@ fn compile_expr_unconverted(
     else {
         return;
     };
-    if let Some(
-        intrinsic @ (IntrinsicId::NumericMin | IntrinsicId::NumericMax | IntrinsicId::NumericClamp),
-    ) = resolved_intrinsic(target)
+    if let Some(intrinsic @ (IntrinsicId::NumericMin | IntrinsicId::NumericMax)) =
+        resolved_intrinsic(target)
     {
         let temps = &context.matches.intrinsic_temps[&expression];
         let receiver_type = compile_receiver(function, target, context);
@@ -1063,36 +1255,47 @@ fn compile_expr_unconverted(
                 for argument in args {
                     compile_expr(function, *argument, context);
                 }
-                function.instruction(&Instruction::Call(context.functions[target_function]));
+                let target_function = context.called_instance(target_function);
+                function.instruction(&Instruction::Call(context.functions[&target_function]));
             }
             wasm_ir::CallTarget::UserFunction { function: target } => {
                 for argument in args {
                     compile_expr(function, *argument, context);
                 }
-                function.instruction(&Instruction::Call(context.functions[target]));
+                let target = context.called_instance(target);
+                function.instruction(&Instruction::Call(context.functions[&target]));
             }
             wasm_ir::CallTarget::Intrinsic { .. } => {
                 unreachable!("standard-library implementations have intrinsic IDs")
             }
-            wasm_ir::CallTarget::ResultError { result } => {
+            wasm_ir::CallTarget::ResultError { .. } => {
+                let Type::Result(result) = ty else {
+                    unreachable!("Err constructors produce Result values")
+                };
                 emit_default(
                     function,
-                    result_value_type(*result, context.semantics),
+                    result_value_type(result, context.semantics),
                     context.gc,
                 );
                 function.instruction(&Instruction::I32Const(1));
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::StructNew(
-                    context.gc.index(Type::Result(*result)),
+                    context.gc.index(Type::Result(result)),
                 ));
             }
-            wasm_ir::CallTarget::OptionSome { option } => {
+            wasm_ir::CallTarget::OptionSome { .. } => {
+                let Type::Option(option) = ty else {
+                    unreachable!("Some constructors produce Option values")
+                };
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::StructNew(
-                    context.gc.index(Type::Option(*option)),
+                    context.gc.index(Type::Option(option)),
                 ));
             }
-            wasm_ir::CallTarget::ResultSuccess { result } => {
+            wasm_ir::CallTarget::ResultSuccess { .. } => {
+                let Type::Result(result) = ty else {
+                    unreachable!("Ok constructors produce Result values")
+                };
                 compile_expr(function, args[0], context);
                 function
                     .instruction(&Instruction::I32Const(0))
@@ -1100,7 +1303,7 @@ fn compile_expr_unconverted(
                         context.gc.standard_index(StdlibTypeId::String),
                     )))
                     .instruction(&Instruction::StructNew(
-                        context.gc.index(Type::Result(*result)),
+                        context.gc.index(Type::Result(result)),
                     ));
             }
         },
@@ -1172,15 +1375,15 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::ProcessRead => {
                 let read_type = match target {
-                    wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => type_arguments[0],
+                    wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => {
+                        context.type_id(type_arguments[0])
+                    }
                     _ => unreachable!("process.read must resolve to its standard-library item"),
                 };
-                let Type::Result(result_type) =
-                    expression_type(expression, context.wasm_ir, context.semantics)
-                else {
+                let Type::Result(result_type) = context.expression_type(expression) else {
                     unreachable!("synchronous process reads produce Result values")
                 };
-                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+                compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
                 emit_process_read_from_stack(
                     function,
@@ -1191,7 +1394,7 @@ fn compile_expr_unconverted(
                 );
             }
             IntrinsicId::ProcessFollow => {
-                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+                compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
                 compile_expr(function, args[1], context);
                 function.instruction(&Instruction::Call(
@@ -1212,7 +1415,7 @@ fn compile_expr_unconverted(
                 unreachable!("process.scan is lowered as an await")
             }
             IntrinsicId::ProcessReadRelative32 => {
-                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+                compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::Call(
                     context
@@ -1228,8 +1431,26 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
+            IntrinsicId::ProcessReadUtf8 => {
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
+                function.instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::ReadUtf8String),
+                ));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Standard(StdlibTypeId::String),
+                    Instruction::RefIsNull,
+                    "UTF-8 string could not be read",
+                    context,
+                );
+            }
             IntrinsicId::ProcessReadManagedString => {
-                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+                compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
                 compile_expr(function, args[1], context);
                 function.instruction(&Instruction::Call(
@@ -1266,12 +1487,12 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::GbaEmulatorRead => {
                 let read_type = match target {
-                    wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => type_arguments[0],
+                    wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => {
+                        context.type_id(type_arguments[0])
+                    }
                     _ => unreachable!("GBA reads resolve to their standard-library method"),
                 };
-                let Type::Result(result_type) =
-                    expression_type(expression, context.wasm_ir, context.semantics)
-                else {
+                let Type::Result(result_type) = context.expression_type(expression) else {
                     unreachable!("GBA reads produce Result values")
                 };
                 let address = context.matches.intrinsic_temps[&expression][0];
@@ -1298,7 +1519,7 @@ fn compile_expr_unconverted(
                 emit_result_error(
                     function,
                     result_type,
-                    semantic_type(read_type, context.semantics),
+                    context.ty(read_type),
                     "invalid or unavailable GBA memory address",
                     context.gc,
                 );
@@ -1315,56 +1536,12 @@ fn compile_expr_unconverted(
                 );
                 function.instruction(&Instruction::End);
             }
-            IntrinsicId::DurationFromParts => {
-                compile_expr(function, args[0], context);
-                compile_expr(function, args[1], context);
-                function.instruction(&Instruction::StructNew(
-                    context.gc.standard_index(StdlibTypeId::Duration),
-                ));
-            }
-            IntrinsicId::DurationFromFrames => {
-                compile_expr(function, args[0], context);
-                compile_expr(function, args[1], context);
-                function.instruction(&Instruction::I64DivS);
-                compile_expr(function, args[0], context);
-                compile_expr(function, args[1], context);
-                function
-                    .instruction(&Instruction::I64RemS)
-                    .instruction(&Instruction::I64Const(1_000_000_000))
-                    .instruction(&Instruction::I64Mul);
-                compile_expr(function, args[1], context);
-                function
-                    .instruction(&Instruction::I64DivS)
-                    .instruction(&Instruction::I32WrapI64)
-                    .instruction(&Instruction::StructNew(
-                        context.gc.standard_index(StdlibTypeId::Duration),
-                    ));
-            }
-            IntrinsicId::DurationSaturatingSecondsF32 => {
-                compile_expr(function, args[0], context);
-                function.instruction(&Instruction::I64TruncSatF32S);
-                compile_expr(function, args[0], context);
-                compile_expr(function, args[0], context);
-                function
-                    .instruction(&Instruction::I64TruncSatF32S)
-                    .instruction(&Instruction::F32ConvertI64S)
-                    .instruction(&Instruction::F32Sub)
-                    .instruction(&Instruction::F32Const(1_000_000_000.0.into()))
-                    .instruction(&Instruction::F32Mul)
-                    .instruction(&Instruction::I32TruncSatF32S)
-                    .instruction(&Instruction::StructNew(
-                        context.gc.standard_index(StdlibTypeId::Duration),
-                    ));
-            }
-            IntrinsicId::NumericMin | IntrinsicId::NumericMax | IntrinsicId::NumericClamp => {
+            IntrinsicId::NumericMin | IntrinsicId::NumericMax => {
                 unreachable!("numeric intrinsics are lowered before ordinary calls")
             }
-            IntrinsicId::AddressOffset | IntrinsicId::AddressAdd => {
+            IntrinsicId::AddressAdd => {
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
-                if builtin == IntrinsicId::AddressOffset {
-                    function.instruction(&Instruction::I64ExtendI32U);
-                }
                 function.instruction(&Instruction::I64Add);
             }
             IntrinsicId::ArrayLength | IntrinsicId::ArrayGet | IntrinsicId::ArraySet => {
@@ -1446,50 +1623,15 @@ fn emit_numeric_method(
             .instruction(&Instruction::LocalGet(temps[1]))
             .instruction(&match (ty, intrinsic) {
                 (Type::F32, IntrinsicId::NumericMin) => Instruction::F32Min,
-                (Type::F32, IntrinsicId::NumericMax | IntrinsicId::NumericClamp) => {
-                    Instruction::F32Max
-                }
+                (Type::F32, IntrinsicId::NumericMax) => Instruction::F32Max,
                 (Type::F64, IntrinsicId::NumericMin) => Instruction::F64Min,
-                (Type::F64, IntrinsicId::NumericMax | IntrinsicId::NumericClamp) => {
-                    Instruction::F64Max
-                }
+                (Type::F64, IntrinsicId::NumericMax) => Instruction::F64Max,
                 _ => unreachable!(),
             });
-        if intrinsic == IntrinsicId::NumericClamp {
-            function
-                .instruction(&Instruction::LocalGet(temps[2]))
-                .instruction(&match ty {
-                    Type::F32 => Instruction::F32Min,
-                    Type::F64 => Instruction::F64Min,
-                    _ => unreachable!(),
-                });
-        }
         return;
     }
 
     let result = BlockType::Result(gc.val_type(ty));
-    if intrinsic == IntrinsicId::NumericClamp {
-        function
-            .instruction(&Instruction::LocalGet(temps[0]))
-            .instruction(&Instruction::LocalGet(temps[1]))
-            .instruction(&compare(ty, ty.is_signed(), Compare::Gt))
-            .instruction(&Instruction::If(result))
-            .instruction(&Instruction::LocalGet(temps[0]))
-            .instruction(&Instruction::Else)
-            .instruction(&Instruction::LocalGet(temps[1]))
-            .instruction(&Instruction::End)
-            .instruction(&Instruction::LocalSet(temps[3]))
-            .instruction(&Instruction::LocalGet(temps[3]))
-            .instruction(&Instruction::LocalGet(temps[2]))
-            .instruction(&compare(ty, ty.is_signed(), Compare::Lt))
-            .instruction(&Instruction::If(result))
-            .instruction(&Instruction::LocalGet(temps[3]))
-            .instruction(&Instruction::Else)
-            .instruction(&Instruction::LocalGet(temps[2]))
-            .instruction(&Instruction::End);
-        return;
-    }
-
     function
         .instruction(&Instruction::LocalGet(temps[0]))
         .instruction(&Instruction::LocalGet(temps[1]))
@@ -1516,6 +1658,7 @@ fn emit_process_read_from_stack(
     error: &str,
     context: &ExprContext<'_>,
 ) {
+    let ty = context.type_id(ty);
     let physical_type = semantic_type(ty, context.semantics);
     let size = context
         .memory
@@ -1557,8 +1700,7 @@ fn emit_sentinel_result(
     message: &str,
     context: &ExprContext<'_>,
 ) {
-    let Type::Result(result) = expression_type(expression, context.wasm_ir, context.semantics)
-    else {
+    let Type::Result(result) = context.expression_type(expression) else {
         unreachable!("fallible process helpers produce Result values")
     };
     let value_local = context.matches.intrinsic_temps[&expression][0];
@@ -1577,10 +1719,13 @@ fn emit_sentinel_result(
 }
 
 fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context: &ExprContext<'_>) {
-    let source = expression_type(expression, context.wasm_ir, context.semantics);
+    let source = context.expression_type(expression);
     compile_expr(function, expression, context);
 
     if target == Type::Standard(StdlibTypeId::String) {
+        if source == target {
+            return;
+        }
         function
             .instruction(&if matches!(source, Type::I8 | Type::I16 | Type::I32) {
                 Instruction::I64ExtendI32S
@@ -1692,7 +1837,7 @@ fn emit_binary(
     right: ExprId,
     context: &ExprContext<'_>,
 ) {
-    let operand_type = expression_type(left, context.wasm_ir, context.semantics);
+    let operand_type = context.expression_type(left);
     if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
         && matches!(operand_type, Type::Standard(_))
         && operand_type.is_enum(context.standard_library)

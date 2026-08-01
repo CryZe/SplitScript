@@ -8,17 +8,18 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{
-        ActionKind, AssignmentId, BinaryOp, Block, EnumId, EnumTypeId, EnumVariantId, Expr, ExprId,
-        ExprKind, FallbackBranch, FunctionId, InterpolatedPart, MatchArm, MatchPattern,
-        PatternBinding, PatternId, Program as SyntaxProgram, RecordFieldId, RecordId,
-        SettingChoiceOptionId, SettingKind, Span, Stmt, SuspensionMode, TypeRef, UnaryOp, ValueId,
+        ActionKind, AssignmentId, BinaryOp, Block, EnumId, EnumVariantId, Expr, ExprId, ExprKind,
+        FallbackBranch, FunctionId, InterpolatedPart, MatchArm, MatchPattern, PatternBinding,
+        PatternId, Program as SyntaxProgram, RecordId, SettingChoiceOptionId, SettingKind, Span,
+        Stmt, SuspensionMode, TypeRef, UnaryOp, ValueId,
     },
     semantic::{
-        ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue, ResolvedWrapperPattern,
+        FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember,
+        ResolvedRecordFieldId, ResolvedRecordId, ResolvedValue, ResolvedWrapperPattern,
         SemanticModel, ValueConversion,
     },
-    stdlib::{StandardLibrary, StdlibTypeId},
-    types::{TypeId, TypeKind},
+    stdlib::{Implementation, StandardLibrary, StdlibItemId, StdlibTypeId},
+    types::{EnumTypeId, TypeId, TypeKind},
     visit::{self, Visitor as SyntaxVisitor},
 };
 
@@ -134,7 +135,8 @@ pub enum ExpressionResolution {
     },
     Call(ResolvedCall),
     RecordLiteral {
-        fields: Vec<RecordFieldId>,
+        record: ResolvedRecordId,
+        fields: Vec<ResolvedRecordFieldId>,
     },
     EnumConstructor {
         variant: ResolvedEnumVariantId,
@@ -202,7 +204,7 @@ pub enum TypedExpressionKind {
     Signature(String),
     Array(Vec<ExprId>),
     Record {
-        record: RecordId,
+        record: ResolvedRecordId,
         fields: Vec<(String, ExprId)>,
     },
     Enum {
@@ -306,6 +308,13 @@ pub enum TypedStatementKind {
         condition: ExprId,
         body: TypedBlock,
     },
+    For {
+        binding: ValueId,
+        iterable_value: ValueId,
+        index_value: ValueId,
+        iterable: ExprId,
+        body: TypedBlock,
+    },
     Break,
     Continue,
     Return(Option<ExprId>),
@@ -336,7 +345,7 @@ pub struct TypedBlock {
 
 #[derive(Debug, Clone)]
 pub struct FunctionBody {
-    pub function: FunctionId,
+    pub function: FunctionInstance,
     pub debug_only: bool,
     pub body: TypedBlock,
 }
@@ -367,6 +376,9 @@ pub struct TypedProgram {
     state_sources: Vec<(ValueId, ExprId)>,
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
+    visible_source_len: usize,
+    visible_function_count: usize,
+    library_functions: HashMap<StdlibItemId, FunctionId>,
 }
 
 impl TypedProgram {
@@ -375,9 +387,13 @@ impl TypedProgram {
         syntax: &SyntaxProgram,
         semantics: &SemanticModel,
         standard_library: StandardLibrary,
+        visible_source_len: usize,
+        visible_function_count: usize,
     ) -> Self {
         let mut builder = TypedBodyBuilder {
             semantics,
+            syntax,
+            standard_library: &standard_library,
             expressions: HashMap::new(),
             assignments: HashMap::new(),
             patterns: HashMap::new(),
@@ -393,7 +409,7 @@ impl TypedProgram {
             .functions
             .iter()
             .map(|function| FunctionBody {
-                function: function.id,
+                function: FunctionInstance::monomorphic(function.id),
                 debug_only: function.debug_only,
                 body: lower_block(
                     &function.body,
@@ -452,6 +468,21 @@ impl TypedProgram {
             }
         }
 
+        let library_functions = standard_library
+            .items()
+            .iter()
+            .filter_map(|item| {
+                let Implementation::LibraryBody { function_name, .. } = item.implementation else {
+                    return None;
+                };
+                let function = syntax
+                    .functions
+                    .iter()
+                    .find(|function| function.name == function_name)?;
+                Some((item.id, function.id))
+            })
+            .collect();
+
         Self {
             standard_library,
             declarations,
@@ -464,6 +495,9 @@ impl TypedProgram {
             state_sources,
             setting_choice_defaults,
             setting_choice_options,
+            visible_source_len,
+            visible_function_count,
+            library_functions,
         }
     }
 
@@ -475,6 +509,13 @@ impl TypedProgram {
         &self.standard_library
     }
 
+    /// Resolves a catalog-owned source implementation to its inferred hidden
+    /// function template. Concrete calls instantiate this declaration through
+    /// the same `FunctionInstance` path as user-authored generic functions.
+    pub fn library_function(&self, item: StdlibItemId) -> Option<FunctionId> {
+        self.library_functions.get(&item).copied()
+    }
+
     pub fn expression(&self, id: ExprId) -> Option<&TypedExpression> {
         self.expressions
             .binary_search_by_key(&id.index(), |expression| expression.id.index())
@@ -483,7 +524,20 @@ impl TypedProgram {
     }
 
     pub fn expressions(&self) -> impl Iterator<Item = &TypedExpression> {
+        self.expressions
+            .iter()
+            .filter(|expression| expression.span.end <= self.visible_source_len)
+    }
+
+    pub(crate) fn all_expressions(&self) -> impl Iterator<Item = &TypedExpression> {
         self.expressions.iter()
+    }
+
+    pub(crate) fn visible_expression_count(&self) -> usize {
+        self.expressions()
+            .map(|expression| expression.id.index() + 1)
+            .max()
+            .unwrap_or(0)
     }
 
     pub fn call(&self, id: ExprId) -> Option<&ResolvedCall> {
@@ -502,9 +556,9 @@ impl TypedProgram {
         }
     }
 
-    pub fn record_literal_fields(&self, id: ExprId) -> Option<&[RecordFieldId]> {
+    pub fn record_literal_fields(&self, id: ExprId) -> Option<&[ResolvedRecordFieldId]> {
         match &self.expression(id)?.resolution {
-            Some(ExpressionResolution::RecordLiteral { fields }) => Some(fields),
+            Some(ExpressionResolution::RecordLiteral { fields, .. }) => Some(fields),
             _ => None,
         }
     }
@@ -537,7 +591,16 @@ impl TypedProgram {
     pub fn function_body(&self, function: FunctionId) -> Option<&TypedBlock> {
         self.function_bodies
             .iter()
-            .find(|body| body.function == function)
+            .find(|body| {
+                body.function.function == function && body.function.type_arguments.is_empty()
+            })
+            .map(|body| &body.body)
+    }
+
+    pub fn function_instance_body(&self, function: &FunctionInstance) -> Option<&TypedBlock> {
+        self.function_bodies
+            .iter()
+            .find(|body| &body.function == function)
             .map(|body| &body.body)
     }
 
@@ -549,6 +612,12 @@ impl TypedProgram {
     }
 
     pub fn function_bodies(&self) -> impl Iterator<Item = &FunctionBody> {
+        self.function_bodies
+            .iter()
+            .filter(|body| body.function.function.index() < self.visible_function_count)
+    }
+
+    pub(crate) fn all_function_bodies(&self) -> impl Iterator<Item = &FunctionBody> {
         self.function_bodies.iter()
     }
 
@@ -575,6 +644,8 @@ impl TypedProgram {
 
 struct TypedBodyBuilder<'a> {
     semantics: &'a SemanticModel,
+    syntax: &'a SyntaxProgram,
+    standard_library: &'a StandardLibrary,
     expressions: HashMap<ExprId, TypedExpression>,
     assignments: HashMap<AssignmentId, ResolvedAssignment>,
     patterns: HashMap<PatternId, ResolvedPattern>,
@@ -599,41 +670,43 @@ impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
     }
 
     fn visit_expr(&mut self, expression: &'ast Expr) {
-        let resolution = match &expression.kind {
-            ExprKind::Path(_) => Some(ExpressionResolution::ValuePath {
-                root: self.semantics.value(expression.id),
-                members: self
+        let resolution = if let Some(variant) = self.semantics.enum_variant(expression.id) {
+            Some(ExpressionResolution::EnumConstructor { variant })
+        } else {
+            match &expression.kind {
+                ExprKind::Path(_) => Some(ExpressionResolution::ValuePath {
+                    root: self.semantics.value(expression.id),
+                    members: self
+                        .semantics
+                        .path_members(expression.id)
+                        .unwrap_or_default()
+                        .to_vec(),
+                }),
+                ExprKind::Member { .. } => Some(ExpressionResolution::Member {
+                    members: self
+                        .semantics
+                        .path_members(expression.id)
+                        .unwrap_or_default()
+                        .to_vec(),
+                }),
+                ExprKind::Call { .. } => self
                     .semantics
-                    .path_members(expression.id)
-                    .unwrap_or_default()
-                    .to_vec(),
-            }),
-            ExprKind::Member { .. } => Some(ExpressionResolution::Member {
-                members: self
-                    .semantics
-                    .path_members(expression.id)
-                    .unwrap_or_default()
-                    .to_vec(),
-            }),
-            ExprKind::Call { .. } => self
-                .semantics
-                .call(expression.id)
-                .cloned()
-                .map(ExpressionResolution::Call),
-            ExprKind::Record { .. } => Some(ExpressionResolution::RecordLiteral {
-                fields: self
-                    .semantics
-                    .record_literal_fields(expression.id)
-                    .expect("checked record literals have resolved fields")
-                    .to_vec(),
-            }),
-            ExprKind::Enum { .. } => Some(ExpressionResolution::EnumConstructor {
-                variant: self
-                    .semantics
-                    .enum_variant(expression.id)
-                    .expect("checked enum constructors have resolved variants"),
-            }),
-            _ => None,
+                    .call(expression.id)
+                    .cloned()
+                    .map(ExpressionResolution::Call),
+                ExprKind::Record { .. } => Some(ExpressionResolution::RecordLiteral {
+                    record: self
+                        .semantics
+                        .record_literal(expression.id)
+                        .expect("checked record literals have resolved nominal identities"),
+                    fields: self
+                        .semantics
+                        .record_literal_fields(expression.id)
+                        .expect("checked record literals have resolved fields")
+                        .to_vec(),
+                }),
+                _ => None,
+            }
         };
         self.expressions.insert(
             expression.id,
@@ -643,7 +716,12 @@ impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
                     .semantics
                     .expression_type(expression.id)
                     .expect("checked expressions have resolved types"),
-                kind: lower_expression_kind(expression, self.semantics),
+                kind: lower_expression_kind(
+                    expression,
+                    self.semantics,
+                    self.syntax,
+                    self.standard_library,
+                ),
                 resolution,
                 conversion: self.semantics.value_conversion(expression.id),
                 span: expression.span,
@@ -752,6 +830,10 @@ pub fn walk_typed_statement<V: TypedVisitor>(
         }
         TypedStatementKind::While { condition, body } => {
             visit_expression(*condition);
+            visitor.visit_block(body, program);
+        }
+        TypedStatementKind::For { iterable, body, .. } => {
+            visit_expression(*iterable);
             visitor.visit_block(body, program);
         }
         TypedStatementKind::Break | TypedStatementKind::Continue => {}
@@ -872,7 +954,34 @@ pub fn walk_typed_match_arm<V: TypedVisitor>(
     );
 }
 
-fn lower_expression_kind(expression: &Expr, semantics: &SemanticModel) -> TypedExpressionKind {
+fn lower_expression_kind(
+    expression: &Expr,
+    semantics: &SemanticModel,
+    syntax: &SyntaxProgram,
+    standard_library: &StandardLibrary,
+) -> TypedExpressionKind {
+    if semantics.enum_variant(expression.id).is_some() {
+        let (variant, payload) = match &expression.kind {
+            ExprKind::Path(path) => {
+                let [_, variant] = path.as_slice() else {
+                    unreachable!("resolved enum paths have two segments")
+                };
+                (variant.clone(), None)
+            }
+            ExprKind::Call { callee, args, .. } => {
+                let [_, variant] = callee.as_slice() else {
+                    unreachable!("resolved enum constructors have two segments")
+                };
+                (variant.clone(), args.first().map(|payload| payload.id))
+            }
+            _ => unreachable!("only enum-shaped syntax resolves an enum variant"),
+        };
+        return TypedExpressionKind::Enum {
+            enumeration: enum_type_for_expression(expression.id, semantics),
+            variant,
+            payload,
+        };
+    }
     match &expression.kind {
         ExprKind::Error => unreachable!("recovery expressions cannot reach typed HIR"),
         ExprKind::None => TypedExpressionKind::None,
@@ -918,17 +1027,6 @@ fn lower_expression_kind(expression: &Expr, semantics: &SemanticModel) -> TypedE
                 .map(|(name, value)| (name.clone(), value.id))
                 .collect(),
         },
-        ExprKind::Enum {
-            enumeration,
-            variant,
-            payload,
-        } => TypedExpressionKind::Enum {
-            enumeration: enumeration
-                .resolved()
-                .expect("typed enum constructors have resolved declarations"),
-            variant: variant.clone(),
-            payload: payload.as_ref().map(|payload| payload.id),
-        },
         ExprKind::Match { value, arms } => TypedExpressionKind::Match {
             value: value.id,
             arms: arms
@@ -936,13 +1034,15 @@ fn lower_expression_kind(expression: &Expr, semantics: &SemanticModel) -> TypedE
                 .map(|arm| TypedMatchArm {
                     pattern: match &arm.pattern {
                         MatchPattern::Enum {
-                            enumeration,
-                            variant,
-                            binding,
+                            variant, binding, ..
                         } => TypedPattern::Enum {
-                            enumeration: enumeration
-                                .resolved()
-                                .expect("typed enum patterns have resolved declarations"),
+                            enumeration: enum_type_for_variant(
+                                semantics
+                                    .pattern_variant(arm.pattern_id)
+                                    .expect("typed enum patterns have resolved variants"),
+                                syntax,
+                                standard_library,
+                            ),
                             variant: variant.clone(),
                             binding: binding.clone(),
                         },
@@ -1031,6 +1131,42 @@ fn lower_expression_kind(expression: &Expr, semantics: &SemanticModel) -> TypedE
     }
 }
 
+fn enum_type_for_expression(expression: ExprId, semantics: &SemanticModel) -> EnumTypeId {
+    let ty = semantics
+        .expression_type(expression)
+        .expect("typed enum constructors have expression types");
+    match semantics.types().kind(ty) {
+        TypeKind::Enum(enumeration) => EnumTypeId::Source(*enumeration),
+        TypeKind::Standard(enumeration) => EnumTypeId::Standard(*enumeration),
+        kind => unreachable!("enum constructor has non-enum type `{kind:?}`"),
+    }
+}
+
+fn enum_type_for_variant(
+    variant: ResolvedEnumVariantId,
+    syntax: &SyntaxProgram,
+    standard_library: &StandardLibrary,
+) -> EnumTypeId {
+    match variant {
+        ResolvedEnumVariantId::Source(variant) => EnumTypeId::Source(
+            syntax
+                .enums
+                .iter()
+                .find(|enumeration| {
+                    enumeration
+                        .variants
+                        .iter()
+                        .any(|candidate| candidate.id == variant)
+                })
+                .expect("resolved source variants belong to a source enum")
+                .id,
+        ),
+        ResolvedEnumVariantId::Standard(variant) => {
+            EnumTypeId::Standard(standard_library.variant(variant).owner)
+        }
+    }
+}
+
 fn lower_block(
     block: &Block,
     semantics: &SemanticModel,
@@ -1049,6 +1185,7 @@ fn lower_block(
                             Stmt::Assign { span, .. }
                             | Stmt::If { span, .. }
                             | Stmt::While { span, .. }
+                            | Stmt::For { span, .. }
                             | Stmt::Break { span }
                             | Stmt::Continue { span }
                             | Stmt::Return { span, .. }
@@ -1106,6 +1243,20 @@ fn lower_block(
                             condition, body, ..
                         } => TypedStatementKind::While {
                             condition: condition.id,
+                            body: lower_block(body, semantics, failure_boundary),
+                        },
+                        Stmt::For {
+                            binding,
+                            iterable_value,
+                            index_value,
+                            iterable,
+                            body,
+                            ..
+                        } => TypedStatementKind::For {
+                            binding: binding.id,
+                            iterable_value: *iterable_value,
+                            index_value: *index_value,
+                            iterable: iterable.id,
                             body: lower_block(body, semantics, failure_boundary),
                         },
                         Stmt::Break { .. } => TypedStatementKind::Break,

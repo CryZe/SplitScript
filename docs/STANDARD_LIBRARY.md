@@ -6,6 +6,38 @@ Game-specific names and offsets belong in the autosplitter; process access,
 signature scanning, engine metadata, watchers, strings, collections, timing,
 and cancellation belong here.
 
+## Native process support
+
+An ordinary `state "game.exe" { ... }` selects the catalog's native state
+provider. The executable names still come from the source declaration, but
+attachment, the implicit value, direct state reads, documentation, and editor
+behavior use the same provider model as emulator-backed states.
+
+The provider exposes a read-only `process: Process` value. `Process` is a
+nominal scalar handle, not a namespace: it can be passed to functions, returned,
+or stored in inferred locals and globals. Its methods include `module`, `read`,
+`follow`, `scan`, `readRelative32`, `readUtf8`, and `readManagedString`. Method
+lowering consumes the written receiver, so this is valid ordinary typed code:
+
+```splitscript
+state "game.exe" {}
+
+fn readScore(attached: Process, address: address) -> u32! {
+    return attached.read(address)
+}
+
+whileAttached {
+    let attached = process
+    let score = readScore(attached, 0x1234) else 0
+}
+```
+
+The native provider uses an identity attachment: the host's attached-process
+handle already is the `Process` representation. Transformed providers such as
+GBA instead run a declared attachment intrinsic and expose a different nominal
+value. This distinction is catalog metadata, not a provider-name switch in the
+parser, checker, or runtime lifecycle.
+
 ## GBA emulator support
 
 `state GBA { ... }` selects the standard-library GBA state provider. The
@@ -23,10 +55,16 @@ the script.
 
 ```splitscript
 state GBA {
-    inventory0: u8 at 0x02002B32
+    inventory: [u8; 6] at 0x02002B32
     scene: u8 at 0x03000BF4
 }
 ```
+
+`[T; N]` carries its exact element count in the type. When `T` is
+`MemoryReadable`, the provider reads the complete fixed array in one host call
+and constructs the GC array only after that call succeeds. It otherwise uses
+the ordinary `[T]` methods, so `current.inventory.get(0)` reads the first byte
+from the already captured snapshot.
 
 Discovery covers VisualBoyAdvance/VBA-M, mGBA's contiguous mapping, NO$GBA,
 standalone Mednafen, the supported RetroArch cores, and mGBA-based BizHawk.
@@ -43,11 +81,53 @@ distinct and lets completion and diagnostics present only the applicable API.
 
 The library surface is described by a backend-independent catalog. Each entry
 has a stable ID, canonical name, callable kind, generic type scheme,
-constraints, effects, availability, documentation, parameter documentation,
-examples, related items, deprecation information, and an implementation key.
+constraints, documentation, parameter documentation, examples, related items,
+deprecation information, and an implementation key.
 Type checking resolves source calls to these IDs. WebAssembly generation and
 async lowering only handle the resolved implementation key; neither resolves
-source names.
+source names. Operational metadata has exactly one authority per implementation:
+the closed intrinsic registry for intrinsic leaves and compiler analysis for
+source-defined bodies.
+
+Every callable has exactly one implementation: either a trusted intrinsic
+declaration ending in `;` or an ordinary SplitScript body. Intrinsics remain
+necessary for host ABI access, physical representations, runtime helpers, and
+special lowering primitives. Higher-level operations are composed in library
+source and checked and lowered through the same resolver, inference, typed HIR,
+effect analysis, reachability, Wasm IR, and encoder as user functions. Merely
+being a library body grants no privilege; it can reach host behavior only by
+calling a validated intrinsic declaration.
+
+The implemented synchronous body tier uses ordinary inferred function
+templates and demand-driven monomorphization. A catalog call supplies its exact
+concrete receiver, parameter, and result signature, so constructed layouts and
+source-owned types use the same `FunctionInstance` machinery as user-defined
+generic functions. Reachability emits only called concrete instances.
+`Numeric.clamp` composes the primitive `min` and `max` operations, while
+`[T].isEmpty()` composes `length()` across arbitrary array element types.
+Neither helper has dedicated intrinsic dispatch or backend lowering.
+
+Bodies may perform any operation reachable through their permitted intrinsic
+leaves. All `Duration` constructors are source-defined: their arithmetic and
+physical GC-record construction live in `standard.split`, so the type has no
+intrinsic operations. This includes zero, signed integer milliseconds, frames,
+parts, and floating-point seconds. A catalog-owned body may construct its
+owning GC struct, including runtime-private fields, without making that
+constructor syntax available to user code or unrelated library functions.
+`address.offset` widens its argument and delegates to primitive full-width
+address addition. `timer.isRunning` and `Module.readRelative32` demonstrate
+effectful composition over timer and process intrinsics entirely in library
+source.
+
+Each independently owned catalog graph runs a standalone compilation of its
+source bodies once. Ordinary typed call-graph analysis derives a canonical
+effect set, availability, attachment requirement, suspension, and cancellation
+metadata without consulting a user program. The immutable result is cached on
+the graph and supplies checking and editor queries. Source entries contain no
+fake `pure` fields that a consumer could accidentally treat as authoritative.
+Normal user compilations still type-check the injected bodies and verify their
+inferred metadata against the standalone result. Actual suspending library
+bodies remain the next body tier.
 
 `CompilerContext` owns the selected catalog through a cloneable
 `StandardLibrary` handle backed by an immutable `Arc` graph. Compiler passes
@@ -55,19 +135,27 @@ borrow that graph; parsed, checked, tooling, and backend products clone the
 owner only when they must retain it. The bundled graph is cached, while tests
 also construct and inject an independently owned validated graph through the
 same context path. This makes catalog identity and lifetime explicit without
-requiring each pass to reconstruct global state. The future privileged
-SplitScript loader can replace the declaration producer behind this ownership
-boundary.
+requiring each pass to reconstruct global state. Its declaration producer is
+the build-only privileged SplitScript loader: `stdlib/standard.split` is parsed
+and source-validated once during the Cargo build, then emitted as typed catalog
+data. Callable body blocks are retained only for source-defined
+implementations. The compiler injects one hidden inferred function template per
+catalog source body after the user file and parses it with the ordinary program
+parser. Resolved catalog call signatures drive concrete instances through
+ordinary demand specialization. Public syntax, HIR, semantic
+iterators, symbols, and editor features retain the user-only view, while the
+backend sees the complete unit. Generated function names use a reserved prefix
+that user programs cannot declare.
 
 Effects distinguish ordinary process reads from operations that require an
 attached process, suspend or retry, and cancel when that process closes.
 `RequiresAttachedProcess` and `CancelsOnProcessClose` are catalog facts shared
-with type checking and async lowering. `StdlibItem::operation_semantics`
+with type checking and async lowering. `StandardLibrary::operation_semantics`
 normalizes them into `SuspensionKind`, `CancellationKind`, availability, and a
 process requirement; `render_operation_semantics` provides their common human
 presentation. Catalog validation rejects incompatible declarations such as a
-non-awaitable cancellable item. Documentation and editor tooling should consume
-these queries directly when their machine-readable interfaces are added.
+non-awaitable cancellable item. Documentation and editor tooling consume these
+queries directly rather than reading implementation-specific storage.
 
 Language-only constructs live in a sibling `LanguageCatalog`, rather than as
 fake standard-library functions. It gives keywords such as `await`, `retry`,
@@ -100,8 +188,9 @@ inference. Record fields, enum payloads, and array elements likewise publish
 their resolved `TypeId` layouts through `RecordFieldId`, `EnumVariantId`, and
 the dedicated `ArrayTypeId`; WebAssembly GC layout construction reads those
 semantic queries rather than the AST annotations. `TypeKind::Array` retains
-both its `ArrayTypeId` layout identity and element `TypeId`, so code generation
-never needs to reconstruct this information from syntax. `TypeStore` has no
+its `ArrayTypeId` layout identity, element `TypeId`, and optional exact length,
+so code generation never needs to reconstruct this information from syntax.
+`TypeStore` has no
 parallel legacy type representation: Wasm storage/value selection lowers
 `TypeId` / `TypeKind` directly into backend-local physical categories.
 
@@ -127,8 +216,10 @@ this guards the promise that future ordinary types do not need compiler-wide
 type matches.
 
 Source annotations, cast targets, and integer suffixes use the separate,
-inference-free `ast::TypeRef`; parser-owned array references and checker-owned
-inferred array layouts are distinct as well. Expressions have no checker-owned
+inference-free `ast::TypeRef`. It contains no catalog or resolved nominal IDs;
+lowering publishes those as `types::ResolvedTypeRef`. Parser-owned constructed
+type expressions and checker-owned resolved layouts are distinct as well.
+Expressions have no checker-owned
 type slot: pending types are recorded directly by `ExprId` and resolved when
 the semantic model is finalized. The dedicated inference context owns type
 variables, union/find unification, requirement composition, integer-literal
@@ -140,7 +231,9 @@ Free functions, typed paths, and type-directed methods are exposed as
 declarative `CallCandidate` values. `process.read(address)` leaves its named
 generic parameter open for bidirectional inference, while an explicit typed
 path such as `process.read.u16(address)` seeds `T = u16`. Method candidates
-carry their receiver type scheme and capability constraints. The checker uses
+include ordinary and typed methods, carry their receiver type scheme and
+capability constraints, and retain the selected receiver value through Wasm
+lowering. The checker uses
 one catalog-call path to instantiate that scheme and submit receiver,
 argument, expected-result, and capability constraints to the same inference
 context used by ordinary expressions. Candidate discovery itself commits no
@@ -304,10 +397,16 @@ only readable fields. Record fields use declaration order and natural
 alignment; one host read obtains the complete layout before the compiler
 recursively constructs its GC value.
 Immediate process operations return `T!`: fixed-layout reads, pointer following,
-relative-address decoding, and managed-string decoding. They can be handled
+relative-address decoding, and string decoding. They can be handled
 synchronously with `else` or `?`; `retry expression` polls any of them across
-attached updates and yields `T`. Managed IL2CPP strings are decoded with
-`process.read.managedString(pointer, maxUtf16Units)` and propagate failed
+attached updates and yields `T`. Native NUL-terminated UTF-8 uses
+`process.readUtf8(address, maxBytes)`. The bound is part of the operation, so
+all successful values have the ordinary `String` type rather than generated
+`string32`-style types. Pointer state fields can write
+`name at address as utf8(maxBytes)`; this is sugar for the same strict,
+bounded, fallible decode after the pointer path is resolved. Managed IL2CPP
+strings are decoded with
+`process.readManagedString(pointer, maxUtf16Units)` and propagate failed
 memory access as an error. The unit limit bounds decoding, while malformed
 surrogate sequences become the Unicode replacement character.
 

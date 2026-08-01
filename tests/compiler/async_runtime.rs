@@ -463,6 +463,43 @@ fn generic_process_read_infers_memory_types_bidirectionally() {
 }
 
 #[test]
+fn inferred_generic_process_helpers_preserve_constraints_and_effects() {
+    let attached = r#"
+        state "game.exe" {}
+        fn readAt(location) {
+            return process.read(location)
+        }
+        whileAttached {
+            let small: u16! = readAt(0x100 as address)
+            let large: u32! = readAt(0x200 as address)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(attached).unwrap())
+        .expect("the helper result should be generic over MemoryReadable values");
+    let parameter = checked
+        .semantics()
+        .function_type_parameters(checked.syntax().functions[0].id)[0];
+    assert!(
+        checked
+            .semantics()
+            .generic_parameter_constraints(parameter)
+            .contains(&splitscript::compiler::stdlib::StdlibCapabilityId::MemoryReadable)
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("each concrete read helper should validate");
+
+    let detached = attached.replace("whileAttached", "onDetached");
+    let diagnostics = splitscript::compile(&detached)
+        .expect_err("the generic helper should retain its attached-process effect");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("requires an attached process") })
+    );
+}
+
+#[test]
 fn memory_readable_records_have_shared_layouts_and_single_read_lowering() {
     use splitscript::compiler::memory::MemoryTypeLayout;
 
@@ -547,6 +584,104 @@ fn memory_readable_records_have_shared_layouts_and_single_read_lowering() {
         error.message.contains("BadMemory.label")
             && error.message.contains("no fixed process-memory layout")
     }));
+}
+
+#[test]
+fn fixed_arrays_have_exact_memory_layouts_and_use_ordinary_array_methods() {
+    use splitscript::compiler::{memory::MemoryTypeLayout, types::TypeKind};
+
+    let source = r#"
+        record Entry {
+            id: u16
+            flags: u8
+        }
+
+        state "game.exe" {
+            bytes: [u8; 6] at 0x1000
+            entries: [Entry; 2] at 0x2000
+        }
+
+        fn firstByte(values: [u8]) {
+            return values.get(0)
+        }
+
+        whileAttached {
+            let first = firstByte(current.bytes)
+            let entry = current.entries.get(1)
+            print(`{current.bytes.length()}:{first}:{entry.id}`)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
+    let fields = &checked.syntax().state.as_ref().unwrap().fields;
+    let bytes = checked.semantics().value_type(fields[0].id).unwrap();
+    let entries = checked.semantics().value_type(fields[1].id).unwrap();
+    assert!(matches!(
+        checked.semantics().types().kind(bytes),
+        TypeKind::Array {
+            length: Some(6),
+            ..
+        }
+    ));
+    assert!(matches!(
+        checked.memory_layouts().layout(bytes, checked.semantics()),
+        Ok(MemoryTypeLayout::FixedArray(layout)) if layout.size == 6 && layout.stride == 1
+    ));
+    assert!(matches!(
+        checked.memory_layouts().layout(entries, checked.semantics()),
+        Ok(MemoryTypeLayout::FixedArray(layout)) if layout.size == 8 && layout.stride == 4
+    ));
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("fixed-array process reads should produce valid Wasm GC arrays");
+
+    let mismatch = r#"
+        state "game.exe" {}
+        whileAttached { let bytes: [u8; 3] = [1, 2] }
+    "#;
+    let errors = splitscript::check(splitscript::parse(mismatch).unwrap()).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| { error.message.contains("expected 3 array elements, found 2") })
+    );
+
+    let incompatible_lengths = r#"
+        state "game.exe" {}
+        fn takesThree(values: [u8; 3]) {}
+        whileAttached {
+            let two: [u8; 2] = [1, 2]
+            takesThree(two)
+        }
+    "#;
+    let errors = splitscript::check(splitscript::parse(incompatible_lengths).unwrap()).unwrap_err();
+    assert!(
+        errors.iter().any(|error| {
+            error.message.contains("[u8; 2]") && error.message.contains("[u8; 3]")
+        })
+    );
+
+    for (declaration, expected) in [
+        ("bytes: [u8] at 0x1000", "use `[T; N]`"),
+        (
+            "bytes: [u8; 0] at 0x1000",
+            "zero-length array does not represent a process-memory read",
+        ),
+        (
+            "bytes: [u8; 4097] at 0x1000",
+            "fixed arrays are limited to 4096 elements",
+        ),
+        (
+            "labels: [String; 2] at 0x1000",
+            "String` has no fixed process-memory layout",
+        ),
+    ] {
+        let source = format!("state \"game.exe\" {{ {declaration} }}");
+        let errors = splitscript::check(splitscript::parse(&source).unwrap()).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error.message.contains(expected)),
+            "expected `{expected}` in {errors:#?}"
+        );
+    }
 }
 
 #[test]
@@ -766,7 +901,7 @@ fn unreachable_gc_layouts_are_pruned_and_live_layouts_are_remapped() {
 
             fn dead(
                 record: DeadRecord,
-                records: Array<DeadRecord>,
+                records: [DeadRecord],
                 optional: DeadEnum?,
                 result: DeadRecord!
             ) {}

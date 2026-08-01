@@ -4,13 +4,36 @@ use crate::{
     ast::{ActionKind, FunctionId, Span},
     hir::{self, TypedExpression, TypedProgram, TypedVisitor},
     semantic::ResolvedCall,
-    stdlib::Effect,
+    stdlib::{
+        Availability, CancellationKind, Effect, EffectSet, OperationMetadata, SuspensionKind,
+    },
 };
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionOperationSemantics {
     pub effects: Vec<Effect>,
     pub requires_attached_process: bool,
+    pub availability: Availability,
+    pub suspension: SuspensionKind,
+    pub cancellation: CancellationKind,
+}
+
+impl Default for FunctionOperationSemantics {
+    fn default() -> Self {
+        function_semantics(Vec::new(), Availability::Everywhere)
+    }
+}
+
+impl FunctionOperationSemantics {
+    pub fn metadata(&self) -> OperationMetadata {
+        OperationMetadata {
+            effects: self
+                .effects
+                .iter()
+                .fold(EffectSet::none(), |effects, effect| effects.with(*effect)),
+            availability: self.availability,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,10 +48,20 @@ pub struct DetachedCallViolation {
     pub standard_library_name: Option<&'static str>,
 }
 
-#[derive(Default)]
 struct CallFacts {
     effects: Vec<Effect>,
     callees: Vec<FunctionId>,
+    availability: Availability,
+}
+
+impl Default for CallFacts {
+    fn default() -> Self {
+        Self {
+            effects: Vec::new(),
+            callees: Vec::new(),
+            availability: Availability::Everywhere,
+        }
+    }
 }
 
 struct CallCollector<'a> {
@@ -39,17 +72,18 @@ impl TypedVisitor for CallCollector<'_> {
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
         match program.call(expression.id) {
             Some(ResolvedCall::StandardLibrary { item, .. }) => {
-                self.facts.effects.extend(
-                    program
-                        .standard_library()
-                        .item(*item)
-                        .effects
-                        .iter()
-                        .copied(),
-                );
+                if let Some(function) = program.library_function(*item) {
+                    self.facts.callees.push(function);
+                } else {
+                    let metadata = program.standard_library().operation_metadata(*item);
+                    self.facts.effects.extend(metadata.effects.iter().copied());
+                    self.facts.availability =
+                        merge_availability(self.facts.availability, metadata.availability);
+                }
             }
             Some(
-                ResolvedCall::UserFunction { function } | ResolvedCall::UserMethod { function, .. },
+                ResolvedCall::UserFunction { function, .. }
+                | ResolvedCall::UserMethod { function, .. },
             ) => self.facts.callees.push(*function),
             Some(
                 ResolvedCall::ResultError { .. }
@@ -65,34 +99,36 @@ impl TypedVisitor for CallCollector<'_> {
 impl OperationAnalysis {
     pub fn infer(program: &TypedProgram) -> Self {
         let function_count = program
-            .function_bodies()
-            .map(|body| body.function.index() + 1)
+            .all_function_bodies()
+            .map(|body| body.function.function.index() + 1)
             .max()
             .unwrap_or(0);
         let mut direct = (0..function_count)
             .map(|_| CallFacts::default())
             .collect::<Vec<_>>();
-        for function in program.function_bodies() {
+        for function in program.all_function_bodies() {
             CallCollector {
-                facts: &mut direct[function.function.index()],
+                facts: &mut direct[function.function.function.index()],
             }
             .visit_block(&function.body, program);
         }
 
         let mut functions = direct
             .iter()
-            .map(|facts| function_semantics(facts.effects.clone()))
+            .map(|facts| function_semantics(facts.effects.clone(), facts.availability))
             .collect::<Vec<_>>();
         loop {
             let mut changed = false;
             for (index, facts) in direct.iter().enumerate() {
                 let mut effects = facts.effects.clone();
+                let mut availability = facts.availability;
                 for callee in &facts.callees {
                     if let Some(callee) = functions.get(callee.index()) {
                         effects.extend_from_slice(&callee.effects);
+                        availability = merge_availability(availability, callee.availability);
                     }
                 }
-                let inferred = function_semantics(effects);
+                let inferred = function_semantics(effects, availability);
                 if inferred != functions[index] {
                     functions[index] = inferred;
                     changed = true;
@@ -125,16 +161,25 @@ impl OperationAnalysis {
                 let violation = match program.call(expression.id) {
                     Some(ResolvedCall::StandardLibrary { item, .. }) => {
                         let item = program.standard_library().item(*item);
-                        item.operation_semantics()
-                            .requires_attached_process
-                            .then_some(DetachedCallViolation {
-                                expression_span: expression.span,
-                                function: None,
-                                standard_library_name: Some(item.qualified_name),
+                        let requires_attached_process = program
+                            .library_function(item.id)
+                            .map(|function| {
+                                self.analysis.function(function).requires_attached_process
                             })
+                            .unwrap_or_else(|| {
+                                program
+                                    .standard_library()
+                                    .operation_semantics(item.id)
+                                    .requires_attached_process
+                            });
+                        requires_attached_process.then_some(DetachedCallViolation {
+                            expression_span: expression.span,
+                            function: None,
+                            standard_library_name: Some(item.qualified_name),
+                        })
                     }
                     Some(
-                        ResolvedCall::UserFunction { function }
+                        ResolvedCall::UserFunction { function, .. }
                         | ResolvedCall::UserMethod { function, .. },
                     ) => self
                         .analysis
@@ -168,7 +213,10 @@ impl OperationAnalysis {
     }
 }
 
-fn function_semantics(mut effects: Vec<Effect>) -> FunctionOperationSemantics {
+fn function_semantics(
+    mut effects: Vec<Effect>,
+    availability: Availability,
+) -> FunctionOperationSemantics {
     effects.sort_by_key(|effect| effect_order(*effect));
     effects.dedup();
     if effects.len() > 1 {
@@ -177,9 +225,27 @@ fn function_semantics(mut effects: Vec<Effect>) -> FunctionOperationSemantics {
     if effects.is_empty() {
         effects.push(Effect::Pure);
     }
+    let metadata = OperationMetadata {
+        effects: effects
+            .iter()
+            .fold(EffectSet::none(), |set, effect| set.with(*effect)),
+        availability,
+    };
+    let operation = metadata.semantics();
     FunctionOperationSemantics {
-        requires_attached_process: effects.contains(&Effect::RequiresAttachedProcess),
         effects,
+        requires_attached_process: operation.requires_attached_process,
+        availability,
+        suspension: operation.suspension,
+        cancellation: operation.cancellation,
+    }
+}
+
+const fn merge_availability(left: Availability, right: Availability) -> Availability {
+    if matches!(left, Availability::OnAttach) || matches!(right, Availability::OnAttach) {
+        Availability::OnAttach
+    } else {
+        Availability::Everywhere
     }
 }
 
@@ -196,5 +262,34 @@ const fn effect_order(effect: Effect) -> u8 {
         Effect::CancelsOnProcessClose => 8,
         Effect::WritesTimer => 9,
         Effect::WritesRuntime => 10,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalized_function_semantics_preserve_every_operational_dimension() {
+        let inferred = function_semantics(
+            vec![
+                Effect::Pure,
+                Effect::ReadsProcess,
+                Effect::RequiresAttachedProcess,
+                Effect::Suspends,
+                Effect::CancelsOnProcessClose,
+            ],
+            Availability::OnAttach,
+        );
+        assert!(!inferred.effects.contains(&Effect::Pure));
+        assert!(inferred.effects.contains(&Effect::ReadsProcess));
+        assert!(inferred.requires_attached_process);
+        assert_eq!(inferred.availability, Availability::OnAttach);
+        assert_eq!(inferred.suspension, SuspensionKind::Suspends);
+        assert_eq!(inferred.cancellation, CancellationKind::ProcessClose);
+        assert_eq!(
+            inferred.metadata().semantics().suspension,
+            inferred.suspension
+        );
     }
 }

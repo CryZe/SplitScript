@@ -5,11 +5,12 @@ use std::collections::HashMap;
 use wasm_encoder::{HeapType, RefType, StorageType, ValType};
 
 use crate::{
-    ast::{ArrayTypeDecl, EnumDecl, EnumTypeId, OptionTypeDecl, Program, ResultTypeDecl},
+    ast::{EnumDecl, Program},
     semantic::ResolvedEnumVariantId,
     stdlib::{
         DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibTypeId,
     },
+    types::{EnumTypeId, ResolvedArrayType, ResolvedOptionType, ResolvedResultType},
 };
 
 use super::{STATE_TYPE, Type, reachability};
@@ -29,9 +30,9 @@ impl GcLayout {
         standard_library: StandardLibrary,
         program: &Program,
         enums: &[EnumDecl],
-        arrays: &[ArrayTypeDecl],
-        options: &[OptionTypeDecl],
-        results: &[ResultTypeDecl],
+        arrays: &[ResolvedArrayType],
+        options: &[ResolvedOptionType],
+        results: &[ResolvedResultType],
         reachability: &reachability::Reachability,
     ) -> Self {
         let standard = standard_library
@@ -86,16 +87,40 @@ impl GcLayout {
             ordered.push(Type::Enum(enumeration.id));
             next += 1;
         }
-        let mut constructed = arrays
+        let mut reachable_arrays = arrays
             .iter()
             .filter(|array| reachability.contains_array_type(array.id))
-            .map(|array| (array.id.index(), Type::Array(array.id)))
-            .chain(
-                options
-                    .iter()
-                    .filter(|option| reachability.contains_option_type(option.id))
-                    .map(|option| (option.id.index(), Type::Option(option.id))),
-            )
+            .collect::<Vec<_>>();
+        let sized_elements = reachable_arrays
+            .iter()
+            .filter(|array| array.length.is_some())
+            .map(|array| array.element)
+            .collect::<Vec<_>>();
+        let reachable_ids = reachable_arrays
+            .iter()
+            .map(|array| array.id)
+            .collect::<Vec<_>>();
+        let supertypes = arrays
+            .iter()
+            .filter(|array| {
+                array.length.is_none()
+                    && sized_elements.contains(&array.element)
+                    && !reachable_ids.contains(&array.id)
+            })
+            .collect::<Vec<_>>();
+        reachable_arrays.extend(supertypes);
+        reachable_arrays.sort_by_key(|array| (array.length.is_some(), array.id.index()));
+        for array in reachable_arrays {
+            let ty = Type::Array(array.id);
+            dynamic.insert(ty, next);
+            ordered.push(ty);
+            next += 1;
+        }
+
+        let mut constructed = options
+            .iter()
+            .filter(|option| reachability.contains_option_type(option.id))
+            .map(|option| (option.id.index(), Type::Option(option.id)))
             .chain(
                 results
                     .iter()

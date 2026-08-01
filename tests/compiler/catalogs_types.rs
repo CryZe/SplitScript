@@ -3,6 +3,248 @@
 use super::*;
 
 #[test]
+fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
+    let library = StandardLibrary::new();
+    for item in [
+        StdlibItemId::DurationFromFrames,
+        StdlibItemId::DurationFromMilliseconds,
+        StdlibItemId::DurationFromParts,
+        StdlibItemId::DurationFromSeconds,
+        StdlibItemId::DurationZero,
+        StdlibItemId::NumericClamp,
+        StdlibItemId::ArrayIsEmpty,
+        StdlibItemId::AddressOffset,
+    ] {
+        assert!(matches!(
+            library.item(item).implementation,
+            Implementation::LibraryBody { .. }
+        ));
+    }
+
+    let source = r#"
+        state "game.exe" {}
+        gameTime {
+            return Duration.fromFrames(125, 60)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("a source-defined library function should use the ordinary checker");
+    assert!(checked.syntax().functions.is_empty());
+    assert_eq!(checked.typed_hir().function_bodies().count(), 0);
+    assert_eq!(checked.semantics().calls().count(), 1);
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile(source).unwrap())
+        .expect("a call through a source-defined library body should produce valid Wasm");
+}
+
+#[test]
+fn duration_convenience_constructors_are_source_defined() {
+    let library = StandardLibrary::new();
+    assert_eq!(
+        library.render_signature(StdlibItemId::DurationZero),
+        "Duration.zero() -> Duration"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::DurationFromMilliseconds),
+        "Duration.fromMilliseconds(milliseconds: i64) -> Duration"
+    );
+
+    for expression in ["Duration.zero()", "Duration.fromMilliseconds(1_500)"] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+                gameTime {{
+                    return {expression}
+                }}
+            "#
+        );
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&splitscript::compile(&source).unwrap())
+            .expect("source-defined duration convenience constructors should produce valid Wasm");
+    }
+}
+
+#[test]
+fn generic_library_bodies_emit_only_reachable_concrete_instances() {
+    let defined_functions = |wasm: &[u8]| {
+        Parser::new(0)
+            .parse_all(wasm)
+            .find_map(
+                |payload| match payload.expect("generated Wasm should parse") {
+                    Payload::FunctionSection(section) => Some(section.count()),
+                    _ => None,
+                },
+            )
+            .expect("generated Wasm has a function section")
+    };
+    let baseline = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let signed: i32 = 10
+                let wide: f64 = 10.0
+            }
+        "#,
+    )
+    .expect("baseline should compile");
+    let specialized = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let signed: i32 = 10
+                let wide: f64 = 10.0
+                let boundedSigned = signed.clamp(0, 7)
+                let boundedWide = wide.clamp(0.0, 7.0)
+            }
+        "#,
+    )
+    .expect("generic source-body instances should compile");
+
+    assert_eq!(
+        defined_functions(&specialized),
+        defined_functions(&baseline) + 2,
+        "only the i32 and f64 clamp instances should survive reachability"
+    );
+}
+
+#[test]
+fn generic_array_library_bodies_share_demand_driven_specialization() {
+    let defined_functions = |wasm: &[u8]| {
+        Parser::new(0)
+            .parse_all(wasm)
+            .find_map(
+                |payload| match payload.expect("generated Wasm should parse") {
+                    Payload::FunctionSection(section) => Some(section.count()),
+                    _ => None,
+                },
+            )
+            .expect("generated Wasm has a function section")
+    };
+    let baseline = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let numbers: [i32] = []
+                let names: [String] = []
+                let numberCount = numbers.length()
+                let nameCount = names.length()
+            }
+        "#,
+    )
+    .expect("the intrinsic baseline should compile");
+    let specialized = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let numbers: [i32] = []
+                let names: [String] = []
+                let noNumbers = numbers.isEmpty()
+                let noNames = names.isEmpty()
+            }
+        "#,
+    )
+    .expect("generic array source bodies should compile");
+
+    assert_eq!(
+        defined_functions(&specialized),
+        defined_functions(&baseline) + 2,
+        "one concrete isEmpty body should be emitted for each reachable array element type"
+    );
+}
+
+#[test]
+fn source_defined_library_bodies_publish_compiler_derived_operation_metadata() {
+    let library = StandardLibrary::new();
+    let clamp = library.item(StdlibItemId::NumericClamp);
+    assert!(matches!(
+        clamp.implementation,
+        Implementation::LibraryBody { .. }
+    ));
+    assert_eq!(
+        library
+            .effects(clamp.id)
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
+        [Effect::Pure]
+    );
+
+    let timer = library.item(StdlibItemId::TimerIsRunning);
+    assert!(matches!(
+        timer.implementation,
+        Implementation::LibraryBody { .. }
+    ));
+    assert!(library.effects(timer.id).contains(&Effect::ReadsTimer));
+    assert!(!library.effects(timer.id).contains(&Effect::Pure));
+    assert_eq!(
+        library.render_operation_semantics(timer.id),
+        "available everywhere; synchronous"
+    );
+
+    let relative = library.item(StdlibItemId::ModuleReadRelative32);
+    assert!(matches!(
+        relative.implementation,
+        Implementation::LibraryBody { .. }
+    ));
+    let operation = library.operation_semantics(relative.id);
+    assert!(library.effects(relative.id).contains(&Effect::ReadsProcess));
+    assert!(operation.requires_attached_process);
+    assert_eq!(operation.availability, Availability::Everywhere);
+    assert_eq!(operation.suspension, SuspensionKind::None);
+    assert_eq!(operation.cancellation, CancellationKind::None);
+
+    let source = r#"
+        state "game.exe" {}
+        fn resolveRelative(module: Module) -> address! {
+            return module.readRelative32(0)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("effectful library bodies should type check as ordinary calls");
+    let function = checked.syntax().functions[0].id;
+    let inferred = checked.effects().function(function);
+    assert!(inferred.effects.contains(&Effect::ReadsProcess));
+    assert!(inferred.requires_attached_process);
+}
+
+#[test]
+fn user_code_cannot_construct_runtime_private_standard_library_records() {
+    let parsed = splitscript::parse(
+        r#"
+        state "game.exe" {}
+        gameTime {
+            return Duration { seconds: 1, nanoseconds: 0 }
+        }
+        "#,
+    )
+    .unwrap();
+    let diagnostics = splitscript::check(splitscript::lower(parsed)).unwrap_err();
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains(
+            "standard-library type `Duration` can only be constructed by its own library methods",
+        )
+    }));
+}
+
+#[test]
+fn compiler_owned_library_function_names_are_reserved() {
+    let parsed = splitscript::parse(
+        r#"
+        state "game.exe" {}
+        fn __splitscript_stdlib_fake() {}
+        "#,
+    )
+    .unwrap();
+    let diagnostics = splitscript::check(splitscript::lower(parsed)).unwrap_err();
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("`__splitscript_stdlib_` are reserved")
+    }));
+}
+
+#[test]
 fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
     let library = StandardLibrary::new();
     let gba = library
@@ -12,7 +254,11 @@ fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
     assert_eq!(gba.value_name, "gba");
     assert_eq!(gba.process_type, StdlibTypeId::GbaEmulator);
     assert_eq!(gba.direct_read, StdlibItemId::GbaEmulatorRead);
-    assert!(gba.processes.contains(&"mGBA.exe"));
+    assert!(matches!(
+        gba.processes,
+        splitscript::compiler::stdlib::StateProviderProcesses::Declared(processes)
+            if processes.contains(&"mGBA.exe")
+    ));
 
     let lowered = splitscript::lower(splitscript::parse("state GBA {}").unwrap());
     let state = lowered.syntax().state.as_ref().unwrap();
@@ -20,15 +266,14 @@ fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
         state
             .provider
             .as_ref()
-            .and_then(|provider| provider.resolved),
-        Some(StdlibStateProviderId::Gba)
+            .map(|provider| provider.name.as_str()),
+        Some("GBA")
     );
+    assert!(state.processes.is_empty());
+    let checked = splitscript::check(lowered).unwrap();
     assert_eq!(
-        state.processes,
-        gba.processes
-            .iter()
-            .map(|process| (*process).to_owned())
-            .collect::<Vec<_>>()
+        checked.semantics().state_provider(),
+        Some(StdlibStateProviderId::Gba)
     );
 
     Validator::new_with_features(WasmFeatures::all())
@@ -76,6 +321,46 @@ fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
         .expect("the provider name should have catalog documentation");
     assert!(hover.markdown.contains("state GBA { ... }"));
     assert!(hover.markdown.contains("gba: GbaEmulator"));
+}
+
+#[test]
+fn native_processes_are_typed_provider_values_and_methods_use_the_receiver() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn keepProcess(value: Process) -> Process {
+            return value
+        }
+
+        whileAttached {
+            let attached = keepProcess(process)
+            let value: u32! = attached.read.u32(0x1000)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
+    let attached = checked
+        .syntax()
+        .actions
+        .iter()
+        .flat_map(|action| &action.body.statements)
+        .find_map(|statement| match statement {
+            splitscript::compiler::ast::Stmt::Variable(variable) if variable.name == "attached" => {
+                Some(variable.id)
+            }
+            _ => None,
+        })
+        .expect("the attached-process binding should exist");
+    let ty = checked
+        .semantics()
+        .value_type(attached)
+        .expect("the provider value should flow through ordinary inference");
+    assert_eq!(
+        checked.semantics().types().kind(ty),
+        &TypeKind::Standard(StdlibTypeId::Process)
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("captured Process receivers should lower to valid Wasm");
 }
 
 #[test]
@@ -301,6 +586,11 @@ fn language_catalog_is_valid_documented_and_compilable() {
         Some(LanguageItemId::ChoiceSetting)
     );
     assert_eq!(
+        language.item_for_source_token("[").map(|item| item.id),
+        Some(LanguageItemId::ArrayType)
+    );
+    assert!(language.item_for_source_token("Array").is_none());
+    assert_eq!(
         StandardLibrary::new()
             .field(StdlibFieldId::ModuleAddress)
             .name,
@@ -369,10 +659,15 @@ fn compiler_database_resolves_language_catalog_syntax() {
 
         state "game.exe" {
             level: i32 at 0x1000
+            mapName at 0x2000 as utf8(32)
         }
 
         fn maybe(value: i32) -> i32? {
             return Some(value)
+        }
+
+        fn preserveBytes(value: [u8]) -> [u8] {
+            return value
         }
 
         fn fallible() -> i32! {
@@ -421,11 +716,29 @@ fn compiler_database_resolves_language_catalog_syntax() {
         database.definition_at(result_type).unwrap(),
         Some(DefinitionTarget::Language(LanguageItemId::ResultType))
     );
+    let array_type = source.find("[u8]").unwrap();
+    assert_eq!(
+        database.definition_at(array_type).unwrap(),
+        Some(DefinitionTarget::Language(LanguageItemId::ArrayType))
+    );
     let propagation = source.find("fallible()?").unwrap() + "fallible()".len();
     assert_eq!(
         database.definition_at(propagation).unwrap(),
         Some(DefinitionTarget::Language(LanguageItemId::Propagate))
     );
+    let utf8_decoder = source.find("utf8(32)").unwrap();
+    assert_eq!(
+        database.definition_at(utf8_decoder).unwrap(),
+        Some(DefinitionTarget::Language(
+            LanguageItemId::NativeStringDecoder
+        ))
+    );
+    let decoder_hover = database
+        .hover(utf8_decoder)
+        .unwrap()
+        .expect("the state decoder should have language documentation");
+    assert!(decoder_hover.markdown.contains("bounded native UTF-8"));
+    assert!(decoder_hover.markdown.contains("not a string-size type"));
 
     let module_field = source.find("module.address").unwrap() + "module.".len();
     assert_eq!(
@@ -663,14 +976,18 @@ fn inferred_declaration_types_are_semantic_and_syntax_annotations_stay_optional(
     let function = &syntax.functions[0];
     assert_eq!(function.params[0].annotation, None);
     assert_eq!(function.return_annotation, None);
-    assert_builtin(function.params[0].id, BuiltinType::I32);
+    let parameter = semantics
+        .value_type(function.params[0].id)
+        .expect("inferred function parameters have semantic types");
+    assert!(matches!(
+        semantics.types().kind(parameter),
+        TypeKind::GenericParameter { owner, index: 0 } if *owner == function.id
+    ));
     let result = semantics
         .function_result(function.id)
         .expect("every function should have a semantic result type");
-    assert_eq!(
-        semantics.types().kind(result),
-        &TypeKind::Builtin(BuiltinType::I32)
-    );
+    assert_eq!(result, parameter);
+    assert_eq!(semantics.function_type_parameters(function.id), [parameter]);
 
     let statements = &syntax.actions[0].body.statements;
     let splitscript::compiler::ast::Stmt::Suspend {
@@ -708,7 +1025,7 @@ fn parsed_type_references_are_inference_free_syntax() {
         }
 
         record Buffer {
-            values: Array<u32>
+            values: [u32]
         }
 
         fn widen(value: i32) -> u64 {
@@ -1053,7 +1370,7 @@ fn option_and_result_equality_is_structural_and_payload_checked() {
     let invalid = r#"
         state "game.exe" {}
 
-        fn same(left: Array<i32>?, right: Array<i32>?) -> bool {
+        fn same(left: [i32]?, right: [i32]?) -> bool {
             return left == right
         }
 

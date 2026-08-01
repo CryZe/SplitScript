@@ -50,6 +50,15 @@ impl CapabilityAnalysis {
         capability: StdlibCapabilityId,
         semantics: &SemanticModel,
     ) -> Result<(), String> {
+        if matches!(
+            semantics.types().kind(ty),
+            TypeKind::GenericParameter { .. }
+        ) && semantics
+            .generic_parameter_constraints(ty)
+            .contains(&capability)
+        {
+            return Ok(());
+        }
         match self.standard_library.capability(capability).behavior {
             CapabilityBehavior::StructuralEquality => self.equality.require(ty, semantics),
             CapabilityBehavior::StructuralMemoryLayout => {

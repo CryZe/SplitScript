@@ -10,8 +10,8 @@ use crate::catalog::Documentation;
 
 use super::{
     declarations::{
-        CORE_TYPES, DeclaredTypeRef, RuntimeRepresentation, StdlibField, StdlibNamespace,
-        StdlibType, StdlibTypeKind, StdlibVariant,
+        CORE_TYPES, CoreTypeId, DeclaredTypeRef, RuntimeRepresentation, StdlibField,
+        StdlibNamespace, StdlibType, StdlibTypeKind, StdlibVariant,
     },
     ids::{StdlibCapabilityId, StdlibTypeId},
 };
@@ -23,6 +23,16 @@ pub(super) fn validate(
     variants: &[StdlibVariant],
 ) -> Vec<String> {
     let mut errors = Vec::new();
+    if !CORE_TYPES
+        .iter()
+        .map(|ty| ty.id)
+        .eq(CoreTypeId::ALL.iter().copied())
+    {
+        errors.push(
+            "the standard-library core table must cover primitive syntax types in canonical order"
+                .to_owned(),
+        );
+    }
     let mut core_type_ids = HashSet::new();
     let mut core_type_names = HashSet::new();
     for ty in CORE_TYPES {

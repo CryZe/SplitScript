@@ -204,7 +204,7 @@ fn render_typed_hir_snapshot(checked: &splitscript::CheckedProgram) -> String {
 
     writeln!(output, "bodies:").unwrap();
     for function in checked.typed_hir().function_bodies() {
-        writeln!(output, "  function {}:", function.function.index()).unwrap();
+        writeln!(output, "  function {}:", function.function.function.index()).unwrap();
         render_typed_block(&mut output, &function.body, 2);
     }
     for action in checked.typed_hir().action_bodies() {
@@ -283,6 +283,24 @@ fn render_typed_block(
             }
             TypedStatementKind::While { condition, body } => {
                 writeln!(output, "{indent}while e{}:", condition.index()).unwrap();
+                render_typed_block(output, body, depth + 1);
+            }
+            TypedStatementKind::For {
+                binding,
+                iterable_value,
+                index_value,
+                iterable,
+                body,
+            } => {
+                writeln!(
+                    output,
+                    "{indent}for v{} in e{} storage=v{} index=v{}:",
+                    binding.index(),
+                    iterable.index(),
+                    iterable_value.index(),
+                    index_value.index()
+                )
+                .unwrap();
                 render_typed_block(output, body, depth + 1);
             }
             TypedStatementKind::Break => writeln!(output, "{indent}break").unwrap(),
@@ -447,8 +465,12 @@ fn snapshot_type_name(
             .find(|enumeration| enumeration.id == *id)
             .map(|enumeration| enumeration.name.clone())
             .unwrap_or_else(|| format!("enum#{id}")),
+        TypeKind::GenericParameter { index, .. } => match index {
+            0..=25 => char::from_u32('T' as u32 + index).unwrap().to_string(),
+            _ => format!("T{}", index + 1),
+        },
         TypeKind::Array { element, .. } => {
-            format!("Array<{}>", snapshot_type_name(checked, *element))
+            format!("[{}]", snapshot_type_name(checked, *element))
         }
         TypeKind::Option { value, .. } => format!("{}?", snapshot_type_name(checked, *value)),
         TypeKind::Result { value, .. } => format!("{}!", snapshot_type_name(checked, *value)),

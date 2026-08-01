@@ -3,10 +3,12 @@
 use std::collections::HashSet;
 
 use crate::{
-    ast::{Program, SettingKind, StateSource},
-    inference::Requirements,
-    stdlib::StdlibCapabilityId,
+    ast::{Program, SettingDecl, SettingKind, StateMemoryDecoder, StateSource},
+    inference::{Requirements, Type},
+    intrinsic_registry::MAX_NATIVE_STRING_BYTES,
+    stdlib::{CoreTypeId, StdlibCapabilityId, StdlibTypeId},
     stdlib_semantic::StandardLibrarySemanticExt,
+    types::EnumTypeId,
 };
 
 use super::{Checker, control_flow::contains_value_return, declarations::FunctionSignature};
@@ -20,11 +22,9 @@ pub(super) fn collect(checker: &mut Checker, program: &Program) {
 
 fn collect_state_fields(checker: &mut Checker, program: &Program) {
     let state = program.state.as_ref().unwrap();
-    let provider = state
-        .provider
-        .as_ref()
-        .and_then(|provider| provider.resolved)
-        .map(|provider| checker.standard_library.state_provider(provider));
+    let provider = checker
+        .provider_value
+        .map(|(provider, _)| checker.standard_library.state_provider(provider));
     for field in &state.fields {
         let ty = if let Some(annotation) = field.annotation {
             checker.syntax_type(annotation)
@@ -56,12 +56,42 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
             if path.offsets.is_empty() {
                 checker.error("a pointer path needs at least one offset", field.span);
             }
-            checker.require(
-                ty,
-                Requirements::capability(StdlibCapabilityId::MemoryReadable),
-                field.span,
-            );
-            if let Some(provider) = provider {
+            if let Some(StateMemoryDecoder::Utf8 { max_bytes, span }) = path.decoder {
+                let string = checker.standard_type(StdlibTypeId::String);
+                checker.unify(ty, string, field.span);
+                if max_bytes == 0 {
+                    checker.error("a UTF-8 state read must allow at least one byte", span);
+                } else if max_bytes > MAX_NATIVE_STRING_BYTES {
+                    checker.error(
+                        format!("a UTF-8 state read is limited to {MAX_NATIVE_STRING_BYTES} bytes"),
+                        span,
+                    );
+                }
+            } else {
+                checker.require(
+                    ty,
+                    Requirements::capability(StdlibCapabilityId::MemoryReadable),
+                    field.span,
+                );
+            }
+            if let Some(provider) = provider
+                && checker
+                    .standard_library
+                    .item(provider.direct_read)
+                    .signature
+                    .parameters[0]
+                    .ty
+                    == crate::stdlib::TypeRef::Core(CoreTypeId::U32)
+            {
+                if path.decoder.is_some() {
+                    checker.error(
+                        format!(
+                            "`state {}` does not yet support decoded string fields",
+                            provider.name
+                        ),
+                        field.span,
+                    );
+                }
                 if path.module.is_some() {
                     checker.error(
                         format!(
@@ -97,8 +127,7 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
 
 fn collect_settings(checker: &mut Checker, program: &Program) {
     for setting in &program.settings {
-        if let Some(ty) = setting.value_type() {
-            let ty = checker.syntax_type(ty);
+        if let Some(ty) = setting_value_type(checker, setting) {
             checker.semantics.resolve_value_type(setting.id, ty);
             if checker
                 .declarations
@@ -113,14 +142,15 @@ fn collect_settings(checker: &mut Checker, program: &Program) {
             }
         }
         let SettingKind::Choice {
-            enumeration,
             default_variant,
             options,
+            ..
         } = &setting.kind
         else {
             continue;
         };
-        let Some(enumeration) = enumeration.source() else {
+        let Some(EnumTypeId::Source(enumeration)) = checker.resolutions.setting_enum(setting.id)
+        else {
             checker.error("unresolved enum used by choice setting", setting.span);
             continue;
         };
@@ -177,6 +207,17 @@ fn collect_settings(checker: &mut Checker, program: &Program) {
                 .semantics
                 .resolve_setting_choice_default(setting.id, variant.id);
         }
+    }
+}
+
+fn setting_value_type(checker: &Checker, setting: &SettingDecl) -> Option<Type> {
+    match &setting.kind {
+        SettingKind::Bool { .. } => Some(checker.core_type(CoreTypeId::Bool)),
+        SettingKind::Choice { .. } => {
+            Some(checker.enum_type(checker.resolutions.setting_enum(setting.id)?))
+        }
+        SettingKind::File { .. } => Some(checker.standard_type(StdlibTypeId::String)),
+        SettingKind::Title { .. } => None,
     }
 }
 
@@ -286,6 +327,7 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
             id: function.id,
             params,
             result,
+            generalized: Vec::new(),
         };
         checker
             .declarations

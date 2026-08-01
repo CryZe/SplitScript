@@ -10,12 +10,12 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::{
     abi::{AbiCatalog, AbiEffect, AbiImportId},
-    ast::ArrayTypeDecl,
     intrinsic_registry::{self, DependencyRoot, RuntimeHelperId},
     stdlib::{Effect, EffectSet, IntrinsicId, StdlibTypeId},
+    types::ResolvedArrayType,
 };
 
-use super::{GcLayout, Type, array_element_type, runtime_helpers};
+use super::{GcLayout, Type, runtime_helpers, try_array_element_type};
 
 pub(super) struct RuntimeHelperPlan {
     pub ordered: Vec<RuntimeHelperId>,
@@ -90,6 +90,8 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(StringEquality, (StringValue, StringValue) -> (I32), deps [], imports [], build_string_equality),
     helper!(ScanProcessRange, (I64, I64, I64, I32, I32, I32) -> (I64), deps [], imports [ProcessRead], build_scan_process_range),
     helper!(ReadRelative32, (I64, I64) -> (I64), deps [], imports [ProcessRead], build_read_relative32),
+    helper!(StringFromMemory, (I32, I32) -> (StringValue), deps [], imports [], build_string_from_memory),
+    helper!(ReadUtf8String, (I64, I64, I32) -> (StringValue), deps [StringFromMemory], imports [ProcessRead], build_read_utf8_string),
     helper!(ReadManagedString, (I64, I64, I32) -> (StringValue), deps [], imports [ProcessRead], build_read_managed_string),
     helper!(UnityAttach, (I64, I32) -> (Standard(StdlibTypeId::UnityModule)), deps [ScanProcessRange, ReadRelative32], imports [ProcessGetModuleAddress, ProcessGetModuleSize], build_unity_attach),
     helper!(CStringEquality, (I64, I64, StringValue, I32, I32) -> (I32), deps [], imports [ProcessRead], build_c_string_equality),
@@ -103,7 +105,6 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(FollowAddress, (I64, I64, U64Array) -> (I64), deps [], imports [ProcessRead], build_follow_address),
     helper!(GbaAttach, (I64) -> (Standard(StdlibTypeId::GbaEmulator)), deps [ScanProcessRange], imports [ProcessRead, ProcessGetModuleAddress, ProcessGetModuleSize, ProcessGetMemoryRangeCount, ProcessGetMemoryRangeAddress, ProcessGetMemoryRangeSize, ProcessGetMemoryRangeFlags], build_gba_attach),
     helper!(GbaTranslateAddress, (I64, Standard(StdlibTypeId::GbaEmulator), I32, I32) -> (I64), deps [], imports [ProcessRead], build_gba_translate_address),
-    helper!(StringFromMemory, (I32, I32) -> (StringValue), deps [], imports [], build_string_from_memory),
     helper!(RefreshSettings, () -> (), deps [], imports [], build_refresh_settings),
 ];
 
@@ -194,7 +195,7 @@ fn collect_abi_effects(import: AbiImportId, effects: &mut EffectSet, errors: &mu
 
 pub(super) fn resolve_signature(
     signature: HelperSignature,
-    arrays: &[ArrayTypeDecl],
+    arrays: &[ResolvedArrayType],
     semantics: &crate::semantic::SemanticModel,
     gc: &GcLayout,
 ) -> (Vec<ValType>, Vec<ValType>) {
@@ -207,7 +208,8 @@ pub(super) fn resolve_signature(
             arrays
                 .iter()
                 .find(|array| {
-                    array_element_type(array.id, semantics) == Type::Standard(StdlibTypeId::String)
+                    try_array_element_type(array.id, semantics)
+                        == Some(Type::Standard(StdlibTypeId::String))
                 })
                 .expect("runtime String-array helper has a reachable layout")
                 .id,
@@ -215,7 +217,7 @@ pub(super) fn resolve_signature(
         HelperValueType::U64Array => gc.val_type(Type::Array(
             arrays
                 .iter()
-                .find(|array| array_element_type(array.id, semantics) == Type::U64)
+                .find(|array| try_array_element_type(array.id, semantics) == Some(Type::U64))
                 .expect("runtime u64-array helper has a reachable layout")
                 .id,
         )),

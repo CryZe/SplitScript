@@ -44,6 +44,7 @@ pub(super) struct SignaturePool {
 impl StaticData {
     pub fn collect(
         program: &Program,
+        process_names: &[&str],
         wasm_ir: &wasm_ir::Program,
         reachability: &Reachability,
         dependencies: &BackendDependencies,
@@ -51,7 +52,7 @@ impl StaticData {
     ) -> Self {
         let state = program.state.as_ref().expect("checked programs have state");
         let mut strings = StringPool::new();
-        for process in &state.processes {
+        for process in process_names {
             strings.intern(process);
         }
         for field in &state.fields {

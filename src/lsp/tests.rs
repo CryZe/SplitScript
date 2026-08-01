@@ -341,7 +341,7 @@ fn inlay_hints_show_inferred_types_and_respect_explicit_annotations() {
             .iter()
             .map(|hint| hint["label"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        [": i32", ": i32", " -> i32", ": i32"]
+        [": i32", ": T", " -> T", ": i32"]
     );
     assert!(hints.iter().all(|hint| hint["kind"] == 1));
     assert_eq!(

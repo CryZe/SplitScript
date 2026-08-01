@@ -24,6 +24,70 @@ pub(super) struct FunctionSignature {
     pub(super) id: FunctionId,
     pub(super) params: Vec<Type>,
     pub(super) result: Type,
+    /// Unbound inference roots generalized after this function's dependency
+    /// component has been solved. Monomorphic functions leave this empty.
+    pub(super) generalized: Vec<u32>,
+}
+
+pub(super) struct InstantiatedFunctionSignature {
+    pub(super) id: FunctionId,
+    pub(super) params: Vec<Type>,
+    pub(super) result: Type,
+    pub(super) type_arguments: Vec<Type>,
+}
+
+impl FunctionSignature {
+    pub(super) fn monomorphic_call(&self) -> InstantiatedFunctionSignature {
+        InstantiatedFunctionSignature {
+            id: self.id,
+            params: self.params.clone(),
+            result: self.result,
+            type_arguments: Vec::new(),
+        }
+    }
+
+    pub(super) fn instantiate(
+        &self,
+        inference: &mut crate::inference::InferenceContext,
+    ) -> InstantiatedFunctionSignature {
+        let mut substitutions = HashMap::new();
+        let params = self
+            .params
+            .iter()
+            .map(|ty| inference.instantiate_type(*ty, &self.generalized, &mut substitutions))
+            .collect();
+        let result = inference.instantiate_type(self.result, &self.generalized, &mut substitutions);
+        let type_arguments = self
+            .generalized
+            .iter()
+            .map(|variable| {
+                substitutions
+                    .get(variable)
+                    .copied()
+                    .expect("every generalized signature variable occurs in its signature")
+            })
+            .collect();
+        InstantiatedFunctionSignature {
+            id: self.id,
+            params,
+            result,
+            type_arguments,
+        }
+    }
+}
+
+impl DeclarationEnvironment {
+    pub(super) fn set_function_generics(&mut self, function: FunctionId, generalized: Vec<u32>) {
+        self.function_signatures
+            .get_mut(&function)
+            .expect("collected functions have canonical signatures")
+            .generalized = generalized.clone();
+        for signature in self.functions.values_mut().chain(self.methods.values_mut()) {
+            if signature.id == function {
+                signature.generalized = generalized.clone();
+            }
+        }
+    }
 }
 
 pub(super) struct DeclarationEnvironment {

@@ -5,6 +5,7 @@
 
 use crate::ast::ActionKind;
 use crate::inference::Type;
+use crate::stdlib::StdlibItemId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum DebugContext {
@@ -53,18 +54,19 @@ impl LoopContext {
 pub(super) enum CallableContext {
     TopLevel,
     Function(String),
+    LibraryFunction(StdlibItemId),
     Action(ActionKind),
 }
 
 impl CallableContext {
     pub(super) fn is_function(&self) -> bool {
-        matches!(self, Self::Function(_))
+        matches!(self, Self::Function(_) | Self::LibraryFunction(_))
     }
 
     pub(super) fn action(&self) -> Option<ActionKind> {
         match self {
             Self::Action(action) => Some(*action),
-            Self::TopLevel | Self::Function(_) => None,
+            Self::TopLevel | Self::Function(_) | Self::LibraryFunction(_) => None,
         }
     }
 
@@ -72,6 +74,7 @@ impl CallableContext {
         match self {
             Self::TopLevel => "top level".to_owned(),
             Self::Function(description) => description.clone(),
+            Self::LibraryFunction(_) => "standard-library function".to_owned(),
             Self::Action(action) => format!("`{}` action", action.name()),
         }
     }

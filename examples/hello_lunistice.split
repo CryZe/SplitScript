@@ -30,6 +30,7 @@ fn greetingIsValid(greeting: Greeting) {
 }
 
 onAttach {
+    let executable = process.name()
     let greeting = Greeting {
         version: 1,
         message: "Hello, world from SplitScript!",
@@ -54,6 +55,7 @@ onAttach {
     let formatted = `{-42}:{7.9 as u32}`
     setTickRate(120.0)
     setVariable("Probe", formatted)
+    setVariable("Process", executable)
 
     if (gameAssembly.address == 0x1000
         && gameAssembly.size == 0x2000
@@ -70,6 +72,7 @@ onAttach {
         && gameManager.address == 0x1e00
         && gameManagerInstance == 0x2700
         && managedScene == "Shrine01 🦊"
+        && executable == "Lunistice-Demo.exe"
         && formatted == "-42:7"
         && (process.read.u8(marker) else 0) == 0x48
         && greetingIsValid(greeting)) {

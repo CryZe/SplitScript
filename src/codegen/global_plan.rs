@@ -31,6 +31,9 @@ pub(super) struct SettingStorage {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct RuntimeGlobals {
     pub process: u32,
+    /// Index of the source-declared process name that successfully attached.
+    /// `-1` means no process is attached.
+    pub process_name: u32,
     pub provider_value: Option<u32>,
     pub current: u32,
     pub old: u32,
@@ -54,6 +57,15 @@ pub(super) fn encode(
             shared: false,
         },
         &ConstExpr::i64_const(0),
+    );
+    let process_name = section.len();
+    section.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+            shared: false,
+        },
+        &ConstExpr::i32_const(-1),
     );
     let provider_value = semantics.state_provider().and_then(|provider| {
         let ty = wasm_ir
@@ -193,6 +205,7 @@ pub(super) fn encode(
         section,
         runtime: RuntimeGlobals {
             process,
+            process_name,
             provider_value,
             current,
             old,

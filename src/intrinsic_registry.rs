@@ -320,6 +320,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::ArrayGet
         | IntrinsicId::ArraySet
         | IntrinsicId::AddressAdd
+        | IntrinsicId::ProcessName
         | IntrinsicId::StringLength => &[],
     }
 }
@@ -332,6 +333,8 @@ const TIMER_WRITE: EffectSet = EffectSet::one(Effect::WritesTimer);
 const RUNTIME_WRITE: EffectSet = EffectSet::one(Effect::WritesRuntime);
 const PROCESS: EffectSet =
     EffectSet::one(Effect::ReadsProcess).with(Effect::RequiresAttachedProcess);
+const ATTACHED_ALLOCATES: EffectSet =
+    EffectSet::one(Effect::RequiresAttachedProcess).with(Effect::Allocates);
 const PROCESS_SUSPEND: EffectSet = PROCESS
     .with(Effect::Suspends)
     .with(Effect::CancelsOnProcessClose);
@@ -544,6 +547,20 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 ADDRESS,
             ),
             PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::ProcessName => contract!(
+            ProcessName,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                None,
+                Some(PROCESS_TYPE),
+                params![],
+                STRING,
+            ),
+            ATTACHED_ALLOCATES,
             Everywhere,
             RepresentationPrimitive
         ),

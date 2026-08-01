@@ -93,7 +93,7 @@ pub(super) fn compile_update(
             .instruction(&Instruction::GlobalSet(globals.detached_entered))
             .instruction(&Instruction::End);
     }
-    for process in lowering.process_names {
+    for (process_index, process) in lowering.process_names.iter().enumerate() {
         let (process_ptr, process_len) = strings.get(process);
         function
             .instruction(&Instruction::GlobalGet(globals.process))
@@ -103,6 +103,13 @@ pub(super) fn compile_update(
             .instruction(&Instruction::I32Const(process_len as i32))
             .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessAttach)))
             .instruction(&Instruction::GlobalSet(globals.process))
+            .instruction(&Instruction::GlobalGet(globals.process))
+            .instruction(&Instruction::I64Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Else)
+            .instruction(&Instruction::I32Const(process_index as i32))
+            .instruction(&Instruction::GlobalSet(globals.process_name))
+            .instruction(&Instruction::End)
             .instruction(&Instruction::End);
     }
     function
@@ -121,7 +128,9 @@ pub(super) fn compile_update(
         .instruction(&Instruction::GlobalGet(globals.process))
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessDetach)))
         .instruction(&Instruction::I64Const(0))
-        .instruction(&Instruction::GlobalSet(globals.process));
+        .instruction(&Instruction::GlobalSet(globals.process))
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::GlobalSet(globals.process_name));
     if let Some(provider_global) = globals.provider_value {
         let provider_type = semantics
             .state_provider()

@@ -162,7 +162,10 @@ if (messages.length !== 1 || messages[0] !== expected) {
     throw new Error(`expected one hello-world message, got ${JSON.stringify(messages)}`);
 }
 
-if (JSON.stringify(variables) !== JSON.stringify([["Probe", "-42:7"]])) {
+if (JSON.stringify(variables) !== JSON.stringify([
+    ["Probe", "-42:7"],
+    ["Process", "Lunistice-Demo.exe"],
+])) {
     throw new Error(`unexpected runtime variables: ${JSON.stringify(variables)}`);
 }
 

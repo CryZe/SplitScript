@@ -1149,6 +1149,7 @@ whileAttached {
     settings.en
     Mode.Ac
     process.re
+    process.na
     process.read.i
     number.cl
     current.position.co
@@ -1160,6 +1161,7 @@ whileAttached {
         assert!(labels(&mut database, "settings.en").contains(&"enabled".to_owned()));
         assert!(labels(&mut database, "Mode.Ac").contains(&"Active".to_owned()));
         assert!(labels(&mut database, "process.re").contains(&"read".to_owned()));
+        assert!(labels(&mut database, "process.na").contains(&"name".to_owned()));
         assert!(labels(&mut database, "process.read.i").contains(&"i32".to_owned()));
         assert!(labels(&mut database, "number.cl").contains(&"clamp".to_owned()));
         assert!(labels(&mut database, "module.ad").contains(&"address".to_owned()));

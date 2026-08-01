@@ -369,17 +369,53 @@ assumption that every process candidate shares one fixed state layout. ASL's
 second `state("game", "version")` string is a version label, not another
 executable name.
 
-- [ ] Design typed state-layout variants. One logical state declaration should
-  be able to provide per-process/per-version module names and pointer paths
-  while exposing one checked common snapshot interface. Attachment must select
-  exactly one variant from explicit probes and report unknown/ambiguous builds;
-  it must never reinterpret a version label as a process fallback.
+- [ ] Design typed state-layout variants from the legacy-ASL corpus rather than
+  treating module size as part of the layout grammar. A 2026-08-01 survey of
+  1,613 ASL files found 443 files with version-labelled states. Of 432 files
+  parsed structurally, 342 keep the same order-independent field interface in
+  every layout, 89 differ, 84 combine more than one executable, and individual
+  scripts contain as many as 46 layouts. Module size is common (276 files), but
+  file/product versions, executable hashes, signatures, process identity, and
+  custom memory discovery are also real selectors.
+  - [ ] Preserve expression-backed state fields and expression `if` as the
+    preferred escape hatch for small, irregular, or already-discovered layouts.
+    Do not force every conditional read through a new declaration form.
+  - [ ] Separate named memory layouts from layout detection. Layout declarations
+    should co-locate concise `at` fields, documentation, and a stable source
+    identity; a distinct implicitly-suspending attachment selector should use
+    ordinary typed SplitScript expressions, `await`/`retry`, matches, process
+    metadata, module sizes, signatures, and reads to select exactly one layout.
+    Do not encode `when module(...).size == ...` as the only probe grammar.
+  - [ ] Generate a typed layout enum/value rather than exposing ASL's mutable
+    string `version`. Lifecycle code must be able to compare and exhaustively
+    match the selected layout without stringly-typed names. Decide the final
+    selector syntax together with its error policy: unsupported and ambiguous
+    builds must stay visibly unattached or fail with one useful diagnostic,
+    never silently fall back to the first declaration.
+  - [ ] Implement the first vertical slice for layouts with an identical field
+    name/type interface. Validate every layout against one canonical snapshot
+    shape and select its pointer sources before `onAttach` completes. This
+    covers roughly four fifths of the surveyed versioned scripts while keeping
+    `current.field` and `old.field` unchanged.
+  - [ ] Design non-uniform layouts separately. The survey found 61 differing
+    interfaces with stable field types and 28 with at least one same-named type
+    conflict. Evaluate common-field projection plus typed variant payloads;
+    do not automatically make every missing field optional or erase conflicting
+    types merely to mimic ASL's dynamic state object.
+  - [ ] Add layout sharing/overrides only after real ports demonstrate the
+    minimum useful rule. Large scripts often repeat nearly identical pointer
+    paths across dozens of versions, but unrestricted inheritance would make
+    the selected memory layout difficult to audit.
 - [ ] Complete the read-only process/module identity surface needed for safe
   version probes. `Module.address` and `Module.size` already cover common size
-  checks; add attached executable identity, module enumeration/search, path or
-  host-supplied version identity, and a deterministic executable fingerprint.
-  Prefer host-provided metadata/fingerprinting over unrestricted filesystem
-  access from Wasm.
+  checks. First expose the exact configured process candidate through which
+  attachment succeeded; the generated attach loop already knows this identity,
+  and selectors need it when several executables share a version label. Keep it
+  distinct from the executable path exposed by the host ABI. Then add module
+  enumeration/search, path or host-supplied file/product-version identity, and
+  a deterministic executable fingerprint as corpus ports require them. Prefer
+  host-provided metadata/fingerprinting over unrestricted filesystem access or
+  reading and hashing an entire module from Wasm.
 - [ ] Make the existing attach-time-discovered state-source pattern a documented
   first-class contract. Scripts can already scan/follow/resolve into globals in
   `onAttach` and use expression-backed state fields; add a canonical recipe,

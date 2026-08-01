@@ -19,6 +19,7 @@ macro_rules! trusted_intrinsics {
             ArrayGet,
             ArraySet,
             AddressAdd,
+            ProcessName,
             ProcessModule,
             ProcessRead,
             ProcessFollow,

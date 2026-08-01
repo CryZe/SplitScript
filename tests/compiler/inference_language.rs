@@ -600,7 +600,7 @@ fn timer_state_is_a_compiler_provided_exhaustive_enum() {
                 for operator in body.get_operators_reader().unwrap() {
                     match operator.unwrap() {
                         wasmparser::Operator::StructNew { .. } => constructed_enum = true,
-                        wasmparser::Operator::GlobalSet { global_index: 6 } => {
+                        wasmparser::Operator::GlobalSet { .. } if constructed_enum => {
                             initializes_previous = constructed_enum;
                             break;
                         }

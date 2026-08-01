@@ -1370,6 +1370,31 @@ fn compile_expr_unconverted(
                     context.abi.function(AbiImportId::RuntimeSetTickRate),
                 ));
             }
+            IntrinsicId::ProcessName => {
+                // Evaluate the written receiver exactly once even though the
+                // matched source name is attachment metadata rather than part
+                // of the scalar process handle.
+                compile_receiver(function, target, context);
+                function.instruction(&Instruction::Drop);
+                let names = &context.state.processes;
+                debug_assert!(!names.is_empty());
+                let string_type = context.gc.val_type(Type::Standard(StdlibTypeId::String));
+                for (index, name) in names.iter().enumerate() {
+                    function
+                        .instruction(&Instruction::GlobalGet(
+                            context.runtime_globals.process_name,
+                        ))
+                        .instruction(&Instruction::I32Const(index as i32))
+                        .instruction(&Instruction::I32Eq)
+                        .instruction(&Instruction::If(BlockType::Result(string_type)));
+                    emit_string_literal(function, name, context.gc);
+                    function.instruction(&Instruction::Else);
+                }
+                function.instruction(&Instruction::Unreachable);
+                for _ in names {
+                    function.instruction(&Instruction::End);
+                }
+            }
             IntrinsicId::NextTick | IntrinsicId::ProcessModule => {
                 unreachable!("suspending functions are lowered as awaits")
             }

@@ -120,6 +120,22 @@ root {
 @representation(scalar, i64)
 @valueUsage(localVariable, globalVariable)
 intrinsic type Process {
+    /// Returns the configured process name that matched during attachment.
+    ///
+    /// This is the exact candidate written in the state declaration, not a
+    /// filesystem path. It lets attachment discovery distinguish executable
+    /// variants without granting file access.
+    ///
+    /// # Example
+    ///
+    /// Distinguish executable variants
+    ///
+    /// ```splitscript
+    /// let executable = process.name()
+    /// ```
+    @intrinsic(ProcessName)
+    fn name() -> String;
+
     /// Waits for a process module.
     ///
     /// Suspends attachment until both module address and size are available.

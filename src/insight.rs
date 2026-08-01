@@ -929,6 +929,22 @@ whileAttached {
     }
 
     #[test]
+    fn matched_process_name_hover_comes_from_the_standard_library() {
+        let source =
+            "state [\"game.exe\", \"demo.exe\"] {}\nwhileAttached { print(process.name()) }";
+        let offset = source.find("name()").unwrap() + 1;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database.hover(offset).unwrap().expect("process.name hover");
+        assert!(hover.markdown.contains("Process.name() -> String"));
+        assert!(
+            hover
+                .markdown
+                .contains("configured process name that matched during attachment")
+        );
+        assert!(hover.markdown.contains("requires an attached process"));
+    }
+
+    #[test]
     fn settings_and_lifecycle_hover_share_the_language_catalog() {
         let source = include_str!("../examples/lso_desktop_settings.split");
         let mut database = CompilerDatabase::new(source);

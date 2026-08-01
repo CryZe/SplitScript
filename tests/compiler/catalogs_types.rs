@@ -334,6 +334,7 @@ fn native_processes_are_typed_provider_values_and_methods_use_the_receiver() {
 
         whileAttached {
             let attached = keepProcess(process)
+            let name = attached.name()
             let value: u32! = attached.read.u32(0x1000)
         }
     "#;
@@ -357,6 +358,27 @@ fn native_processes_are_typed_provider_values_and_methods_use_the_receiver() {
     assert_eq!(
         checked.semantics().types().kind(ty),
         &TypeKind::Standard(StdlibTypeId::Process)
+    );
+    let name = checked
+        .syntax()
+        .actions
+        .iter()
+        .flat_map(|action| &action.body.statements)
+        .find_map(|statement| match statement {
+            splitscript::compiler::ast::Stmt::Variable(variable) if variable.name == "name" => {
+                Some(variable.id)
+            }
+            _ => None,
+        })
+        .expect("the attached-process name binding should exist");
+    assert_eq!(
+        checked.semantics().types().kind(
+            checked
+                .semantics()
+                .value_type(name)
+                .expect("process.name should have a semantic type")
+        ),
+        &TypeKind::Standard(StdlibTypeId::String)
     );
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))

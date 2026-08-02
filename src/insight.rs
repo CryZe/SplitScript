@@ -920,6 +920,41 @@ whileAttached {
     }
 
     #[test]
+    fn namespace_hover_uses_catalog_documentation() {
+        let source = r#"
+state "game.exe" {}
+
+whileAttached {
+    let running = timer.isRunning()
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(source.find("timer").unwrap() + 2)
+            .unwrap()
+            .expect("namespace hover");
+        let start = source.find("timer").unwrap();
+        assert_eq!(
+            hover.span,
+            Span {
+                start,
+                end: start + 5
+            }
+        );
+        assert!(hover.markdown.contains("```splitscript\ntimer\n```"));
+        assert!(
+            hover
+                .markdown
+                .contains("Reads information from the LiveSplit timer")
+        );
+        assert!(
+            hover
+                .markdown
+                .contains("let currentTimerState = timer.state()")
+        );
+    }
+
+    #[test]
     fn language_hover_is_served_from_the_language_catalog() {
         let source = "state \"game.exe\" {}\nwhileAttached { let version = v\"1.2.3.4\"; retry process.read<i32>(0) }";
         let offset = source.find("retry").unwrap() + 1;

@@ -532,6 +532,24 @@ impl CompilerDatabase {
             }
         }
         if let TokenKind::Ident(name) = &token.kind
+            && let Some(namespace) = analysis
+                .and_then(|analysis| {
+                    let segment = analysis.segments.iter().position(|segment| {
+                        segment.span.start <= offset && offset < segment.span.end
+                    })?;
+                    let path = analysis.segments[..=segment]
+                        .iter()
+                        .map(|segment| segment.name.as_str())
+                        .collect::<Vec<_>>();
+                    self.context.standard_library().namespace_by_path(&path)
+                })
+                .or_else(|| self.context.standard_library().namespace_by_name(name))
+        {
+            return Ok(Some(DefinitionTarget::StandardLibrarySymbol(
+                StdlibSymbolId::Namespace(namespace.id),
+            )));
+        }
+        if let TokenKind::Ident(name) = &token.kind
             && let Some(ty) = self.context.standard_library().type_by_name(name)
         {
             return Ok(Some(DefinitionTarget::StandardLibrarySymbol(

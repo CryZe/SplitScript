@@ -33,7 +33,7 @@ pub(super) struct EmissionContext<'a> {
     pub settings: &'a HashMap<ValueId, SettingStorage>,
     pub runtime_globals: RuntimeGlobals,
     pub runtime_helpers: &'a RuntimeHelperPlan,
-    pub functions: &'a HashMap<FunctionInstance, u32>,
+    pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
     pub display_functions: &'a HashMap<StdlibTypeId, FunctionInstance>,
     pub equality_functions: &'a EqualityFunctions,
     pub records: &'a [RecordDecl],
@@ -44,6 +44,7 @@ pub(super) struct EmissionContext<'a> {
     pub semantics: &'a SemanticModel,
     pub wasm_ir: &'a wasm_ir::Program,
     pub gc: &'a GcLayout,
+    pub async_frames: &'a super::async_frame::AsyncFrameLayouts,
 }
 
 /// Extra pools required only by the async attachment state machine.

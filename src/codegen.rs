@@ -42,8 +42,8 @@ mod specialization;
 mod unity_layout;
 mod update;
 
-use self::async_frame::AsyncFrameLayout;
-use self::async_state::compile_async_attach;
+use self::async_frame::AsyncFrameLayouts;
+use self::async_state::{compile_async_attach, compile_async_function_poll};
 use self::backend_type::Type;
 use self::context::{AttachContext, EmissionContext};
 use self::data_plan::StaticData;
@@ -53,7 +53,8 @@ use self::gc_layout::GcLayout;
 use self::global_plan::SettingStorage;
 use self::runtime_helper_registry::RuntimeHelperPlan;
 use self::script_functions::{
-    LocalPlanOptions, compile_action, compile_read, compile_user_function, plan_wasm_locals,
+    LocalPlanOptions, compile_action, compile_async_function_init, compile_read,
+    compile_user_function, plan_wasm_locals,
 };
 use self::settings::compile_start;
 use self::update::compile_update;
@@ -178,7 +179,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         arrays: array_types,
         options: option_types,
         results: result_types,
-        asyncs: _async_types,
+        asyncs: async_types,
     } = constructed_types;
     let semantics = &semantics;
     let enums = &enums;
@@ -200,7 +201,6 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         .iter()
         .find(|action| action.kind == ActionKind::OnAttach)
         .map(|action| action.kind);
-    let async_layout = AsyncFrameLayout::for_action(on_attach, wasm_ir, semantics);
     let cancellation_region = on_attach.and_then(|action| {
         wasm_ir
             .body(BodyOwner::Action(action))
@@ -208,6 +208,9 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     });
     let mut reachability =
         reachability::Reachability::analyze(program, semantics, enums, wasm_ir, &standard_library);
+    let async_frames =
+        AsyncFrameLayouts::plan(on_attach, program, wasm_ir, semantics, &reachability);
+    let async_layout = async_frames.attach.as_ref();
     let dependencies = BackendDependencies::analyze(program, semantics, wasm_ir, &reachability);
     reachability.require_runtime_helper_types(&dependencies, array_types, semantics);
     let static_data = StaticData::collect(
@@ -229,11 +232,13 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         standard_library: &standard_library,
         program,
         semantics,
-        async_layout: async_layout.as_ref(),
+        async_layout,
+        async_frames: &async_frames,
         enums,
         array_types,
         option_types,
         result_types,
+        async_types: &async_types,
         reachability: &reachability,
     });
     let imports::EncodedImports {
@@ -279,6 +284,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             dependencies: &dependencies,
             reachability: &reachability,
             gc: &gc,
+            wasm_ir,
         },
     );
     let lowering = EmissionContext {
@@ -301,6 +307,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         semantics,
         wasm_ir,
         gc: &gc,
+        async_frames: &async_frames,
     };
     let runtime = AttachContext {
         abi: &abi,
@@ -377,7 +384,14 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             .iter()
             .find(|function| function.id == instance.function)
             .expect("reachable function instances have source declarations");
-        codes.function(&compile_user_function(function, instance, &lowering));
+        if let Some(layout) = async_frames.function(instance) {
+            codes.function(&compile_async_function_init(
+                function, instance, layout, &lowering,
+            ));
+            codes.function(&compile_async_function_poll(instance, layout, &runtime));
+        } else {
+            codes.function(&compile_user_function(function, instance, &lowering));
+        }
     }
     for field in state.ordered_read_fields() {
         codes.function(&compile_read(field, &abi, strings, &lowering));
@@ -386,7 +400,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         if action.kind == ActionKind::OnAttach {
             codes.function(&compile_async_attach(
                 action,
-                async_layout.as_ref().unwrap(),
+                async_layout.unwrap(),
                 &runtime,
             ));
         } else {
@@ -436,15 +450,15 @@ fn resolved_intrinsic(target: &wasm_ir::CallTarget) -> Option<IntrinsicId> {
     }
 }
 
-fn call_target(wasm_ir: &wasm_ir::Program, expression: ExprId) -> &wasm_ir::CallTarget {
+fn call_target(wasm_ir: &wasm_ir::Program, expression: ExprId) -> Option<&wasm_ir::CallTarget> {
     let wasm_ir::ExpressionKind::Call { target, .. } = &wasm_ir
         .expression(expression)
         .expect("checked call belongs to Wasm IR")
         .kind
     else {
-        unreachable!("suspending values are resolved calls")
+        return None;
     };
-    target
+    Some(target)
 }
 
 fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
@@ -542,12 +556,6 @@ fn result_value_type(result: ResultTypeId, semantics: &SemanticModel) -> Type {
 
 fn emit_struct_get(function: &mut Function, field_index: u32, ty: Type) {
     emit_typed_struct_get(function, STATE_TYPE, field_index, ty);
-}
-
-fn emit_async_frame_ref(function: &mut Function, globals: global_plan::RuntimeGlobals) {
-    function
-        .instruction(&Instruction::GlobalGet(globals.async_frame))
-        .instruction(&Instruction::RefAsNonNull);
 }
 
 fn emit_typed_struct_get(

@@ -22,13 +22,19 @@ pub(super) struct FunctionPlan<'a> {
     pub section: FunctionSection,
     pub runtime_helpers: RuntimeHelperPlan,
     pub equality: EqualityFunctions,
-    pub users: HashMap<FunctionInstance, u32>,
+    pub users: HashMap<FunctionInstance, UserFunctionPlan>,
     pub displays: HashMap<StdlibTypeId, FunctionInstance>,
     pub reads: Vec<u32>,
     pub actions: HashMap<ActionKind, u32>,
     pub start: u32,
     pub update: u32,
     pub arrays: &'a [ResolvedArrayType],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct UserFunctionPlan {
+    pub call: u32,
+    pub poll: Option<u32>,
 }
 
 pub(super) struct Inputs<'a> {
@@ -43,6 +49,7 @@ pub(super) struct Inputs<'a> {
     pub dependencies: &'a BackendDependencies,
     pub reachability: &'a reachability::Reachability,
     pub gc: &'a GcLayout,
+    pub wasm_ir: &'a crate::wasm_ir::Program,
 }
 
 pub(super) fn encode<'a>(
@@ -63,6 +70,7 @@ pub(super) fn encode<'a>(
         dependencies,
         reachability,
         gc,
+        wasm_ir,
     } = inputs;
     let mut section = FunctionSection::new();
     let mut next_function = imported_functions;
@@ -155,28 +163,46 @@ pub(super) fn encode<'a>(
             ),
             semantics,
         );
-        let index = declare(
-            function
-                .params
-                .iter()
-                .map(|parameter| {
-                    gc.val_type(semantic_type(
-                        semantics.specialize_type(
-                            instance,
-                            semantics
-                                .value_type(parameter.id)
-                                .expect("checked parameters have types"),
-                        ),
-                        semantics,
-                    ))
-                })
-                .collect(),
-            (result != Type::Void)
-                .then(|| gc.val_type(result))
-                .into_iter()
-                .collect(),
-        );
-        users.insert(instance.clone(), index);
+        let params = function
+            .params
+            .iter()
+            .map(|parameter| {
+                gc.val_type(semantic_type(
+                    semantics.specialize_type(
+                        instance,
+                        semantics
+                            .value_type(parameter.id)
+                            .expect("checked parameters have types"),
+                    ),
+                    semantics,
+                ))
+            })
+            .collect::<Vec<_>>();
+        let body = wasm_ir
+            .body(crate::wasm_ir::BodyOwner::Function(instance.clone()))
+            .expect("reachable functions have Wasm IR bodies");
+        let plan = if matches!(body.abi, crate::wasm_ir::BodyAbi::AsyncFunction(_)) {
+            let frame = ValType::Ref(RefType {
+                nullable: false,
+                heap_type: HeapType::Concrete(gc.function_frame_index(instance)),
+            });
+            UserFunctionPlan {
+                call: declare(params, vec![frame]),
+                poll: Some(declare(vec![frame], vec![ValType::I32])),
+            }
+        } else {
+            UserFunctionPlan {
+                call: declare(
+                    params,
+                    (result != Type::Void)
+                        .then(|| gc.val_type(result))
+                        .into_iter()
+                        .collect(),
+                ),
+                poll: None,
+            }
+        };
+        users.insert(instance.clone(), plan);
     }
 
     let mut reads = Vec::with_capacity(

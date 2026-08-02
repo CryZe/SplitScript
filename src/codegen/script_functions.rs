@@ -60,6 +60,7 @@ pub(super) fn compile_read(
             semantics: lowering.semantics,
             wasm_ir: lowering.wasm_ir,
             gc: lowering.gc,
+            async_frames: lowering.async_frames,
             function_instance: None,
             loop_control: None,
             bare_return: BareReturn::Void,
@@ -393,6 +394,7 @@ pub(super) fn compile_user_function(
         semantics: lowering.semantics,
         wasm_ir: lowering.wasm_ir,
         gc: lowering.gc,
+        async_frames: lowering.async_frames,
         function_instance: Some(instance),
         loop_control: None,
         bare_return: BareReturn::Void,
@@ -465,6 +467,7 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
         semantics: lowering.semantics,
         wasm_ir: lowering.wasm_ir,
         gc: lowering.gc,
+        async_frames: lowering.async_frames,
         function_instance: None,
         loop_control: None,
         bare_return: BareReturn::Action(action.kind),
@@ -559,10 +562,51 @@ use crate::{
 
 use super::{
     GcLayout, Type,
+    async_frame::AsyncFrameLayout,
     context::EmissionContext,
     data_plan::StringPool,
-    emit_memory_value, emit_result_error, emit_result_success,
+    emit_default, emit_memory_value, emit_result_error, emit_result_success,
     expression::{BareReturn, ExprContext, LocalStorage, MatchLayout, compile_block, compile_expr},
     imports::Abi,
     memarg, memory_plan, semantic_type, value_type,
 };
+
+pub(super) fn compile_async_function_init(
+    declaration: &FunctionDecl,
+    instance: &crate::semantic::FunctionInstance,
+    layout: &AsyncFrameLayout,
+    lowering: &EmissionContext<'_>,
+) -> Function {
+    let mut function = Function::new([]);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(
+            lowering.gc.function_frame_tag(instance) as i32,
+        ));
+    for (position, ty) in layout.types.iter().copied().enumerate() {
+        let field = position as u32 + layout.base_fields;
+        if let Some(parameter) =
+            declaration
+                .params
+                .iter()
+                .enumerate()
+                .find_map(|(parameter_index, parameter)| {
+                    layout
+                        .fields
+                        .get(&parameter.id)
+                        .is_some_and(|(candidate, _)| *candidate == field)
+                        .then_some(parameter_index as u32)
+                })
+        {
+            function.instruction(&Instruction::LocalGet(parameter));
+        } else {
+            emit_default(&mut function, ty, lowering.gc);
+        }
+    }
+    function
+        .instruction(&Instruction::StructNew(
+            lowering.gc.function_frame_index(instance),
+        ))
+        .instruction(&Instruction::End);
+    function
+}

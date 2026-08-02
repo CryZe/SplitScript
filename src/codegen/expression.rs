@@ -20,12 +20,13 @@ use crate::{
 
 use super::{
     EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, SettingStorage, Type,
-    array_element_type, emit_array_get, emit_async_frame_ref, emit_default, emit_failure_transfer,
-    emit_int, emit_memory_value, emit_result_error, emit_result_success, emit_string_literal,
-    emit_struct_get, emit_typed_struct_get, enum_variant_payload, global_plan::RuntimeGlobals,
-    imports::Abi, memarg, memory_plan::AbiReadScratch, record_field_type, resolved_intrinsic,
-    result_value_type, runtime_helpers::emit_value_equality, script_functions::emit_action_default,
-    semantic_type, standard_field_type, try_array_element_type, value_type,
+    array_element_type, async_frame::AsyncFrameRef, emit_array_get, emit_default,
+    emit_failure_transfer, emit_int, emit_memory_value, emit_result_error, emit_result_success,
+    emit_string_literal, emit_struct_get, emit_typed_struct_get, enum_variant_payload,
+    global_plan::RuntimeGlobals, imports::Abi, memarg, memory_plan::AbiReadScratch,
+    record_field_type, resolved_intrinsic, result_value_type, runtime_helpers::emit_value_equality,
+    script_functions::emit_action_default, semantic_type, standard_field_type,
+    try_array_element_type, value_type,
 };
 
 #[derive(Default)]
@@ -44,6 +45,7 @@ pub(super) enum LocalStorage<'a> {
         temporaries: &'a HashMap<TemporaryId, (u32, Type)>,
     },
     Hybrid {
+        frame: AsyncFrameRef,
         wasm_values: &'a HashMap<ValueId, (u32, Type)>,
         frame_values: &'a HashMap<ValueId, (u32, Type)>,
         wasm_temporaries: &'a HashMap<TemporaryId, (u32, Type)>,
@@ -51,11 +53,29 @@ pub(super) enum LocalStorage<'a> {
     },
 }
 
+impl LocalStorage<'_> {
+    pub(super) fn continuation_frame(self) -> Option<AsyncFrameRef> {
+        match self {
+            Self::Hybrid { frame, .. } => Some(frame),
+            Self::Wasm { .. } => None,
+        }
+    }
+
+    pub(super) fn frame(self) -> AsyncFrameRef {
+        self.continuation_frame()
+            .expect("direct bodies do not have continuation frames")
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum BareReturn {
     Void,
     Action(ActionKind),
     AsyncAttach,
+    AsyncFuture {
+        frame: AsyncFrameRef,
+        completion: Option<(u32, Type)>,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -69,7 +89,7 @@ pub(super) struct ExprContext<'a> {
     pub settings: &'a HashMap<ValueId, SettingStorage>,
     pub runtime_globals: RuntimeGlobals,
     pub runtime_helpers: &'a RuntimeHelperPlan,
-    pub functions: &'a HashMap<FunctionInstance, u32>,
+    pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
     pub display_functions: &'a HashMap<StdlibTypeId, FunctionInstance>,
     pub equality_functions: &'a EqualityFunctions,
     pub records: &'a [RecordDecl],
@@ -81,6 +101,7 @@ pub(super) struct ExprContext<'a> {
     pub semantics: &'a SemanticModel,
     pub wasm_ir: &'a wasm_ir::Program,
     pub gc: &'a GcLayout,
+    pub async_frames: &'a super::async_frame::AsyncFrameLayouts,
     /// Concrete type arguments while emitting a generic function template.
     pub function_instance: Option<&'a FunctionInstance>,
     pub loop_control: Option<LoopControl>,
@@ -163,25 +184,15 @@ impl LoopControl {
         }
     }
 
-    pub(super) fn emit_break(
-        self,
-        function: &mut Function,
-        gc: &GcLayout,
-        globals: RuntimeGlobals,
-    ) {
-        self.emit(function, true, gc, globals);
+    pub(super) fn emit_break(self, function: &mut Function, frame: Option<AsyncFrameRef>) {
+        self.emit(function, true, frame);
     }
 
-    pub(super) fn emit_continue(
-        self,
-        function: &mut Function,
-        gc: &GcLayout,
-        globals: RuntimeGlobals,
-    ) {
-        self.emit(function, false, gc, globals);
+    pub(super) fn emit_continue(self, function: &mut Function, frame: Option<AsyncFrameRef>) {
+        self.emit(function, false, frame);
     }
 
-    fn emit(self, function: &mut Function, is_break: bool, gc: &GcLayout, globals: RuntimeGlobals) {
+    fn emit(self, function: &mut Function, is_break: bool, frame: Option<AsyncFrameRef>) {
         match self {
             Self::Branch {
                 break_depth,
@@ -198,16 +209,17 @@ impl LoopControl {
                 continue_state,
                 dispatcher_depth,
             } => {
+                let frame = frame.expect("async loop control has a continuation frame");
                 let state = if is_break {
                     break_state
                 } else {
                     continue_state
                 };
-                emit_async_frame_ref(function, globals);
+                frame.emit(function);
                 function
                     .instruction(&Instruction::I32Const(state.index() as i32))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: gc.async_frame_index(),
+                        struct_type_index: frame.struct_type,
                         field_index: 0,
                     })
                     .instruction(&Instruction::Br(dispatcher_depth));
@@ -385,12 +397,12 @@ fn compile_block_with_loop(
         wasm_ir::Terminator::Break => {
             loop_control
                 .expect("checked break statements belong to loops")
-                .emit_break(function, context.gc, context.runtime_globals);
+                .emit_break(function, context.locals.continuation_frame());
         }
         wasm_ir::Terminator::Continue => {
             loop_control
                 .expect("checked continue statements belong to loops")
-                .emit_continue(function, context.gc, context.runtime_globals);
+                .emit_continue(function, context.locals.continuation_frame());
         }
         wasm_ir::Terminator::AsyncWhile { .. }
         | wasm_ir::Terminator::AsyncWhileCondition { .. }
@@ -698,13 +710,14 @@ pub(super) fn compile_assignment(
     match context.locals {
         LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&target) => {
             let (field, ty) = frame_values[&target];
-            emit_async_frame_ref(function, context.runtime_globals);
+            let frame = context.locals.frame();
+            frame.emit(function);
             compile_assignment_value(function, operation, value, ty, context, |function| {
-                emit_async_frame_ref(function, context.runtime_globals);
-                emit_typed_struct_get(function, context.gc.async_frame_index(), field, ty);
+                frame.emit(function);
+                emit_typed_struct_get(function, frame.struct_type, field, ty);
             });
             function.instruction(&Instruction::StructSet {
-                struct_type_index: context.gc.async_frame_index(),
+                struct_type_index: frame.struct_type,
                 field_index: field,
             });
         }
@@ -750,10 +763,11 @@ pub(super) fn compile_temporary_set(
             frame_temporaries, ..
         } if frame_temporaries.contains_key(&target) => {
             let (field, _) = frame_temporaries[&target];
-            emit_async_frame_ref(function, context.runtime_globals);
+            let frame = context.locals.frame();
+            frame.emit(function);
             compile_expr(function, value, context);
             function.instruction(&Instruction::StructSet {
-                struct_type_index: context.gc.async_frame_index(),
+                struct_type_index: frame.struct_type,
                 field_index: field,
             });
         }
@@ -783,8 +797,9 @@ fn compile_temporary_get(
             frame_temporaries, ..
         } if frame_temporaries.contains_key(&temporary) => {
             let (field, ty) = frame_temporaries[&temporary];
-            emit_async_frame_ref(function, context.runtime_globals);
-            emit_typed_struct_get(function, context.gc.async_frame_index(), field, ty);
+            let frame = context.locals.frame();
+            frame.emit(function);
+            emit_typed_struct_get(function, frame.struct_type, field, ty);
         }
         LocalStorage::Hybrid {
             wasm_temporaries, ..
@@ -832,7 +847,7 @@ fn compile_assignment_call(
             compile_receiver(function, target, context);
             compile_expr(function, argument, context);
             let target_function = context.called_instance(target_function);
-            function.instruction(&Instruction::Call(context.functions[&target_function]));
+            function.instruction(&Instruction::Call(context.functions[&target_function].call));
         }
         wasm_ir::CallTarget::Intrinsic { intrinsic, .. }
             if matches!(
@@ -962,8 +977,9 @@ fn compile_resolved_path(
         ResolvedValue::Variable(value) => match context.locals {
             LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&value) => {
                 let (field, ty) = frame_values[&value];
-                emit_async_frame_ref(function, context.runtime_globals);
-                emit_typed_struct_get(function, context.gc.async_frame_index(), field, ty);
+                let frame = context.locals.frame();
+                frame.emit(function);
+                emit_typed_struct_get(function, frame.struct_type, field, ty);
                 ty
             }
             LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&value) => {
@@ -1002,10 +1018,11 @@ fn compile_value_set(
     match context.locals {
         LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&value) => {
             let (field, _) = frame_values[&value];
-            emit_async_frame_ref(function, context.runtime_globals);
+            let frame = context.locals.frame();
+            frame.emit(function);
             emit_value(function);
             function.instruction(&Instruction::StructSet {
-                struct_type_index: context.gc.async_frame_index(),
+                struct_type_index: frame.struct_type,
                 field_index: field,
             });
         }
@@ -1750,14 +1767,14 @@ fn compile_expr_unconverted(
                     compile_expr(function, *argument, context);
                 }
                 let target_function = context.called_instance(target_function);
-                function.instruction(&Instruction::Call(context.functions[&target_function]));
+                function.instruction(&Instruction::Call(context.functions[&target_function].call));
             }
             wasm_ir::CallTarget::UserFunction { function: target } => {
                 for argument in args {
                     compile_expr(function, *argument, context);
                 }
                 let target = context.called_instance(target);
-                function.instruction(&Instruction::Call(context.functions[&target]));
+                function.instruction(&Instruction::Call(context.functions[&target].call));
             }
             wasm_ir::CallTarget::Intrinsic { .. } => {
                 unreachable!("standard-library implementations have intrinsic IDs")
@@ -2242,7 +2259,25 @@ fn compile_fallback_branch(
     match fallback {
         wasm_ir::FallbackBranch::Value(value) => compile_expr(function, value, context),
         wasm_ir::FallbackBranch::Return(value) => {
-            if let Some(value) = value {
+            if let BareReturn::AsyncFuture { frame, completion } = context.bare_return {
+                if let Some(value) = value {
+                    let (field, _) = completion.expect("value-returning futures have result slots");
+                    frame.emit(function);
+                    compile_expr(function, value, context);
+                    function.instruction(&Instruction::StructSet {
+                        struct_type_index: frame.struct_type,
+                        field_index: field,
+                    });
+                }
+                frame.emit(function);
+                function
+                    .instruction(&Instruction::I32Const(-1))
+                    .instruction(&Instruction::StructSet {
+                        struct_type_index: frame.struct_type,
+                        field_index: 0,
+                    });
+                function.instruction(&Instruction::I32Const(1));
+            } else if let Some(value) = value {
                 compile_expr(function, value, context);
             } else {
                 match context.bare_return {
@@ -2253,6 +2288,7 @@ fn compile_fallback_branch(
                     BareReturn::AsyncAttach => {
                         function.instruction(&Instruction::I32Const(1));
                     }
+                    BareReturn::AsyncFuture { .. } => unreachable!(),
                 }
             }
             function.instruction(&Instruction::Return);
@@ -2261,13 +2297,13 @@ fn compile_fallback_branch(
             context
                 .loop_control
                 .expect("checked `else break` belongs to a loop")
-                .emit_break(function, context.gc, context.runtime_globals);
+                .emit_break(function, context.locals.continuation_frame());
         }
         wasm_ir::FallbackBranch::Continue => {
             context
                 .loop_control
                 .expect("checked `else continue` belongs to a loop")
-                .emit_continue(function, context.gc, context.runtime_globals);
+                .emit_continue(function, context.locals.continuation_frame());
         }
     }
 }
@@ -2392,7 +2428,7 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
             && let Some(display) = context.display_functions.get(&standard)
         {
             let display = context.called_instance(display);
-            function.instruction(&Instruction::Call(context.functions[&display]));
+            function.instruction(&Instruction::Call(context.functions[&display].call));
             return;
         }
         function

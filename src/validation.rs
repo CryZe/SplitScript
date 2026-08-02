@@ -316,6 +316,19 @@ fn validate_suspending_calls(
         }
     }
 
+    fn has_runtime_future_storage(call: &ResolvedCall, standard_library: &StandardLibrary) -> bool {
+        match call {
+            ResolvedCall::UserFunction { .. } | ResolvedCall::UserMethod { .. } => true,
+            ResolvedCall::StandardLibrary { item, .. } => matches!(
+                standard_library.item(*item).implementation,
+                Implementation::LibraryBody { .. }
+            ),
+            ResolvedCall::ResultError { .. }
+            | ResolvedCall::OptionSome { .. }
+            | ResolvedCall::ResultSuccess { .. } => false,
+        }
+    }
+
     let mut awaited = AwaitCollector::default();
     for function in hir.all_function_bodies() {
         awaited.visit_block(&function.body, hir);
@@ -323,12 +336,6 @@ fn validate_suspending_calls(
     for action in hir.action_bodies() {
         awaited.visit_block(&action.body, hir);
     }
-
-    let library_functions = standard_library
-        .items()
-        .iter()
-        .filter_map(|item| hir.library_function(item.id))
-        .collect::<HashSet<_>>();
 
     let mut diagnostics = Vec::new();
     for expression in hir.expressions() {
@@ -341,25 +348,10 @@ fn validate_suspending_calls(
         };
         if suspension == crate::stdlib::SuspensionKind::Suspends
             && !awaited.operands.contains(&expression.id)
+            && !has_runtime_future_storage(call, standard_library)
         {
             diagnostics.push(Diagnostic::semantic(
                 format!("`{name}` suspends and must be awaited"),
-                expression.span,
-            ));
-        }
-        if suspension == crate::stdlib::SuspensionKind::Suspends
-            && awaited.operands.contains(&expression.id)
-            && matches!(
-                call,
-                ResolvedCall::UserFunction { function, .. }
-                    | ResolvedCall::UserMethod { function, .. }
-                    if !library_functions.contains(function)
-            )
-        {
-            diagnostics.push(Diagnostic::semantic(
-                format!(
-                    "`{name}` has an async result, but executable async source-function calls require typed continuation-frame emission"
-                ),
                 expression.span,
             ));
         }
@@ -1169,6 +1161,13 @@ fn validate_must_use_block(
                     declaration
                         .must_use
                         .map(|reason| (declaration.name, reason))
+                })
+                .or_else(|| {
+                    matches!(semantics.types().kind(expression.ty), TypeKind::Async { .. })
+                        .then_some((
+                            "async operation",
+                            "Await the future or store it for later; discarding it means the operation is never polled.",
+                        ))
                 });
                 if let Some((name, reason)) = callable.or(constructed) {
                     diagnostics.push(

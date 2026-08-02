@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     ast::{
-        ArrayTypeId, BinaryOp, EnumDecl, EnumId, ExprId, OptionTypeId, Program, RecordId,
-        ResultTypeId,
+        ArrayTypeId, AsyncTypeId, BinaryOp, EnumDecl, EnumId, ExprId, OptionTypeId, Program,
+        RecordId, ResultTypeId,
     },
     semantic::{FunctionInstance, SemanticModel},
     stdlib::{
@@ -29,6 +29,7 @@ pub(super) struct Reachability {
     gc_arrays: BTreeSet<ArrayTypeId>,
     gc_options: BTreeSet<OptionTypeId>,
     gc_results: BTreeSet<ResultTypeId>,
+    gc_asyncs: BTreeSet<AsyncTypeId>,
     display_functions: BTreeMap<StdlibTypeId, FunctionInstance>,
 }
 
@@ -394,6 +395,10 @@ impl Reachability {
         self.gc_results.contains(&result)
     }
 
+    pub fn contains_async_type(&self, future: AsyncTypeId) -> bool {
+        self.gc_asyncs.contains(&future)
+    }
+
     fn require_types(
         &mut self,
         roots: impl IntoIterator<Item = TypeId>,
@@ -485,7 +490,10 @@ impl Reachability {
                     self.gc_results.insert(*layout);
                     pending.push(*value);
                 }
-                TypeKind::Async { value, .. } => pending.push(*value),
+                TypeKind::Async { layout, value } => {
+                    self.gc_asyncs.insert(*layout);
+                    pending.push(*value);
+                }
             }
         }
     }

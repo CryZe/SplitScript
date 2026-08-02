@@ -2,8 +2,9 @@
 
 use std::collections::HashMap;
 
-use wasm_encoder::{BlockType, Function, Instruction, ValType};
+use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
 
+use crate::semantic::FunctionInstance;
 use crate::{
     abi::AbiImportId,
     ast::{Action, ExprId, SuspensionMode, ValueId},
@@ -14,19 +15,18 @@ use crate::{
 };
 
 use super::{
-    GcLayout, LocalPlanOptions, Type,
-    async_frame::AsyncFrameLayout,
+    LocalPlanOptions, Type,
+    async_frame::{AsyncFrameLayout, AsyncFrameRef, AsyncFrameSource},
     call_target,
     context::AttachContext,
     data_plan::{SignaturePool, StringPool},
-    emit_async_frame_ref, emit_memory_value, emit_string_literal, emit_typed_struct_get,
+    emit_memory_value, emit_string_literal, emit_typed_struct_get,
     expression::{
         BareReturn, ExprContext, LocalStorage, LoopControl, MatchLayout, compile_assignment,
         compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
         compile_for_has_next, compile_for_init, compile_receiver, compile_statement_pattern,
         compile_temporary_set, store_match_binding,
     },
-    global_plan::RuntimeGlobals,
     imports::Abi,
     memarg, plan_wasm_locals, resolved_intrinsic, semantic_type, unity_layout,
 };
@@ -41,6 +41,66 @@ pub(super) fn compile_async_attach(
         .wasm_ir
         .body(BodyOwner::Action(action.kind))
         .expect("checked actions have Wasm IR bodies");
+    let frame = AsyncFrameRef {
+        struct_type: runtime.lowering.gc.async_frame_index(),
+        source: AsyncFrameSource::Global(runtime.lowering.runtime_globals.async_frame),
+    };
+    let result_global = runtime
+        .lowering
+        .state
+        .layout_enum
+        .is_some()
+        .then_some(runtime.lowering.runtime_globals.selected_layout)
+        .flatten();
+    compile_async_body(
+        wasm_body,
+        layout,
+        runtime,
+        frame,
+        None,
+        BareReturn::AsyncAttach,
+        result_global,
+    )
+}
+
+pub(super) fn compile_async_function_poll(
+    instance: &FunctionInstance,
+    layout: &AsyncFrameLayout,
+    runtime: &AttachContext<'_>,
+) -> Function {
+    let wasm_body = runtime
+        .lowering
+        .wasm_ir
+        .body(BodyOwner::Function(instance.clone()))
+        .expect("checked functions have Wasm IR bodies");
+    let frame = AsyncFrameRef {
+        struct_type: runtime.lowering.gc.function_frame_index(instance),
+        source: AsyncFrameSource::Local(0),
+    };
+    compile_async_body(
+        wasm_body,
+        layout,
+        runtime,
+        frame,
+        Some(instance),
+        BareReturn::AsyncFuture {
+            frame,
+            completion: layout.completion,
+        },
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_async_body(
+    wasm_body: &wasm_ir::Body,
+    layout: &AsyncFrameLayout,
+    runtime: &AttachContext<'_>,
+    frame: AsyncFrameRef,
+    function_instance: Option<&FunctionInstance>,
+    bare_return: BareReturn,
+    result_global: Option<u32>,
+) -> Function {
     let cancellation_region = wasm_body
         .cancellation_region
         .expect("onAttach is owned by the process-lifetime cancellation region");
@@ -55,7 +115,7 @@ pub(super) fn compile_async_attach(
         LocalPlanOptions {
             parameter_count: 1,
             semantics: runtime.lowering.semantics,
-            instance: None,
+            instance: function_instance,
             include_values: true,
         },
     );
@@ -69,6 +129,7 @@ pub(super) fn compile_async_attach(
         abi: runtime.abi,
         state: runtime.lowering.state,
         locals: LocalStorage::Hybrid {
+            frame,
             wasm_values: &planned_locals,
             frame_values: &layout.fields,
             wasm_temporaries: &matches.temporaries,
@@ -91,17 +152,11 @@ pub(super) fn compile_async_attach(
         semantics: runtime.lowering.semantics,
         wasm_ir: runtime.lowering.wasm_ir,
         gc: runtime.lowering.gc,
-        function_instance: None,
+        async_frames: runtime.lowering.async_frames,
+        function_instance,
         loop_control: None,
-        bare_return: BareReturn::AsyncAttach,
+        bare_return,
     };
-    let result_global = runtime
-        .lowering
-        .state
-        .layout_enum
-        .is_some()
-        .then_some(context.runtime_globals.selected_layout)
-        .flatten();
 
     let mut states = (0..wasm_body.async_state_count)
         .map(|_| None)
@@ -115,10 +170,10 @@ pub(super) fn compile_async_attach(
 
     function.instruction(&Instruction::Loop(BlockType::Empty));
     for (pc, state) in states.into_iter().enumerate() {
-        emit_async_frame_ref(&mut function, context.runtime_globals);
+        frame.emit(&mut function);
         function
             .instruction(&Instruction::StructGet {
-                struct_type_index: runtime.lowering.gc.async_frame_index(),
+                struct_type_index: frame.struct_type,
                 field_index: 0,
             })
             .instruction(&Instruction::I32Const(pc as i32))
@@ -175,12 +230,7 @@ pub(super) fn compile_async_attach(
                     &context,
                 );
                 function.instruction(&Instruction::Else);
-                set_async_state(
-                    &mut function,
-                    exit_state,
-                    runtime.lowering.gc,
-                    runtime.lowering.runtime_globals,
-                );
+                set_async_state(&mut function, exit_state, frame);
                 function
                     .instruction(&Instruction::Br(2))
                     .instruction(&Instruction::End);
@@ -192,11 +242,16 @@ pub(super) fn compile_async_attach(
                 resume_state,
                 cancellation,
             } => {
-                assert_eq!(
-                    cancellation,
-                    Some(cancellation_region),
-                    "awaited standard-library operation must participate in its body's cancellation region"
-                );
+                if call_target(context.wasm_ir, value)
+                    .and_then(resolved_intrinsic)
+                    .is_some()
+                {
+                    assert_eq!(
+                        cancellation,
+                        Some(cancellation_region),
+                        "awaited standard-library operation must participate in its body's cancellation region"
+                    );
+                }
                 compile_suspension_poll(
                     &mut function,
                     mode,
@@ -208,15 +263,11 @@ pub(super) fn compile_async_attach(
                     layout,
                     &context,
                 );
-                set_async_state(
-                    &mut function,
-                    resume_state,
-                    runtime.lowering.gc,
-                    runtime.lowering.runtime_globals,
-                );
+                set_async_state(&mut function, resume_state, frame);
                 function.instruction(&Instruction::Br(1));
             }
         }
+        mark_future_complete(&mut function, bare_return);
         function
             .instruction(&Instruction::I32Const(1))
             .instruction(&Instruction::Return)
@@ -229,6 +280,18 @@ pub(super) fn compile_async_attach(
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::End);
     function
+}
+
+fn mark_future_complete(function: &mut Function, target: BareReturn) {
+    if let BareReturn::AsyncFuture { frame, .. } = target {
+        frame.emit(function);
+        function
+            .instruction(&Instruction::I32Const(-1))
+            .instruction(&Instruction::StructSet {
+                struct_type_index: frame.struct_type,
+                field_index: 0,
+            });
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -251,6 +314,16 @@ fn compile_suspension_poll(
         .wasm_ir
         .expression(value)
         .expect("await value belongs to Wasm IR");
+    if !matches!(
+        &value_expression.kind,
+        wasm_ir::ExpressionKind::Call {
+            target: wasm_ir::CallTarget::Intrinsic { .. },
+            ..
+        }
+    ) {
+        compile_source_future_poll(function, destination, value, layout, context);
+        return;
+    }
     let wasm_ir::ExpressionKind::Call {
         target,
         arguments: args,
@@ -327,7 +400,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::LocalGet(module_size_local));
@@ -337,7 +410,7 @@ fn compile_suspension_poll(
                         context.gc.standard_index(StdlibTypeId::Module),
                     ))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
@@ -354,7 +427,7 @@ fn compile_suspension_poll(
                 .expect("checked process reads are MemoryReadable")
                 .size();
             if let Some((_, stored_type)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 debug_assert_eq!(stored_type, read_type);
             }
             compile_receiver(function, target, context);
@@ -391,7 +464,7 @@ fn compile_suspension_poll(
                     context.gc,
                 );
                 function.instruction(&Instruction::StructSet {
-                    struct_type_index: context.gc.async_frame_index(),
+                    struct_type_index: context.locals.frame().struct_type,
                     field_index: field,
                 });
             }
@@ -413,11 +486,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
@@ -451,11 +524,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
@@ -476,17 +549,17 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
         }
         Some(IntrinsicId::UnityIl2Cpp) => {
-            function.instruction(&Instruction::LocalGet(0));
+            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_expr(function, args[0], context);
             function
                 .instruction(&Instruction::Call(
@@ -501,17 +574,17 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(unity_module_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
         }
         Some(IntrinsicId::UnityModuleImage) => {
-            function.instruction(&Instruction::LocalGet(0));
+            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             function
@@ -527,17 +600,17 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(unity_image_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
         }
         Some(IntrinsicId::UnityImageClass) => {
-            function.instruction(&Instruction::LocalGet(0));
+            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             function
@@ -553,17 +626,17 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(unity_class_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
         }
         Some(IntrinsicId::UnityClassFieldAny) => {
-            function.instruction(&Instruction::LocalGet(0));
+            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             function
@@ -579,17 +652,17 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(unity_field_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
         }
         Some(IntrinsicId::UnityClassField) => {
-            function.instruction(&Instruction::LocalGet(0));
+            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             function
@@ -605,20 +678,20 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::I64Const(1))
                     .instruction(&Instruction::I64Sub)
                     .instruction(&Instruction::I32WrapI64)
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
         }
         Some(IntrinsicId::UnityClassStaticInstance) => {
-            function.instruction(&Instruction::LocalGet(0));
+            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
             function
@@ -634,11 +707,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
@@ -662,7 +735,7 @@ fn compile_suspension_poll(
                 })
                 .instruction(&Instruction::I64ExtendI32U)
                 .instruction(&Instruction::LocalSet(module_address_local))
-                .instruction(&Instruction::LocalGet(0));
+                .instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             function
                 .instruction(&Instruction::RefAsNonNull)
@@ -698,11 +771,11 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
@@ -717,7 +790,7 @@ fn compile_suspension_poll(
                 unreachable!();
             };
             let entry = signatures.get(signature);
-            function.instruction(&Instruction::LocalGet(0));
+            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             function
                 .instruction(&Instruction::RefAsNonNull)
@@ -749,17 +822,151 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
             if let Some((field, _)) = layout.field(destination) {
-                emit_async_frame_ref(function, context.runtime_globals);
+                context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
                     .instruction(&Instruction::StructSet {
-                        struct_type_index: context.gc.async_frame_index(),
+                        struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
                     });
             }
         }
         _ => unreachable!("type checking only permits awaitable builtins"),
     }
+}
+
+fn compile_source_future_poll(
+    function: &mut Function,
+    destination: wasm_ir::SuspensionDestination,
+    expression: ExprId,
+    parent_layout: &AsyncFrameLayout,
+    context: &ExprContext<'_>,
+) {
+    let (child_field, child_type) = parent_layout.children[&expression];
+    let Type::Async(child_future) = child_type else {
+        unreachable!("source async calls produce future values")
+    };
+    let parent = context.locals.frame();
+
+    parent.emit(function);
+    function
+        .instruction(&Instruction::StructGet {
+            struct_type_index: parent.struct_type,
+            field_index: child_field,
+        })
+        .instruction(&Instruction::RefIsNull)
+        .instruction(&Instruction::If(BlockType::Empty));
+    parent.emit(function);
+    compile_expr(function, expression, context);
+    function
+        .instruction(&Instruction::StructSet {
+            struct_type_index: parent.struct_type,
+            field_index: child_field,
+        })
+        .instruction(&Instruction::End);
+
+    let candidates = context
+        .async_frames
+        .functions()
+        .filter(|(candidate, _)| {
+            let result = context.semantics.specialize_type(
+                candidate,
+                context
+                    .semantics
+                    .function_result(candidate.function)
+                    .expect("checked functions have result types"),
+            );
+            semantic_type(result, context.semantics) == child_type
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        !candidates.is_empty(),
+        "reachable source future values have at least one concrete producer"
+    );
+    function.instruction(&Instruction::Block(BlockType::Empty));
+    for (child, child_layout) in candidates {
+        let child_frame = context.gc.function_frame_index(child);
+        parent.emit(function);
+        function
+            .instruction(&Instruction::StructGet {
+                struct_type_index: parent.struct_type,
+                field_index: child_field,
+            })
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::StructGet {
+                struct_type_index: context.gc.index(Type::Async(child_future)),
+                field_index: 1,
+            })
+            .instruction(&Instruction::I32Const(
+                context.gc.function_frame_tag(child) as i32
+            ))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::If(BlockType::Empty));
+        emit_child_frame(function, parent, child_field, child_frame);
+        function
+            .instruction(&Instruction::Call(
+                context.functions[child]
+                    .poll
+                    .expect("async source functions have poll entries"),
+            ))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End);
+
+        if let Some((destination_field, destination_type)) = parent_layout.field(destination) {
+            let (completion_field, completion_type) = child_layout
+                .completion
+                .expect("value-producing async callees have completion slots");
+            debug_assert_eq!(destination_type, completion_type);
+            parent.emit(function);
+            emit_child_frame(function, parent, child_field, child_frame);
+            emit_typed_struct_get(function, child_frame, completion_field, completion_type);
+            function.instruction(&Instruction::StructSet {
+                struct_type_index: parent.struct_type,
+                field_index: destination_field,
+            });
+        }
+
+        clear_child_future(function, parent, child_field, child_future, context);
+        function
+            .instruction(&Instruction::Br(1))
+            .instruction(&Instruction::End);
+    }
+    function
+        .instruction(&Instruction::Unreachable)
+        .instruction(&Instruction::End);
+}
+
+fn clear_child_future(
+    function: &mut Function,
+    parent: AsyncFrameRef,
+    field: u32,
+    future: crate::ast::AsyncTypeId,
+    context: &ExprContext<'_>,
+) {
+    parent.emit(function);
+    function
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            context.gc.index(Type::Async(future)),
+        )))
+        .instruction(&Instruction::StructSet {
+            struct_type_index: parent.struct_type,
+            field_index: field,
+        });
+}
+
+fn emit_child_frame(function: &mut Function, parent: AsyncFrameRef, field: u32, child_frame: u32) {
+    parent.emit(function);
+    function
+        .instruction(&Instruction::StructGet {
+            struct_type_index: parent.struct_type,
+            field_index: field,
+        })
+        .instruction(&Instruction::RefCastNonNull(HeapType::Concrete(
+            child_frame,
+        )));
 }
 
 fn emit_module_name_value(
@@ -874,7 +1081,7 @@ fn compile_retry_poll(
 
     if let Some((field, stored_type)) = frame.field(destination) {
         debug_assert_eq!(stored_type, semantic_type(*result_value, context.semantics));
-        emit_async_frame_ref(function, context.runtime_globals);
+        context.locals.frame().emit(function);
         function
             .instruction(&Instruction::LocalGet(result_local))
             .instruction(&Instruction::RefAsNonNull);
@@ -885,7 +1092,7 @@ fn compile_retry_poll(
             stored_type,
         );
         function.instruction(&Instruction::StructSet {
-            struct_type_index: context.gc.async_frame_index(),
+            struct_type_index: context.locals.frame().struct_type,
             field_index: field,
         });
     }
@@ -1054,17 +1261,12 @@ fn collect_async_states<'a>(
     }
 }
 
-fn set_async_state(
-    function: &mut Function,
-    state: wasm_ir::AsyncStateId,
-    gc: &GcLayout,
-    globals: RuntimeGlobals,
-) {
-    emit_async_frame_ref(function, globals);
+fn set_async_state(function: &mut Function, state: wasm_ir::AsyncStateId, frame: AsyncFrameRef) {
+    frame.emit(function);
     function
         .instruction(&Instruction::I32Const(state.index() as i32))
         .instruction(&Instruction::StructSet {
-            struct_type_index: gc.async_frame_index(),
+            struct_type_index: frame.struct_type,
             field_index: 0,
         });
 }
@@ -1310,15 +1512,15 @@ fn compile_async_flow(
         wasm_ir::Terminator::Break => {
             loop_control
                 .expect("checked break statements belong to loops")
-                .emit_break(function, context.gc, context.runtime_globals);
+                .emit_break(function, context.locals.continuation_frame());
         }
         wasm_ir::Terminator::Continue => {
             loop_control
                 .expect("checked continue statements belong to loops")
-                .emit_continue(function, context.gc, context.runtime_globals);
+                .emit_continue(function, context.locals.continuation_frame());
         }
         wasm_ir::Terminator::AsyncWhile { header_state, .. } => {
-            set_async_state(function, *header_state, context.gc, context.runtime_globals);
+            set_async_state(function, *header_state, context.locals.frame());
             function.instruction(&Instruction::Br(loop_depth));
         }
         wasm_ir::Terminator::AsyncWhileCondition {
@@ -1341,26 +1543,46 @@ fn compile_async_flow(
                 context,
             );
             function.instruction(&Instruction::Else);
-            set_async_state(function, *exit_state, context.gc, context.runtime_globals);
+            set_async_state(function, *exit_state, context.locals.frame());
             function
                 .instruction(&Instruction::Br(loop_depth + 1))
                 .instruction(&Instruction::End);
         }
         wasm_ir::Terminator::AsyncFor { header_state, .. } => {
-            set_async_state(function, *header_state, context.gc, context.runtime_globals);
+            set_async_state(function, *header_state, context.locals.frame());
             function.instruction(&Instruction::Br(loop_depth));
         }
         wasm_ir::Terminator::Return(value) => {
-            if let Some(global) = result_global {
-                compile_expr(
-                    function,
-                    value.expect("layout selection returns a typed layout"),
-                    context,
-                );
-                function.instruction(&Instruction::GlobalSet(global));
-            } else {
-                debug_assert!(value.is_none());
+            match context.bare_return {
+                BareReturn::AsyncFuture { frame, completion } => {
+                    if let Some(value) = value {
+                        let (field, _) =
+                            completion.expect("value-returning futures have completion slots");
+                        frame.emit(function);
+                        compile_expr(function, *value, context);
+                        function.instruction(&Instruction::StructSet {
+                            struct_type_index: frame.struct_type,
+                            field_index: field,
+                        });
+                    }
+                }
+                BareReturn::AsyncAttach => {
+                    if let Some(global) = result_global {
+                        compile_expr(
+                            function,
+                            value.expect("layout selection returns a typed layout"),
+                            context,
+                        );
+                        function.instruction(&Instruction::GlobalSet(global));
+                    } else {
+                        debug_assert!(value.is_none());
+                    }
+                }
+                BareReturn::Void | BareReturn::Action(_) => {
+                    unreachable!("direct bodies do not use the async state emitter")
+                }
             }
+            mark_future_complete(function, context.bare_return);
             function
                 .instruction(&Instruction::I32Const(1))
                 .instruction(&Instruction::Return);
@@ -1374,14 +1596,19 @@ fn compile_async_flow(
             cancellation,
             ..
         } => {
-            assert_eq!(
-                *cancellation,
-                Some(cancellation_region),
-                "awaited standard-library operation must participate in its body's cancellation region"
-            );
-            set_async_state(function, *poll_state, context.gc, context.runtime_globals);
+            if call_target(context.wasm_ir, *value)
+                .and_then(resolved_intrinsic)
+                .is_some()
+            {
+                assert_eq!(
+                    *cancellation,
+                    Some(cancellation_region),
+                    "awaited standard-library operation must participate in its body's cancellation region"
+                );
+            }
+            set_async_state(function, *poll_state, context.locals.frame());
             if *mode == SuspensionMode::Await
-                && resolved_intrinsic(call_target(context.wasm_ir, *value))
+                && call_target(context.wasm_ir, *value).and_then(resolved_intrinsic)
                     == Some(IntrinsicId::NextTick)
             {
                 function
@@ -1400,7 +1627,7 @@ fn compile_async_flow(
                     context,
                 );
             }
-            set_async_state(function, *resume_state, context.gc, context.runtime_globals);
+            set_async_state(function, *resume_state, context.locals.frame());
             function.instruction(&Instruction::Br(loop_depth));
         }
         wasm_ir::Terminator::Throw { .. } => {

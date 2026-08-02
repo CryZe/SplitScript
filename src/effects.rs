@@ -90,6 +90,12 @@ fn collect_call_facts(facts: &mut CallFacts, call: &ResolvedCall, program: &Type
 
 impl TypedVisitor for CallCollector<'_> {
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
+        if matches!(expression.kind, hir::TypedExpressionKind::Suspend { .. }) {
+            self.facts
+                .effects
+                .extend([Effect::Suspends, Effect::CancelsOnProcessClose]);
+            self.facts.availability = Availability::OnAttach;
+        }
         if let Some(call) = program.call(expression.id) {
             collect_call_facts(self.facts, call, program);
         }
@@ -358,11 +364,11 @@ onAttach {
     CatalogSuspensionProbe.waitThroughHelper()
 }
 "#;
-        let errors = crate::check(crate::lower(crate::parse(synchronous).unwrap())).unwrap_err();
-        assert!(errors.iter().any(|error| {
-            error
-                .message
-                .contains("`CatalogSuspensionProbe.waitThroughHelper` suspends and must be awaited")
+        let mut database = crate::database::CompilerDatabase::new(synchronous);
+        let recovered = database.recovering_check().unwrap();
+        assert!(recovered.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code == crate::DiagnosticCode::MustUse
+                && diagnostic.message == "unused result of `async operation`"
         }));
     }
 
@@ -388,11 +394,7 @@ onAttach {
 "#;
         let mut database = crate::database::CompilerDatabase::new(source);
         let recovered = database.recovering_check().unwrap();
-        assert!(recovered.diagnostics().iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("require typed continuation-frame emission")
-        }));
+        assert!(recovered.diagnostics().is_empty());
         for name in ["loadModule", "loadModuleIndirectly"] {
             let function = recovered
                 .syntax()
@@ -419,14 +421,7 @@ onAttach {
         );
         assert!(hints.iter().any(|hint| hint.label == " -> async Module"));
 
-        let errors = crate::compile(source).expect_err(
-            "async source calls must stop before synchronous Wasm emission until frames land",
-        );
-        assert!(errors.iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("require typed continuation-frame emission")
-        }));
+        crate::compile(source).expect("typed source futures should lower to continuation frames");
     }
 
     #[test]

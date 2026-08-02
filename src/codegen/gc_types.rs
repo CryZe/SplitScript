@@ -9,13 +9,14 @@ use crate::{
     ast::{EnumDecl, Program},
     semantic::SemanticModel,
     stdlib::{DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibTypeId},
-    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType},
+    types::{ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType},
 };
 
 use super::{
-    GcLayout, Type, array_element_type, async_frame::AsyncFrameLayout, enum_variant_payload,
-    option_value_type, reachability, record_field_type, result_value_type, standard_field_type,
-    value_type,
+    GcLayout, Type, array_element_type,
+    async_frame::{AsyncFrameLayout, AsyncFrameLayouts},
+    enum_variant_payload, option_value_type, reachability, record_field_type, result_value_type,
+    standard_field_type, value_type,
 };
 
 pub(super) struct EncodedTypes {
@@ -29,10 +30,12 @@ pub(super) struct Inputs<'a> {
     pub program: &'a Program,
     pub semantics: &'a SemanticModel,
     pub async_layout: Option<&'a AsyncFrameLayout>,
+    pub async_frames: &'a AsyncFrameLayouts,
     pub enums: &'a [EnumDecl],
     pub array_types: &'a [ResolvedArrayType],
     pub option_types: &'a [ResolvedOptionType],
     pub result_types: &'a [ResolvedResultType],
+    pub async_types: &'a [ResolvedAsyncType],
     pub reachability: &'a reachability::Reachability,
 }
 
@@ -42,21 +45,25 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         program,
         semantics,
         async_layout,
+        async_frames,
         enums,
         array_types,
         option_types,
         result_types,
+        async_types,
         reachability,
     } = inputs;
-    let layout = GcLayout::plan(
-        standard_library.clone(),
+    let layout = GcLayout::plan(super::gc_layout::Inputs {
+        standard_library: standard_library.clone(),
         program,
         enums,
-        array_types,
-        option_types,
-        result_types,
+        arrays: array_types,
+        options: option_types,
+        results: result_types,
+        asyncs: async_types,
+        async_frames,
         reachability,
-    );
+    });
     let state = program
         .state
         .as_ref()
@@ -266,6 +273,77 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             supertype_idx,
             composite_type: CompositeType {
                 inner,
+                shared: false,
+                descriptor: None,
+                describes: None,
+            },
+        });
+    }
+    for future in async_types
+        .iter()
+        .filter(|future| reachability.contains_async_type(future.id))
+    {
+        debug_assert_eq!(
+            layout.index(Type::Async(future.id)),
+            recursive_types.len() as u32
+        );
+        recursive_types.push(SubType {
+            is_final: false,
+            supertype_idx: None,
+            composite_type: CompositeType {
+                inner: CompositeInnerType::Struct(StructType {
+                    fields: vec![
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I32),
+                            mutable: true,
+                        },
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I32),
+                            mutable: false,
+                        },
+                    ]
+                    .into(),
+                }),
+                shared: false,
+                descriptor: None,
+                describes: None,
+            },
+        });
+    }
+    for (instance, frame) in async_frames.functions() {
+        let result = semantics.specialize_type(
+            instance,
+            semantics
+                .function_result(instance.function)
+                .expect("checked functions have result types"),
+        );
+        let Type::Async(future) = super::semantic_type(result, semantics) else {
+            unreachable!("suspending functions return async values")
+        };
+        let frame_index = layout.function_frame_index(instance);
+        debug_assert_eq!(frame_index, recursive_types.len() as u32);
+        recursive_types.push(SubType {
+            is_final: true,
+            supertype_idx: Some(layout.index(Type::Async(future))),
+            composite_type: CompositeType {
+                inner: CompositeInnerType::Struct(StructType {
+                    fields: [
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I32),
+                            mutable: true,
+                        },
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I32),
+                            mutable: false,
+                        },
+                    ]
+                    .into_iter()
+                    .chain(frame.types.iter().map(|ty| FieldType {
+                        element_type: layout.storage_type(*ty),
+                        mutable: true,
+                    }))
+                    .collect(),
+                }),
                 shared: false,
                 descriptor: None,
                 describes: None,

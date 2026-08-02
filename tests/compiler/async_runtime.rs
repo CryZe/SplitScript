@@ -640,6 +640,95 @@ fn awaited_call_operands_are_captured_once_before_polling() {
 }
 
 #[test]
+fn source_defined_async_functions_use_typed_nested_frames() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn loadModule(expected: u32) -> async Module {
+            let module = await process.module("game.dll")
+            if expected == 7 { print("parameter survived") }
+            return module
+        }
+
+        fn loadIndirectly() {
+            return await loadModule(7)
+        }
+
+        onAttach {
+            let module = await loadIndirectly()
+            print(module.address)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("source-defined futures should be executable");
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("typed nested continuation frames should produce valid Wasm GC");
+}
+
+#[test]
+fn source_future_values_can_be_stored_and_awaited_later() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn afterTick(value: u32) -> async u32 {
+            await nextTick()
+            return value
+        }
+
+        onAttach {
+            let pending = afterTick(42)
+            print("created")
+            let value = await pending
+            print(value)
+            let again = await pending
+            print(again)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("source future values should be ordinary storable values");
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("stored and repeatedly awaited future handles should validate");
+}
+
+#[test]
+fn source_futures_flow_through_parameters_and_records() {
+    let source = r#"
+        state "game.exe" {}
+
+        record PendingValue {
+            operation: async u32
+        }
+
+        fn afterTick(value: u32) -> async u32 {
+            await nextTick()
+            return value
+        }
+
+        fn consume(operation: async u32) -> async u32 {
+            return await operation
+        }
+
+        onAttach {
+            let pending = PendingValue { operation: afterTick(7) }
+            let value = await consume(pending.operation)
+            print(value)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("async values should use ordinary parameter and record storage");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("future values passed through aggregate storage should validate");
+}
+
+#[test]
 fn signature_literals_are_typed_validated_and_scannable() {
     let source = r#"
         state "game.exe" {}

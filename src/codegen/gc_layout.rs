@@ -5,36 +5,56 @@ use std::collections::HashMap;
 use wasm_encoder::{HeapType, RefType, StorageType, ValType};
 
 use crate::{
-    ast::{EnumDecl, Program},
-    semantic::ResolvedEnumVariantId,
+    ast::{AsyncTypeId, EnumDecl, Program},
+    semantic::{FunctionInstance, ResolvedEnumVariantId},
     stdlib::{
         DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibTypeId,
     },
-    types::{EnumTypeId, ResolvedArrayType, ResolvedOptionType, ResolvedResultType},
+    types::{
+        EnumTypeId, ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType,
+    },
 };
 
-use super::{STATE_TYPE, Type, reachability};
+use super::{STATE_TYPE, Type, async_frame::AsyncFrameLayouts, reachability};
 
 pub(super) struct GcLayout {
     pub standard_library: StandardLibrary,
     standard: HashMap<StdlibTypeId, u32>,
     standard_fields: HashMap<StdlibFieldId, u32>,
     async_frame: u32,
+    async_values: HashMap<AsyncTypeId, u32>,
+    function_frames: HashMap<FunctionInstance, u32>,
+    function_frame_tags: HashMap<FunctionInstance, u32>,
     dynamic: HashMap<Type, u32>,
     ordered: Vec<Type>,
     pub type_count: u32,
 }
 
+pub(super) struct Inputs<'a> {
+    pub standard_library: StandardLibrary,
+    pub program: &'a Program,
+    pub enums: &'a [EnumDecl],
+    pub arrays: &'a [ResolvedArrayType],
+    pub options: &'a [ResolvedOptionType],
+    pub results: &'a [ResolvedResultType],
+    pub asyncs: &'a [ResolvedAsyncType],
+    pub async_frames: &'a AsyncFrameLayouts,
+    pub reachability: &'a reachability::Reachability,
+}
+
 impl GcLayout {
-    pub(super) fn plan(
-        standard_library: StandardLibrary,
-        program: &Program,
-        enums: &[EnumDecl],
-        arrays: &[ResolvedArrayType],
-        options: &[ResolvedOptionType],
-        results: &[ResolvedResultType],
-        reachability: &reachability::Reachability,
-    ) -> Self {
+    pub(super) fn plan(inputs: Inputs<'_>) -> Self {
+        let Inputs {
+            standard_library,
+            program,
+            enums,
+            arrays,
+            options,
+            results,
+            asyncs,
+            async_frames,
+            reachability,
+        } = inputs;
         let standard = standard_library
             .types()
             .iter()
@@ -135,11 +155,30 @@ impl GcLayout {
             next += 1;
         }
 
+        let mut async_values = HashMap::new();
+        for future in asyncs
+            .iter()
+            .filter(|future| reachability.contains_async_type(future.id))
+        {
+            async_values.insert(future.id, next);
+            next += 1;
+        }
+        let mut function_frames = HashMap::new();
+        let mut function_frame_tags = HashMap::new();
+        for (tag, (instance, _)) in async_frames.functions().enumerate() {
+            function_frames.insert(instance.clone(), next);
+            function_frame_tags.insert(instance.clone(), tag as u32 + 1);
+            next += 1;
+        }
+
         Self {
             standard_library,
             standard,
             standard_fields,
             async_frame,
+            async_values,
+            function_frames,
+            function_frame_tags,
             dynamic,
             ordered,
             type_count: next,
@@ -194,10 +233,27 @@ impl GcLayout {
         self.async_frame
     }
 
+    pub(super) fn function_frame_index(&self, instance: &FunctionInstance) -> u32 {
+        self.function_frames
+            .get(instance)
+            .copied()
+            .expect("suspending function instances have planned GC frames")
+    }
+
+    pub(super) fn function_frame_tag(&self, instance: &FunctionInstance) -> u32 {
+        self.function_frame_tags
+            .get(instance)
+            .copied()
+            .expect("suspending function instances have runtime tags")
+    }
+
     pub(super) fn index(&self, ty: Type) -> u32 {
         match ty {
             Type::StateSnapshot => STATE_TYPE,
-            Type::Async(_) => self.async_frame,
+            Type::Async(future) => *self
+                .async_values
+                .get(&future)
+                .expect("reachable async values have erased GC headers"),
             Type::Standard(standard) => self.standard_index(standard),
             Type::Record(_)
             | Type::Enum(_)

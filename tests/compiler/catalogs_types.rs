@@ -839,7 +839,7 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     for item in library.items() {
         assert!(!item.documentation.summary.is_empty());
         for example in item.documentation.examples {
-            splitscript::compile(example.validation_source()).unwrap_or_else(|errors| {
+            splitscript::compile(&example.validation_program()).unwrap_or_else(|errors| {
                 panic!(
                     "standard-library example `{}: {}` failed: {errors:#?}",
                     item.qualified_name, example.title
@@ -850,7 +850,7 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     for provider in library.state_providers() {
         assert!(!provider.documentation.summary.is_empty());
         for example in provider.documentation.examples {
-            splitscript::compile(example.validation_source()).unwrap_or_else(|errors| {
+            splitscript::compile(&example.validation_program()).unwrap_or_else(|errors| {
                 panic!(
                     "state-provider example `{}: {}` failed: {errors:#?}",
                     provider.name, example.title
@@ -858,6 +858,56 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
             });
         }
     }
+    let declaration_documentation = library
+        .namespaces()
+        .iter()
+        .map(|value| (value.name, value.documentation))
+        .chain(
+            library
+                .capabilities()
+                .iter()
+                .map(|value| (value.name, value.documentation)),
+        )
+        .chain(
+            library
+                .type_constructors()
+                .iter()
+                .map(|value| (value.name, value.documentation)),
+        )
+        .chain(
+            library
+                .types()
+                .iter()
+                .map(|value| (value.name, value.documentation)),
+        )
+        .chain(
+            library
+                .fields()
+                .iter()
+                .map(|value| (value.name, value.documentation)),
+        )
+        .chain(
+            library
+                .variants()
+                .iter()
+                .map(|value| (value.name, value.documentation)),
+        );
+    let mut checked_declaration_examples = 0;
+    for (name, documentation) in declaration_documentation {
+        for example in documentation.examples {
+            checked_declaration_examples += 1;
+            splitscript::compile(&example.validation_program()).unwrap_or_else(|errors| {
+                panic!(
+                    "standard-library declaration example `{name}: {}` failed: {errors:#?}",
+                    example.title
+                )
+            });
+        }
+    }
+    assert!(
+        checked_declaration_examples >= 7,
+        "representative non-callable declarations should retain checked examples"
+    );
 }
 
 #[test]
@@ -927,7 +977,7 @@ fn language_catalog_is_valid_documented_and_compilable() {
     for item in language.items() {
         assert!(!item.documentation.summary.is_empty());
         for example in item.documentation.examples {
-            splitscript::compile(example.validation_source()).unwrap_or_else(|errors| {
+            splitscript::compile(&example.validation_program()).unwrap_or_else(|errors| {
                 panic!(
                     "language example `{}: {}` failed: {errors:#?}",
                     item.name, example.title
@@ -1053,6 +1103,16 @@ fn compiler_database_resolves_language_catalog_syntax() {
             splitscript::compiler::stdlib::StdlibSymbolId::Field(StdlibFieldId::ModuleAddress)
         ))
     );
+    let module_field_hover = database
+        .hover(module_field)
+        .unwrap()
+        .expect("standard-library field hover");
+    assert!(module_field_hover.markdown.contains("**Examples**"));
+    assert!(
+        module_field_hover
+            .markdown
+            .contains("let baseAddress = executable.address")
+    );
     let timer_state = source.find("TimerState.Running").unwrap();
     assert_eq!(
         database.definition_at(timer_state).unwrap(),
@@ -1069,6 +1129,15 @@ fn compiler_database_resolves_language_catalog_syntax() {
                 StdlibVariantId::TimerStateRunning
             )
         ))
+    );
+    let running_variant_hover = database
+        .hover(timer_state + "TimerState.".len())
+        .unwrap()
+        .expect("standard-library variant hover");
+    assert!(
+        running_variant_hover
+            .markdown
+            .contains("timer.state() == TimerState.Running")
     );
 
     for (root, expected) in [

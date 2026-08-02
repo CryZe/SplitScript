@@ -607,6 +607,10 @@ impl<'a> Validator<'a> {
             self.error(format!(
                 "`{owner}` must have exactly one focused documentation example"
             ));
+        } else if !example && docs.examples.len() > 1 {
+            self.error(format!(
+                "`{owner}` must not have more than one focused documentation example"
+            ));
         }
         for value in &docs.examples {
             if value.title.trim().is_empty() || value.source.trim().is_empty() {

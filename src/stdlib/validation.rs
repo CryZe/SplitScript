@@ -493,4 +493,19 @@ fn validate_documentation<Id>(
     if documentation.details.trim().is_empty() {
         errors.push(format!("{kind} `{name}` has no documentation details"));
     }
+    if documentation.examples.len() > 1 {
+        errors.push(format!(
+            "{kind} `{name}` has more than one focused documentation example"
+        ));
+    }
+    for example in documentation.examples {
+        if example.title.trim().is_empty()
+            || example.source.trim().is_empty()
+            || !example.has_validation_source()
+        {
+            errors.push(format!(
+                "{kind} `{name}` has an incomplete documentation example"
+            ));
+        }
+    }
 }

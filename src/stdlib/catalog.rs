@@ -11,8 +11,8 @@ use super::{
     declarations::{
         CapabilityBehavior, CoreTypeId, FieldVisibility, RuntimeRepresentation,
         StateProviderAttachment, StateProviderProcesses, StdlibCapability, StdlibField,
-        StdlibNamespace, StdlibOwner, StdlibStateProvider, StdlibSymbolId, StdlibType,
-        StdlibTypeConstructor, StdlibTypeKind, StdlibVariant, ValueUsage,
+        StdlibNamespace, StdlibOwner, StdlibStateProvider, StdlibType, StdlibTypeConstructor,
+        StdlibTypeKind, StdlibVariant, ValueUsage,
     },
     ids::{
         IntrinsicId, StdlibCapabilityId, StdlibFieldId, StdlibItemId, StdlibNamespaceId,
@@ -197,23 +197,11 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
     }
 }
 
-const fn documentation(
-    summary: &'static str,
-    details: &'static str,
-) -> Documentation<StdlibSymbolId> {
-    Documentation {
-        summary,
-        details,
-        examples: &[],
-        related: &[],
-    }
-}
-
 include!(concat!(env!("OUT_DIR"), "/stdlib_catalog.rs"));
 
 #[cfg(test)]
 mod tests {
-    use crate::stdlib::StandardLibrary;
+    use crate::stdlib::{StandardLibrary, StdlibSymbolId};
 
     use super::*;
 

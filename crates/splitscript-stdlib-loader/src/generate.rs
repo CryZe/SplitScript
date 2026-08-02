@@ -112,9 +112,9 @@ impl<'a> CatalogGenerator<'a> {
                     .collect::<Vec<_>>()
                     .join(",");
                 output.push_str(&format!(
-                    "StdlibCapability {{ id: StdlibCapabilityId::{}, name: {}, super_capabilities: &[{super_capabilities}], behavior: CapabilityBehavior::{behavior}, documentation: documentation({}, {}) }},\n",
+                    "StdlibCapability {{ id: StdlibCapabilityId::{}, name: {}, super_capabilities: &[{super_capabilities}], behavior: CapabilityBehavior::{behavior}, documentation: {} }},\n",
                     ident(&owner.name), quote(&owner.name),
-                    quote(&owner.documentation.summary), quote(&owner.documentation.details)
+                    self.documentation(&owner.documentation)
                 ));
             }
         }
@@ -127,10 +127,10 @@ impl<'a> CatalogGenerator<'a> {
                     .map(|reason| format!("Some({})", quote(reason)))
                     .unwrap_or_else(|| "None".to_owned());
                 output.push_str(&format!(
-                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, name: {}, parameters: &[{}], must_use: {must_use}, documentation: documentation({}, {}) }},\n",
+                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, name: {}, parameters: &[{}], must_use: {must_use}, documentation: {} }},\n",
                     quote(&owner.name),
                     owner.type_parameters.iter().map(|parameter| quote(&parameter.name)).collect::<Vec<_>>().join(","),
-                    quote(&owner.documentation.summary), quote(&owner.documentation.details)
+                    self.documentation(&owner.documentation)
                 ));
             }
         }
@@ -139,10 +139,10 @@ impl<'a> CatalogGenerator<'a> {
             if let Declaration::Namespace(owner) = declaration {
                 let id = path_ident(&owner.name);
                 output.push_str(&format!(
-                    "StdlibNamespace {{ id: StdlibNamespaceId::{id}, name: {}, path: &[{}], documentation: documentation({}, {}) }},\n",
+                    "StdlibNamespace {{ id: StdlibNamespaceId::{id}, name: {}, path: &[{}], documentation: {} }},\n",
                     quote(owner.name.rsplit('.').next().unwrap()),
                     owner.name.split('.').map(quote).collect::<Vec<_>>().join(","),
-                    quote(&owner.documentation.summary), quote(&owner.documentation.details)
+                    self.documentation(&owner.documentation)
                 ));
             }
         }
@@ -173,9 +173,9 @@ impl<'a> CatalogGenerator<'a> {
                 let owner = ident(&declaration.name);
                 for variant in &declaration.variants {
                     output.push_str(&format!(
-                        "StdlibVariant {{ id: StdlibVariantId::{}{}, owner: StdlibTypeId::{owner}, name: {}, documentation: documentation({}, {}) }},\n",
+                        "StdlibVariant {{ id: StdlibVariantId::{}{}, owner: StdlibTypeId::{owner}, name: {}, documentation: {} }},\n",
                         owner, ident(&variant.name), quote(&variant.name),
-                        quote(&variant.documentation.summary), quote(&variant.documentation.summary)
+                        self.documentation(&variant.documentation)
                     ));
                 }
             }
@@ -184,6 +184,30 @@ impl<'a> CatalogGenerator<'a> {
         self.emit_all_items(&mut output);
         output.push_str("];\n");
         output
+    }
+
+    fn documentation(&self, documentation: &crate::Documentation) -> String {
+        let examples = documentation
+            .examples
+            .iter()
+            .map(|example| {
+                format!(
+                    "Example::on_attach_body({}, {})",
+                    quote(&example.title),
+                    quote(&example.source)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "Documentation {{ summary: {}, details: {}, examples: &[{examples}], related: &[] }}",
+            quote(&documentation.summary),
+            quote(if documentation.details.is_empty() {
+                &documentation.summary
+            } else {
+                &documentation.details
+            })
+        )
     }
 
     fn emit_type(&self, output: &mut String, declaration: &StructDeclaration, kind: &str) {
@@ -206,20 +230,20 @@ impl<'a> CatalogGenerator<'a> {
             output.push_str("#[cfg(test)] ");
         }
         output.push_str(&format!(
-            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, kind: StdlibTypeKind::{kind}, capabilities: {}, display: {display}, representation: {}, value_usage: {}, documentation: documentation({}, {}) }},\n",
+            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, kind: StdlibTypeKind::{kind}, capabilities: {}, display: {display}, representation: {}, value_usage: {}, documentation: {} }},\n",
             quote(&declaration.name), self.capabilities(&declaration.attributes),
             self.representation(&declaration.attributes), self.value_usage(&declaration.attributes),
-            quote(&declaration.documentation.summary), quote(&declaration.documentation.details)
+            self.documentation(&declaration.documentation)
         ));
     }
 
     fn emit_enum_type(&self, output: &mut String, declaration: &crate::EnumDeclaration) {
         let id = ident(&declaration.name);
         output.push_str(&format!(
-            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, kind: StdlibTypeKind::Enum, capabilities: {}, display: None, representation: {}, value_usage: {}, documentation: documentation({}, {}) }},\n",
+            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, kind: StdlibTypeKind::Enum, capabilities: {}, display: None, representation: {}, value_usage: {}, documentation: {} }},\n",
             quote(&declaration.name), self.capabilities(&declaration.attributes),
             self.representation(&declaration.attributes), self.value_usage(&declaration.attributes),
-            quote(&declaration.documentation.summary), quote(&declaration.documentation.details)
+            self.documentation(&declaration.documentation)
         ));
     }
 
@@ -231,7 +255,7 @@ impl<'a> CatalogGenerator<'a> {
                 output.push_str("#[cfg(test)] ");
             }
             output.push_str(&format!(
-                "StdlibField {{ id: StdlibFieldId::{}{}, owner: StdlibTypeId::{owner}, name: {}, ty: {}, visibility: FieldVisibility::{}, documentation: documentation({}, {}) }},\n",
+                "StdlibField {{ id: StdlibFieldId::{}{}, owner: StdlibTypeId::{owner}, name: {}, ty: {}, visibility: FieldVisibility::{}, documentation: {} }},\n",
                 owner, ident(&field.name),
                 quote(&field.name),
                 self.type_ref(&field.ty, &[]),
@@ -240,7 +264,7 @@ impl<'a> CatalogGenerator<'a> {
                 } else {
                     "Public"
                 },
-                quote(&field.documentation.summary), quote(&field.documentation.summary)
+                self.documentation(&field.documentation)
             ));
         }
     }
@@ -944,6 +968,40 @@ struct FileVersion {
         assert!(generated.contains("display: Some(StdlibItemId::FileVersionToString)"));
         assert!(generated.contains("Implementation::LibraryBody"));
         assert!(generated.contains("__splitscript_stdlib_FileVersionToString"));
+    }
+
+    #[test]
+    fn non_callable_examples_survive_catalog_generation_as_focused_snippets() {
+        let source = r#"
+/// Timer operations.
+///
+/// # Example
+///
+/// Inspect the timer
+///
+/// ```splitscript
+/// let state = timer.state()
+/// ```
+namespace timer {}
+
+/// Optional values.
+///
+/// # Example
+///
+/// Store an optional value
+///
+/// ```splitscript
+/// let value: u32? = 4
+/// ```
+typeConstructor Option<T> {}
+"#;
+        let generated = generate_catalog(&parse(source).unwrap()).unwrap();
+        assert!(generated.contains(
+            "Example::on_attach_body(\"Inspect the timer\", \"let state = timer.state()\")"
+        ));
+        assert!(generated.contains(
+            "Example::on_attach_body(\"Store an optional value\", \"let value: u32? = 4\")"
+        ));
     }
 
     #[test]

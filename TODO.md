@@ -244,6 +244,18 @@ tooling consumers only see the normalized immutable graph.
   variants, capabilities, and type constructors, then require examples for
   every public documented symbol. Do not pad symbols with shared test-like
   programs; the rendered snippet must teach that symbol specifically.
+  - [x] Preserve documentation examples on every generated declaration kind
+    instead of silently discarding examples outside callables and state
+    providers. Non-callable examples are authored as focused action-body
+    snippets; the shared catalog layer generates their otherwise-uninteresting
+    state/action fixture only for compiler validation, so hover and generated
+    documentation never display test scaffolding. Namespace, capability, type
+    constructor, type, field, enum, and variant examples exercise the first
+    vertical slice through generation, validation, compilation, and hover.
+  - [ ] Author one distinct focused example for every remaining public
+    declaration, reject missing examples at loader and normalized-graph
+    validation boundaries, and add a uniqueness check across non-callable
+    symbols just like the existing callable/provider policy.
 - [ ] Add a trusted custom-capability handler registry only when the first
   capability cannot be described by declared membership, structural equality,
   or structural memory layout. Bind and validate it like an intrinsic rather

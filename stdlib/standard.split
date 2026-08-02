@@ -313,6 +313,14 @@ intrinsic type Process {
 /// Reads information from the LiveSplit timer.
 ///
 /// Timer operations expose runtime state used by autosplitter decisions.
+///
+/// # Example
+///
+/// Inspect the timer through its namespace
+///
+/// ```splitscript
+/// let currentTimerState = timer.state()
+/// ```
 namespace timer {
     /// Returns the current timer state.
     ///
@@ -623,6 +631,14 @@ capability Equatable<T> {}
 ///
 /// An `as String` cast, string interpolation, `print`, and `setVariable` all
 /// display values through this single capability.
+///
+/// # Example
+///
+/// Display a value without an explicit string conversion
+///
+/// ```splitscript
+/// print(42)
+/// ```
 @behavior(declared)
 capability Display<T> {}
 
@@ -708,6 +724,14 @@ typeConstructor Array<T> {
 /// Represents a value that may be absent.
 ///
 /// The postfix `?` type syntax constructs an Option value.
+///
+/// # Example
+///
+/// Store an optional value
+///
+/// ```splitscript
+/// let possibleLevel: u32? = 4
+/// ```
 @mustUse("Optional values must be inspected or explicitly discarded.")
 typeConstructor Option<T> {}
 
@@ -788,6 +812,14 @@ extend address {
 /// produce this same type. A decoded string owns its GC storage and is not a
 /// view into target-process memory. Decoder bounds such as `utf8(64)` describe
 /// the memory operation, not distinct `String` types.
+///
+/// # Example
+///
+/// Store owned text
+///
+/// ```splitscript
+/// let character: String = "Toree"
+/// ```
 @representation(gcArray, u8, mutable, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 @capabilities(Equatable, Display)
@@ -1545,6 +1577,15 @@ struct FileVersion {
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 struct Module {
     /// Returns the module base address.
+    ///
+    /// # Example
+    ///
+    /// Read a discovered module's base address
+    ///
+    /// ```splitscript
+    /// let executable = await process.mainModule()
+    /// let baseAddress = executable.address
+    /// ```
     address: address,
 
     /// Returns the mapped module size.
@@ -1759,6 +1800,20 @@ struct Module {
 /// Describes the current LiveSplit timer state.
 ///
 /// Timer state is an exhaustive enum returned by timer.state().
+///
+/// # Example
+///
+/// Match the complete timer state
+///
+/// ```splitscript
+/// let label = match timer.state() {
+///     TimerState.NotRunning => "Not running",
+///     TimerState.Running => "Running",
+///     TimerState.Paused => "Paused",
+///     TimerState.Ended => "Ended",
+///     TimerState.Unknown => "Unknown"
+/// }
+/// ```
 @representation(enum, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
 @capabilities(Equatable)
@@ -1767,6 +1822,14 @@ enum TimerState {
     NotRunning,
 
     /// The timer is running.
+    ///
+    /// # Example
+    ///
+    /// Detect an active run
+    ///
+    /// ```splitscript
+    /// let active = timer.state() == TimerState.Running
+    /// ```
     Running,
 
     /// The timer is paused.

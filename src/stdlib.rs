@@ -702,7 +702,7 @@ impl StandardLibrary {
             for example in provider.documentation.examples {
                 if example.title.trim().is_empty()
                     || example.source.trim().is_empty()
-                    || example.validation_source().trim().is_empty()
+                    || !example.has_validation_source()
                 {
                     errors.push(format!(
                         "state provider `{}` has an incomplete example",
@@ -931,7 +931,7 @@ impl StandardLibrary {
             for example in item.documentation.examples {
                 if example.title.trim().is_empty()
                     || example.source.trim().is_empty()
-                    || example.validation_source().trim().is_empty()
+                    || !example.has_validation_source()
                 {
                     errors.push(format!(
                         "`{}` has an incomplete example",
@@ -1209,6 +1209,21 @@ fn validate_named_declarations<T, I>(
         }
         if documentation.summary.trim().is_empty() || documentation.details.trim().is_empty() {
             errors.push(format!("{kind} `{name}` has incomplete documentation"));
+        }
+        if documentation.examples.len() > 1 {
+            errors.push(format!(
+                "{kind} `{name}` has more than one focused documentation example"
+            ));
+        }
+        for example in documentation.examples {
+            if example.title.trim().is_empty()
+                || example.source.trim().is_empty()
+                || !example.has_validation_source()
+            {
+                errors.push(format!(
+                    "{kind} `{name}` has an incomplete documentation example"
+                ));
+            }
         }
     }
 }

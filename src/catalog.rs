@@ -21,7 +21,13 @@ pub struct Example {
     /// A complete program used only to keep the example compiler-checked.
     /// This may provide declarations and lifecycle context that would distract
     /// from the documented symbol in `source`.
-    validation_source: &'static str,
+    validation: ExampleValidation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExampleValidation {
+    CompleteProgram(&'static str),
+    OnAttachBody,
 }
 
 impl Example {
@@ -33,11 +39,41 @@ impl Example {
         Self {
             title,
             source,
-            validation_source,
+            validation: ExampleValidation::CompleteProgram(validation_source),
         }
     }
 
-    pub const fn validation_source(self) -> &'static str {
-        self.validation_source
+    /// Creates a focused statement snippet whose compiler fixture is generated
+    /// automatically. Catalog authors do not need to pollute the visible
+    /// example with an otherwise unrelated state declaration and action block.
+    pub const fn on_attach_body(title: &'static str, source: &'static str) -> Self {
+        Self {
+            title,
+            source,
+            validation: ExampleValidation::OnAttachBody,
+        }
+    }
+
+    pub fn validation_program(self) -> String {
+        match self.validation {
+            ExampleValidation::CompleteProgram(source) => source.to_owned(),
+            ExampleValidation::OnAttachBody => {
+                let mut program = String::from("state \"example.exe\" {}\nonAttach {\n");
+                for line in self.source.lines() {
+                    program.push_str("    ");
+                    program.push_str(line);
+                    program.push('\n');
+                }
+                program.push_str("}\n");
+                program
+            }
+        }
+    }
+
+    pub const fn has_validation_source(self) -> bool {
+        match self.validation {
+            ExampleValidation::CompleteProgram(source) => !source.is_empty(),
+            ExampleValidation::OnAttachBody => true,
+        }
     }
 }

@@ -1424,6 +1424,28 @@ onAttach {
     }
 
     #[test]
+    fn stored_future_hover_preserves_the_async_value_type() {
+        let source = r#"
+state "game.exe" {}
+onAttach {
+    let pending = process.mainModule()
+    print("created")
+    let module = await pending
+    print(module.address)
+}
+"#;
+        let offset = source.rfind("pending").unwrap();
+        let mut database = CompilerDatabase::new(source);
+        let hover = database.hover(offset).unwrap().expect("future hover");
+        assert!(
+            hover.markdown.contains("let pending: async Module"),
+            "{}",
+            hover.markdown
+        );
+        assert!(hover.markdown.contains("Local variable"));
+    }
+
+    #[test]
     fn inferred_generic_function_hover_shows_parameters_and_capability_bounds() {
         let source = r#"
 fn smaller(left, right) {

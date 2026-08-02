@@ -16,14 +16,17 @@ use crate::{
 
 use super::{
     LocalPlanOptions, Type,
-    async_frame::{AsyncFrameLayout, AsyncFrameRef, AsyncFrameSource},
+    async_frame::{
+        AsyncFrameLayout, AsyncFrameRef, AsyncFrameSource, IntrinsicFutureInstance,
+        IntrinsicFutureLayout,
+    },
     call_target,
     context::AttachContext,
     data_plan::{SignaturePool, StringPool},
     emit_memory_value, emit_string_literal, emit_typed_struct_get,
     expression::{
-        BareReturn, ExprContext, LocalStorage, LoopControl, MatchLayout, compile_assignment,
-        compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
+        BareReturn, ExprContext, IntrinsicCapture, LocalStorage, LoopControl, MatchLayout,
+        compile_assignment, compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
         compile_for_has_next, compile_for_init, compile_receiver, compile_statement_pattern,
         compile_temporary_set, store_match_binding,
     },
@@ -91,6 +94,136 @@ pub(super) fn compile_async_function_poll(
     )
 }
 
+pub(super) fn compile_intrinsic_future_poll(
+    instance: &IntrinsicFutureInstance,
+    layout: &IntrinsicFutureLayout,
+    runtime: &AttachContext<'_>,
+) -> Function {
+    let frame = AsyncFrameRef {
+        struct_type: runtime.lowering.gc.intrinsic_frame_index(instance),
+        source: AsyncFrameSource::Local(0),
+    };
+    let planned = wasm_ir::intrinsic_future_locals(
+        instance.expression,
+        runtime.lowering.wasm_ir,
+        runtime.lowering.semantics,
+    );
+    let mut matches = MatchLayout::default();
+    let mut local_types = Vec::new();
+    let mut values = HashMap::new();
+    plan_wasm_locals(
+        &planned,
+        &mut values,
+        &mut matches,
+        &mut local_types,
+        LocalPlanOptions {
+            parameter_count: 1,
+            semantics: runtime.lowering.semantics,
+            instance: instance.owner.as_ref(),
+            include_values: false,
+        },
+    );
+    let mut function = Function::new(
+        local_types
+            .into_iter()
+            .map(|ty| (1, runtime.lowering.gc.val_type(ty))),
+    );
+    let empty_values = HashMap::new();
+    let empty_temporaries = HashMap::new();
+    let context = ExprContext {
+        standard_library: runtime.lowering.standard_library,
+        abi: runtime.abi,
+        state: runtime.lowering.state,
+        locals: LocalStorage::Hybrid {
+            frame,
+            wasm_values: &empty_values,
+            frame_values: &empty_values,
+            wasm_temporaries: &empty_temporaries,
+            frame_temporaries: &empty_temporaries,
+        },
+        globals: runtime.lowering.globals,
+        global_types: runtime.lowering.global_types,
+        settings: runtime.lowering.settings,
+        runtime_globals: runtime.lowering.runtime_globals,
+        runtime_helpers: runtime.lowering.runtime_helpers,
+        functions: runtime.lowering.functions,
+        intrinsic_futures: runtime.lowering.intrinsic_futures,
+        display_functions: runtime.lowering.display_functions,
+        equality_functions: runtime.lowering.equality_functions,
+        records: runtime.lowering.records,
+        enums: runtime.lowering.enums,
+        arrays: runtime.lowering.arrays,
+        memory: runtime.lowering.memory,
+        abi_read: runtime.lowering.abi_read,
+        matches: &matches,
+        semantics: runtime.lowering.semantics,
+        wasm_ir: runtime.lowering.wasm_ir,
+        gc: runtime.lowering.gc,
+        async_frames: runtime.lowering.async_frames,
+        intrinsic_capture: Some(IntrinsicCapture { frame, layout }),
+        function_instance: instance.owner.as_ref(),
+        loop_control: None,
+        bare_return: BareReturn::AsyncFuture {
+            frame,
+            completion: layout.completion,
+        },
+    };
+
+    frame.emit(&mut function);
+    function
+        .instruction(&Instruction::StructGet {
+            struct_type_index: frame.struct_type,
+            field_index: 0,
+        })
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+
+    if call_target(runtime.lowering.wasm_ir, instance.expression).and_then(resolved_intrinsic)
+        == Some(IntrinsicId::NextTick)
+    {
+        frame.emit(&mut function);
+        function
+            .instruction(&Instruction::StructGet {
+                struct_type_index: frame.struct_type,
+                field_index: 0,
+            })
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::If(BlockType::Empty));
+        frame.emit(&mut function);
+        function
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::StructSet {
+                struct_type_index: frame.struct_type,
+                field_index: 0,
+            })
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End);
+    }
+
+    let destination_layout = AsyncFrameLayout::for_leaf_completion(layout.completion);
+    compile_suspension_poll(
+        &mut function,
+        SuspensionMode::Await,
+        wasm_ir::SuspensionDestination::BodyResult,
+        instance.expression,
+        runtime.abi,
+        runtime.strings,
+        runtime.signatures,
+        &destination_layout,
+        &context,
+    );
+    mark_future_complete(&mut function, context.bare_return);
+    function
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::End);
+    function
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compile_async_body(
     wasm_body: &wasm_ir::Body,
@@ -141,6 +274,7 @@ fn compile_async_body(
         runtime_globals: runtime.lowering.runtime_globals,
         runtime_helpers: runtime.lowering.runtime_helpers,
         functions: runtime.lowering.functions,
+        intrinsic_futures: runtime.lowering.intrinsic_futures,
         display_functions: runtime.lowering.display_functions,
         equality_functions: runtime.lowering.equality_functions,
         records: runtime.lowering.records,
@@ -153,6 +287,7 @@ fn compile_async_body(
         wasm_ir: runtime.lowering.wasm_ir,
         gc: runtime.lowering.gc,
         async_frames: runtime.lowering.async_frames,
+        intrinsic_capture: None,
         function_instance,
         loop_control: None,
         bare_return,
@@ -417,7 +552,9 @@ fn compile_suspension_poll(
         }
         Some(IntrinsicId::ProcessRead) => {
             let read_type_id = match target {
-                wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => type_arguments[0],
+                wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => {
+                    context.type_id(type_arguments[0])
+                }
                 _ => unreachable!("process.read must resolve to its standard-library item"),
             };
             let read_type = semantic_type(read_type_id, context.semantics);
@@ -865,7 +1002,7 @@ fn compile_source_future_poll(
         })
         .instruction(&Instruction::End);
 
-    let candidates = context
+    let source_candidates = context
         .async_frames
         .functions()
         .filter(|(candidate, _)| {
@@ -879,12 +1016,17 @@ fn compile_source_future_poll(
             semantic_type(result, context.semantics) == child_type
         })
         .collect::<Vec<_>>();
+    let intrinsic_candidates = context
+        .async_frames
+        .intrinsics()
+        .filter(|(_, layout)| layout.future == child_type)
+        .collect::<Vec<_>>();
     assert!(
-        !candidates.is_empty(),
-        "reachable source future values have at least one concrete producer"
+        !source_candidates.is_empty() || !intrinsic_candidates.is_empty(),
+        "reachable future values have at least one concrete producer"
     );
     function.instruction(&Instruction::Block(BlockType::Empty));
-    for (child, child_layout) in candidates {
+    for (child, child_layout) in source_candidates {
         let child_frame = context.gc.function_frame_index(child);
         parent.emit(function);
         function
@@ -919,6 +1061,52 @@ fn compile_source_future_poll(
             let (completion_field, completion_type) = child_layout
                 .completion
                 .expect("value-producing async callees have completion slots");
+            debug_assert_eq!(destination_type, completion_type);
+            parent.emit(function);
+            emit_child_frame(function, parent, child_field, child_frame);
+            emit_typed_struct_get(function, child_frame, completion_field, completion_type);
+            function.instruction(&Instruction::StructSet {
+                struct_type_index: parent.struct_type,
+                field_index: destination_field,
+            });
+        }
+
+        clear_child_future(function, parent, child_field, child_future, context);
+        function
+            .instruction(&Instruction::Br(1))
+            .instruction(&Instruction::End);
+    }
+    for (child, child_layout) in intrinsic_candidates {
+        let child_frame = context.gc.intrinsic_frame_index(child);
+        parent.emit(function);
+        function
+            .instruction(&Instruction::StructGet {
+                struct_type_index: parent.struct_type,
+                field_index: child_field,
+            })
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::StructGet {
+                struct_type_index: context.gc.index(Type::Async(child_future)),
+                field_index: 1,
+            })
+            .instruction(&Instruction::I32Const(
+                context.gc.intrinsic_frame_tag(child) as i32,
+            ))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::If(BlockType::Empty));
+        emit_child_frame(function, parent, child_field, child_frame);
+        function
+            .instruction(&Instruction::Call(context.intrinsic_futures[child]))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End);
+
+        if let Some((destination_field, destination_type)) = parent_layout.field(destination) {
+            let (completion_field, completion_type) = child_layout
+                .completion
+                .expect("value-producing intrinsic futures have completion slots");
             debug_assert_eq!(destination_type, completion_type);
             parent.emit(function);
             emit_child_frame(function, parent, child_field, child_frame);

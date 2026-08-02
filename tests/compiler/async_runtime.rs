@@ -2,6 +2,93 @@
 
 use super::*;
 
+#[derive(Default)]
+struct AsyncTestHost {
+    process_open: bool,
+    messages: Vec<String>,
+}
+
+fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasmtime::Instance) {
+    use wasmtime::{Config, Engine, ExternType, Linker, Module, Store, Val, ValType};
+
+    let wasm = splitscript::compile(source).expect("runtime fixture should compile");
+    let mut config = Config::new();
+    config.wasm_gc(true);
+    config.wasm_function_references(true);
+    let engine = Engine::new(&config).expect("GC-enabled Wasmtime engine should initialize");
+    let module = Module::new(&engine, wasm).expect("Wasmtime should compile generated Wasm GC");
+    let mut linker: Linker<AsyncTestHost> = Linker::new(&engine);
+    for import in module.imports() {
+        let ExternType::Func(function_type) = import.ty() else {
+            panic!("SplitScript host ABI imports only functions")
+        };
+        let module_name = import.module().to_owned();
+        let name = import.name().to_owned();
+        let host_name = name.clone();
+        let result_types = function_type.results().collect::<Vec<_>>();
+        linker
+            .func_new(
+                &module_name,
+                &name,
+                function_type,
+                move |mut caller, parameters, results| {
+                    for (result, ty) in results.iter_mut().zip(&result_types) {
+                        *result = match ty {
+                            ValType::I32 => Val::I32(0),
+                            ValType::I64 => Val::I64(0),
+                            ValType::F32 => Val::F32(0),
+                            ValType::F64 => Val::F64(0),
+                            ty => panic!("mock host does not return `{ty}`"),
+                        };
+                    }
+                    match host_name.as_str() {
+                        "process_attach" => results[0] = Val::I64(1),
+                        "process_is_open" => {
+                            results[0] = Val::I32(i32::from(caller.data().process_open));
+                        }
+                        "process_get_module_address" => results[0] = Val::I64(0x1000),
+                        "process_get_module_size" => results[0] = Val::I64(0x200),
+                        "runtime_print_message" => {
+                            let pointer = parameters[0].unwrap_i32() as usize;
+                            let length = parameters[1].unwrap_i32() as usize;
+                            let memory = caller
+                                .get_export("memory")
+                                .and_then(wasmtime::Extern::into_memory)
+                                .expect("generated modules export memory");
+                            let mut bytes = vec![0; length];
+                            memory
+                                .read(&caller, pointer, &mut bytes)
+                                .expect("print range should belong to guest memory");
+                            caller
+                                .data_mut()
+                                .messages
+                                .push(String::from_utf8(bytes).expect("printed strings are UTF-8"));
+                        }
+                        _ => {}
+                    }
+                    Ok(())
+                },
+            )
+            .expect("mock host import should be unique");
+    }
+    let mut store = Store::new(
+        &engine,
+        AsyncTestHost {
+            process_open: true,
+            messages: Vec::new(),
+        },
+    );
+    let instance = linker
+        .instantiate(&mut store, &module)
+        .expect("generated module should instantiate against the mock ABI");
+    instance
+        .get_typed_func::<(), ()>(&mut store, "_start")
+        .unwrap()
+        .call(&mut store, ())
+        .unwrap();
+    (store, instance)
+}
+
 #[test]
 fn on_attach_preserves_locals_across_awaits() {
     let source = r#"
@@ -697,6 +784,134 @@ fn source_future_values_can_be_stored_and_awaited_later() {
 }
 
 #[test]
+fn intrinsic_future_values_can_be_stored_and_awaited_later() {
+    let source = r#"
+        state "game.exe" {}
+
+        record PendingModule {
+            operation: async Module
+        }
+
+        fn consume(operation: async Module) -> async Module {
+            return await operation
+        }
+
+        onAttach {
+            let pending = PendingModule {
+                operation: process.module("game.dll")
+            }
+            print("created")
+            let module = await consume(pending.operation)
+            print(module.address)
+            let sameModule = await pending.operation
+            print(sameModule.address)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("intrinsic future values should be ordinary storable values");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("stored intrinsic future handles should validate");
+}
+
+#[test]
+fn stored_intrinsic_futures_cover_ticks_captured_arguments_and_method_receivers() {
+    let source = r#"
+        state "game.exe" {}
+
+        onAttach {
+            let tick = nextTick()
+            let scan = process.scan(0x1000, 0x200, sig"48 8B ?? 89")
+            let executable = await process.mainModule()
+            let moduleScan = executable.scan(sig"48 8B ?? 89")
+
+            await tick
+            let rangedAddress = await scan
+            let moduleAddress = await moduleScan
+            print(rangedAddress)
+            print(moduleAddress)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("all intrinsically suspending calls should create storable future values");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("intrinsic future captures and standalone poll bodies should validate");
+}
+
+#[test]
+fn creating_and_dropping_a_future_does_not_suspend_the_creator() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn prepare() {
+            let _pending = nextTick()
+            print("prepared")
+        }
+
+        onAttach {
+            prepare()
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("future creation alone should be synchronous");
+    let prepare = &checked.syntax().functions[0];
+    assert_eq!(
+        checked.effects().function(prepare.id).suspension,
+        splitscript::compiler::stdlib::SuspensionKind::None
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("a synchronous future-producing expression should validate");
+}
+
+#[test]
+fn stored_discovery_future_executes_and_is_cancelled_with_its_attachment() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn discover() -> async Module {
+            await nextTick()
+            return await process.module("game.dll")
+        }
+
+        onAttach {
+            let pending = discover()
+            print("created")
+            let module = await pending
+            print(module.address)
+            let sameModule = await pending
+            print(sameModule.address)
+            await process.closed()
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["created"]);
+
+    store.data_mut().process_open = false;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["created"]);
+
+    store.data_mut().process_open = true;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["created", "created"]);
+
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        ["created", "created", "4096", "4096"]
+    );
+}
+
+#[test]
 fn source_futures_flow_through_parameters_and_records() {
     let source = r#"
         state "game.exe" {}
@@ -726,6 +941,95 @@ fn source_futures_flow_through_parameters_and_records() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
         .expect("future values passed through aggregate storage should validate");
+}
+
+#[test]
+fn generic_async_functions_receive_distinct_typed_frames() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn afterTick(value) {
+            await nextTick()
+            return value
+        }
+
+        onAttach {
+            let number = await afterTick(7u32)
+            let text = await afterTick("ready")
+            print(number)
+            print(text)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("generic async functions should specialize their future frames");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("each generic async specialization should have a valid typed result slot");
+}
+
+#[test]
+fn async_methods_capture_their_receiver_once() {
+    let source = r#"
+        state "game.exe" {}
+
+        record Counter {
+            value: u32
+        }
+
+        fn Counter.afterTick() -> async u32 {
+            await nextTick()
+            return self.value
+        }
+
+        onAttach {
+            let pending = Counter { value: 9 }.afterTick()
+            let value = await pending
+            print(value)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("async methods should retain their implicit receiver");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("the receiver should live in the method's typed future frame");
+}
+
+#[test]
+fn process_lifetime_futures_cannot_escape_into_globals() {
+    let source = r#"
+        state "game.exe" {}
+        record Holder { operation: async u32 }
+        let pending: Holder? = None
+    "#;
+
+    let diagnostics = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect_err("globals must not retain cancelled future frames");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("cannot store a process-lifetime async value")
+    }));
+}
+
+#[test]
+fn recursive_async_functions_have_a_bounded_design_diagnostic() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn recurse(value: u32) -> async u32 {
+            await nextTick()
+            if value == 0 { return 0 }
+            return await recurse(value - 1)
+        }
+    "#;
+
+    let diagnostics = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect_err("recursive future allocation needs an explicit language policy");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message == "async function `recurse` cannot be recursive yet"
+    }));
 }
 
 #[test]

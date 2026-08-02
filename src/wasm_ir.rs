@@ -3040,6 +3040,28 @@ impl<'a> LocalPlanner<'a> {
     }
 }
 
+/// Plans the scratch locals required by one compiler-provided async operation's
+/// standalone poll function. Unlike a source body, this generated body has no
+/// syntax-owned locals of its own.
+pub(crate) fn intrinsic_future_locals(
+    expression: ExprId,
+    program: &Program,
+    semantics: &SemanticModel,
+) -> Vec<Local> {
+    let lowered = program
+        .expression(expression)
+        .expect("intrinsic future expressions belong to Wasm IR");
+    let Some(intrinsic) = resolved_intrinsic(program, expression) else {
+        unreachable!("intrinsic future frames are only planned for intrinsic calls")
+    };
+    let mut planner = LocalPlanner::new(semantics);
+    if let Some(policy) = intrinsic_registry::contract(intrinsic).async_scratch {
+        let completion = planner.awaited_value_type(lowered.ty);
+        planner.push_intrinsic_scratch(expression, completion, policy);
+    }
+    planner.locals
+}
+
 impl Visitor for LocalPlanner<'_> {
     fn visit_statement(&mut self, statement: &Statement, program: &Program) {
         match statement {

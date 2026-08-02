@@ -23,6 +23,7 @@ splitscript-stdlib-loader = { path = "crates/splitscript-stdlib-loader" }
 
 [dev-dependencies]
 wasmparser = "0.254.0"
+wasmtime = { version = "45.0.3", default-features = false, features = ["cranelift", "gc", "gc-drc", "runtime", "std"] }
 
 [[bin]]
 name = "splitc"

@@ -737,7 +737,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "fn name() -> async T { ... }",
         "Marks an explicitly typed function result as asynchronous.",
-        "A function containing await or retry has an async result. Write `async T` when its result type is explicit; when the result type is omitted, both `async` and `T` are inferred. Calling it requires await. Async results describe continuation state and will become storable values once first-class future storage is implemented.",
+        "A function containing await or retry has an async result. Write `async T` when its result type is explicit; when the result type is omitted, both `async` and `T` are inferred. Calling a source-defined async function creates a process-lifetime future value without polling it. That `async T` value can be stored in locals and aggregates, passed to functions, and awaited later. Its typed continuation frame retains parameters, live locals, nested futures, and the completed T. Futures cannot escape into globals because process closure owns their cancellation.",
         ASYNC_RESULT_EXAMPLE
     ),
     language_item!(
@@ -745,8 +745,8 @@ define_language_catalog! {
         "await",
         LanguageItemKind::Keyword,
         "let value = await operation",
-        "Waits for an intrinsically suspending operation.",
-        "Await is available in onAttach. Its continuation is cancelled and reset when the attached process closes.",
+        "Waits for an asynchronous value and yields its result.",
+        "Await is an ordinary prefix expression available in onAttach and source-defined async helpers. It accepts any async T expression, yields T, and can be nested in calls, operators, member access, conditionals, matches, fallbacks, and loop conditions. Source future values may be stored and awaited repeatedly; an already completed future yields its retained result without rerunning its body. The process-lifetime continuation tree is cancelled when the attached process closes.",
         AWAIT_EXAMPLE
     ),
     language_item!(

@@ -212,21 +212,21 @@ tooling consumers only see the normalized immutable graph.
   - [x] Add generic array-like and source-type-compatible bodies after ordinary
     generic functions exist. `[T].isEmpty()` is the first constructed-type
     helper and uses the shared demand-driven specialization pipeline.
-  - [ ] Add suspending standard-library bodies through an explicit coroutine
+  - [x] Add suspending standard-library bodies through an explicit coroutine
     calling convention; do not treat permission to write `await` as sufficient
     or disguise a compiler implementation as a source body.
     - [x] Classify source-defined functions as synchronous or suspending from
-      their transitive checked call graph. A suspending function must be called
-      with `await`, and its attachment/cancellation requirements remain the
+      their transitive checked call graph. Calling a suspending source function
+      creates a future that may be stored or awaited, and its
+      attachment/cancellation requirements remain the
       compiler-derived catalog facts consumed by diagnostics and tooling.
       User functions with an explicit result spell it `-> async T`; omitted
       results infer both asyncness and `T`, and hover/inlay output preserves the
       distinction. Explicit mismatches receive machine-applicable fixes.
       Privileged bodies may use `await` without an authored async marker; the
-      post-check validator resolves the bootstrap cycle by validating awaited
-      source-body calls after fixed-point effect inference. Test-only direct and
-      transitive helpers establish this semantic boundary without claiming the
-      synchronous Wasm call ABI can execute them yet.
+      post-check validator resolves the bootstrap cycle by validating source-
+      body calls after fixed-point effect inference. Direct and transitive
+      helpers now exercise the same typed future ABI as user functions.
     - [x] Define a backend poll ABI that distinguishes `Pending` from `Ready`
       and carries the completed value without changing the ordinary synchronous
       Wasm call ABI. `Pending = 0` and `Ready = 1`; non-void completion is
@@ -234,17 +234,14 @@ tooling consumers only see the normalized immutable graph.
       rather than a third error status, and dropping a process-owned frame
       cancels it without manufacturing completion. Wasm IR classifies direct,
       host `onAttach` poll, and async source-function bodies explicitly.
-      Until the following frame/emitter steps land, an executable user async
-      call receives a semantic diagnostic before code generation; declarations
-      and editor inference remain available without risking a backend panic.
-    - [ ] Promote `async T` from an immediately awaited function-result type to
-      a generally storable first-class future value once typed frames exist.
-      The source spelling and semantic signature are established now, but
-      variables, parameters, fields, and unpolled returns must not claim storage
-      semantics until the backend can preserve and poll their frame identity.
-      At that point, promote `await` from its current statement forms (including
-      direct `return await operation`) to a generally composable expression over
-      an `async T` value, without introducing a second suspension model.
+      Synchronous functions keep their direct Wasm ABI. Async source functions
+      instead have separate initializer and typed-frame poll functions.
+    - [x] Promote `async T` from an immediately awaited function-result type to
+      a generally storable first-class future value. Source functions and
+      intrinsically suspending catalog calls both create typed GC future frames
+      without polling. Futures flow through variables, parameters, records,
+      enums, options, results, and arrays. Process-lifetime ownership prevents
+      them (including nested aggregate references) from escaping into globals.
       - [x] Give `async T` one identity in every shared type layer: source
         `TypeRef`, inference, resolved `TypeKind`, function/call signatures, and
         editor display. A function body returns `T`; invoking it produces
@@ -265,30 +262,42 @@ tooling consumers only see the normalized immutable graph.
         compiler temporary, or body result) instead of combining an optional
         binding with boolean flags. The continuation graph, not parser position,
         decides what happens to the completed value.
-      - [ ] Specify future creation separately from polling. Creating a source
+      - [x] Specify future creation separately from polling. Creating a source
         async call evaluates and stores its receiver/arguments once and returns
         a GC future handle; awaiting polls that same identity. Multiple awaits,
         polling after completion, dropped futures, and process-close cancellation
-        need deterministic behavior and runtime tests.
-      - [ ] Use a shared erased future header only where Wasm GC requires it;
+        have deterministic frame semantics; retain end-to-end runtime coverage
+        under the broader test item below.
+      - [x] Use a shared erased future header only where Wasm GC requires it;
         keep each reachable `FunctionInstance`'s continuation payload and result
         slot statically typed. Box primitive results only at a genuinely erased
         storage boundary, not on every direct await.
-    - [ ] Give every reachable suspending `FunctionInstance` a typed GC frame
+      - [x] Give every reachable intrinsically suspending call site a concrete
+        leaf-frame subtype and poll function under the same erased `async T`
+        header. Creation captures its receiver and runtime arguments once;
+        literal-only operands remain compile-time data. Producer-tag dispatch,
+        completion retention, repeated awaits, `nextTick`'s one-update yield,
+        and process-close cancellation now use the same protocol as source
+        futures. Merely creating a future records allocation/availability but
+        does not incorrectly make the enclosing function suspending.
+    - [x] Give every reachable suspending `FunctionInstance` a typed GC frame
       containing its program counter, parameters/receiver, locals live across
       suspension, nested callee frame, and result storage. Plan these layouts
       with the existing demand-driven specialization and GC-type reachability.
-    - [ ] Let the caller retain and poll the child frame across ticks, then move
+    - [x] Let the caller retain and poll the child frame across ticks, then move
       the ready result into the source binding and release the child frame.
       Nested suspending source calls must compose; recursion needs an explicit
       diagnostic until frame allocation and recursion limits are designed.
-    - [ ] Generalize the current `onAttach`-specific async emitter around a
+    - [x] Generalize the current `onAttach`-specific async emitter around a
       shared state-machine body emitter. Keep the process-lifetime region as the
       root cancellation owner and propagate it through awaited library calls.
-    - [ ] Add type-checker, Wasm-validation, runtime, cancellation, generic-
-      specialization, and editor-metadata tests with one real source-defined
-      discovery helper. Continue migrating high-level helpers afterward; retain
-      only representation, host-ABI, runtime, or lowering leaves as intrinsics.
+    - [x] Add type-checker, Wasm-validation, host-executed runtime,
+      cancellation, generic-specialization, and editor-metadata tests with one
+      real source-defined discovery helper. The Wasmtime-backed fixture covers
+      a stored source future, nested `nextTick` and module-discovery futures,
+      process-close cancellation, reattachment, typed completion, and repeated
+      awaits. Continue migrating high-level helpers afterward; retain only
+      representation, host-ABI, runtime, or lowering leaves as intrinsics.
 
 ### Catalog completeness
 

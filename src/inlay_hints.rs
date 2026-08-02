@@ -174,4 +174,29 @@ whileAttached {
             ]
         );
     }
+
+    #[test]
+    fn distinguishes_future_values_from_awaited_completion_values() {
+        let source = r#"state "game.exe" {}
+fn discover() {
+    return await process.mainModule()
+}
+onAttach {
+    let pending = discover()
+    let module = await pending
+    print(module.address)
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let snapshot = database.semantic_snapshot().unwrap();
+        let hints = inferred_type_hints(
+            &snapshot,
+            Span {
+                start: 0,
+                end: source.len(),
+            },
+        );
+        assert!(hints.iter().any(|hint| hint.label == " -> async Module"));
+        assert!(hints.iter().any(|hint| hint.label == ": async Module"));
+        assert!(hints.iter().any(|hint| hint.label == ": Module"));
+    }
 }

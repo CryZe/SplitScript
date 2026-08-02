@@ -12,7 +12,8 @@ use crate::{
 
 use super::{
     EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, Type, action_result_val_type,
-    dependencies::BackendDependencies, reachability, runtime_helper_registry, semantic_type,
+    async_frame::IntrinsicFutureInstance, dependencies::BackendDependencies, reachability,
+    runtime_helper_registry, semantic_type,
 };
 
 /// The complete, deterministic assignment of generated function signatures
@@ -23,6 +24,7 @@ pub(super) struct FunctionPlan<'a> {
     pub runtime_helpers: RuntimeHelperPlan,
     pub equality: EqualityFunctions,
     pub users: HashMap<FunctionInstance, UserFunctionPlan>,
+    pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
     pub displays: HashMap<StdlibTypeId, FunctionInstance>,
     pub reads: Vec<u32>,
     pub actions: HashMap<ActionKind, u32>,
@@ -50,6 +52,7 @@ pub(super) struct Inputs<'a> {
     pub reachability: &'a reachability::Reachability,
     pub gc: &'a GcLayout,
     pub wasm_ir: &'a crate::wasm_ir::Program,
+    pub async_frames: &'a super::async_frame::AsyncFrameLayouts,
 }
 
 pub(super) fn encode<'a>(
@@ -71,6 +74,7 @@ pub(super) fn encode<'a>(
         reachability,
         gc,
         wasm_ir,
+        async_frames,
     } = inputs;
     let mut section = FunctionSection::new();
     let mut next_function = imported_functions;
@@ -205,6 +209,15 @@ pub(super) fn encode<'a>(
         users.insert(instance.clone(), plan);
     }
 
+    let mut intrinsic_futures = HashMap::new();
+    for (instance, _) in async_frames.intrinsics() {
+        let frame = ValType::Ref(RefType {
+            nullable: false,
+            heap_type: HeapType::Concrete(gc.intrinsic_frame_index(instance)),
+        });
+        intrinsic_futures.insert(instance.clone(), declare(vec![frame], vec![ValType::I32]));
+    }
+
     let mut reads = Vec::with_capacity(
         program
             .state
@@ -254,6 +267,7 @@ pub(super) fn encode<'a>(
         runtime_helpers,
         equality,
         users,
+        intrinsic_futures,
         displays: reachability
             .display_functions()
             .map(|(ty, function)| (ty, function.clone()))

@@ -3,10 +3,11 @@
 use crate::{
     ast::{ActionKind, FunctionId, Span},
     hir::{self, TypedExpression, TypedProgram, TypedVisitor},
-    semantic::ResolvedCall,
+    semantic::{ResolvedCall, SemanticModel},
     stdlib::{
         Availability, CancellationKind, Effect, EffectSet, OperationMetadata, SuspensionKind,
     },
+    types::TypeKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +52,7 @@ pub struct DetachedCallViolation {
 struct CallFacts {
     effects: Vec<Effect>,
     callees: Vec<FunctionId>,
+    future_callees: Vec<FunctionId>,
     availability: Availability,
 }
 
@@ -59,6 +61,7 @@ impl Default for CallFacts {
         Self {
             effects: Vec::new(),
             callees: Vec::new(),
+            future_callees: Vec::new(),
             availability: Availability::Everywhere,
         }
     }
@@ -66,21 +69,40 @@ impl Default for CallFacts {
 
 struct CallCollector<'a> {
     facts: &'a mut CallFacts,
+    semantics: &'a SemanticModel,
 }
 
-fn collect_call_facts(facts: &mut CallFacts, call: &ResolvedCall, program: &TypedProgram) {
+fn collect_call_facts(
+    facts: &mut CallFacts,
+    call: &ResolvedCall,
+    program: &TypedProgram,
+    creates_future: bool,
+) {
+    if creates_future {
+        facts.effects.push(Effect::Allocates);
+    }
     match call {
         ResolvedCall::StandardLibrary { item, .. } => {
             if let Some(function) = program.library_function(*item) {
-                facts.callees.push(function);
+                if creates_future {
+                    facts.future_callees.push(function);
+                } else {
+                    facts.callees.push(function);
+                }
             } else {
                 let metadata = program.standard_library().operation_metadata(*item);
-                facts.effects.extend(metadata.effects.iter().copied());
+                if !creates_future {
+                    facts.effects.extend(metadata.effects.iter().copied());
+                }
                 facts.availability = merge_availability(facts.availability, metadata.availability);
             }
         }
         ResolvedCall::UserFunction { function, .. } | ResolvedCall::UserMethod { function, .. } => {
-            facts.callees.push(*function)
+            if creates_future {
+                facts.future_callees.push(*function)
+            } else {
+                facts.callees.push(*function)
+            }
         }
         ResolvedCall::ResultError { .. }
         | ResolvedCall::OptionSome { .. }
@@ -90,14 +112,21 @@ fn collect_call_facts(facts: &mut CallFacts, call: &ResolvedCall, program: &Type
 
 impl TypedVisitor for CallCollector<'_> {
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
-        if matches!(expression.kind, hir::TypedExpressionKind::Suspend { .. }) {
+        if let hir::TypedExpressionKind::Suspend { value, .. } = expression.kind {
             self.facts
                 .effects
                 .extend([Effect::Suspends, Effect::CancelsOnProcessClose]);
             self.facts.availability = Availability::OnAttach;
+            if let Some(call) = program.call(value) {
+                collect_call_facts(self.facts, call, program, false);
+            }
         }
         if let Some(call) = program.call(expression.id) {
-            collect_call_facts(self.facts, call, program);
+            let creates_future = matches!(
+                self.semantics.types().kind(expression.ty),
+                TypeKind::Async { .. }
+            );
+            collect_call_facts(self.facts, call, program, creates_future);
         }
         hir::walk_typed_expression(self, expression, program);
     }
@@ -116,14 +145,14 @@ impl TypedVisitor for CallCollector<'_> {
         if let hir::TypedStatementKind::Assign { assignment, .. } = &statement.kind
             && let Some(call) = &assignment.operator
         {
-            collect_call_facts(self.facts, call, program);
+            collect_call_facts(self.facts, call, program, false);
         }
         hir::walk_typed_statement(self, statement, program);
     }
 }
 
 impl OperationAnalysis {
-    pub fn infer(program: &TypedProgram) -> Self {
+    pub fn infer(program: &TypedProgram, semantics: &SemanticModel) -> Self {
         let function_count = program
             .all_function_bodies()
             .map(|body| body.function.function.index() + 1)
@@ -135,6 +164,7 @@ impl OperationAnalysis {
         for function in program.all_function_bodies() {
             CallCollector {
                 facts: &mut direct[function.function.function.index()],
+                semantics,
             }
             .visit_block(&function.body, program);
         }
@@ -151,6 +181,11 @@ impl OperationAnalysis {
                 for callee in &facts.callees {
                     if let Some(callee) = functions.get(callee.index()) {
                         effects.extend_from_slice(&callee.effects);
+                        availability = merge_availability(availability, callee.availability);
+                    }
+                }
+                for callee in &facts.future_callees {
+                    if let Some(callee) = functions.get(callee.index()) {
                         availability = merge_availability(availability, callee.availability);
                     }
                 }

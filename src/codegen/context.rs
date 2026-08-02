@@ -34,6 +34,7 @@ pub(super) struct EmissionContext<'a> {
     pub runtime_globals: RuntimeGlobals,
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
+    pub intrinsic_futures: &'a HashMap<super::async_frame::IntrinsicFutureInstance, u32>,
     pub display_functions: &'a HashMap<StdlibTypeId, FunctionInstance>,
     pub equality_functions: &'a EqualityFunctions,
     pub records: &'a [RecordDecl],

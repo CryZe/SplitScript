@@ -15,7 +15,11 @@ use crate::{
     },
 };
 
-use super::{STATE_TYPE, Type, async_frame::AsyncFrameLayouts, reachability};
+use super::{
+    STATE_TYPE, Type,
+    async_frame::{AsyncFrameLayouts, IntrinsicFutureInstance},
+    reachability,
+};
 
 pub(super) struct GcLayout {
     pub standard_library: StandardLibrary,
@@ -25,6 +29,8 @@ pub(super) struct GcLayout {
     async_values: HashMap<AsyncTypeId, u32>,
     function_frames: HashMap<FunctionInstance, u32>,
     function_frame_tags: HashMap<FunctionInstance, u32>,
+    intrinsic_frames: HashMap<IntrinsicFutureInstance, u32>,
+    intrinsic_frame_tags: HashMap<IntrinsicFutureInstance, u32>,
     dynamic: HashMap<Type, u32>,
     ordered: Vec<Type>,
     pub type_count: u32,
@@ -170,6 +176,14 @@ impl GcLayout {
             function_frame_tags.insert(instance.clone(), tag as u32 + 1);
             next += 1;
         }
+        let first_intrinsic_tag = function_frames.len() as u32 + 1;
+        let mut intrinsic_frames = HashMap::new();
+        let mut intrinsic_frame_tags = HashMap::new();
+        for (position, (instance, _)) in async_frames.intrinsics().enumerate() {
+            intrinsic_frames.insert(instance.clone(), next);
+            intrinsic_frame_tags.insert(instance.clone(), first_intrinsic_tag + position as u32);
+            next += 1;
+        }
 
         Self {
             standard_library,
@@ -179,6 +193,8 @@ impl GcLayout {
             async_values,
             function_frames,
             function_frame_tags,
+            intrinsic_frames,
+            intrinsic_frame_tags,
             dynamic,
             ordered,
             type_count: next,
@@ -245,6 +261,20 @@ impl GcLayout {
             .get(instance)
             .copied()
             .expect("suspending function instances have runtime tags")
+    }
+
+    pub(super) fn intrinsic_frame_index(&self, instance: &IntrinsicFutureInstance) -> u32 {
+        self.intrinsic_frames
+            .get(instance)
+            .copied()
+            .expect("reachable intrinsic futures have planned GC frames")
+    }
+
+    pub(super) fn intrinsic_frame_tag(&self, instance: &IntrinsicFutureInstance) -> u32 {
+        self.intrinsic_frame_tags
+            .get(instance)
+            .copied()
+            .expect("reachable intrinsic futures have runtime tags")
     }
 
     pub(super) fn index(&self, ty: Type) -> u32 {

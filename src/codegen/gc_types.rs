@@ -350,6 +350,40 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             },
         });
     }
+    for (instance, frame) in async_frames.intrinsics() {
+        let Type::Async(future) = frame.future else {
+            unreachable!("intrinsic future layouts have async value types")
+        };
+        let frame_index = layout.intrinsic_frame_index(instance);
+        debug_assert_eq!(frame_index, recursive_types.len() as u32);
+        recursive_types.push(SubType {
+            is_final: true,
+            supertype_idx: Some(layout.index(Type::Async(future))),
+            composite_type: CompositeType {
+                inner: CompositeInnerType::Struct(StructType {
+                    fields: [
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I32),
+                            mutable: true,
+                        },
+                        FieldType {
+                            element_type: StorageType::Val(ValType::I32),
+                            mutable: false,
+                        },
+                    ]
+                    .into_iter()
+                    .chain(frame.types.iter().map(|ty| FieldType {
+                        element_type: layout.storage_type(*ty),
+                        mutable: true,
+                    }))
+                    .collect(),
+                }),
+                shared: false,
+                descriptor: None,
+                describes: None,
+            },
+        });
+    }
     let mut types = TypeSection::new();
     types.ty().rec(recursive_types);
 

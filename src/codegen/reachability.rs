@@ -341,6 +341,12 @@ impl Reachability {
         self.functions.iter()
     }
 
+    pub fn expression_instances(
+        &self,
+    ) -> impl Iterator<Item = (Option<FunctionInstance>, ExprId)> + '_ {
+        self.expression_instances.iter().cloned()
+    }
+
     pub fn display_functions(&self) -> impl Iterator<Item = (StdlibTypeId, &FunctionInstance)> {
         self.display_functions
             .iter()

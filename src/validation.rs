@@ -37,7 +37,7 @@ pub(crate) fn validate(
     semantics: &SemanticModel,
     enum_types: &[EnumDecl],
 ) -> ValidationOutput {
-    let effects = OperationAnalysis::infer(hir);
+    let effects = OperationAnalysis::infer(hir, semantics);
     let capabilities = CapabilityAnalysis::build_with_library(
         &syntax.records,
         enum_types,
@@ -46,6 +46,7 @@ pub(crate) fn validate(
     );
     let mut diagnostics = Vec::new();
     diagnostics.extend(validate_function_instances(syntax, hir, semantics));
+    diagnostics.extend(validate_future_storage(syntax, semantics, enum_types));
     diagnostics.extend(validate_must_use(&standard_library, hir, semantics));
     diagnostics.extend(validate_unused_bindings(syntax, hir));
     diagnostics.extend(validate_unused_declarations(syntax, hir, semantics));
@@ -55,6 +56,7 @@ pub(crate) fn validate(
         hir,
         &effects,
     ));
+    diagnostics.extend(validate_async_recursion(syntax, hir, &effects));
     diagnostics.extend(validate_suspending_calls(
         &standard_library,
         syntax,
@@ -180,6 +182,159 @@ pub(crate) fn validate(
         effects,
         diagnostics,
     }
+}
+
+fn validate_async_recursion(
+    syntax: &Program,
+    hir: &TypedProgram,
+    effects: &OperationAnalysis,
+) -> Vec<Diagnostic> {
+    #[derive(Default)]
+    struct Calls {
+        values: HashSet<ast::FunctionId>,
+    }
+    impl TypedVisitor for Calls {
+        fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
+            if let Some(call) = program.call(expression.id) {
+                match call {
+                    ResolvedCall::UserFunction { function, .. }
+                    | ResolvedCall::UserMethod { function, .. } => {
+                        self.values.insert(*function);
+                    }
+                    ResolvedCall::StandardLibrary { item, .. } => {
+                        if let Some(function) = program.library_function(*item) {
+                            self.values.insert(function);
+                        }
+                    }
+                    ResolvedCall::ResultError { .. }
+                    | ResolvedCall::OptionSome { .. }
+                    | ResolvedCall::ResultSuccess { .. } => {}
+                }
+            }
+            hir::walk_typed_expression(self, expression, program);
+        }
+    }
+
+    let mut graph = HashMap::<ast::FunctionId, HashSet<ast::FunctionId>>::new();
+    for body in hir.all_function_bodies() {
+        let mut calls = Calls::default();
+        calls.visit_block(&body.body, hir);
+        graph
+            .entry(body.function.function)
+            .or_default()
+            .extend(calls.values);
+    }
+
+    fn reaches(
+        target: ast::FunctionId,
+        current: ast::FunctionId,
+        graph: &HashMap<ast::FunctionId, HashSet<ast::FunctionId>>,
+        visited: &mut HashSet<ast::FunctionId>,
+    ) -> bool {
+        graph.get(&current).is_some_and(|callees| {
+            callees.contains(&target)
+                || callees
+                    .iter()
+                    .copied()
+                    .any(|callee| visited.insert(callee) && reaches(target, callee, graph, visited))
+        })
+    }
+
+    syntax
+        .functions
+        .iter()
+        .filter(|function| {
+            effects.function(function.id).suspension == crate::stdlib::SuspensionKind::Suspends
+                && reaches(function.id, function.id, &graph, &mut HashSet::new())
+        })
+        .map(|function| {
+            Diagnostic::semantic(
+                format!("async function `{}` cannot be recursive yet", function.name),
+                function.name_span,
+            )
+            .with_primary_label("recursive future-frame allocation has no configured limit")
+            .with_note(
+                "rewrite the recursion as a loop until bounded recursive futures are specified",
+            )
+        })
+        .collect()
+}
+
+fn validate_future_storage(
+    syntax: &Program,
+    semantics: &SemanticModel,
+    enum_types: &[EnumDecl],
+) -> Vec<Diagnostic> {
+    fn contains_future(
+        ty: crate::types::TypeId,
+        syntax: &Program,
+        semantics: &SemanticModel,
+        enum_types: &[EnumDecl],
+        visited: &mut HashSet<crate::types::TypeId>,
+    ) -> bool {
+        if !visited.insert(ty) {
+            return false;
+        }
+        match semantics.types().kind(ty) {
+            TypeKind::Async { .. } => true,
+            TypeKind::Record(record) => syntax
+                .records
+                .iter()
+                .find(|declaration| declaration.id == *record)
+                .is_some_and(|declaration| {
+                    declaration.fields.iter().any(|field| {
+                        semantics.record_field_type(field.id).is_some_and(|field| {
+                            contains_future(field, syntax, semantics, enum_types, visited)
+                        })
+                    })
+                }),
+            TypeKind::Enum(enumeration) => enum_types
+                .iter()
+                .find(|declaration| declaration.id == *enumeration)
+                .is_some_and(|declaration| {
+                    declaration.variants.iter().any(|variant| {
+                        semantics
+                            .enum_variant_payload(variant.id)
+                            .is_some_and(|payload| {
+                                contains_future(payload, syntax, semantics, enum_types, visited)
+                            })
+                    })
+                }),
+            TypeKind::Array { element, .. }
+            | TypeKind::Option { value: element, .. }
+            | TypeKind::Result { value: element, .. } => {
+                contains_future(*element, syntax, semantics, enum_types, visited)
+            }
+            TypeKind::Builtin(_)
+            | TypeKind::Standard(_)
+            | TypeKind::StateSnapshot
+            | TypeKind::SettingsView
+            | TypeKind::GenericParameter { .. } => false,
+        }
+    }
+
+    syntax
+        .globals
+        .iter()
+        .filter(|global| {
+            semantics.value_type(global.id).is_some_and(|ty| {
+                contains_future(ty, syntax, semantics, enum_types, &mut HashSet::new())
+            })
+        })
+        .map(|global| {
+            Diagnostic::semantic(
+                format!(
+                    "global `{}` cannot store a process-lifetime async value",
+                    global.name
+                ),
+                global.name_span,
+            )
+            .with_primary_label("this value may retain a cancelled process operation")
+            .with_note(
+                "store the future in an onAttach local and await it before the process closes",
+            )
+        })
+        .collect()
 }
 
 fn validate_async_function_results(
@@ -316,13 +471,13 @@ fn validate_suspending_calls(
         }
     }
 
-    fn has_runtime_future_storage(call: &ResolvedCall, standard_library: &StandardLibrary) -> bool {
+    fn has_runtime_future_storage(
+        call: &ResolvedCall,
+        _standard_library: &StandardLibrary,
+    ) -> bool {
         match call {
             ResolvedCall::UserFunction { .. } | ResolvedCall::UserMethod { .. } => true,
-            ResolvedCall::StandardLibrary { item, .. } => matches!(
-                standard_library.item(*item).implementation,
-                Implementation::LibraryBody { .. }
-            ),
+            ResolvedCall::StandardLibrary { .. } => true,
             ResolvedCall::ResultError { .. }
             | ResolvedCall::OptionSome { .. }
             | ResolvedCall::ResultSuccess { .. } => false,

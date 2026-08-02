@@ -43,7 +43,9 @@ mod unity_layout;
 mod update;
 
 use self::async_frame::AsyncFrameLayouts;
-use self::async_state::{compile_async_attach, compile_async_function_poll};
+use self::async_state::{
+    compile_async_attach, compile_async_function_poll, compile_intrinsic_future_poll,
+};
 use self::backend_type::Type;
 use self::context::{AttachContext, EmissionContext};
 use self::data_plan::StaticData;
@@ -262,6 +264,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         runtime_helpers,
         equality: equality_functions,
         users: user_functions,
+        intrinsic_futures,
         displays: display_functions,
         reads: read_functions,
         actions: action_functions,
@@ -285,6 +288,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             reachability: &reachability,
             gc: &gc,
             wasm_ir,
+            async_frames: &async_frames,
         },
     );
     let lowering = EmissionContext {
@@ -297,6 +301,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         runtime_globals,
         runtime_helpers: &runtime_helpers,
         functions: &user_functions,
+        intrinsic_futures: &intrinsic_futures,
         display_functions: &display_functions,
         equality_functions: &equality_functions,
         records: &program.records,
@@ -392,6 +397,9 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         } else {
             codes.function(&compile_user_function(function, instance, &lowering));
         }
+    }
+    for (instance, layout) in async_frames.intrinsics() {
+        codes.function(&compile_intrinsic_future_poll(instance, layout, &runtime));
     }
     for field in state.ordered_read_fields() {
         codes.function(&compile_read(field, &abi, strings, &lowering));

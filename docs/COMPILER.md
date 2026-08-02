@@ -700,6 +700,30 @@ the same runtime tick. Conditional branches use continuation-style lowered
 tails, allowing a suspension inside either branch to rejoin code after the
 conditional without source-level special cases.
 
+Source-defined async calls have a split initializer/poll ABI. The initializer
+captures the receiver and arguments exactly once and returns an `async T`
+reference. Every reachable generic `FunctionInstance` receives its own final
+GC frame subtype containing a mutable program counter, stable producer tag,
+parameters, locals and compiler temporaries live across suspension, nested
+future handles, and a typed completion slot. The erased `async T` supertype
+contains only the state/tag header used at storage boundaries; primitive
+completion values remain unboxed in concrete frames. A poll function takes its
+concrete frame and returns `0` for pending or `1` for ready. On completion the
+counter becomes the completed sentinel, making repeated polls idempotent.
+
+Awaiting an arbitrary future stores that identity in the caller's frame,
+dispatches its producer tag to the matching typed poll function, copies the
+ready completion into the continuation destination, and releases only the
+caller's temporary child reference. Source functions and intrinsically
+suspending catalog calls are both concrete producers under the same erased
+header. Intrinsic leaf frames capture receivers and runtime arguments once and
+reuse the ordinary suspension emitter for host polling; literal-only arguments
+remain static data. The original future can remain in a local or aggregate and
+be awaited again. Process closure drops the host-owned root frame and therefore
+its complete nested continuation tree. Semantic validation prevents
+process-lifetime future references, including references nested in aggregates,
+from escaping into globals.
+
 Array `for` loops lower through compiler-owned iterable, `u32` index, and
 element-binding values. Ordinary bodies become structured Wasm block/loop
 control flow; the iterable is evaluated once and the index advances before the

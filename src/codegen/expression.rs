@@ -20,13 +20,19 @@ use crate::{
 
 use super::{
     EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, SettingStorage, Type,
-    array_element_type, async_frame::AsyncFrameRef, emit_array_get, emit_default,
-    emit_failure_transfer, emit_int, emit_memory_value, emit_result_error, emit_result_success,
-    emit_string_literal, emit_struct_get, emit_typed_struct_get, enum_variant_payload,
-    global_plan::RuntimeGlobals, imports::Abi, memarg, memory_plan::AbiReadScratch,
-    record_field_type, resolved_intrinsic, result_value_type, runtime_helpers::emit_value_equality,
-    script_functions::emit_action_default, semantic_type, standard_field_type,
-    try_array_element_type, value_type,
+    array_element_type,
+    async_frame::{AsyncFrameRef, IntrinsicFutureInstance, IntrinsicFutureLayout},
+    emit_array_get, emit_default, emit_failure_transfer, emit_int, emit_memory_value,
+    emit_result_error, emit_result_success, emit_string_literal, emit_struct_get,
+    emit_typed_struct_get, enum_variant_payload,
+    global_plan::RuntimeGlobals,
+    imports::Abi,
+    memarg,
+    memory_plan::AbiReadScratch,
+    record_field_type, resolved_intrinsic, result_value_type,
+    runtime_helpers::emit_value_equality,
+    script_functions::emit_action_default,
+    semantic_type, standard_field_type, try_array_element_type, value_type,
 };
 
 #[derive(Default)]
@@ -90,6 +96,7 @@ pub(super) struct ExprContext<'a> {
     pub runtime_globals: RuntimeGlobals,
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
+    pub intrinsic_futures: &'a HashMap<IntrinsicFutureInstance, u32>,
     pub display_functions: &'a HashMap<StdlibTypeId, FunctionInstance>,
     pub equality_functions: &'a EqualityFunctions,
     pub records: &'a [RecordDecl],
@@ -102,10 +109,17 @@ pub(super) struct ExprContext<'a> {
     pub wasm_ir: &'a wasm_ir::Program,
     pub gc: &'a GcLayout,
     pub async_frames: &'a super::async_frame::AsyncFrameLayouts,
+    pub intrinsic_capture: Option<IntrinsicCapture<'a>>,
     /// Concrete type arguments while emitting a generic function template.
     pub function_instance: Option<&'a FunctionInstance>,
     pub loop_control: Option<LoopControl>,
     pub bare_return: BareReturn,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct IntrinsicCapture<'a> {
+    pub frame: AsyncFrameRef,
+    pub layout: &'a IntrinsicFutureLayout,
 }
 
 impl ExprContext<'_> {
@@ -897,6 +911,14 @@ pub(super) fn compile_receiver(
     context: &ExprContext<'_>,
 ) -> Type {
     let (receiver, receiver_type) = resolved_receiver(target, context);
+    if let Some(capture) = context.intrinsic_capture
+        && let Some((field, captured_type)) = capture.layout.receiver
+    {
+        debug_assert_eq!(captured_type, receiver_type);
+        capture.frame.emit(function);
+        emit_typed_struct_get(function, capture.frame.struct_type, field, captured_type);
+        return receiver_type;
+    }
     match receiver {
         ResolvedReceiver::Path { root, members } => {
             let lowered_type = compile_resolved_path(function, *root, members, context);
@@ -1193,6 +1215,13 @@ fn emit_path_fields(
 }
 
 pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context: &ExprContext<'_>) {
+    if let Some(capture) = context.intrinsic_capture
+        && let Some(&(field, ty)) = capture.layout.arguments.get(&expression)
+    {
+        capture.frame.emit(function);
+        emit_typed_struct_get(function, capture.frame.struct_type, field, ty);
+        return;
+    }
     let expression_ir = context
         .wasm_ir
         .expression(expression)
@@ -1743,6 +1772,36 @@ fn compile_expr_unconverted(
     else {
         return;
     };
+    if matches!(ty, Type::Async(_)) && resolved_intrinsic(target).is_some() {
+        let instance = IntrinsicFutureInstance {
+            owner: context.function_instance.cloned(),
+            expression,
+        };
+        let layout = context
+            .async_frames
+            .intrinsic(&instance)
+            .expect("reachable intrinsic async calls have frame layouts");
+        function
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::I32Const(
+                context.gc.intrinsic_frame_tag(&instance) as i32,
+            ));
+        if layout.receiver.is_some() {
+            compile_receiver(function, target, context);
+        }
+        for argument in args {
+            if layout.arguments.contains_key(argument) {
+                compile_expr(function, *argument, context);
+            }
+        }
+        if let Some((_, completion)) = layout.completion {
+            emit_default(function, completion, context.gc);
+        }
+        function.instruction(&Instruction::StructNew(
+            context.gc.intrinsic_frame_index(&instance),
+        ));
+        return;
+    }
     if let Some(intrinsic @ (IntrinsicId::NumericMin | IntrinsicId::NumericMax)) =
         resolved_intrinsic(target)
     {

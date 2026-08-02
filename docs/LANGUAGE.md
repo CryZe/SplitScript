@@ -907,6 +907,41 @@ let marker = await gameAssembly.scan(sig"48 8B ?? ??")
 Like every `onAttach` suspension, a pending next-tick continuation is discarded
 if the process closes.
 
+Source-defined helpers use `async T` as a real future type. The annotation is
+required only when the return type is written explicitly; otherwise both the
+future and its completion type are inferred:
+
+```text
+fn afterTick(value) {
+    await nextTick()
+    return value
+}
+
+onAttach {
+    let pending = afterTick(42)
+    print("future created")
+    let value = await pending
+    print(value)
+}
+```
+
+Calling `afterTick` evaluates and captures its arguments once and allocates a
+typed WebAssembly GC continuation frame; it does not begin polling the body.
+Intrinsically asynchronous operations behave the same way, so
+`let pending = process.module("game.dll")` creates a future that may be passed
+or stored before `await pending`. An `async T` value can be held in a local,
+record, enum, option, result, or array and passed as a parameter. Awaiting it
+dispatches to its concrete typed poll function. Once complete, the frame
+retains `T`, so another await returns the same value without rerunning the
+operation. Merely creating a future is synchronous. Futures are owned by the
+attached-process lifetime and therefore cannot be stored in globals.
+
+`await` is an ordinary prefix expression rather than a declaration form. It
+can appear inside member access, arguments, arithmetic, interpolation,
+conditional and match arms, guards, fallbacks, and loop conditions. Lowering
+spills earlier operands once and leaves branch-local suspensions inside the
+selected branch, preserving source evaluation order across ticks.
+
 `onAttach` supports the same variables, assignments, expressions, calls, and
 conditional control flow as other action blocks, including suspensions nested
 in `if`, `else if`, and `else` branches. Locals that live across a suspension

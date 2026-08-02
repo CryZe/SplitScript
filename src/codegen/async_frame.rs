@@ -1,6 +1,6 @@
 //! Planned GC-frame storage for values that survive async suspension.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     ast::{ActionKind, ExprId, Program, ValueId},
@@ -54,6 +54,18 @@ pub(super) struct AsyncFrameLayout {
 }
 
 impl AsyncFrameLayout {
+    /// Adapts a generated leaf future's completion slot to the shared
+    /// suspension emitter. Leaf futures have no source locals or nested child
+    /// continuations, but store their ready value through the same destination
+    /// contract as source state machines.
+    pub(super) fn for_leaf_completion(completion: Option<(u32, Type)>) -> Self {
+        Self {
+            completion,
+            base_fields: 2,
+            ..Self::default()
+        }
+    }
+
     pub(super) fn for_action(
         action: Option<ActionKind>,
         wasm_ir: &wasm_ir::Program,
@@ -200,6 +212,9 @@ impl AsyncFrameLayout {
         };
         wasm_ir::Visitor::visit_block(&mut children, &body.entry, program);
         for (expression, ty) in children.values {
+            if layout.children.contains_key(&expression) {
+                continue;
+            }
             let field = layout.base_fields + layout.types.len() as u32;
             layout.children.insert(expression, (field, ty));
             layout.types.push(ty);
@@ -242,6 +257,22 @@ pub(super) struct AsyncFrameLayouts {
     pub attach: Option<AsyncFrameLayout>,
     functions: HashMap<FunctionInstance, AsyncFrameLayout>,
     ordered_functions: Vec<FunctionInstance>,
+    intrinsics: HashMap<IntrinsicFutureInstance, IntrinsicFutureLayout>,
+    ordered_intrinsics: Vec<IntrinsicFutureInstance>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) struct IntrinsicFutureInstance {
+    pub owner: Option<FunctionInstance>,
+    pub expression: ExprId,
+}
+
+pub(super) struct IntrinsicFutureLayout {
+    pub future: Type,
+    pub receiver: Option<(u32, Type)>,
+    pub arguments: HashMap<ExprId, (u32, Type)>,
+    pub completion: Option<(u32, Type)>,
+    pub types: Vec<Type>,
 }
 
 impl AsyncFrameLayouts {
@@ -268,10 +299,153 @@ impl AsyncFrameLayouts {
                 AsyncFrameLayout::for_function(instance, program, wasm_ir, semantics),
             );
         }
+        let mut intrinsics = HashMap::new();
+        let mut ordered_intrinsics = Vec::new();
+        let mut directly_polled = HashSet::new();
+        struct DirectIntrinsicPolls<'a> {
+            owner: Option<&'a FunctionInstance>,
+            values: &'a mut HashSet<IntrinsicFutureInstance>,
+        }
+        impl wasm_ir::Visitor for DirectIntrinsicPolls<'_> {
+            fn visit_terminator(
+                &mut self,
+                terminator: &wasm_ir::Terminator,
+                program: &wasm_ir::Program,
+            ) {
+                if let wasm_ir::Terminator::Suspend { value, .. } = terminator
+                    && matches!(
+                        program
+                            .expression(*value)
+                            .expect("suspension operands belong to Wasm IR")
+                            .kind,
+                        wasm_ir::ExpressionKind::Call {
+                            target: wasm_ir::CallTarget::Intrinsic { .. },
+                            ..
+                        }
+                    )
+                {
+                    self.values.insert(IntrinsicFutureInstance {
+                        owner: self.owner.cloned(),
+                        expression: *value,
+                    });
+                }
+                wasm_ir::walk_terminator(self, terminator, program);
+            }
+        }
+        for body in wasm_ir
+            .bodies()
+            .filter(|body| matches!(body.owner, BodyOwner::Action(_)))
+        {
+            wasm_ir::Visitor::visit_block(
+                &mut DirectIntrinsicPolls {
+                    owner: None,
+                    values: &mut directly_polled,
+                },
+                &body.entry,
+                wasm_ir,
+            );
+        }
+        for owner in reachability.functions() {
+            let body = wasm_ir
+                .body(BodyOwner::Function(owner.clone()))
+                .expect("reachable functions have Wasm IR bodies");
+            wasm_ir::Visitor::visit_block(
+                &mut DirectIntrinsicPolls {
+                    owner: Some(owner),
+                    values: &mut directly_polled,
+                },
+                &body.entry,
+                wasm_ir,
+            );
+        }
+        for (owner, expression) in reachability.expression_instances() {
+            let lowered = wasm_ir
+                .expression(expression)
+                .expect("reachable expressions belong to Wasm IR");
+            let wasm_ir::ExpressionKind::Call { target, arguments } = &lowered.kind else {
+                continue;
+            };
+            let wasm_ir::CallTarget::Intrinsic {
+                receiver,
+                receiver_type,
+                ..
+            } = target
+            else {
+                continue;
+            };
+            let specialize = |ty| {
+                owner
+                    .as_ref()
+                    .map_or(ty, |owner| semantics.specialize_type(owner, ty))
+            };
+            let future_id = specialize(lowered.ty);
+            let Type::Async(_) = semantic_type(future_id, semantics) else {
+                continue;
+            };
+            let crate::types::TypeKind::Async { value, .. } = semantics.types().kind(future_id)
+            else {
+                unreachable!()
+            };
+            let mut types = Vec::new();
+            let receiver = receiver.as_ref().map(|_| {
+                let ty = semantic_type(
+                    specialize(receiver_type.expect("method receivers have semantic types")),
+                    semantics,
+                );
+                let field = 2 + types.len() as u32;
+                types.push(ty);
+                (field, ty)
+            });
+            let mut captured_arguments = HashMap::new();
+            for argument in arguments {
+                let argument_expression = wasm_ir
+                    .expression(*argument)
+                    .expect("intrinsic arguments belong to Wasm IR");
+                if matches!(
+                    argument_expression.kind,
+                    wasm_ir::ExpressionKind::String(_) | wasm_ir::ExpressionKind::Signature(_)
+                ) {
+                    continue;
+                }
+                let ty = semantic_type(specialize(argument_expression.ty), semantics);
+                let field = 2 + types.len() as u32;
+                types.push(ty);
+                captured_arguments.insert(*argument, (field, ty));
+            }
+            let completion_type = semantic_type(specialize(*value), semantics);
+            let completion = (completion_type != Type::Void).then(|| {
+                let field = 2 + types.len() as u32;
+                types.push(completion_type);
+                (field, completion_type)
+            });
+            let instance = IntrinsicFutureInstance {
+                owner: owner.clone(),
+                expression,
+            };
+            if directly_polled.contains(&instance) {
+                continue;
+            }
+            if intrinsics.contains_key(&instance) {
+                continue;
+            }
+            ordered_intrinsics.push(instance.clone());
+            intrinsics.insert(
+                instance,
+                IntrinsicFutureLayout {
+                    future: semantic_type(future_id, semantics),
+                    receiver,
+                    arguments: captured_arguments,
+                    completion,
+                    types,
+                },
+            );
+        }
         Self {
             attach,
             functions,
             ordered_functions,
+            intrinsics,
+            ordered_intrinsics,
         }
     }
 
@@ -285,5 +459,20 @@ impl AsyncFrameLayouts {
         self.ordered_functions
             .iter()
             .map(|instance| (instance, &self.functions[instance]))
+    }
+
+    pub(super) fn intrinsic(
+        &self,
+        instance: &IntrinsicFutureInstance,
+    ) -> Option<&IntrinsicFutureLayout> {
+        self.intrinsics.get(instance)
+    }
+
+    pub(super) fn intrinsics(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&IntrinsicFutureInstance, &IntrinsicFutureLayout)> {
+        self.ordered_intrinsics
+            .iter()
+            .map(|instance| (instance, &self.intrinsics[instance]))
     }
 }

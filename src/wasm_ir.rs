@@ -79,7 +79,6 @@ pub enum LocalPurpose {
     Value(ValueId),
     Temporary(TemporaryId),
     MatchValue(ExprId),
-    MatchBinding(PatternId),
     FallbackValue(ExprId),
     IntrinsicScratch { expression: ExprId, slot: u8 },
     SuspensionScratch(ExprId),
@@ -159,6 +158,9 @@ pub enum ExpressionKind {
         value: ExprId,
     },
     Temporary(TemporaryId),
+    FallbackSuccess {
+        source: ExprId,
+    },
     Propagate {
         value: ExprId,
         target: TypeId,
@@ -245,6 +247,18 @@ pub enum LoweredPattern {
         binding: Option<ValueId>,
     },
     Wildcard,
+}
+
+impl LoweredPattern {
+    pub const fn binding(&self) -> Option<ValueId> {
+        match self {
+            Self::Enum { binding, .. }
+            | Self::OptionSome { binding, .. }
+            | Self::ResultSuccess { binding, .. }
+            | Self::ResultError { binding, .. } => *binding,
+            Self::Bool(_) | Self::Int(_) | Self::OptionNone(_) | Self::Wildcard => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -371,6 +385,17 @@ pub enum Statement {
         then_block: Block,
         else_block: Block,
     },
+    Match {
+        expression: ExprId,
+        value: ExprId,
+        arms: Vec<MatchStatementArm>,
+    },
+    Fallback {
+        expression: ExprId,
+        value: ExprId,
+        fallback_block: Block,
+        success_block: Block,
+    },
     While {
         condition: ExprId,
         body: Block,
@@ -388,6 +413,14 @@ pub enum Statement {
         index_value: ValueId,
         iterable: ExprId,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchStatementArm {
+    pub pattern_id: PatternId,
+    pub pattern: LoweredPattern,
+    pub guard: Option<ExprId>,
+    pub block: Block,
 }
 
 #[derive(Debug, Clone)]
@@ -1251,6 +1284,53 @@ fn analyze_statements_liveness(
                 collect_expression_values(*condition, &mut then_live, local_values, program);
                 *live = then_live;
             }
+            Statement::Match { value, arms, .. } => {
+                let mut match_live = HashSet::new();
+                for arm in arms {
+                    let mut arm_live = analyze_suspension_liveness(
+                        &mut arm.block,
+                        live.clone(),
+                        local_values,
+                        ordered_locals,
+                        program,
+                        frame_values,
+                    );
+                    if let Some(guard) = arm.guard {
+                        collect_expression_values(guard, &mut arm_live, local_values, program);
+                    }
+                    if let Some(binding) = arm.pattern.binding() {
+                        arm_live.remove(&binding);
+                    }
+                    match_live.extend(arm_live);
+                }
+                collect_expression_values(*value, &mut match_live, local_values, program);
+                *live = match_live;
+            }
+            Statement::Fallback {
+                value,
+                fallback_block,
+                success_block,
+                ..
+            } => {
+                let mut branch_live = analyze_suspension_liveness(
+                    fallback_block,
+                    live.clone(),
+                    local_values,
+                    ordered_locals,
+                    program,
+                    frame_values,
+                );
+                branch_live.extend(analyze_suspension_liveness(
+                    success_block,
+                    live.clone(),
+                    local_values,
+                    ordered_locals,
+                    program,
+                    frame_values,
+                ));
+                collect_expression_values(*value, &mut branch_live, local_values, program);
+                *live = branch_live;
+            }
             Statement::While { condition, body } => {
                 let mut body_live = analyze_suspension_liveness(
                     body,
@@ -1370,7 +1450,7 @@ fn lower_async_block(
     )
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum AsyncExpressionStep {
     Store {
         target: TemporaryId,
@@ -1388,6 +1468,27 @@ enum AsyncExpressionStep {
         else_expression: Box<NormalizedExpression>,
         destination: Option<TemporaryId>,
     },
+    Fallback {
+        expression: ExprId,
+        value: ExprId,
+        fallback: Box<NormalizedExpression>,
+        destination: TemporaryId,
+        success: ExprId,
+    },
+    Match {
+        expression: ExprId,
+        value: ExprId,
+        arms: Vec<NormalizedMatchArm>,
+        destination: Option<TemporaryId>,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct NormalizedMatchArm {
+    pattern_id: PatternId,
+    pattern: LoweredPattern,
+    guard: Option<NormalizedExpression>,
+    value: NormalizedExpression,
 }
 
 impl AsyncExpressionStep {
@@ -1404,11 +1505,21 @@ impl AsyncExpressionStep {
                 .iter()
                 .chain(&else_expression.steps)
                 .any(Self::suspends),
+            Self::Match { arms, .. } => arms
+                .iter()
+                .flat_map(|arm| {
+                    arm.guard
+                        .iter()
+                        .flat_map(|guard| &guard.steps)
+                        .chain(&arm.value.steps)
+                })
+                .any(Self::suspends),
+            Self::Fallback { fallback, .. } => fallback.steps.iter().any(Self::suspends),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct NormalizedExpression {
     value: ExprId,
     steps: Vec<AsyncExpressionStep>,
@@ -1450,6 +1561,11 @@ fn normalize_expression_suspensions_with(
         let operand = normalize_expression_suspensions_with(value, context);
         let mut steps = operand.steps;
         let cancellation = suspension_cancellation(mode, value, context.typed_hir);
+        let operand_value = if mode == SuspensionMode::Await {
+            capture_await_operand(operand.value, &mut steps, context)
+        } else {
+            operand.value
+        };
         if matches!(
             context.semantics.types().kind(original.ty),
             TypeKind::Builtin(BuiltinType::Void)
@@ -1457,7 +1573,7 @@ fn normalize_expression_suspensions_with(
             steps.push(AsyncExpressionStep::Suspend {
                 mode,
                 destination: SuspensionDestination::Discard,
-                value: operand.value,
+                value: operand_value,
                 cancellation,
             });
             return NormalizedExpression {
@@ -1475,7 +1591,7 @@ fn normalize_expression_suspensions_with(
         steps.push(AsyncExpressionStep::Suspend {
             mode,
             destination: SuspensionDestination::Temporary(temporary),
-            value: operand.value,
+            value: operand_value,
             cancellation,
         });
         return NormalizedExpression { value, steps };
@@ -1504,6 +1620,18 @@ fn normalize_expression_suspensions_with(
             (short_circuit, right)
         };
         return normalize_if_expression(original, left, then_expr, else_expr, context);
+    }
+
+    if let ExpressionKind::Match { value, arms } = original.kind.clone() {
+        return normalize_match_expression(original, value, arms, context);
+    }
+
+    if let ExpressionKind::Fallback {
+        value,
+        fallback: FallbackBranch::Value(fallback),
+    } = original.kind.clone()
+    {
+        return normalize_fallback_expression(original, value, fallback, context);
     }
 
     let mut children = Vec::new();
@@ -1550,6 +1678,262 @@ fn normalize_expression_suspensions_with(
     let value = context
         .wasm_ir
         .push_generated_expression(original.ty, kind, original.conversion);
+    NormalizedExpression { value, steps }
+}
+
+fn capture_await_operand(
+    operand: ExprId,
+    steps: &mut Vec<AsyncExpressionStep>,
+    context: &mut AsyncNormalizationContext<'_>,
+) -> ExprId {
+    let expression = context
+        .wasm_ir
+        .expression(operand)
+        .expect("await operand belongs to Wasm IR")
+        .clone();
+    let ExpressionKind::Call {
+        mut target,
+        mut arguments,
+    } = expression.kind
+    else {
+        return operand;
+    };
+
+    let receiver = match &mut target {
+        CallTarget::UserMethod {
+            receiver,
+            receiver_type,
+            ..
+        }
+        | CallTarget::Intrinsic {
+            receiver: Some(receiver),
+            receiver_type: Some(receiver_type),
+            ..
+        } => Some((receiver, *receiver_type)),
+        _ => None,
+    };
+    if let Some((receiver, receiver_type)) = receiver {
+        match receiver.clone() {
+            ResolvedReceiver::Expression {
+                expression,
+                members,
+            } => {
+                let receiver_expression = if members.is_empty() {
+                    expression
+                } else {
+                    context.wasm_ir.push_generated_expression(
+                        receiver_type,
+                        ExpressionKind::Member {
+                            receiver: expression,
+                            members,
+                        },
+                        None,
+                    )
+                };
+                let captured = capture_await_value(receiver_expression, steps, context);
+                *receiver = ResolvedReceiver::Expression {
+                    expression: captured,
+                    members: Vec::new(),
+                };
+            }
+            ResolvedReceiver::Path { root, members }
+                if matches!(root, ResolvedValue::Variable(_)) || !members.is_empty() =>
+            {
+                let receiver_expression = context.wasm_ir.push_generated_expression(
+                    receiver_type,
+                    ExpressionKind::Path {
+                        root: Some(root),
+                        members,
+                    },
+                    None,
+                );
+                let captured = capture_await_value(receiver_expression, steps, context);
+                *receiver = ResolvedReceiver::Expression {
+                    expression: captured,
+                    members: Vec::new(),
+                };
+            }
+            ResolvedReceiver::Path { .. } => {}
+        }
+    }
+    for argument in &mut arguments {
+        *argument = capture_await_value(*argument, steps, context);
+    }
+    context.wasm_ir.push_generated_expression(
+        expression.ty,
+        ExpressionKind::Call { target, arguments },
+        expression.conversion,
+    )
+}
+
+fn capture_await_value(
+    value: ExprId,
+    steps: &mut Vec<AsyncExpressionStep>,
+    context: &mut AsyncNormalizationContext<'_>,
+) -> ExprId {
+    let expression = context
+        .wasm_ir
+        .expression(value)
+        .expect("await capture belongs to Wasm IR");
+    if matches!(
+        expression.kind,
+        ExpressionKind::None
+            | ExpressionKind::Bool(_)
+            | ExpressionKind::Int(_)
+            | ExpressionKind::Float(_)
+            | ExpressionKind::String(_)
+            | ExpressionKind::Signature(_)
+            | ExpressionKind::Temporary(_)
+            | ExpressionKind::FallbackSuccess { .. }
+    ) {
+        return value;
+    }
+    let ty = context.wasm_ir.effective_expression_type(value);
+    let (temporary, captured) = context.wasm_ir.temporary(ty);
+    steps.push(AsyncExpressionStep::Store {
+        target: temporary,
+        value,
+    });
+    captured
+}
+
+fn normalize_fallback_expression(
+    original: Expression,
+    value: ExprId,
+    fallback: ExprId,
+    context: &mut AsyncNormalizationContext<'_>,
+) -> NormalizedExpression {
+    let input = normalize_expression_suspensions_with(value, context);
+    let fallback = normalize_expression_suspensions_with(fallback, context);
+    if fallback.steps.is_empty() {
+        let kind = ExpressionKind::Fallback {
+            value: input.value,
+            fallback: FallbackBranch::Value(fallback.value),
+        };
+        let value =
+            context
+                .wasm_ir
+                .push_generated_expression(original.ty, kind, original.conversion);
+        return NormalizedExpression {
+            value,
+            steps: input.steps,
+        };
+    }
+
+    let storage_ty = original
+        .conversion
+        .map_or(original.ty, |conversion| conversion.source);
+    let (destination, result) =
+        context
+            .wasm_ir
+            .temporary_read(storage_ty, original.ty, original.conversion);
+    let success = context.wasm_ir.push_generated_expression(
+        storage_ty,
+        ExpressionKind::FallbackSuccess {
+            source: original.id,
+        },
+        None,
+    );
+    let mut steps = input.steps;
+    steps.push(AsyncExpressionStep::Fallback {
+        expression: original.id,
+        value: input.value,
+        fallback: Box::new(fallback),
+        destination,
+        success,
+    });
+    NormalizedExpression {
+        value: result,
+        steps,
+    }
+}
+
+fn normalize_match_expression(
+    original: Expression,
+    value: ExprId,
+    arms: Vec<MatchArm>,
+    context: &mut AsyncNormalizationContext<'_>,
+) -> NormalizedExpression {
+    let input = normalize_expression_suspensions_with(value, context);
+    let arms = arms
+        .into_iter()
+        .map(|arm| NormalizedMatchArm {
+            pattern_id: arm.pattern_id,
+            pattern: arm.pattern,
+            guard: arm
+                .guard
+                .map(|guard| normalize_expression_suspensions_with(guard, context)),
+            value: normalize_expression_suspensions_with(arm.value, context),
+        })
+        .collect::<Vec<_>>();
+    if arms.iter().all(|arm| {
+        arm.value.steps.is_empty()
+            && arm
+                .guard
+                .as_ref()
+                .is_none_or(|guard| guard.steps.is_empty())
+    }) {
+        let kind = ExpressionKind::Match {
+            value: input.value,
+            arms: arms
+                .into_iter()
+                .map(|arm| MatchArm {
+                    pattern_id: arm.pattern_id,
+                    pattern: arm.pattern,
+                    guard: arm.guard.map(|guard| guard.value),
+                    value: arm.value.value,
+                })
+                .collect(),
+        };
+        let value =
+            context
+                .wasm_ir
+                .push_generated_expression(original.ty, kind, original.conversion);
+        return NormalizedExpression {
+            value,
+            steps: input.steps,
+        };
+    }
+
+    let is_void = matches!(
+        context.semantics.types().kind(original.ty),
+        TypeKind::Builtin(BuiltinType::Void)
+    );
+    let (destination, value) = if is_void {
+        (None, original.id)
+    } else {
+        let storage_ty = original
+            .conversion
+            .map_or(original.ty, |conversion| conversion.source);
+        let (temporary, value) =
+            context
+                .wasm_ir
+                .temporary_read(storage_ty, original.ty, original.conversion);
+        (Some(temporary), value)
+    };
+    let guard_suspends = arms.iter().any(|arm| {
+        arm.guard
+            .as_ref()
+            .is_some_and(|guard| !guard.steps.is_empty())
+    });
+    let mut steps = input.steps;
+    let input_value = if guard_suspends {
+        let ty = context.wasm_ir.effective_expression_type(input.value);
+        let (temporary, value) = context.wasm_ir.temporary(ty);
+        steps.push(AsyncExpressionStep::Store {
+            target: temporary,
+            value: input.value,
+        });
+        value
+    } else {
+        input.value
+    };
+    steps.push(AsyncExpressionStep::Match {
+        expression: original.id,
+        value: input_value,
+        arms,
+        destination,
+    });
     NormalizedExpression { value, steps }
 }
 
@@ -1617,6 +2001,7 @@ fn map_expression_children(
         | ExpressionKind::String(_)
         | ExpressionKind::Signature(_)
         | ExpressionKind::Temporary(_)
+        | ExpressionKind::FallbackSuccess { .. }
         | ExpressionKind::Path { .. } => kind,
         ExpressionKind::InterpolatedString(parts) => ExpressionKind::InterpolatedString(
             parts
@@ -1735,6 +2120,73 @@ fn map_expression_children(
     }
 }
 
+fn lower_normalized_match_arms(
+    expression: ExprId,
+    value: ExprId,
+    arms: &[NormalizedMatchArm],
+    destination: Option<TemporaryId>,
+    continuation: &Block,
+) -> Vec<MatchStatementArm> {
+    arms.iter()
+        .enumerate()
+        .map(|(index, arm)| {
+            let mut value_tail = continuation.clone();
+            value_tail.statements.insert(
+                0,
+                destination.map_or(
+                    Statement::Evaluate {
+                        expression: arm.value.value,
+                        discard_result: false,
+                    },
+                    |target| Statement::StoreTemporary {
+                        target,
+                        value: arm.value.value,
+                    },
+                ),
+            );
+            let value_block = wrap_async_expression_steps(arm.value.steps.clone(), value_tail);
+            let (guard, block) = match &arm.guard {
+                Some(guard) if !guard.steps.is_empty() => {
+                    let remaining = Block {
+                        statements: vec![Statement::Match {
+                            expression,
+                            value,
+                            arms: lower_normalized_match_arms(
+                                expression,
+                                value,
+                                &arms[index + 1..],
+                                destination,
+                                continuation,
+                            ),
+                        }],
+                        terminator: Terminator::Fallthrough,
+                    };
+                    let guarded = Block {
+                        statements: vec![Statement::If {
+                            condition: guard.value,
+                            then_block: value_block,
+                            else_block: remaining,
+                        }],
+                        terminator: Terminator::Fallthrough,
+                    };
+                    (
+                        None,
+                        wrap_async_expression_steps(guard.steps.clone(), guarded),
+                    )
+                }
+                Some(guard) => (Some(guard.value), value_block),
+                None => (None, value_block),
+            };
+            MatchStatementArm {
+                pattern_id: arm.pattern_id,
+                pattern: arm.pattern.clone(),
+                guard,
+                block,
+            }
+        })
+        .collect()
+}
+
 fn wrap_async_expression_steps(steps: Vec<AsyncExpressionStep>, mut continuation: Block) -> Block {
     for step in steps.into_iter().rev() {
         match step {
@@ -1796,6 +2248,61 @@ fn wrap_async_expression_steps(steps: Vec<AsyncExpressionStep>, mut continuation
                         condition,
                         then_block,
                         else_block,
+                    }],
+                    terminator: Terminator::Fallthrough,
+                };
+            }
+            AsyncExpressionStep::Match {
+                expression,
+                value,
+                arms,
+                destination,
+            } => {
+                continuation = Block {
+                    statements: vec![Statement::Match {
+                        expression,
+                        value,
+                        arms: lower_normalized_match_arms(
+                            expression,
+                            value,
+                            &arms,
+                            destination,
+                            &continuation,
+                        ),
+                    }],
+                    terminator: Terminator::Fallthrough,
+                };
+            }
+            AsyncExpressionStep::Fallback {
+                expression,
+                value,
+                fallback,
+                destination,
+                success,
+            } => {
+                let mut fallback_tail = continuation.clone();
+                fallback_tail.statements.insert(
+                    0,
+                    Statement::StoreTemporary {
+                        target: destination,
+                        value: fallback.value,
+                    },
+                );
+                let fallback_block = wrap_async_expression_steps(fallback.steps, fallback_tail);
+                let mut success_block = continuation;
+                success_block.statements.insert(
+                    0,
+                    Statement::StoreTemporary {
+                        target: destination,
+                        value: success,
+                    },
+                );
+                continuation = Block {
+                    statements: vec![Statement::Fallback {
+                        expression,
+                        value,
+                        fallback_block,
+                        success_block,
                     }],
                     terminator: Terminator::Fallthrough,
                 };
@@ -2186,6 +2693,19 @@ fn assign_async_states(block: &mut Block, next: &mut u32) {
                 assign_async_states(then_block, next);
                 assign_async_states(else_block, next);
             }
+            Statement::Match { arms, .. } => {
+                for arm in arms {
+                    assign_async_states(&mut arm.block, next);
+                }
+            }
+            Statement::Fallback {
+                fallback_block,
+                success_block,
+                ..
+            } => {
+                assign_async_states(fallback_block, next);
+                assign_async_states(success_block, next);
+            }
             Statement::While { body, .. } | Statement::For { body, .. } => {
                 assign_async_states(body, next)
             }
@@ -2255,6 +2775,19 @@ fn set_async_while_targets(
             } => {
                 set_async_while_targets(then_block, header_state, exit_state);
                 set_async_while_targets(else_block, header_state, exit_state);
+            }
+            Statement::Match { arms, .. } => {
+                for arm in arms {
+                    set_async_while_targets(&mut arm.block, header_state, exit_state);
+                }
+            }
+            Statement::Fallback {
+                fallback_block,
+                success_block,
+                ..
+            } => {
+                set_async_while_targets(fallback_block, header_state, exit_state);
+                set_async_while_targets(success_block, header_state, exit_state);
             }
             Statement::While { body, .. } | Statement::For { body, .. } => {
                 set_async_while_targets(body, header_state, exit_state);
@@ -2519,6 +3052,31 @@ impl Visitor for LocalPlanner<'_> {
                 declaration: true,
                 ..
             } => self.value(*target),
+            Statement::Match {
+                expression,
+                value,
+                arms,
+            } => {
+                let value_type = program
+                    .expression(*value)
+                    .expect("match input belongs to Wasm IR")
+                    .ty;
+                self.push(value_type, LocalPurpose::MatchValue(*expression));
+                for arm in arms {
+                    if let Some(binding) = arm.pattern.binding() {
+                        self.value(binding);
+                    }
+                }
+            }
+            Statement::Fallback {
+                expression, value, ..
+            } => {
+                let value_type = program
+                    .expression(*value)
+                    .expect("fallback input belongs to Wasm IR")
+                    .ty;
+                self.push(value_type, LocalPurpose::FallbackValue(*expression));
+            }
             Statement::For {
                 binding,
                 iterable_value,
@@ -2613,11 +3171,7 @@ impl Visitor for LocalPlanner<'_> {
                     _ => None,
                 };
                 if let Some(binding) = binding {
-                    let binding_type = self
-                        .semantics
-                        .value_type(binding)
-                        .expect("checked pattern bindings have types");
-                    self.push(binding_type, LocalPurpose::MatchBinding(arm.pattern_id));
+                    self.value(binding);
                 }
                 if let Some(guard) = arm.guard {
                     self.visit_expression_id(guard, program);

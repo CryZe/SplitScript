@@ -464,6 +464,182 @@ fn suspending_while_conditions_are_reentered_on_every_back_edge() {
 }
 
 #[test]
+fn match_arm_suspensions_are_selected_and_payloads_survive_resumption() {
+    use splitscript::compiler::wasm_ir::{BodyOwner, Statement, Terminator};
+
+    let source = r#"
+        state "game.exe" {}
+
+        enum Input {
+            Value(u32)
+            Missing
+        }
+
+        onAttach {
+            let selected = match Input.Value(3) {
+                Input.Value(payload) => retry process.read<u32>(0x1000) + payload,
+                Input.Missing => 7
+            }
+            print(selected)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("match arm values may suspend");
+    let lowered = splitscript::lower_wasm(&checked);
+    let body = lowered
+        .body(BodyOwner::Action(
+            splitscript::compiler::ast::ActionKind::OnAttach,
+        ))
+        .expect("onAttach has a lowered body");
+    let Some(Statement::Match { arms, .. }) = body.entry.statements.first() else {
+        panic!("a suspending match must remain branch-shaped")
+    };
+    assert!(matches!(
+        arms[0].block.terminator,
+        Terminator::Suspend { .. }
+    ));
+    assert!(!matches!(
+        arms[1].block.terminator,
+        Terminator::Suspend { .. }
+    ));
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("match payloads and arm-local suspension should use typed frame storage");
+}
+
+#[test]
+fn suspending_match_guards_resume_into_the_next_arm_when_false() {
+    use splitscript::compiler::wasm_ir::{BodyOwner, Statement, Terminator};
+
+    let source = r#"
+        state "game.exe" {}
+        onAttach {
+            let selected = match 1 {
+                1 if retry process.read<u8>(0x1000) == 1 => 10,
+                1 => 20,
+                _ => 30
+            }
+            print(selected)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("match guards may suspend");
+    let lowered = splitscript::lower_wasm(&checked);
+    let body = lowered
+        .body(BodyOwner::Action(
+            splitscript::compiler::ast::ActionKind::OnAttach,
+        ))
+        .expect("onAttach has a lowered body");
+    let Some(Statement::StoreTemporary { .. }) = body.entry.statements.first() else {
+        panic!("the match input must survive a suspending guard")
+    };
+    let Some(Statement::Match { arms, .. }) = body.entry.statements.get(1) else {
+        panic!("the guarded match remains explicit control flow")
+    };
+    let Terminator::Suspend { continuation, .. } = &arms[0].block.terminator else {
+        panic!("the first matching arm polls its guard")
+    };
+    let Some(Statement::If { else_block, .. }) = continuation.statements.first() else {
+        panic!("guard readiness must branch on the guard result")
+    };
+    assert!(matches!(
+        else_block.statements.first(),
+        Some(Statement::Match { .. })
+    ));
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("suspending guards should preserve match dispatch in typed continuation states");
+}
+
+#[test]
+fn suspending_value_fallbacks_only_poll_on_the_failure_path() {
+    use splitscript::compiler::wasm_ir::{BodyOwner, Statement, Terminator};
+
+    let source = r#"
+        state "game.exe" {}
+        onAttach {
+            let maybe: u32? = None
+            let selected = maybe else retry process.read<u32>(0x1000)
+            print(selected)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("fallback values may suspend");
+    let lowered = splitscript::lower_wasm(&checked);
+    let body = lowered
+        .body(BodyOwner::Action(
+            splitscript::compiler::ast::ActionKind::OnAttach,
+        ))
+        .expect("onAttach has a lowered body");
+    let Some(Statement::Fallback {
+        fallback_block,
+        success_block,
+        ..
+    }) = body.entry.statements.get(1)
+    else {
+        panic!("fallback must remain explicit branch control flow")
+    };
+    assert!(matches!(
+        fallback_block.terminator,
+        Terminator::Suspend { .. }
+    ));
+    assert!(!matches!(
+        success_block.terminator,
+        Terminator::Suspend { .. }
+    ));
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("fallback success extraction and suspension should use typed temporaries");
+}
+
+#[test]
+fn awaited_call_operands_are_captured_once_before_polling() {
+    use splitscript::compiler::wasm_ir::{BodyOwner, Statement, Terminator};
+
+    let source = r#"
+        state "game.exe" {}
+
+        fn scanStart() -> Address {
+            print("capture")
+            return 0x1000 as Address
+        }
+
+        onAttach {
+            let found = await process.scan(
+                scanStart(),
+                0x100u64,
+                sig"48 8B ?? 00"
+            )
+            print(found)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("await operands may contain ordinary expressions");
+    let lowered = splitscript::lower_wasm(&checked);
+    let body = lowered
+        .body(BodyOwner::Action(
+            splitscript::compiler::ast::ActionKind::OnAttach,
+        ))
+        .expect("onAttach has a lowered body");
+    assert!(matches!(
+        body.entry.statements.first(),
+        Some(Statement::StoreTemporary { .. })
+    ));
+    assert!(matches!(body.entry.terminator, Terminator::Suspend { .. }));
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("captured await arguments should remain in typed continuation storage");
+}
+
+#[test]
 fn signature_literals_are_typed_validated_and_scannable() {
     let source = r#"
         state "game.exe" {}

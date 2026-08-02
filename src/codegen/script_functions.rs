@@ -35,7 +35,6 @@ pub(super) fn compile_read(
                 .map(|ty| (1, lowering.gc.val_type(ty))),
         );
         let locals = HashMap::new();
-        let pattern_bindings = HashMap::new();
         let context = ExprContext {
             standard_library: lowering.standard_library,
             abi: lowering.abi,
@@ -58,7 +57,6 @@ pub(super) fn compile_read(
             memory: lowering.memory,
             abi_read: lowering.abi_read,
             matches: &matches,
-            pattern_bindings: &pattern_bindings,
             semantics: lowering.semantics,
             wasm_ir: lowering.wasm_ir,
             gc: lowering.gc,
@@ -370,7 +368,6 @@ pub(super) fn compile_user_function(
             .into_iter()
             .map(|ty| (1, lowering.gc.val_type(ty))),
     );
-    let pattern_bindings = HashMap::new();
     let context = ExprContext {
         standard_library: lowering.standard_library,
         abi: lowering.abi,
@@ -393,7 +390,6 @@ pub(super) fn compile_user_function(
         memory: lowering.memory,
         abi_read: lowering.abi_read,
         matches: &matches,
-        pattern_bindings: &pattern_bindings,
         semantics: lowering.semantics,
         wasm_ir: lowering.wasm_ir,
         gc: lowering.gc,
@@ -444,7 +440,6 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
             .into_iter()
             .map(|ty| (1, lowering.gc.val_type(ty))),
     );
-    let pattern_bindings = HashMap::new();
     let context = ExprContext {
         standard_library: lowering.standard_library,
         abi: lowering.abi,
@@ -467,7 +462,6 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
         memory: lowering.memory,
         abi_read: lowering.abi_read,
         matches: &matches,
-        pattern_bindings: &pattern_bindings,
         semantics: lowering.semantics,
         wasm_ir: lowering.wasm_ir,
         gc: lowering.gc,
@@ -533,9 +527,6 @@ pub(super) fn plan_wasm_locals(
             }
             LocalPurpose::MatchValue(expression) => {
                 matches.values.insert(expression, index);
-            }
-            LocalPurpose::MatchBinding(pattern) => {
-                matches.bindings.insert(pattern, (index, ty));
             }
             LocalPurpose::FallbackValue(expression) => {
                 matches.fallback_values.insert(expression, index);

@@ -255,13 +255,13 @@ tooling consumers only see the normalized immutable graph.
         separate statement/binding/return suspension grammar. `await` unwraps
         exactly `async T` to `T`; `retry` remains the orthogonal operation that
         repeatedly evaluates `T!` and unwraps its successful `T`.
-      - [ ] Add an evaluation-order-preserving async normalization pass. Before
+      - [x] Add an evaluation-order-preserving async normalization pass. Before
         extracting a nested await, spill every earlier non-replayable sibling
         (call arguments, receivers, operators, interpolation parts, conditions,
         match inputs/guards, and fallback operands) exactly once. Represent
         compiler temporaries with typed IR identities rather than fabricated
         source `ValueId`s, and include them in liveness/frame planning.
-      - [ ] Make suspension destinations explicit (`discard`, source binding,
+      - [x] Make suspension destinations explicit (`discard`, source binding,
         compiler temporary, or body result) instead of combining an optional
         binding with boolean flags. The continuation graph, not parser position,
         decides what happens to the completed value.

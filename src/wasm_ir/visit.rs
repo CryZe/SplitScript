@@ -75,6 +75,25 @@ pub fn walk_statement(
             visitor.visit_block(then_block, program);
             visitor.visit_block(else_block, program);
         }
+        Statement::Match { value, arms, .. } => {
+            visitor.visit_expression_id(*value, program);
+            for arm in arms {
+                if let Some(guard) = arm.guard {
+                    visitor.visit_expression_id(guard, program);
+                }
+                visitor.visit_block(&arm.block, program);
+            }
+        }
+        Statement::Fallback {
+            value,
+            fallback_block,
+            success_block,
+            ..
+        } => {
+            visitor.visit_expression_id(*value, program);
+            visitor.visit_block(fallback_block, program);
+            visitor.visit_block(success_block, program);
+        }
         Statement::While { condition, body } => {
             visitor.visit_expression_id(*condition, program);
             visitor.visit_block(body, program);
@@ -155,6 +174,7 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
         | ExpressionKind::String(_)
         | ExpressionKind::Signature(_)
         | ExpressionKind::Temporary(_)
+        | ExpressionKind::FallbackSuccess { .. }
         | ExpressionKind::Path { .. } => {}
         ExpressionKind::Member { receiver, .. } => visit(*receiver),
         ExpressionKind::InterpolatedString(parts) => {

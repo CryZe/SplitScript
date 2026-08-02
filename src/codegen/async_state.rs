@@ -22,8 +22,9 @@ use super::{
     emit_async_frame_ref, emit_memory_value, emit_string_literal, emit_typed_struct_get,
     expression::{
         BareReturn, ExprContext, LocalStorage, LoopControl, MatchLayout, compile_assignment,
-        compile_expr, compile_for_bind_and_advance, compile_for_has_next, compile_for_init,
-        compile_receiver, compile_temporary_set,
+        compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
+        compile_for_has_next, compile_for_init, compile_receiver, compile_statement_pattern,
+        compile_temporary_set, store_match_binding,
     },
     global_plan::RuntimeGlobals,
     imports::Abi,
@@ -63,7 +64,6 @@ pub(super) fn compile_async_attach(
             .into_iter()
             .map(|ty| (1, runtime.lowering.gc.val_type(ty))),
     );
-    let pattern_bindings = HashMap::new();
     let context = ExprContext {
         standard_library: runtime.lowering.standard_library,
         abi: runtime.abi,
@@ -88,7 +88,6 @@ pub(super) fn compile_async_attach(
         memory: runtime.lowering.memory,
         abi_read: runtime.lowering.abi_read,
         matches: &matches,
-        pattern_bindings: &pattern_bindings,
         semantics: runtime.lowering.semantics,
         wasm_ir: runtime.lowering.wasm_ir,
         gc: runtime.lowering.gc,
@@ -946,6 +945,19 @@ fn collect_async_states<'a>(
                 collect_async_states(then_block, states, loop_targets);
                 collect_async_states(else_block, states, loop_targets);
             }
+            wasm_ir::Statement::Match { arms, .. } => {
+                for arm in arms {
+                    collect_async_states(&arm.block, states, loop_targets);
+                }
+            }
+            wasm_ir::Statement::Fallback {
+                fallback_block,
+                success_block,
+                ..
+            } => {
+                collect_async_states(fallback_block, states, loop_targets);
+                collect_async_states(success_block, states, loop_targets);
+            }
             wasm_ir::Statement::While { body, .. } => {
                 collect_async_states(body, states, loop_targets)
             }
@@ -1109,6 +1121,95 @@ fn compile_async_flow(
                 compile_async_flow(
                     function,
                     else_block,
+                    loop_depth + 1,
+                    loop_control.map(|control| control.nested(1)),
+                    result_global,
+                    cancellation_region,
+                    runtime,
+                    layout,
+                    context,
+                );
+                function.instruction(&Instruction::End);
+            }
+            wasm_ir::Statement::Match {
+                expression,
+                value,
+                arms,
+            } => {
+                let value_local = context.matches.values[expression];
+                let value_type = context.expression_type(*value);
+                compile_expr(function, *value, context);
+                function.instruction(&Instruction::LocalSet(value_local));
+                for (arm_index, arm) in arms.iter().enumerate() {
+                    let binding = compile_statement_pattern(
+                        function,
+                        &arm.pattern,
+                        value_local,
+                        value_type,
+                        context,
+                    );
+                    let arm_context = ExprContext {
+                        loop_control: loop_control
+                            .map(|control| control.nested(arm_index as u32 + 1)),
+                        ..*context
+                    };
+                    if binding.is_some() || arm.guard.is_some() {
+                        function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+                        if let Some(binding) = binding {
+                            store_match_binding(function, binding, value_local, &arm_context);
+                        }
+                        if let Some(guard) = arm.guard {
+                            compile_expr(function, guard, &arm_context);
+                        } else {
+                            function.instruction(&Instruction::I32Const(1));
+                        }
+                        function
+                            .instruction(&Instruction::Else)
+                            .instruction(&Instruction::I32Const(0))
+                            .instruction(&Instruction::End);
+                    }
+                    function.instruction(&Instruction::If(BlockType::Empty));
+                    compile_async_flow(
+                        function,
+                        &arm.block,
+                        loop_depth + arm_index as u32 + 1,
+                        arm_context.loop_control,
+                        result_global,
+                        cancellation_region,
+                        runtime,
+                        layout,
+                        &arm_context,
+                    );
+                    function.instruction(&Instruction::Else);
+                }
+                function.instruction(&Instruction::Unreachable);
+                for _ in arms {
+                    function.instruction(&Instruction::End);
+                }
+            }
+            wasm_ir::Statement::Fallback {
+                expression,
+                value,
+                fallback_block,
+                success_block,
+            } => {
+                compile_fallback_condition(function, *expression, *value, context);
+                function.instruction(&Instruction::If(BlockType::Empty));
+                compile_async_flow(
+                    function,
+                    fallback_block,
+                    loop_depth + 1,
+                    loop_control.map(|control| control.nested(1)),
+                    result_global,
+                    cancellation_region,
+                    runtime,
+                    layout,
+                    context,
+                );
+                function.instruction(&Instruction::Else);
+                compile_async_flow(
+                    function,
+                    success_block,
                     loop_depth + 1,
                     loop_control.map(|control| control.nested(1)),
                     result_global,

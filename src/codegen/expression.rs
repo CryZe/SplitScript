@@ -31,7 +31,6 @@ use super::{
 #[derive(Default)]
 pub(super) struct MatchLayout {
     pub values: HashMap<ExprId, u32>,
-    pub bindings: HashMap<crate::ast::PatternId, (u32, Type)>,
     pub fallback_values: HashMap<ExprId, u32>,
     pub intrinsic_temps: HashMap<ExprId, Vec<u32>>,
     pub suspension_temps: HashMap<ExprId, u32>,
@@ -79,7 +78,6 @@ pub(super) struct ExprContext<'a> {
     pub memory: &'a MemoryLayouts,
     pub abi_read: AbiReadScratch,
     pub matches: &'a MatchLayout,
-    pub pattern_bindings: &'a HashMap<ValueId, (u32, Type)>,
     pub semantics: &'a SemanticModel,
     pub wasm_ir: &'a wasm_ir::Program,
     pub gc: &'a GcLayout,
@@ -267,6 +265,44 @@ fn compile_block_with_loop(
                 );
                 function.instruction(&Instruction::End);
             }
+            wasm_ir::Statement::Match {
+                expression,
+                value,
+                arms,
+            } => compile_match_statement(
+                function,
+                *expression,
+                *value,
+                arms,
+                context,
+                action,
+                loop_control,
+            ),
+            wasm_ir::Statement::Fallback {
+                expression,
+                value,
+                fallback_block,
+                success_block,
+            } => {
+                compile_fallback_condition(function, *expression, *value, context);
+                function.instruction(&Instruction::If(BlockType::Empty));
+                compile_block_with_loop(
+                    function,
+                    fallback_block,
+                    context,
+                    action,
+                    loop_control.map(|control| control.nested(1)),
+                );
+                function.instruction(&Instruction::Else);
+                compile_block_with_loop(
+                    function,
+                    success_block,
+                    context,
+                    action,
+                    loop_control.map(|control| control.nested(1)),
+                );
+                function.instruction(&Instruction::End);
+            }
             wasm_ir::Statement::While { condition, body } => {
                 function
                     .instruction(&Instruction::Block(BlockType::Empty))
@@ -384,6 +420,271 @@ fn compile_block_with_loop(
         wasm_ir::Terminator::Suspend { .. } => {
             unreachable!("suspension is lowered by the async action compiler")
         }
+    }
+}
+
+pub(super) fn compile_fallback_condition(
+    function: &mut Function,
+    expression: ExprId,
+    value: ExprId,
+    context: &ExprContext<'_>,
+) {
+    let input_local = context.matches.fallback_values[&expression];
+    let input_type = context.expression_type(value);
+    compile_expr(function, value, context);
+    function.instruction(&Instruction::LocalSet(input_local));
+    match input_type {
+        Type::Option(_) => {
+            function
+                .instruction(&Instruction::LocalGet(input_local))
+                .instruction(&Instruction::RefIsNull);
+        }
+        Type::Result(result) => {
+            function
+                .instruction(&Instruction::LocalGet(input_local))
+                .instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(
+                function,
+                context.gc.index(Type::Result(result)),
+                1,
+                Type::I32,
+            );
+        }
+        _ => unreachable!("typed fallback inputs are optional or result values"),
+    }
+}
+
+fn compile_fallback_success(
+    function: &mut Function,
+    source: ExprId,
+    ty: Type,
+    context: &ExprContext<'_>,
+) {
+    let source = context
+        .wasm_ir
+        .expression(source)
+        .expect("fallback success source belongs to Wasm IR");
+    let wasm_ir::ExpressionKind::Fallback { value, .. } = source.kind else {
+        unreachable!("fallback success references a fallback expression")
+    };
+    let input_local = context.matches.fallback_values[&source.id];
+    match context.expression_type(value) {
+        Type::Option(option) => {
+            function
+                .instruction(&Instruction::LocalGet(input_local))
+                .instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(function, context.gc.index(Type::Option(option)), 0, ty);
+        }
+        Type::Result(result) => {
+            function
+                .instruction(&Instruction::LocalGet(input_local))
+                .instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(function, context.gc.index(Type::Result(result)), 0, ty);
+        }
+        _ => unreachable!("typed fallback inputs are optional or result values"),
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct MatchPatternBinding {
+    value: ValueId,
+    payload_type: Type,
+    struct_type: u32,
+    field_index: u32,
+}
+
+pub(super) fn compile_statement_pattern(
+    function: &mut Function,
+    pattern: &wasm_ir::LoweredPattern,
+    value_local: u32,
+    value_type: Type,
+    context: &ExprContext<'_>,
+) -> Option<MatchPatternBinding> {
+    let enum_pattern = if let wasm_ir::LoweredPattern::Enum {
+        enumeration,
+        variant,
+        binding,
+    } = pattern
+    {
+        let variant_index = context
+            .gc
+            .enum_variant_index(*enumeration, *variant, context.enums);
+        Some((*enumeration, variant_index, *binding))
+    } else {
+        None
+    };
+    let binding = match pattern {
+        wasm_ir::LoweredPattern::Enum { .. } => {
+            let (_, variant_index, binding) = enum_pattern.unwrap();
+            binding.map(|binding| {
+                (
+                    binding,
+                    context.gc.index(value_type),
+                    variant_index as u32 + 1,
+                )
+            })
+        }
+        wasm_ir::LoweredPattern::OptionSome { binding, .. } => {
+            let Type::Option(option) = value_type else {
+                unreachable!("Some patterns match Option values")
+            };
+            binding.map(|binding| (binding, context.gc.index(Type::Option(option)), 0))
+        }
+        wasm_ir::LoweredPattern::ResultSuccess { binding, .. } => {
+            let Type::Result(result) = value_type else {
+                unreachable!("Ok patterns match Result values")
+            };
+            binding.map(|binding| (binding, context.gc.index(Type::Result(result)), 0))
+        }
+        wasm_ir::LoweredPattern::ResultError { binding, .. } => {
+            let Type::Result(result) = value_type else {
+                unreachable!("Err patterns match Result values")
+            };
+            binding.map(|binding| (binding, context.gc.index(Type::Result(result)), 2))
+        }
+        _ => None,
+    };
+    match pattern {
+        wasm_ir::LoweredPattern::Enum { .. } => {
+            let (_, variant_index, _) = enum_pattern.unwrap();
+            function
+                .instruction(&Instruction::LocalGet(value_local))
+                .instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(function, context.gc.index(value_type), 0, Type::I32);
+            function
+                .instruction(&Instruction::I32Const(variant_index as i32))
+                .instruction(&Instruction::I32Eq);
+        }
+        wasm_ir::LoweredPattern::Bool(expected) => {
+            function
+                .instruction(&Instruction::LocalGet(value_local))
+                .instruction(&Instruction::I32Const(*expected as i32))
+                .instruction(&Instruction::I32Eq);
+        }
+        wasm_ir::LoweredPattern::Int(value) => {
+            function.instruction(&Instruction::LocalGet(value_local));
+            emit_int(function, *value, value_type);
+            function.instruction(
+                &if matches!(value_type, Type::I64 | Type::U64 | Type::Address) {
+                    Instruction::I64Eq
+                } else {
+                    Instruction::I32Eq
+                },
+            );
+        }
+        wasm_ir::LoweredPattern::OptionNone(_) => {
+            function
+                .instruction(&Instruction::LocalGet(value_local))
+                .instruction(&Instruction::RefIsNull);
+        }
+        wasm_ir::LoweredPattern::OptionSome { .. } => {
+            function
+                .instruction(&Instruction::LocalGet(value_local))
+                .instruction(&Instruction::RefIsNull)
+                .instruction(&Instruction::I32Eqz);
+        }
+        wasm_ir::LoweredPattern::ResultSuccess { .. }
+        | wasm_ir::LoweredPattern::ResultError { .. } => {
+            let Type::Result(result) = value_type else {
+                unreachable!("result patterns match Result values")
+            };
+            function
+                .instruction(&Instruction::LocalGet(value_local))
+                .instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(
+                function,
+                context.gc.index(Type::Result(result)),
+                1,
+                Type::I32,
+            );
+            function.instruction(&Instruction::I32Const(matches!(
+                pattern,
+                wasm_ir::LoweredPattern::ResultError { .. }
+            ) as i32));
+            function.instruction(&Instruction::I32Eq);
+        }
+        wasm_ir::LoweredPattern::Wildcard => {
+            function.instruction(&Instruction::I32Const(1));
+        }
+    }
+    binding.map(|(value, struct_type, field_index)| MatchPatternBinding {
+        value,
+        payload_type: context.ty(context
+            .semantics
+            .value_type(value)
+            .expect("checked pattern bindings have types")),
+        struct_type,
+        field_index,
+    })
+}
+
+pub(super) fn store_match_binding(
+    function: &mut Function,
+    binding: MatchPatternBinding,
+    value_local: u32,
+    context: &ExprContext<'_>,
+) {
+    compile_value_set(function, binding.value, context, |function| {
+        function
+            .instruction(&Instruction::LocalGet(value_local))
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(
+            function,
+            binding.struct_type,
+            binding.field_index,
+            binding.payload_type,
+        );
+    });
+}
+
+fn compile_match_statement(
+    function: &mut Function,
+    expression: ExprId,
+    value: ExprId,
+    arms: &[wasm_ir::MatchStatementArm],
+    context: &ExprContext<'_>,
+    action: Option<ActionKind>,
+    loop_control: Option<LoopControl>,
+) {
+    let value_local = context.matches.values[&expression];
+    let value_type = context.expression_type(value);
+    compile_expr(function, value, context);
+    function.instruction(&Instruction::LocalSet(value_local));
+    for (arm_index, arm) in arms.iter().enumerate() {
+        let binding =
+            compile_statement_pattern(function, &arm.pattern, value_local, value_type, context);
+        let arm_context = ExprContext {
+            loop_control: loop_control.map(|control| control.nested(arm_index as u32 + 1)),
+            ..*context
+        };
+        if binding.is_some() || arm.guard.is_some() {
+            function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+            if let Some(binding) = binding {
+                store_match_binding(function, binding, value_local, &arm_context);
+            }
+            if let Some(guard) = arm.guard {
+                compile_expr(function, guard, &arm_context);
+            } else {
+                function.instruction(&Instruction::I32Const(1));
+            }
+            function
+                .instruction(&Instruction::Else)
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::End);
+        }
+        function.instruction(&Instruction::If(BlockType::Empty));
+        compile_block_with_loop(
+            function,
+            &arm.block,
+            &arm_context,
+            action,
+            arm_context.loop_control,
+        );
+        function.instruction(&Instruction::Else);
+    }
+    function.instruction(&Instruction::Unreachable);
+    for _ in arms {
+        function.instruction(&Instruction::End);
     }
 }
 
@@ -658,39 +959,28 @@ fn compile_resolved_path(
             }));
             storage.ty
         }
-        ResolvedValue::Variable(value) => {
-            if let Some(&(local, ty)) = context.pattern_bindings.get(&value) {
+        ResolvedValue::Variable(value) => match context.locals {
+            LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&value) => {
+                let (field, ty) = frame_values[&value];
+                emit_async_frame_ref(function, context.runtime_globals);
+                emit_typed_struct_get(function, context.gc.async_frame_index(), field, ty);
+                ty
+            }
+            LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&value) => {
+                let (local, ty) = wasm_values[&value];
                 function.instruction(&Instruction::LocalGet(local));
                 ty
-            } else {
-                match context.locals {
-                    LocalStorage::Hybrid { frame_values, .. }
-                        if frame_values.contains_key(&value) =>
-                    {
-                        let (field, ty) = frame_values[&value];
-                        emit_async_frame_ref(function, context.runtime_globals);
-                        emit_typed_struct_get(function, context.gc.async_frame_index(), field, ty);
-                        ty
-                    }
-                    LocalStorage::Hybrid { wasm_values, .. }
-                        if wasm_values.contains_key(&value) =>
-                    {
-                        let (local, ty) = wasm_values[&value];
-                        function.instruction(&Instruction::LocalGet(local));
-                        ty
-                    }
-                    LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
-                        let (local, ty) = values[&value];
-                        function.instruction(&Instruction::LocalGet(local));
-                        ty
-                    }
-                    _ => {
-                        function.instruction(&Instruction::GlobalGet(context.globals[&value]));
-                        context.global_types[&value]
-                    }
-                }
             }
-        }
+            LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
+                let (local, ty) = values[&value];
+                function.instruction(&Instruction::LocalGet(local));
+                ty
+            }
+            _ => {
+                function.instruction(&Instruction::GlobalGet(context.globals[&value]));
+                context.global_types[&value]
+            }
+        },
     };
     emit_path_fields(function, members, value_type, context)
 }
@@ -935,6 +1225,9 @@ fn compile_expr_unconverted(
         }
         wasm_ir::ExpressionKind::Temporary(temporary) => {
             compile_temporary_get(function, *temporary, context);
+        }
+        wasm_ir::ExpressionKind::FallbackSuccess { source } => {
+            compile_fallback_success(function, *source, ty, context);
         }
         wasm_ir::ExpressionKind::None => match ty {
             Type::Bool => {
@@ -1263,7 +1556,6 @@ fn compile_expr_unconverted(
                 BlockType::Result(context.gc.val_type(ty))
             };
             for (arm_index, arm) in arms.iter().enumerate() {
-                let mut bindings = context.pattern_bindings.clone();
                 let enum_pattern = if let wasm_ir::LoweredPattern::Enum {
                     enumeration,
                     variant,
@@ -1310,9 +1602,15 @@ fn compile_expr_unconverted(
                     _ => None,
                 };
                 let binding = binding.map(|(binding, struct_type, field_index)| {
-                    let (binding_local, payload_type) = context.matches.bindings[&arm.pattern_id];
-                    bindings.insert(binding, (binding_local, payload_type));
-                    (binding_local, payload_type, struct_type, field_index)
+                    (
+                        binding,
+                        context.ty(context
+                            .semantics
+                            .value_type(binding)
+                            .expect("checked pattern bindings have types")),
+                        struct_type,
+                        field_index,
+                    )
                 });
                 match &arm.pattern {
                     wasm_ir::LoweredPattern::Enum { .. } => {
@@ -1380,19 +1678,19 @@ fn compile_expr_unconverted(
                     }
                 }
                 let arm_context = ExprContext {
-                    pattern_bindings: &bindings,
                     loop_control: context
                         .loop_control
                         .map(|control| control.nested(arm_index as u32 + 1)),
                     ..*context
                 };
-                if let Some((binding_local, payload_type, struct_type, field_index)) = binding {
+                if let Some((binding, payload_type, struct_type, field_index)) = binding {
                     function.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
-                    function
-                        .instruction(&Instruction::LocalGet(value_local))
-                        .instruction(&Instruction::RefAsNonNull);
-                    emit_typed_struct_get(function, struct_type, field_index, payload_type);
-                    function.instruction(&Instruction::LocalSet(binding_local));
+                    compile_value_set(function, binding, &arm_context, |function| {
+                        function
+                            .instruction(&Instruction::LocalGet(value_local))
+                            .instruction(&Instruction::RefAsNonNull);
+                        emit_typed_struct_get(function, struct_type, field_index, payload_type);
+                    });
                     if let Some(guard) = arm.guard {
                         compile_expr(function, guard, &arm_context);
                     } else {

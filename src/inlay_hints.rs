@@ -82,9 +82,13 @@ impl InlayHintCollector<'_> {
         else {
             return;
         };
+        let is_async = self.snapshot.effects().is_some_and(|effects| {
+            effects.function(function.id).suspension == crate::stdlib::SuspensionKind::Suspends
+        });
+        let async_prefix = if is_async { "async " } else { "" };
         self.add_hint(
             closing_parenthesis.span.end,
-            format!(" -> {}", display_type(ty, self.snapshot)),
+            format!(" -> {async_prefix}{}", display_type(ty, self.snapshot)),
         );
     }
 }

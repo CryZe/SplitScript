@@ -63,8 +63,11 @@ impl CallableContext {
         matches!(self, Self::Function(_) | Self::LibraryFunction(_))
     }
 
-    pub(super) fn is_library_function(&self) -> bool {
-        matches!(self, Self::LibraryFunction(_))
+    pub(super) fn can_suspend(&self) -> bool {
+        matches!(
+            self,
+            Self::Function(_) | Self::LibraryFunction(_) | Self::Action(ActionKind::OnAttach)
+        )
     }
 
     pub(super) fn action(&self) -> Option<ActionKind> {

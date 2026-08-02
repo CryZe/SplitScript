@@ -163,5 +163,15 @@ mod tests {
                 .runtime_behavior
                 .ends_with("requires an attached process")
         );
+
+        let suspending = StandardLibraryDocumentation::generate(
+            StdlibItemId::CatalogSuspensionProbeWaitThroughHelper,
+            &[],
+        );
+        assert!(
+            suspending.signature.ends_with("() -> async void"),
+            "{}",
+            suspending.signature
+        );
     }
 }

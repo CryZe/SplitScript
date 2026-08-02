@@ -216,12 +216,15 @@ impl Parser<'_> {
         if !missing_closing_parenthesis {
             self.expect(TokenKind::RParen, "expected `)` after the parameters")?;
         }
-        let return_annotation = if self.eat(&TokenKind::Minus).is_some() {
-            self.expect(TokenKind::Gt, "expected `>` in the return arrow `->`")?;
-            Some(self.parse_type("expected a return type")?.0)
-        } else {
-            None
-        };
+        let (return_annotation, return_is_async, return_async_span, return_annotation_span) =
+            if self.eat(&TokenKind::Minus).is_some() {
+                self.expect(TokenKind::Gt, "expected `>` in the return arrow `->`")?;
+                let async_span = self.eat_ident("async");
+                let (ty, span) = self.parse_type("expected a return type after `async`")?;
+                (Some(ty), async_span.is_some(), async_span, Some(span))
+            } else {
+                (None, false, None, None)
+            };
         let body = self.block()?;
         let span = Span {
             start,
@@ -236,6 +239,9 @@ impl Parser<'_> {
             method_of,
             params,
             return_annotation,
+            return_is_async,
+            return_async_span,
+            return_annotation_span,
             body,
             span,
         })

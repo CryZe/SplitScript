@@ -219,14 +219,29 @@ tooling consumers only see the normalized immutable graph.
       their transitive checked call graph. A suspending function must be called
       with `await`, and its attachment/cancellation requirements remain the
       compiler-derived catalog facts consumed by diagnostics and tooling.
+      User functions with an explicit result spell it `-> async T`; omitted
+      results infer both asyncness and `T`, and hover/inlay output preserves the
+      distinction. Explicit mismatches receive machine-applicable fixes.
       Privileged bodies may use `await` without an authored async marker; the
       post-check validator resolves the bootstrap cycle by validating awaited
       source-body calls after fixed-point effect inference. Test-only direct and
       transitive helpers establish this semantic boundary without claiming the
       synchronous Wasm call ABI can execute them yet.
-    - [ ] Define a backend poll ABI that distinguishes `Pending` from `Ready`
+    - [x] Define a backend poll ABI that distinguishes `Pending` from `Ready`
       and carries the completed value without changing the ordinary synchronous
-      Wasm call ABI. Specify cancellation and failure behavior before emission.
+      Wasm call ABI. `Pending = 0` and `Ready = 1`; non-void completion is
+      retained in the typed frame, a `T!` completes with its whole Result value
+      rather than a third error status, and dropping a process-owned frame
+      cancels it without manufacturing completion. Wasm IR classifies direct,
+      host `onAttach` poll, and async source-function bodies explicitly.
+      Until the following frame/emitter steps land, an executable user async
+      call receives a semantic diagnostic before code generation; declarations
+      and editor inference remain available without risking a backend panic.
+    - [ ] Promote `async T` from an immediately awaited function-result type to
+      a generally storable first-class future value once typed frames exist.
+      The source spelling and semantic signature are established now, but
+      variables, parameters, fields, and unpolled returns must not claim storage
+      semantics until the backend can preserve and poll their frame identity.
     - [ ] Give every reachable suspending `FunctionInstance` a typed GC frame
       containing its program counter, parameters/receiver, locals live across
       suspension, nested callee frame, and result storage. Plan these layouts

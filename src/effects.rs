@@ -97,6 +97,16 @@ impl TypedVisitor for CallCollector<'_> {
     }
 
     fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
+        // `retry` is suspending control flow even when its operand is merely a
+        // synchronous operation returning `T!`. Recording the statement
+        // itself also makes asyncness an authored-body fact rather than an
+        // accidental property of the callee's effect declaration.
+        if matches!(statement.kind, hir::TypedStatementKind::Suspend { .. }) {
+            self.facts
+                .effects
+                .extend([Effect::Suspends, Effect::CancelsOnProcessClose]);
+            self.facts.availability = Availability::OnAttach;
+        }
         if let hir::TypedStatementKind::Assign { assignment, .. } = &statement.kind
             && let Some(call) = &assignment.operator
         {
@@ -353,6 +363,98 @@ onAttach {
             error
                 .message
                 .contains("CatalogSuspensionProbe.waitThroughHelper` must be awaited")
+        }));
+    }
+
+    #[test]
+    fn source_functions_infer_and_validate_async_results() {
+        let source = r#"
+state "game.exe" {}
+
+fn loadModule() -> async Module {
+    let module = await process.module("game.dll")
+    return module
+}
+
+fn loadModuleIndirectly() {
+    let module = await loadModule()
+    return module
+}
+
+onAttach {
+    let module = await loadModuleIndirectly()
+    print(module.address)
+}
+"#;
+        let mut database = crate::database::CompilerDatabase::new(source);
+        let recovered = database.recovering_check().unwrap();
+        assert!(recovered.diagnostics().iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("require typed continuation-frame emission")
+        }));
+        for name in ["loadModule", "loadModuleIndirectly"] {
+            let function = recovered
+                .syntax()
+                .functions
+                .iter()
+                .find(|function| function.name == name)
+                .unwrap();
+            assert_eq!(
+                recovered
+                    .effects()
+                    .unwrap()
+                    .function(function.id)
+                    .suspension,
+                SuspensionKind::Suspends
+            );
+        }
+
+        let hints = crate::inlay_hints::inferred_type_hints(
+            &database.semantic_snapshot().unwrap(),
+            crate::ast::Span {
+                start: 0,
+                end: source.len(),
+            },
+        );
+        assert!(hints.iter().any(|hint| hint.label == " -> async Module"));
+
+        let errors = crate::compile(source).expect_err(
+            "async source calls must stop before synchronous Wasm emission until frames land",
+        );
+        assert!(errors.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("require typed continuation-frame emission")
+        }));
+    }
+
+    #[test]
+    fn explicit_function_results_must_agree_with_inferred_asyncness() {
+        let missing = r#"
+state "game.exe" {}
+fn loadModule() -> Module {
+    let module = await process.module("game.dll")
+    return module
+}
+"#;
+        let errors = crate::check(crate::lower(crate::parse(missing).unwrap())).unwrap_err();
+        let error = errors
+            .iter()
+            .find(|error| error.message.contains("must be marked `async`"))
+            .unwrap();
+        let fix = error.fixes.first().expect("async mismatch has a fix");
+        assert_eq!(fix.edits[0].replacement, "async ");
+
+        let unnecessary = r#"
+state "game.exe" {}
+fn answer() -> async i32 {
+    return 42
+}
+"#;
+        let errors = crate::check(crate::lower(crate::parse(unnecessary).unwrap())).unwrap_err();
+        assert!(errors.iter().any(|error| {
+            error.message == "function `answer` is declared async but never suspends"
         }));
     }
 }

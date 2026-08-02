@@ -668,7 +668,12 @@ pub fn lower_wasm_with_options(
     checked: &CheckedProgram,
     options: CompilerOptions,
 ) -> codegen::BackendProgram<'_> {
-    let wasm_ir = wasm_ir::Program::lower(&checked.hir, &checked.semantics, options.profile);
+    let wasm_ir = wasm_ir::Program::lower(
+        &checked.hir,
+        &checked.semantics,
+        &checked.effects,
+        options.profile,
+    );
     codegen::BackendProgram::new(checked, wasm_ir)
 }
 

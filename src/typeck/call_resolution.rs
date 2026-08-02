@@ -824,8 +824,7 @@ impl Checker {
         let operation = self.standard_library.operation_semantics(item.id);
         if operation.availability == Availability::OnAttach
             && !(self.expression_mode == ExpressionMode::SuspensionOperand
-                && (matches!(self.callable, CallableContext::Action(ActionKind::OnAttach))
-                    || self.callable.is_library_function()))
+                && self.callable.can_suspend())
         {
             self.error(
                 format!("`{}` must be awaited in `onAttach`", item.qualified_name),

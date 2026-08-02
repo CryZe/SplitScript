@@ -959,7 +959,8 @@ fn probe(value:[u8]!)->String{let missing:[u8]?=None;let fixed:[u8;3]=[1,2,3];le
 fn nested()->[[u8]]{return [[1]]}
 fn fallible()->f32!{return Err("missing")}
 fn optional()->f32?{return None}"#;
-        let formatted = format_source(source).unwrap();
+        let source = format!("{source}\nfn asynchronous()->async f32{{return 1.0}}");
+        let formatted = format_source(&source).unwrap();
 
         assert!(formatted.contains("bytes: [u8; 6] at 0x100"), "{formatted}");
         assert!(
@@ -971,6 +972,10 @@ fn optional()->f32?{return None}"#;
         assert!(formatted.contains("fn nested() -> [[u8]] {"), "{formatted}");
         assert!(formatted.contains("fn fallible() -> f32! {"), "{formatted}");
         assert!(formatted.contains("fn optional() -> f32? {"), "{formatted}");
+        assert!(
+            formatted.contains("fn asynchronous() -> async f32 {"),
+            "{formatted}"
+        );
         assert!(!formatted.contains("f32!{"), "{formatted}");
         assert!(!formatted.contains("f32?{"), "{formatted}");
         assert!(formatted.contains("sig\"48 8B ??\""));

@@ -244,9 +244,7 @@ impl Checker {
                 value,
                 span,
             } => {
-                if !matches!(self.callable, CallableContext::Action(ActionKind::OnAttach))
-                    && !self.callable.is_library_function()
-                {
+                if !self.callable.can_suspend() {
                     let keyword = match mode {
                         SuspensionMode::Await => "await",
                         SuspensionMode::Retry => "retry",
@@ -265,18 +263,7 @@ impl Checker {
                         SuspensionMode::Await => {
                             let supported = self
                                 .semantics
-                                .standard_library_item(value.id)
-                                .is_some_and(|item| {
-                                    self.standard_library
-                                        .operation_semantics(item)
-                                        .suspension
-                                        .is_awaitable()
-                                        || (self.callable.is_library_function()
-                                            && matches!(
-                                                self.standard_library.item(item).implementation,
-                                                crate::stdlib::Implementation::LibraryBody { .. }
-                                            ))
-                                });
+                                .call_is_provisionally_awaitable(value.id, &self.standard_library);
                             if !supported {
                                 self.error("this operation is not awaitable", value.span);
                                 return None;

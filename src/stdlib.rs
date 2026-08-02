@@ -521,6 +521,9 @@ impl StandardLibrary {
             rendered.push_str(&parameter.ty.render_with(self, substitutions));
         }
         rendered.push_str(") -> ");
+        if self.operation_semantics(id).suspension == SuspensionKind::Suspends {
+            rendered.push_str("async ");
+        }
         rendered.push_str(&signature.result.render_with(self, substitutions));
         let unresolved = signature
             .type_parameters

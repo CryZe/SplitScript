@@ -159,6 +159,11 @@ whileAttached {
 
 const ASYNC_SOURCE: &str = r#"state "game.exe" {}
 
+fn loadGameAssembly() -> async Module {
+    let module = await process.module("GameAssembly.dll")
+    return module
+}
+
 fn readMarker() {
     return process.read<i32>(0x3000)
 }
@@ -168,6 +173,22 @@ onAttach {
     let module = await process.module("GameAssembly.dll")
     let marker = retry readMarker()
     print(`ready {module.address}:{marker}`)
+}"#;
+
+// Catalog examples are compiled all the way through Wasm. The declaration is
+// deliberately unreachable until typed source-function frame emission lands;
+// parsing, checking, hover, and inlay inference still validate its async
+// signature and body here.
+const ASYNC_RESULT_SOURCE: &str = r#"state "game.exe" {}
+
+fn loadGameAssembly() -> async Module {
+    let module = await process.module("GameAssembly.dll")
+    return module
+}
+
+onAttach {
+    let module = await process.module("GameAssembly.dll")
+    print(module.address)
 }"#;
 
 const TYPES_AND_LITERALS_SOURCE: &str = r#"state "game.exe" {}
@@ -318,6 +339,12 @@ focused_example!(
     "Return an error",
     "fn requireAddress(value) -> address! {\n    if value == 0 { throw \"address is null\" }\n    return value\n}",
     FAILURE_SOURCE
+);
+focused_example!(
+    ASYNC_RESULT_EXAMPLE,
+    "Declare an asynchronous helper",
+    "fn loadGameAssembly() -> async Module {\n    let module = await process.module(\"GameAssembly.dll\")\n    return module\n}",
+    ASYNC_RESULT_SOURCE
 );
 focused_example!(
     AWAIT_EXAMPLE,
@@ -705,6 +732,15 @@ define_language_catalog! {
         THROW_EXAMPLE
     ),
     language_item!(
+        Async,
+        "async",
+        LanguageItemKind::Keyword,
+        "fn name() -> async T { ... }",
+        "Marks an explicitly typed function result as asynchronous.",
+        "A function containing await or retry has an async result. Write `async T` when its result type is explicit; when the result type is omitted, both `async` and `T` are inferred. Calling it requires await. Async results describe continuation state and will become storable values once first-class future storage is implemented.",
+        ASYNC_RESULT_EXAMPLE
+    ),
+    language_item!(
         Await,
         "await",
         LanguageItemKind::Keyword,
@@ -719,7 +755,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "let value = retry resultExpression",
         "Retries a Result expression until it succeeds.",
-        "The T! expression is evaluated once per attached update. An error stays pending; success yields T. User functions require no async annotation.",
+        "The T! expression is evaluated once per attached update. An error stays pending; success yields T. A containing function infers an async result unless it has an explicit result type, in which case write `-> async T`.",
         RETRY_EXAMPLE
     ),
     language_item!(

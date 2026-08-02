@@ -849,6 +849,7 @@ fn is_keyword(name: &str) -> bool {
             | "continue"
             | "return"
             | "throw"
+            | "async"
             | "await"
             | "retry"
             | "match"

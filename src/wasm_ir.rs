@@ -18,6 +18,7 @@ use crate::{
         ActionKind, BinaryOp, ExprId, OptionTypeId, PatternId, ResultTypeId, SuspensionMode,
         UnaryOp, ValueId,
     },
+    effects::OperationAnalysis,
     hir::{
         self, ExpressionResolution, ImplicitConversion, TypedExpression, TypedExpressionKind,
         TypedFallbackBranch, TypedInterpolatedPart, TypedPattern, TypedProgram, TypedStatementKind,
@@ -28,7 +29,9 @@ use crate::{
         ResolvedRecordFieldId, ResolvedRecordId, ResolvedValue, ResolvedWrapperPattern,
         SemanticModel, ValueConversion,
     },
-    stdlib::{CancellationKind, Implementation, IntrinsicId, StandardLibrary},
+    stdlib::{
+        CancellationKind, CoreTypeId, Implementation, IntrinsicId, StandardLibrary, SuspensionKind,
+    },
     types::{BuiltinType, EnumTypeId, TypeId, TypeKind},
 };
 
@@ -227,6 +230,10 @@ pub enum LoweredPattern {
 #[derive(Debug, Clone)]
 pub struct Body {
     pub owner: BodyOwner,
+    /// Wasm-facing call contract. Direct bodies retain the ordinary function
+    /// ABI; async functions are initialized into a typed continuation frame
+    /// and polled separately.
+    pub abi: BodyAbi,
     pub entry: Block,
     pub locals: Vec<Local>,
     /// Source locals retained by at least one poll or continuation state.
@@ -236,6 +243,52 @@ pub struct Body {
     pub cancellation_region: Option<CancellationRegion>,
     /// Entry, poll, and continuation states in this async body.
     pub async_state_count: u32,
+}
+
+/// Stable status returned by every generated poll entry point.
+///
+/// Keeping this independent of the completed value avoids inventing a `T`
+/// while an `async T` is pending. The ready value lives in the continuation
+/// frame described by [`AsyncCompletion`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum PollStatus {
+    Pending = 0,
+    Ready = 1,
+}
+
+impl PollStatus {
+    pub const fn wasm_value(self) -> i32 {
+        self as i32
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AsyncCompletion {
+    Void,
+    /// A completed `T` is retained in the function's typed frame. For `T!`,
+    /// this stores the complete Result value: failure is ordinary readiness,
+    /// not a third poll status.
+    FrameValue(TypeId),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AsyncFunctionAbi {
+    pub completion: AsyncCompletion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyAbi {
+    /// Ordinary parameters and result, unchanged from the synchronous Wasm
+    /// calling convention.
+    Direct,
+    /// Existing host-facing `onAttach(process) -> i32` poll contract.
+    AttachPoll,
+    /// A source function is initialized with its ordinary parameters, then
+    /// polled through a typed frame. Dropping that frame at the body's
+    /// cancellation boundary cancels the computation without producing a
+    /// Ready value.
+    AsyncFunction(AsyncFunctionAbi),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -359,6 +412,7 @@ impl Program {
     pub(crate) fn lower(
         typed_hir: &TypedProgram,
         semantics: &SemanticModel,
+        effects: &OperationAnalysis,
         profile: crate::BuildProfile,
     ) -> Self {
         let expressions = typed_hir
@@ -387,6 +441,7 @@ impl Program {
                 &function.body,
                 typed_hir,
                 semantics,
+                effects,
                 profile,
                 &program,
             );
@@ -398,6 +453,7 @@ impl Program {
                 &action.body,
                 typed_hir,
                 semantics,
+                effects,
                 profile,
                 &program,
             );
@@ -777,10 +833,33 @@ fn lower_body(
     block: &hir::TypedBlock,
     typed_hir: &TypedProgram,
     semantics: &SemanticModel,
+    effects: &OperationAnalysis,
     profile: crate::BuildProfile,
     wasm_ir: &Program,
 ) -> Body {
-    let mut entry = if owner == BodyOwner::Action(ActionKind::OnAttach) {
+    let abi = match &owner {
+        BodyOwner::Action(ActionKind::OnAttach) => BodyAbi::AttachPoll,
+        BodyOwner::Action(_) => BodyAbi::Direct,
+        BodyOwner::Function(instance)
+            if effects.function(instance.function).suspension == SuspensionKind::Suspends =>
+        {
+            let result = semantics
+                .function_result(instance.function)
+                .expect("checked functions have result types");
+            let result = semantics.specialize_type(instance, result);
+            let completion = if matches!(
+                semantics.types().kind(result),
+                TypeKind::Builtin(CoreTypeId::Void)
+            ) {
+                AsyncCompletion::Void
+            } else {
+                AsyncCompletion::FrameValue(result)
+            };
+            BodyAbi::AsyncFunction(AsyncFunctionAbi { completion })
+        }
+        BodyOwner::Function(_) => BodyAbi::Direct,
+    };
+    let mut entry = if !matches!(abi, BodyAbi::Direct) {
         lower_async_block(block, typed_hir, semantics, profile)
     } else {
         lower_block(block, typed_hir, semantics, profile)
@@ -789,10 +868,19 @@ fn lower_body(
     assign_async_states(&mut entry, &mut next_async_state);
     let locals = plan_block(&entry, wasm_ir, semantics);
     let frame_values = plan_frame_values(&mut entry, &locals, wasm_ir);
-    let cancellation_region = (owner == BodyOwner::Action(ActionKind::OnAttach))
-        .then_some(CancellationRegion::ProcessLifetime);
+    let cancellation_region = match &owner {
+        BodyOwner::Action(ActionKind::OnAttach) => Some(CancellationRegion::ProcessLifetime),
+        BodyOwner::Function(instance)
+            if effects.function(instance.function).cancellation
+                == CancellationKind::ProcessClose =>
+        {
+            Some(CancellationRegion::ProcessLifetime)
+        }
+        BodyOwner::Action(_) | BodyOwner::Function(_) => None,
+    };
     Body {
         owner,
+        abi,
         entry,
         locals,
         frame_values,
@@ -1811,4 +1899,68 @@ fn resolved_intrinsic(program: &Program, expression: ExprId) -> Option<Intrinsic
         return None;
     };
     Some(*intrinsic)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn async_function_bodies_use_a_typed_poll_contract() {
+        let source = r#"
+state "game.exe" {}
+fn synchronous() -> i32 { return 42 }
+fn loadModule() -> async Module {
+    let module = await process.module("game.dll")
+    return module
+}
+onAttach {
+    let module = await process.module("game.dll")
+    print(module.address)
+}
+"#;
+        let checked = crate::check(crate::lower(crate::parse(source).unwrap())).unwrap();
+        let backend = crate::lower_wasm(&checked);
+        let function = |name: &str| {
+            checked
+                .syntax()
+                .functions
+                .iter()
+                .find(|function| function.name == name)
+                .unwrap()
+                .id
+        };
+
+        let synchronous = backend
+            .wasm_ir()
+            .body(BodyOwner::Function(FunctionInstance::monomorphic(
+                function("synchronous"),
+            )))
+            .unwrap();
+        assert_eq!(synchronous.abi, BodyAbi::Direct);
+
+        let asynchronous = backend
+            .wasm_ir()
+            .body(BodyOwner::Function(FunctionInstance::monomorphic(
+                function("loadModule"),
+            )))
+            .unwrap();
+        let BodyAbi::AsyncFunction(abi) = asynchronous.abi else {
+            panic!("expected an async source-function ABI")
+        };
+        let AsyncCompletion::FrameValue(result) = abi.completion else {
+            panic!("Module completion needs typed frame storage")
+        };
+        assert!(matches!(
+            checked.semantics().types().kind(result),
+            TypeKind::Standard(_)
+        ));
+        assert_eq!(
+            asynchronous.cancellation_region,
+            Some(CancellationRegion::ProcessLifetime)
+        );
+        assert!(asynchronous.async_state_count > 1);
+        assert_eq!(PollStatus::Pending.wasm_value(), 0);
+        assert_eq!(PollStatus::Ready.wasm_value(), 1);
+    }
 }

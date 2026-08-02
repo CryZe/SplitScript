@@ -352,6 +352,9 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 })
                 .collect::<Option<Vec<_>>>()?;
             let result = semantics.function_result(function.id)?;
+            let is_async = context.effects().is_some_and(|effects| {
+                effects.function(function.id).suspension == crate::stdlib::SuspensionKind::Suspends
+            });
             let bounds = semantics
                 .function_type_parameters(function.id)
                 .iter()
@@ -388,8 +391,9 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             );
             Some(source_markdown(
                 &format!(
-                    "fn {name}({}) -> {}{}",
+                    "fn {name}({}) -> {}{}{}",
                     parameters.join(", "),
+                    if is_async { "async " } else { "" },
                     render_type(result, context),
                     if bounds.is_empty() {
                         String::new()
@@ -1024,7 +1028,11 @@ whileAttached {
             .hover(offset)
             .unwrap()
             .expect("process.mainModule hover");
-        assert!(hover.markdown.contains("Process.mainModule() -> Module"));
+        assert!(
+            hover
+                .markdown
+                .contains("Process.mainModule() -> async Module")
+        );
         assert!(hover.markdown.contains("main executable module"));
         assert!(hover.markdown.contains("available in onAttach; suspends"));
     }
@@ -1038,7 +1046,7 @@ whileAttached {
             .hover(offset)
             .unwrap()
             .expect("process.closed hover");
-        assert!(hover.markdown.contains("Process.closed() -> void"));
+        assert!(hover.markdown.contains("Process.closed() -> async void"));
         assert!(
             hover
                 .markdown
@@ -1393,6 +1401,30 @@ whileAttached {
         assert!(!hover.markdown.contains("Function."));
         assert!(!hover.markdown.contains("pure."));
         assert!(!hover.markdown.contains("synchronous."));
+    }
+
+    #[test]
+    fn inferred_async_function_hover_includes_async_in_the_result_type() {
+        let source = r#"
+state "game.exe" {}
+fn loadModule() {
+    let module = await process.module("game.dll")
+    return module
+}
+onAttach {
+    let module = await loadModule()
+    print(module.address)
+}
+"#;
+        let offset = source.rfind("loadModule").unwrap();
+        let mut database = CompilerDatabase::new(source);
+        let hover = database.hover(offset).unwrap().expect("function hover");
+        assert!(
+            hover.markdown.contains("fn loadModule() -> async Module"),
+            "{}",
+            hover.markdown
+        );
+        assert!(hover.markdown.contains("**Runtime behavior:** suspends"));
     }
 
     #[test]

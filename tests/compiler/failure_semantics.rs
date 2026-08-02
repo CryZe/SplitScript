@@ -761,7 +761,10 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
     let next_tick = library
         .item_by_name("nextTick")
         .expect("nextTick should be catalog-backed");
-    assert_eq!(library.render_signature(next_tick.id), "nextTick() -> void");
+    assert_eq!(
+        library.render_signature(next_tick.id),
+        "nextTick() -> async void"
+    );
     assert_eq!(
         library.operation_semantics(next_tick.id).suspension,
         SuspensionKind::Suspends
@@ -775,7 +778,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
         .expect("Process.closed should be catalog-backed");
     assert_eq!(
         library.render_signature(process_closed.id),
-        "Process.closed() -> void"
+        "Process.closed() -> async void"
     );
     assert_eq!(
         library.render_operation_semantics(process_closed.id),
@@ -824,7 +827,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
     assert!(!field_any.documentation.summary.is_empty());
     assert_eq!(
         library.render_signature(field_any.id),
-        "UnityClass.fieldAny(names: [String]) -> UnityField"
+        "UnityClass.fieldAny(names: [String]) -> async UnityField"
     );
 }
 

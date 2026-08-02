@@ -49,6 +49,12 @@ pub(crate) fn validate(
     diagnostics.extend(validate_must_use(&standard_library, hir, semantics));
     diagnostics.extend(validate_unused_bindings(syntax, hir));
     diagnostics.extend(validate_unused_declarations(syntax, hir, semantics));
+    diagnostics.extend(validate_async_function_results(
+        &standard_library,
+        syntax,
+        hir,
+        &effects,
+    ));
     diagnostics.extend(validate_suspending_calls(
         &standard_library,
         syntax,
@@ -176,6 +182,83 @@ pub(crate) fn validate(
     }
 }
 
+fn validate_async_function_results(
+    standard_library: &StandardLibrary,
+    syntax: &Program,
+    hir: &TypedProgram,
+    effects: &OperationAnalysis,
+) -> Vec<Diagnostic> {
+    let library_functions = standard_library
+        .items()
+        .iter()
+        .filter_map(|item| hir.library_function(item.id))
+        .collect::<HashSet<_>>();
+    let mut diagnostics = Vec::new();
+    for function in &syntax.functions {
+        if library_functions.contains(&function.id) {
+            continue;
+        }
+        let inferred_async =
+            effects.function(function.id).suspension == crate::stdlib::SuspensionKind::Suspends;
+        match (
+            function.return_annotation,
+            function.return_is_async,
+            inferred_async,
+        ) {
+            (Some(_), false, true) => {
+                let annotation = function
+                    .return_annotation_span
+                    .expect("explicit return annotations retain their span");
+                let insertion = ast::Span {
+                    start: annotation.start,
+                    end: annotation.start,
+                };
+                diagnostics.push(
+                    Diagnostic::semantic(
+                        format!(
+                            "function `{}` suspends, so its explicit result must be marked `async`",
+                            function.name
+                        ),
+                        annotation,
+                    )
+                    .with_machine_applicable_fix(
+                        "mark the result as async",
+                        insertion,
+                        "async ",
+                    ),
+                );
+            }
+            (Some(_), true, false) => {
+                let keyword = function
+                    .return_async_span
+                    .expect("async return annotations retain the keyword span");
+                let annotation = function
+                    .return_annotation_span
+                    .expect("explicit return annotations retain their span");
+                diagnostics.push(
+                    Diagnostic::semantic(
+                        format!(
+                            "function `{}` is declared async but never suspends",
+                            function.name
+                        ),
+                        keyword,
+                    )
+                    .with_machine_applicable_fix(
+                        "remove `async`",
+                        ast::Span {
+                            start: keyword.start,
+                            end: annotation.start,
+                        },
+                        "",
+                    ),
+                );
+            }
+            _ => {}
+        }
+    }
+    diagnostics
+}
+
 fn validate_suspending_calls(
     standard_library: &StandardLibrary,
     syntax: &Program,
@@ -241,6 +324,12 @@ fn validate_suspending_calls(
         awaited.visit_block(&action.body, hir);
     }
 
+    let library_functions = standard_library
+        .items()
+        .iter()
+        .filter_map(|item| hir.library_function(item.id))
+        .collect::<HashSet<_>>();
+
     let mut diagnostics = Vec::new();
     for expression in hir.expressions() {
         let Some(call) = hir.call(expression.id) else {
@@ -255,6 +344,22 @@ fn validate_suspending_calls(
         {
             diagnostics.push(Diagnostic::semantic(
                 format!("`{name}` suspends and must be awaited"),
+                expression.span,
+            ));
+        }
+        if suspension == crate::stdlib::SuspensionKind::Suspends
+            && awaited.operands.contains(&expression.id)
+            && matches!(
+                call,
+                ResolvedCall::UserFunction { function, .. }
+                    | ResolvedCall::UserMethod { function, .. }
+                    if !library_functions.contains(function)
+            )
+        {
+            diagnostics.push(Diagnostic::semantic(
+                format!(
+                    "`{name}` has an async result, but executable async source-function calls require typed continuation-frame emission"
+                ),
                 expression.span,
             ));
         }

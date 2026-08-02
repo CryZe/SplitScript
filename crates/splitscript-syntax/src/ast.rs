@@ -402,6 +402,13 @@ pub struct FunctionDecl {
     pub method_of: Option<TypeRef>,
     pub params: Vec<Parameter>,
     pub return_annotation: Option<TypeRef>,
+    /// Whether the explicitly written result is `async T` rather than `T`.
+    ///
+    /// An omitted result annotation has no syntax-level marker; its asyncness
+    /// is inferred from the function body by semantic analysis.
+    pub return_is_async: bool,
+    pub return_async_span: Option<Span>,
+    pub return_annotation_span: Option<Span>,
     pub body: Block,
     pub span: Span,
 }

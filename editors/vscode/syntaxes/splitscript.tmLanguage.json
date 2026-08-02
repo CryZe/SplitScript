@@ -136,7 +136,7 @@
       "patterns": [
         {
           "name": "keyword.control.splitscript",
-          "match": "\\b(if|else|while|for|in|break|continue|match|return|throw|await|retry|as|debug)\\b"
+          "match": "\\b(if|else|while|for|in|break|continue|match|return|throw|async|await|retry|as|debug)\\b"
         },
         {
           "name": "keyword.declaration.splitscript",

@@ -835,6 +835,37 @@ pub(crate) struct SemanticBuilder {
 }
 
 impl SemanticBuilder {
+    pub(crate) fn call_is_provisionally_awaitable(
+        &self,
+        expression: ExprId,
+        standard_library: &crate::stdlib::StandardLibrary,
+    ) -> bool {
+        match self.calls.get(&expression) {
+            Some(PendingResolvedCall::StandardLibrary { item, .. }) => {
+                standard_library
+                    .operation_semantics(*item)
+                    .suspension
+                    .is_awaitable()
+                    || matches!(
+                        standard_library.item(*item).implementation,
+                        crate::stdlib::Implementation::LibraryBody { .. }
+                    )
+            }
+            // Function effects are derived only after every body has been
+            // checked. Accept the operand provisionally and let the
+            // whole-program suspension validator reject synchronous callees.
+            Some(
+                PendingResolvedCall::UserFunction { .. } | PendingResolvedCall::UserMethod { .. },
+            ) => true,
+            Some(
+                PendingResolvedCall::ResultError { .. }
+                | PendingResolvedCall::OptionSome { .. }
+                | PendingResolvedCall::ResultSuccess { .. },
+            )
+            | None => false,
+        }
+    }
+
     pub(crate) fn resolve_recursive_call_type_arguments(
         &mut self,
         functions: &HashMap<FunctionId, Vec<Type>>,

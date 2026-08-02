@@ -352,9 +352,6 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 })
                 .collect::<Option<Vec<_>>>()?;
             let result = semantics.function_result(function.id)?;
-            let is_async = context.effects().is_some_and(|effects| {
-                effects.function(function.id).suspension == crate::stdlib::SuspensionKind::Suspends
-            });
             let bounds = semantics
                 .function_type_parameters(function.id)
                 .iter()
@@ -391,9 +388,8 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             );
             Some(source_markdown(
                 &format!(
-                    "fn {name}({}) -> {}{}{}",
+                    "fn {name}({}) -> {}{}",
                     parameters.join(", "),
-                    if is_async { "async " } else { "" },
                     render_type(result, context),
                     if bounds.is_empty() {
                         String::new()

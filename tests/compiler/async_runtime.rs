@@ -45,14 +45,18 @@ fn on_attach_preserves_locals_across_awaits() {
     let splitscript::compiler::ast::Stmt::Variable(after_only) = &action.body.statements[5] else {
         panic!("expected afterOnly");
     };
-    let splitscript::compiler::ast::Stmt::Suspend {
-        binding: Some(unused_module),
-        ..
-    } = &action.body.statements[8]
+    let splitscript::compiler::ast::Stmt::Variable(unused_module) = &action.body.statements[8]
     else {
         panic!("expected unusedModule await binding");
     };
-    assert_eq!(body.frame_values, [expected.id]);
+    assert!(matches!(
+        unused_module.value.kind,
+        splitscript::compiler::ast::ExprKind::Suspend {
+            mode: splitscript::compiler::ast::SuspensionMode::Await,
+            ..
+        }
+    ));
+    assert!(body.frame_values.contains(&expected.id));
     assert!(!body.frame_values.contains(&before_only.id));
     assert!(!body.frame_values.contains(&overwritten.id));
     assert!(!body.frame_values.contains(&after_only.id));
@@ -74,15 +78,11 @@ fn on_attach_preserves_locals_across_awaits() {
         *cancellation,
         Some(splitscript::compiler::wasm_ir::CancellationRegion::ProcessLifetime)
     );
-    assert_eq!(live_values, &[expected.id]);
-    assert!(matches!(
-        continuation.statements.as_slice(),
-        [
-            splitscript::compiler::wasm_ir::Statement::Store { .. },
-            splitscript::compiler::wasm_ir::Statement::Store { .. },
-            splitscript::compiler::wasm_ir::Statement::If { .. }
-        ]
-    ));
+    assert!(live_values.contains(&expected.id));
+    assert!(continuation.statements.iter().any(|statement| matches!(
+        statement,
+        splitscript::compiler::wasm_ir::Statement::If { .. }
+    )));
     let splitscript::compiler::wasm_ir::Terminator::Suspend {
         cancellation,
         live_values,
@@ -95,7 +95,11 @@ fn on_attach_preserves_locals_across_awaits() {
         *cancellation,
         Some(splitscript::compiler::wasm_ir::CancellationRegion::ProcessLifetime)
     );
-    assert!(live_values.is_empty());
+    assert!(!live_values.contains(&before_only.id));
+    assert!(!live_values.contains(&expected.id));
+    assert!(!live_values.contains(&overwritten.id));
+    assert!(!live_values.contains(&after_only.id));
+    assert!(!live_values.contains(&unused_module.id));
 
     let wasm = splitscript::codegen(&checked);
     Validator::new_with_features(WasmFeatures::all())
@@ -193,8 +197,13 @@ fn on_attach_lowers_awaits_inside_conditional_branches() {
     };
     assert_eq!(poll_state.index(), 1);
     assert_eq!(resume_state.index(), 2);
-    let [splitscript::compiler::wasm_ir::Statement::If { then_block, .. }] =
-        continuation.statements.as_slice()
+    let Some(splitscript::compiler::wasm_ir::Statement::If { then_block, .. }) =
+        continuation.statements.iter().find(|statement| {
+            matches!(
+                statement,
+                splitscript::compiler::wasm_ir::Statement::If { .. }
+            )
+        })
     else {
         panic!("the first continuation should branch");
     };
@@ -231,14 +240,16 @@ fn retry_is_first_class_suspending_control_flow_for_result_expressions() {
     let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
         .expect("retry should unwrap a user function's inferred Result value");
     let action = &checked.syntax().actions[0];
-    let splitscript::compiler::ast::Stmt::Suspend {
-        mode: splitscript::compiler::ast::SuspensionMode::Retry,
-        binding: Some(marker),
-        ..
-    } = &action.body.statements[0]
-    else {
+    let splitscript::compiler::ast::Stmt::Variable(marker) = &action.body.statements[0] else {
         panic!("expected a retry binding");
     };
+    assert!(matches!(
+        marker.value.kind,
+        splitscript::compiler::ast::ExprKind::Suspend {
+            mode: splitscript::compiler::ast::SuspensionMode::Retry,
+            ..
+        }
+    ));
     let marker_type = checked
         .semantics()
         .value_type(marker.id)
@@ -277,11 +288,11 @@ fn retry_rejects_non_result_expressions() {
     "#;
     let error = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
         .expect_err("retry should require a Result expression");
-    assert!(error.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("expects an expression of type `T!`")
-    }));
+    assert!(
+        error
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("expects a result value (`T!`)") })
+    );
 }
 
 #[test]
@@ -302,6 +313,154 @@ fn process_fallbacks_and_awaited_module_values_are_typed_and_persistent() {
     for expected in [b"full.exe".as_slice(), b"demo.exe".as_slice()] {
         assert!(wasm.windows(expected.len()).any(|bytes| bytes == expected));
     }
+}
+
+#[test]
+fn await_is_an_expression_inside_member_access_arguments_and_arithmetic() {
+    let source = r#"
+        state "game.exe" {}
+        onAttach {
+            print(`base {(await process.module("game.exe")).address}`)
+            let value = 1 + retry process.read<u32>(0x1000)
+            print(value)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("await and retry should compose inside ordinary expressions");
+    let body = splitscript::lower_wasm(&checked)
+        .body(splitscript::compiler::wasm_ir::BodyOwner::Action(
+            splitscript::compiler::ast::ActionKind::OnAttach,
+        ))
+        .expect("onAttach has a lowered body")
+        .clone();
+    assert_eq!(body.async_state_count, 5);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("nested suspension expressions should produce valid Wasm GC");
+}
+
+#[test]
+fn operands_before_a_nested_await_are_spilled_before_suspension() {
+    use splitscript::compiler::wasm_ir::{BodyOwner, LocalPurpose, Statement, Terminator};
+
+    let source = r#"
+        state "game.exe" {}
+
+        fn marker() -> u32 {
+            print("marker")
+            return 4
+        }
+
+        onAttach {
+            let total = marker() + retry process.read<u32>(0x1000)
+            print(total)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("a side-effecting operand may precede a nested suspension");
+    let lowered = splitscript::lower_wasm(&checked);
+    let body = lowered
+        .body(BodyOwner::Action(
+            splitscript::compiler::ast::ActionKind::OnAttach,
+        ))
+        .expect("onAttach has a lowered body");
+
+    let Some(Statement::StoreTemporary { target, .. }) = body.entry.statements.first() else {
+        panic!("the earlier call must be evaluated into a compiler temporary")
+    };
+    assert!(body.frame_temporaries.contains(target));
+    assert!(body.locals.iter().any(
+        |local| matches!(local.purpose, LocalPurpose::Temporary(candidate) if candidate == *target)
+    ));
+    assert!(matches!(body.entry.terminator, Terminator::Suspend { .. }));
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("evaluation-order spills should produce valid typed continuation storage");
+}
+
+#[test]
+fn expression_branches_keep_suspensions_inside_the_selected_path() {
+    use splitscript::compiler::wasm_ir::{BodyOwner, Statement, Terminator};
+
+    let source = r#"
+        state "game.exe" {}
+        onAttach {
+            let selected = if false {
+                retry process.read<u32>(0x1000)
+            } else {
+                7
+            }
+            let shortCircuited = false
+                && retry process.read<u8>(0x1001) == 1
+            print(selected)
+            if shortCircuited { print("unexpected") }
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("awaits may occur in expression branches and short-circuit operands");
+    let lowered = splitscript::lower_wasm(&checked);
+    let body = lowered
+        .body(BodyOwner::Action(
+            splitscript::compiler::ast::ActionKind::OnAttach,
+        ))
+        .expect("onAttach has a lowered body");
+
+    let Some(Statement::If {
+        then_block,
+        else_block,
+        ..
+    }) = body.entry.statements.first()
+    else {
+        panic!("the expression if must remain branch-shaped in the continuation graph")
+    };
+    assert!(matches!(then_block.terminator, Terminator::Suspend { .. }));
+    assert!(!matches!(else_block.terminator, Terminator::Suspend { .. }));
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("branch-local suspensions should produce valid Wasm GC");
+}
+
+#[test]
+fn suspending_while_conditions_are_reentered_on_every_back_edge() {
+    use splitscript::compiler::wasm_ir::{BodyOwner, Terminator};
+
+    let source = r#"
+        state "game.exe" {}
+        onAttach {
+            while retry process.read<u8>(0x1000) == 0 {
+                await nextTick()
+            }
+            print("done")
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("while conditions may suspend");
+    let lowered = splitscript::lower_wasm(&checked);
+    let body = lowered
+        .body(BodyOwner::Action(
+            splitscript::compiler::ast::ActionKind::OnAttach,
+        ))
+        .expect("onAttach has a lowered body");
+    let Terminator::AsyncWhile { header, .. } = &body.entry.terminator else {
+        panic!("a suspending condition requires an async loop header")
+    };
+    let Terminator::Suspend { continuation, .. } = &header.terminator else {
+        panic!("the loop header must poll its condition before deciding the iteration")
+    };
+    assert!(matches!(
+        continuation.terminator,
+        Terminator::AsyncWhileCondition { .. }
+    ));
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("suspending loop conditions should produce valid Wasm GC");
 }
 
 #[test]

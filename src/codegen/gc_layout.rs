@@ -197,6 +197,7 @@ impl GcLayout {
     pub(super) fn index(&self, ty: Type) -> u32 {
         match ty {
             Type::StateSnapshot => STATE_TYPE,
+            Type::Async(_) => self.async_frame,
             Type::Standard(standard) => self.standard_index(standard),
             Type::Record(_)
             | Type::Enum(_)
@@ -245,7 +246,8 @@ impl GcLayout {
             | Type::Enum(_)
             | Type::Array(_)
             | Type::Option(_)
-            | Type::Result(_) => ValType::Ref(RefType {
+            | Type::Result(_)
+            | Type::Async(_) => ValType::Ref(RefType {
                 nullable: true,
                 heap_type: HeapType::Concrete(self.index(ty)),
             }),

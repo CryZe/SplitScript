@@ -219,9 +219,14 @@ impl Parser<'_> {
         let (return_annotation, return_is_async, return_async_span, return_annotation_span) =
             if self.eat(&TokenKind::Minus).is_some() {
                 self.expect(TokenKind::Gt, "expected `>` in the return arrow `->`")?;
-                let async_span = self.eat_ident("async");
-                let (ty, span) = self.parse_type("expected a return type after `async`")?;
-                (Some(ty), async_span.is_some(), async_span, Some(span))
+                let async_span = self.at_ident("async").then_some(self.current().span);
+                let (ty, span) = self.parse_type("expected a return type")?;
+                (
+                    Some(ty),
+                    matches!(ty, TypeRef::Async(_)),
+                    async_span,
+                    Some(span),
+                )
             } else {
                 (None, false, None, None)
             };

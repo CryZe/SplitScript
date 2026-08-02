@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     ast::{
         BinaryOp, Expr, ExprId, ExprKind, FallbackBranch, InterpolatedPart, MatchPattern, Span,
-        UnaryOp,
+        SuspensionMode, UnaryOp,
     },
     inference::{Requirements, Type},
     semantic::{ResolvedRecordFieldId, ResolvedRecordId, ResolvedWrapperPattern},
@@ -602,6 +602,52 @@ impl Checker {
                     }
                 }
                 self.expect_expression(expr.id, value_type, expected, expr.span)?
+            }
+            ExprKind::Suspend {
+                mode,
+                destination,
+                value,
+            } => {
+                if !self.callable.can_suspend() {
+                    let keyword = match mode {
+                        SuspensionMode::Await => "await",
+                        SuspensionMode::Retry => "retry",
+                    };
+                    self.error(
+                        format!("`{keyword}` is not available in this synchronous body"),
+                        expr.span,
+                    );
+                }
+                let operand = self.with_expression_mode(
+                    super::context::ExpressionMode::SuspensionOperand,
+                    |checker| checker.expr(value, None),
+                )?;
+                let result = match mode {
+                    SuspensionMode::Await => match self.shallow_type(operand) {
+                        Type::Async(future) => self.inference.async_value(future),
+                        operand => {
+                            let operand = self.type_name(operand);
+                            self.error(
+                                format!("`await` expects an async value, found `{operand}`"),
+                                value.span,
+                            );
+                            return None;
+                        }
+                    },
+                    SuspensionMode::Retry => match self.shallow_type(operand) {
+                        Type::Result(result) => self.inference.result_value(result),
+                        operand => {
+                            let operand = self.type_name(operand);
+                            self.error(
+                                format!("`retry` expects a result value (`T!`), found `{operand}`"),
+                                value.span,
+                            );
+                            return None;
+                        }
+                    },
+                };
+                self.semantics.resolve_value_type(*destination, result);
+                self.expect_expression(expr.id, result, expected, expr.span)?
             }
             ExprKind::Propagate(value) => {
                 let input = self.expr(value, None)?;

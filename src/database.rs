@@ -1015,6 +1015,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             | ExprKind::Match { .. }
             | ExprKind::If { .. }
             | ExprKind::Fallback { .. }
+            | ExprKind::Suspend { .. }
             | ExprKind::Propagate(_)
             | ExprKind::Unary { .. }
             | ExprKind::Binary { .. } => {}
@@ -1043,6 +1044,11 @@ fn named_type(
             .iter()
             .find(|result| result.id == id)
             .and_then(|result| named_type(syntax, result.value)),
+        SyntaxTypeRef::Async(id) => syntax
+            .async_types
+            .iter()
+            .find(|future| future.id == id)
+            .and_then(|future| named_type(syntax, future.value)),
         SyntaxTypeRef::Named(id) => {
             let name = syntax.type_name(id);
             syntax

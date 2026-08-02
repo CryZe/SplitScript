@@ -3,9 +3,8 @@
 //! Statement grammar.
 
 use super::{
-    Block, Diagnostic, ForBinding, Parser, RecoveryNode, RecoveryNodeKind, Span, Stmt,
-    SuspensionBinding, SuspensionMode, TokenKind, VariableDecl, assignment_operator,
-    statement_span,
+    Block, Diagnostic, ForBinding, Parser, RecoveryNode, RecoveryNodeKind, Span, Stmt, TokenKind,
+    VariableDecl, assignment_operator, statement_span,
 };
 
 impl Parser<'_> {
@@ -104,9 +103,6 @@ impl Parser<'_> {
             if self.at_ident("const") || self.at_ident("var") {
                 self.record_let_keyword_diagnostic();
             }
-            if self.is_suspension_binding() {
-                return self.suspension_binding();
-            }
             let declaration = self.variable_decl()?;
             self.terminator()?;
             return Ok(Stmt::Variable(declaration));
@@ -168,28 +164,6 @@ impl Parser<'_> {
         }
         if self.eat_ident("return").is_some() {
             let start = self.previous().span.start;
-            if !self.line_break_before_current()
-                && (self.at_ident("await") || self.at_ident("retry"))
-            {
-                let mode = if self.eat_ident("await").is_some() {
-                    SuspensionMode::Await
-                } else {
-                    self.expect_ident("retry")?;
-                    SuspensionMode::Retry
-                };
-                let value = self.root_expression();
-                self.terminator()?;
-                return Ok(Stmt::Suspend {
-                    mode,
-                    binding: None,
-                    returns: true,
-                    value,
-                    span: Span {
-                        start,
-                        end: self.previous().span.end,
-                    },
-                });
-            }
             let value = if self.at(&TokenKind::Semicolon)
                 || self.at(&TokenKind::RBrace)
                 || self.line_break_before_current()
@@ -224,27 +198,6 @@ impl Parser<'_> {
                     start,
                     end: self.previous().span.end,
                 },
-            });
-        }
-        if self.at_ident("await") || self.at_ident("retry") {
-            let mode = if self.eat_ident("await").is_some() {
-                SuspensionMode::Await
-            } else {
-                self.expect_ident("retry")?;
-                SuspensionMode::Retry
-            };
-            let start = self.previous().span.start;
-            let value = self.root_expression();
-            self.terminator()?;
-            return Ok(Stmt::Suspend {
-                mode,
-                binding: None,
-                returns: false,
-                span: Span {
-                    start,
-                    end: self.previous().span.end,
-                },
-                value,
             });
         }
         if let TokenKind::Ident(name) = &self.current().kind
@@ -300,54 +253,6 @@ impl Parser<'_> {
             then_block,
             else_block,
             span: Span { start, end },
-        })
-    }
-
-    pub(super) fn is_suspension_binding(&self) -> bool {
-        let mut offset = 2;
-        while !matches!(self.peek(offset).kind, TokenKind::Assign | TokenKind::Eof) {
-            offset += 1;
-        }
-        matches!(self.peek(offset).kind, TokenKind::Assign)
-            && matches!(&self.peek(offset + 1).kind, TokenKind::Ident(name) if name == "await" || name == "retry")
-    }
-
-    pub(super) fn suspension_binding(&mut self) -> Result<Stmt, Diagnostic> {
-        let start = self.bump().span.start;
-        let (name, name_span) = self.expect_any_ident("expected a variable name")?;
-        let annotation = if self.eat(&TokenKind::Colon).is_some() {
-            Some(self.parse_type("expected a type name")?.0)
-        } else {
-            None
-        };
-        self.expect(TokenKind::Assign, "expected `=` in variable declaration")?;
-        let mode = if self.eat_ident("await").is_some() {
-            SuspensionMode::Await
-        } else {
-            self.expect_ident("retry")?;
-            SuspensionMode::Retry
-        };
-        let value = self.root_expression();
-        self.terminator()?;
-        let span = Span {
-            start,
-            end: self.previous().span.end,
-        };
-        Ok(Stmt::Suspend {
-            mode,
-            binding: Some(SuspensionBinding {
-                id: self.new_value_id(),
-                name,
-                name_span,
-                annotation,
-                span: Span {
-                    start,
-                    end: value.span.end.max(name_span.end),
-                },
-            }),
-            returns: false,
-            value,
-            span,
         })
     }
 

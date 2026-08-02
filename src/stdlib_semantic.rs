@@ -134,6 +134,7 @@ fn semantic_type_may_have_capability(
             behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
         }
         TypeKind::GenericParameter { .. } => false,
+        TypeKind::Async { .. } => false,
     }
 }
 

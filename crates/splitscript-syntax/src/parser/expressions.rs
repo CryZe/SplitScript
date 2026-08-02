@@ -13,6 +13,17 @@ impl Parser<'_> {
         let mut left = self.prefix()?;
         let mut saw_comparison = false;
         loop {
+            if self.line_break_before_current()
+                && matches!(
+                    &left.kind,
+                    ExprKind::Suspend { value, .. } if matches!(value.kind, ExprKind::Error)
+                )
+            {
+                // A recovered suspension operand owns only its source line.
+                // Do not reinterpret an operator starting the next malformed
+                // statement as a continuation of this expression.
+                break;
+            }
             if (self.at(&TokenKind::LParen) || self.begins_generic_call(left.span.end))
                 && matches!(&left.kind, ExprKind::Member { .. })
             {
@@ -163,6 +174,32 @@ impl Parser<'_> {
     }
 
     pub(super) fn prefix(&mut self) -> Result<Expr, Diagnostic> {
+        if self.at_ident("await") || self.at_ident("retry") {
+            let mode = if self.eat_ident("await").is_some() {
+                super::SuspensionMode::Await
+            } else {
+                self.expect_ident("retry")?;
+                super::SuspensionMode::Retry
+            };
+            let start = self.previous().span;
+            let expression_start = self.cursor.position();
+            let parsed = if self.expression_is_missing_before_statement() {
+                Err(self.error("expected an expression"))
+            } else {
+                self.expression(11)
+            };
+            let value = self.recover_root_expression(parsed, expression_start);
+            let span = start.join(value.span);
+            let destination = self.new_value_id();
+            return Ok(self.new_expr(
+                ExprKind::Suspend {
+                    mode,
+                    destination,
+                    value: Box::new(value),
+                },
+                span,
+            ));
+        }
         if self.eat_ident("if").is_some() {
             let start = self.previous().span;
             return self.if_expression(start);
@@ -688,8 +725,6 @@ impl Parser<'_> {
                         | "continue"
                         | "return"
                         | "throw"
-                        | "await"
-                        | "retry"
                 ) || assignment_operator(&self.peek(1).kind).is_some()
             }
             _ => false,

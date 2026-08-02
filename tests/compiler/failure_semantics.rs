@@ -932,11 +932,11 @@ fn immediate_process_failures_are_results_and_not_awaitable_intrinsics() {
         "#,
     )
     .expect_err("immediate Result operations should use retry rather than await");
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message == "this operation is not awaitable")
-    );
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("`await` expects an async value")
+    }));
 }
 
 #[test]

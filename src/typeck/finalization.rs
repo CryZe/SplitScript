@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::{
     ast::{FunctionId, Program, Span, StateSource},
     inference::Type,
-    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType},
+    types::{ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType},
 };
 
 use super::{CheckOutput, Checker, RecoveringCheckOutput};
@@ -67,6 +67,15 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             value: result.value.to_ref(checker.inference.type_store()),
         })
         .collect::<Vec<_>>();
+    let async_types = checker
+        .inference
+        .asyncs()
+        .iter()
+        .map(|future| ResolvedAsyncType {
+            id: future.id,
+            value: future.value.to_ref(checker.inference.type_store()),
+        })
+        .collect::<Vec<_>>();
     for array in &array_types {
         let element = checker.resolved_type_ref(array.element);
         checker
@@ -82,6 +91,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
         &array_types,
         &option_types,
         &result_types,
+        &async_types,
         |ty| checker.resolved_type(ty),
     );
     semantics.set_function_parameter_types(
@@ -112,6 +122,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             array_types,
             option_types,
             result_types,
+            async_types,
         },
         diagnostics,
     }

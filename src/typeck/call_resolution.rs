@@ -789,10 +789,26 @@ impl Checker {
             self.unify(receiver.ty, declared_receiver, span)?;
             concrete_signature.push(declared_receiver);
         }
+        let operation = self.standard_library.operation_semantics(item.id);
+        let source_body_suspends = match item.implementation {
+            crate::stdlib::Implementation::LibraryBody { function_name, .. } => {
+                let result = self
+                    .declarations
+                    .functions
+                    .get(function_name)
+                    .map(|signature| signature.result);
+                result.is_some_and(|result| matches!(self.shallow_type(result), Type::Async(_)))
+            }
+            crate::stdlib::Implementation::Intrinsic(_) => false,
+        };
         let expected_result = expected.map(|ty| self.shallow_type(ty));
-        let result_type = if let (Some(value), Some(Type::Result(result))) = (
+        let expected_completion = expected_result.map(|expected| match expected {
+            Type::Async(future) => self.inference.async_value(future),
+            expected => expected,
+        });
+        let completion_type = if let (Some(value), Some(Type::Result(result))) = (
             catalog_type_argument(item.signature.result, StdlibTypeConstructorId::Result),
-            expected_result,
+            expected_completion,
         ) {
             let declared_value = self.catalog_type(value, &variables);
             let expected_value = self.inference.result_value(result);
@@ -800,6 +816,13 @@ impl Checker {
             Type::Result(result)
         } else {
             self.catalog_type(item.signature.result, &variables)
+        };
+        let result_type = if operation.suspension == crate::stdlib::SuspensionKind::Suspends
+            || source_body_suspends
+        {
+            Type::Async(self.inference.async_type(completion_type))
+        } else {
+            completion_type
         };
         let result = self.expect_expression(expression, result_type, expected, span)?;
         if args.len() != item.signature.parameters.len() {
@@ -821,11 +844,7 @@ impl Checker {
             concrete_signature.push(parameter_type);
         }
         concrete_signature.push(result_type);
-        let operation = self.standard_library.operation_semantics(item.id);
-        if operation.availability == Availability::OnAttach
-            && !(self.expression_mode == ExpressionMode::SuspensionOperand
-                && self.callable.can_suspend())
-        {
+        if operation.availability == Availability::OnAttach && !self.callable.can_suspend() {
             self.error(
                 format!("`{}` must be awaited in `onAttach`", item.qualified_name),
                 span,
@@ -1480,6 +1499,10 @@ impl Checker {
             Type::Result(result) => {
                 let value = self.inference.result_value(result);
                 format!("{}!", self.type_name(value))
+            }
+            Type::Async(future) => {
+                let value = self.inference.async_value(future);
+                format!("async {}", self.type_name(value))
             }
             Type::Variable(_) => "an inferred type".to_owned(),
             Type::Known(id) => match self.inference.type_store().kind(id) {

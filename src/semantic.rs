@@ -251,6 +251,7 @@ pub struct SemanticModel {
     values: HashMap<ExprId, ResolvedValue>,
     value_types: HashMap<ValueId, TypeId>,
     function_results: HashMap<FunctionId, TypeId>,
+    function_completions: HashMap<FunctionId, TypeId>,
     function_parameter_types: HashMap<FunctionId, Vec<TypeId>>,
     function_type_parameters: HashMap<FunctionId, Vec<TypeId>>,
     generic_parameter_constraints: HashMap<TypeId, Vec<crate::stdlib::StdlibCapabilityId>>,
@@ -327,6 +328,12 @@ impl SemanticModel {
 
     pub fn function_result(&self, function: FunctionId) -> Option<TypeId> {
         self.function_results.get(&function).copied()
+    }
+
+    /// The value produced when an async function completes. Synchronous
+    /// functions have the same result and completion type.
+    pub fn function_completion(&self, function: FunctionId) -> Option<TypeId> {
+        self.function_completions.get(&function).copied()
     }
 
     pub fn function_parameter_types(&self, function: FunctionId) -> &[TypeId] {
@@ -406,6 +413,7 @@ impl SemanticModel {
             TypeKind::Array { element, .. } => Some((0, self.specialize_type(instance, *element))),
             TypeKind::Option { value, .. } => Some((1, self.specialize_type(instance, *value))),
             TypeKind::Result { value, .. } => Some((2, self.specialize_type(instance, *value))),
+            TypeKind::Async { value, .. } => Some((3, self.specialize_type(instance, *value))),
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot
@@ -423,7 +431,9 @@ impl SemanticModel {
         };
         let original_child = match self.types.kind(ty) {
             TypeKind::Array { element, .. } => *element,
-            TypeKind::Option { value, .. } | TypeKind::Result { value, .. } => *value,
+            TypeKind::Option { value, .. }
+            | TypeKind::Result { value, .. }
+            | TypeKind::Async { value, .. } => *value,
             _ => unreachable!(),
         };
         if child == original_child {
@@ -440,6 +450,7 @@ impl SemanticModel {
                 ) if *element == child && *length == original_array_length => Some(candidate),
                 (1, TypeKind::Option { value, .. }) if *value == child => Some(candidate),
                 (2, TypeKind::Result { value, .. }) if *value == child => Some(candidate),
+                (3, TypeKind::Async { value, .. }) if *value == child => Some(candidate),
                 _ => None,
             })
             .unwrap_or_else(|| {
@@ -468,6 +479,7 @@ impl SemanticModel {
         None
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn materialize_specialized_type(
         &mut self,
         instance: &FunctionInstance,
@@ -476,6 +488,7 @@ impl SemanticModel {
         arrays: &mut Vec<ResolvedArrayType>,
         options: &mut Vec<ResolvedOptionType>,
         results: &mut Vec<ResolvedResultType>,
+        asyncs: &mut Vec<crate::types::ResolvedAsyncType>,
     ) -> TypeId {
         if let Some(specialized) = self.specialized_types.get(&(instance.clone(), ty)) {
             return *specialized;
@@ -490,8 +503,9 @@ impl SemanticModel {
             TypeKind::Array {
                 element, length, ..
             } => {
-                let element = self
-                    .materialize_specialized_type(instance, element, ids, arrays, options, results);
+                let element = self.materialize_specialized_type(
+                    instance, element, ids, arrays, options, results, asyncs,
+                );
                 if element
                     == match self.types.kind(ty) {
                         TypeKind::Array { element, .. } => *element,
@@ -515,8 +529,9 @@ impl SemanticModel {
                 }
             }
             TypeKind::Option { value, .. } => {
-                let value = self
-                    .materialize_specialized_type(instance, value, ids, arrays, options, results);
+                let value = self.materialize_specialized_type(
+                    instance, value, ids, arrays, options, results, asyncs,
+                );
                 if value
                     == match self.types.kind(ty) {
                         TypeKind::Option { value, .. } => *value,
@@ -534,8 +549,9 @@ impl SemanticModel {
                 }
             }
             TypeKind::Result { value, .. } => {
-                let value = self
-                    .materialize_specialized_type(instance, value, ids, arrays, options, results);
+                let value = self.materialize_specialized_type(
+                    instance, value, ids, arrays, options, results, asyncs,
+                );
                 if value
                     == match self.types.kind(ty) {
                         TypeKind::Result { value, .. } => *value,
@@ -550,6 +566,26 @@ impl SemanticModel {
                         value: self.resolved_type_ref(value),
                     });
                     self.types.intern(TypeKind::Result { layout, value })
+                }
+            }
+            TypeKind::Async { value, .. } => {
+                let value = self.materialize_specialized_type(
+                    instance, value, ids, arrays, options, results, asyncs,
+                );
+                if value
+                    == match self.types.kind(ty) {
+                        TypeKind::Async { value, .. } => *value,
+                        _ => unreachable!(),
+                    }
+                {
+                    ty
+                } else {
+                    let layout = ids.async_value();
+                    asyncs.push(crate::types::ResolvedAsyncType {
+                        id: layout,
+                        value: self.resolved_type_ref(value),
+                    });
+                    self.types.intern(TypeKind::Async { layout, value })
                 }
             }
             TypeKind::Builtin(_)
@@ -579,6 +615,7 @@ impl SemanticModel {
             TypeKind::Array { layout, .. } => crate::types::ResolvedTypeRef::Array(*layout),
             TypeKind::Option { layout, .. } => crate::types::ResolvedTypeRef::Option(*layout),
             TypeKind::Result { layout, .. } => crate::types::ResolvedTypeRef::Result(*layout),
+            TypeKind::Async { layout, .. } => crate::types::ResolvedTypeRef::Async(*layout),
         }
     }
 
@@ -613,6 +650,14 @@ impl SemanticModel {
                     value: template, ..
                 },
                 TypeKind::Result {
+                    value: concrete, ..
+                },
+            )
+            | (
+                TypeKind::Async {
+                    value: template, ..
+                },
+                TypeKind::Async {
                     value: concrete, ..
                 },
             ) => self.specialize_signature_node(*template, *concrete, searched),
@@ -815,6 +860,7 @@ pub(crate) struct SemanticBuilder {
     values: HashMap<ExprId, ResolvedValue>,
     value_types: HashMap<ValueId, Type>,
     function_results: HashMap<FunctionId, Type>,
+    function_completions: HashMap<FunctionId, Type>,
     record_field_types: HashMap<RecordFieldId, Type>,
     standard_field_types: HashMap<StdlibFieldId, Type>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<Type>>,
@@ -929,6 +975,11 @@ impl SemanticBuilder {
 
     pub(crate) fn resolve_function_result(&mut self, function: FunctionId, ty: Type) {
         let previous = self.function_results.insert(function, ty);
+        debug_assert!(previous.is_none(), "function IDs must be unique");
+    }
+
+    pub(crate) fn resolve_function_completion(&mut self, function: FunctionId, ty: Type) {
+        let previous = self.function_completions.insert(function, ty);
         debug_assert!(previous.is_none(), "function IDs must be unique");
     }
 
@@ -1077,6 +1128,7 @@ impl SemanticBuilder {
         arrays: &[ResolvedArrayType],
         options: &[ResolvedOptionType],
         results: &[ResolvedResultType],
+        asyncs: &[crate::types::ResolvedAsyncType],
         mut resolve: impl FnMut(Type) -> Type,
     ) -> SemanticModel {
         let Self {
@@ -1086,6 +1138,7 @@ impl SemanticBuilder {
             values,
             value_types,
             function_results,
+            function_completions,
             record_field_types,
             standard_field_types,
             enum_variant_payloads,
@@ -1108,13 +1161,16 @@ impl SemanticBuilder {
         // layout queryable even when inference created it only as a boundary
         // and no source declaration ultimately names it.
         for array in arrays {
-            types.intern_inferred(Type::Array(array.id), arrays, options, results);
+            types.intern_inferred(Type::Array(array.id), arrays, options, results, asyncs);
         }
         for option in options {
-            types.intern_inferred(Type::Option(option.id), arrays, options, results);
+            types.intern_inferred(Type::Option(option.id), arrays, options, results, asyncs);
         }
         for result in results {
-            types.intern_inferred(Type::Result(result.id), arrays, options, results);
+            types.intern_inferred(Type::Result(result.id), arrays, options, results, asyncs);
+        }
+        for future in asyncs {
+            types.intern_inferred(Type::Async(future.id), arrays, options, results, asyncs);
         }
         let (calls, assignment_calls) = {
             let mut finish_call = |call| match call {
@@ -1126,11 +1182,15 @@ impl SemanticBuilder {
                     function,
                     type_arguments: type_arguments
                         .into_iter()
-                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .map(|ty| {
+                            types.intern_inferred(resolve(ty), arrays, options, results, asyncs)
+                        })
                         .collect(),
                     signature: signature
                         .into_iter()
-                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .map(|ty| {
+                            types.intern_inferred(resolve(ty), arrays, options, results, asyncs)
+                        })
                         .collect(),
                 },
                 PendingResolvedCall::UserMethod {
@@ -1143,11 +1203,15 @@ impl SemanticBuilder {
                     function,
                     type_arguments: type_arguments
                         .into_iter()
-                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .map(|ty| {
+                            types.intern_inferred(resolve(ty), arrays, options, results, asyncs)
+                        })
                         .collect(),
                     signature: signature
                         .into_iter()
-                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .map(|ty| {
+                            types.intern_inferred(resolve(ty), arrays, options, results, asyncs)
+                        })
                         .collect(),
                     receiver,
                     receiver_type: types.intern_inferred(
@@ -1155,6 +1219,7 @@ impl SemanticBuilder {
                         arrays,
                         options,
                         results,
+                        asyncs,
                     ),
                 },
                 PendingResolvedCall::StandardLibrary {
@@ -1167,15 +1232,20 @@ impl SemanticBuilder {
                     item,
                     type_arguments: type_arguments
                         .into_iter()
-                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .map(|ty| {
+                            types.intern_inferred(resolve(ty), arrays, options, results, asyncs)
+                        })
                         .collect(),
                     signature: signature
                         .into_iter()
-                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .map(|ty| {
+                            types.intern_inferred(resolve(ty), arrays, options, results, asyncs)
+                        })
                         .collect(),
                     receiver,
-                    receiver_type: receiver_type
-                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results)),
+                    receiver_type: receiver_type.map(|ty| {
+                        types.intern_inferred(resolve(ty), arrays, options, results, asyncs)
+                    }),
                 },
                 PendingResolvedCall::ResultError { result } => {
                     let result = resolved_result_layout(resolve(Type::Result(result)), &types);
@@ -1205,7 +1275,7 @@ impl SemanticBuilder {
             .map(|(expression, ty)| {
                 (
                     expression,
-                    types.intern_inferred(resolve(ty), arrays, options, results),
+                    types.intern_inferred(resolve(ty), arrays, options, results, asyncs),
                 )
             })
             .collect();
@@ -1214,7 +1284,7 @@ impl SemanticBuilder {
             .map(|(value, ty)| {
                 (
                     value,
-                    types.intern_inferred(resolve(ty), arrays, options, results),
+                    types.intern_inferred(resolve(ty), arrays, options, results, asyncs),
                 )
             })
             .collect();
@@ -1223,7 +1293,16 @@ impl SemanticBuilder {
             .map(|(function, ty)| {
                 (
                     function,
-                    types.intern_inferred(resolve(ty), arrays, options, results),
+                    types.intern_inferred(resolve(ty), arrays, options, results, asyncs),
+                )
+            })
+            .collect();
+        let function_completions = function_completions
+            .into_iter()
+            .map(|(function, ty)| {
+                (
+                    function,
+                    types.intern_inferred(resolve(ty), arrays, options, results, asyncs),
                 )
             })
             .collect();
@@ -1232,7 +1311,7 @@ impl SemanticBuilder {
             .map(|(field, ty)| {
                 (
                     field,
-                    types.intern_inferred(resolve(ty), arrays, options, results),
+                    types.intern_inferred(resolve(ty), arrays, options, results, asyncs),
                 )
             })
             .collect();
@@ -1241,7 +1320,7 @@ impl SemanticBuilder {
             .map(|(field, ty)| {
                 (
                     field,
-                    types.intern_inferred(resolve(ty), arrays, options, results),
+                    types.intern_inferred(resolve(ty), arrays, options, results, asyncs),
                 )
             })
             .collect();
@@ -1250,7 +1329,9 @@ impl SemanticBuilder {
             .map(|(variant, payload)| {
                 (
                     variant,
-                    payload.map(|ty| types.intern_inferred(resolve(ty), arrays, options, results)),
+                    payload.map(|ty| {
+                        types.intern_inferred(resolve(ty), arrays, options, results, asyncs)
+                    }),
                 )
             })
             .collect();
@@ -1259,7 +1340,7 @@ impl SemanticBuilder {
             .map(|(array, element)| {
                 (
                     array,
-                    types.intern_inferred(resolve(element), arrays, options, results),
+                    types.intern_inferred(resolve(element), arrays, options, results, asyncs),
                 )
             })
             .collect();
@@ -1268,7 +1349,7 @@ impl SemanticBuilder {
             .map(|(field, result)| {
                 (
                     field,
-                    types.intern_inferred(resolve(result), arrays, options, results),
+                    types.intern_inferred(resolve(result), arrays, options, results, asyncs),
                 )
             })
             .collect();
@@ -1277,7 +1358,7 @@ impl SemanticBuilder {
             .map(|(expression, result)| {
                 (
                     expression,
-                    types.intern_inferred(resolve(result), arrays, options, results),
+                    types.intern_inferred(resolve(result), arrays, options, results, asyncs),
                 )
             })
             .collect();
@@ -1293,12 +1374,14 @@ impl SemanticBuilder {
                             arrays,
                             options,
                             results,
+                            asyncs,
                         ),
                         target: types.intern_inferred(
                             resolve(conversion.target),
                             arrays,
                             options,
                             results,
+                            asyncs,
                         ),
                     },
                 )
@@ -1336,6 +1419,7 @@ impl SemanticBuilder {
             values,
             value_types,
             function_results,
+            function_completions,
             function_parameter_types: HashMap::new(),
             function_type_parameters: HashMap::new(),
             generic_parameter_constraints: HashMap::new(),

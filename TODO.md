@@ -245,6 +245,35 @@ tooling consumers only see the normalized immutable graph.
       At that point, promote `await` from its current statement forms (including
       direct `return await operation`) to a generally composable expression over
       an `async T` value, without introducing a second suspension model.
+      - [x] Give `async T` one identity in every shared type layer: source
+        `TypeRef`, inference, resolved `TypeKind`, function/call signatures, and
+        editor display. A function body returns `T`; invoking it produces
+        `async T`. Intrinsically suspending catalog calls follow the same rule.
+        Remove `return_is_async` and effect-based signature decoration once the
+        constructed type itself carries this fact.
+      - [x] Parse `await value` as an ordinary prefix expression and retire the
+        separate statement/binding/return suspension grammar. `await` unwraps
+        exactly `async T` to `T`; `retry` remains the orthogonal operation that
+        repeatedly evaluates `T!` and unwraps its successful `T`.
+      - [ ] Add an evaluation-order-preserving async normalization pass. Before
+        extracting a nested await, spill every earlier non-replayable sibling
+        (call arguments, receivers, operators, interpolation parts, conditions,
+        match inputs/guards, and fallback operands) exactly once. Represent
+        compiler temporaries with typed IR identities rather than fabricated
+        source `ValueId`s, and include them in liveness/frame planning.
+      - [ ] Make suspension destinations explicit (`discard`, source binding,
+        compiler temporary, or body result) instead of combining an optional
+        binding with boolean flags. The continuation graph, not parser position,
+        decides what happens to the completed value.
+      - [ ] Specify future creation separately from polling. Creating a source
+        async call evaluates and stores its receiver/arguments once and returns
+        a GC future handle; awaiting polls that same identity. Multiple awaits,
+        polling after completion, dropped futures, and process-close cancellation
+        need deterministic behavior and runtime tests.
+      - [ ] Use a shared erased future header only where Wasm GC requires it;
+        keep each reachable `FunctionInstance`'s continuation payload and result
+        slot statically typed. Box primitive results only at a genuinely erased
+        storage boundary, not on every direct await.
     - [ ] Give every reachable suspending `FunctionInstance` a typed GC frame
       containing its program counter, parameters/receiver, locals live across
       suspension, nested callee frame, and result storage. Plan these layouts

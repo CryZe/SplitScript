@@ -40,7 +40,10 @@ pub(super) fn compile_read(
             standard_library: lowering.standard_library,
             abi: lowering.abi,
             state: lowering.state,
-            locals: LocalStorage::Wasm(&locals),
+            locals: LocalStorage::Wasm {
+                values: &locals,
+                temporaries: &matches.temporaries,
+            },
             globals: lowering.globals,
             global_types: lowering.global_types,
             settings: lowering.settings,
@@ -372,7 +375,10 @@ pub(super) fn compile_user_function(
         standard_library: lowering.standard_library,
         abi: lowering.abi,
         state: lowering.state,
-        locals: LocalStorage::Wasm(&locals),
+        locals: LocalStorage::Wasm {
+            values: &locals,
+            temporaries: &matches.temporaries,
+        },
         globals: lowering.globals,
         global_types: lowering.global_types,
         settings: lowering.settings,
@@ -401,7 +407,7 @@ pub(super) fn compile_user_function(
             instance,
             lowering
                 .semantics
-                .function_result(declaration.id)
+                .function_completion(declaration.id)
                 .expect("checked functions have result types"),
         ),
         lowering.semantics,
@@ -443,7 +449,10 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
         standard_library: lowering.standard_library,
         abi: lowering.abi,
         state: lowering.state,
-        locals: LocalStorage::Wasm(&locals),
+        locals: LocalStorage::Wasm {
+            values: &locals,
+            temporaries: &matches.temporaries,
+        },
         globals: lowering.globals,
         global_types: lowering.global_types,
         settings: lowering.settings,
@@ -518,6 +527,9 @@ pub(super) fn plan_wasm_locals(
         match local.purpose {
             LocalPurpose::Value(value) => {
                 locals.insert(value, (index, ty));
+            }
+            LocalPurpose::Temporary(temporary) => {
+                matches.temporaries.insert(temporary, (index, ty));
             }
             LocalPurpose::MatchValue(expression) => {
                 matches.values.insert(expression, index);

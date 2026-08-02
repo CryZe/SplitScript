@@ -9,15 +9,15 @@ mod types;
 use crate::{
     PrimitiveType as CoreTypeId, Token, TokenCursor, TokenKind,
     ast::{
-        Action, ActionKind, ArrayTypeDecl, ArrayTypeId, AssignmentId, BinaryOp, Block,
-        ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference, EnumVariant, EnumVariantId,
-        Expr, ExprId, ExprKind, FallbackBranch, ForBinding, FunctionDecl, FunctionId,
-        InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter,
-        PatternBinding, PatternId, PointerPath, Program, RecordDecl, RecordField, RecordFieldId,
-        RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption, SettingChoiceOptionId,
-        SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl, StateField, StateLayoutDecl,
-        StateMemoryDecoder, StateProviderRef, StateSource, Stmt, SuspensionBinding, SuspensionMode,
-        TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
+        Action, ActionKind, ArrayTypeDecl, ArrayTypeId, AssignmentId, AsyncTypeDecl, AsyncTypeId,
+        BinaryOp, Block, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference, EnumVariant,
+        EnumVariantId, Expr, ExprId, ExprKind, FallbackBranch, ForBinding, FunctionDecl,
+        FunctionId, InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId,
+        Parameter, PatternBinding, PatternId, PointerPath, Program, RecordDecl, RecordField,
+        RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
+        SettingChoiceOptionId, SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl,
+        StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource, Stmt,
+        SuspensionMode, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::Diagnostic,
     source::{RecoveryNode, RecoveryNodeKind},
@@ -48,6 +48,8 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         option_type_ids: HashMap::new(),
         result_types: Vec::new(),
         result_type_ids: HashMap::new(),
+        async_types: Vec::new(),
+        async_type_ids: HashMap::new(),
         type_names: Vec::new(),
         type_name_spans: Vec::new(),
         type_name_ids: HashMap::new(),
@@ -77,6 +79,8 @@ struct Parser<'a> {
     option_type_ids: HashMap<TypeRef, OptionTypeId>,
     result_types: Vec<ResultTypeDecl>,
     result_type_ids: HashMap<TypeRef, ResultTypeId>,
+    async_types: Vec<AsyncTypeDecl>,
+    async_type_ids: HashMap<TypeRef, AsyncTypeId>,
     type_names: Vec<String>,
     type_name_spans: Vec<Span>,
     type_name_ids: HashMap<String, TypeNameId>,
@@ -325,6 +329,7 @@ impl Parser<'_> {
         program.array_types = self.array_types;
         program.option_types = self.option_types;
         program.result_types = self.result_types;
+        program.async_types = self.async_types;
         program.type_names = self.type_names;
         program.type_name_spans = self.type_name_spans;
         ParseOutput {

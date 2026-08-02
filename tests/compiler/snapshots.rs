@@ -449,6 +449,9 @@ fn snapshot_expression_kind(
                 format!("fallback e{} else=continue", value.index())
             }
         },
+        TypedExpressionKind::Suspend { mode, value, .. } => {
+            format!("{mode:?} e{}", value.index())
+        }
         TypedExpressionKind::Propagate { value, target } => {
             format!("propagate e{} -> t{}", value.index(), target.index())
         }
@@ -504,5 +507,8 @@ fn snapshot_type_name(
         }
         TypeKind::Option { value, .. } => format!("{}?", snapshot_type_name(checked, *value)),
         TypeKind::Result { value, .. } => format!("{}!", snapshot_type_name(checked, *value)),
+        TypeKind::Async { value, .. } => {
+            format!("async {}", snapshot_type_name(checked, *value))
+        }
     }
 }

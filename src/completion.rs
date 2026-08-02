@@ -777,7 +777,8 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
                 | crate::ast::FallbackBranch::Continue { .. } => {}
             }
         }
-        ExprKind::Propagate(value)
+        ExprKind::Suspend { value, .. }
+        | ExprKind::Propagate(value)
         | ExprKind::Member {
             receiver: value, ..
         }
@@ -915,7 +916,8 @@ fn add_inferred_fields(
         | TypeKind::GenericParameter { .. }
         | TypeKind::Array { .. }
         | TypeKind::Option { .. }
-        | TypeKind::Result { .. } => {}
+        | TypeKind::Result { .. }
+        | TypeKind::Async { .. } => {}
     }
 }
 

@@ -233,6 +233,11 @@ pub enum TypedExpressionKind {
         value: ExprId,
         fallback: TypedFallbackBranch,
     },
+    Suspend {
+        mode: SuspensionMode,
+        destination: ValueId,
+        value: ExprId,
+    },
     /// Unwraps a result or transfers its error to the nearest failure boundary.
     Propagate {
         value: ExprId,
@@ -443,7 +448,7 @@ impl TypedProgram {
                 body: lower_block(
                     &function.body,
                     semantics,
-                    semantics.function_result(function.id).filter(|result| {
+                    semantics.function_completion(function.id).filter(|result| {
                         matches!(semantics.types().kind(*result), TypeKind::Result { .. })
                     }),
                 ),
@@ -935,7 +940,8 @@ pub fn walk_typed_expression<V: TypedVisitor>(
                 | TypedFallbackBranch::Continue => {}
             }
         }
-        TypedExpressionKind::Propagate { value, .. } => visit_expression(*value),
+        TypedExpressionKind::Suspend { value, .. }
+        | TypedExpressionKind::Propagate { value, .. } => visit_expression(*value),
         TypedExpressionKind::Member { receiver, .. } => visit_expression(*receiver),
         TypedExpressionKind::Unary { expression, .. }
         | TypedExpressionKind::Cast { expression, .. } => visit_expression(*expression),
@@ -1132,6 +1138,15 @@ fn lower_expression_kind(
                 FallbackBranch::Break { .. } => TypedFallbackBranch::Break,
                 FallbackBranch::Continue { .. } => TypedFallbackBranch::Continue,
             },
+        },
+        ExprKind::Suspend {
+            mode,
+            destination,
+            value,
+        } => TypedExpressionKind::Suspend {
+            mode: *mode,
+            destination: *destination,
+            value: value.id,
         },
         ExprKind::Propagate(value) => TypedExpressionKind::Propagate {
             value: value.id,

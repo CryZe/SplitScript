@@ -485,6 +485,7 @@ impl Reachability {
                     self.gc_results.insert(*layout);
                     pending.push(*value);
                 }
+                TypeKind::Async { value, .. } => pending.push(*value),
             }
         }
     }
@@ -561,7 +562,8 @@ impl Reachability {
                 | TypeKind::Enum(_)
                 | TypeKind::Array { .. }
                 | TypeKind::Option { .. }
-                | TypeKind::Result { .. } => {}
+                | TypeKind::Result { .. }
+                | TypeKind::Async { .. } => {}
             }
         }
     }

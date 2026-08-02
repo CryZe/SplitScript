@@ -1,8 +1,8 @@
 //! Source type-expression parsing and constructed syntax-type interning.
 
 use super::{
-    ArrayTypeDecl, Diagnostic, OptionTypeDecl, Parser, ResultTypeDecl, Span, TokenKind, TypeNameId,
-    TypeRef, csharp_numeric_type,
+    ArrayTypeDecl, AsyncTypeDecl, Diagnostic, OptionTypeDecl, Parser, ResultTypeDecl, Span,
+    TokenKind, TypeNameId, TypeRef, csharp_numeric_type,
 };
 
 impl Parser<'_> {
@@ -26,6 +26,24 @@ impl Parser<'_> {
         &mut self,
         message: &'static str,
     ) -> Result<(TypeRef, Span), Diagnostic> {
+        if let Some(start) = self.eat_ident("async") {
+            let (value, end) = self.parse_type("expected a type after `async`")?;
+            if matches!(value, TypeRef::Async(_)) {
+                return Err(Diagnostic::new(
+                    "an asynchronous value cannot be wrapped in `async` again",
+                    start.join(end),
+                ));
+            }
+            let id = if let Some(&id) = self.async_type_ids.get(&value) {
+                id
+            } else {
+                let id = self.constructed_type_ids.async_value();
+                self.async_types.push(AsyncTypeDecl { id, value });
+                self.async_type_ids.insert(value, id);
+                id
+            };
+            return Ok((TypeRef::Async(id), start.join(end)));
+        }
         let (mut ty, start, mut end) = if let Some(start) = self.eat(&TokenKind::LBracket) {
             let (element, _) = self.parse_type("expected an array element type")?;
             let length = if self.eat(&TokenKind::Semicolon).is_some() {

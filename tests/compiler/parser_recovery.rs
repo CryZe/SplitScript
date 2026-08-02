@@ -940,7 +940,7 @@ fn recovering_parse_preserves_malformed_if_expressions() {
 #[test]
 fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressions() {
     use splitscript::{
-        compiler::ast::{ExprKind, StateSource, Stmt, SuspensionMode},
+        compiler::ast::{Expr, ExprKind, StateSource, Stmt, SuspensionMode},
         compiler::syntax::RecoveryNodeKind,
     };
 
@@ -1000,13 +1000,15 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
     ));
     assert!(matches!(
         statements[3],
-        Stmt::Suspend { mode: SuspensionMode::Await, ref value, .. }
-            if matches!(value.kind, ExprKind::Error)
+        Stmt::Expression(Expr { kind: ExprKind::Suspend {
+            mode: SuspensionMode::Await, ref value, ..
+        }, .. }) if matches!(value.kind, ExprKind::Error)
     ));
     assert!(matches!(
         statements[4],
-        Stmt::Suspend { mode: SuspensionMode::Retry, ref value, .. }
-            if matches!(value.kind, ExprKind::Error)
+        Stmt::Expression(Expr { kind: ExprKind::Suspend {
+            mode: SuspensionMode::Retry, ref value, ..
+        }, .. }) if matches!(value.kind, ExprKind::Error)
     ));
     assert!(matches!(
         statements[5],

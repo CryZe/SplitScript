@@ -11,7 +11,13 @@ impl ExprId {
         self.0 as usize
     }
 
-    pub(crate) fn from_index(index: u32) -> Self {
+    /// Creates an identity for a compiler-generated expression arena entry.
+    ///
+    /// Source parsers should allocate IDs through their parser context. This
+    /// constructor exists for downstream lowering passes that extend the
+    /// expression arena after parsing.
+    #[doc(hidden)]
+    pub fn from_index(index: u32) -> Self {
         Self(index)
     }
 }
@@ -135,6 +141,20 @@ impl ResultTypeId {
     }
 }
 
+/// Stable identity for an asynchronous-value type expression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AsyncTypeId(u32);
+
+impl AsyncTypeId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    pub(crate) fn from_index(index: u32) -> Self {
+        Self(index)
+    }
+}
+
 /// Stable identity for a field declared by a record in one parsed program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RecordFieldId(u32);
@@ -181,6 +201,7 @@ display_stable_id!(
     ArrayTypeId,
     OptionTypeId,
     ResultTypeId,
+    AsyncTypeId,
     RecordFieldId,
     EnumVariantId
 );
@@ -248,6 +269,7 @@ pub struct Program {
     pub array_types: Vec<ArrayTypeDecl>,
     pub option_types: Vec<OptionTypeDecl>,
     pub result_types: Vec<ResultTypeDecl>,
+    pub async_types: Vec<AsyncTypeDecl>,
     pub functions: Vec<FunctionDecl>,
     pub actions: Vec<Action>,
 }
@@ -317,6 +339,10 @@ impl ConstructedTypeIdAllocator {
         ResultTypeId::from_index(self.take())
     }
 
+    pub fn async_value(&mut self) -> AsyncTypeId {
+        AsyncTypeId::from_index(self.take())
+    }
+
     pub fn next_index(&self) -> u32 {
         self.next
     }
@@ -349,6 +375,12 @@ pub struct OptionTypeDecl {
 #[derive(Debug, Clone, Copy)]
 pub struct ResultTypeDecl {
     pub id: ResultTypeId,
+    pub value: TypeRef,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AsyncTypeDecl {
+    pub id: AsyncTypeId,
     pub value: TypeRef,
 }
 
@@ -764,6 +796,14 @@ pub enum ExprKind {
         value: Box<Expr>,
         fallback: FallbackBranch,
     },
+    Suspend {
+        mode: SuspensionMode,
+        /// Compiler-owned storage for the completed value. This gives an
+        /// expression-level suspension a stable destination independent of
+        /// the source context in which it appears.
+        destination: ValueId,
+        value: Box<Expr>,
+    },
     Propagate(Box<Expr>),
     Path(Vec<String>),
     Member {
@@ -901,6 +941,7 @@ pub enum TypeRef {
     Array(ArrayTypeId),
     Option(OptionTypeId),
     Result(ResultTypeId),
+    Async(AsyncTypeId),
 }
 
 impl TypeRef {
@@ -932,6 +973,7 @@ impl fmt::Display for TypeRef {
             Self::Array(id) => write!(f, "Array#{id}"),
             Self::Option(id) => write!(f, "Option#{id}"),
             Self::Result(id) => write!(f, "Result#{id}"),
+            Self::Async(id) => write!(f, "Async#{id}"),
         }
     }
 }

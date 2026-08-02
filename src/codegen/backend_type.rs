@@ -5,7 +5,7 @@
 //! inference or name resolution.
 
 use crate::{
-    ast::{ArrayTypeId, EnumId, OptionTypeId, RecordId, ResultTypeId},
+    ast::{ArrayTypeId, AsyncTypeId, EnumId, OptionTypeId, RecordId, ResultTypeId},
     stdlib::{
         CoreTypeId, DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibTypeId,
         with_core_types,
@@ -25,6 +25,7 @@ macro_rules! define_backend_type {
             Array(ArrayTypeId),
             Option(OptionTypeId),
             Result(ResultTypeId),
+            Async(AsyncTypeId),
         }
     };
 }

@@ -377,20 +377,41 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
                 ty
             })
             .collect::<Vec<_>>();
-        let result = if let Some(annotation) = function.return_annotation {
-            checker.syntax_type(annotation)
+        let annotated = function
+            .return_annotation
+            .map(|annotation| checker.syntax_type(annotation));
+        let completion = if let Some(Type::Async(future)) = annotated {
+            checker.inference.async_value(future)
+        } else if let Some(annotation) = annotated {
+            annotation
         } else if contains_value_return(&function.body) {
             checker.fresh_inference(Requirements::none(), None)
         } else {
             checker.core_type(crate::stdlib::CoreTypeId::Void)
         };
+        let is_async = function.return_is_async
+            || crate::typeck::control_flow::contains_suspension(&function.body);
+        let result = if is_async {
+            match annotated {
+                Some(result @ Type::Async(_)) => result,
+                _ => Type::Async(checker.inference.async_type(completion)),
+            }
+        } else if let Some(annotation) = annotated {
+            annotation
+        } else {
+            completion
+        };
         checker
             .semantics
             .resolve_function_result(function.id, result);
+        checker
+            .semantics
+            .resolve_function_completion(function.id, completion);
         let signature = FunctionSignature {
             id: function.id,
             params,
             result,
+            completion,
             generalized: Vec::new(),
         };
         checker

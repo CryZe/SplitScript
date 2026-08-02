@@ -362,7 +362,7 @@ onAttach {
         assert!(errors.iter().any(|error| {
             error
                 .message
-                .contains("CatalogSuspensionProbe.waitThroughHelper` must be awaited")
+                .contains("`CatalogSuspensionProbe.waitThroughHelper` suspends and must be awaited")
         }));
     }
 
@@ -471,9 +471,14 @@ fn loadUnity() {
         let function = &checked.syntax().functions[0];
         assert!(matches!(
             function.body.statements.as_slice(),
-            [crate::ast::Stmt::Suspend {
-                mode: crate::ast::SuspensionMode::Await,
-                returns: true,
+            [crate::ast::Stmt::Return {
+                value: Some(crate::ast::Expr {
+                    kind: crate::ast::ExprKind::Suspend {
+                        mode: crate::ast::SuspensionMode::Await,
+                        ..
+                    },
+                    ..
+                }),
                 ..
             }]
         ));
@@ -482,10 +487,18 @@ fn loadUnity() {
             SuspensionKind::Suspends
         );
         let result = checked.semantics().function_result(function.id).unwrap();
+        let crate::types::TypeKind::Async { value, .. } = checked.semantics().types().kind(result)
+        else {
+            panic!("an async function should expose an async call result")
+        };
         assert!(matches!(
-            checked.semantics().types().kind(result),
+            checked.semantics().types().kind(*value),
             crate::types::TypeKind::Standard(_)
         ));
+        assert_eq!(
+            checked.semantics().function_completion(function.id),
+            Some(*value)
+        );
         crate::compile(source)
             .expect("an unused async helper should compile without a parser error");
     }

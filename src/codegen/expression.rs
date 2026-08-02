@@ -15,7 +15,7 @@ use crate::{
     },
     stdlib::{IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibTypeId},
     types::{EnumTypeId, ResolvedArrayType, TypeId},
-    wasm_ir,
+    wasm_ir::{self, TemporaryId},
 };
 
 use super::{
@@ -35,14 +35,20 @@ pub(super) struct MatchLayout {
     pub fallback_values: HashMap<ExprId, u32>,
     pub intrinsic_temps: HashMap<ExprId, Vec<u32>>,
     pub suspension_temps: HashMap<ExprId, u32>,
+    pub temporaries: HashMap<TemporaryId, (u32, Type)>,
 }
 
 #[derive(Clone, Copy)]
 pub(super) enum LocalStorage<'a> {
-    Wasm(&'a HashMap<ValueId, (u32, Type)>),
+    Wasm {
+        values: &'a HashMap<ValueId, (u32, Type)>,
+        temporaries: &'a HashMap<TemporaryId, (u32, Type)>,
+    },
     Hybrid {
-        wasm: &'a HashMap<ValueId, (u32, Type)>,
-        frame: &'a HashMap<ValueId, (u32, Type)>,
+        wasm_values: &'a HashMap<ValueId, (u32, Type)>,
+        frame_values: &'a HashMap<ValueId, (u32, Type)>,
+        wasm_temporaries: &'a HashMap<TemporaryId, (u32, Type)>,
+        frame_temporaries: &'a HashMap<TemporaryId, (u32, Type)>,
     },
 }
 
@@ -234,6 +240,9 @@ fn compile_block_with_loop(
             } => {
                 compile_assignment(function, *target, operation.as_ref(), *value, context);
             }
+            wasm_ir::Statement::StoreTemporary { target, value } => {
+                compile_temporary_set(function, *target, *value, context);
+            }
             wasm_ir::Statement::If {
                 condition,
                 then_block,
@@ -347,7 +356,9 @@ fn compile_block_with_loop(
                 .expect("checked continue statements belong to loops")
                 .emit_continue(function, context.gc, context.runtime_globals);
         }
-        wasm_ir::Terminator::AsyncWhile { .. } | wasm_ir::Terminator::AsyncFor { .. } => {
+        wasm_ir::Terminator::AsyncWhile { .. }
+        | wasm_ir::Terminator::AsyncWhileCondition { .. }
+        | wasm_ir::Terminator::AsyncFor { .. } => {
             unreachable!("async loops are lowered by the async action compiler")
         }
         wasm_ir::Terminator::Return(value) => {
@@ -384,8 +395,8 @@ pub(super) fn compile_assignment(
     context: &ExprContext<'_>,
 ) {
     match context.locals {
-        LocalStorage::Hybrid { frame, .. } if frame.contains_key(&target) => {
-            let (field, ty) = frame[&target];
+        LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&target) => {
+            let (field, ty) = frame_values[&target];
             emit_async_frame_ref(function, context.runtime_globals);
             compile_assignment_value(function, operation, value, ty, context, |function| {
                 emit_async_frame_ref(function, context.runtime_globals);
@@ -396,15 +407,15 @@ pub(super) fn compile_assignment(
                 field_index: field,
             });
         }
-        LocalStorage::Hybrid { wasm, .. } if wasm.contains_key(&target) => {
-            let (local, ty) = wasm[&target];
+        LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&target) => {
+            let (local, ty) = wasm_values[&target];
             compile_assignment_value(function, operation, value, ty, context, |function| {
                 function.instruction(&Instruction::LocalGet(local));
             });
             function.instruction(&Instruction::LocalSet(local));
         }
-        LocalStorage::Wasm(locals) if locals.contains_key(&target) => {
-            let (local, ty) = locals[&target];
+        LocalStorage::Wasm { values, .. } if values.contains_key(&target) => {
+            let (local, ty) = values[&target];
             compile_assignment_value(function, operation, value, ty, context, |function| {
                 function.instruction(&Instruction::LocalGet(local));
             });
@@ -425,6 +436,64 @@ pub(super) fn compile_assignment(
             function.instruction(&Instruction::GlobalSet(global));
         }
     }
+}
+
+pub(super) fn compile_temporary_set(
+    function: &mut Function,
+    target: TemporaryId,
+    value: ExprId,
+    context: &ExprContext<'_>,
+) {
+    match context.locals {
+        LocalStorage::Hybrid {
+            frame_temporaries, ..
+        } if frame_temporaries.contains_key(&target) => {
+            let (field, _) = frame_temporaries[&target];
+            emit_async_frame_ref(function, context.runtime_globals);
+            compile_expr(function, value, context);
+            function.instruction(&Instruction::StructSet {
+                struct_type_index: context.gc.async_frame_index(),
+                field_index: field,
+            });
+        }
+        LocalStorage::Hybrid {
+            wasm_temporaries, ..
+        } if wasm_temporaries.contains_key(&target) => {
+            compile_expr(function, value, context);
+            function.instruction(&Instruction::LocalSet(wasm_temporaries[&target].0));
+        }
+        LocalStorage::Wasm { temporaries, .. } => {
+            compile_expr(function, value, context);
+            function.instruction(&Instruction::LocalSet(temporaries[&target].0));
+        }
+        LocalStorage::Hybrid { .. } => {
+            unreachable!("planned compiler temporary has storage")
+        }
+    }
+}
+
+fn compile_temporary_get(
+    function: &mut Function,
+    temporary: TemporaryId,
+    context: &ExprContext<'_>,
+) {
+    match context.locals {
+        LocalStorage::Hybrid {
+            frame_temporaries, ..
+        } if frame_temporaries.contains_key(&temporary) => {
+            let (field, ty) = frame_temporaries[&temporary];
+            emit_async_frame_ref(function, context.runtime_globals);
+            emit_typed_struct_get(function, context.gc.async_frame_index(), field, ty);
+        }
+        LocalStorage::Hybrid {
+            wasm_temporaries, ..
+        } => {
+            function.instruction(&Instruction::LocalGet(wasm_temporaries[&temporary].0));
+        }
+        LocalStorage::Wasm { temporaries, .. } => {
+            function.instruction(&Instruction::LocalGet(temporaries[&temporary].0));
+        }
+    };
 }
 
 fn compile_assignment_value(
@@ -595,19 +664,23 @@ fn compile_resolved_path(
                 ty
             } else {
                 match context.locals {
-                    LocalStorage::Hybrid { frame, .. } if frame.contains_key(&value) => {
-                        let (field, ty) = frame[&value];
+                    LocalStorage::Hybrid { frame_values, .. }
+                        if frame_values.contains_key(&value) =>
+                    {
+                        let (field, ty) = frame_values[&value];
                         emit_async_frame_ref(function, context.runtime_globals);
                         emit_typed_struct_get(function, context.gc.async_frame_index(), field, ty);
                         ty
                     }
-                    LocalStorage::Hybrid { wasm, .. } if wasm.contains_key(&value) => {
-                        let (local, ty) = wasm[&value];
+                    LocalStorage::Hybrid { wasm_values, .. }
+                        if wasm_values.contains_key(&value) =>
+                    {
+                        let (local, ty) = wasm_values[&value];
                         function.instruction(&Instruction::LocalGet(local));
                         ty
                     }
-                    LocalStorage::Wasm(locals) if locals.contains_key(&value) => {
-                        let (local, ty) = locals[&value];
+                    LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
+                        let (local, ty) = values[&value];
                         function.instruction(&Instruction::LocalGet(local));
                         ty
                     }
@@ -637,8 +710,8 @@ fn compile_value_set(
     emit_value: impl FnOnce(&mut Function),
 ) {
     match context.locals {
-        LocalStorage::Hybrid { frame, .. } if frame.contains_key(&value) => {
-            let (field, _) = frame[&value];
+        LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&value) => {
+            let (field, _) = frame_values[&value];
             emit_async_frame_ref(function, context.runtime_globals);
             emit_value(function);
             function.instruction(&Instruction::StructSet {
@@ -646,13 +719,13 @@ fn compile_value_set(
                 field_index: field,
             });
         }
-        LocalStorage::Hybrid { wasm, .. } if wasm.contains_key(&value) => {
+        LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&value) => {
             emit_value(function);
-            function.instruction(&Instruction::LocalSet(wasm[&value].0));
+            function.instruction(&Instruction::LocalSet(wasm_values[&value].0));
         }
-        LocalStorage::Wasm(locals) if locals.contains_key(&value) => {
+        LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
             emit_value(function);
-            function.instruction(&Instruction::LocalSet(locals[&value].0));
+            function.instruction(&Instruction::LocalSet(values[&value].0));
         }
         _ => unreachable!("compiler-owned for-loop values are local"),
     }
@@ -855,6 +928,14 @@ fn compile_expr_unconverted(
 ) {
     let expression = expression_ir.id;
     match &expression_ir.kind {
+        wasm_ir::ExpressionKind::Suspend { destination, .. } => {
+            if ty != Type::Void {
+                compile_value_get(function, *destination, context);
+            }
+        }
+        wasm_ir::ExpressionKind::Temporary(temporary) => {
+            compile_temporary_get(function, *temporary, context);
+        }
         wasm_ir::ExpressionKind::None => match ty {
             Type::Bool => {
                 function.instruction(&Instruction::I32Const(-1));

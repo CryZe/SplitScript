@@ -164,7 +164,7 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
         DebugContext::from_declaration(function.debug_only),
         |checker| {
             let signature = checker.declarations.function_signatures[&function.id].clone();
-            let failure = match checker.shallow_type(signature.result) {
+            let failure = match checker.shallow_type(signature.completion) {
                 result @ Type::Result(_) => FailureContext::boundary(result),
                 _ => FailureContext::None,
             };
@@ -186,7 +186,7 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
                         |receiver| format!("method `{receiver}.{}`", function.name),
                     ))
                 });
-            checker.with_callable_context(callable, signature.result, failure, |checker| {
+            checker.with_callable_context(callable, signature.completion, failure, |checker| {
                 checker.scopes.clear();
                 checker.scopes.push(HashMap::new());
                 for (parameter, ty) in function.params.iter().zip(signature.params.iter().copied())
@@ -216,10 +216,10 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
                     }
                 }
                 checker.block(&function.body, false);
-                if signature.result != checker.core_type(crate::stdlib::CoreTypeId::Void)
+                if signature.completion != checker.core_type(crate::stdlib::CoreTypeId::Void)
                     && !definitely_returns(&function.body)
                 {
-                    let result = checker.type_name(signature.result);
+                    let result = checker.type_name(signature.completion);
                     checker.error(
                         format!(
                             "function `{}` must return `{}` on every path",
@@ -331,6 +331,18 @@ fn layout_selection_is_terminal(checker: &Checker, block: &crate::ast::Block) ->
                 && layout_selection_is_terminal(checker, else_block)
         }
         crate::ast::Stmt::Suspend { value, .. } => checker
+            .semantics
+            .standard_library_item(value.id)
+            .is_some_and(|item| {
+                checker.standard_library.item(item).implementation
+                    == crate::stdlib::Implementation::Intrinsic(
+                        crate::stdlib::IntrinsicId::ProcessClosed,
+                    )
+            }),
+        crate::ast::Stmt::Expression(crate::ast::Expr {
+            kind: crate::ast::ExprKind::Suspend { value, .. },
+            ..
+        }) => checker
             .semantics
             .standard_library_item(value.id)
             .is_some_and(|item| {

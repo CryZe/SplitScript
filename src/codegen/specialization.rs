@@ -6,7 +6,7 @@ use std::collections::{BTreeSet, HashMap};
 use crate::{
     ast::{ConstructedTypeIdAllocator, ExprId},
     semantic::{FunctionInstance, SemanticModel},
-    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, TypeId},
+    types::{ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType, TypeId},
     wasm_ir::{self, BodyOwner, Visitor},
 };
 
@@ -16,12 +16,14 @@ pub(super) fn materialize(
     arrays: &mut Vec<ResolvedArrayType>,
     options: &mut Vec<ResolvedOptionType>,
     results: &mut Vec<ResolvedResultType>,
+    asyncs: &mut Vec<ResolvedAsyncType>,
 ) {
     let next = arrays
         .iter()
         .map(|ty| ty.id.index() as u32 + 1)
         .chain(options.iter().map(|ty| ty.id.index() as u32 + 1))
         .chain(results.iter().map(|ty| ty.id.index() as u32 + 1))
+        .chain(asyncs.iter().map(|ty| ty.id.index() as u32 + 1))
         .max()
         .unwrap_or_default();
     let mut ids = ConstructedTypeIdAllocator::starting_at(next);
@@ -42,7 +44,7 @@ pub(super) fn materialize(
             .expect("reachable calls have function templates");
         for local in &body.locals {
             materialize_type(
-                semantics, &instance, local.ty, &mut ids, arrays, options, results,
+                semantics, &instance, local.ty, &mut ids, arrays, options, results, asyncs,
             );
         }
         for (expression, owner) in &owners {
@@ -53,7 +55,7 @@ pub(super) fn materialize(
                 .expression(*expression)
                 .expect("owned expressions belong to Wasm IR");
             materialize_expression_types(
-                expression, &instance, semantics, &mut ids, arrays, options, results,
+                expression, &instance, semantics, &mut ids, arrays, options, results, asyncs,
             );
             if let Some(called) = called_function(&expression.kind) {
                 pending.push(semantics.specialize_function_instance(&instance, &called));
@@ -121,6 +123,7 @@ fn called_function(kind: &wasm_ir::ExpressionKind) -> Option<FunctionInstance> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn materialize_expression_types(
     expression: &wasm_ir::Expression,
     instance: &FunctionInstance,
@@ -129,6 +132,7 @@ fn materialize_expression_types(
     arrays: &mut Vec<ResolvedArrayType>,
     options: &mut Vec<ResolvedOptionType>,
     results: &mut Vec<ResolvedResultType>,
+    asyncs: &mut Vec<ResolvedAsyncType>,
 ) {
     materialize_type(
         semantics,
@@ -138,10 +142,13 @@ fn materialize_expression_types(
         arrays,
         options,
         results,
+        asyncs,
     );
     if let Some(conversion) = expression.conversion {
         for ty in [conversion.source, conversion.target] {
-            materialize_type(semantics, instance, ty, ids, arrays, options, results);
+            materialize_type(
+                semantics, instance, ty, ids, arrays, options, results, asyncs,
+            );
         }
     }
     match &expression.kind {
@@ -153,7 +160,9 @@ fn materialize_expression_types(
                 } => *string_conversion_source,
                 wasm_ir::InterpolatedPart::Text(_) => None,
             }) {
-                materialize_type(semantics, instance, source, ids, arrays, options, results);
+                materialize_type(
+                    semantics, instance, source, ids, arrays, options, results, asyncs,
+                );
             }
         }
         wasm_ir::ExpressionKind::Call { target, .. } => match target {
@@ -166,6 +175,7 @@ fn materialize_expression_types(
                     arrays,
                     options,
                     results,
+                    asyncs,
                 );
             }
             wasm_ir::CallTarget::Intrinsic {
@@ -174,7 +184,9 @@ fn materialize_expression_types(
                 ..
             } => {
                 for ty in type_arguments.iter().copied().chain(*receiver_type) {
-                    materialize_type(semantics, instance, ty, ids, arrays, options, results);
+                    materialize_type(
+                        semantics, instance, ty, ids, arrays, options, results, asyncs,
+                    );
                 }
             }
             wasm_ir::CallTarget::UserFunction { .. }
@@ -183,12 +195,15 @@ fn materialize_expression_types(
             | wasm_ir::CallTarget::ResultSuccess { .. } => {}
         },
         wasm_ir::ExpressionKind::Propagate { target, .. } => {
-            materialize_type(semantics, instance, *target, ids, arrays, options, results);
+            materialize_type(
+                semantics, instance, *target, ids, arrays, options, results, asyncs,
+            );
         }
         _ => {}
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn materialize_type(
     semantics: &mut SemanticModel,
     instance: &FunctionInstance,
@@ -197,6 +212,7 @@ fn materialize_type(
     arrays: &mut Vec<ResolvedArrayType>,
     options: &mut Vec<ResolvedOptionType>,
     results: &mut Vec<ResolvedResultType>,
+    asyncs: &mut Vec<ResolvedAsyncType>,
 ) {
-    semantics.materialize_specialized_type(instance, ty, ids, arrays, options, results);
+    semantics.materialize_specialized_type(instance, ty, ids, arrays, options, results, asyncs);
 }

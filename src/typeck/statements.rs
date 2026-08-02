@@ -270,6 +270,7 @@ impl Checker {
                                 return None;
                             }
                             match self.shallow_type(result) {
+                                Type::Async(future) => self.inference.async_value(future),
                                 Type::Result(result) => self.inference.result_value(result),
                                 result => result,
                             }

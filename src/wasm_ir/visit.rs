@@ -62,6 +62,7 @@ pub fn walk_statement(
 ) {
     match statement {
         Statement::Store { value, .. }
+        | Statement::StoreTemporary { value, .. }
         | Statement::Evaluate {
             expression: value, ..
         } => visitor.visit_expression_id(*value, program),
@@ -94,14 +95,18 @@ pub fn walk_terminator(
     match terminator {
         Terminator::Fallthrough | Terminator::Break | Terminator::Continue => {}
         Terminator::AsyncWhile {
-            condition,
-            body,
+            header,
             continuation,
             ..
         } => {
+            visitor.visit_block(header, program);
+            visitor.visit_block(continuation, program);
+        }
+        Terminator::AsyncWhileCondition {
+            condition, body, ..
+        } => {
             visitor.visit_expression_id(*condition, program);
             visitor.visit_block(body, program);
-            visitor.visit_block(continuation, program);
         }
         Terminator::AsyncFor {
             body, continuation, ..
@@ -149,6 +154,7 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
         | ExpressionKind::Float(_)
         | ExpressionKind::String(_)
         | ExpressionKind::Signature(_)
+        | ExpressionKind::Temporary(_)
         | ExpressionKind::Path { .. } => {}
         ExpressionKind::Member { receiver, .. } => visit(*receiver),
         ExpressionKind::InterpolatedString(parts) => {
@@ -164,7 +170,9 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
         }
         ExpressionKind::Enum { payload, .. } => payload.iter().copied().for_each(&mut visit),
         ExpressionKind::Unary { operand, .. } => visit(*operand),
-        ExpressionKind::Cast { value } | ExpressionKind::Propagate { value, .. } => visit(*value),
+        ExpressionKind::Cast { value }
+        | ExpressionKind::Suspend { value, .. }
+        | ExpressionKind::Propagate { value, .. } => visit(*value),
         ExpressionKind::Binary { left, right, .. } => {
             visit(*left);
             visit(*right);

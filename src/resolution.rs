@@ -43,6 +43,7 @@ impl ProgramResolutions {
             TypeRef::Array(id) => Some(ResolvedTypeRef::Array(id)),
             TypeRef::Option(id) => Some(ResolvedTypeRef::Option(id)),
             TypeRef::Result(id) => Some(ResolvedTypeRef::Result(id)),
+            TypeRef::Async(id) => Some(ResolvedTypeRef::Async(id)),
         }
     }
 

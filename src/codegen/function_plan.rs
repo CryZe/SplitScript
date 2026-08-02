@@ -150,7 +150,7 @@ pub(super) fn encode<'a>(
             semantics.specialize_type(
                 instance,
                 semantics
-                    .function_result(instance.function)
+                    .function_completion(instance.function)
                     .expect("checked functions have result types"),
             ),
             semantics,

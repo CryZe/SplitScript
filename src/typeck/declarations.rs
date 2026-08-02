@@ -24,6 +24,9 @@ pub(super) struct FunctionSignature {
     pub(super) id: FunctionId,
     pub(super) params: Vec<Type>,
     pub(super) result: Type,
+    /// Value accepted by `return` inside the function body. For an async
+    /// signature this is the `T` inside the call result's `async T`.
+    pub(super) completion: Type,
     /// Unbound inference roots generalized after this function's dependency
     /// component has been solved. Monomorphic functions leave this empty.
     pub(super) generalized: Vec<u32>,

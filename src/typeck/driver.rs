@@ -2,7 +2,7 @@
 
 use crate::{
     ast::Program,
-    inference::{ArrayLayout, InferenceContext, OptionLayout, ResultLayout, Type},
+    inference::{ArrayLayout, AsyncLayout, InferenceContext, OptionLayout, ResultLayout, Type},
     resolution::ProgramResolutions,
     semantic::SemanticBuilder,
     stdlib::StandardLibrary,
@@ -63,6 +63,14 @@ fn initialize_checker(
             value: syntax_type(result.value, &semantic_types, resolutions),
         })
         .collect::<Vec<_>>();
+    let async_types = program
+        .async_types
+        .iter()
+        .map(|future| AsyncLayout {
+            id: future.id,
+            value: syntax_type(future.value, &semantic_types, resolutions),
+        })
+        .collect::<Vec<_>>();
     let void_type = Type::Known(semantic_types.id_for_core(crate::stdlib::CoreTypeId::Void));
     let inference = InferenceContext::new(
         standard_library.clone(),
@@ -71,6 +79,7 @@ fn initialize_checker(
         array_types,
         option_types,
         result_types,
+        async_types,
     );
     let provider_value = resolutions.state_provider().map(|provider| {
         let declaration = standard_library.state_provider(provider);

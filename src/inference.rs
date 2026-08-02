@@ -6,7 +6,7 @@
 use std::{collections::HashMap, fmt, ops::BitOr};
 
 use crate::{
-    ast::{ArrayTypeId, ConstructedTypeIdAllocator, OptionTypeId, ResultTypeId},
+    ast::{ArrayTypeId, AsyncTypeId, ConstructedTypeIdAllocator, OptionTypeId, ResultTypeId},
     stdlib::{CapabilityBehavior, CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
     types::{BuiltinType, ResolvedTypeRef, TypeId, TypeKind, TypeStore},
 };
@@ -17,6 +17,7 @@ pub(crate) enum Type {
     Array(ArrayTypeId),
     Option(OptionTypeId),
     Result(ResultTypeId),
+    Async(AsyncTypeId),
     Variable(u32),
 }
 
@@ -34,10 +35,12 @@ impl Type {
                 TypeKind::Array { layout, .. } => ResolvedTypeRef::Array(*layout),
                 TypeKind::Option { layout, .. } => ResolvedTypeRef::Option(*layout),
                 TypeKind::Result { layout, .. } => ResolvedTypeRef::Result(*layout),
+                TypeKind::Async { layout, .. } => ResolvedTypeRef::Async(*layout),
             },
             Self::Array(id) => ResolvedTypeRef::Array(id),
             Self::Option(id) => ResolvedTypeRef::Option(id),
             Self::Result(id) => ResolvedTypeRef::Result(id),
+            Self::Async(id) => ResolvedTypeRef::Async(id),
             Self::Variable(variable) => {
                 unreachable!("inference variable ?{variable} cannot become a source type reference")
             }
@@ -52,6 +55,7 @@ impl fmt::Display for Type {
             Self::Array(id) => write!(formatter, "Array#{id}"),
             Self::Option(id) => write!(formatter, "Option#{id}"),
             Self::Result(id) => write!(formatter, "Result#{id}"),
+            Self::Async(id) => write!(formatter, "Async#{id}"),
             Self::Variable(id) => write!(formatter, "?{id}"),
         }
     }
@@ -147,6 +151,12 @@ pub(crate) struct ResultLayout {
     pub(crate) value: Type,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AsyncLayout {
+    pub(crate) id: AsyncTypeId,
+    pub(crate) value: Type,
+}
+
 pub(crate) struct InferenceContext {
     standard_library: StandardLibrary,
     types: TypeStore,
@@ -154,8 +164,10 @@ pub(crate) struct InferenceContext {
     arrays: Vec<ArrayLayout>,
     options: Vec<OptionLayout>,
     results: Vec<ResultLayout>,
+    asyncs: Vec<AsyncLayout>,
     canonical_options: HashMap<OptionTypeId, OptionTypeId>,
     canonical_results: HashMap<ResultTypeId, ResultTypeId>,
+    canonical_asyncs: HashMap<AsyncTypeId, AsyncTypeId>,
     constructed_types: HashMap<Type, TypeId>,
     constructed_type_ids: ConstructedTypeIdAllocator,
 }
@@ -168,15 +180,18 @@ impl InferenceContext {
         arrays: impl IntoIterator<Item = ArrayLayout>,
         options: impl IntoIterator<Item = OptionLayout>,
         results: impl IntoIterator<Item = ResultLayout>,
+        asyncs: impl IntoIterator<Item = AsyncLayout>,
     ) -> Self {
         let arrays = arrays.into_iter().collect::<Vec<_>>();
         let options = options.into_iter().collect::<Vec<_>>();
         let results = results.into_iter().collect::<Vec<_>>();
+        let asyncs = asyncs.into_iter().collect::<Vec<_>>();
         let next_constructed_type_index = arrays
             .iter()
             .map(|layout| layout.id.index() as u32 + 1)
             .chain(options.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(results.iter().map(|layout| layout.id.index() as u32 + 1))
+            .chain(asyncs.iter().map(|layout| layout.id.index() as u32 + 1))
             .fold(first_constructed_type_index, u32::max);
         Self {
             standard_library,
@@ -185,8 +200,10 @@ impl InferenceContext {
             arrays,
             options,
             results,
+            asyncs,
             canonical_options: HashMap::new(),
             canonical_results: HashMap::new(),
+            canonical_asyncs: HashMap::new(),
             constructed_types: HashMap::new(),
             constructed_type_ids: ConstructedTypeIdAllocator::starting_at(
                 next_constructed_type_index,
@@ -254,6 +271,7 @@ impl InferenceContext {
             TypeKind::Array { .. } => "Array".into(),
             TypeKind::Option { .. } => "Option".into(),
             TypeKind::Result { .. } => "Result".into(),
+            TypeKind::Async { .. } => "async".into(),
         }
     }
 
@@ -338,6 +356,15 @@ impl InferenceContext {
                     Type::Result(self.result_type(instantiated))
                 }
             }
+            Type::Async(future) => {
+                let value = self.async_value(future);
+                let instantiated = self.instantiate_type(value, generalized, substitutions);
+                if instantiated == value {
+                    Type::Async(future)
+                } else {
+                    Type::Async(self.async_type(instantiated))
+                }
+            }
             known @ Type::Known(_) => known,
         }
     }
@@ -367,6 +394,7 @@ impl InferenceContext {
             Type::Result(result) => {
                 self.collect_unbound_variables(self.result_value(result), output)
             }
+            Type::Async(future) => self.collect_unbound_variables(self.async_value(future), output),
             Type::Known(_) => {}
         }
     }
@@ -442,6 +470,12 @@ impl InferenceContext {
                 let right_value = self.result_value(right);
                 self.unify(left_value, right_value)?;
                 Ok(Type::Result(left))
+            }
+            (Type::Async(left), Type::Async(right)) => {
+                let left_value = self.async_value(left);
+                let right_value = self.async_value(right);
+                self.unify(left_value, right_value)?;
+                Ok(Type::Async(left))
             }
             (left, right) if left == right => Ok(left),
             (left, right) => Err(InferenceError::TypeMismatch { left, right }),
@@ -554,6 +588,12 @@ impl InferenceContext {
                     .copied()
                     .unwrap_or(result),
             ),
+            Type::Async(future) => Type::Async(
+                self.canonical_asyncs
+                    .get(&future)
+                    .copied()
+                    .unwrap_or(future),
+            ),
             ty => ty,
         };
         self.constructed_types
@@ -578,7 +618,17 @@ impl InferenceContext {
             .iter()
             .map(|layout| Type::Result(layout.id))
             .collect::<Vec<_>>();
-        for ty in arrays.into_iter().chain(options).chain(results) {
+        let asyncs = self
+            .asyncs
+            .iter()
+            .map(|layout| Type::Async(layout.id))
+            .collect::<Vec<_>>();
+        for ty in arrays
+            .into_iter()
+            .chain(options)
+            .chain(results)
+            .chain(asyncs)
+        {
             self.intern_resolved_type(ty);
         }
     }
@@ -640,6 +690,14 @@ impl InferenceContext {
             .value
     }
 
+    pub(crate) fn async_value(&self, id: AsyncTypeId) -> Type {
+        self.asyncs
+            .iter()
+            .find(|future| future.id == id)
+            .expect("checked async type has a declaration")
+            .value
+    }
+
     pub(crate) fn option_type(&mut self, value: Type) -> OptionTypeId {
         if let Some(option) = self.options.iter().find(|option| option.value == value) {
             return option.id;
@@ -655,6 +713,15 @@ impl InferenceContext {
         }
         let id = self.constructed_type_ids.result();
         self.results.push(ResultLayout { id, value });
+        id
+    }
+
+    pub(crate) fn async_type(&mut self, value: Type) -> AsyncTypeId {
+        if let Some(future) = self.asyncs.iter().find(|future| future.value == value) {
+            return future.id;
+        }
+        let id = self.constructed_type_ids.async_value();
+        self.asyncs.push(AsyncLayout { id, value });
         id
     }
 
@@ -700,6 +767,19 @@ impl InferenceContext {
             result.value = value;
         }
 
+        let async_values = self
+            .asyncs
+            .iter()
+            .map(|future| future.value)
+            .collect::<Vec<_>>();
+        let async_values = async_values
+            .into_iter()
+            .map(|value| self.resolve(value))
+            .collect::<Vec<_>>();
+        for (future, value) in self.asyncs.iter_mut().zip(async_values) {
+            future.value = value;
+        }
+
         // Constructors can allocate a provisional wrapper before later uses
         // constrain its value type. Once all inference variables resolve,
         // collapse layouts with identical value types to the first stable ID.
@@ -708,13 +788,19 @@ impl InferenceContext {
         loop {
             let previous_options = self.canonical_options.clone();
             let previous_results = self.canonical_results.clone();
+            let previous_asyncs = self.canonical_asyncs.clone();
             self.canonical_options.clear();
             self.canonical_results.clear();
+            self.canonical_asyncs.clear();
 
             let mut option_representatives = Vec::<(Type, OptionTypeId)>::new();
             for option in &self.options {
-                let value =
-                    canonical_wrapper_type(option.value, &previous_options, &previous_results);
+                let value = canonical_wrapper_type(
+                    option.value,
+                    &previous_options,
+                    &previous_results,
+                    &previous_asyncs,
+                );
                 let canonical = option_representatives
                     .iter()
                     .find_map(|(candidate, id)| (*candidate == value).then_some(*id))
@@ -727,8 +813,12 @@ impl InferenceContext {
 
             let mut result_representatives = Vec::<(Type, ResultTypeId)>::new();
             for result in &self.results {
-                let value =
-                    canonical_wrapper_type(result.value, &previous_options, &previous_results);
+                let value = canonical_wrapper_type(
+                    result.value,
+                    &previous_options,
+                    &previous_results,
+                    &previous_asyncs,
+                );
                 let canonical = result_representatives
                     .iter()
                     .find_map(|(candidate, id)| (*candidate == value).then_some(*id))
@@ -739,8 +829,27 @@ impl InferenceContext {
                 self.canonical_results.insert(result.id, canonical);
             }
 
+            let mut async_representatives = Vec::<(Type, AsyncTypeId)>::new();
+            for future in &self.asyncs {
+                let value = canonical_wrapper_type(
+                    future.value,
+                    &previous_options,
+                    &previous_results,
+                    &previous_asyncs,
+                );
+                let canonical = async_representatives
+                    .iter()
+                    .find_map(|(candidate, id)| (*candidate == value).then_some(*id))
+                    .unwrap_or_else(|| {
+                        async_representatives.push((value, future.id));
+                        future.id
+                    });
+                self.canonical_asyncs.insert(future.id, canonical);
+            }
+
             if self.canonical_options == previous_options
                 && self.canonical_results == previous_results
+                && self.canonical_asyncs == previous_asyncs
             {
                 break;
             }
@@ -748,13 +857,30 @@ impl InferenceContext {
 
         let canonical_options = self.canonical_options.clone();
         let canonical_results = self.canonical_results.clone();
+        let canonical_asyncs = self.canonical_asyncs.clone();
         for option in &mut self.options {
-            option.value =
-                canonical_wrapper_type(option.value, &canonical_options, &canonical_results);
+            option.value = canonical_wrapper_type(
+                option.value,
+                &canonical_options,
+                &canonical_results,
+                &canonical_asyncs,
+            );
         }
         for result in &mut self.results {
-            result.value =
-                canonical_wrapper_type(result.value, &canonical_options, &canonical_results);
+            result.value = canonical_wrapper_type(
+                result.value,
+                &canonical_options,
+                &canonical_results,
+                &canonical_asyncs,
+            );
+        }
+        for future in &mut self.asyncs {
+            future.value = canonical_wrapper_type(
+                future.value,
+                &canonical_options,
+                &canonical_results,
+                &canonical_asyncs,
+            );
         }
     }
 
@@ -768,6 +894,10 @@ impl InferenceContext {
 
     pub(crate) fn results(&self) -> &[ResultLayout] {
         &self.results
+    }
+
+    pub(crate) fn asyncs(&self) -> &[AsyncLayout] {
+        &self.asyncs
     }
 
     fn intern_resolved_type(&mut self, ty: Type) -> TypeId {
@@ -797,6 +927,11 @@ impl InferenceContext {
                 let value = self.result_value(layout);
                 let value = self.intern_resolved_type(value);
                 TypeKind::Result { layout, value }
+            }
+            Type::Async(layout) => {
+                let value = self.async_value(layout);
+                let value = self.intern_resolved_type(value);
+                TypeKind::Async { layout, value }
             }
             Type::Variable(variable) => {
                 unreachable!("unresolved type variable ?{variable} reached semantic interning")
@@ -891,6 +1026,7 @@ impl InferenceContext {
             Type::Array(array) => self.occurs_in(variable, self.array_element(array), visited),
             Type::Option(option) => self.occurs_in(variable, self.option_value(option), visited),
             Type::Result(result) => self.occurs_in(variable, self.result_value(result), visited),
+            Type::Async(future) => self.occurs_in(variable, self.async_value(future), visited),
             Type::Known(_) => false,
         }
     }
@@ -976,12 +1112,14 @@ pub(crate) fn type_may_have_capability(
             TypeKind::Enum(_) | TypeKind::Option { .. } | TypeKind::Result { .. } => {
                 behavior == CapabilityBehavior::StructuralEquality
             }
+            TypeKind::Async { .. } => false,
             TypeKind::Array { length, .. } => {
                 behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
             }
             TypeKind::GenericParameter { .. } => false,
         },
         Type::Option(_) | Type::Result(_) => behavior == CapabilityBehavior::StructuralEquality,
+        Type::Async(_) => false,
         Type::Array(_) => behavior == CapabilityBehavior::StructuralMemoryLayout,
         Type::Variable(_) => false,
     }
@@ -991,10 +1129,12 @@ fn canonical_wrapper_type(
     ty: Type,
     options: &HashMap<OptionTypeId, OptionTypeId>,
     results: &HashMap<ResultTypeId, ResultTypeId>,
+    asyncs: &HashMap<AsyncTypeId, AsyncTypeId>,
 ) -> Type {
     match ty {
         Type::Option(option) => Type::Option(options.get(&option).copied().unwrap_or(option)),
         Type::Result(result) => Type::Result(results.get(&result).copied().unwrap_or(result)),
+        Type::Async(future) => Type::Async(asyncs.get(&future).copied().unwrap_or(future)),
         ty => ty,
     }
 }
@@ -1027,8 +1167,15 @@ mod tests {
 
     #[test]
     fn unifies_bidirectionally_and_checks_literal_bounds() {
-        let mut inference =
-            InferenceContext::new(StandardLibrary::new(), TypeStore::default(), 0, [], [], []);
+        let mut inference = InferenceContext::new(
+            StandardLibrary::new(),
+            TypeStore::default(),
+            0,
+            [],
+            [],
+            [],
+            [],
+        );
         let value = inference.fresh(
             Requirements::capability(StdlibCapabilityId::Integer),
             Some(256),
@@ -1047,8 +1194,15 @@ mod tests {
 
     #[test]
     fn combines_constraints_and_defaults_numeric_variables() {
-        let mut inference =
-            InferenceContext::new(StandardLibrary::new(), TypeStore::default(), 0, [], [], []);
+        let mut inference = InferenceContext::new(
+            StandardLibrary::new(),
+            TypeStore::default(),
+            0,
+            [],
+            [],
+            [],
+            [],
+        );
         let value = inference.fresh(Requirements::capability(StdlibCapabilityId::Signed), None);
         inference
             .require(value, Requirements::capability(StdlibCapabilityId::Numeric))
@@ -1074,8 +1228,15 @@ mod tests {
 
     #[test]
     fn scheme_instantiation_preserves_constraints_sharing_and_nested_shapes() {
-        let mut inference =
-            InferenceContext::new(StandardLibrary::new(), TypeStore::default(), 0, [], [], []);
+        let mut inference = InferenceContext::new(
+            StandardLibrary::new(),
+            TypeStore::default(),
+            0,
+            [],
+            [],
+            [],
+            [],
+        );
         let template = inference.fresh(Requirements::capability(StdlibCapabilityId::Numeric), None);
         let Type::Variable(root) = template else {
             unreachable!()
@@ -1134,6 +1295,7 @@ mod tests {
                 id: result,
                 value: Type::Option(option),
             }],
+            [],
         );
 
         inference.finalize_arrays();

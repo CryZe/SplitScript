@@ -23,7 +23,7 @@ use super::{
     expression::{
         BareReturn, ExprContext, LocalStorage, LoopControl, MatchLayout, compile_assignment,
         compile_expr, compile_for_bind_and_advance, compile_for_has_next, compile_for_init,
-        compile_receiver,
+        compile_receiver, compile_temporary_set,
     },
     global_plan::RuntimeGlobals,
     imports::Abi,
@@ -69,8 +69,10 @@ pub(super) fn compile_async_attach(
         abi: runtime.abi,
         state: runtime.lowering.state,
         locals: LocalStorage::Hybrid {
-            wasm: &planned_locals,
-            frame: &layout.fields,
+            wasm_values: &planned_locals,
+            frame_values: &layout.fields,
+            wasm_temporaries: &matches.temporaries,
+            frame_temporaries: &layout.temporaries,
         },
         globals: runtime.lowering.globals,
         global_types: runtime.lowering.global_types,
@@ -139,42 +141,6 @@ pub(super) fn compile_async_attach(
                 layout,
                 &context,
             ),
-            AsyncState::LoopHeader {
-                condition,
-                body,
-                header_state,
-                exit_state,
-            } => {
-                compile_expr(&mut function, condition, &context);
-                function.instruction(&Instruction::If(BlockType::Empty));
-                compile_async_flow(
-                    &mut function,
-                    body,
-                    2,
-                    Some(
-                        AsyncLoopTargets {
-                            break_state: exit_state,
-                            continue_state: header_state,
-                        }
-                        .control(2),
-                    ),
-                    result_global,
-                    cancellation_region,
-                    runtime,
-                    layout,
-                    &context,
-                );
-                function.instruction(&Instruction::Else);
-                set_async_state(
-                    &mut function,
-                    exit_state,
-                    runtime.lowering.gc,
-                    runtime.lowering.runtime_globals,
-                );
-                function
-                    .instruction(&Instruction::Br(2))
-                    .instruction(&Instruction::End);
-            }
             AsyncState::ForHeader {
                 binding,
                 iterable_value,
@@ -222,7 +188,7 @@ pub(super) fn compile_async_attach(
             }
             AsyncState::Poll {
                 mode,
-                binding,
+                destination,
                 value,
                 resume_state,
                 cancellation,
@@ -235,7 +201,7 @@ pub(super) fn compile_async_attach(
                 compile_suspension_poll(
                     &mut function,
                     mode,
-                    binding,
+                    destination,
                     value,
                     runtime.abi,
                     runtime.strings,
@@ -270,7 +236,7 @@ pub(super) fn compile_async_attach(
 fn compile_suspension_poll(
     function: &mut Function,
     mode: SuspensionMode,
-    binding: Option<ValueId>,
+    destination: wasm_ir::SuspensionDestination,
     value: ExprId,
     abi: &Abi,
     strings: &StringPool,
@@ -279,7 +245,7 @@ fn compile_suspension_poll(
     context: &ExprContext<'_>,
 ) {
     if mode == SuspensionMode::Retry {
-        compile_retry_poll(function, binding, value, layout, context);
+        compile_retry_poll(function, destination, value, layout, context);
         return;
     }
     let value_expression = context
@@ -361,7 +327,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
@@ -388,7 +354,7 @@ fn compile_suspension_poll(
                 .layout(read_type_id, context.semantics)
                 .expect("checked process reads are MemoryReadable")
                 .size();
-            if let Some((_, stored_type)) = layout.field(binding) {
+            if let Some((_, stored_type)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 debug_assert_eq!(stored_type, read_type);
             }
@@ -415,7 +381,7 @@ fn compile_suspension_poll(
                     .instruction(&Instruction::Return)
                     .instruction(&Instruction::End);
             }
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_memory_value(
                     function,
                     read_type_id,
@@ -447,7 +413,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
@@ -485,7 +451,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
@@ -510,7 +476,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
@@ -535,7 +501,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(unity_module_local))
@@ -561,7 +527,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(unity_image_local))
@@ -587,7 +553,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(unity_class_local))
@@ -613,7 +579,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(unity_field_local))
@@ -639,7 +605,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
@@ -668,7 +634,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
@@ -732,7 +698,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
@@ -783,7 +749,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(binding) {
+            if let Some((field, _)) = layout.field(destination) {
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
@@ -872,7 +838,7 @@ fn emit_process_module_query(
 
 fn compile_retry_poll(
     function: &mut Function,
-    binding: Option<ValueId>,
+    destination: wasm_ir::SuspensionDestination,
     expression: ExprId,
     frame: &AsyncFrameLayout,
     context: &ExprContext<'_>,
@@ -907,7 +873,7 @@ fn compile_retry_poll(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
 
-    if let Some((field, stored_type)) = frame.field(binding) {
+    if let Some((field, stored_type)) = frame.field(destination) {
         debug_assert_eq!(stored_type, semantic_type(*result_value, context.semantics));
         emit_async_frame_ref(function, context.runtime_globals);
         function
@@ -932,12 +898,6 @@ enum AsyncState<'a> {
         block: &'a wasm_ir::Block,
         loop_targets: Option<AsyncLoopTargets>,
     },
-    LoopHeader {
-        condition: ExprId,
-        body: &'a wasm_ir::Block,
-        header_state: wasm_ir::AsyncStateId,
-        exit_state: wasm_ir::AsyncStateId,
-    },
     ForHeader {
         binding: ValueId,
         iterable_value: ValueId,
@@ -948,7 +908,7 @@ enum AsyncState<'a> {
     },
     Poll {
         mode: SuspensionMode,
-        binding: Option<ValueId>,
+        destination: wasm_ir::SuspensionDestination,
         value: ExprId,
         resume_state: wasm_ir::AsyncStateId,
         cancellation: Option<wasm_ir::CancellationRegion>,
@@ -993,6 +953,7 @@ fn collect_async_states<'a>(
                 collect_async_states(body, states, loop_targets)
             }
             wasm_ir::Statement::Store { .. }
+            | wasm_ir::Statement::StoreTemporary { .. }
             | wasm_ir::Statement::Evaluate { .. }
             | wasm_ir::Statement::ForInit { .. } => {}
         }
@@ -1000,7 +961,7 @@ fn collect_async_states<'a>(
     match &block.terminator {
         wasm_ir::Terminator::Suspend {
             mode,
-            binding,
+            destination,
             value,
             poll_state,
             resume_state,
@@ -1010,7 +971,7 @@ fn collect_async_states<'a>(
         } => {
             states[poll_state.index() as usize] = Some(AsyncState::Poll {
                 mode: *mode,
-                binding: *binding,
+                destination: *destination,
                 value: *value,
                 resume_state: *resume_state,
                 cancellation: *cancellation,
@@ -1022,8 +983,7 @@ fn collect_async_states<'a>(
             collect_async_states(continuation, states, loop_targets);
         }
         wasm_ir::Terminator::AsyncWhile {
-            condition,
-            body,
+            header,
             continuation,
             header_state,
             exit_state,
@@ -1032,18 +992,19 @@ fn collect_async_states<'a>(
                 break_state: *exit_state,
                 continue_state: *header_state,
             };
-            states[header_state.index() as usize] = Some(AsyncState::LoopHeader {
-                condition: *condition,
-                body,
-                header_state: *header_state,
-                exit_state: *exit_state,
+            states[header_state.index() as usize] = Some(AsyncState::Block {
+                block: header,
+                loop_targets: Some(inner_targets),
             });
             states[exit_state.index() as usize] = Some(AsyncState::Block {
                 block: continuation,
                 loop_targets,
             });
-            collect_async_states(body, states, Some(inner_targets));
+            collect_async_states(header, states, Some(inner_targets));
             collect_async_states(continuation, states, loop_targets);
+        }
+        wasm_ir::Terminator::AsyncWhileCondition { body, .. } => {
+            collect_async_states(body, states, loop_targets);
         }
         wasm_ir::Terminator::AsyncFor {
             binding,
@@ -1122,6 +1083,9 @@ fn compile_async_flow(
                 ..
             } => {
                 compile_assignment(function, *target, operation.as_ref(), *value, context);
+            }
+            wasm_ir::Statement::StoreTemporary { target, value } => {
+                compile_temporary_set(function, *target, *value, context);
             }
             wasm_ir::Statement::If {
                 condition,
@@ -1256,6 +1220,31 @@ fn compile_async_flow(
             set_async_state(function, *header_state, context.gc, context.runtime_globals);
             function.instruction(&Instruction::Br(loop_depth));
         }
+        wasm_ir::Terminator::AsyncWhileCondition {
+            condition,
+            body,
+            exit_state,
+            ..
+        } => {
+            compile_expr(function, *condition, context);
+            function.instruction(&Instruction::If(BlockType::Empty));
+            compile_async_flow(
+                function,
+                body,
+                loop_depth + 1,
+                loop_control.map(|control| control.nested(1)),
+                result_global,
+                cancellation_region,
+                runtime,
+                layout,
+                context,
+            );
+            function.instruction(&Instruction::Else);
+            set_async_state(function, *exit_state, context.gc, context.runtime_globals);
+            function
+                .instruction(&Instruction::Br(loop_depth + 1))
+                .instruction(&Instruction::End);
+        }
         wasm_ir::Terminator::AsyncFor { header_state, .. } => {
             set_async_state(function, *header_state, context.gc, context.runtime_globals);
             function.instruction(&Instruction::Br(loop_depth));
@@ -1277,7 +1266,7 @@ fn compile_async_flow(
         }
         wasm_ir::Terminator::Suspend {
             mode,
-            binding,
+            destination,
             value,
             poll_state,
             resume_state,
@@ -1301,7 +1290,7 @@ fn compile_async_flow(
                 compile_suspension_poll(
                     function,
                     *mode,
-                    *binding,
+                    *destination,
                     *value,
                     runtime.abi,
                     runtime.strings,

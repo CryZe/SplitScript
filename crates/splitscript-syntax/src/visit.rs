@@ -282,7 +282,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
                 | FallbackBranch::Continue { .. } => {}
             }
         }
-        ExprKind::Propagate(value) => visitor.visit_expr(value),
+        ExprKind::Suspend { value, .. } | ExprKind::Propagate(value) => visitor.visit_expr(value),
         ExprKind::Member { receiver, .. } => visitor.visit_expr(receiver),
         ExprKind::Unary { expr, .. } | ExprKind::Cast { expr, .. } => visitor.visit_expr(expr),
         ExprKind::Binary { left, right, .. } => {
@@ -609,7 +609,7 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
                 | FallbackBranch::Continue { .. } => {}
             }
         }
-        ExprKind::Propagate(value) => folder.fold_expr(value),
+        ExprKind::Suspend { value, .. } | ExprKind::Propagate(value) => folder.fold_expr(value),
         ExprKind::Member { receiver, .. } => folder.fold_expr(receiver),
         ExprKind::Unary { expr, .. } => folder.fold_expr(expr),
         ExprKind::Cast { expr, target } => {

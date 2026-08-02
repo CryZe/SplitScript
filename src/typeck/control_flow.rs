@@ -37,6 +37,32 @@ pub(super) fn contains_value_return(block: &Block) -> bool {
     finder.0
 }
 
+pub(super) fn contains_suspension(block: &Block) -> bool {
+    struct SuspensionFinder(bool);
+
+    impl<'ast> Visitor<'ast> for SuspensionFinder {
+        fn visit_stmt(&mut self, statement: &'ast Stmt) {
+            if matches!(statement, Stmt::Suspend { .. }) {
+                self.0 = true;
+            } else if !self.0 {
+                visit::walk_stmt(self, statement);
+            }
+        }
+
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if matches!(expression.kind, ExprKind::Suspend { .. }) {
+                self.0 = true;
+            } else if !self.0 {
+                visit::walk_expr(self, expression);
+            }
+        }
+    }
+
+    let mut finder = SuspensionFinder(false);
+    finder.visit_block(block);
+    finder.0
+}
+
 pub(super) fn contains_propagation(expression: &Expr) -> bool {
     #[derive(Default)]
     struct PropagationFinder(bool);

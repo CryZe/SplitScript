@@ -1401,13 +1401,13 @@ fn inferred_declaration_types_are_semantic_and_syntax_annotations_stay_optional(
     assert_eq!(semantics.function_type_parameters(function.id), [parameter]);
 
     let statements = &syntax.actions[0].body.statements;
-    let splitscript::compiler::ast::Stmt::Suspend {
-        binding: Some(module),
-        ..
-    } = &statements[0]
-    else {
+    let splitscript::compiler::ast::Stmt::Variable(module) = &statements[0] else {
         panic!("expected an awaited module binding");
     };
+    assert!(matches!(
+        module.value.kind,
+        splitscript::compiler::ast::ExprKind::Suspend { .. }
+    ));
     assert_eq!(module.annotation, None);
     assert_standard(module.id, StdlibTypeId::Module);
 

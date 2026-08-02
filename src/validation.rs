@@ -271,16 +271,16 @@ fn validate_suspending_calls(
     }
 
     impl TypedVisitor for AwaitCollector {
-        fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
-            if let TypedStatementKind::Suspend {
+        fn visit_expression(&mut self, expression: &hir::TypedExpression, program: &TypedProgram) {
+            if let hir::TypedExpressionKind::Suspend {
                 mode: ast::SuspensionMode::Await,
                 value,
                 ..
-            } = statement.kind
+            } = expression.kind
             {
                 self.operands.insert(value);
             }
-            hir::walk_typed_statement(self, statement, program);
+            hir::walk_typed_expression(self, expression, program);
         }
     }
 
@@ -1030,7 +1030,8 @@ fn expand_fully_observed_types(
             }
             TypeKind::Array { element, .. }
             | TypeKind::Option { value: element, .. }
-            | TypeKind::Result { value: element, .. } => pending.push_back(*element),
+            | TypeKind::Result { value: element, .. }
+            | TypeKind::Async { value: element, .. } => pending.push_back(*element),
             TypeKind::Builtin(_) | TypeKind::Standard(_) | TypeKind::GenericParameter { .. } => {}
         }
     }
@@ -1101,7 +1102,8 @@ fn expand_reachable_nominal_types(
             }
             TypeKind::Array { element, .. }
             | TypeKind::Option { value: element, .. }
-            | TypeKind::Result { value: element, .. } => pending.push_back(*element),
+            | TypeKind::Result { value: element, .. }
+            | TypeKind::Async { value: element, .. } => pending.push_back(*element),
             TypeKind::Builtin(_) | TypeKind::Standard(_) | TypeKind::GenericParameter { .. } => {}
         }
     }

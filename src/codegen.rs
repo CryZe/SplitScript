@@ -91,6 +91,7 @@ struct ConstructedTypes {
     arrays: Vec<ResolvedArrayType>,
     options: Vec<ResolvedOptionType>,
     results: Vec<ResolvedResultType>,
+    asyncs: Vec<crate::types::ResolvedAsyncType>,
 }
 
 /// Complete, immutable input to backend planning and Wasm encoding.
@@ -116,6 +117,7 @@ impl<'a> BackendProgram<'a> {
             arrays: checked.array_types.clone(),
             options: checked.option_types.clone(),
             results: checked.result_types.clone(),
+            asyncs: checked.async_types.clone(),
         };
         specialization::materialize(
             &wasm_ir,
@@ -123,6 +125,7 @@ impl<'a> BackendProgram<'a> {
             &mut constructed_types.arrays,
             &mut constructed_types.options,
             &mut constructed_types.results,
+            &mut constructed_types.asyncs,
         );
         Self {
             standard_library: checked.context.standard_library(),
@@ -175,6 +178,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         arrays: array_types,
         options: option_types,
         results: result_types,
+        asyncs: _async_types,
     } = constructed_types;
     let semantics = &semantics;
     let enums = &enums;
@@ -457,6 +461,7 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
         TypeKind::Array { layout, .. } => Type::Array(*layout),
         TypeKind::Option { layout, .. } => Type::Option(*layout),
         TypeKind::Result { layout, .. } => Type::Result(*layout),
+        TypeKind::Async { layout, .. } => Type::Async(*layout),
     }
 }
 

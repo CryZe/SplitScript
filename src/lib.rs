@@ -352,6 +352,7 @@ pub struct CheckedProgram {
     array_types: Vec<types::ResolvedArrayType>,
     option_types: Vec<types::ResolvedOptionType>,
     result_types: Vec<types::ResolvedResultType>,
+    async_types: Vec<types::ResolvedAsyncType>,
 }
 
 /// Semantic facts retained for editor tooling even when type checking reports
@@ -598,6 +599,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         array_types: output.array_types,
         option_types: output.option_types,
         result_types: output.result_types,
+        async_types: output.async_types,
     })
 }
 

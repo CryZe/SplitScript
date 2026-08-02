@@ -9,7 +9,8 @@ use std::fmt;
 
 use crate::{
     ast::{
-        ArrayTypeId, EnumDecl, EnumId, FunctionId, OptionTypeId, RecordDecl, RecordId, ResultTypeId,
+        ArrayTypeId, AsyncTypeId, EnumDecl, EnumId, FunctionId, OptionTypeId, RecordDecl, RecordId,
+        ResultTypeId,
     },
     inference::Type,
     stdlib::{CoreTypeId, StandardLibrary, StdlibTypeId},
@@ -56,6 +57,7 @@ pub enum ResolvedTypeRef {
     Array(ArrayTypeId),
     Option(OptionTypeId),
     Result(ResultTypeId),
+    Async(AsyncTypeId),
 }
 
 pub(crate) fn generic_parameter_name(index: u32) -> String {
@@ -83,6 +85,12 @@ pub struct ResolvedOptionType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedResultType {
     pub id: ResultTypeId,
+    pub value: ResolvedTypeRef,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedAsyncType {
+    pub id: AsyncTypeId,
     pub value: ResolvedTypeRef,
 }
 
@@ -122,6 +130,10 @@ pub enum TypeKind {
     },
     Result {
         layout: ResultTypeId,
+        value: TypeId,
+    },
+    Async {
+        layout: AsyncTypeId,
         value: TypeId,
     },
 }
@@ -232,6 +244,7 @@ impl TypeStore {
         arrays: &[ResolvedArrayType],
         options: &[ResolvedOptionType],
         results: &[ResolvedResultType],
+        asyncs: &[ResolvedAsyncType],
     ) -> TypeId {
         if let Type::Known(id) = ty {
             debug_assert!(
@@ -247,7 +260,7 @@ impl TypeStore {
                     .iter()
                     .find(|array| array.id == id)
                     .unwrap_or_else(|| panic!("missing checked array type {id}"));
-                let element = self.intern_type_ref(array.element, arrays, options, results);
+                let element = self.intern_type_ref(array.element, arrays, options, results, asyncs);
                 TypeKind::Array {
                     layout: id,
                     element,
@@ -260,7 +273,7 @@ impl TypeStore {
                     .find(|option| option.id == id)
                     .unwrap_or_else(|| panic!("missing checked option type {id}"))
                     .value;
-                let value = self.intern_type_ref(value, arrays, options, results);
+                let value = self.intern_type_ref(value, arrays, options, results, asyncs);
                 TypeKind::Option { layout: id, value }
             }
             Type::Result(id) => {
@@ -269,8 +282,17 @@ impl TypeStore {
                     .find(|result| result.id == id)
                     .unwrap_or_else(|| panic!("missing checked result type {id}"))
                     .value;
-                let value = self.intern_type_ref(value, arrays, options, results);
+                let value = self.intern_type_ref(value, arrays, options, results, asyncs);
                 TypeKind::Result { layout: id, value }
+            }
+            Type::Async(id) => {
+                let value = asyncs
+                    .iter()
+                    .find(|future| future.id == id)
+                    .unwrap_or_else(|| panic!("missing checked async type {id}"))
+                    .value;
+                let value = self.intern_type_ref(value, arrays, options, results, asyncs);
+                TypeKind::Async { layout: id, value }
             }
             Type::Variable(_) => {
                 unreachable!("unresolved `{ty}` reached the semantic type store")
@@ -285,6 +307,7 @@ impl TypeStore {
         arrays: &[ResolvedArrayType],
         options: &[ResolvedOptionType],
         results: &[ResolvedResultType],
+        asyncs: &[ResolvedAsyncType],
     ) -> TypeId {
         match ty {
             ResolvedTypeRef::Core(core) => self.id_for_core(core),
@@ -295,13 +318,16 @@ impl TypeStore {
             ResolvedTypeRef::Enum(enumeration) => self.id_for_enum(enumeration),
             ResolvedTypeRef::GenericParameter(parameter) => parameter,
             ResolvedTypeRef::Array(id) => {
-                self.intern_inferred(Type::Array(id), arrays, options, results)
+                self.intern_inferred(Type::Array(id), arrays, options, results, asyncs)
             }
             ResolvedTypeRef::Option(id) => {
-                self.intern_inferred(Type::Option(id), arrays, options, results)
+                self.intern_inferred(Type::Option(id), arrays, options, results, asyncs)
             }
             ResolvedTypeRef::Result(id) => {
-                self.intern_inferred(Type::Result(id), arrays, options, results)
+                self.intern_inferred(Type::Result(id), arrays, options, results, asyncs)
+            }
+            ResolvedTypeRef::Async(id) => {
+                self.intern_inferred(Type::Async(id), arrays, options, results, asyncs)
             }
         }
     }

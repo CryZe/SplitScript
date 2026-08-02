@@ -708,7 +708,8 @@ fn break_and_continue_require_loops() {
 fn compound_assignments_reuse_binary_typing_and_lowering() {
     use splitscript::{
         compiler::ast::{ActionKind, BinaryOp},
-        compiler::wasm_ir::{BodyOwner, Statement},
+        compiler::stdlib::IntrinsicId,
+        compiler::wasm_ir::{BodyOwner, CallTarget, Statement},
     };
 
     let source = r#"
@@ -753,7 +754,25 @@ fn compound_assignments_reuse_binary_typing_and_lowering() {
             .statements
             .iter()
             .filter_map(|statement| match statement {
-                Statement::Store { op: Some(op), .. } => Some(*op),
+                Statement::Store {
+                    operation:
+                        Some(splitscript::compiler::wasm_ir::AssignmentOperation::Primitive(op)),
+                    ..
+                } => Some(*op),
+                Statement::Store {
+                    operation:
+                        Some(splitscript::compiler::wasm_ir::AssignmentOperation::Call(
+                            CallTarget::Intrinsic { intrinsic, .. },
+                        )),
+                    ..
+                } if *intrinsic == IntrinsicId::NumericAdd => Some(BinaryOp::Add),
+                Statement::Store {
+                    operation:
+                        Some(splitscript::compiler::wasm_ir::AssignmentOperation::Call(
+                            CallTarget::Intrinsic { intrinsic, .. },
+                        )),
+                    ..
+                } if *intrinsic == IntrinsicId::NumericSubtract => Some(BinaryOp::Sub),
                 _ => None,
             })
             .collect::<Vec<_>>(),

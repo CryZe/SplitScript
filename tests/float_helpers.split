@@ -1,0 +1,48 @@
+state "game.exe" {}
+
+whileAttached {
+    let passed = 0
+    let sample32: f32 = -1.25
+    let whole32: f32 = 2
+
+    if sample32.abs() == 1.25
+        && sample32.floor() == -2
+        && sample32.ceil() == -1
+        && whole32 == 2.0 {
+        passed += 1
+    }
+
+    let positiveHalf: f64 = 2.5
+    let negativeHalf: f64 = -2.5
+    if positiveHalf.round() == 2
+        && negativeHalf.round() == -2
+        && 3.5.round() == 4
+        && (-3.5).round() == -4
+        && 2.49.round() == 2
+        && (-2.49).round() == -2 {
+        passed += 2
+    }
+
+    if 1.25.roundTo(1) == 1.2
+        && (-1.25).roundTo(1) == -1.2
+        && 12.375.roundTo(2) == 12.38 {
+        passed += 4
+    }
+
+    let zero: f64 = 0
+    let nan = zero / zero
+    let infinity = 1.0 / zero
+    let exactInteger: f64 = 9_007_199_254_740_992
+    if nan.isNaN()
+        && !nan.isFinite()
+        && !infinity.isNaN()
+        && !infinity.isFinite()
+        && infinity.roundTo(0) == infinity
+        && nan.roundTo(0).isNaN()
+        && sample32.isFinite()
+        && exactInteger.isFinite() {
+        passed += 8
+    }
+
+    setVariable("Float Helpers", passed)
+}

@@ -6,11 +6,11 @@ use std::{
 };
 
 use super::{
-    CoreType, CoreTypeId, FieldVisibility, ItemKind, OperationMetadata, StdlibCapability,
-    StdlibCapabilityId, StdlibField, StdlibFieldId, StdlibItem, StdlibItemId, StdlibNamespace,
-    StdlibNamespaceId, StdlibOwner, StdlibStateProvider, StdlibStateProviderId, StdlibSymbolId,
-    StdlibType, StdlibTypeConstructor, StdlibTypeConstructorId, StdlibTypeId, StdlibVariant,
-    StdlibVariantId, TypeRef,
+    CoreType, CoreTypeId, FieldVisibility, ItemKind, OperationMetadata, StandardBinaryOperator,
+    StdlibCapability, StdlibCapabilityId, StdlibField, StdlibFieldId, StdlibItem, StdlibItemId,
+    StdlibNamespace, StdlibNamespaceId, StdlibOwner, StdlibStateProvider, StdlibStateProviderId,
+    StdlibSymbolId, StdlibType, StdlibTypeConstructor, StdlibTypeConstructorId, StdlibTypeId,
+    StdlibVariant, StdlibVariantId, TypeRef,
     catalog::{
         CAPABILITIES, FIELDS, ITEMS, NAMESPACES, STATE_PROVIDERS, TYPE_CONSTRUCTORS, TYPES,
         VARIANTS,
@@ -42,6 +42,7 @@ pub(super) struct StandardLibraryGraph {
     pub(super) items_by_name: HashMap<&'static str, &'static StdlibItem>,
     pub(super) methods: Vec<&'static StdlibItem>,
     pub(super) methods_by_name: HashMap<&'static str, Vec<&'static StdlibItem>>,
+    pub(super) binary_operators: HashMap<StandardBinaryOperator, Vec<&'static StdlibItem>>,
     pub(super) children_by_owner: HashMap<StdlibOwner, Vec<StdlibSymbolId>>,
     source_body_operations: OnceLock<HashMap<StdlibItemId, OperationMetadata>>,
 }
@@ -137,6 +138,43 @@ impl StandardLibraryGraph {
                 .filter(|item| matches!(item.kind, ItemKind::Method { .. })),
             |item| item.name,
         );
+        let binary_operators = group(
+            ITEMS.iter().filter(|item| item.binary_operator.is_some()),
+            |item| item.binary_operator.expect("filtered operator binding"),
+        );
+        let mut operator_bindings = HashMap::new();
+        for item in ITEMS.iter().filter(|item| item.binary_operator.is_some()) {
+            let operator = item.binary_operator.expect("filtered operator binding");
+            let ItemKind::Method { receiver } = item.kind else {
+                errors.push(format!(
+                    "operator implementation `{}` is not a method",
+                    item.qualified_name
+                ));
+                continue;
+            };
+            let expected_result = match operator {
+                StandardBinaryOperator::Add | StandardBinaryOperator::Subtract => receiver,
+                StandardBinaryOperator::LessThan
+                | StandardBinaryOperator::LessThanOrEqual
+                | StandardBinaryOperator::GreaterThan
+                | StandardBinaryOperator::GreaterThanOrEqual => TypeRef::Core(CoreTypeId::Bool),
+            };
+            if item.signature.parameters.len() != 1
+                || item.signature.parameters[0].ty != receiver
+                || item.signature.result != expected_result
+            {
+                errors.push(format!(
+                    "operator implementation `{}` has an invalid binary signature",
+                    item.qualified_name
+                ));
+            }
+            if let Some(previous) = operator_bindings.insert((item.owner, operator), item) {
+                errors.push(format!(
+                    "operator implementations `{}` and `{}` have the same owner and operator",
+                    previous.qualified_name, item.qualified_name
+                ));
+            }
+        }
 
         let mut graph = Self {
             core_types,
@@ -158,6 +196,7 @@ impl StandardLibraryGraph {
             items_by_name,
             methods,
             methods_by_name,
+            binary_operators,
             children_by_owner: HashMap::new(),
             source_body_operations: OnceLock::new(),
         };

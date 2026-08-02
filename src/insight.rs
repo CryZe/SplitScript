@@ -254,8 +254,8 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             "Read-only transactional state values. `current` contains the latest committed state and `old` contains the preceding committed state.",
         )),
         SourceDefinitionId::Settings => Some(source_markdown(
-            "settings / oldSettings: settings snapshot",
-            "Read-only settings values. `settings` contains the latest host settings and `oldSettings` contains their values from the preceding update.",
+            "settings / oldSettings: settings view",
+            "Read-only, allocation-free views. `settings` selects the latest host settings and `oldSettings` selects their values from the preceding update.",
         )),
         SourceDefinitionId::Value(value) => {
             let ty = semantics.value_type(value)?;
@@ -1230,6 +1230,82 @@ whileAttached {
     }
 
     #[test]
+    fn first_class_state_snapshot_hover_preserves_type_and_field_documentation() {
+        let source = r#"
+state "game.exe" {
+    /// Current level number.
+    level: u32 at 0x100
+}
+fn levelOf(snapshot) {
+    return snapshot.level
+}
+whileAttached {
+    let captured = current
+    print(levelOf(captured))
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        for (offset, expected) in [
+            (source.find("snapshot)").unwrap(), "snapshot: StateSnapshot"),
+            (
+                source.find("captured =").unwrap(),
+                "let captured: StateSnapshot",
+            ),
+            (
+                source.find("snapshot.level").unwrap() + "snapshot.".len(),
+                "Current level number.",
+            ),
+        ] {
+            let hover = database.hover(offset).unwrap().expect("snapshot hover");
+            assert!(
+                hover.markdown.contains(expected),
+                "missing `{expected}` in {}",
+                hover.markdown
+            );
+        }
+    }
+
+    #[test]
+    fn first_class_settings_view_hover_preserves_type_and_setting_documentation() {
+        let source = r#"
+settings {
+    /// Enables automatic splitting.
+    "Enabled" => enabled: true
+}
+state "game.exe" {}
+fn isEnabled(view) {
+    return view.enabled
+}
+whileAttached {
+    let captured = settings
+    print(isEnabled(captured))
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        for (offset, expected) in [
+            (source.find("view)").unwrap(), "view: SettingsView"),
+            (
+                source.find("captured =").unwrap(),
+                "let captured: SettingsView",
+            ),
+            (
+                source.find("view.enabled").unwrap() + "view.".len(),
+                "Enables automatic splitting.",
+            ),
+        ] {
+            let hover = database
+                .hover(offset)
+                .unwrap()
+                .expect("settings view hover");
+            assert!(
+                hover.markdown.contains(expected),
+                "missing `{expected}` in {}",
+                hover.markdown
+            );
+        }
+    }
+
+    #[test]
     fn source_function_hover_renders_propagated_effects_after_semantic_validation_errors() {
         let source = r#"
 fn readValue() -> f32! {
@@ -1335,7 +1411,7 @@ whileAttached {
             .expect("generic function hover");
         assert_eq!(
             hover.markdown.lines().nth(1),
-            Some("fn twoDigits(value: T) -> String where T: Integer"),
+            Some("fn twoDigits(value: T) -> String where T: Numeric + Display"),
             "{}",
             hover.markdown
         );

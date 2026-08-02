@@ -453,6 +453,12 @@ impl HighlightCollector<'_> {
                         if readonly { MODIFIER_READONLY } else { 0 },
                     );
                 }
+                ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot => {
+                    self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
+                }
+                ResolvedValue::SettingsView | ResolvedValue::OldSettingsView => {
+                    self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
+                }
                 ResolvedValue::CurrentState(_) | ResolvedValue::OldState(_) => {
                     self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
                     if let Some(span) = spans.get(1) {
@@ -509,13 +515,22 @@ impl HighlightCollector<'_> {
                     .saturating_sub(call_suffix_width + members.len())
             };
             for (span, member) in spans.iter().skip(start).take(members.len()).zip(members) {
-                let modifiers = match member {
-                    ResolvedMember::StandardField(_) => {
-                        MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY
+                let (kind, modifiers) = match member {
+                    ResolvedMember::StateField(_) => {
+                        (SemanticTokenKind::StateField, MODIFIER_READONLY)
                     }
-                    ResolvedMember::RecordField(_) => MODIFIER_READONLY,
+                    ResolvedMember::SettingField(_) => {
+                        (SemanticTokenKind::Setting, MODIFIER_READONLY)
+                    }
+                    ResolvedMember::StandardField(_) => (
+                        SemanticTokenKind::Property,
+                        MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
+                    ),
+                    ResolvedMember::RecordField(_) => {
+                        (SemanticTokenKind::Property, MODIFIER_READONLY)
+                    }
                 };
-                self.insert(*span, SemanticTokenKind::Property, modifiers);
+                self.insert(*span, kind, modifiers);
             }
         }
 

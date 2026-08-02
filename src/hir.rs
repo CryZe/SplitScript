@@ -282,10 +282,11 @@ pub struct TypedExpression {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedAssignment {
     pub id: AssignmentId,
     pub target: ValueId,
+    pub operator: Option<ResolvedCall>,
     pub span: Span,
 }
 
@@ -598,7 +599,7 @@ impl TypedProgram {
         self.assignments
             .binary_search_by_key(&id.index(), |assignment| assignment.id.index())
             .ok()
-            .map(|index| self.assignments[index])
+            .map(|index| self.assignments[index].clone())
     }
 
     pub fn pattern(&self, id: PatternId) -> Option<ResolvedPattern> {
@@ -686,6 +687,7 @@ impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
                         .semantics
                         .assignment_target(*id)
                         .expect("checked assignments have resolved targets"),
+                    operator: self.semantics.assignment_call(*id).cloned(),
                     span: *span,
                 },
             );
@@ -696,6 +698,8 @@ impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
     fn visit_expr(&mut self, expression: &'ast Expr) {
         let resolution = if let Some(variant) = self.semantics.enum_variant(expression.id) {
             Some(ExpressionResolution::EnumConstructor { variant })
+        } else if let Some(call) = self.semantics.call(expression.id) {
+            Some(ExpressionResolution::Call(call.clone()))
         } else {
             match &expression.kind {
                 ExprKind::Path(_) => Some(ExpressionResolution::ValuePath {
@@ -713,11 +717,7 @@ impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
                         .unwrap_or_default()
                         .to_vec(),
                 }),
-                ExprKind::Call { .. } => self
-                    .semantics
-                    .call(expression.id)
-                    .cloned()
-                    .map(ExpressionResolution::Call),
+                ExprKind::Call { .. } => None,
                 ExprKind::Record { .. } => Some(ExpressionResolution::RecordLiteral {
                     record: self
                         .semantics
@@ -1264,6 +1264,7 @@ fn lower_block(
                                 target: semantics
                                     .assignment_target(*id)
                                     .expect("checked assignments have resolved targets"),
+                                operator: semantics.assignment_call(*id).cloned(),
                                 span: *span,
                             },
                             op: *op,

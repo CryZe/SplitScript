@@ -447,6 +447,8 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
     match semantics.types().kind(id) {
         TypeKind::Builtin(builtin) => Type::from_core(*builtin),
         TypeKind::Standard(standard) => Type::Standard(*standard),
+        TypeKind::StateSnapshot => Type::StateSnapshot,
+        TypeKind::SettingsView => Type::SettingsView,
         TypeKind::Record(record) => Type::Record(*record),
         TypeKind::Enum(enumeration) => Type::Enum(*enumeration),
         TypeKind::GenericParameter { .. } => {
@@ -696,10 +698,19 @@ fn emit_failure_transfer(
 }
 
 fn emit_int(function: &mut Function, value: u64, ty: Type) {
-    if matches!(ty, Type::I64 | Type::U64 | Type::Address) {
-        function.instruction(&Instruction::I64Const(value as i64));
-    } else {
-        function.instruction(&Instruction::I32Const(value as i32));
+    match ty {
+        Type::I64 | Type::U64 | Type::Address => {
+            function.instruction(&Instruction::I64Const(value as i64));
+        }
+        Type::F32 => {
+            function.instruction(&Instruction::F32Const((value as f32).into()));
+        }
+        Type::F64 => {
+            function.instruction(&Instruction::F64Const((value as f64).into()));
+        }
+        _ => {
+            function.instruction(&Instruction::I32Const(value as i32));
+        }
     }
 }
 
@@ -733,6 +744,22 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
     };
     match &inner.kind {
         wasm_ir::ExpressionKind::Bool(value) => ConstExpr::i32_const(*value as i32),
+        wasm_ir::ExpressionKind::Int(value) if ty == Type::F32 => ConstExpr::f32_const(
+            (if negative {
+                -(*value as f32)
+            } else {
+                *value as f32
+            })
+            .into(),
+        ),
+        wasm_ir::ExpressionKind::Int(value) if ty == Type::F64 => ConstExpr::f64_const(
+            (if negative {
+                -(*value as f64)
+            } else {
+                *value as f64
+            })
+            .into(),
+        ),
         wasm_ir::ExpressionKind::Int(value)
             if matches!(ty, Type::I64 | Type::U64 | Type::Address) =>
         {

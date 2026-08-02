@@ -250,6 +250,7 @@ impl<'a> Validator<'a> {
         inherited: &[TypeParameter],
     ) {
         let mut names = HashSet::new();
+        let mut operator_bindings = HashSet::new();
         for function in functions {
             let qualified = if owner == "root" {
                 function.name.clone()
@@ -263,9 +264,30 @@ impl<'a> Validator<'a> {
             self.validate_attributes(
                 &qualified,
                 &function.attributes,
-                &["intrinsic", "display", "mustUse"],
+                &["intrinsic", "display", "mustUse", "operator"],
             );
             self.validate_must_use(&qualified, &function.attributes);
+            self.validate_operator(owner, &qualified, function);
+            if let Some([AttributeArgument::Name(operator)]) = function
+                .attributes
+                .iter()
+                .find(|attribute| attribute.name == "operator")
+                .map(|attribute| attribute.arguments.as_slice())
+                && matches!(
+                    operator.as_str(),
+                    "add"
+                        | "subtract"
+                        | "lessThan"
+                        | "lessThanOrEqual"
+                        | "greaterThan"
+                        | "greaterThanOrEqual"
+                )
+                && !operator_bindings.insert(operator.as_str())
+            {
+                self.error(format!(
+                    "`{owner}` declares more than one `{operator}` operator implementation"
+                ));
+            }
             if has_attribute(&function.attributes, "mustUse")
                 && function.result == Type::Name("void".to_owned())
             {
@@ -368,6 +390,41 @@ impl<'a> Validator<'a> {
                 self.validate_type(&parameter_owner, &parameter.ty, parameters);
             }
             self.validate_type(&format!("{qualified} result"), &function.result, parameters);
+        }
+    }
+
+    fn validate_operator(&mut self, owner: &str, qualified: &str, function: &FunctionDeclaration) {
+        let Some(operator) = function
+            .attributes
+            .iter()
+            .find(|attribute| attribute.name == "operator")
+        else {
+            return;
+        };
+        let valid_name = matches!(
+            operator.arguments.as_slice(),
+            [AttributeArgument::Name(name)] if matches!(
+                name.as_str(),
+                "add"
+                    | "subtract"
+                    | "lessThan"
+                    | "lessThanOrEqual"
+                    | "greaterThan"
+                    | "greaterThanOrEqual"
+            )
+        );
+        if !valid_name {
+            self.error(format!(
+                "`{qualified}` attribute `@operator` expects a supported binary operator name"
+            ));
+        }
+        let owner_supports_methods = self.types.contains(owner)
+            || self.capabilities.contains(owner)
+            || PrimitiveType::parse(owner).is_some();
+        if !owner_supports_methods || function.is_static || function.parameters.len() != 1 {
+            self.error(format!(
+                "`{qualified}` operator implementation must be a method with exactly one parameter"
+            ));
         }
     }
 

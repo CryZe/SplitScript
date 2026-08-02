@@ -257,7 +257,7 @@ pub enum Statement {
         /// an existing local/global. Local planning consumes this semantic
         /// distinction instead of re-reading typed HIR.
         declaration: bool,
-        op: Option<BinaryOp>,
+        operation: Option<AssignmentOperation>,
         value: ExprId,
     },
     Evaluate {
@@ -286,6 +286,12 @@ pub enum Statement {
         index_value: ValueId,
         iterable: ExprId,
     },
+}
+
+#[derive(Debug, Clone)]
+pub enum AssignmentOperation {
+    Primitive(BinaryOp),
+    Call(CallTarget),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -562,11 +568,20 @@ fn lower_expression(
         TypedExpressionKind::Cast {
             expression: value, ..
         } => ExpressionKind::Cast { value: *value },
-        TypedExpressionKind::Binary { op, left, right } => ExpressionKind::Binary {
-            op: *op,
-            left: *left,
-            right: *right,
-        },
+        TypedExpressionKind::Binary { op, left, right } => {
+            if let Some(ExpressionResolution::Call(target)) = &expression.resolution {
+                ExpressionKind::Call {
+                    target: lower_call_target(target, typed_hir, semantics),
+                    arguments: vec![*right],
+                }
+            } else {
+                ExpressionKind::Binary {
+                    op: *op,
+                    left: *left,
+                    right: *right,
+                }
+            }
+        }
         TypedExpressionKind::Call { arguments, .. } => {
             let Some(ExpressionResolution::Call(target)) = &expression.resolution else {
                 unreachable!("checked calls have a resolved target")
@@ -742,6 +757,19 @@ fn lower_call_target(
         ResolvedCall::OptionSome { option } => CallTarget::OptionSome { option: *option },
         ResolvedCall::ResultSuccess { result } => CallTarget::ResultSuccess { result: *result },
     }
+}
+
+fn lower_assignment_operation(
+    assignment: &hir::ResolvedAssignment,
+    op: Option<BinaryOp>,
+    typed_hir: &TypedProgram,
+    semantics: &SemanticModel,
+) -> Option<AssignmentOperation> {
+    assignment
+        .operator
+        .as_ref()
+        .map(|call| AssignmentOperation::Call(lower_call_target(call, typed_hir, semantics)))
+        .or_else(|| op.map(AssignmentOperation::Primitive))
 }
 
 fn lower_body(
@@ -952,10 +980,13 @@ fn analyze_statements_liveness(
     for statement in statements.iter_mut().rev() {
         match statement {
             Statement::Store {
-                target, op, value, ..
+                target,
+                operation,
+                value,
+                ..
             } => {
                 live.remove(target);
-                if op.is_some() && local_values.contains(target) {
+                if operation.is_some() && local_values.contains(target) {
                     live.insert(*target);
                 }
                 collect_expression_values(*value, live, local_values, program);
@@ -1119,7 +1150,7 @@ fn lower_async_statements(
                     Statement::Store {
                         target: *value,
                         declaration: true,
-                        op: None,
+                        operation: None,
                         value: *initializer,
                     },
                 );
@@ -1134,7 +1165,9 @@ fn lower_async_statements(
                     Statement::Store {
                         target: assignment.target,
                         declaration: false,
-                        op: *op,
+                        operation: lower_assignment_operation(
+                            assignment, *op, typed_hir, semantics,
+                        ),
                         value: *value,
                     },
                 );
@@ -1439,7 +1472,7 @@ fn lower_statements(
                 block.statements.push(Statement::Store {
                     target: *value,
                     declaration: true,
-                    op: None,
+                    operation: None,
                     value: *initializer,
                 });
             }
@@ -1451,7 +1484,7 @@ fn lower_statements(
                 block.statements.push(Statement::Store {
                     target: assignment.target,
                     declaration: false,
-                    op: *op,
+                    operation: lower_assignment_operation(assignment, *op, typed_hir, semantics),
                     value: *value,
                 });
             }

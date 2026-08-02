@@ -1,0 +1,32 @@
+let sample = 0
+
+state "game.exe" {}
+
+whileAttached {
+    let combined = Duration.fromSeconds(1.75)
+    combined += Duration.fromMilliseconds(500.0)
+    let difference = Duration.fromSeconds(1.25)
+    difference -= Duration.fromSeconds(2.5)
+    if combined.wholeSeconds() == 2
+        && combined.subsecondNanoseconds() == 250_000_000
+        && combined.totalSeconds() == 2.25
+        && combined.totalMilliseconds() == 2_250.0
+        && difference.wholeSeconds() == -2
+        && difference.subsecondNanoseconds() == 750_000_000 {
+        setVariable("Duration Helpers", "ok")
+    }
+}
+
+gameTime {
+    sample += 1
+    return match sample {
+        1 => Duration.fromSeconds(1.25 as f32),
+        2 => Duration.fromSeconds(-1.25),
+        3 => Duration.fromMilliseconds(1_500.0),
+        4 => Duration.fromMilliseconds(2_250.0 as f32),
+        5 => Duration.fromWholeMilliseconds(-1_501),
+        6 => Duration.fromSeconds(1.75) + Duration.fromMilliseconds(500.0),
+        7 => Duration.fromSeconds(1.25) - Duration.fromSeconds(2.5),
+        _ => Duration.fromNanoseconds(-1_250_000_100),
+    }
+}

@@ -443,7 +443,9 @@ impl TypedVisitor for DeclarationDependencyCollector {
             self.observed_record_fields
                 .extend(members.iter().filter_map(|member| match member {
                     ResolvedMember::RecordField(field) => Some(*field),
-                    ResolvedMember::StandardField(_) => None,
+                    ResolvedMember::StateField(_)
+                    | ResolvedMember::SettingField(_)
+                    | ResolvedMember::StandardField(_) => None,
                 }));
         };
         match &expression.resolution {
@@ -775,6 +777,22 @@ fn expand_fully_observed_types(
             continue;
         }
         match semantics.types().kind(ty) {
+            TypeKind::StateSnapshot => {
+                if let Some(state) = &syntax.state {
+                    pending.extend(
+                        state
+                            .canonical_fields()
+                            .iter()
+                            .filter_map(|field| semantics.value_type(field.id)),
+                    );
+                }
+            }
+            TypeKind::SettingsView => pending.extend(
+                syntax
+                    .settings
+                    .iter()
+                    .filter_map(|setting| semantics.value_type(setting.id)),
+            ),
             TypeKind::Record(record) => {
                 if let Some(record) = records.get(record) {
                     for field in &record.fields {
@@ -828,6 +846,22 @@ fn expand_reachable_nominal_types(
             continue;
         }
         match semantics.types().kind(ty) {
+            TypeKind::StateSnapshot => {
+                if let Some(state) = &syntax.state {
+                    pending.extend(
+                        state
+                            .canonical_fields()
+                            .iter()
+                            .filter_map(|field| semantics.value_type(field.id)),
+                    );
+                }
+            }
+            TypeKind::SettingsView => pending.extend(
+                syntax
+                    .settings
+                    .iter()
+                    .filter_map(|setting| semantics.value_type(setting.id)),
+            ),
             TypeKind::Record(record) => {
                 reachable_records.insert(*record);
                 if let Some(record) = records.get(record) {

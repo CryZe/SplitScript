@@ -484,6 +484,8 @@ fn resolved_type_ref(ty: ResolvedTypeRef, types: &TypeStore) -> Type {
     match ty {
         ResolvedTypeRef::Core(core) => Type::Known(types.id_for_core(core)),
         ResolvedTypeRef::Standard(standard) => Type::Known(types.id_for_standard(standard)),
+        ResolvedTypeRef::StateSnapshot => Type::Known(types.id_for_state_snapshot()),
+        ResolvedTypeRef::SettingsView => Type::Known(types.id_for_settings_view()),
         ResolvedTypeRef::Record(record) => Type::Known(types.id_for_record(record)),
         ResolvedTypeRef::Enum(enumeration) => Type::Known(types.id_for_enum(enumeration)),
         ResolvedTypeRef::GenericParameter(parameter) => Type::Known(parameter),

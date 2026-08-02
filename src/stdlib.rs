@@ -19,8 +19,8 @@ pub use ids::{
 };
 pub use schema::{
     Availability, CancellationKind, Deprecation, Effect, EffectSet, Implementation, ItemKind,
-    OperationMetadata, OperationSemantics, Parameter, ParameterRule, Signature, StdlibItem,
-    SuspensionKind, TypeParameter, TypeRef,
+    OperationMetadata, OperationSemantics, Parameter, ParameterRule, Signature,
+    StandardBinaryOperator, StdlibItem, SuspensionKind, TypeParameter, TypeRef,
 };
 
 pub use declarations::{
@@ -311,6 +311,19 @@ impl StandardLibrary {
     /// implements `Display` with its own source or intrinsic body.
     pub fn display_implementation(&self, ty: StdlibTypeId) -> Option<&'static StdlibItem> {
         self.type_decl(ty).display.map(|item| self.item(item))
+    }
+
+    /// Returns every catalog method bound to the requested binary syntax.
+    /// Applicability to a concrete receiver is decided by the semantic adapter.
+    pub fn binary_operator_items(
+        &self,
+        operator: StandardBinaryOperator,
+    ) -> impl Iterator<Item = &'static StdlibItem> + '_ {
+        self.graph
+            .binary_operators
+            .get(&operator)
+            .into_iter()
+            .flat_map(|items| items.iter().copied())
     }
 
     pub fn render_declared_type(&self, ty: DeclaredTypeRef) -> &'static str {
@@ -925,7 +938,17 @@ impl StandardLibrary {
                         item.qualified_name
                     ));
                 }
-                if !example.source.contains(&example_call) {
+                let demonstrates_operator = item.binary_operator.is_some_and(|operator| {
+                    example.source.contains(match operator {
+                        StandardBinaryOperator::Add => " + ",
+                        StandardBinaryOperator::Subtract => " - ",
+                        StandardBinaryOperator::LessThan => " < ",
+                        StandardBinaryOperator::LessThanOrEqual => " <= ",
+                        StandardBinaryOperator::GreaterThan => " > ",
+                        StandardBinaryOperator::GreaterThanOrEqual => " >= ",
+                    })
+                });
+                if !example.source.contains(&example_call) && !demonstrates_operator {
                     errors.push(format!(
                         "example for `{}` does not demonstrate `{example_call}`",
                         item.qualified_name

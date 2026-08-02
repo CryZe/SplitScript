@@ -57,7 +57,7 @@ impl Checker {
                     suffix
                 } else {
                     self.fresh_inference(
-                        Requirements::capability(StdlibCapabilityId::Integer),
+                        Requirements::capability(StdlibCapabilityId::Numeric),
                         Some(*value),
                     )
                 };
@@ -816,9 +816,39 @@ impl Checker {
         } else {
             expected.map(|ty| self.expected_value_type(ty))
         };
-        let left_ty = self.expr(left, operand_hint)?;
-        let right_ty = self.expr(right, operand_hint)?;
+        // `None` has no payload from which to infer its `T?` type. Equality,
+        // however, supplies exactly that context through the opposite operand.
+        // Check the informative side first without otherwise making binary
+        // expression inference depend on operand order.
+        let (left_ty, right_ty) = match (&left.kind, &right.kind) {
+            (ExprKind::None, ExprKind::None) => {
+                let left_ty = self.expr(left, operand_hint)?;
+                let right_ty = self.expr(right, operand_hint)?;
+                (left_ty, right_ty)
+            }
+            (ExprKind::None, _) if matches!(op, BinaryOp::Eq | BinaryOp::Ne) => {
+                let right_ty = self.expr(right, operand_hint)?;
+                let left_ty = self.expr(left, Some(right_ty))?;
+                (left_ty, right_ty)
+            }
+            (_, ExprKind::None) if matches!(op, BinaryOp::Eq | BinaryOp::Ne) => {
+                let left_ty = self.expr(left, operand_hint)?;
+                let right_ty = self.expr(right, Some(left_ty))?;
+                (left_ty, right_ty)
+            }
+            _ => {
+                let left_ty = self.expr(left, operand_hint)?;
+                let right_ty = self.expr(right, operand_hint)?;
+                (left_ty, right_ty)
+            }
+        };
         let operand_ty = self.unify(left_ty, right_ty, span)?;
+
+        if let Some(result) =
+            self.resolve_binary_operator(op, operand_ty, expression, left.id, span)
+        {
+            return self.expect_expression(expression, result, expected, span);
+        }
 
         self.require_binary_operand(op, operand_ty, span)?;
 

@@ -1,0 +1,27 @@
+let detectedAt: Instant? = None
+
+state "game.exe" {}
+
+whileAttached {
+    if detectedAt == None {
+        detectedAt = Instant.now()
+        return
+    }
+
+    let startedAt = detectedAt else return
+    let finishedAt = Instant.now()
+    let measured = finishedAt.durationSince(startedAt)
+    let backwards = startedAt.durationSince(finishedAt)
+    let quarterSecond = Duration.fromMilliseconds(250)
+    let halfSecond = Duration.fromMilliseconds(500)
+
+    if startedAt != finishedAt
+        && measured > Duration.zero()
+        && measured >= quarterSecond
+        && measured <= quarterSecond
+        && backwards < measured
+        && backwards == Duration.zero()
+        && startedAt.hasElapsed(halfSecond) {
+        setVariable("Instant Helpers", "ok")
+    }
+}

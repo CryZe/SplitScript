@@ -68,31 +68,41 @@ struct CallCollector<'a> {
     facts: &'a mut CallFacts,
 }
 
+fn collect_call_facts(facts: &mut CallFacts, call: &ResolvedCall, program: &TypedProgram) {
+    match call {
+        ResolvedCall::StandardLibrary { item, .. } => {
+            if let Some(function) = program.library_function(*item) {
+                facts.callees.push(function);
+            } else {
+                let metadata = program.standard_library().operation_metadata(*item);
+                facts.effects.extend(metadata.effects.iter().copied());
+                facts.availability = merge_availability(facts.availability, metadata.availability);
+            }
+        }
+        ResolvedCall::UserFunction { function, .. } | ResolvedCall::UserMethod { function, .. } => {
+            facts.callees.push(*function)
+        }
+        ResolvedCall::ResultError { .. }
+        | ResolvedCall::OptionSome { .. }
+        | ResolvedCall::ResultSuccess { .. } => {}
+    }
+}
+
 impl TypedVisitor for CallCollector<'_> {
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
-        match program.call(expression.id) {
-            Some(ResolvedCall::StandardLibrary { item, .. }) => {
-                if let Some(function) = program.library_function(*item) {
-                    self.facts.callees.push(function);
-                } else {
-                    let metadata = program.standard_library().operation_metadata(*item);
-                    self.facts.effects.extend(metadata.effects.iter().copied());
-                    self.facts.availability =
-                        merge_availability(self.facts.availability, metadata.availability);
-                }
-            }
-            Some(
-                ResolvedCall::UserFunction { function, .. }
-                | ResolvedCall::UserMethod { function, .. },
-            ) => self.facts.callees.push(*function),
-            Some(
-                ResolvedCall::ResultError { .. }
-                | ResolvedCall::OptionSome { .. }
-                | ResolvedCall::ResultSuccess { .. },
-            )
-            | None => {}
+        if let Some(call) = program.call(expression.id) {
+            collect_call_facts(self.facts, call, program);
         }
         hir::walk_typed_expression(self, expression, program);
+    }
+
+    fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
+        if let hir::TypedStatementKind::Assign { assignment, .. } = &statement.kind
+            && let Some(call) = &assignment.operator
+        {
+            collect_call_facts(self.facts, call, program);
+        }
+        hir::walk_typed_statement(self, statement, program);
     }
 }
 
@@ -156,10 +166,15 @@ impl OperationAnalysis {
             analysis: &'a OperationAnalysis,
             violations: Vec<DetachedCallViolation>,
         }
-        impl TypedVisitor for Validator<'_> {
-            fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
-                let violation = match program.call(expression.id) {
-                    Some(ResolvedCall::StandardLibrary { item, .. }) => {
+        impl Validator<'_> {
+            fn violation(
+                &self,
+                call: &ResolvedCall,
+                span: Span,
+                program: &TypedProgram,
+            ) -> Option<DetachedCallViolation> {
+                match call {
+                    ResolvedCall::StandardLibrary { item, .. } => {
                         let item = program.standard_library().item(*item);
                         let requires_attached_process = program
                             .library_function(item.id)
@@ -173,34 +188,46 @@ impl OperationAnalysis {
                                     .requires_attached_process
                             });
                         requires_attached_process.then_some(DetachedCallViolation {
-                            expression_span: expression.span,
+                            expression_span: span,
                             function: None,
                             standard_library_name: Some(item.qualified_name),
                         })
                     }
-                    Some(
-                        ResolvedCall::UserFunction { function, .. }
-                        | ResolvedCall::UserMethod { function, .. },
-                    ) => self
+                    ResolvedCall::UserFunction { function, .. }
+                    | ResolvedCall::UserMethod { function, .. } => self
                         .analysis
                         .function(*function)
                         .requires_attached_process
                         .then_some(DetachedCallViolation {
-                            expression_span: expression.span,
+                            expression_span: span,
                             function: Some(*function),
                             standard_library_name: None,
                         }),
-                    Some(
-                        ResolvedCall::ResultError { .. }
-                        | ResolvedCall::OptionSome { .. }
-                        | ResolvedCall::ResultSuccess { .. },
-                    )
-                    | None => None,
-                };
+                    ResolvedCall::ResultError { .. }
+                    | ResolvedCall::OptionSome { .. }
+                    | ResolvedCall::ResultSuccess { .. } => None,
+                }
+            }
+        }
+        impl TypedVisitor for Validator<'_> {
+            fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
+                let violation = program
+                    .call(expression.id)
+                    .and_then(|call| self.violation(call, expression.span, program));
                 if let Some(violation) = violation {
                     self.violations.push(violation);
                 }
                 hir::walk_typed_expression(self, expression, program);
+            }
+
+            fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
+                if let hir::TypedStatementKind::Assign { assignment, .. } = &statement.kind
+                    && let Some(call) = &assignment.operator
+                    && let Some(violation) = self.violation(call, assignment.span, program)
+                {
+                    self.violations.push(violation);
+                }
+                hir::walk_typed_statement(self, statement, program);
             }
         }
 
@@ -255,13 +282,14 @@ const fn effect_order(effect: Effect) -> u8 {
         Effect::Allocates => 1,
         Effect::MutatesValue => 2,
         Effect::ReadsTimer => 3,
-        Effect::ReadsProcess => 4,
-        Effect::RequiresAttachedProcess => 5,
-        Effect::Retryable => 6,
-        Effect::Suspends => 7,
-        Effect::CancelsOnProcessClose => 8,
-        Effect::WritesTimer => 9,
-        Effect::WritesRuntime => 10,
+        Effect::ReadsRuntime => 4,
+        Effect::ReadsProcess => 5,
+        Effect::RequiresAttachedProcess => 6,
+        Effect::Retryable => 7,
+        Effect::Suspends => 8,
+        Effect::CancelsOnProcessClose => 9,
+        Effect::WritesTimer => 10,
+        Effect::WritesRuntime => 11,
     }
 }
 

@@ -287,6 +287,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
             Helper(Runtime::FormatI64),
         ],
         IntrinsicId::RuntimeSetTickRate => &[HostImport(Host::RuntimeSetTickRate)],
+        IntrinsicId::InstantNow => &[HostImport(Host::WasiClockTimeGet)],
         IntrinsicId::TimerState => &[HostImport(Host::TimerGetState)],
         IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => &[
             HostImport(Host::ProcessGetModuleAddress),
@@ -316,8 +317,14 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::StringConcat => &[Helper(Runtime::ConcatStrings)],
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
         IntrinsicId::NextTick
+        | IntrinsicId::NumericAdd
+        | IntrinsicId::NumericSubtract
         | IntrinsicId::NumericMin
         | IntrinsicId::NumericMax
+        | IntrinsicId::FloatAbs
+        | IntrinsicId::FloatFloor
+        | IntrinsicId::FloatCeil
+        | IntrinsicId::FloatRound
         | IntrinsicId::ArrayLength
         | IntrinsicId::ArrayGet
         | IntrinsicId::ArraySet
@@ -332,6 +339,8 @@ const PURE: EffectSet = EffectSet::one(Effect::Pure);
 const ALLOCATES: EffectSet = EffectSet::one(Effect::Allocates);
 const MUTATES: EffectSet = EffectSet::one(Effect::MutatesValue);
 const TIMER_READ: EffectSet = EffectSet::one(Effect::ReadsTimer);
+const RUNTIME_READ_ALLOCATES: EffectSet =
+    EffectSet::one(Effect::ReadsRuntime).with(Effect::Allocates);
 const TIMER_WRITE: EffectSet = EffectSet::one(Effect::WritesTimer);
 const RUNTIME_WRITE: EffectSet = EffectSet::one(Effect::WritesRuntime);
 const PROCESS: EffectSet =
@@ -356,6 +365,7 @@ const PROCESS_TYPE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Pr
 const SIGNATURE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Signature);
 const MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Module);
 const TIMER_STATE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::TimerState);
+const INSTANT: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Instant);
 const UNITY_MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityModule);
 const UNITY_IMAGE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityImage);
 const UNITY_CLASS: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityClass);
@@ -394,6 +404,7 @@ const GBA_EMULATOR_RESULT: ContractTypeRef = ContractTypeRef::Application {
 const NO_TYPE_PARAMETERS: Option<&[StdlibCapabilityId]> = None;
 const UNCONSTRAINED_T: Option<&[StdlibCapabilityId]> = Some(&[]);
 const NUMERIC_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Numeric]);
+const FLOAT_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Float]);
 const MEMORY_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::MemoryReadable]);
 const DISPLAY_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Display]);
 
@@ -477,6 +488,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             HostBoundary
         ),
+        IntrinsicId::InstantNow => contract!(
+            InstantNow,
+            Function,
+            signature(NO_TYPE_PARAMETERS, None, params![], INSTANT),
+            RUNTIME_READ_ALLOCATES,
+            Everywhere,
+            HostBoundary
+        ),
         IntrinsicId::NextTick => {
             contract!(
                 NextTick,
@@ -495,10 +514,58 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             RepresentationPrimitive
         ),
+        IntrinsicId::NumericAdd => contract!(
+            NumericAdd,
+            Method,
+            signature(NUMERIC_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::NumericSubtract => contract!(
+            NumericSubtract,
+            Method,
+            signature(NUMERIC_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
         IntrinsicId::NumericMax => contract!(
             NumericMax,
             Method,
             signature(NUMERIC_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::FloatAbs => contract!(
+            FloatAbs,
+            Method,
+            signature(FLOAT_T, Some(T), params![], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::FloatFloor => contract!(
+            FloatFloor,
+            Method,
+            signature(FLOAT_T, Some(T), params![], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::FloatCeil => contract!(
+            FloatCeil,
+            Method,
+            signature(FLOAT_T, Some(T), params![], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::FloatRound => contract!(
+            FloatRound,
+            Method,
+            signature(FLOAT_T, Some(T), params![], T),
             PURE,
             Everywhere,
             RepresentationPrimitive

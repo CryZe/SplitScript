@@ -9,9 +9,10 @@ use splitscript::{
             ResolvedRecordFieldId, ResolvedValue,
         },
         stdlib::{
-            Availability, CancellationKind, CoreTypeId, Effect, Implementation, StandardLibrary,
-            StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibTypeConstructorId,
-            StdlibTypeId, StdlibVariantId, SuspensionKind,
+            Availability, CancellationKind, CoreTypeId, Effect, Implementation, IntrinsicId,
+            StandardBinaryOperator, StandardLibrary, StdlibFieldId, StdlibItemId,
+            StdlibStateProviderId, StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
+            SuspensionKind,
         },
         types::{BuiltinType, TypeKind},
     },

@@ -27,7 +27,7 @@ state ["Lunistice.exe", "Lunistice-Demo.exe"] {
         )?)
     }
 
-    levelTime = process.read(timerInstance.offset(levelTimeOffset))
+    levelTime: f32 = process.read(timerInstance.offset(levelTimeOffset))
     levelTimeParts = process.read(timerInstance.offset(levelTimeVectorOffset))
     timerStopped = process.read(timerInstance.offset(timerStoppedOffset))
     character = process.read<u32>(timerInstance.offset(characterOffset))

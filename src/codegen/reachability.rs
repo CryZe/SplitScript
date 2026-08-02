@@ -41,9 +41,16 @@ impl Reachability {
         standard_library: &StandardLibrary,
     ) -> Self {
         let mut pending = Vec::new();
+        let mut pending_functions = Vec::new();
         for body in wasm_ir.bodies() {
             if matches!(body.owner, BodyOwner::Action(_)) {
                 collect_block_expression_roots(&body.entry, wasm_ir, None, &mut pending);
+                collect_assignment_function_roots(
+                    &body.entry,
+                    wasm_ir,
+                    None,
+                    &mut pending_functions,
+                );
             }
         }
         pending.extend(
@@ -58,7 +65,32 @@ impl Reachability {
         );
 
         let mut reachable = Self::default();
-        while let Some((owner, id)) = pending.pop() {
+        loop {
+            while let Some((owner, function)) = pending_functions.pop() {
+                let function = owner.as_ref().map_or(function.clone(), |owner| {
+                    semantics.specialize_function_instance(owner, &function)
+                });
+                if reachable.functions.insert(function.clone()) {
+                    let body = wasm_ir
+                        .body(BodyOwner::Function(function.clone()))
+                        .expect("resolved user functions have Wasm IR bodies");
+                    collect_block_expression_roots(
+                        &body.entry,
+                        wasm_ir,
+                        Some(function.clone()),
+                        &mut pending,
+                    );
+                    collect_assignment_function_roots(
+                        &body.entry,
+                        wasm_ir,
+                        Some(function),
+                        &mut pending_functions,
+                    );
+                }
+            }
+            let Some((owner, id)) = pending.pop() else {
+                break;
+            };
             if !reachable.expression_instances.insert((owner.clone(), id)) {
                 continue;
             }
@@ -98,18 +130,8 @@ impl Reachability {
                         semantics.specialize_function_instance(owner, &function)
                     })
                 });
-                if let Some(function) = function
-                    && reachable.functions.insert(function.clone())
-                {
-                    let body = wasm_ir
-                        .body(BodyOwner::Function(function.clone()))
-                        .expect("resolved user functions have Wasm IR bodies");
-                    collect_block_expression_roots(
-                        &body.entry,
-                        wasm_ir,
-                        Some(function),
-                        &mut pending,
-                    );
+                if let Some(function) = function {
+                    pending_functions.push((None, function));
                 }
             }
 
@@ -174,17 +196,7 @@ impl Reachability {
                 reachable
                     .display_functions
                     .insert(standard, function.clone());
-                if reachable.functions.insert(function.clone()) {
-                    let body = wasm_ir
-                        .body(BodyOwner::Function(function.clone()))
-                        .expect("custom Display implementations have Wasm IR bodies");
-                    collect_block_expression_roots(
-                        &body.entry,
-                        wasm_ir,
-                        Some(function),
-                        &mut pending,
-                    );
-                }
+                pending_functions.push((None, function));
             }
         }
 
@@ -398,6 +410,29 @@ impl Reachability {
             }
             match semantics.types().kind(ty) {
                 TypeKind::Builtin(_) | TypeKind::GenericParameter { .. } => {}
+                TypeKind::StateSnapshot => {
+                    pending.extend(
+                        program
+                            .state
+                            .as_ref()
+                            .expect("checked programs have state declarations")
+                            .canonical_fields()
+                            .iter()
+                            .map(|field| {
+                                semantics
+                                    .value_type(field.id)
+                                    .expect("checked state fields have semantic types")
+                            }),
+                    );
+                }
+                TypeKind::SettingsView => {
+                    pending.extend(
+                        program
+                            .settings
+                            .iter()
+                            .filter_map(|setting| semantics.value_type(setting.id)),
+                    );
+                }
                 TypeKind::Standard(standard) => {
                     if matches!(
                         standard_library.type_decl(*standard).representation,
@@ -487,7 +522,10 @@ impl Reachability {
                         }));
                     }
                 }
-                TypeKind::Builtin(_) | TypeKind::GenericParameter { .. } => {}
+                TypeKind::Builtin(_)
+                | TypeKind::StateSnapshot
+                | TypeKind::SettingsView
+                | TypeKind::GenericParameter { .. } => {}
                 TypeKind::Record(record) if self.equality_records.insert(*record) => {
                     let declaration = program
                         .records
@@ -551,4 +589,35 @@ fn collect_block_expression_roots(
     }
 
     RootCollector { owner, output }.visit_block(block, program);
+}
+
+fn collect_assignment_function_roots(
+    block: &wasm_ir::Block,
+    program: &wasm_ir::Program,
+    owner: Option<FunctionInstance>,
+    output: &mut Vec<(Option<FunctionInstance>, FunctionInstance)>,
+) {
+    struct AssignmentCollector<'a> {
+        owner: Option<FunctionInstance>,
+        output: &'a mut Vec<(Option<FunctionInstance>, FunctionInstance)>,
+    }
+
+    impl Visitor for AssignmentCollector<'_> {
+        fn visit_statement(&mut self, statement: &wasm_ir::Statement, program: &wasm_ir::Program) {
+            if let wasm_ir::Statement::Store {
+                operation:
+                    Some(wasm_ir::AssignmentOperation::Call(wasm_ir::CallTarget::UserMethod {
+                        function,
+                        ..
+                    })),
+                ..
+            } = statement
+            {
+                self.output.push((self.owner.clone(), function.clone()));
+            }
+            wasm_ir::walk_statement(self, statement, program);
+        }
+    }
+
+    AssignmentCollector { owner, output }.visit_block(block, program);
 }

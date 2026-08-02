@@ -479,6 +479,8 @@ fn snapshot_type_name(
     match checked.semantics().types().kind(ty) {
         TypeKind::Builtin(builtin) => builtin.to_string(),
         TypeKind::Standard(standard) => StandardLibrary::new().type_decl(*standard).name.to_owned(),
+        TypeKind::StateSnapshot => "StateSnapshot".to_owned(),
+        TypeKind::SettingsView => "SettingsView".to_owned(),
         TypeKind::Record(id) => checked
             .syntax()
             .records

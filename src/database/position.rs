@@ -126,6 +126,9 @@ pub(super) fn syntax_expression_resolution(
     if let Some(variant) = semantics.enum_variant(expression.id) {
         return Some(ExpressionResolution::EnumConstructor { variant });
     }
+    if let Some(call) = semantics.call(expression.id) {
+        return Some(ExpressionResolution::Call(call.clone()));
+    }
     match &expression.kind {
         ExprKind::Path(_) => Some(ExpressionResolution::ValuePath {
             root: semantics.value(expression.id),
@@ -140,10 +143,7 @@ pub(super) fn syntax_expression_resolution(
                 .unwrap_or_default()
                 .to_vec(),
         }),
-        ExprKind::Call { .. } => semantics
-            .call(expression.id)
-            .cloned()
-            .map(ExpressionResolution::Call),
+        ExprKind::Call { .. } => None,
         ExprKind::Record { .. } => semantics
             .record_literal_fields(expression.id)
             .map(|fields| ExpressionResolution::RecordLiteral {

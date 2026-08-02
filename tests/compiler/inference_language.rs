@@ -177,6 +177,149 @@ fn inferred_capability_bounds_are_enforced_at_every_call() {
 }
 
 #[test]
+fn equality_infers_none_from_the_opposite_optional_operand() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let value: i32? = None
+            if value == None { print("none") }
+            if None != value { print("some") }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("either equality operand should determine None's optional type");
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("contextually typed None equality should produce valid Wasm GC");
+
+    let ambiguous = r#"
+        state "game.exe" {}
+        whileAttached {
+            if None == None { print("ambiguous") }
+        }
+    "#;
+    let diagnostics = splitscript::check(splitscript::parse(ambiguous).unwrap())
+        .expect_err("two untyped None values still need an annotation");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("cannot infer the value type of `None`")
+    }));
+}
+
+#[test]
+fn state_snapshots_flow_through_locals_parameters_and_returns() {
+    let source = r#"
+        state "game.exe" {
+            /// Current level number.
+            level: u32 at 0x100
+        }
+
+        fn levelOf(snapshot) {
+            return snapshot.level
+        }
+
+        fn identity(value) {
+            return value
+        }
+
+        whileAttached {
+            let snapshot = identity(current)
+            let previous = old
+            let level: u32 = levelOf(snapshot)
+            if level != previous.level {
+                print(level)
+            }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("state snapshots should be ordinary inferred read-only values");
+    let snapshot_type = checked.semantics().types().id_for_state_snapshot();
+    assert_eq!(
+        checked
+            .semantics()
+            .value_type(checked.syntax().functions[0].params[0].id),
+        Some(snapshot_type)
+    );
+    assert!(
+        checked
+            .semantics()
+            .types()
+            .iter()
+            .any(|(id, kind)| id == snapshot_type && matches!(kind, TypeKind::StateSnapshot))
+    );
+
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("first-class state snapshot references should produce valid Wasm GC");
+}
+
+#[test]
+fn settings_views_flow_through_locals_parameters_and_returns_without_gc_objects() {
+    let source = r#"
+        enum CaptureMode {
+            WindowTitle
+            FullPath
+        }
+
+        settings {
+            /// Enables splitting.
+            "Enabled" => enabled: true
+            /// Selects the capture source.
+            "Capture Mode" => captureMode: choice {
+                "Window Title" => CaptureMode.WindowTitle default
+                "Full Path" => CaptureMode.FullPath
+            }
+        }
+
+        state "game.exe" {}
+
+        fn changed(currentSettings, previousSettings) {
+            return currentSettings.enabled != previousSettings.enabled
+                || currentSettings.captureMode != previousSettings.captureMode
+        }
+
+        fn identity(value) {
+            return value
+        }
+
+        whileAttached {
+            let captured = identity(settings)
+            let previous = oldSettings
+            if changed(captured, previous) {
+                if captured.enabled {
+                    print("enabled")
+                }
+            }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("settings views should be ordinary inferred read-only values");
+    let view_type = checked.semantics().types().id_for_settings_view();
+    assert_eq!(
+        checked
+            .semantics()
+            .value_type(checked.syntax().functions[0].params[0].id),
+        Some(view_type)
+    );
+    assert!(
+        checked
+            .semantics()
+            .types()
+            .iter()
+            .any(|(id, kind)| id == view_type && matches!(kind, TypeKind::SettingsView))
+    );
+
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("selector-backed settings views should produce valid Wasm");
+}
+
+#[test]
 fn recursive_generic_components_reuse_the_callers_concrete_instance() {
     let source = r#"
         state "game.exe" {}
@@ -299,6 +442,65 @@ fn generic_instance_expansion_has_a_deterministic_total_limit() {
         diagnostic
             .message
             .contains("limit of 256 concrete instances")
+    }));
+}
+
+#[test]
+fn integer_looking_literals_flow_into_float_contexts_exactly() {
+    let valid = r#"
+        let global: f32 = 16_777_216
+        state "game.exe" {}
+
+        fn identity(value) {
+            return value
+        }
+
+        whileAttached {
+            let small: f32 = 2
+            let large: f64 = 9_007_199_254_740_992
+            let inferred: f32 = identity(3)
+        }
+    "#;
+    let wasm = splitscript::compile(valid)
+        .expect("exact integer literals should satisfy float expectations");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("contextual float literals should lower to valid local and global constants");
+
+    for (ty, value) in [("f32", "16_777_217"), ("f64", "9_007_199_254_740_993")] {
+        let source =
+            format!("state \"game.exe\" {{}} whileAttached {{ let value: {ty} = {value} }}");
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("an inexact integer literal must not silently lose precision");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == splitscript::DiagnosticCode::Type
+                    && diagnostic.message.contains("integer literal")
+                    && diagnostic.message.contains(ty)
+            }),
+            "missing exactness diagnostic for {value} as {ty}: {diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
+fn floating_process_reads_require_an_unambiguous_memory_width() {
+    let source = r#"
+        state "game.exe" {
+            elapsed = process.read(0x100)
+        }
+
+        gameTime {
+            return Duration.fromSeconds(current.elapsed + 0.0)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("an f32/f64 process-memory ambiguity must not silently choose a width");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == splitscript::DiagnosticCode::Type
+            && diagnostic
+                .message
+                .contains("cannot infer whether process memory uses `f32` or `f64`")
     }));
 }
 

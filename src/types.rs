@@ -48,6 +48,8 @@ impl fmt::Display for EnumTypeId {
 pub enum ResolvedTypeRef {
     Core(CoreTypeId),
     Standard(StdlibTypeId),
+    StateSnapshot,
+    SettingsView,
     Record(RecordId),
     Enum(EnumId),
     GenericParameter(TypeId),
@@ -96,6 +98,13 @@ pub type BuiltinType = CoreTypeId;
 pub enum TypeKind {
     Builtin(BuiltinType),
     Standard(StdlibTypeId),
+    /// The generated structural value described by the program's `state`
+    /// declaration. It is intentionally not a source-spellable nominal type.
+    StateSnapshot,
+    /// An immutable view of either the current or previous setting values.
+    /// The backend represents this as a selector, so passing one does not
+    /// allocate a GC object.
+    SettingsView,
     Record(RecordId),
     Enum(EnumId),
     GenericParameter {
@@ -142,6 +151,8 @@ impl TypeStore {
         for standard in library.types() {
             store.intern(TypeKind::Standard(standard.id));
         }
+        store.intern(TypeKind::StateSnapshot);
+        store.intern(TypeKind::SettingsView);
         store
     }
 
@@ -186,6 +197,14 @@ impl TypeStore {
 
     pub fn id_for_standard(&self, standard: StdlibTypeId) -> TypeId {
         self.interned[&TypeKind::Standard(standard)]
+    }
+
+    pub fn id_for_state_snapshot(&self) -> TypeId {
+        self.interned[&TypeKind::StateSnapshot]
+    }
+
+    pub fn id_for_settings_view(&self) -> TypeId {
+        self.interned[&TypeKind::SettingsView]
     }
 
     pub fn id_for_record(&self, record: RecordId) -> TypeId {
@@ -270,6 +289,8 @@ impl TypeStore {
         match ty {
             ResolvedTypeRef::Core(core) => self.id_for_core(core),
             ResolvedTypeRef::Standard(standard) => self.id_for_standard(standard),
+            ResolvedTypeRef::StateSnapshot => self.id_for_state_snapshot(),
+            ResolvedTypeRef::SettingsView => self.id_for_settings_view(),
             ResolvedTypeRef::Record(record) => self.id_for_record(record),
             ResolvedTypeRef::Enum(enumeration) => self.id_for_enum(enumeration),
             ResolvedTypeRef::GenericParameter(parameter) => parameter,

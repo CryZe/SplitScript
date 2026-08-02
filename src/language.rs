@@ -939,11 +939,11 @@ define_language_catalog! {
         STATE_SOURCE
     ),
     compiler_symbol_item!(
-        LanguageItemId::OldSettingsSnapshot,
+        LanguageItemId::OldSettingsView,
         "oldSettings",
         LanguageItemKind::SnapshotRoot,
         "oldSettings.settingName",
-        "Accesses the previous settings snapshot.",
+        "Accesses the previous settings view.",
         "Settings are refreshed on every update; oldSettings retains the preceding values for change detection.",
         "let changed = settings.enabled != oldSettings.enabled",
         SETTINGS_SOURCE
@@ -1009,7 +1009,7 @@ define_language_catalog! {
         WhileAttached,
         "whileAttached",
         "Runs on every initialized attached update.",
-        "State and settings snapshots have already refreshed transactionally when this action runs.",
+        "State and settings data has already refreshed transactionally when this action runs.",
         "whileAttached {\n    setVariable(\"Level\", current.level as String)\n}"
     ),
     action_item!(

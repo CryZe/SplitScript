@@ -19,11 +19,11 @@ use crate::{
 };
 
 use super::{
-    EqualityFunctions, GcLayout, RuntimeHelperPlan, SettingStorage, Type, array_element_type,
-    emit_array_get, emit_async_frame_ref, emit_default, emit_failure_transfer, emit_int,
-    emit_memory_value, emit_result_error, emit_result_success, emit_string_literal,
+    EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, SettingStorage, Type,
+    array_element_type, emit_array_get, emit_async_frame_ref, emit_default, emit_failure_transfer,
+    emit_int, emit_memory_value, emit_result_error, emit_result_success, emit_string_literal,
     emit_struct_get, emit_typed_struct_get, enum_variant_payload, global_plan::RuntimeGlobals,
-    imports::Abi, memory_plan::AbiReadScratch, record_field_type, resolved_intrinsic,
+    imports::Abi, memarg, memory_plan::AbiReadScratch, record_field_type, resolved_intrinsic,
     result_value_type, runtime_helpers::emit_value_equality, script_functions::emit_action_default,
     semantic_type, standard_field_type, try_array_element_type, value_type,
 };
@@ -227,9 +227,12 @@ fn compile_block_with_loop(
     for statement in &block.statements {
         match statement {
             wasm_ir::Statement::Store {
-                target, op, value, ..
+                target,
+                operation,
+                value,
+                ..
             } => {
-                compile_assignment(function, *target, *op, *value, context);
+                compile_assignment(function, *target, operation.as_ref(), *value, context);
             }
             wasm_ir::Statement::If {
                 condition,
@@ -376,7 +379,7 @@ fn compile_block_with_loop(
 pub(super) fn compile_assignment(
     function: &mut Function,
     target: ValueId,
-    op: Option<BinaryOp>,
+    operation: Option<&wasm_ir::AssignmentOperation>,
     value: ExprId,
     context: &ExprContext<'_>,
 ) {
@@ -384,14 +387,10 @@ pub(super) fn compile_assignment(
         LocalStorage::Hybrid { frame, .. } if frame.contains_key(&target) => {
             let (field, ty) = frame[&target];
             emit_async_frame_ref(function, context.runtime_globals);
-            if let Some(op) = op {
+            compile_assignment_value(function, operation, value, ty, context, |function| {
                 emit_async_frame_ref(function, context.runtime_globals);
                 emit_typed_struct_get(function, context.gc.async_frame_index(), field, ty);
-                compile_expr(function, value, context);
-                emit_binary_instruction(function, op, ty);
-            } else {
-                compile_expr(function, value, context);
-            }
+            });
             function.instruction(&Instruction::StructSet {
                 struct_type_index: context.gc.async_frame_index(),
                 field_index: field,
@@ -399,37 +398,91 @@ pub(super) fn compile_assignment(
         }
         LocalStorage::Hybrid { wasm, .. } if wasm.contains_key(&target) => {
             let (local, ty) = wasm[&target];
-            if let Some(op) = op {
+            compile_assignment_value(function, operation, value, ty, context, |function| {
                 function.instruction(&Instruction::LocalGet(local));
-                compile_expr(function, value, context);
-                emit_binary_instruction(function, op, ty);
-            } else {
-                compile_expr(function, value, context);
-            }
+            });
             function.instruction(&Instruction::LocalSet(local));
         }
         LocalStorage::Wasm(locals) if locals.contains_key(&target) => {
             let (local, ty) = locals[&target];
-            if let Some(op) = op {
+            compile_assignment_value(function, operation, value, ty, context, |function| {
                 function.instruction(&Instruction::LocalGet(local));
-                compile_expr(function, value, context);
-                emit_binary_instruction(function, op, ty);
-            } else {
-                compile_expr(function, value, context);
-            }
+            });
             function.instruction(&Instruction::LocalSet(local));
         }
         _ => {
             let global = context.globals[&target];
-            if let Some(op) = op {
-                function.instruction(&Instruction::GlobalGet(global));
-                compile_expr(function, value, context);
-                emit_binary_instruction(function, op, context.global_types[&target]);
-            } else {
-                compile_expr(function, value, context);
-            }
+            compile_assignment_value(
+                function,
+                operation,
+                value,
+                context.global_types[&target],
+                context,
+                |function| {
+                    function.instruction(&Instruction::GlobalGet(global));
+                },
+            );
             function.instruction(&Instruction::GlobalSet(global));
         }
+    }
+}
+
+fn compile_assignment_value(
+    function: &mut Function,
+    operation: Option<&wasm_ir::AssignmentOperation>,
+    value: ExprId,
+    ty: Type,
+    context: &ExprContext<'_>,
+    emit_current: impl FnOnce(&mut Function),
+) {
+    match operation {
+        Some(wasm_ir::AssignmentOperation::Primitive(op)) => {
+            emit_current(function);
+            compile_expr(function, value, context);
+            emit_binary_instruction(function, *op, ty);
+        }
+        Some(wasm_ir::AssignmentOperation::Call(target)) => {
+            compile_assignment_call(function, target, value, context)
+        }
+        None => compile_expr(function, value, context),
+    }
+}
+
+fn compile_assignment_call(
+    function: &mut Function,
+    target: &wasm_ir::CallTarget,
+    argument: ExprId,
+    context: &ExprContext<'_>,
+) {
+    match target {
+        wasm_ir::CallTarget::UserMethod {
+            function: target_function,
+            ..
+        } => {
+            compile_receiver(function, target, context);
+            compile_expr(function, argument, context);
+            let target_function = context.called_instance(target_function);
+            function.instruction(&Instruction::Call(context.functions[&target_function]));
+        }
+        wasm_ir::CallTarget::Intrinsic { intrinsic, .. }
+            if matches!(
+                intrinsic,
+                IntrinsicId::NumericAdd | IntrinsicId::NumericSubtract
+            ) =>
+        {
+            let receiver = compile_receiver(function, target, context);
+            compile_expr(function, argument, context);
+            emit_binary_instruction(
+                function,
+                if *intrinsic == IntrinsicId::NumericAdd {
+                    BinaryOp::Add
+                } else {
+                    BinaryOp::Sub
+                },
+                receiver,
+            );
+        }
+        _ => unreachable!("validated compound assignments use binary method call targets"),
     }
 }
 
@@ -497,6 +550,18 @@ fn compile_resolved_path(
                 ));
             }
             Type::Standard(declaration.process_type)
+        }
+        ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot => {
+            let snapshot = u32::from(matches!(value, ResolvedValue::OldSnapshot));
+            function.instruction(&Instruction::LocalGet(snapshot));
+            Type::StateSnapshot
+        }
+        ResolvedValue::SettingsView | ResolvedValue::OldSettingsView => {
+            function.instruction(&Instruction::I32Const(i32::from(matches!(
+                value,
+                ResolvedValue::OldSettingsView
+            ))));
+            Type::SettingsView
         }
         ResolvedValue::CurrentState(field) | ResolvedValue::OldState(field) => {
             let snapshot = u32::from(matches!(value, ResolvedValue::OldState(_)));
@@ -664,11 +729,41 @@ pub(super) fn compile_for_bind_and_advance(
 fn emit_path_fields(
     function: &mut Function,
     fields: &[ResolvedMember],
-    mut value_type: Type,
+    mut current_type: Type,
     context: &ExprContext<'_>,
 ) -> Type {
     for field in fields {
         let (struct_type_index, field_index, field_type) = match field {
+            ResolvedMember::StateField(field) => {
+                let (field_index, field_type) = context
+                    .state
+                    .canonical_fields()
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, state_field)| {
+                        (state_field.id == *field).then_some((
+                            index as u32,
+                            value_type(state_field.id, context.semantics),
+                        ))
+                    })
+                    .expect("resolved state field belongs to the checked state block");
+                debug_assert_eq!(current_type, Type::StateSnapshot);
+                (STATE_TYPE, field_index, field_type)
+            }
+            ResolvedMember::SettingField(setting) => {
+                debug_assert_eq!(current_type, Type::SettingsView);
+                let storage = context.settings[setting];
+                function
+                    .instruction(&Instruction::If(BlockType::Result(
+                        context.gc.val_type(storage.ty),
+                    )))
+                    .instruction(&Instruction::GlobalGet(storage.old))
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::GlobalGet(storage.current))
+                    .instruction(&Instruction::End);
+                current_type = storage.ty;
+                continue;
+            }
             ResolvedMember::StandardField(field) => {
                 let library = context.standard_library;
                 let declaration = library.field(*field);
@@ -682,7 +777,7 @@ fn emit_path_fields(
                     .expect("declared standard field has a runtime slot")
                     as u32;
                 let owner_type = Type::from_standard(declaration.owner);
-                debug_assert_eq!(value_type, owner_type);
+                debug_assert_eq!(current_type, owner_type);
                 (
                     context.gc.index(owner_type),
                     field_index,
@@ -702,7 +797,7 @@ fn emit_path_fields(
                             .map(|(index, field)| (record, index as u32, field))
                     })
                     .expect("resolved record field belongs to a checked declaration");
-                debug_assert_eq!(value_type, Type::Record(record.id));
+                debug_assert_eq!(current_type, Type::Record(record.id));
                 (
                     context.gc.index(Type::Record(record.id)),
                     field_index,
@@ -712,9 +807,9 @@ fn emit_path_fields(
         };
         function.instruction(&Instruction::RefAsNonNull);
         emit_typed_struct_get(function, struct_type_index, field_index, field_type);
-        value_type = field_type;
+        current_type = field_type;
     }
-    value_type
+    current_type
 }
 
 pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context: &ExprContext<'_>) {
@@ -1447,6 +1542,26 @@ fn compile_expr_unconverted(
                     context.abi.function(AbiImportId::RuntimeSetTickRate),
                 ));
             }
+            IntrinsicId::InstantNow => {
+                let destination = context.abi_read.destination(8);
+                function
+                    // WASI clock ID 1 is the monotonic clock. A precision of
+                    // one requests the finest available nanosecond reading.
+                    .instruction(&Instruction::I32Const(1))
+                    .instruction(&Instruction::I64Const(1))
+                    .instruction(&Instruction::I32Const(destination))
+                    .instruction(&Instruction::Call(
+                        context.abi.function(AbiImportId::WasiClockTimeGet),
+                    ))
+                    .instruction(&Instruction::If(BlockType::Empty))
+                    .instruction(&Instruction::Unreachable)
+                    .instruction(&Instruction::End)
+                    .instruction(&Instruction::I32Const(destination))
+                    .instruction(&Instruction::I64Load(memarg()))
+                    .instruction(&Instruction::StructNew(
+                        context.gc.standard_index(StdlibTypeId::Instant),
+                    ));
+            }
             IntrinsicId::ProcessName => {
                 // Evaluate the written receiver exactly once even though the
                 // matched source name is attachment metadata rather than part
@@ -1666,6 +1781,36 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::NumericMin | IntrinsicId::NumericMax => {
                 unreachable!("numeric intrinsics are lowered before ordinary calls")
+            }
+            IntrinsicId::NumericAdd | IntrinsicId::NumericSubtract => {
+                let receiver = compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                emit_binary_instruction(
+                    function,
+                    if builtin == IntrinsicId::NumericAdd {
+                        BinaryOp::Add
+                    } else {
+                        BinaryOp::Sub
+                    },
+                    receiver,
+                );
+            }
+            IntrinsicId::FloatAbs
+            | IntrinsicId::FloatFloor
+            | IntrinsicId::FloatCeil
+            | IntrinsicId::FloatRound => {
+                let receiver = compile_receiver(function, target, context);
+                function.instruction(&match (receiver, builtin) {
+                    (Type::F32, IntrinsicId::FloatAbs) => Instruction::F32Abs,
+                    (Type::F32, IntrinsicId::FloatFloor) => Instruction::F32Floor,
+                    (Type::F32, IntrinsicId::FloatCeil) => Instruction::F32Ceil,
+                    (Type::F32, IntrinsicId::FloatRound) => Instruction::F32Nearest,
+                    (Type::F64, IntrinsicId::FloatAbs) => Instruction::F64Abs,
+                    (Type::F64, IntrinsicId::FloatFloor) => Instruction::F64Floor,
+                    (Type::F64, IntrinsicId::FloatCeil) => Instruction::F64Ceil,
+                    (Type::F64, IntrinsicId::FloatRound) => Instruction::F64Nearest,
+                    _ => unreachable!("float intrinsics require an f32 or f64 receiver"),
+                });
             }
             IntrinsicId::AddressAdd => {
                 compile_receiver(function, target, context);

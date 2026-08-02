@@ -64,19 +64,25 @@ fn enabledName(value) {
     }
 }
 
+fn liveReloadChanged(currentSettings, previousSettings) {
+    return currentSettings.liveReload != previousSettings.liveReload
+}
+
 onAttach {
     print("Hello, World!")
 }
 
 whileAttached {
-    setVariable("Auto Splitting", enabledName(settings.enableAutoSplitting))
-    setVariable("Capture Source", captureModeName(settings.captureMode))
-    setVariable("Layout File", settings.layoutFile)
+    let currentSettings = settings
+    let previousSettings = oldSettings
+    setVariable("Auto Splitting", enabledName(currentSettings.enableAutoSplitting))
+    setVariable("Capture Source", captureModeName(currentSettings.captureMode))
+    setVariable("Layout File", currentSettings.layoutFile)
 
-    if settings.liveReload != oldSettings.liveReload {
-        print(`Live Reload is now {enabledName(settings.liveReload)}`)
+    if liveReloadChanged(currentSettings, previousSettings) {
+        print(`Live Reload is now {enabledName(currentSettings.liveReload)}`)
     }
-    if settings.verboseLogging {
+    if currentSettings.verboseLogging {
         print("Verbose settings diagnostics tick")
     }
 }

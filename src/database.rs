@@ -312,6 +312,9 @@ fn source_definition_for_resolution(
 
 fn source_definition_for_member(member: &ResolvedMember) -> Option<SourceDefinitionId> {
     match member {
+        ResolvedMember::StateField(field) | ResolvedMember::SettingField(field) => {
+            Some(SourceDefinitionId::Value(*field))
+        }
         ResolvedMember::RecordField(field) => Some(SourceDefinitionId::RecordField(*field)),
         ResolvedMember::StandardField(_) => None,
     }
@@ -322,6 +325,10 @@ fn definition_for_member(
     member: &ResolvedMember,
 ) -> Option<DefinitionTarget> {
     match member {
+        ResolvedMember::StateField(field) | ResolvedMember::SettingField(field) => definitions
+            .get(SourceDefinitionId::Value(*field))
+            .cloned()
+            .map(DefinitionTarget::Source),
         ResolvedMember::RecordField(field) => definitions
             .get(SourceDefinitionId::RecordField(*field))
             .cloned()
@@ -338,9 +345,31 @@ fn source_definition_for_value_path(
     segment: usize,
 ) -> Option<SourceDefinitionId> {
     let root = root?;
+    if matches!(
+        root,
+        ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot
+    ) {
+        return (segment == 0).then_some(SourceDefinitionId::State);
+    }
+    if matches!(
+        root,
+        ResolvedValue::SettingsView | ResolvedValue::OldSettingsView
+    ) {
+        if segment == 0 {
+            return Some(SourceDefinitionId::Settings);
+        }
+        return match members.get(segment - 1)? {
+            ResolvedMember::SettingField(setting) => Some(SourceDefinitionId::Value(*setting)),
+            member => source_definition_for_member(member),
+        };
+    }
     let root_segment = match root {
         ResolvedValue::ProviderValue(_) => return None,
         ResolvedValue::Variable(_) => 0,
+        ResolvedValue::CurrentSnapshot
+        | ResolvedValue::OldSnapshot
+        | ResolvedValue::SettingsView
+        | ResolvedValue::OldSettingsView => unreachable!(),
         ResolvedValue::CurrentState(_)
         | ResolvedValue::OldState(_)
         | ResolvedValue::Setting(_)
@@ -354,7 +383,12 @@ fn source_definition_for_value_path(
             ResolvedValue::Setting(_) | ResolvedValue::OldSetting(_) => {
                 Some(SourceDefinitionId::Settings)
             }
-            ResolvedValue::ProviderValue(_) | ResolvedValue::Variable(_) => None,
+            ResolvedValue::ProviderValue(_)
+            | ResolvedValue::Variable(_)
+            | ResolvedValue::CurrentSnapshot
+            | ResolvedValue::OldSnapshot
+            | ResolvedValue::SettingsView
+            | ResolvedValue::OldSettingsView => None,
         };
     }
     if segment == root_segment {
@@ -362,6 +396,9 @@ fn source_definition_for_value_path(
     }
     let member = segment.checked_sub(root_segment + 1)?;
     match members.get(member)? {
+        ResolvedMember::StateField(field) | ResolvedMember::SettingField(field) => {
+            Some(SourceDefinitionId::Value(*field))
+        }
         ResolvedMember::RecordField(field) => Some(SourceDefinitionId::RecordField(*field)),
         ResolvedMember::StandardField(_) => None,
     }
@@ -374,9 +411,42 @@ fn definition_for_value_path(
     segment: usize,
 ) -> Option<DefinitionTarget> {
     let root = root?;
+    if matches!(
+        root,
+        ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot
+    ) {
+        return (segment == 0)
+            .then(|| definitions.get(SourceDefinitionId::State))
+            .flatten()
+            .cloned()
+            .map(DefinitionTarget::Source);
+    }
+    if matches!(
+        root,
+        ResolvedValue::SettingsView | ResolvedValue::OldSettingsView
+    ) {
+        let definition = if segment == 0 {
+            SourceDefinitionId::Settings
+        } else {
+            let ResolvedMember::SettingField(setting) = members.get(segment - 1)? else {
+                return members
+                    .get(segment - 1)
+                    .and_then(|member| definition_for_member(definitions, member));
+            };
+            SourceDefinitionId::Value(*setting)
+        };
+        return definitions
+            .get(definition)
+            .cloned()
+            .map(DefinitionTarget::Source);
+    }
     let root_segment = match root {
         ResolvedValue::ProviderValue(_) => 0,
         ResolvedValue::Variable(_) => 0,
+        ResolvedValue::CurrentSnapshot
+        | ResolvedValue::OldSnapshot
+        | ResolvedValue::SettingsView
+        | ResolvedValue::OldSettingsView => unreachable!(),
         ResolvedValue::CurrentState(_)
         | ResolvedValue::OldState(_)
         | ResolvedValue::Setting(_)
@@ -390,7 +460,12 @@ fn definition_for_value_path(
             ResolvedValue::Setting(_) | ResolvedValue::OldSetting(_) => {
                 SourceDefinitionId::Settings
             }
-            ResolvedValue::ProviderValue(_) | ResolvedValue::Variable(_) => return None,
+            ResolvedValue::ProviderValue(_)
+            | ResolvedValue::Variable(_)
+            | ResolvedValue::CurrentSnapshot
+            | ResolvedValue::OldSnapshot
+            | ResolvedValue::SettingsView
+            | ResolvedValue::OldSettingsView => return None,
         };
         return definitions
             .get(definition)
@@ -410,6 +485,10 @@ fn definition_for_value_path(
     }
     let member = segment.checked_sub(root_segment + 1)?;
     match members.get(member)? {
+        ResolvedMember::StateField(field) | ResolvedMember::SettingField(field) => definitions
+            .get(SourceDefinitionId::Value(*field))
+            .cloned()
+            .map(DefinitionTarget::Source),
         ResolvedMember::RecordField(field) => definitions
             .get(SourceDefinitionId::RecordField(*field))
             .cloned()

@@ -9,8 +9,9 @@ use crate::{
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
     signature::parse_signature,
     stdlib::{
-        Availability, DeclaredTypeRef, ItemKind, ParameterRule, StdlibItem, StdlibItemId,
-        StdlibTypeConstructorId, StdlibTypeId, TypeRef as CatalogTypeRef,
+        Availability, DeclaredTypeRef, ItemKind, ParameterRule, StandardBinaryOperator, StdlibItem,
+        StdlibItemId, StdlibOwner, StdlibTypeConstructorId, StdlibTypeId,
+        TypeRef as CatalogTypeRef,
     },
     stdlib_semantic::{CallCandidate, StandardLibrarySemanticExt},
     types::TypeKind,
@@ -23,6 +24,140 @@ use super::{
 };
 
 impl Checker {
+    /// Resolves binary syntax through a catalog-declared method. Inferred
+    /// operands select capability bindings; concrete operands may select a
+    /// more specific implementation owned by their exact type.
+    pub(super) fn resolve_binary_operator(
+        &mut self,
+        op: crate::ast::BinaryOp,
+        operand: Type,
+        expression: ExprId,
+        left: ExprId,
+        span: Span,
+    ) -> Option<Type> {
+        let (result, call) = self.binary_operator_call(
+            op,
+            operand,
+            ResolvedReceiver::Expression {
+                expression: left,
+                members: Vec::new(),
+            },
+            span,
+        )?;
+        self.semantics.resolve_call(expression, call);
+        Some(result)
+    }
+
+    pub(super) fn resolve_assignment_operator(
+        &mut self,
+        assignment: crate::ast::AssignmentId,
+        op: crate::ast::BinaryOp,
+        operand: Type,
+        target: crate::ast::ValueId,
+        span: Span,
+    ) -> Option<Type> {
+        let (result, call) = self.binary_operator_call(
+            op,
+            operand,
+            ResolvedReceiver::Path {
+                root: ResolvedValue::Variable(target),
+                members: Vec::new(),
+            },
+            span,
+        )?;
+        self.semantics.resolve_assignment_call(assignment, call);
+        Some(result)
+    }
+
+    fn binary_operator_call(
+        &mut self,
+        op: crate::ast::BinaryOp,
+        operand: Type,
+        receiver: ResolvedReceiver,
+        span: Span,
+    ) -> Option<(Type, PendingResolvedCall)> {
+        let operator = match op {
+            crate::ast::BinaryOp::Add => StandardBinaryOperator::Add,
+            crate::ast::BinaryOp::Sub => StandardBinaryOperator::Subtract,
+            crate::ast::BinaryOp::Lt => StandardBinaryOperator::LessThan,
+            crate::ast::BinaryOp::Le => StandardBinaryOperator::LessThanOrEqual,
+            crate::ast::BinaryOp::Gt => StandardBinaryOperator::GreaterThan,
+            crate::ast::BinaryOp::Ge => StandardBinaryOperator::GreaterThanOrEqual,
+            _ => return None,
+        };
+        let inferred_operand = matches!(self.shallow_type(operand), Type::Variable(_));
+        let candidates = self
+            .standard_library
+            .binary_operator_candidates(operator)
+            .into_iter()
+            .filter(|candidate| {
+                (!inferred_operand
+                    || matches!(candidate.receiver(), Some(CatalogTypeRef::Parameter(_))))
+                    && self.catalog_candidate_may_apply(candidate, operand)
+            })
+            .collect::<Vec<_>>();
+        let [candidate] = candidates.as_slice() else {
+            if candidates.len() > 1 {
+                self.error(
+                    format!(
+                        "operator is ambiguous between {}",
+                        candidates
+                            .iter()
+                            .map(|candidate| candidate.item.qualified_name)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    span,
+                );
+            }
+            return None;
+        };
+        let item = candidate.item;
+        let mut variables = HashMap::new();
+        for parameter in item.signature.type_parameters {
+            let requirements = parameter
+                .constraints
+                .iter()
+                .fold(Requirements::none(), |requirements, constraint| {
+                    requirements | Requirements::capability(*constraint)
+                });
+            let ty = self.fresh_inference(requirements.clone(), None);
+            if !requirements.is_empty() {
+                self.require(ty, requirements, span)?;
+            }
+            variables.insert(parameter.name, ty);
+        }
+        let receiver_type = self.catalog_type(
+            candidate
+                .receiver()
+                .expect("operator bindings are validated methods"),
+            &variables,
+        );
+        self.unify(operand, receiver_type, span)?;
+        let [parameter] = item.signature.parameters else {
+            unreachable!("operator bindings are validated binary methods")
+        };
+        let parameter_type = self.catalog_type(parameter.ty, &variables);
+        self.unify(operand, parameter_type, span)?;
+        let result = self.catalog_type(item.signature.result, &variables);
+        let type_arguments = item
+            .signature
+            .type_parameters
+            .iter()
+            .map(|parameter| variables[parameter.name])
+            .collect();
+        Some((
+            result,
+            PendingResolvedCall::StandardLibrary {
+                item: item.id,
+                type_arguments,
+                signature: vec![receiver_type, parameter_type, result],
+                receiver: Some(receiver),
+                receiver_type: Some(receiver_type),
+            },
+        ))
+    }
+
     pub(super) fn call(
         &mut self,
         call: CallSyntax<'_>,
@@ -248,6 +383,7 @@ impl Checker {
                     .into_iter()
                     .filter(|candidate| self.catalog_candidate_may_apply(candidate, receiver_type))
                     .collect::<Vec<_>>();
+                self.prefer_specific_catalog_candidates(&mut candidates, receiver_type);
                 if candidates.len() > 1 {
                     self.ambiguous_catalog_call(callee, &candidates, span);
                     return None;
@@ -378,6 +514,7 @@ impl Checker {
             .into_iter()
             .filter(|candidate| self.catalog_candidate_may_apply(candidate, receiver_type))
             .collect::<Vec<_>>();
+        self.prefer_specific_catalog_candidates(&mut candidates, receiver_type);
         if candidates.len() > 1 {
             self.ambiguous_catalog_call(std::slice::from_ref(method), &candidates, span);
             return None;
@@ -763,6 +900,25 @@ impl Checker {
         }
     }
 
+    fn prefer_specific_catalog_candidates(
+        &mut self,
+        candidates: &mut Vec<CallCandidate>,
+        receiver: Type,
+    ) {
+        if candidates.len() < 2 {
+            return;
+        }
+        let receiver_is_inferred = matches!(self.shallow_type(receiver), Type::Variable(_));
+        let specificity = |candidate: &CallCandidate| match candidate.receiver() {
+            Some(CatalogTypeRef::Parameter(_)) => 1,
+            Some(_) if receiver_is_inferred => 0,
+            Some(_) => 2,
+            None => 0,
+        };
+        let strongest = candidates.iter().map(specificity).max().unwrap_or_default();
+        candidates.retain(|candidate| specificity(candidate) == strongest);
+    }
+
     pub(super) fn ambiguous_catalog_call(
         &mut self,
         callee: &[String],
@@ -857,28 +1013,37 @@ impl Checker {
         expression: Option<ExprId>,
     ) -> Option<PathResolution> {
         match path {
+            [name, fields @ ..]
+                if matches!(
+                    name.as_str(),
+                    "current" | "old" | "settings" | "oldSettings"
+                ) && self.binding(name).is_some() =>
+            {
+                let binding = self
+                    .binding_for_use(name, span)
+                    .expect("the shadowing binding was found above");
+                let (ty, members) =
+                    self.resolve_members_or_defer(binding.ty, fields, span, expression)?;
+                Some(PathResolution {
+                    ty,
+                    value: binding.id.map(ResolvedValue::Variable),
+                    members,
+                })
+            }
+            [root] if root == "current" || root == "old" => {
+                self.require_state_snapshot(span)?;
+                Some(PathResolution {
+                    ty: Type::Known(self.inference.type_store().id_for_state_snapshot()),
+                    value: Some(if root == "current" {
+                        ResolvedValue::CurrentSnapshot
+                    } else {
+                        ResolvedValue::OldSnapshot
+                    }),
+                    members: Some(Vec::new()),
+                })
+            }
             [root, field, fields @ ..] if root == "current" || root == "old" => {
-                if self.expression_mode == ExpressionMode::StateSource {
-                    self.error(
-                        "a state field cannot read from its own `current` or `old` snapshot",
-                        span,
-                    );
-                    return None;
-                }
-                if self.callable.is_function() {
-                    self.error(
-                        "functions are independent of action snapshots; pass the value as a parameter",
-                        span,
-                    );
-                    return None;
-                }
-                if matches!(self.callable, CallableContext::Action(ActionKind::OnAttach)) {
-                    self.error(
-                        "state snapshots are not available until `onAttach` completes",
-                        span,
-                    );
-                    return None;
-                }
+                self.require_state_snapshot(span)?;
                 let Some((id, ty)) = self.declarations.state_fields.get(field).copied() else {
                     self.error(format!("unknown state field `{field}`"), span);
                     return None;
@@ -912,6 +1077,15 @@ impl Checker {
                     members,
                 })
             }
+            [root] if root == "settings" || root == "oldSettings" => Some(PathResolution {
+                ty: Type::Known(self.inference.type_store().id_for_settings_view()),
+                value: Some(if root == "settings" {
+                    ResolvedValue::SettingsView
+                } else {
+                    ResolvedValue::OldSettingsView
+                }),
+                members: Some(Vec::new()),
+            }),
             [name, fields @ ..]
                 if self.provider_value.is_some_and(|(provider, _)| {
                     self.standard_library.state_provider(provider).value_name == name
@@ -967,6 +1141,38 @@ impl Checker {
                 None
             }
         }
+    }
+
+    fn require_state_snapshot(&mut self, span: Span) -> Option<()> {
+        if self.expression_mode == ExpressionMode::StateSource {
+            self.error(
+                "a state field cannot read from its own `current` or `old` snapshot",
+                span,
+            );
+            return None;
+        }
+        if self.callable.is_function() {
+            self.error(
+                "functions are independent of action snapshots; pass the value as a parameter",
+                span,
+            );
+            return None;
+        }
+        if !matches!(self.callable, CallableContext::Action(_)) {
+            self.error(
+                "state snapshots are only available in lifecycle actions",
+                span,
+            );
+            return None;
+        }
+        if matches!(self.callable, CallableContext::Action(ActionKind::OnAttach)) {
+            self.error(
+                "state snapshots are not available until `onAttach` completes",
+                span,
+            );
+            return None;
+        }
+        Some(())
     }
 
     pub(super) fn resolve_members_or_defer(
@@ -1038,8 +1244,30 @@ impl Checker {
     }
 
     pub(super) fn lookup_member(&self, ty: Type, field: &str) -> Option<(Type, ResolvedMember)> {
+        if matches!(
+            ty,
+            Type::Known(id)
+                if matches!(self.inference.type_store().kind(id), TypeKind::StateSnapshot)
+        ) {
+            return self
+                .declarations
+                .state_fields
+                .get(field)
+                .map(|(field, ty)| (*ty, ResolvedMember::StateField(*field)));
+        }
+        if matches!(
+            ty,
+            Type::Known(id)
+                if matches!(self.inference.type_store().kind(id), TypeKind::SettingsView)
+        ) {
+            return self
+                .declarations
+                .settings
+                .get(field)
+                .map(|(setting, ty)| (*ty, ResolvedMember::SettingField(*setting)));
+        }
         if let Some(owner) = self.standard_type_id(ty)
-            && let Some(field) = self.standard_library.public_field(owner, field)
+            && let Some(field) = self.visible_standard_field(owner, field)
         {
             return Some((
                 self.standard_field_type(field.id),
@@ -1061,6 +1289,25 @@ impl Checker {
                 }),
             None => None,
         }
+    }
+
+    fn visible_standard_field(
+        &self,
+        owner: StdlibTypeId,
+        name: &str,
+    ) -> Option<&'static crate::stdlib::StdlibField> {
+        self.standard_library.public_field(owner, name).or_else(|| {
+            let CallableContext::LibraryFunction(item) = self.callable else {
+                return None;
+            };
+            (self.standard_library.item(item).owner == StdlibOwner::Type(owner))
+                .then(|| {
+                    self.standard_library
+                        .fields_of(owner)
+                        .find(|field| field.name == name)
+                })
+                .flatten()
+        })
     }
 
     pub(super) fn resolve_deferred_member_paths(&mut self) {
@@ -1200,6 +1447,12 @@ impl Checker {
             .iter()
             .filter(|ty| self.standard_library.public_fields(ty.id).next().is_some())
             .map(|ty| self.standard_type(ty.id))
+            .chain([Type::Known(
+                self.inference.type_store().id_for_state_snapshot(),
+            )])
+            .chain([Type::Known(
+                self.inference.type_store().id_for_settings_view(),
+            )])
             .chain(
                 self.declarations
                     .records
@@ -1242,6 +1495,8 @@ impl Checker {
                     .iter()
                     .find(|candidate| candidate.id == *enumeration)
                     .map_or_else(|| ty.to_string(), |enumeration| enumeration.name.clone()),
+                TypeKind::StateSnapshot => "StateSnapshot".to_owned(),
+                TypeKind::SettingsView => "SettingsView".to_owned(),
                 _ => self.inference.known_type_name(id),
             },
         }

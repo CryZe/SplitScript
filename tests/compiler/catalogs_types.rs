@@ -10,8 +10,26 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::DurationFromMilliseconds,
         StdlibItemId::DurationFromParts,
         StdlibItemId::DurationFromSeconds,
+        StdlibItemId::DurationFromNanoseconds,
+        StdlibItemId::DurationFromWholeMilliseconds,
         StdlibItemId::DurationFromWholeSeconds,
+        StdlibItemId::DurationWholeSeconds,
+        StdlibItemId::DurationSubsecondNanoseconds,
+        StdlibItemId::DurationTotalSeconds,
+        StdlibItemId::DurationTotalMilliseconds,
+        StdlibItemId::DurationAdd,
+        StdlibItemId::DurationSubtract,
+        StdlibItemId::DurationLessThan,
+        StdlibItemId::DurationLessThanOrEqual,
+        StdlibItemId::DurationGreaterThan,
+        StdlibItemId::DurationGreaterThanOrEqual,
         StdlibItemId::DurationZero,
+        StdlibItemId::InstantDurationSince,
+        StdlibItemId::InstantElapsed,
+        StdlibItemId::InstantHasElapsed,
+        StdlibItemId::FloatRoundTo,
+        StdlibItemId::FloatIsNaN,
+        StdlibItemId::FloatIsFinite,
         StdlibItemId::NumericClamp,
         StdlibItemId::ArrayIsEmpty,
         StdlibItemId::AddressOffset,
@@ -74,17 +92,42 @@ fn duration_convenience_constructors_are_source_defined() {
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromMilliseconds),
-        "Duration.fromMilliseconds(milliseconds: i64) -> Duration"
+        "Duration.fromMilliseconds<T>(milliseconds: T) -> Duration where T: Float"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::DurationFromWholeMilliseconds),
+        "Duration.fromWholeMilliseconds(milliseconds: i64) -> Duration"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromWholeSeconds),
         "Duration.fromWholeSeconds(seconds: i64) -> Duration"
     );
+    assert_eq!(
+        library.render_signature(StdlibItemId::DurationFromNanoseconds),
+        "Duration.fromNanoseconds(nanoseconds: i64) -> Duration"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::DurationAdd),
+        "Duration.add(other: Duration) -> Duration"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::DurationTotalSeconds),
+        "Duration.totalSeconds() -> f64"
+    );
+    assert!(library.type_has_capability(
+        splitscript::compiler::stdlib::StdlibTypeId::Duration,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Equatable,
+    ));
 
     for expression in [
         "Duration.zero()",
         "Duration.fromWholeSeconds(-12)",
-        "Duration.fromMilliseconds(1_500)",
+        "Duration.fromWholeMilliseconds(1_500)",
+        "Duration.fromNanoseconds(-1_250_000_100)",
+        "Duration.fromMilliseconds(1_500.25)",
+        "Duration.fromMilliseconds(1_500.25 as f32)",
+        "Duration.fromSeconds(1.25)",
+        "Duration.fromSeconds(1.25 as f32)",
     ] {
         let source = format!(
             r#"
@@ -98,6 +141,172 @@ fn duration_convenience_constructors_are_source_defined() {
             .validate_all(&splitscript::compile(&source).unwrap())
             .expect("source-defined duration convenience constructors should produce valid Wasm");
     }
+}
+
+#[test]
+fn instant_uses_one_monotonic_host_boundary_and_source_defined_arithmetic() {
+    let library = StandardLibrary::new();
+    assert_eq!(
+        library.render_signature(StdlibItemId::InstantNow),
+        "Instant.now() -> Instant"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::InstantDurationSince),
+        "Instant.durationSince(earlier: Instant) -> Duration"
+    );
+    assert!(matches!(
+        library.item(StdlibItemId::InstantNow).implementation,
+        Implementation::Intrinsic(IntrinsicId::InstantNow)
+    ));
+    for item in [
+        StdlibItemId::InstantDurationSince,
+        StdlibItemId::InstantElapsed,
+        StdlibItemId::InstantHasElapsed,
+    ] {
+        assert!(matches!(
+            library.item(item).implementation,
+            Implementation::LibraryBody { .. }
+        ));
+    }
+    let now_effects = library.operation_metadata(StdlibItemId::InstantNow).effects;
+    assert!(now_effects.contains(&splitscript::compiler::stdlib::Effect::ReadsRuntime));
+    assert!(now_effects.contains(&splitscript::compiler::stdlib::Effect::Allocates));
+
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let startedAt = Instant.now()
+            if startedAt.hasElapsed(Duration.zero()) {
+                print("ready")
+            }
+        }
+    "#;
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile(source).unwrap())
+        .expect("monotonic instants and their source-defined methods should produce valid Wasm");
+}
+
+#[test]
+fn binary_syntax_resolves_through_catalog_declared_methods() {
+    let library = StandardLibrary::new();
+    assert_eq!(
+        library.item(StdlibItemId::DurationAdd).binary_operator,
+        Some(StandardBinaryOperator::Add)
+    );
+    assert_eq!(
+        library.item(StdlibItemId::DurationSubtract).binary_operator,
+        Some(StandardBinaryOperator::Subtract)
+    );
+    assert_eq!(
+        library.item(StdlibItemId::DurationLessThan).binary_operator,
+        Some(StandardBinaryOperator::LessThan)
+    );
+    assert_eq!(
+        library
+            .item(StdlibItemId::DurationGreaterThanOrEqual)
+            .binary_operator,
+        Some(StandardBinaryOperator::GreaterThanOrEqual)
+    );
+    assert_eq!(
+        library.item(StdlibItemId::NumericAdd).binary_operator,
+        Some(StandardBinaryOperator::Add)
+    );
+
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let number = 20 + 22
+            let duration = Duration.fromSeconds(1.5) + Duration.fromSeconds(0.5)
+            let difference = duration - Duration.fromWholeSeconds(1)
+            let ordered = difference < duration && duration >= difference
+            print(number)
+            print(difference.wholeSeconds())
+            if ordered {
+                print("ordered")
+            }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("catalog-declared operators should type-check as ordinary calls");
+    let resolved_items = checked
+        .semantics()
+        .calls()
+        .filter_map(|(_, call)| match call {
+            ResolvedCall::StandardLibrary { item, .. } => Some(*item),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for expected in [
+        StdlibItemId::NumericAdd,
+        StdlibItemId::DurationAdd,
+        StdlibItemId::DurationSubtract,
+        StdlibItemId::DurationLessThan,
+        StdlibItemId::DurationGreaterThanOrEqual,
+    ] {
+        assert!(
+            resolved_items.contains(&expected),
+            "operator syntax should resolve to {expected:?}"
+        );
+    }
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile(source).unwrap())
+        .expect("catalog-declared operators should lower to valid Wasm");
+}
+
+#[test]
+fn compound_assignment_resolves_through_the_same_catalog_method() {
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let elapsed = Duration.zero()
+            elapsed += Duration.fromWholeSeconds(1)
+            print(elapsed.wholeSeconds())
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("Duration compound assignment should type-check through its operator binding");
+    let assignment = checked
+        .typed_hir()
+        .action_body(splitscript::compiler::ast::ActionKind::WhileAttached)
+        .unwrap()
+        .statements
+        .iter()
+        .find_map(|statement| match &statement.kind {
+            splitscript::compiler::hir::TypedStatementKind::Assign { assignment, .. } => {
+                Some(assignment)
+            }
+            _ => None,
+        })
+        .expect("fixture should contain a compound assignment");
+    assert!(matches!(
+        assignment.operator,
+        Some(ResolvedCall::StandardLibrary {
+            item: StdlibItemId::DurationAdd,
+            ..
+        })
+    ));
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("source-defined compound operators should produce valid Wasm");
+}
+
+#[test]
+fn standard_library_bodies_can_read_only_their_own_private_representation() {
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let duration = Duration.zero()
+            let leaked = duration.seconds
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("user source must not read private standard-library representation fields");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == splitscript::DiagnosticCode::Type
+            && diagnostic
+                .message
+                .contains("Duration has no field `seconds`")
+    }));
 }
 
 #[test]
@@ -574,7 +783,7 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromSeconds),
-        "Duration.fromSeconds(seconds: f32) -> Duration"
+        "Duration.fromSeconds<T>(seconds: T) -> Duration where T: Float"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::StringContains),
@@ -599,6 +808,22 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     assert_eq!(
         library.render_signature(StdlibItemId::StringSlice),
         "String.slice(start: u32, end: u32) -> String!"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::FloatAbs),
+        "T.abs() -> T where T: Float"
+    );
+    assert!(matches!(
+        library.item(StdlibItemId::FloatRound).implementation,
+        Implementation::Intrinsic { .. }
+    ));
+    assert_eq!(
+        library.render_signature(StdlibItemId::FloatRoundTo),
+        "T.roundTo(decimalPlaces: u32) -> T where T: Float"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::FloatIsFinite),
+        "T.isFinite() -> bool where T: Float"
     );
     for removed in [
         "timer.setVariable",
@@ -863,10 +1088,7 @@ fn compiler_database_resolves_language_catalog_syntax() {
     }
     for (root, expected) in [
         ("current.level", "current / old: state snapshot"),
-        (
-            "settings.selected",
-            "settings / oldSettings: settings snapshot",
-        ),
+        ("settings.selected", "settings / oldSettings: settings view"),
     ] {
         let hover = database
             .hover(source.find(root).unwrap())

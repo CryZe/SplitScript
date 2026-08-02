@@ -388,12 +388,26 @@ type `GbaEmulator`; scripts never retain or attach the emulator themselves.
 - [ ] Add structural anonymous record values/types after named-record layout
   semantics settle. Infer their fields bidirectionally and decide explicitly
   whether anonymous records can be memory-readable.
-- [ ] Make `current`, `old`, `settings`, and `oldSettings` first-class read-only
-  snapshot values rather than path-only compiler roots. Give state and settings
-  snapshots proper structural types so values such as `let snapshot = current`
+- [x] Make `current`, `old`, `settings`, and `oldSettings` first-class read-only
+  values rather than path-only compiler roots. Give state snapshots and settings
+  views proper structural types so values such as `let snapshot = current`
   can flow through inference, parameters, and returns without losing field
   identity. Tooling already presents the roots as read-only variables and
   navigates them to their declaring block.
+  - [x] Promote `current` and `old` to ordinary `StateSnapshot` references over
+    the existing transactional state GC object. Locals, inferred function
+    parameters, generic identity calls, and returns retain the snapshot without
+    copying it; state-field resolution, documentation, completion, semantic
+    highlighting, and navigation keep the original field identity. A lexical
+    binding named `current` or `old` still shadows the lifecycle root.
+  - [x] Promote `settings` and `oldSettings` to ordinary inferred
+    `SettingsView` values. The backend represents a view as a one-word selector
+    over the already-existing current/old setting globals, so binding, passing,
+    and returning one performs no GC allocation or value copying; field access
+    selects the corresponding storage, and direct `settings.field` reads remain
+    allocation-free. The name deliberately says “view”, not “snapshot”: it is
+    an immutable capability for observing one side of the runtime's current/old
+    settings pair rather than a permanently retained copy.
 
 ## P0 — Support versioned and discovered native state
 
@@ -640,23 +654,71 @@ executable name.
   - [x] Add focused catalog and guide documentation distinguishing bounded
     native-memory UTF-8 reads, Unity managed UTF-16 object reads, and the
     ordinary owned GC `String` value both produce.
-- [ ] Add catalog-owned floating-point helpers such as `round`, precision-aware
-  rounding, `floor`, `ceil`, `abs`, and finite/NaN checks. Extend contextual
-  numeric-literal inference so an exact integer-looking literal can satisfy an
-  `f32`/`f64` expectation without requiring a cosmetic `.0`, while retaining
-  range and precision diagnostics.
+- [x] Add catalog-owned floating-point helpers: intrinsic `abs`, `floor`, and
+  `ceil`, plus source-defined `round`, `roundTo`, `isNaN`, and `isFinite` on the
+  generic `Float` capability. `round` maps directly to Wasm `nearest`, and both
+  it and `roundTo` use unbiased ties-to-even semantics. Exact integer-looking
+  literals now satisfy contextual `f32`/`f64`
+  expectations without a cosmetic `.0`; values that would lose integer
+  precision produce a type diagnostic. Catalog validation, compile-time
+  inference tests, Wasm validation, and a runtime fixture cover both widths.
 - [ ] Complete `Duration` arithmetic and constructors, then add a monotonic
   `Instant`/elapsed-time API for debounce and delayed-split logic. Wall-clock
   calendar time should not be used where a monotonic clock is intended.
   - [x] Define `Duration.zero()` and signed integer
-    `Duration.fromMilliseconds(i64)` in standard-library source, alongside the
-    existing source-defined frames, parts, and floating-seconds constructors.
+    `Duration.fromWholeMilliseconds(i64)` in standard-library source, alongside
+    the existing source-defined frames, parts, and floating-seconds
+    constructors.
   - [x] Add exact signed integer seconds as source-defined
     `Duration.fromWholeSeconds(i64)`, keeping the floating-point
-    `fromSeconds(f32)` conversion visibly distinct.
-  - [ ] Add additional floating-point inputs based on real call sites. Design
-    arithmetic together with the user-facing operator
-    capability model rather than hard-coding `Duration` into binary typing.
+    `fromSeconds<T: Float>` conversion visibly distinct.
+  - [x] Generalize `Duration.fromSeconds` over the source-defined `Float`
+    capability so both f32 and the C#/ASL-typical f64 work without overloads.
+    Split milliseconds into generic `fromMilliseconds<T: Float>` and exact
+    `fromWholeMilliseconds(i64)` constructors, all implemented in library
+    source.
+  - [x] Normalize every constructor to one signed `(seconds, nanoseconds)`
+    representation, permit Duration values in ordinary source storage, and add
+    source-defined component/total accessors plus `add` and `subtract`. Keep
+    private representation fields visible only to source bodies owned by
+    `Duration`; user completion and field lookup must not expose them.
+  - [x] Make binary addition and subtraction catalog-declared language roles,
+    analogous to source-driven `Display`: ordinary privileged methods use
+    `@operator(add)` / `@operator(subtract)`, generated metadata indexes the
+    binding, type checking resolves syntax to a normal catalog call, and
+    lowering reuses its intrinsic or source body. Bind both the generic
+    `Numeric` capability and source-defined `Duration.add` / `subtract`; prefer
+    exact receiver implementations over capability defaults. Validate one
+    binding per owner/operator and require receiver, operand, and result types
+    to agree. Runtime coverage exercises normalized positive and negative
+    Duration results without any Duration-specific checker or backend branch.
+  - [x] Resolve `+=` and `-=` through those same catalog bindings. Typed
+    assignments retain their resolved call, Wasm IR owns either a primitive or
+    call-backed store operation, effects and reachability observe statement
+    call targets, and source-defined implementations are retained even when a
+    compound assignment is their only use. Duration compound assignment and
+    numeric local/global storage share this path.
+  - [x] Add exact signed `Duration.fromNanoseconds(i64)` rather than leaking
+    C#'s `TimeSpan` tick unit into the permanent API. Straightforward ports may
+    convert a C# tick count to its actual unit of 100 nanoseconds; negative
+    fractional values normalize without passing through floating point.
+  - [x] Add a monotonic `Instant` value for delayed splits and debouncing.
+    `Instant.now()` is the single trusted WASI monotonic-clock boundary;
+    saturating `durationSince` and `elapsed` are ordinary standard-library
+    source bodies returning `Duration`. Clock reads carry an explicit
+    `reads runtime state` effect, and runtime coverage fixes the clock readings
+    to prove elapsed and backwards-time behavior deterministically.
+    Source-defined `hasElapsed(Duration)` covers the common polling operation,
+    including an `Instant?` persisted across ticks. Defer `Instant + Duration`
+    until its overflow contract is chosen explicitly rather than inheriting an
+    accidental Wasm wraparound.
+  - [x] Extend catalog-declared operators to `<`, `<=`, `>`, and `>=`, with
+    operator-specific signature validation. `Duration` implements all four in
+    standard-library source using its normalized integer components, so delay
+    logic does not need a lossy floating-point conversion; numeric comparisons
+    retain their primitive fallback.
+  - [ ] Extend catalog-declared operators to multiplication, division, and
+    remainder when concrete non-numeric types require them.
 
 ## P1 — Model polling, settings, and timer integration explicitly
 
@@ -1127,6 +1189,9 @@ redistributable compatible workbench.
   premature cross-file complexity into every span and query.
 - [ ] Enrich diagnostics with focused labels, notes, and machine-applicable
   fixes as real confusing cases are found.
+  - [x] Let contextual wrapper inference flow across equality operands before
+    diagnosing constructors such as `None`, so `optionalValue == None` learns
+    `T?` from the opposite operand just as assignments and returns do.
 - [ ] Add snippets for state, settings, lifecycle blocks, match, records, and
   common standard-library patterns. Keep completion candidates compiler-owned
   and the VS Code client thin.

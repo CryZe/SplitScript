@@ -414,8 +414,19 @@ impl<'a> CatalogGenerator<'a> {
         let must_use = optional_attribute_name(&function.attributes, "mustUse")
             .map(|reason| format!("Some({})", quote(reason)))
             .unwrap_or_else(|| "None".to_owned());
+        let binary_operator = optional_attribute_name(&function.attributes, "operator")
+            .map(|operator| match operator {
+                "add" => "Some(StandardBinaryOperator::Add)",
+                "subtract" => "Some(StandardBinaryOperator::Subtract)",
+                "lessThan" => "Some(StandardBinaryOperator::LessThan)",
+                "lessThanOrEqual" => "Some(StandardBinaryOperator::LessThanOrEqual)",
+                "greaterThan" => "Some(StandardBinaryOperator::GreaterThan)",
+                "greaterThanOrEqual" => "Some(StandardBinaryOperator::GreaterThanOrEqual)",
+                _ => unreachable!("validated operator binding"),
+            })
+            .unwrap_or("None");
         output.push_str(&format!(
-                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, validation_fixture(StdlibItemId::{id}))], related: &[] }}, implementation: {implementation} }},\n",
+                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, validation_fixture(StdlibItemId::{id}))], related: &[] }}, implementation: {implementation} }},\n",
                 quote(&function.name),
                 quote(&qualified_name),
                 self.type_parameters(type_parameters, owner),

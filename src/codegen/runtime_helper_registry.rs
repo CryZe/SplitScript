@@ -135,6 +135,7 @@ pub(super) fn validate_intrinsic_effects() -> Vec<String> {
         }
         for effect in [
             Effect::ReadsTimer,
+            Effect::ReadsRuntime,
             Effect::ReadsProcess,
             Effect::WritesTimer,
             Effect::WritesRuntime,
@@ -182,6 +183,7 @@ fn collect_abi_effects(import: AbiImportId, effects: &mut EffectSet, errors: &mu
     for effect in AbiCatalog::new().import(import).effects {
         let mapped = match effect {
             AbiEffect::ReadsTimer => Some(Effect::ReadsTimer),
+            AbiEffect::ReadsRuntime => Some(Effect::ReadsRuntime),
             AbiEffect::WritesTimer => Some(Effect::WritesTimer),
             AbiEffect::WritesRuntime => Some(Effect::WritesRuntime),
             AbiEffect::ReadsProcess => Some(Effect::ReadsProcess),

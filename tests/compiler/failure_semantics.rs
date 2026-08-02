@@ -284,7 +284,7 @@ fn wasm_ir_owns_backend_call_targets_intrinsics_and_arguments() {
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
     let lowered = splitscript::lower_wasm(&checked);
-    let mut saw = [false; 4];
+    let mut saw = [false; 5];
 
     for expression in checked.typed_hir().expressions() {
         let Some(expected_target) = checked.typed_hir().call(expression.id) else {
@@ -297,14 +297,16 @@ fn wasm_ir_owns_backend_call_targets_intrinsics_and_arguments() {
         else {
             panic!("resolved calls must not remain deferred to typed HIR")
         };
-        let TypedExpressionKind::Call {
-            arguments: expected_arguments,
-            ..
-        } = &expression.kind
-        else {
-            unreachable!()
-        };
-        assert_eq!(arguments, expected_arguments);
+        match &expression.kind {
+            TypedExpressionKind::Call {
+                arguments: expected_arguments,
+                ..
+            } => assert_eq!(arguments, expected_arguments),
+            TypedExpressionKind::Binary { right, .. } => {
+                assert_eq!(arguments.as_slice(), [*right])
+            }
+            _ => unreachable!("only calls and catalog-backed operators resolve call targets"),
+        }
         match (target, expected_target) {
             (
                 CallTarget::UserFunction { function },
@@ -337,8 +339,11 @@ fn wasm_ir_owns_backend_call_targets_intrinsics_and_arguments() {
                 ResolvedCall::StandardLibrary { item: expected, .. },
             ) => {
                 assert_eq!(item, expected);
-                assert_eq!(*intrinsic, IntrinsicId::NumericMin);
-                saw[2] = true;
+                match intrinsic {
+                    IntrinsicId::NumericMin => saw[2] = true,
+                    IntrinsicId::NumericAdd => saw[4] = true,
+                    _ => panic!("unexpected intrinsic call target `{intrinsic:?}`"),
+                }
             }
             (
                 CallTarget::ResultError { result },

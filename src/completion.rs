@@ -859,6 +859,30 @@ fn add_inferred_fields(
     standard_library: &StandardLibrary,
 ) {
     match receiver {
+        TypeKind::StateSnapshot => {
+            if let Some(state) = &syntax.state {
+                for field in state.canonical_fields() {
+                    builder.add(simple_completion(
+                        &field.name,
+                        CompletionKind::Property,
+                        "state field",
+                    ));
+                }
+            }
+        }
+        TypeKind::SettingsView => {
+            for setting in &syntax.settings {
+                if !matches!(setting.kind, SettingKind::Title { .. }) {
+                    let mut completion = simple_completion(
+                        &setting.name,
+                        CompletionKind::Setting,
+                        &setting.description,
+                    );
+                    completion.documentation = setting.tooltip.clone();
+                    builder.add(completion);
+                }
+            }
+        }
         TypeKind::Record(id) => {
             if let Some(record) = syntax.records.iter().find(|record| record.id == *id) {
                 for field in &record.fields {
@@ -1228,7 +1252,11 @@ settings {
 
 whileAttached {
     let number: i32 = 4
+    let snapshot = current
+    let capturedSettings = settings
     current.po
+    snapshot.po
+    capturedSettings.en
     settings.en
     Mode.Ac
     process.re
@@ -1242,6 +1270,8 @@ whileAttached {
 "#;
         let mut database = CompilerDatabase::new(source);
         assert!(labels(&mut database, "current.po").contains(&"position".to_owned()));
+        assert!(labels(&mut database, "snapshot.po").contains(&"position".to_owned()));
+        assert!(labels(&mut database, "capturedSettings.en").contains(&"enabled".to_owned()));
         assert!(labels(&mut database, "settings.en").contains(&"enabled".to_owned()));
         assert!(labels(&mut database, "Mode.Ac").contains(&"Active".to_owned()));
         assert!(labels(&mut database, "process.re").contains(&"read".to_owned()));

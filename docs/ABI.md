@@ -1,7 +1,10 @@
 # Generated WebAssembly ABI
 
-SplitScript targets the `env` imports used by the ASL v2 prototype and the
-LiveSplit sandboxed Auto Splitting Runtime.
+SplitScript primarily targets the `env` imports used by the ASL v2 prototype
+and the LiveSplit sandboxed Auto Splitting Runtime. Features that need a
+standardized host facility may also use a narrowly scoped WASI import; the
+monotonic `Instant` clock uses
+`wasi_snapshot_preview1.clock_time_get`.
 
 This is an internal compiler/runtime contract, not part of the source-language
 standard library or its editor documentation. `src/abi.rs` is the source of
@@ -30,6 +33,7 @@ suite verifies the table below against the catalog renderer.
 | `timer_resume_game_time` | `() -> ()` |
 | `timer_set_variable` | `(i32, i32, i32, i32) -> ()` |
 | `runtime_set_tick_rate` | `(f64) -> ()` |
+| `clock_time_get` | `(i32, i64, i32) -> i32` |
 | `process_attach` | `(i32, i32) -> i64` |
 | `process_detach` | `(i64) -> ()` |
 | `process_is_open` | `(i64) -> i32` |
@@ -57,9 +61,11 @@ suite verifies the table below against the catalog renderer.
 | `setting_value_get_bool` | `(i64, i32) -> i32` |
 | `setting_value_get_string` | `(i64, i32, i32) -> i32` |
 
-The compiler currently imports the complete core table even if a particular
-source file does not use every action. This makes the ABI deterministic and easy
-to inspect. Dead-import elimination can be added later.
+The compiler plans imports from reachable operations. Every autosplitter gets
+the small lifecycle baseline; optional facilities such as process reads,
+settings, logging, and the monotonic clock are imported only when reachable
+source needs them. Import identities and ordering remain deterministic through
+the ABI catalog.
 
 `_start` registers the complete settings GUI, including nested titles,
 tooltips, choices, and file filters. Every exported `update` call loads a
@@ -70,14 +76,15 @@ available as `oldSettings`.
 
 ## GC types
 
-Type index 0 is the source-specific state struct. Eight- and sixteen-bit fields
-use packed GC fields; wider numbers and references use their native value
-types. The remaining built-in recursive-group types are `Duration` (1),
-`String` (2), `Module` (3), `UnityModule` (4), `UnityImage` (5), `UnityClass`
-(6), `UnityField` (7), and the attach continuation frame (8). User records,
-enums, and arrays follow at index 9. String backing arrays are internally
-mutable so decoders and formatters can construct dynamically sized values, but
-the source language exposes strings as immutable values.
+The compiler derives GC layouts and type indices from the reachable catalog and
+source program; consumers must not rely on fixed numeric indices. Eight- and
+sixteen-bit fields use packed GC fields, while wider numbers and references use
+their native value types. Standard-library records such as `Duration` and
+`Instant`, source records and enums, constructed arrays, wrapper types, state
+snapshots, and an attach continuation frame are included only as required.
+String backing arrays are internally mutable so decoders and formatters can
+construct dynamically sized values, but the source language exposes strings as
+immutable values.
 
 Signature needles and masks are parsed by the compiler and stored in static
 linear-memory data. A generated scanner reads the target module through

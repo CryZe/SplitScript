@@ -33,6 +33,7 @@ pub enum Effect {
     Allocates,
     MutatesValue,
     ReadsTimer,
+    ReadsRuntime,
     ReadsProcess,
     RequiresAttachedProcess,
     Retryable,
@@ -43,11 +44,12 @@ pub enum Effect {
 }
 
 impl Effect {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 12] = [
         Self::Pure,
         Self::Allocates,
         Self::MutatesValue,
         Self::ReadsTimer,
+        Self::ReadsRuntime,
         Self::ReadsProcess,
         Self::RequiresAttachedProcess,
         Self::Retryable,
@@ -67,6 +69,7 @@ impl Effect {
             Self::Allocates => "allocates",
             Self::MutatesValue => "mutates the receiver",
             Self::ReadsTimer => "reads timer state",
+            Self::ReadsRuntime => "reads runtime state",
             Self::ReadsProcess => "reads process memory",
             Self::RequiresAttachedProcess => "requires an attached process",
             Self::Retryable => "retryable",
@@ -259,6 +262,21 @@ pub struct Deprecation {
     pub replacement: Option<StdlibItemId>,
 }
 
+/// Source-language binary syntax implemented by an ordinary catalog method.
+///
+/// Keeping this identity in the backend-neutral schema lets parsing, type
+/// checking, documentation, and lowering agree on one declaration without
+/// teaching those stages about particular standard-library types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StandardBinaryOperator {
+    Add,
+    Subtract,
+    LessThan,
+    LessThanOrEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StdlibItem {
     pub id: StdlibItemId,
@@ -266,6 +284,7 @@ pub struct StdlibItem {
     pub name: &'static str,
     pub qualified_name: &'static str,
     pub kind: ItemKind,
+    pub binary_operator: Option<StandardBinaryOperator>,
     pub signature: Signature,
     pub must_use: Option<&'static str>,
     pub deprecation: Option<Deprecation>,

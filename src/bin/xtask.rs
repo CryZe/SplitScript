@@ -212,6 +212,27 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/float_helpers.split",
+        output: "float_helpers.wasm",
+        profile: "release",
+        harness: "tests/float_helpers_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
+        source: "tests/duration_helpers.split",
+        output: "duration_helpers.wasm",
+        profile: "release",
+        harness: "tests/duration_helpers_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
+        source: "tests/instant_helpers.split",
+        output: "instant_helpers.wasm",
+        profile: "release",
+        harness: "tests/instant_helpers_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/for_loop.split",
         output: "for_loop.wasm",
         profile: "release",

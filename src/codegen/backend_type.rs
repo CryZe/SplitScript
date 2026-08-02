@@ -18,6 +18,8 @@ macro_rules! define_backend_type {
         pub(super) enum Type {
             $($core),*,
             Standard(StdlibTypeId),
+            StateSnapshot,
+            SettingsView,
             Record(RecordId),
             Enum(EnumId),
             Array(ArrayTypeId),

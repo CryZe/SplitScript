@@ -1116,9 +1116,12 @@ fn compile_async_flow(
     for statement in &block.statements {
         match statement {
             wasm_ir::Statement::Store {
-                target, op, value, ..
+                target,
+                operation,
+                value,
+                ..
             } => {
-                compile_assignment(function, *target, *op, *value, context);
+                compile_assignment(function, *target, operation.as_ref(), *value, context);
             }
             wasm_ir::Statement::If {
                 condition,

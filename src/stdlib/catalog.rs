@@ -19,8 +19,8 @@ use super::{
         StdlibStateProviderId, StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
     },
     schema::{
-        Implementation, ItemKind, Parameter, ParameterRule, Signature, StdlibItem, TypeParameter,
-        TypeRef,
+        Implementation, ItemKind, Parameter, ParameterRule, Signature, StandardBinaryOperator,
+        StdlibItem, TypeParameter, TypeRef,
     },
 };
 
@@ -71,6 +71,18 @@ whileAttached {
     let minimum = value.min(7)
     let maximum = value.max(10)
     let bounded = value.clamp(0, 7)
+}"#;
+const FLOAT_EXAMPLE: &str = r#"state "game.exe" {}
+whileAttached {
+    let sample: f32 = -1.25
+    let whole: f64 = 2
+    let magnitude = sample.abs()
+    let lower = sample.floor()
+    let upper = sample.ceil()
+    let nearest = sample.round()
+    let oneDecimalPlace = sample.roundTo(1)
+    let finite = sample.isFinite()
+    let notANumber = sample.isNaN()
 }"#;
 const ARRAY_EXAMPLE: &str = r#"state "game.exe" {}
 whileAttached {
@@ -124,9 +136,18 @@ const GBA_EXAMPLE: &str = r#"state GBA {
 const fn validation_fixture(item: StdlibItemId) -> &'static str {
     match item {
         StdlibItemId::NextTick => NEXT_TICK_EXAMPLE,
-        StdlibItemId::NumericMin | StdlibItemId::NumericMax | StdlibItemId::NumericClamp => {
-            NUMERIC_EXAMPLE
-        }
+        StdlibItemId::NumericAdd
+        | StdlibItemId::NumericSubtract
+        | StdlibItemId::NumericMin
+        | StdlibItemId::NumericMax
+        | StdlibItemId::NumericClamp => NUMERIC_EXAMPLE,
+        StdlibItemId::FloatAbs
+        | StdlibItemId::FloatFloor
+        | StdlibItemId::FloatCeil
+        | StdlibItemId::FloatRound
+        | StdlibItemId::FloatRoundTo
+        | StdlibItemId::FloatIsNaN
+        | StdlibItemId::FloatIsFinite => FLOAT_EXAMPLE,
         StdlibItemId::ArrayLength | StdlibItemId::ArrayGet | StdlibItemId::ArraySet => {
             ARRAY_EXAMPLE
         }
@@ -148,8 +169,16 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::UnityClassStaticTable
         | StdlibItemId::UnityClassStaticInstance => UNITY_EXAMPLE,
         StdlibItemId::DurationFromFrames
+        | StdlibItemId::DurationFromMilliseconds
         | StdlibItemId::DurationFromParts
-        | StdlibItemId::DurationFromSeconds => DURATION_EXAMPLE,
+        | StdlibItemId::DurationFromSeconds
+        | StdlibItemId::DurationFromWholeMilliseconds
+        | StdlibItemId::DurationWholeSeconds
+        | StdlibItemId::DurationSubsecondNanoseconds
+        | StdlibItemId::DurationTotalSeconds
+        | StdlibItemId::DurationTotalMilliseconds
+        | StdlibItemId::DurationAdd
+        | StdlibItemId::DurationSubtract => DURATION_EXAMPLE,
         StdlibItemId::GbaEmulatorRead => GBA_EXAMPLE,
         StdlibItemId::Print
         | StdlibItemId::SetVariable

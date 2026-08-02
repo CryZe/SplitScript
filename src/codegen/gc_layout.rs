@@ -196,6 +196,7 @@ impl GcLayout {
 
     pub(super) fn index(&self, ty: Type) -> u32 {
         match ty {
+            Type::StateSnapshot => STATE_TYPE,
             Type::Standard(standard) => self.standard_index(standard),
             Type::Record(_)
             | Type::Enum(_)
@@ -212,12 +213,21 @@ impl GcLayout {
     pub(super) fn val_type(&self, ty: Type) -> ValType {
         match ty {
             Type::Void => unreachable!(),
-            Type::Bool | Type::I8 | Type::U8 | Type::I16 | Type::U16 | Type::I32 | Type::U32 => {
-                ValType::I32
-            }
+            Type::Bool
+            | Type::I8
+            | Type::U8
+            | Type::I16
+            | Type::U16
+            | Type::I32
+            | Type::U32
+            | Type::SettingsView => ValType::I32,
             Type::I64 | Type::U64 | Type::Address => ValType::I64,
             Type::F32 => ValType::F32,
             Type::F64 => ValType::F64,
+            Type::StateSnapshot => ValType::Ref(RefType {
+                nullable: true,
+                heap_type: HeapType::Concrete(STATE_TYPE),
+            }),
             Type::Standard(standard) => {
                 match self.standard_library.type_decl(standard).representation {
                     RuntimeRepresentation::Scalar { storage } => {

@@ -6,8 +6,8 @@
 
 use crate::{
     stdlib::{
-        CapabilityBehavior, ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem,
-        StdlibTypeConstructorId, TypeRef,
+        CapabilityBehavior, ItemKind, StandardBinaryOperator, StandardLibrary, StdlibCapabilityId,
+        StdlibItem, StdlibTypeConstructorId, TypeRef,
     },
     types::TypeKind,
 };
@@ -30,6 +30,7 @@ impl CallCandidate {
 pub trait StandardLibrarySemanticExt {
     fn function_candidates(&self, path: &[String]) -> Vec<CallCandidate>;
     fn method_candidates(&self, name: &str) -> Vec<CallCandidate>;
+    fn binary_operator_candidates(&self, operator: StandardBinaryOperator) -> Vec<CallCandidate>;
     fn methods_for_type(&self, receiver: &TypeKind) -> Vec<&'static StdlibItem>;
     fn resolve_path(&self, path: &[String]) -> Option<CallCandidate>;
 }
@@ -49,6 +50,12 @@ impl StandardLibrarySemanticExt for StandardLibrary {
 
     fn method_candidates(&self, name: &str) -> Vec<CallCandidate> {
         self.method_items_named(name)
+            .map(|item| CallCandidate { item })
+            .collect()
+    }
+
+    fn binary_operator_candidates(&self, operator: StandardBinaryOperator) -> Vec<CallCandidate> {
+        self.binary_operator_items(operator)
             .map(|item| CallCandidate { item })
             .collect()
     }
@@ -115,6 +122,7 @@ fn semantic_type_may_have_capability(
     match ty {
         TypeKind::Builtin(builtin) => library.core_type_has_capability(*builtin, capability),
         TypeKind::Standard(standard) => library.type_has_capability(*standard, capability),
+        TypeKind::StateSnapshot | TypeKind::SettingsView => false,
         TypeKind::Record(_) => matches!(
             behavior,
             CapabilityBehavior::StructuralEquality | CapabilityBehavior::StructuralMemoryLayout

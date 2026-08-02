@@ -41,6 +41,7 @@ pub struct AbiValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AbiEffect {
     ReadsTimer,
+    ReadsRuntime,
     WritesTimer,
     WritesRuntime,
     ManagesProcess,
@@ -102,6 +103,7 @@ const fn output(name: &'static str) -> AbiValue {
 }
 
 const TIMER_READ: &[AbiEffect] = &[AbiEffect::ReadsTimer];
+const RUNTIME_READ: &[AbiEffect] = &[AbiEffect::ReadsRuntime];
 const TIMER_WRITE: &[AbiEffect] = &[AbiEffect::WritesTimer];
 const RUNTIME_WRITE: &[AbiEffect] = &[AbiEffect::WritesRuntime];
 const PROCESS_MANAGEMENT: &[AbiEffect] = &[AbiEffect::ManagesProcess];
@@ -110,10 +112,10 @@ const SETTINGS_REGISTRATION: &[AbiEffect] = &[AbiEffect::RegistersSettings];
 const SETTINGS_READ: &[AbiEffect] = &[AbiEffect::ReadsSettings];
 
 macro_rules! import {
-    ($id:ident, $name:literal, $params:expr, $results:expr, $effects:expr, $lifetime:literal, $summary:literal) => {
+    ($id:ident, $(in $module:literal,)? $name:literal, $params:expr, $results:expr, $effects:expr, $lifetime:literal, $summary:literal) => {
         AbiImport {
             id: AbiImportId::$id,
-            module: "env",
+            module: import!(@module $($module)?),
             name: $name,
             parameters: $params,
             results: $results,
@@ -122,12 +124,19 @@ macro_rules! import {
             summary: $summary,
         }
     };
+    (@module $module:literal) => {
+        $module
+    };
+    (@module) => {
+        "env"
+    };
 }
 
 macro_rules! abi_catalog {
     ($(
         import!(
             $id:ident,
+            $(in $module:literal,)?
             $name:literal,
             $parameters:expr,
             $results:expr,
@@ -154,6 +163,7 @@ macro_rules! abi_catalog {
         const IMPORTS: &[AbiImport] = &[$(
             import!(
                 $id,
+                $(in $module,)?
                 $name,
                 $parameters,
                 $results,
@@ -254,6 +264,20 @@ abi_catalog! {
         RUNTIME_WRITE,
         "Retains no guest values.",
         "Changes the runtime update frequency."
+    ),
+    import!(
+        WasiClockTimeGet,
+        in "wasi_snapshot_preview1",
+        "clock_time_get",
+        &[
+            value("clock_id", AbiType::I32),
+            value("precision", AbiType::I64),
+            output("timestamp_pointer")
+        ],
+        &[value("errno", AbiType::I32)],
+        RUNTIME_READ,
+        "Writes one unsigned 64-bit monotonic timestamp to guest memory.",
+        "Reads the WASI monotonic clock in nanoseconds."
     ),
     import!(
         ProcessAttach,

@@ -26,6 +26,8 @@ impl Type {
             Self::Known(id) => match types.kind(id) {
                 TypeKind::Builtin(builtin) => ResolvedTypeRef::Core(*builtin),
                 TypeKind::Standard(standard) => ResolvedTypeRef::Standard(*standard),
+                TypeKind::StateSnapshot => ResolvedTypeRef::StateSnapshot,
+                TypeKind::SettingsView => ResolvedTypeRef::SettingsView,
                 TypeKind::Record(record) => ResolvedTypeRef::Record(*record),
                 TypeKind::Enum(enumeration) => ResolvedTypeRef::Enum(*enumeration),
                 TypeKind::GenericParameter { .. } => ResolvedTypeRef::GenericParameter(id),
@@ -242,6 +244,8 @@ impl InferenceContext {
         match self.types.kind(id) {
             TypeKind::Builtin(builtin) => builtin.to_string(),
             TypeKind::Standard(standard) => self.standard_library.type_decl(*standard).name.into(),
+            TypeKind::StateSnapshot => "StateSnapshot".into(),
+            TypeKind::SettingsView => "SettingsView".into(),
             TypeKind::Record(record) => format!("record#{record}"),
             TypeKind::Enum(enumeration) => format!("enum#{enumeration}"),
             TypeKind::GenericParameter { index, .. } => {
@@ -486,6 +490,14 @@ impl InferenceContext {
                 continue;
             }
             let requirements = &self.variables[root as usize].requirements;
+            if requirements.contains(StdlibCapabilityId::Float)
+                && requirements.contains(StdlibCapabilityId::MemoryReadable)
+            {
+                errors.push(error(format!(
+                    "cannot infer whether process memory uses `f32` or `f64` for type variable `?{root}`; add a type annotation to the state field or memory read"
+                )));
+                continue;
+            }
             let default = if requirements.intersects(&[StdlibCapabilityId::Float]) {
                 Some(self.known_builtin(BuiltinType::F64))
             } else if requirements.intersects(&[
@@ -916,8 +928,15 @@ fn fits_unsigned_literal(types: &TypeStore, value: u64, ty: Type) -> bool {
         TypeKind::Builtin(BuiltinType::I32) => value <= i32::MAX as u64,
         TypeKind::Builtin(BuiltinType::U64 | BuiltinType::Address) => true,
         TypeKind::Builtin(BuiltinType::I64) => value <= i64::MAX as u64,
+        TypeKind::Builtin(BuiltinType::F32) => integer_is_exact_at_precision(value, 24),
+        TypeKind::Builtin(BuiltinType::F64) => integer_is_exact_at_precision(value, 53),
         _ => false,
     }
+}
+
+fn integer_is_exact_at_precision(value: u64, precision: u32) -> bool {
+    let significant_bits = u64::BITS - value.leading_zeros();
+    significant_bits <= precision || value.trailing_zeros() >= significant_bits - precision
 }
 
 fn type_meets_requirements(
@@ -949,6 +968,7 @@ pub(crate) fn type_may_have_capability(
         Type::Known(id) => match types.kind(id) {
             TypeKind::Builtin(builtin) => library.core_type_has_capability(*builtin, capability),
             TypeKind::Standard(standard) => library.type_has_capability(*standard, capability),
+            TypeKind::StateSnapshot | TypeKind::SettingsView => false,
             TypeKind::Record(_) => matches!(
                 behavior,
                 CapabilityBehavior::StructuralEquality | CapabilityBehavior::StructuralMemoryLayout

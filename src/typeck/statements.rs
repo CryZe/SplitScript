@@ -75,7 +75,16 @@ impl Checker {
                         if self.expr(value, Some(binding.ty)).is_some()
                             && let Some(op) = op
                         {
-                            self.require_binary_operand(*op, binding.ty, *span);
+                            let resolved = binding.id.and_then(|target| {
+                                self.resolve_assignment_operator(
+                                    *id, *op, binding.ty, target, *span,
+                                )
+                            });
+                            if let Some(result) = resolved {
+                                self.unify(result, binding.ty, *span);
+                            } else {
+                                self.require_binary_operand(*op, binding.ty, *span);
+                            }
                         }
                     }
                     None => self.error(format!("unknown variable `{name}`"), *span),
@@ -417,7 +426,7 @@ impl Checker {
         }
     }
 
-    fn binding(&self, name: &str) -> Option<Binding> {
+    pub(super) fn binding(&self, name: &str) -> Option<Binding> {
         self.scopes
             .iter()
             .rev()

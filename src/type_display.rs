@@ -15,6 +15,8 @@ pub(crate) fn display_type(ty: TypeId, snapshot: &SemanticSnapshot) -> String {
             .type_decl(*standard)
             .name
             .to_owned(),
+        TypeKind::StateSnapshot => "StateSnapshot".to_owned(),
+        TypeKind::SettingsView => "SettingsView".to_owned(),
         TypeKind::Record(id) => snapshot
             .syntax()
             .records

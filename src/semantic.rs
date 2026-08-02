@@ -112,6 +112,10 @@ pub struct ValueConversion {
 pub enum ResolvedValue {
     ProviderValue(StdlibStateProviderId),
     Variable(ValueId),
+    CurrentSnapshot,
+    OldSnapshot,
+    SettingsView,
+    OldSettingsView,
     CurrentState(ValueId),
     OldState(ValueId),
     Setting(ValueId),
@@ -123,7 +127,11 @@ impl ResolvedValue {
     /// values are compiler/catalog-owned roots and have no source declaration.
     pub fn source_value(self) -> Option<ValueId> {
         match self {
-            Self::ProviderValue(_) => None,
+            Self::ProviderValue(_)
+            | Self::CurrentSnapshot
+            | Self::OldSnapshot
+            | Self::SettingsView
+            | Self::OldSettingsView => None,
             Self::Variable(value)
             | Self::CurrentState(value)
             | Self::OldState(value)
@@ -190,6 +198,8 @@ impl ResolvedReceiver {
 /// A field selected after the root of a resolved value path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResolvedMember {
+    StateField(ValueId),
+    SettingField(ValueId),
     RecordField(RecordFieldId),
     StandardField(StdlibFieldId),
 }
@@ -260,6 +270,7 @@ pub struct SemanticModel {
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
     assignments: HashMap<AssignmentId, ValueId>,
+    assignment_calls: HashMap<AssignmentId, ResolvedCall>,
     value_conversions: HashMap<ExprId, ValueConversion>,
     visible_expression_count: Option<usize>,
 }
@@ -397,6 +408,8 @@ impl SemanticModel {
             TypeKind::Result { value, .. } => Some((2, self.specialize_type(instance, *value))),
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
+            | TypeKind::StateSnapshot
+            | TypeKind::SettingsView
             | TypeKind::Record(_)
             | TypeKind::Enum(_)
             | TypeKind::GenericParameter { .. } => None,
@@ -541,6 +554,8 @@ impl SemanticModel {
             }
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
+            | TypeKind::StateSnapshot
+            | TypeKind::SettingsView
             | TypeKind::Record(_)
             | TypeKind::Enum(_)
             | TypeKind::GenericParameter { .. } => ty,
@@ -554,6 +569,8 @@ impl SemanticModel {
         match self.types.kind(ty) {
             TypeKind::Builtin(core) => crate::types::ResolvedTypeRef::Core(*core),
             TypeKind::Standard(standard) => crate::types::ResolvedTypeRef::Standard(*standard),
+            TypeKind::StateSnapshot => crate::types::ResolvedTypeRef::StateSnapshot,
+            TypeKind::SettingsView => crate::types::ResolvedTypeRef::SettingsView,
             TypeKind::Record(record) => crate::types::ResolvedTypeRef::Record(*record),
             TypeKind::Enum(enumeration) => crate::types::ResolvedTypeRef::Enum(*enumeration),
             TypeKind::GenericParameter { .. } => {
@@ -722,6 +739,10 @@ impl SemanticModel {
         self.assignments.get(&assignment).copied()
     }
 
+    pub fn assignment_call(&self, assignment: AssignmentId) -> Option<&ResolvedCall> {
+        self.assignment_calls.get(&assignment)
+    }
+
     pub fn assignment_targets(&self) -> impl Iterator<Item = (AssignmentId, ValueId)> + '_ {
         self.assignments
             .iter()
@@ -809,6 +830,7 @@ pub(crate) struct SemanticBuilder {
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
     assignments: HashMap<AssignmentId, ValueId>,
+    assignment_calls: HashMap<AssignmentId, PendingResolvedCall>,
     value_conversions: HashMap<ExprId, PendingValueConversion>,
 }
 
@@ -850,6 +872,18 @@ impl SemanticBuilder {
     pub(crate) fn resolve_call(&mut self, expression: ExprId, call: PendingResolvedCall) {
         let previous = self.calls.insert(expression, call);
         debug_assert!(previous.is_none(), "call expression IDs must be unique");
+    }
+
+    pub(crate) fn resolve_assignment_call(
+        &mut self,
+        assignment: AssignmentId,
+        call: PendingResolvedCall,
+    ) {
+        let previous = self.assignment_calls.insert(assignment, call);
+        debug_assert!(
+            previous.is_none(),
+            "assignment operator call must be unique"
+        );
     }
 
     pub(crate) fn resolve_value(&mut self, expression: ExprId, value: ResolvedValue) {
@@ -1036,6 +1070,7 @@ impl SemanticBuilder {
             setting_choice_defaults,
             setting_choice_options,
             assignments,
+            assignment_calls,
             value_conversions,
         } = self;
         // WebAssembly GC layouts are nominal. Keep every allocated constructed
@@ -1050,85 +1085,90 @@ impl SemanticBuilder {
         for result in results {
             types.intern_inferred(Type::Result(result.id), arrays, options, results);
         }
-        let calls = calls
-            .into_iter()
-            .map(|(expression, call)| {
-                let call = match call {
-                    PendingResolvedCall::UserFunction {
-                        function,
-                        type_arguments,
-                        signature,
-                    } => ResolvedCall::UserFunction {
-                        function,
-                        type_arguments: type_arguments
-                            .into_iter()
-                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
-                            .collect(),
-                        signature: signature
-                            .into_iter()
-                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
-                            .collect(),
-                    },
-                    PendingResolvedCall::UserMethod {
-                        function,
-                        type_arguments,
-                        signature,
-                        receiver,
-                        receiver_type,
-                    } => ResolvedCall::UserMethod {
-                        function,
-                        type_arguments: type_arguments
-                            .into_iter()
-                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
-                            .collect(),
-                        signature: signature
-                            .into_iter()
-                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
-                            .collect(),
-                        receiver,
-                        receiver_type: types.intern_inferred(
-                            resolve(receiver_type),
-                            arrays,
-                            options,
-                            results,
-                        ),
-                    },
-                    PendingResolvedCall::StandardLibrary {
-                        item,
-                        type_arguments,
-                        signature,
-                        receiver,
-                        receiver_type,
-                    } => ResolvedCall::StandardLibrary {
-                        item,
-                        type_arguments: type_arguments
-                            .into_iter()
-                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
-                            .collect(),
-                        signature: signature
-                            .into_iter()
-                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
-                            .collect(),
-                        receiver,
-                        receiver_type: receiver_type
-                            .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results)),
-                    },
-                    PendingResolvedCall::ResultError { result } => {
-                        let result = resolved_result_layout(resolve(Type::Result(result)), &types);
-                        ResolvedCall::ResultError { result }
-                    }
-                    PendingResolvedCall::OptionSome { option } => {
-                        let option = resolved_option_layout(resolve(Type::Option(option)), &types);
-                        ResolvedCall::OptionSome { option }
-                    }
-                    PendingResolvedCall::ResultSuccess { result } => {
-                        let result = resolved_result_layout(resolve(Type::Result(result)), &types);
-                        ResolvedCall::ResultSuccess { result }
-                    }
-                };
-                (expression, call)
-            })
-            .collect();
+        let (calls, assignment_calls) = {
+            let mut finish_call = |call| match call {
+                PendingResolvedCall::UserFunction {
+                    function,
+                    type_arguments,
+                    signature,
+                } => ResolvedCall::UserFunction {
+                    function,
+                    type_arguments: type_arguments
+                        .into_iter()
+                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .collect(),
+                    signature: signature
+                        .into_iter()
+                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .collect(),
+                },
+                PendingResolvedCall::UserMethod {
+                    function,
+                    type_arguments,
+                    signature,
+                    receiver,
+                    receiver_type,
+                } => ResolvedCall::UserMethod {
+                    function,
+                    type_arguments: type_arguments
+                        .into_iter()
+                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .collect(),
+                    signature: signature
+                        .into_iter()
+                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .collect(),
+                    receiver,
+                    receiver_type: types.intern_inferred(
+                        resolve(receiver_type),
+                        arrays,
+                        options,
+                        results,
+                    ),
+                },
+                PendingResolvedCall::StandardLibrary {
+                    item,
+                    type_arguments,
+                    signature,
+                    receiver,
+                    receiver_type,
+                } => ResolvedCall::StandardLibrary {
+                    item,
+                    type_arguments: type_arguments
+                        .into_iter()
+                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .collect(),
+                    signature: signature
+                        .into_iter()
+                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results))
+                        .collect(),
+                    receiver,
+                    receiver_type: receiver_type
+                        .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results)),
+                },
+                PendingResolvedCall::ResultError { result } => {
+                    let result = resolved_result_layout(resolve(Type::Result(result)), &types);
+                    ResolvedCall::ResultError { result }
+                }
+                PendingResolvedCall::OptionSome { option } => {
+                    let option = resolved_option_layout(resolve(Type::Option(option)), &types);
+                    ResolvedCall::OptionSome { option }
+                }
+                PendingResolvedCall::ResultSuccess { result } => {
+                    let result = resolved_result_layout(resolve(Type::Result(result)), &types);
+                    ResolvedCall::ResultSuccess { result }
+                }
+            };
+            let calls = calls
+                .into_iter()
+                .map(|(expression, call)| (expression, finish_call(call)))
+                .collect();
+            let assignment_calls = assignment_calls
+                .into_iter()
+                .map(|(assignment, call)| (assignment, finish_call(call)))
+                .collect();
+            (calls, assignment_calls)
+        };
         let expression_types = expression_types
             .into_iter()
             .map(|(expression, ty)| {
@@ -1284,6 +1324,7 @@ impl SemanticBuilder {
             setting_choice_defaults,
             setting_choice_options,
             assignments,
+            assignment_calls,
             value_conversions,
             visible_expression_count: None,
         }

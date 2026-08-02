@@ -106,12 +106,20 @@ fn diagnostics_expose_stable_stage_codes_and_severity() {
         "#,
     )
     .expect_err("process access requires an attachment");
-    assert!(
-        semantic
-            .iter()
-            .all(|diagnostic| diagnostic.code == DiagnosticCode::Semantic)
-    );
+    assert!(semantic.iter().any(|diagnostic| {
+        diagnostic.severity == DiagnosticSeverity::Error
+            && diagnostic.code == DiagnosticCode::Semantic
+    }));
+    assert!(semantic.iter().any(|diagnostic| {
+        diagnostic.severity == DiagnosticSeverity::Warning
+            && diagnostic.code == DiagnosticCode::MustUse
+    }));
     assert_eq!(DiagnosticCode::Semantic.as_str(), "SS0004");
+
+    assert_eq!(DiagnosticCode::MustUse.as_str(), "SS1001");
+    assert_eq!(DiagnosticCode::UnusedBinding.as_str(), "SS1002");
+    assert_eq!(DiagnosticCode::UnusedDeclaration.as_str(), "SS1003");
+    assert_eq!(DiagnosticCode::UnusedMember.as_str(), "SS1004");
 }
 
 #[test]

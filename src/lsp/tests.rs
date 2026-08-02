@@ -138,6 +138,35 @@ fn changes_reuse_the_document_database_and_formatting_ignores_type_errors() {
 }
 
 #[test]
+fn publishes_unused_binding_warnings_without_rejecting_the_document() {
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    let diagnostics = server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": "file:///game.split",
+                "version": 1,
+                "text": "state \"game.exe\" {} whileAttached { let unused = 1 }"
+            }
+        }),
+    ));
+    let warning = &diagnostics[0]["params"]["diagnostics"][0];
+    assert_eq!(warning["severity"], 2);
+    assert_eq!(warning["code"], "SS1002");
+    assert!(
+        warning["message"]
+            .as_str()
+            .unwrap()
+            .contains("unused variable")
+    );
+    assert_eq!(
+        warning["data"]["fixes"][0]["applicability"],
+        "machine-applicable"
+    );
+}
+
+#[test]
 fn positions_use_utf16_code_units_and_close_clears_diagnostics() {
     assert_eq!(
         position("🦊x", "🦊".len()),
@@ -918,4 +947,57 @@ fn document_symbols_and_code_actions_preserve_compiler_structure() {
         }
     }));
     assert!(unrelated[0]["result"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn unused_member_code_actions_apply_validated_multi_edit_suppressions() {
+    let source = concat!(
+        "record Pair {\n",
+        "    used: i32\n",
+        "    unused: i32\n",
+        "}\n",
+        "state \"game.exe\" {}\n",
+        "fn pair() -> Pair { return Pair { used: 1, unused: 2 } }\n",
+        "whileAttached { pair().used }\n"
+    );
+    let uri = "file:///unused-member.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    let diagnostics = server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    let published = diagnostics[0]["params"]["diagnostics"].as_array().unwrap();
+    assert_eq!(published.len(), 1, "{published:#?}");
+    assert_eq!(published[0]["code"], "SS1004", "{published:#?}");
+
+    let actions = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 23,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": position(source, source.len())
+            },
+            "context": {
+                "diagnostics": published,
+                "only": ["quickfix"]
+            }
+        }
+    }));
+    let quick_fixes = actions[0]["result"].as_array().unwrap();
+    assert_eq!(quick_fixes.len(), 1, "{quick_fixes:#?}");
+    assert_eq!(quick_fixes[0]["title"], "rename `unused` to `_unused`");
+    assert_eq!(quick_fixes[0]["isPreferred"], true);
+    let edits = quick_fixes[0]["edit"]["changes"][uri].as_array().unwrap();
+    assert_eq!(edits.len(), 2);
+    assert!(edits.iter().all(|edit| edit["newText"] == "_unused"));
 }

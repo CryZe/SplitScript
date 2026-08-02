@@ -10,8 +10,8 @@ use splitscript::{
         },
         stdlib::{
             Availability, CancellationKind, CoreTypeId, Effect, Implementation, StandardLibrary,
-            StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibTypeId, StdlibVariantId,
-            SuspensionKind,
+            StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibTypeConstructorId,
+            StdlibTypeId, StdlibVariantId, SuspensionKind,
         },
         types::{BuiltinType, TypeKind},
     },

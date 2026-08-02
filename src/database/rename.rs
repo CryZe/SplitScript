@@ -19,6 +19,12 @@ pub struct RenameTarget {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenamePlan {
+    pub replacement: String,
+    pub spans: Vec<Span>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RenameError {
     Diagnostics(Arc<[Diagnostic]>),
     NotRenameable,
@@ -143,6 +149,38 @@ impl CompilerDatabase {
             }
         }
         Ok(spans)
+    }
+
+    /// Plans an underscore-prefixed rename for a compiler warning.
+    ///
+    /// The ordinary rename validator proves that all references retain their
+    /// declaration identities after the edit. Additional underscores are
+    /// tried when the most natural spelling would collide with an existing
+    /// binding.
+    pub fn underscore_suppression_at(
+        &mut self,
+        offset: usize,
+    ) -> Result<Option<RenamePlan>, RenameError> {
+        let Some(target) = self
+            .rename_target_at(offset)
+            .map_err(RenameError::Diagnostics)?
+        else {
+            return Ok(None);
+        };
+        if target.name.starts_with('_') {
+            return Ok(None);
+        }
+
+        let mut replacement = format!("_{}", target.name);
+        loop {
+            match self.rename_at(offset, &replacement) {
+                Ok(spans) => return Ok(Some(RenamePlan { replacement, spans })),
+                Err(RenameError::ConflictingBinding | RenameError::ReservedIdentifier) => {
+                    replacement.insert(0, '_');
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     fn is_generated_layout_symbol(&mut self, id: SourceDefinitionId) -> bool {

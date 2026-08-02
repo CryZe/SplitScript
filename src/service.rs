@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     BuildProfile, CompilerContext, CompilerOptions, Diagnostic, DiagnosticFix, DiagnosticLabel,
-    DiagnosticLabelStyle, DiagnosticSeverity, FixApplicability, TextEdit,
-    compile_with_context_and_options,
+    DiagnosticLabelStyle, DiagnosticSeverity, FixApplicability, TextEdit, WarningPolicy,
+    compile_with_context_and_options_diagnostics,
 };
 
 pub const COMPILER_SERVICE_PROTOCOL_VERSION: u32 = 1;
@@ -26,6 +26,8 @@ pub struct CompileRequest {
     pub revision: u64,
     pub source: String,
     pub profile: BuildProfile,
+    #[serde(default)]
+    pub warnings: WarningPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,13 +194,20 @@ impl CompilerService {
             revision,
             source,
             profile,
+            warnings,
         } = request;
-        let (diagnostics, artifact) = match compile_with_context_and_options(
+        let (diagnostics, artifact) = match compile_with_context_and_options_diagnostics(
             self.context.clone(),
             &source,
-            CompilerOptions { profile },
+            CompilerOptions { profile, warnings },
         ) {
-            Ok(artifact) => (Vec::new(), Some(artifact)),
+            Ok((artifact, diagnostics)) => (
+                diagnostics
+                    .into_iter()
+                    .map(ServiceDiagnostic::from)
+                    .collect(),
+                Some(artifact),
+            ),
             Err(diagnostics) => (
                 diagnostics
                     .into_iter()
@@ -307,6 +316,7 @@ mod tests {
             revision: 42,
             source: source.to_owned(),
             profile: BuildProfile::Release,
+            warnings: WarningPolicy::default(),
         }
     }
 
@@ -334,6 +344,43 @@ mod tests {
             ServiceDiagnosticSeverity::Error
         );
         assert!(response.diagnostics[0].code.starts_with("SS"));
+    }
+
+    #[test]
+    fn successful_compilation_preserves_warnings() {
+        let response = CompilerService::new()
+            .compile(request(
+                r#"state "game.exe" {} whileAttached { "abc".replaceAll("a", "b") }"#,
+            ))
+            .expect("warnings are not protocol failures");
+        assert!(response.succeeded());
+        assert_eq!(response.diagnostics.len(), 1);
+        assert_eq!(
+            response.diagnostics[0].severity,
+            ServiceDiagnosticSeverity::Warning
+        );
+        assert!(response.diagnostics[0].message.contains("replaceAll"));
+    }
+
+    #[test]
+    fn warning_policy_crosses_the_embedded_service_boundary() {
+        let mut request =
+            request(r#"state "game.exe" {} whileAttached { "abc".replaceAll("a", "b") }"#);
+        assert!(
+            request
+                .warnings
+                .set(crate::DiagnosticCode::MustUse, crate::WarningLevel::Deny)
+        );
+        let response = CompilerService::new()
+            .compile(request)
+            .expect("policy denial is a compiler result, not a protocol error");
+        assert!(!response.succeeded());
+        assert_eq!(response.diagnostics.len(), 1);
+        assert_eq!(response.diagnostics[0].code, "SS1001");
+        assert_eq!(
+            response.diagnostics[0].severity,
+            ServiceDiagnosticSeverity::Error
+        );
     }
 
     #[test]

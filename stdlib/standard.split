@@ -267,7 +267,9 @@ intrinsic type Process {
     ///
     /// At most `maxBytes` are read in one host operation. Decoding stops at
     /// the first NUL byte. Failed memory access, an excessive bound, or invalid
-    /// UTF-8 returns an error.
+    /// UTF-8 returns an error. After decoding, the result is an ordinary
+    /// garbage-collected `String`; the bound belongs to this read operation and
+    /// is not part of the result's type.
     ///
     /// # Example
     ///
@@ -286,7 +288,11 @@ intrinsic type Process {
 
     /// Reads a Unity managed string.
     ///
-    /// The bounded UTF-16 payload is decoded into an immutable SplitScript string. Memory-access failure returns an error; malformed surrogate sequences decode as the replacement character.
+    /// The address identifies a Unity managed string object rather than its text
+    /// bytes. Its bounded UTF-16 payload is decoded into an ordinary immutable
+    /// SplitScript `String`. Memory-access failure or an excessive bound returns
+    /// an error; malformed surrogate sequences decode as the Unicode replacement
+    /// character.
     ///
     /// # Example
     ///
@@ -540,11 +546,13 @@ typeConstructor Array<T> {
 /// Represents a value that may be absent.
 ///
 /// The postfix `?` type syntax constructs an Option value.
+@mustUse("Optional values must be inspected or explicitly discarded.")
 typeConstructor Option<T> {}
 
 /// Represents a value or an error.
 ///
 /// The postfix `!` type syntax constructs a Result value.
+@mustUse("Result values must be handled so failures are not silently ignored.")
 typeConstructor Result<T> {}
 
 extend address {
@@ -612,9 +620,12 @@ extend address {
     }
 }
 
-/// Stores immutable UTF-8 text.
+/// Stores ordinary immutable UTF-8 text in WebAssembly GC memory.
 ///
-/// String literals, interpolation, process decoders, and timer variables use garbage-collected strings.
+/// String literals, interpolation, process decoders, and timer variables all
+/// produce this same type. A decoded string owns its GC storage and is not a
+/// view into target-process memory. Decoder bounds such as `utf8(64)` describe
+/// the memory operation, not distinct `String` types.
 @representation(gcArray, u8, mutable, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 @capabilities(Equatable, Display)
@@ -632,6 +643,124 @@ intrinsic type String {
     /// ```
     @intrinsic(StringLength)
     fn byteLength() -> u32;
+
+    /// Tests whether this string contains an exact substring.
+    ///
+    /// Matching is case-sensitive over the UTF-8 text. An empty substring is
+    /// contained in every string.
+    ///
+    /// # Example
+    ///
+    /// Recognize a level-name fragment
+    ///
+    /// ```splitscript
+    /// let isBonusLevel = levelName.contains("Bonus")
+    /// ```
+    @intrinsic(StringContains)
+    fn contains(
+        /// The substring to search for.
+        substring: String,
+    ) -> bool;
+
+    /// Tests whether this string starts with an exact prefix.
+    ///
+    /// Matching is case-sensitive over the UTF-8 text. Every string starts
+    /// with the empty prefix.
+    ///
+    /// # Example
+    ///
+    /// Recognize challenge levels
+    ///
+    /// ```splitscript
+    /// let isChallenge = levelName.startsWith("Challenge_")
+    /// ```
+    @intrinsic(StringStartsWith)
+    fn startsWith(
+        /// The prefix to compare.
+        prefix: String,
+    ) -> bool;
+
+    /// Tests whether this string ends with an exact suffix.
+    ///
+    /// Matching is case-sensitive over the UTF-8 text. Every string ends with
+    /// the empty suffix.
+    ///
+    /// # Example
+    ///
+    /// Recognize completed scene names
+    ///
+    /// ```splitscript
+    /// let isCompleted = sceneName.endsWith("_Complete")
+    /// ```
+    @intrinsic(StringEndsWith)
+    fn endsWith(
+        /// The suffix to compare.
+        suffix: String,
+    ) -> bool;
+
+    /// Compares two strings while ignoring ASCII letter case.
+    ///
+    /// Only `A` through `Z` and `a` through `z` are folded. All other UTF-8
+    /// bytes must match exactly, so this operation is allocation-free and does
+    /// not claim to implement Unicode case folding.
+    ///
+    /// # Example
+    ///
+    /// Match a process name with explicit ASCII semantics
+    ///
+    /// ```splitscript
+    /// let isGame = processName.equalsIgnoreAsciiCase("Lunistice.exe")
+    /// ```
+    @intrinsic(StringEqualsIgnoreAsciiCase)
+    fn equalsIgnoreAsciiCase(
+        /// The string to compare.
+        other: String,
+    ) -> bool;
+
+    /// Replaces every exact, non-overlapping occurrence of a string.
+    ///
+    /// Matches are case-sensitive and selected from left to right. An empty
+    /// search string returns an error because insertion between bytes would not
+    /// preserve the UTF-8 string invariant. The result is allocated at its exact
+    /// final byte length; an unrepresentable length also returns an error.
+    ///
+    /// # Example
+    ///
+    /// Normalize a scene-name separator
+    ///
+    /// ```splitscript
+    /// let label = sceneName.replaceAll("_", " ") else sceneName
+    /// ```
+    @mustUse("Strings are immutable; replaceAll returns a new string and does not modify its receiver.")
+    @intrinsic(StringReplaceAll)
+    fn replaceAll(
+        /// The non-empty string to find.
+        search: String,
+        /// The string inserted for every match.
+        replacement: String,
+    ) -> String!;
+
+    /// Extracts text between two UTF-8 byte offsets.
+    ///
+    /// The start index is inclusive and the end index is exclusive. Invalid,
+    /// reversed, or out-of-range bounds return an error, as do offsets inside a
+    /// multibyte code point. The result is newly allocated and can never contain
+    /// more UTF-8 bytes than this string.
+    ///
+    /// # Example
+    ///
+    /// Extract a level-number component
+    ///
+    /// ```splitscript
+    /// let prefix = "Straße".slice(0, 6) else "Unknown"
+    /// ```
+    @intrinsic(StringSlice)
+    fn slice(
+        /// The inclusive UTF-8 byte offset.
+        start: u32,
+        /// The exclusive UTF-8 byte offset.
+        end: u32,
+    ) -> String!;
 
     /// Concatenates an array of strings.
     ///
@@ -683,6 +812,25 @@ struct Duration {
     /// ```
     static fn zero() -> Duration {
         return Duration.fromParts(0, 0)
+    }
+
+    /// Constructs a duration from whole seconds.
+    ///
+    /// The signed value is preserved exactly without a floating-point
+    /// conversion.
+    ///
+    /// # Example
+    ///
+    /// Convert an integer counter to game time
+    ///
+    /// ```splitscript
+    /// return Duration.fromWholeSeconds(elapsedSeconds)
+    /// ```
+    static fn fromWholeSeconds(
+        /// The signed number of elapsed whole seconds.
+        seconds: i64,
+    ) -> Duration {
+        return Duration.fromParts(seconds, 0)
     }
 
     /// Constructs a duration from whole milliseconds.

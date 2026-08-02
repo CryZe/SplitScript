@@ -87,6 +87,7 @@ After installation, the CLI is `splitc`:
 ```console
 splitc game.split -o game.wasm
 splitc game.split -o game.wasm --profile release
+splitc game.split -o game.wasm --deny warnings --allow SS1003
 splitc fmt game.split
 splitc fmt game.split --check
 ```
@@ -95,6 +96,11 @@ splitc fmt game.split --check
 performs the same operation without writing and succeeds only when the file is
 already canonical. Syntax errors are rendered normally and never cause a
 partial rewrite.
+
+Compile and watch commands accept repeatable `--allow`, `--warn`, and `--deny`
+warning selectors. A selector is a stable warning code such as `SS1002`, or
+`warnings` for every warning; later selectors take precedence. Denied warnings
+fail the build without changing their `SS100x` diagnostic identity.
 
 The initial language server is available over standard LSP stdio framing:
 

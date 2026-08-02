@@ -75,6 +75,25 @@ pub(super) fn build_string_equality(inputs: &RuntimeHelperInputs<'_>) -> Functio
     equality::compile_string_eq(inputs.gc)
 }
 
+pub(super) fn build_string_match(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_match(inputs.gc)
+}
+
+pub(super) fn build_string_find(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_find(inputs.gc)
+}
+
+pub(super) fn build_string_replace_all(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_replace_all(
+        inputs.plan.function(RuntimeHelperId::StringFind),
+        inputs.gc,
+    )
+}
+
+pub(super) fn build_string_slice(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_slice(inputs.gc)
+}
+
 pub(super) fn build_scan_process_range(inputs: &RuntimeHelperInputs<'_>) -> Function {
     process::compile_scan_process_range(inputs.abi, inputs.memory.scratch().scan)
 }

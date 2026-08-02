@@ -122,7 +122,10 @@ fn compiler_profiles_flow_through_staged_and_one_shot_compilation() {
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
     let mut outputs = Vec::new();
     for profile in [BuildProfile::Debug, BuildProfile::Release] {
-        let options = CompilerOptions { profile };
+        let options = CompilerOptions {
+            profile,
+            ..CompilerOptions::default()
+        };
         let lowered = splitscript::lower_wasm_with_options(&checked, options);
         assert_eq!(lowered.profile(), profile);
         let staged = splitscript::codegen_with_options(&checked, options);
@@ -175,12 +178,14 @@ fn debug_statements_are_checked_but_erased_from_release_lowering() {
         &checked,
         CompilerOptions {
             profile: BuildProfile::Debug,
+            ..CompilerOptions::default()
         },
     );
     let release_lowering = splitscript::lower_wasm_with_options(
         &checked,
         CompilerOptions {
             profile: BuildProfile::Release,
+            ..CompilerOptions::default()
         },
     );
     for function in debug_functions {
@@ -206,6 +211,7 @@ fn debug_statements_are_checked_but_erased_from_release_lowering() {
         source,
         CompilerOptions {
             profile: BuildProfile::Debug,
+            ..CompilerOptions::default()
         },
     )
     .unwrap();
@@ -213,6 +219,7 @@ fn debug_statements_are_checked_but_erased_from_release_lowering() {
         source,
         CompilerOptions {
             profile: BuildProfile::Release,
+            ..CompilerOptions::default()
         },
     )
     .unwrap();
@@ -270,6 +277,7 @@ fn debug_bindings_support_suspension_and_are_erased_from_release() {
             &source,
             CompilerOptions {
                 profile: BuildProfile::Debug,
+                ..CompilerOptions::default()
             },
         )
         .expect("debug suspension bindings should compile");
@@ -277,6 +285,7 @@ fn debug_bindings_support_suspension_and_are_erased_from_release() {
             &source,
             CompilerOptions {
                 profile: BuildProfile::Release,
+                ..CompilerOptions::default()
             },
         )
         .expect("release should type-check and erase debug suspension bindings");

@@ -60,14 +60,14 @@ fn isFirstLevel(levelOrScene) {
 fn isFinalBaseLevel(levelOrScene) {
     return match levelOrScene {
         LevelOrScene.Level(level) => level >= 13,
-        LevelOrScene.Scene(scene) => false
+        LevelOrScene.Scene => false
     }
 }
 
 fn isBaseCredits(levelOrScene) {
     return match levelOrScene {
         LevelOrScene.Level(level) => level == 2,
-        LevelOrScene.Scene(scene) => false
+        LevelOrScene.Scene => false
     }
 }
 
@@ -97,8 +97,8 @@ fn levelText(level) {
 
 fn levelOrSceneVariable(levelOrScene) {
     return match levelOrScene {
-        LevelOrScene.Level(level) => "Level",
-        LevelOrScene.Scene(scene) => "Scene"
+        LevelOrScene.Level => "Level",
+        LevelOrScene.Scene => "Scene"
     }
 }
 

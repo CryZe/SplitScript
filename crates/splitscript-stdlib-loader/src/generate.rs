@@ -123,8 +123,11 @@ impl<'a> CatalogGenerator<'a> {
         for declaration in &self.library.declarations {
             if let Declaration::TypeConstructor(owner) = declaration {
                 let id = ident(&owner.name);
+                let must_use = optional_attribute_name(&owner.attributes, "mustUse")
+                    .map(|reason| format!("Some({})", quote(reason)))
+                    .unwrap_or_else(|| "None".to_owned());
                 output.push_str(&format!(
-                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, name: {}, parameters: &[{}], documentation: documentation({}, {}) }},\n",
+                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, name: {}, parameters: &[{}], must_use: {must_use}, documentation: documentation({}, {}) }},\n",
                     quote(&owner.name),
                     owner.type_parameters.iter().map(|parameter| quote(&parameter.name)).collect::<Vec<_>>().join(","),
                     quote(&owner.documentation.summary), quote(&owner.documentation.details)
@@ -408,8 +411,11 @@ impl<'a> CatalogGenerator<'a> {
                 ),
             )
         };
+        let must_use = optional_attribute_name(&function.attributes, "mustUse")
+            .map(|reason| format!("Some({})", quote(reason)))
+            .unwrap_or_else(|| "None".to_owned());
         output.push_str(&format!(
-                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, validation_fixture(StdlibItemId::{id}))], related: &[] }}, implementation: {implementation} }},\n",
+                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, validation_fixture(StdlibItemId::{id}))], related: &[] }}, implementation: {implementation} }},\n",
                 quote(&function.name),
                 quote(&qualified_name),
                 self.type_parameters(type_parameters, owner),

@@ -10,6 +10,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::DurationFromMilliseconds,
         StdlibItemId::DurationFromParts,
         StdlibItemId::DurationFromSeconds,
+        StdlibItemId::DurationFromWholeSeconds,
         StdlibItemId::DurationZero,
         StdlibItemId::NumericClamp,
         StdlibItemId::ArrayIsEmpty,
@@ -39,6 +40,32 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
 }
 
 #[test]
+fn must_use_obligations_are_catalog_owned() {
+    let library = StandardLibrary::new();
+    assert!(
+        library
+            .type_constructor(StdlibTypeConstructorId::Option)
+            .must_use
+            .expect("Option values should carry a use obligation")
+            .contains("inspected")
+    );
+    assert!(
+        library
+            .type_constructor(StdlibTypeConstructorId::Result)
+            .must_use
+            .expect("Result values should carry a use obligation")
+            .contains("failures")
+    );
+    assert!(
+        library
+            .item(StdlibItemId::StringReplaceAll)
+            .must_use
+            .expect("immutable replacement should explain its returned value")
+            .contains("immutable")
+    );
+}
+
+#[test]
 fn duration_convenience_constructors_are_source_defined() {
     let library = StandardLibrary::new();
     assert_eq!(
@@ -49,8 +76,16 @@ fn duration_convenience_constructors_are_source_defined() {
         library.render_signature(StdlibItemId::DurationFromMilliseconds),
         "Duration.fromMilliseconds(milliseconds: i64) -> Duration"
     );
+    assert_eq!(
+        library.render_signature(StdlibItemId::DurationFromWholeSeconds),
+        "Duration.fromWholeSeconds(seconds: i64) -> Duration"
+    );
 
-    for expression in ["Duration.zero()", "Duration.fromMilliseconds(1_500)"] {
+    for expression in [
+        "Duration.zero()",
+        "Duration.fromWholeSeconds(-12)",
+        "Duration.fromMilliseconds(1_500)",
+    ] {
         let source = format!(
             r#"
                 state "game.exe" {{}}
@@ -540,6 +575,30 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromSeconds),
         "Duration.fromSeconds(seconds: f32) -> Duration"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::StringContains),
+        "String.contains(substring: String) -> bool"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::StringStartsWith),
+        "String.startsWith(prefix: String) -> bool"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::StringEndsWith),
+        "String.endsWith(suffix: String) -> bool"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::StringEqualsIgnoreAsciiCase),
+        "String.equalsIgnoreAsciiCase(other: String) -> bool"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::StringReplaceAll),
+        "String.replaceAll(search: String, replacement: String) -> String!"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::StringSlice),
+        "String.slice(start: u32, end: u32) -> String!"
     );
     for removed in [
         "timer.setVariable",

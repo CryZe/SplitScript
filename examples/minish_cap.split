@@ -119,8 +119,6 @@ let delayedSplit = DelayedSplit.Inactive
 /// Absolute frame on which the pending delayed split should fire.
 let delayedSplitAt: i64 = 0
 
-/// Whether Smith's Sword has already been observed during this run.
-let gotSmithsSword = false
 /// Whether the Deepwood Shrine entrance split has already fired this run.
 let enteredDeepwoodShrine = false
 /// Whether the Deepwood Shrine boss-room split has already fired this run.
@@ -166,7 +164,6 @@ fn heartsText(quarters) {
 
 /// Restores all per-run split guards and delayed-split state to their defaults.
 fn resetRunProgress() {
-    gotSmithsSword = false
     enteredDeepwoodShrine = false
     enteredDeepwoodShrineBoss = false
     enteredMtCrenel = false

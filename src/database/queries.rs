@@ -4,7 +4,7 @@ use std::{cmp::Reverse, sync::Arc};
 
 use crate::{
     CheckedProgram, CompilerContext, Diagnostic, LoweredProgram, ParsedProgram, RecoveredCheck,
-    RecoveredParse,
+    RecoveredParse, WarningPolicy,
     ast::{AssignmentId, ExprId, ExprKind, FunctionId, Span, ValueId},
     highlight::SemanticHighlightIndex,
     hir::{Declaration, TypedExpressionKind},
@@ -39,6 +39,7 @@ impl SourceRevision {
 #[derive(Debug)]
 pub struct CompilerDatabase {
     pub(super) context: CompilerContext,
+    warning_policy: WarningPolicy,
     source: String,
     revision: SourceRevision,
     cache: QueryCache,
@@ -52,6 +53,7 @@ impl CompilerDatabase {
     pub fn with_context(context: CompilerContext, source: impl Into<String>) -> Self {
         Self {
             context,
+            warning_policy: WarningPolicy::default(),
             source: source.into(),
             revision: SourceRevision::default(),
             cache: QueryCache::default(),
@@ -64,6 +66,21 @@ impl CompilerDatabase {
 
     pub fn context(&self) -> CompilerContext {
         self.context.clone()
+    }
+
+    pub const fn warning_policy(&self) -> WarningPolicy {
+        self.warning_policy
+    }
+
+    /// Changes only the diagnostic presentation policy. Semantic compiler
+    /// products remain valid even when a warning is denied.
+    pub fn set_warning_policy(&mut self, warning_policy: WarningPolicy) -> bool {
+        if warning_policy == self.warning_policy {
+            return false;
+        }
+        self.warning_policy = warning_policy;
+        self.cache.diagnostics = None;
+        true
     }
 
     pub const fn revision(&self) -> SourceRevision {
@@ -560,10 +577,21 @@ impl CompilerDatabase {
 
     pub fn diagnostics(&mut self) -> Arc<[Diagnostic]> {
         if self.cache.diagnostics.is_none() {
-            self.cache.diagnostics = Some(match self.check() {
-                Ok(_) => Arc::from(Vec::<Diagnostic>::new()),
-                Err(errors) => errors,
-            });
+            let diagnostics = match self.check() {
+                Ok(checked) => self
+                    .warning_policy
+                    .apply(checked.diagnostics().iter().cloned()),
+                Err(errors)
+                    if !errors
+                        .iter()
+                        .any(|diagnostic| self.warning_policy.changes(diagnostic)) =>
+                {
+                    self.cache.diagnostics = Some(errors);
+                    return Arc::clone(self.cache.diagnostics.as_ref().unwrap());
+                }
+                Err(errors) => self.warning_policy.apply(errors.iter().cloned()),
+            };
+            self.cache.diagnostics = Some(Arc::from(diagnostics));
         }
         Arc::clone(self.cache.diagnostics.as_ref().unwrap())
     }

@@ -267,6 +267,7 @@ pub struct StdlibItem {
     pub qualified_name: &'static str,
     pub kind: ItemKind,
     pub signature: Signature,
+    pub must_use: Option<&'static str>,
     pub deprecation: Option<Deprecation>,
     pub documentation: Documentation<StdlibSymbolId>,
     pub implementation: Implementation,

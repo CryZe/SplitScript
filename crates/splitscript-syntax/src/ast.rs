@@ -366,6 +366,7 @@ pub struct EnumDecl {
 pub struct EnumVariant {
     pub id: EnumVariantId,
     pub name: String,
+    pub name_span: Span,
     pub documentation: Option<String>,
     pub payload: Option<TypeRef>,
     pub span: Span,
@@ -385,6 +386,7 @@ pub struct RecordDecl {
 pub struct RecordField {
     pub id: RecordFieldId,
     pub name: String,
+    pub name_span: Span,
     pub documentation: Option<String>,
     pub ty: TypeRef,
     pub span: Span,
@@ -394,6 +396,7 @@ pub struct RecordField {
 pub struct FunctionDecl {
     pub id: FunctionId,
     pub name: String,
+    pub name_span: Span,
     pub documentation: Option<String>,
     pub debug_only: bool,
     pub method_of: Option<TypeRef>,
@@ -407,6 +410,7 @@ pub struct FunctionDecl {
 pub struct Parameter {
     pub id: ValueId,
     pub name: String,
+    pub name_span: Span,
     pub annotation: Option<TypeRef>,
     pub span: Span,
 }
@@ -560,6 +564,7 @@ pub enum SettingFileFilter {
 pub struct VariableDecl {
     pub id: ValueId,
     pub name: String,
+    pub name_span: Span,
     pub documentation: Option<String>,
     pub mutable: bool,
     pub debug_only: bool,
@@ -691,6 +696,7 @@ pub enum SuspensionMode {
 pub struct SuspensionBinding {
     pub id: ValueId,
     pub name: String,
+    pub name_span: Span,
     pub annotation: Option<TypeRef>,
     pub span: Span,
 }
@@ -807,10 +813,21 @@ pub struct MatchArm {
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PatternBinding {
     pub id: ValueId,
     pub name: String,
+    pub name_span: Span,
+}
+
+impl std::fmt::Debug for PatternBinding {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("PatternBinding")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]

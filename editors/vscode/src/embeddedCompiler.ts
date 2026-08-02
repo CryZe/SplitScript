@@ -3,6 +3,14 @@ const RESPONSE_MAGIC = new Uint8Array([0x53, 0x53, 0x43, 0x52]);
 export const compilerServiceProtocolVersion = 1;
 
 export type EmbeddedBuildProfile = 'debug' | 'release';
+export type EmbeddedWarningLevel = 'allow' | 'warn' | 'deny';
+
+export interface EmbeddedWarningPolicy {
+    mustUse?: EmbeddedWarningLevel;
+    unusedBinding?: EmbeddedWarningLevel;
+    unusedDeclaration?: EmbeddedWarningLevel;
+    unusedMember?: EmbeddedWarningLevel;
+}
 
 export interface EmbeddedCompileRequest {
     protocolVersion: number;
@@ -10,6 +18,8 @@ export interface EmbeddedCompileRequest {
     revision: number;
     source: string;
     profile: EmbeddedBuildProfile;
+    /** Optional host/project policy. Omission preserves the default warn level. */
+    warnings?: EmbeddedWarningPolicy;
 }
 
 export interface EmbeddedServiceSpan {

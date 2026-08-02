@@ -44,7 +44,7 @@ impl ReferenceIndex {
                         .and_then(call_receiver)
                 });
             if let Some(read) = read {
-                let Some(target) = resolved_value_id(read) else {
+                let Some(target) = read.source_value() else {
                     continue;
                 };
                 references.entry(target).or_default().push(ValueReference {
@@ -90,26 +90,7 @@ impl ReferenceIndex {
     }
 }
 
-pub(super) fn resolved_value_id(value: ResolvedValue) -> Option<ValueId> {
-    match value {
-        ResolvedValue::ProviderValue(_) => None,
-        ResolvedValue::Variable(value)
-        | ResolvedValue::CurrentState(value)
-        | ResolvedValue::OldState(value)
-        | ResolvedValue::Setting(value)
-        | ResolvedValue::OldSetting(value) => Some(value),
-    }
-}
-
 fn call_receiver(call: &ResolvedCall) -> Option<ResolvedValue> {
-    match call {
-        ResolvedCall::UserMethod { receiver, .. } => receiver.path().map(|(root, _)| root),
-        ResolvedCall::StandardLibrary { receiver, .. } => receiver
-            .as_ref()
-            .and_then(|receiver| receiver.path().map(|(root, _)| root)),
-        ResolvedCall::UserFunction { .. }
-        | ResolvedCall::ResultError { .. }
-        | ResolvedCall::OptionSome { .. }
-        | ResolvedCall::ResultSuccess { .. } => None,
-    }
+    call.receiver()
+        .and_then(|receiver| receiver.path().map(|(root, _)| root))
 }

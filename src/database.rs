@@ -12,7 +12,7 @@ mod snapshot;
 pub use position::{IdentifierSegment, PositionAnalysis};
 pub use queries::{CompilerDatabase, SourceRevision};
 pub use references::{ReferenceIndex, ValueReference, ValueReferenceKind};
-pub use rename::{RenameError, RenameTarget};
+pub use rename::{RenameError, RenamePlan, RenameTarget};
 pub use snapshot::SemanticSnapshot;
 
 use position::{syntax_expression_resolution, syntax_expression_segments};
@@ -358,7 +358,7 @@ fn source_definition_for_value_path(
         };
     }
     if segment == root_segment {
-        return references::resolved_value_id(root).map(SourceDefinitionId::Value);
+        return root.source_value().map(SourceDefinitionId::Value);
     }
     let member = segment.checked_sub(root_segment + 1)?;
     match members.get(member)? {
@@ -404,9 +404,7 @@ fn definition_for_value_path(
             ));
         }
         return definitions
-            .get(SourceDefinitionId::Value(references::resolved_value_id(
-                root,
-            )?))
+            .get(SourceDefinitionId::Value(root.source_value()?))
             .cloned()
             .map(DefinitionTarget::Source);
     }

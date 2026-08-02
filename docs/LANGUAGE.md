@@ -138,6 +138,52 @@ and `%=`, plus `|=`, `&=`, `^=`, `<<=`, and `>>=` for integers. A compound
 assignment uses exactly the same operand typing and runtime operation as its
 ordinary binary operator while resolving the destination only once.
 
+Unread parameters, local variables, loop elements, match payloads, and
+`await`/`retry` bindings produce non-fatal warnings. The analysis follows
+resolved value identities, so shadowed names and method receivers are handled
+correctly. A plain assignment is only a write and does not make a binding used;
+a compound assignment also reads the previous value. Prefix an intentionally
+unused name with `_`. The warning's quick fix chooses a non-conflicting
+underscore-prefixed name and updates writes to that same binding.
+
+The compiler also warns about private globals, functions, records, and enums
+that cannot be reached from lifecycle behavior or the host-visible state and
+settings interface. Reachability is transitive and follows resolved identities:
+a helper called only by another dead helper is still unused, while types in a
+reachable function signature and types nested inside a reachable record or enum
+remain live. Debug statements participate in this analysis in both build
+profiles so editor warnings do not change when publishing a release build.
+Prefix an intentionally reserved declaration with `_` to suppress its warning.
+
+Reachable records and enums receive member-level checks without cascading from
+an entirely dead type. Accessing a record member reads that field; merely
+constructing or deserializing the record does not. Constructing or matching an
+enum variant observes that variant, and variants exposed by a choice setting
+are host-visible. Structural `==` and `!=` observe every field or variant in the
+recursively compared shape. Unobserved fields and variants produce non-fatal
+warnings with their exact declaration-name spans and support the same `_`
+suppression convention.
+
+Warning codes are stable tooling identifiers: `SS1001` denotes a discarded
+must-use value, `SS1002` an unread local binding, `SS1003` an unreachable
+declaration, and `SS1004` an unused record field or enum variant. The wording
+may improve without requiring editor integrations to classify messages by
+text.
+
+Compiler hosts can configure every warning code as `allow`, `warn`, or `deny`.
+Allowing suppresses that diagnostic, while denying makes the configured build
+fail but keeps the original `SS100x` code and source information. This policy
+does not change whether the source parses or type-checks, so editor semantic
+features remain available for denied warnings. With `splitc`, repeat
+`--allow`, `--warn`, or `--deny` followed by a code; use `warnings` to select
+all warning codes. Later arguments override earlier selectors.
+
+The language server offers preferred quick fixes that apply the `_`
+suppression convention. For declarations and members, the action is a complete
+validated rename: references in dead helper code and record-literal labels are
+updated as well, name collisions gain additional underscores, and the edited
+program must still preserve every resolved declaration identity.
+
 Supported value types are:
 
 - `bool`
@@ -353,6 +399,12 @@ present Options compare their values. Results first compare whether they are
 successes or errors. Successes compare their values, errors compare their
 error strings by content, and a success never equals an error. This composes
 through records and enums that contain wrapper fields or payloads.
+
+`Option` and `Result` values are marked as must-use. Writing a call that returns
+one as a bare expression statement produces a warning because absence or
+failure would otherwise be silently ignored. Using the value in an assignment,
+argument, return, match, `else`, or `?` consumes it. The warning is non-fatal:
+debug watch and release builds still emit their Wasm artifact.
 
 Both wrappers can be matched exhaustively with explicit state patterns:
 
@@ -934,8 +986,8 @@ types such as `string32`. `process.readUtf8(address, maxBytes)` reads at most
 4096 bytes in one host call, stops at the first NUL byte (or at the bound), and
 returns `String!`. An inaccessible range, a zero or excessive bound, or invalid
 UTF-8 is an ordinary error. This is intentionally different from
-`managedString`, which understands the in-memory layout of a Unity managed
-string.
+`process.readManagedString`, which understands the in-memory layout of a Unity
+managed string.
 
 Pointer-backed state fields have compact sugar for the same operation. The
 decoder applies after the complete module-relative pointer path has been
@@ -1036,6 +1088,9 @@ let executableLabel = `version {version}`
 ```
 
 `String.concat` remains available as the lower-level collection operation.
+Transformations such as `replaceAll` do not mutate their receiver. They return
+a new string and are marked must-use, so a discarded result receives a focused
+warning explaining the immutable behavior.
 `print(value)` and `setVariable(key, value)` accept any `Display` value
 and apply these same conversions at the runtime boundary, so numeric values and
 addresses do not need an explicit `as String` cast. A standard-library type can

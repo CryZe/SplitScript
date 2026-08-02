@@ -13,10 +13,12 @@ CompilerContext (immutable compiler services and catalog graph) + source
   -> codegen -> WebAssembly GC
 ```
 
-`CompilerOptions` selects `BuildProfile::Debug` or `BuildProfile::Release` for
-the profile-aware `lower_wasm_with_options`, `codegen_with_options`, and
-`compile_with_options` entry points. The selected profile is stored on the
-Wasm-oriented program so profile erasure can remain a semantic lowering pass.
+`CompilerOptions` selects `BuildProfile::Debug` or `BuildProfile::Release` and
+contains the host-selected `WarningPolicy`. Profile-aware lowering and codegen
+consume the profile; complete `compile_with_options` products additionally
+apply the warning policy before generating an artifact. The selected profile is
+stored on the Wasm-oriented program so profile erasure can remain a semantic
+lowering pass.
 The convenience entry points default to debug. Until debug-only syntax is
 encountered, both profiles emit identical modules. Debug statements, bindings,
 globals, and functions remain in typed HIR for diagnostics in every profile.
@@ -136,17 +138,37 @@ statements remain distinct syntax nodes and diagnostics.
 
 Diagnostics are backend-independent values defined in
 [`crates/splitscript-syntax/src/diagnostic.rs`](../crates/splitscript-syntax/src/diagnostic.rs).
-They carry a stable category code
-and severity: `SS0001` for lexical errors, `SS0002` for syntax errors, `SS0003`
-for type errors, and `SS0004` for semantic validation after type checking. The
-same value owns its primary and secondary labels, notes, and fixes. Fixes have
+They carry a stable code and severity. Compiler-stage errors use `SS0001` for
+lexing, `SS0002` for parsing, `SS0003` for type checking, and `SS0004` for
+post-type semantic validation. Actionable warnings use their own `SS1xxx`
+namespace: `SS1001` for discarded must-use values, `SS1002` for unread local
+bindings, `SS1003` for unreachable declarations, and `SS1004` for unused
+record fields or enum variants. Clients can therefore configure and present a
+warning without parsing its human-readable message. The same value owns its
+primary and secondary labels, notes, and fixes. Fixes have
 an explicit applicability and may contain multiple source edits. The repeated
 optional/result-postfix diagnostic already supplies a machine-applicable edit
-that removes the extra postfix, while the model remains available for future
-LSP code actions. The CLI renderer consumes these fields directly. Spans
+that removes the extra postfix, while unused local bindings provide a
+multi-edit underscore-suppression action. For unused declarations and members,
+the LSP reuses the identity-aware Rename query to update every reference,
+tries extra underscores on collisions, and type-checks the candidate before
+offering the action. The LSP publishes the same diagnostic codes as the
+CLI/compiler service. Spans
 remain byte offsets within the one source file; a `FileId` and source map are
 deliberately deferred until the language gains modules or another feature that
 accepts multiple sources.
+
+`WarningPolicy` independently configures each `SS100x` code as `allow`, `warn`,
+or `deny`. Policy is deliberately applied after semantic checking. `allow`
+omits the diagnostic from the configured product, `warn` preserves its normal
+non-fatal severity, and `deny` rejects artifact generation while retaining the
+warning code, labels, fixes, and origin. A denied warning is therefore never
+reclassified as an `SS0002` parser error or `SS0003` type error. The incremental
+database applies policy only to its diagnostic cache, so hover, completion,
+rename, and other semantic queries remain available. The same serializable
+policy crosses the embedded compiler-service boundary. A future persistent
+project format can own this value without changing compiler passes or protocol
+semantics.
 
 Post-type semantic checks live in [`src/validation.rs`](../src/validation.rs),
 not in the public pipeline glue. One `ValidationOutput` derives capability and

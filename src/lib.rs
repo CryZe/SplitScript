@@ -60,10 +60,110 @@ pub enum BuildProfile {
     Release,
 }
 
+/// Configures how a warning participates in a particular compiler product.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WarningLevel {
+    /// Omits the diagnostic from the configured product.
+    Allow,
+    /// Publishes the diagnostic without rejecting compilation.
+    #[default]
+    Warn,
+    /// Publishes the diagnostic as an error and rejects compilation.
+    Deny,
+}
+
+/// Per-warning policy selected by a compiler host or project configuration.
+///
+/// Warning generation remains independent from this policy. This value is
+/// applied only when diagnostics cross a compiler-product boundary, preserving
+/// the original `SS100x` code even when a denied warning rejects a build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct WarningPolicy {
+    must_use: WarningLevel,
+    unused_binding: WarningLevel,
+    unused_declaration: WarningLevel,
+    unused_member: WarningLevel,
+}
+
+impl WarningPolicy {
+    pub const fn level(self, code: DiagnosticCode) -> Option<WarningLevel> {
+        match code {
+            DiagnosticCode::MustUse => Some(self.must_use),
+            DiagnosticCode::UnusedBinding => Some(self.unused_binding),
+            DiagnosticCode::UnusedDeclaration => Some(self.unused_declaration),
+            DiagnosticCode::UnusedMember => Some(self.unused_member),
+            DiagnosticCode::Lexical
+            | DiagnosticCode::Syntax
+            | DiagnosticCode::Type
+            | DiagnosticCode::Semantic => None,
+        }
+    }
+
+    /// Sets one warning code, returning `false` for non-warning diagnostics.
+    pub const fn set(&mut self, code: DiagnosticCode, level: WarningLevel) -> bool {
+        let target = match code {
+            DiagnosticCode::MustUse => &mut self.must_use,
+            DiagnosticCode::UnusedBinding => &mut self.unused_binding,
+            DiagnosticCode::UnusedDeclaration => &mut self.unused_declaration,
+            DiagnosticCode::UnusedMember => &mut self.unused_member,
+            DiagnosticCode::Lexical
+            | DiagnosticCode::Syntax
+            | DiagnosticCode::Type
+            | DiagnosticCode::Semantic => return false,
+        };
+        *target = level;
+        true
+    }
+
+    pub fn set_all(&mut self, level: WarningLevel) {
+        for code in DiagnosticCode::WARNINGS {
+            let changed = self.set(code, level);
+            debug_assert!(changed);
+        }
+    }
+
+    pub(crate) fn changes(self, diagnostic: &Diagnostic) -> bool {
+        diagnostic.severity == DiagnosticSeverity::Warning
+            && match self.level(diagnostic.code) {
+                Some(level) => !matches!(level, WarningLevel::Warn),
+                None => false,
+            }
+    }
+
+    /// Applies this policy while retaining diagnostic codes and structured
+    /// source information. Parser and type errors are never affected.
+    pub fn apply(self, diagnostics: impl IntoIterator<Item = Diagnostic>) -> Vec<Diagnostic> {
+        diagnostics
+            .into_iter()
+            .filter_map(|mut diagnostic| {
+                if diagnostic.severity != DiagnosticSeverity::Warning {
+                    return Some(diagnostic);
+                }
+                match self.level(diagnostic.code) {
+                    Some(WarningLevel::Allow) => None,
+                    Some(WarningLevel::Deny) => {
+                        diagnostic.severity = DiagnosticSeverity::Error;
+                        diagnostic.notes.push(format!(
+                            "warning {} is denied by the active warning policy",
+                            diagnostic.code
+                        ));
+                        Some(diagnostic)
+                    }
+                    Some(WarningLevel::Warn) | None => Some(diagnostic),
+                }
+            })
+            .collect()
+    }
+}
+
 /// Options shared by staged and one-shot compilation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct CompilerOptions {
     pub profile: BuildProfile,
+    pub warnings: WarningPolicy,
 }
 
 /// Immutable compiler-wide services shared by every stage of one compilation.
@@ -244,6 +344,7 @@ pub struct CheckedProgram {
     syntax: ast::Program,
     compilation_syntax: ast::Program,
     hir: hir::TypedProgram,
+    diagnostics: Vec<Diagnostic>,
     semantics: semantic::SemanticModel,
     capabilities: capabilities::CapabilityAnalysis,
     effects: effects::OperationAnalysis,
@@ -327,6 +428,11 @@ impl CheckedProgram {
 
     pub fn typed_hir(&self) -> &hir::TypedProgram {
         &self.hir
+    }
+
+    /// Non-fatal diagnostics produced while checking this valid program.
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
     }
 
     pub fn memory_layouts(&self) -> &memory::MemoryLayouts {
@@ -470,15 +576,21 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         &output.semantics,
         &output.enum_types,
     );
-    if !validation.diagnostics.is_empty() {
+    if validation
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    {
         return Err(validation.diagnostics);
     }
+    let diagnostics = validation.diagnostics;
     Ok(CheckedProgram {
         context,
         document,
         syntax,
         compilation_syntax,
         hir: typed_hir,
+        diagnostics,
         semantics: output.semantics,
         capabilities: validation.capabilities,
         effects: validation.effects,
@@ -594,10 +706,34 @@ pub fn compile_with_context_and_options(
     source: &str,
     options: CompilerOptions,
 ) -> Result<Vec<u8>, Vec<Diagnostic>> {
+    compile_with_context_and_options_diagnostics(context, source, options)
+        .map(|(artifact, _diagnostics)| artifact)
+}
+
+/// Runs the complete compiler pipeline and preserves non-fatal diagnostics
+/// alongside the generated artifact.
+///
+/// Convenience compilation functions intentionally return only the artifact
+/// on success. Interactive and command-line hosts should use this entry point
+/// so warnings are not lost merely because code generation succeeded.
+pub fn compile_with_context_and_options_diagnostics(
+    context: CompilerContext,
+    source: &str,
+    options: CompilerOptions,
+) -> Result<(Vec<u8>, Vec<Diagnostic>), Vec<Diagnostic>> {
     let parsed = parse_with_context(context, source)?;
     let lowered = lower(parsed);
     let checked = check(lowered)?;
-    Ok(codegen_with_options(&checked, options))
+    let diagnostics = options
+        .warnings
+        .apply(checked.diagnostics().iter().cloned());
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    {
+        return Err(diagnostics);
+    }
+    Ok((codegen_with_options(&checked, options), diagnostics))
 }
 
 #[cfg(test)]

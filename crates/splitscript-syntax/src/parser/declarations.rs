@@ -44,6 +44,7 @@ impl Parser<'_> {
                 let variant = EnumVariant {
                     id: self.new_enum_variant_id(),
                     name: variant_name,
+                    name_span: variant_span,
                     documentation,
                     payload,
                     span: variant_span.join(self.previous().span),
@@ -95,6 +96,7 @@ impl Parser<'_> {
                 let field = RecordField {
                     id: self.new_record_field_id(),
                     name: field_name,
+                    name_span: field_start,
                     documentation,
                     ty,
                     span: field_start.join(type_span),
@@ -124,7 +126,7 @@ impl Parser<'_> {
         self.next_function_id += 1;
         let start = self.bump().span.start;
         let (first_name, first_span) = self.expect_any_ident("expected a function name")?;
-        let (method_of, name) = if self.eat(&TokenKind::Dot).is_some() {
+        let (method_of, name, name_span) = if self.eat(&TokenKind::Dot).is_some() {
             let receiver_name = match first_name.as_str() {
                 "string" => {
                     self.record_string_type_diagnostic(first_span);
@@ -144,16 +146,18 @@ impl Parser<'_> {
                 }
             };
             let receiver = self.resolve_type(receiver_name, first_span)?;
-            let method = self.expect_any_ident("expected a method name after `.`")?.0;
-            (Some(receiver), method)
+            let (method, method_span) =
+                self.expect_any_ident("expected a method name after `.`")?;
+            (Some(receiver), method, method_span)
         } else {
-            (None, first_name)
+            (None, first_name, first_span)
         };
         self.expect(TokenKind::LParen, "expected `(` after the function name")?;
         let mut params = method_of.map_or_else(Vec::new, |ty| {
             vec![Parameter {
                 id: self.new_value_id(),
                 name: "self".to_owned(),
+                name_span: first_span,
                 annotation: Some(ty),
                 span: first_span,
             }]
@@ -192,6 +196,7 @@ impl Parser<'_> {
                 let parameter = Parameter {
                     id: self.new_value_id(),
                     name: param_name,
+                    name_span: param_start,
                     annotation,
                     span: param_start.join(type_span),
                 };
@@ -225,6 +230,7 @@ impl Parser<'_> {
         Ok(FunctionDecl {
             id,
             name,
+            name_span,
             documentation: None,
             debug_only: false,
             method_of,
@@ -333,6 +339,7 @@ impl Parser<'_> {
         let variant = EnumVariant {
             id: self.new_enum_variant_id(),
             name,
+            name_span,
             documentation,
             payload: None,
             span: name_span,

@@ -1342,6 +1342,63 @@ fn compile_expr_unconverted(
                     .instruction(&Instruction::RefAsNonNull)
                     .instruction(&Instruction::ArrayLen);
             }
+            IntrinsicId::StringContains
+            | IntrinsicId::StringStartsWith
+            | IntrinsicId::StringEndsWith
+            | IntrinsicId::StringEqualsIgnoreAsciiCase => {
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                let mode = match builtin {
+                    IntrinsicId::StringContains => 0,
+                    IntrinsicId::StringStartsWith => 1,
+                    IntrinsicId::StringEndsWith => 2,
+                    IntrinsicId::StringEqualsIgnoreAsciiCase => 3,
+                    _ => unreachable!(),
+                };
+                function
+                    .instruction(&Instruction::I32Const(mode))
+                    .instruction(&Instruction::Call(
+                        context
+                            .runtime_helpers
+                            .function(RuntimeHelperId::StringMatch),
+                    ));
+            }
+            IntrinsicId::StringReplaceAll => {
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
+                function.instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::StringReplaceAll),
+                ));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Standard(StdlibTypeId::String),
+                    Instruction::RefIsNull,
+                    "string replacement search is empty or its result is too large",
+                    context,
+                );
+            }
+            IntrinsicId::StringSlice => {
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
+                function.instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::StringSlice),
+                ));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Standard(StdlibTypeId::String),
+                    Instruction::RefIsNull,
+                    "string slice offsets are out of bounds or not UTF-8 boundaries",
+                    context,
+                );
+            }
             IntrinsicId::StringConcat => {
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::Call(

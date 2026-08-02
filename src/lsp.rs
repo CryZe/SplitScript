@@ -21,7 +21,7 @@ use protocol::{
 };
 
 use crate::{
-    FixApplicability,
+    DiagnosticCode, DiagnosticFix, FixApplicability, TextEdit,
     database::DefinitionTarget,
     highlight::{SEMANTIC_TOKEN_MODIFIERS, SemanticTokenKind},
 };
@@ -304,7 +304,31 @@ impl LanguageServer {
             .iter()
             .filter(|diagnostic| diagnostic.span.start <= end && start <= diagnostic.span.end)
         {
-            for fix in &diagnostic.fixes {
+            let mut fixes = diagnostic.fixes.clone();
+            if fixes.is_empty()
+                && matches!(
+                    diagnostic.code,
+                    DiagnosticCode::UnusedDeclaration | DiagnosticCode::UnusedMember
+                )
+                && let Ok(Some(plan)) = document
+                    .database
+                    .underscore_suppression_at(diagnostic.span.start)
+            {
+                let original = &source[diagnostic.span.start..diagnostic.span.end];
+                fixes.push(DiagnosticFix {
+                    title: format!("rename `{original}` to `{}`", plan.replacement),
+                    applicability: FixApplicability::MachineApplicable,
+                    edits: plan
+                        .spans
+                        .into_iter()
+                        .map(|span| TextEdit {
+                            span,
+                            replacement: plan.replacement.clone(),
+                        })
+                        .collect(),
+                });
+            }
+            for fix in &fixes {
                 let edits = fix
                     .edits
                     .iter()

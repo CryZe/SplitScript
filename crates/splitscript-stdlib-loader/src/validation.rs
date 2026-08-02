@@ -143,7 +143,8 @@ impl<'a> Validator<'a> {
                     self.validate_owner(value, &value.type_parameters);
                 }
                 Declaration::TypeConstructor(value) => {
-                    self.validate_attributes(&value.name, &value.attributes, &[]);
+                    self.validate_attributes(&value.name, &value.attributes, &["mustUse"]);
+                    self.validate_must_use(&value.name, &value.attributes);
                     self.validate_owner(value, &value.type_parameters);
                 }
                 Declaration::CoreExtension(value) => {
@@ -259,7 +260,19 @@ impl<'a> Validator<'a> {
                 self.error(format!("`{owner}` repeats function `{}`", function.name));
             }
             self.validate_documentation(&qualified, &function.documentation, true);
-            self.validate_attributes(&qualified, &function.attributes, &["intrinsic", "display"]);
+            self.validate_attributes(
+                &qualified,
+                &function.attributes,
+                &["intrinsic", "display", "mustUse"],
+            );
+            self.validate_must_use(&qualified, &function.attributes);
+            if has_attribute(&function.attributes, "mustUse")
+                && function.result == Type::Name("void".to_owned())
+            {
+                self.error(format!(
+                    "`{qualified}` cannot be `@mustUse` because it returns `void`"
+                ));
+            }
             if has_attribute(&function.attributes, "display") {
                 if function
                     .attributes
@@ -545,6 +558,21 @@ impl<'a> Validator<'a> {
         }
     }
 
+    fn validate_must_use(&mut self, owner: &str, attributes: &[Attribute]) {
+        let Some(attribute) = attributes
+            .iter()
+            .find(|attribute| attribute.name == "mustUse")
+        else {
+            return;
+        };
+        match attribute.arguments.as_slice() {
+            [AttributeArgument::String(reason)] if !reason.trim().is_empty() => {}
+            _ => self.error(format!(
+                "`{owner}` attribute `@mustUse` expects one non-empty string argument"
+            )),
+        }
+    }
+
     fn validate_attributes(&mut self, owner: &str, attributes: &[Attribute], known: &[&str]) {
         let mut names = HashSet::new();
         for attribute in attributes {
@@ -766,6 +794,46 @@ root {
                 .any(|error| error.message.contains("exactly one focused")),
             "{errors:#?}"
         );
+    }
+
+    #[test]
+    fn must_use_requires_a_reason_and_a_returned_value() {
+        let malformed = r#"
+/// Optional values.
+@mustUse("")
+typeConstructor Option<T> {}
+"#;
+        let errors = generate_catalog(&parse(malformed).unwrap()).unwrap_err();
+        assert!(errors.iter().any(|error| {
+            error
+                .message
+                .contains("expects one non-empty string argument")
+        }));
+
+        let void_callable = r#"
+root {
+    /// Prints a message.
+    ///
+    /// Writes diagnostic output.
+    ///
+    /// # Example
+    ///
+    /// Print
+    ///
+    /// ```splitscript
+    /// print()
+    /// ```
+    @mustUse("Observe this value.")
+    @intrinsic(Print)
+    fn print() -> void;
+}
+"#;
+        let errors = generate_catalog(&parse(void_callable).unwrap()).unwrap_err();
+        assert!(errors.iter().any(|error| {
+            error
+                .message
+                .contains("cannot be `@mustUse` because it returns `void`")
+        }));
     }
 
     #[test]

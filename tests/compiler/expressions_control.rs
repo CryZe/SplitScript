@@ -3,6 +3,404 @@
 use super::*;
 
 #[test]
+fn discarded_must_use_values_warn_without_failing_compilation() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn maybeValue() -> i32? {
+            return None
+        }
+
+        whileAttached {
+            "abc".replaceAll("a", "b")
+            maybeValue()
+
+            let replaced = "abc".replaceAll("a", "b") else "abc"
+            let optional = maybeValue()
+            print(replaced)
+            print(optional else 0)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("warnings must not reject a valid program");
+    assert_eq!(checked.diagnostics().len(), 2);
+    assert!(checked.diagnostics().iter().all(|diagnostic| {
+        diagnostic.severity == splitscript::DiagnosticSeverity::Warning
+            && diagnostic.code == splitscript::DiagnosticCode::MustUse
+            && diagnostic.message.starts_with("unused result of")
+    }));
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.message.contains("String.replaceAll")
+            && diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("immutable"))
+    }));
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.message.contains("Option")
+            && diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("inspected"))
+    }));
+
+    let (wasm, warnings) = splitscript::compile_with_context_and_options_diagnostics(
+        splitscript::CompilerContext::default(),
+        source,
+        splitscript::CompilerOptions::default(),
+    )
+    .expect("one-shot compilation should preserve warnings and emit an artifact");
+    assert_eq!(warnings, checked.diagnostics());
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("discarded values should lower to valid Wasm");
+}
+
+#[test]
+fn warning_policy_filters_or_denies_without_changing_semantic_checking() {
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            "abc".replaceAll("a", "b")
+            let unread = 1
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("raw semantic checking should retain non-fatal warnings");
+    assert_eq!(checked.diagnostics().len(), 2);
+
+    let mut warnings = splitscript::WarningPolicy::default();
+    assert!(warnings.set(
+        splitscript::DiagnosticCode::MustUse,
+        splitscript::WarningLevel::Allow,
+    ));
+    assert!(warnings.set(
+        splitscript::DiagnosticCode::UnusedBinding,
+        splitscript::WarningLevel::Deny,
+    ));
+    let diagnostics = splitscript::compile_with_options(
+        source,
+        splitscript::CompilerOptions {
+            warnings,
+            ..splitscript::CompilerOptions::default()
+        },
+    )
+    .expect_err("a denied warning should reject the configured build");
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+    assert_eq!(
+        diagnostics[0].code,
+        splitscript::DiagnosticCode::UnusedBinding
+    );
+    assert_eq!(
+        diagnostics[0].severity,
+        splitscript::DiagnosticSeverity::Error
+    );
+    assert!(
+        diagnostics[0]
+            .notes
+            .iter()
+            .any(|note| note.contains("denied by the active warning policy"))
+    );
+}
+
+#[test]
+fn unused_bindings_warn_by_identity_and_support_intentional_underscores() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn inspect(unusedParameter: i32, usedParameter: i32) {
+            let unusedLocal = 1
+            let _unusedLocal = 9
+            let _intentional = 2
+            let writtenOnly = 3
+            writtenOnly = 4
+            let compound = 1
+            compound += 1
+            let receiver = "level"
+            receiver.byteLength()
+
+            for unusedItem in [1] {
+                print("tick")
+            }
+
+            let optional: i32? = Some(1)
+            print(match optional {
+                Some(unusedPayload) => "present",
+                None => "absent"
+            })
+            print(usedParameter)
+        }
+
+        onAttach {
+            let unusedModule = await process.module("game.exe")
+            let _ignoredModule = await process.module("game.exe")
+        }
+
+        whileAttached {
+            inspect(1, 2)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("unused bindings should be non-fatal warnings");
+    let unused = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.message.starts_with("unused "))
+        .collect::<Vec<_>>();
+    assert_eq!(unused.len(), 6, "{unused:#?}");
+    assert!(
+        unused
+            .iter()
+            .all(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::UnusedBinding)
+    );
+    for name in [
+        "unusedParameter",
+        "unusedLocal",
+        "writtenOnly",
+        "unusedItem",
+        "unusedPayload",
+        "unusedModule",
+    ] {
+        let diagnostic = unused
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains(&format!("`{name}`")))
+            .unwrap_or_else(|| panic!("missing unused warning for {name}: {unused:#?}"));
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], name);
+        assert_eq!(diagnostic.fixes.len(), 1);
+        assert_eq!(
+            diagnostic.fixes[0].applicability,
+            splitscript::FixApplicability::MachineApplicable
+        );
+    }
+    for name in [
+        "_intentional",
+        "_unusedLocal",
+        "_ignoredModule",
+        "compound",
+        "receiver",
+        "usedParameter",
+    ] {
+        assert!(
+            unused
+                .iter()
+                .all(|diagnostic| !diagnostic.message.ends_with(&format!("`{name}`"))),
+            "unexpected unused warning for {name}: {unused:#?}"
+        );
+    }
+
+    let written = unused
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("`writtenOnly`"))
+        .unwrap();
+    assert_eq!(written.fixes[0].edits.len(), 2);
+    assert_eq!(
+        written.fixes[0]
+            .edits
+            .iter()
+            .map(|edit| &source[edit.span.start..edit.span.end])
+            .collect::<Vec<_>>(),
+        ["writtenOnly", "writtenOnly"]
+    );
+    let local = unused
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("`unusedLocal`"))
+        .unwrap();
+    assert_eq!(local.fixes[0].edits[0].replacement, "__unusedLocal");
+}
+
+#[test]
+fn unused_declarations_follow_reachable_calls_and_global_reads() {
+    let source = r#"
+        enum LiveKind {
+            Active
+            Dormant
+        }
+
+        record LiveRecord {
+            kind: LiveKind
+            ignored: i32
+            _reserved: i32
+        }
+
+        enum DeadKind {
+            Inactive
+        }
+
+        record DeadRecord {
+            kind: DeadKind
+        }
+
+        enum _IntentionalEnum {
+            Reserved
+        }
+
+        record _IntentionalRecord {
+            value: i32
+        }
+
+        let stateRoot = 1
+        let actionRoot = 2
+        let deadGlobal = 3
+        let _intentionalGlobal = 4
+
+        state "game.exe" {
+            value = stateRoot
+        }
+
+        fn reachableRoot() {
+            reachableLeaf()
+            reachableType().kind
+        }
+
+        fn reachableLeaf() {
+            print(actionRoot)
+        }
+
+        fn reachableType() -> LiveRecord {
+            return LiveRecord {
+                kind: LiveKind.Active,
+                ignored: 1,
+                _reserved: 2
+            }
+        }
+
+        fn deadParent() {
+            deadLeaf()
+        }
+
+        fn deadLeaf() {
+            print("dead")
+        }
+
+        fn deadRecursive() {
+            deadRecursive()
+        }
+
+        fn deadTyped(_value: DeadRecord) {}
+
+        fn _intentionalFunction() {
+            print("reserved")
+        }
+
+        whileAttached {
+            reachableRoot()
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("unused declarations should be non-fatal warnings");
+    let unused = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.message.starts_with("unused global")
+                || diagnostic.message.starts_with("unused function")
+                || diagnostic.message.starts_with("unused record")
+                || diagnostic.message.starts_with("unused enum")
+        })
+        .collect::<Vec<_>>();
+
+    assert!(unused.iter().all(|diagnostic| {
+        diagnostic.code
+            == if diagnostic.message.starts_with("unused record field")
+                || diagnostic.message.starts_with("unused enum variant")
+            {
+                splitscript::DiagnosticCode::UnusedMember
+            } else {
+                splitscript::DiagnosticCode::UnusedDeclaration
+            }
+    }));
+
+    for (name, source_name) in [
+        ("deadGlobal", "deadGlobal"),
+        ("deadParent", "deadParent"),
+        ("deadLeaf", "deadLeaf"),
+        ("deadRecursive", "deadRecursive"),
+        ("deadTyped", "deadTyped"),
+        ("DeadRecord", "DeadRecord"),
+        ("DeadKind", "DeadKind"),
+        ("LiveRecord.ignored", "ignored"),
+        ("LiveKind.Dormant", "Dormant"),
+    ] {
+        let diagnostic = unused
+            .iter()
+            .find(|diagnostic| diagnostic.message.ends_with(&format!("`{name}`")))
+            .unwrap_or_else(|| panic!("missing unused warning for {name}: {unused:#?}"));
+        assert_eq!(
+            &source[diagnostic.span.start..diagnostic.span.end],
+            source_name
+        );
+        assert!(diagnostic.fixes.is_empty());
+    }
+    for name in [
+        "stateRoot",
+        "actionRoot",
+        "reachableRoot",
+        "reachableLeaf",
+        "reachableType",
+        "LiveRecord",
+        "LiveKind",
+        "LiveRecord.kind",
+        "LiveRecord._reserved",
+        "LiveKind.Active",
+        "_intentionalGlobal",
+        "_intentionalFunction",
+        "_IntentionalRecord",
+        "_IntentionalEnum",
+    ] {
+        assert!(
+            unused
+                .iter()
+                .all(|diagnostic| !diagnostic.message.ends_with(&format!("`{name}`"))),
+            "unexpected unused warning for {name}: {unused:#?}"
+        );
+    }
+}
+
+#[test]
+fn structural_equality_observes_complete_record_and_enum_shapes() {
+    let source = r#"
+        record Pair {
+            left: i32
+            right: i32
+        }
+
+        enum Mode {
+            First
+            Second
+        }
+
+        state "game.exe" {}
+
+        fn recordsEqual(left: Pair, right: Pair) -> bool {
+            return left == right
+        }
+
+        fn modesEqual(left: Mode, right: Mode) -> bool {
+            return left == right
+        }
+
+        whileAttached {
+            if recordsEqual(
+                Pair { left: 1, right: 2 },
+                Pair { left: 1, right: 2 }
+            ) {}
+            if modesEqual(Mode.First, Mode.First) {}
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("structural equality should type check");
+    let member_warnings = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.message.starts_with("unused record field")
+                || diagnostic.message.starts_with("unused enum variant")
+        })
+        .collect::<Vec<_>>();
+    assert!(member_warnings.is_empty(), "{member_warnings:#?}");
+}
+
+#[test]
 fn if_expressions_infer_branches_bidirectionally_and_lower_to_wasm() {
     let source = r#"
         enum Selected {
@@ -490,12 +888,17 @@ fn standard_types_can_supply_source_defined_display_implementations() {
 }
 
 #[test]
-fn strings_are_gc_values_with_content_equality_and_length() {
+fn strings_are_gc_values_with_content_equality_length_and_predicates() {
     let source = r#"
         state "game.exe" {}
         whileAttached {
             let message = "tick"
-            if (message == "tick" && message != "tock" && message.byteLength() == 4u32) {
+            if message == "tick"
+                && message != "tock"
+                && message.byteLength() == 4u32
+                && message.contains("ic")
+                && message.startsWith("ti")
+                && message.endsWith("ck") {
                 print(message)
             }
         }

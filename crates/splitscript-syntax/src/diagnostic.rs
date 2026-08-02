@@ -1,4 +1,5 @@
 use std::fmt;
+use std::str::FromStr;
 
 use crate::Span;
 
@@ -9,15 +10,55 @@ pub enum DiagnosticCode {
     Syntax,
     Type,
     Semantic,
+    MustUse,
+    UnusedBinding,
+    UnusedDeclaration,
+    UnusedMember,
 }
 
 impl DiagnosticCode {
+    pub const WARNINGS: [Self; 4] = [
+        Self::MustUse,
+        Self::UnusedBinding,
+        Self::UnusedDeclaration,
+        Self::UnusedMember,
+    ];
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Lexical => "SS0001",
             Self::Syntax => "SS0002",
             Self::Type => "SS0003",
             Self::Semantic => "SS0004",
+            Self::MustUse => "SS1001",
+            Self::UnusedBinding => "SS1002",
+            Self::UnusedDeclaration => "SS1003",
+            Self::UnusedMember => "SS1004",
+        }
+    }
+
+    pub const fn is_warning(self) -> bool {
+        matches!(
+            self,
+            Self::MustUse | Self::UnusedBinding | Self::UnusedDeclaration | Self::UnusedMember
+        )
+    }
+}
+
+impl FromStr for DiagnosticCode {
+    type Err = ();
+
+    fn from_str(code: &str) -> Result<Self, Self::Err> {
+        match code.to_ascii_uppercase().as_str() {
+            "SS0001" => Ok(Self::Lexical),
+            "SS0002" => Ok(Self::Syntax),
+            "SS0003" => Ok(Self::Type),
+            "SS0004" => Ok(Self::Semantic),
+            "SS1001" => Ok(Self::MustUse),
+            "SS1002" => Ok(Self::UnusedBinding),
+            "SS1003" => Ok(Self::UnusedDeclaration),
+            "SS1004" => Ok(Self::UnusedMember),
+            _ => Err(()),
         }
     }
 }
@@ -122,6 +163,12 @@ impl Diagnostic {
 
     pub fn semantic(message: impl Into<String>, span: Span) -> Self {
         Self::error(DiagnosticCode::Semantic, message, span)
+    }
+
+    pub fn warning(code: DiagnosticCode, message: impl Into<String>, span: Span) -> Self {
+        let mut diagnostic = Self::error(code, message, span);
+        diagnostic.severity = DiagnosticSeverity::Warning;
+        diagnostic
     }
 
     pub fn error(code: DiagnosticCode, message: impl Into<String>, span: Span) -> Self {

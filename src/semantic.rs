@@ -118,6 +118,35 @@ pub enum ResolvedValue {
     OldSetting(ValueId),
 }
 
+impl ResolvedValue {
+    /// Returns the source value identity read by this resolution. Provider
+    /// values are compiler/catalog-owned roots and have no source declaration.
+    pub fn source_value(self) -> Option<ValueId> {
+        match self {
+            Self::ProviderValue(_) => None,
+            Self::Variable(value)
+            | Self::CurrentState(value)
+            | Self::OldState(value)
+            | Self::Setting(value)
+            | Self::OldSetting(value) => Some(value),
+        }
+    }
+}
+
+impl ResolvedCall {
+    /// Returns the receiver resolution for method-shaped calls.
+    pub fn receiver(&self) -> Option<&ResolvedReceiver> {
+        match self {
+            Self::UserMethod { receiver, .. } => Some(receiver),
+            Self::StandardLibrary { receiver, .. } => receiver.as_ref(),
+            Self::UserFunction { .. }
+            | Self::ResultError { .. }
+            | Self::OptionSome { .. }
+            | Self::ResultSuccess { .. } => None,
+        }
+    }
+}
+
 /// The value on which a method is invoked.
 ///
 /// Plain source paths retain their declaration root and resolved fields for

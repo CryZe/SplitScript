@@ -315,6 +315,7 @@ impl Parser<'_> {
             binding: Some(SuspensionBinding {
                 id: self.new_value_id(),
                 name,
+                name_span,
                 annotation,
                 span: Span {
                     start,
@@ -339,6 +340,7 @@ impl Parser<'_> {
         Ok(VariableDecl {
             id: self.new_value_id(),
             name,
+            name_span,
             documentation: None,
             mutable: true,
             debug_only: false,

@@ -178,6 +178,7 @@ pub struct StdlibTypeConstructor {
     pub id: StdlibTypeConstructorId,
     pub name: &'static str,
     pub parameters: &'static [&'static str],
+    pub must_use: Option<&'static str>,
     pub documentation: Documentation<StdlibSymbolId>,
 }
 

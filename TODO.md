@@ -212,10 +212,31 @@ tooling consumers only see the normalized immutable graph.
   - [x] Add generic array-like and source-type-compatible bodies after ordinary
     generic functions exist. `[T].isEmpty()` is the first constructed-type
     helper and uses the shared demand-driven specialization pipeline.
-  - [ ] Add suspending standard-library bodies after their required language
-    and lowering model is designed. Continue migrating high-level helpers as
-    each required language feature becomes available; retain only true
-    representation, host-ABI, runtime, or lowering primitives as intrinsics.
+  - [ ] Add suspending standard-library bodies through an explicit coroutine
+    calling convention; do not treat permission to write `await` as sufficient
+    or disguise a compiler implementation as a source body.
+    - [ ] Classify source-defined functions as synchronous or suspending from
+      their transitive checked call graph. A suspending function must be called
+      with `await`, and its attachment/cancellation requirements must remain the
+      compiler-derived catalog facts consumed by diagnostics and tooling.
+    - [ ] Define a backend poll ABI that distinguishes `Pending` from `Ready`
+      and carries the completed value without changing the ordinary synchronous
+      Wasm call ABI. Specify cancellation and failure behavior before emission.
+    - [ ] Give every reachable suspending `FunctionInstance` a typed GC frame
+      containing its program counter, parameters/receiver, locals live across
+      suspension, nested callee frame, and result storage. Plan these layouts
+      with the existing demand-driven specialization and GC-type reachability.
+    - [ ] Let the caller retain and poll the child frame across ticks, then move
+      the ready result into the source binding and release the child frame.
+      Nested suspending source calls must compose; recursion needs an explicit
+      diagnostic until frame allocation and recursion limits are designed.
+    - [ ] Generalize the current `onAttach`-specific async emitter around a
+      shared state-machine body emitter. Keep the process-lifetime region as the
+      root cancellation owner and propagate it through awaited library calls.
+    - [ ] Add type-checker, Wasm-validation, runtime, cancellation, generic-
+      specialization, and editor-metadata tests with one real source-defined
+      discovery helper. Continue migrating high-level helpers afterward; retain
+      only representation, host-ABI, runtime, or lowering leaves as intrinsics.
 
 ### Catalog completeness
 
@@ -518,6 +539,69 @@ executable name.
   to prioritize Dolphin/PCSX2/RetroArch/DOSBox-style address translation after
   GBA; do not add emulator-name conditionals to the parser or type checker.
 
+## P1 — Make actionable warnings a first-class compiler product
+
+- [x] Diagnose intentionally discardable values separately from values whose
+  result carries an obligation.
+  - [x] Let privileged catalog declarations mark a callable or constructed
+    value type with `@mustUse("reason")`. Discarding such a value as a bare
+    expression statement should produce a non-fatal warning whose note explains
+    the obligation; binding, consuming, returning, or propagating it must not
+    warn. Mark `Option<T>` and `Result<T>` globally, and give
+    immutable transformations such as `String.replaceAll` a focused reason.
+  - [x] Preserve successful compilation while publishing warnings through the
+    compiler facade, incremental database, CLI, compile service, LSP, VS Code
+    builds, and debug watch. Keep severity and source fixes structured rather
+    than rendering warnings into strings at an inner layer.
+- [x] Add an unused-code analysis over resolved semantic identities rather than
+  spelling heuristics.
+  - [x] Start with unread local bindings and parameters, including bindings in
+    `for`, `match`, and failure-control constructs. An underscore-prefixed name
+    should express intentional non-use; offer a machine-applicable rename when
+    appropriate, and do not confuse a write with a read.
+  - [x] Diagnose unreachable private globals, functions, records, and enums.
+    Seed the transitive graph from lifecycle blocks and state/settings ABI
+    declarations, include debug statements independent of the selected build
+    profile, follow resolved calls and global reads by identity, and propagate
+    reachable function signatures plus nested nominal layouts. References from
+    one dead declaration do not keep another declaration alive; hidden
+    standard-library source bodies remain catalog-owned.
+  - [x] Extend the same graph to record fields and enum variants. Direct member
+    access observes record fields; construction and memory deserialization do
+    not. Construction and reachable patterns observe enum variants. Choice
+    settings root their exposed variants, and structural equality observes the
+    complete recursively nested record/enum shape. Members of a wholly dead
+    type do not produce cascading diagnostics. Keep future compiler-invoked
+    capability implementations and host callbacks as explicit roots rather
+    than relying on apparent source calls.
+  - [x] Validate the member policy against maintained ports before enabling it:
+    exact member-name spans, underscore suppression, focused notes, equality
+    regression coverage, and a warning-free example corpus cover the initial
+    policy. Source-defined standard-library declarations retain their separate
+    catalog/root policy rather than blanket source-level suppression.
+  - [x] Publish stable warning-specific diagnostic codes independently from
+    compiler-stage errors: `SS1001` for must-use results, `SS1002` for unused
+    bindings, `SS1003` for unused declarations, and `SS1004` for unused
+    members. Preserve focused labels/notes and the `_` suppression convention;
+    the LSP publishes the same codes and machine-applicable local-binding
+    rename actions as the compiler service and CLI.
+  - [x] Reuse the identity-aware rename planner to offer safe multi-edit
+    suppression actions for globals, functions, nominal types, fields, and
+    variants, including references that live only in otherwise dead code. The
+    planner tries additional underscores on collision and rechecks both the
+    edited program and every stable reference identity before the LSP offers a
+    preferred quick fix.
+  - [x] Add a transport-neutral allow/warn/deny policy keyed by stable warning
+    code. Apply it at compiler-product boundaries rather than inside parsing or
+    type checking: `allow` filters a warning, `warn` preserves it, and `deny`
+    rejects a configured build while retaining the original `SS100x` code and
+    adding an explicit policy note. The staged semantic product remains valid;
+    the incremental database can change policy without invalidating semantic
+    caches, embedded compile requests carry the policy, and native compile/watch
+    commands accept repeated `--allow`, `--warn`, and `--deny` selectors for one
+    code or `warnings`. Defer choosing a persistent project-file syntax until a
+    project/module model supplies a natural owner for it.
+
 ## P1 — Add port-driven collections, text, math, and time
 
 - [x] Use bracket syntax as the sole source spelling for arrays: `[T]` when the
@@ -541,10 +625,21 @@ executable name.
   records should be the normal replacement for C# tuples; add tuple syntax only
   if ports show that records remain materially noisy.
 - [ ] Fill out immutable `String` operations used by real split logic:
-  `contains`, `startsWith`, `endsWith`, substring/slicing, replacement, and
-  deliberate case comparison. Specify byte versus Unicode indexing and keep
-  every allocation bounded. Add focused docs showing fixed-memory strings,
-  managed strings, and ordinary GC strings as separate concepts.
+  - [x] Add allocation-free, exact, case-sensitive `contains`, `startsWith`,
+    and `endsWith` predicates over valid UTF-8 strings. Empty needles match;
+    runtime coverage includes multibyte text and longer-needle failures.
+  - [x] Add fallible `slice(start, end)` with inclusive/exclusive UTF-8 byte
+    offsets. Invalid, reversed, out-of-range, and non-code-point-boundary offsets
+    return `String!`; the allocation is bounded by the source byte length.
+  - [x] Add allocation-free `equalsIgnoreAsciiCase` with deliberately narrow
+    ASCII folding; non-ASCII UTF-8 bytes compare exactly rather than implying
+    incomplete Unicode case folding.
+  - [x] Add fallible, exact, non-overlapping `replaceAll`. Reject an empty search
+    string and an unrepresentable result length, precompute the exact output
+    size, and allocate only once.
+  - [x] Add focused catalog and guide documentation distinguishing bounded
+    native-memory UTF-8 reads, Unity managed UTF-16 object reads, and the
+    ordinary owned GC `String` value both produce.
 - [ ] Add catalog-owned floating-point helpers such as `round`, precision-aware
   rounding, `floor`, `ceil`, `abs`, and finite/NaN checks. Extend contextual
   numeric-literal inference so an exact integer-looking literal can satisfy an
@@ -556,8 +651,11 @@ executable name.
   - [x] Define `Duration.zero()` and signed integer
     `Duration.fromMilliseconds(i64)` in standard-library source, alongside the
     existing source-defined frames, parts, and floating-seconds constructors.
-  - [ ] Add integer-seconds and any additional floating-point inputs based on
-    real call sites. Design arithmetic together with the user-facing operator
+  - [x] Add exact signed integer seconds as source-defined
+    `Duration.fromWholeSeconds(i64)`, keeping the floating-point
+    `fromSeconds(f32)` conversion visibly distinct.
+  - [ ] Add additional floating-point inputs based on real call sites. Design
+    arithmetic together with the user-facing operator
     capability model rather than hard-coding `Duration` into binary typing.
 
 ## P1 — Model polling, settings, and timer integration explicitly

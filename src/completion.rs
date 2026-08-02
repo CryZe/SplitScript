@@ -1358,12 +1358,32 @@ split {
         let literal_source = source.replacen("2 => \"½\"", "2 => \"½\".", 1);
         let mut database = CompilerDatabase::new(literal_source);
         let literal = labels(&mut database, "2 => \"½\".");
-        assert!(literal.contains(&"byteLength".to_owned()), "{literal:#?}");
+        for member in [
+            "byteLength",
+            "contains",
+            "startsWith",
+            "endsWith",
+            "equalsIgnoreAsciiCase",
+            "replaceAll",
+            "slice",
+        ] {
+            assert!(literal.contains(&member.to_owned()), "{literal:#?}");
+        }
 
         let local_source = source.replacen("return fraction", "return fraction.", 1);
         let mut database = CompilerDatabase::new(local_source);
         let local = labels(&mut database, "return fraction.");
-        assert!(local.contains(&"byteLength".to_owned()), "{local:#?}");
+        for member in [
+            "byteLength",
+            "contains",
+            "startsWith",
+            "endsWith",
+            "equalsIgnoreAsciiCase",
+            "replaceAll",
+            "slice",
+        ] {
+            assert!(local.contains(&member.to_owned()), "{local:#?}");
+        }
     }
 
     #[test]

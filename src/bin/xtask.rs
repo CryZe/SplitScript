@@ -233,6 +233,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/string_predicates.split",
+        output: "string_predicates.wasm",
+        profile: "release",
+        harness: "tests/string_predicates_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/while_loop.split",
         output: "while_loop.wasm",
         profile: "release",

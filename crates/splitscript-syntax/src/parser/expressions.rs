@@ -195,7 +195,7 @@ impl Parser<'_> {
         }
         if self.eat(&TokenKind::Bang).is_some() {
             let start = self.previous().span;
-            let expr = self.required_prefix()?;
+            let expr = self.required_expression(11)?;
             let span = start.join(expr.span);
             return Ok(self.new_expr(
                 ExprKind::Unary {
@@ -207,7 +207,7 @@ impl Parser<'_> {
         }
         if self.eat(&TokenKind::Minus).is_some() {
             let start = self.previous().span;
-            let expr = self.required_prefix()?;
+            let expr = self.required_expression(11)?;
             let span = start.join(expr.span);
             return Ok(self.new_expr(
                 ExprKind::Unary {
@@ -670,16 +670,6 @@ impl Parser<'_> {
         self.recover_required_expression(parsed, expression_start)
     }
 
-    pub(super) fn required_prefix(&mut self) -> Result<Expr, Diagnostic> {
-        let expression_start = self.cursor.position();
-        let parsed = if self.expression_is_missing_before_statement() {
-            Err(self.error("expected an expression"))
-        } else {
-            self.prefix()
-        };
-        self.recover_required_expression(parsed, expression_start)
-    }
-
     pub(super) fn expression_is_missing_before_statement(&self) -> bool {
         if !self.line_break_before_current() {
             return false;
@@ -776,13 +766,13 @@ impl Parser<'_> {
             {
                 self.bump();
                 self.bump();
-                let binding_name = self
-                    .expect_any_ident("expected a binding or `_` in the wrapper pattern")?
-                    .0;
+                let (binding_name, binding_span) =
+                    self.expect_any_ident("expected a binding or `_` in the wrapper pattern")?;
                 self.expect(TokenKind::RParen, "expected `)` after the wrapper binding")?;
                 let binding = (binding_name != "_").then(|| PatternBinding {
                     id: self.new_value_id(),
                     name: binding_name,
+                    name_span: binding_span,
                 });
                 match name.as_str() {
                     "Some" => MatchPattern::OptionSome(binding),
@@ -796,11 +786,13 @@ impl Parser<'_> {
                 if self.eat(&TokenKind::Dot).is_some() {
                     let (variant, _) = self.expect_any_ident("expected a variant name")?;
                     let binding = if self.eat(&TokenKind::LParen).is_some() {
-                        let name = self.expect_any_ident("expected a payload binding")?.0;
+                        let (name, name_span) =
+                            self.expect_any_ident("expected a payload binding")?;
                         self.expect(TokenKind::RParen, "expected `)` after the payload binding")?;
                         Some(PatternBinding {
                             id: self.new_value_id(),
                             name,
+                            name_span,
                         })
                     } else {
                         None

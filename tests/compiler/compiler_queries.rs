@@ -28,6 +28,49 @@ fn compiler_context_identity_survives_every_pipeline_product() {
 }
 
 #[test]
+fn compiler_database_publishes_non_fatal_warnings() {
+    use splitscript::{DiagnosticSeverity, tooling::database::CompilerDatabase};
+
+    let mut database = CompilerDatabase::new(
+        r#"state "game.exe" {} whileAttached { "abc".replaceAll("a", "b") }"#,
+    );
+    assert!(database.check().is_ok());
+    let diagnostics = database.diagnostics();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Warning);
+    assert!(diagnostics[0].message.contains("replaceAll"));
+}
+
+#[test]
+fn compiler_database_applies_warning_policy_without_losing_semantics() {
+    use splitscript::{
+        DiagnosticCode, DiagnosticSeverity, WarningLevel, WarningPolicy,
+        tooling::database::CompilerDatabase,
+    };
+
+    let source = r#"state "game.exe" {} whileAttached { let unread = 1 }"#;
+    let mut database = CompilerDatabase::new(source);
+    database
+        .check()
+        .expect("warning policy must not invalidate semantic products");
+
+    let mut policy = WarningPolicy::default();
+    assert!(policy.set(DiagnosticCode::UnusedBinding, WarningLevel::Deny));
+    assert!(database.set_warning_policy(policy));
+    let diagnostics = database.diagnostics();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, DiagnosticCode::UnusedBinding);
+    assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
+    database
+        .check()
+        .expect("denial changes the product status, not semantic checking");
+
+    assert!(policy.set(DiagnosticCode::UnusedBinding, WarningLevel::Allow));
+    assert!(database.set_warning_policy(policy));
+    assert!(database.diagnostics().is_empty());
+}
+
+#[test]
 fn vscode_manifest_tracks_the_lsp_semantic_token_legend() {
     use std::collections::BTreeSet;
 
@@ -789,6 +832,64 @@ fn rename_queries_validate_identifiers_reservations_and_binding_identity() {
         database.rename_at(print, "write"),
         Err(RenameError::NotRenameable)
     ));
+}
+
+#[test]
+fn underscore_suppression_reuses_validated_identity_renames() {
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let source = r#"
+        record Snapshot {
+            used: i32
+            unusedField: i32
+        }
+
+        let deadGlobal = 1
+        let _deadGlobal = 2
+        state "game.exe" {}
+
+        fn deadHelper() {
+            print(deadGlobal)
+        }
+
+        fn snapshot() -> Snapshot {
+            return Snapshot { used: 1, unusedField: 2 }
+        }
+
+        whileAttached {
+            snapshot().used
+        }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    database.check().expect("warnings do not reject the source");
+
+    let global_offset = source.find("deadGlobal =").unwrap();
+    let global = database
+        .underscore_suppression_at(global_offset)
+        .unwrap()
+        .expect("the unused global is renameable");
+    assert_eq!(global.replacement, "__deadGlobal");
+    assert_eq!(global.spans.len(), 2);
+    assert!(
+        global
+            .spans
+            .iter()
+            .all(|span| &source[span.start..span.end] == "deadGlobal")
+    );
+
+    let field_offset = source.find("unusedField: i32").unwrap();
+    let field = database
+        .underscore_suppression_at(field_offset)
+        .unwrap()
+        .expect("the unread field is renameable");
+    assert_eq!(field.replacement, "_unusedField");
+    assert_eq!(field.spans.len(), 2);
+    assert!(
+        field
+            .spans
+            .iter()
+            .all(|span| &source[span.start..span.end] == "unusedField")
+    );
 }
 
 #[test]

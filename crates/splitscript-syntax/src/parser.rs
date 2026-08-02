@@ -572,6 +572,28 @@ mod tests {
     }
 
     #[test]
+    fn postfix_calls_bind_more_tightly_than_unary_operators() {
+        let source = r#"
+            state "game.exe" {}
+            whileAttached {
+                let absent = !"short".contains("long")
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let Stmt::Variable(variable) = &program.actions[0].body.statements[0] else {
+            panic!("expected a variable declaration")
+        };
+        let ExprKind::Unary {
+            op: UnaryOp::Not,
+            expr,
+        } = &variable.value.kind
+        else {
+            panic!("expected unary negation outside the call")
+        };
+        assert!(matches!(expr.kind, ExprKind::Call { .. }));
+    }
+
+    #[test]
     fn builds_multiline_setting_tooltips_from_doc_comments() {
         let source = r#"
             state "game.exe" {}

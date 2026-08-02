@@ -38,6 +38,10 @@ pub(crate) enum RuntimeHelperId {
     TimerSetVariable,
     FormatI64,
     StringEquality,
+    StringMatch,
+    StringFind,
+    StringReplaceAll,
+    StringSlice,
     ScanProcessRange,
     ReadRelative32,
     StringFromMemory,
@@ -263,6 +267,8 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::ProcessReadUtf8
         | IntrinsicId::ProcessReadManagedString
         | IntrinsicId::ModulePath
+        | IntrinsicId::StringReplaceAll
+        | IntrinsicId::StringSlice
         | IntrinsicId::GbaAttach => scratch(ScratchType::ResultValue, 1),
         IntrinsicId::GbaEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
         _ => None,
@@ -301,6 +307,12 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::UnityClassStaticInstance => &[Helper(Runtime::UnityGetStaticInstance)],
         IntrinsicId::GbaAttach => &[Helper(Runtime::GbaAttach)],
         IntrinsicId::GbaEmulatorRead => &[Helper(Runtime::GbaTranslateAddress)],
+        IntrinsicId::StringContains
+        | IntrinsicId::StringStartsWith
+        | IntrinsicId::StringEndsWith
+        | IntrinsicId::StringEqualsIgnoreAsciiCase => &[Helper(Runtime::StringMatch)],
+        IntrinsicId::StringReplaceAll => &[Helper(Runtime::StringReplaceAll)],
+        IntrinsicId::StringSlice => &[Helper(Runtime::StringSlice)],
         IntrinsicId::StringConcat => &[Helper(Runtime::ConcatStrings)],
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
         IntrinsicId::NextTick
@@ -334,6 +346,7 @@ const NEXT_TICK: EffectSet = EffectSet::one(Effect::RequiresAttachedProcess)
     .with(Effect::CancelsOnProcessClose);
 
 const VOID: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Void);
+const BOOL: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Bool);
 const U32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U32);
 const U64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U64);
 const F64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::F64);
@@ -672,6 +685,84 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(NO_TYPE_PARAMETERS, Some(STRING), params![], U32,),
             PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringContains => contract!(
+            StringContains,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(STRING)],
+                BOOL,
+            ),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringStartsWith => contract!(
+            StringStartsWith,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(STRING)],
+                BOOL,
+            ),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringEndsWith => contract!(
+            StringEndsWith,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(STRING)],
+                BOOL,
+            ),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringEqualsIgnoreAsciiCase => contract!(
+            StringEqualsIgnoreAsciiCase,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(STRING)],
+                BOOL,
+            ),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringReplaceAll => contract!(
+            StringReplaceAll,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(STRING), value(STRING)],
+                STRING_RESULT,
+            ),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringSlice => contract!(
+            StringSlice,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(U32), value(U32)],
+                STRING_RESULT,
+            ),
+            ALLOCATES,
             Everywhere,
             RepresentationPrimitive
         ),

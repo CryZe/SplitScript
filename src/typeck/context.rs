@@ -63,6 +63,10 @@ impl CallableContext {
         matches!(self, Self::Function(_) | Self::LibraryFunction(_))
     }
 
+    pub(super) fn is_library_function(&self) -> bool {
+        matches!(self, Self::LibraryFunction(_))
+    }
+
     pub(super) fn action(&self) -> Option<ActionKind> {
         match self {
             Self::Action(action) => Some(*action),

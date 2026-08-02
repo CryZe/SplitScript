@@ -49,6 +49,12 @@ pub(crate) fn validate(
     diagnostics.extend(validate_must_use(&standard_library, hir, semantics));
     diagnostics.extend(validate_unused_bindings(syntax, hir));
     diagnostics.extend(validate_unused_declarations(syntax, hir, semantics));
+    diagnostics.extend(validate_suspending_calls(
+        &standard_library,
+        syntax,
+        hir,
+        &effects,
+    ));
 
     // The standalone standard-library bootstrap is the authority for catalog
     // metadata. Every ordinary compilation rechecks the same injected bodies
@@ -168,6 +174,110 @@ pub(crate) fn validate(
         effects,
         diagnostics,
     }
+}
+
+fn validate_suspending_calls(
+    standard_library: &StandardLibrary,
+    syntax: &Program,
+    hir: &TypedProgram,
+    effects: &OperationAnalysis,
+) -> Vec<Diagnostic> {
+    #[derive(Default)]
+    struct AwaitCollector {
+        operands: HashSet<crate::ast::ExprId>,
+    }
+
+    impl TypedVisitor for AwaitCollector {
+        fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
+            if let TypedStatementKind::Suspend {
+                mode: ast::SuspensionMode::Await,
+                value,
+                ..
+            } = statement.kind
+            {
+                self.operands.insert(value);
+            }
+            hir::walk_typed_statement(self, statement, program);
+        }
+    }
+
+    fn call_semantics(
+        call: &ResolvedCall,
+        standard_library: &StandardLibrary,
+        syntax: &Program,
+        hir: &TypedProgram,
+        effects: &OperationAnalysis,
+    ) -> Option<(crate::stdlib::SuspensionKind, String)> {
+        match call {
+            ResolvedCall::StandardLibrary { item, .. } => {
+                let declaration = standard_library.item(*item);
+                let suspension = hir.library_function(*item).map_or_else(
+                    || standard_library.operation_semantics(*item).suspension,
+                    |function| effects.function(function).suspension,
+                );
+                Some((suspension, declaration.qualified_name.to_owned()))
+            }
+            ResolvedCall::UserFunction { function, .. }
+            | ResolvedCall::UserMethod { function, .. } => {
+                let name = syntax
+                    .functions
+                    .iter()
+                    .find(|declaration| declaration.id == *function)
+                    .map(|declaration| declaration.name.clone())
+                    .unwrap_or_else(|| "function".to_owned());
+                Some((effects.function(*function).suspension, name))
+            }
+            ResolvedCall::ResultError { .. }
+            | ResolvedCall::OptionSome { .. }
+            | ResolvedCall::ResultSuccess { .. } => None,
+        }
+    }
+
+    let mut awaited = AwaitCollector::default();
+    for function in hir.all_function_bodies() {
+        awaited.visit_block(&function.body, hir);
+    }
+    for action in hir.action_bodies() {
+        awaited.visit_block(&action.body, hir);
+    }
+
+    let mut diagnostics = Vec::new();
+    for expression in hir.expressions() {
+        let Some(call) = hir.call(expression.id) else {
+            continue;
+        };
+        let Some((suspension, name)) = call_semantics(call, standard_library, syntax, hir, effects)
+        else {
+            continue;
+        };
+        if suspension == crate::stdlib::SuspensionKind::Suspends
+            && !awaited.operands.contains(&expression.id)
+        {
+            diagnostics.push(Diagnostic::semantic(
+                format!("`{name}` suspends and must be awaited"),
+                expression.span,
+            ));
+        }
+    }
+    for operand in awaited.operands {
+        let Some(expression) = hir.expression(operand) else {
+            continue;
+        };
+        let Some(call) = hir.call(operand) else {
+            continue;
+        };
+        let Some((suspension, name)) = call_semantics(call, standard_library, syntax, hir, effects)
+        else {
+            continue;
+        };
+        if !suspension.is_awaitable() {
+            diagnostics.push(Diagnostic::semantic(
+                format!("`{name}` is synchronous and cannot be awaited"),
+                expression.span,
+            ));
+        }
+    }
+    diagnostics
 }
 
 #[derive(Debug, Clone, Copy)]

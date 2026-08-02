@@ -320,4 +320,39 @@ mod tests {
             inferred.suspension
         );
     }
+
+    #[test]
+    fn catalog_source_bodies_derive_direct_and_transitive_suspension() {
+        let library = crate::stdlib::StandardLibrary::new();
+        for item in [
+            crate::stdlib::StdlibItemId::CatalogSuspensionProbeWaitOneTick,
+            crate::stdlib::StdlibItemId::CatalogSuspensionProbeWaitThroughHelper,
+        ] {
+            let semantics = library.operation_semantics(item);
+            assert_eq!(semantics.suspension, SuspensionKind::Suspends);
+            assert_eq!(semantics.availability, Availability::OnAttach);
+            assert_eq!(semantics.cancellation, CancellationKind::ProcessClose);
+        }
+
+        let awaited = r#"
+state "game.exe" {}
+onAttach {
+    await CatalogSuspensionProbe.waitThroughHelper()
+}
+"#;
+        crate::check(crate::lower(crate::parse(awaited).unwrap())).unwrap();
+
+        let synchronous = r#"
+state "game.exe" {}
+onAttach {
+    CatalogSuspensionProbe.waitThroughHelper()
+}
+"#;
+        let errors = crate::check(crate::lower(crate::parse(synchronous).unwrap())).unwrap_err();
+        assert!(errors.iter().any(|error| {
+            error
+                .message
+                .contains("CatalogSuspensionProbe.waitThroughHelper` must be awaited")
+        }));
+    }
 }

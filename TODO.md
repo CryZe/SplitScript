@@ -215,10 +215,15 @@ tooling consumers only see the normalized immutable graph.
   - [ ] Add suspending standard-library bodies through an explicit coroutine
     calling convention; do not treat permission to write `await` as sufficient
     or disguise a compiler implementation as a source body.
-    - [ ] Classify source-defined functions as synchronous or suspending from
+    - [x] Classify source-defined functions as synchronous or suspending from
       their transitive checked call graph. A suspending function must be called
-      with `await`, and its attachment/cancellation requirements must remain the
+      with `await`, and its attachment/cancellation requirements remain the
       compiler-derived catalog facts consumed by diagnostics and tooling.
+      Privileged bodies may use `await` without an authored async marker; the
+      post-check validator resolves the bootstrap cycle by validating awaited
+      source-body calls after fixed-point effect inference. Test-only direct and
+      transitive helpers establish this semantic boundary without claiming the
+      synchronous Wasm call ABI can execute them yet.
     - [ ] Define a backend poll ABI that distinguishes `Pending` from `Ready`
       and carries the completed value without changing the ordinary synchronous
       Wasm call ABI. Specify cancellation and failure behavior before emission.

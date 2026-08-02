@@ -2567,3 +2567,55 @@ struct CatalogFixedMemoryProbe {
     /// ```
     values: [u16; 3],
 }
+
+/// Exercises derived suspension metadata for catalog-owned source bodies.
+///
+/// This declaration exists only in tests and verifies direct and transitive
+/// suspension without adding an authored `async` marker.
+///
+/// # Example
+///
+/// Name the suspension fixture
+///
+/// ```splitscript
+/// let fixtureName = "CatalogSuspensionProbe"
+/// ```
+@testOnly
+@representation(gcStruct, nullable)
+@valueUsage()
+struct CatalogSuspensionProbe {
+    /// Keeps the test fixture structurally representable.
+    private marker: u8,
+
+    /// Suspends through a trusted leaf operation.
+    ///
+    /// The body is classified from its resolved call rather than an authored
+    /// async annotation.
+    ///
+    /// # Example
+    ///
+    /// Await the direct helper
+    ///
+    /// ```splitscript
+    /// await CatalogSuspensionProbe.waitOneTick()
+    /// ```
+    static fn waitOneTick() -> void {
+        await nextTick()
+    }
+
+    /// Suspends transitively through another source-defined helper.
+    ///
+    /// The callee's derived operation metadata propagates through the ordinary
+    /// function call graph.
+    ///
+    /// # Example
+    ///
+    /// Await the transitive helper
+    ///
+    /// ```splitscript
+    /// await CatalogSuspensionProbe.waitThroughHelper()
+    /// ```
+    static fn waitThroughHelper() -> void {
+        await CatalogSuspensionProbe.waitOneTick()
+    }
+}

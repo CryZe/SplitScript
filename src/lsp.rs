@@ -76,7 +76,7 @@ impl LanguageServer {
                                 "documentFormattingProvider": true,
                                 "documentSymbolProvider": true,
                                 "codeActionProvider": {
-                                    "codeActionKinds": ["quickfix"],
+                                    "codeActionKinds": ["quickfix", "refactor.extract"],
                                     "resolveProvider": false
                                 },
                                 "completionProvider": {
@@ -276,12 +276,19 @@ impl LanguageServer {
             Err(response) => return response,
         };
         let uri = params.text_document.uri;
-        if params.context.only.as_ref().is_some_and(|kinds| {
-            !kinds.is_empty()
-                && !kinds
-                    .iter()
-                    .any(|kind| kind == "quickfix" || kind.starts_with("quickfix."))
-        }) {
+        let permits = |requested: &str| {
+            params.context.only.as_ref().is_none_or(|kinds| {
+                kinds.is_empty()
+                    || kinds.iter().any(|kind| {
+                        requested == kind
+                            || requested.starts_with(&format!("{kind}."))
+                            || kind.starts_with(&format!("{requested}."))
+                    })
+            })
+        };
+        let permits_quick_fixes = permits("quickfix");
+        let permits_extractions = permits("refactor.extract");
+        if !permits_quick_fixes && !permits_extractions {
             return response(id, json!([]));
         }
         let Some(document) = self.documents.get_mut(&uri) else {
@@ -298,38 +305,74 @@ impl LanguageServer {
         ) else {
             return error_response(id, -32602, "invalid code-action range");
         };
-        let diagnostics = document.database.diagnostics();
         let mut actions = Vec::new();
-        for diagnostic in diagnostics
-            .iter()
-            .filter(|diagnostic| diagnostic.span.start <= end && start <= diagnostic.span.end)
-        {
-            let mut fixes = diagnostic.fixes.clone();
-            if fixes.is_empty()
-                && matches!(
-                    diagnostic.code,
-                    DiagnosticCode::UnusedDeclaration | DiagnosticCode::UnusedMember
-                )
-                && let Ok(Some(plan)) = document
-                    .database
-                    .underscore_suppression_at(diagnostic.span.start)
+        if permits_quick_fixes {
+            let diagnostics = document.database.diagnostics();
+            for diagnostic in diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.span.start <= end && start <= diagnostic.span.end)
             {
-                let original = &source[diagnostic.span.start..diagnostic.span.end];
-                fixes.push(DiagnosticFix {
-                    title: format!("rename `{original}` to `{}`", plan.replacement),
-                    applicability: FixApplicability::MachineApplicable,
-                    edits: plan
-                        .spans
-                        .into_iter()
-                        .map(|span| TextEdit {
-                            span,
-                            replacement: plan.replacement.clone(),
+                let mut fixes = diagnostic.fixes.clone();
+                if fixes.is_empty()
+                    && matches!(
+                        diagnostic.code,
+                        DiagnosticCode::UnusedDeclaration | DiagnosticCode::UnusedMember
+                    )
+                    && let Ok(Some(plan)) = document
+                        .database
+                        .underscore_suppression_at(diagnostic.span.start)
+                {
+                    let original = &source[diagnostic.span.start..diagnostic.span.end];
+                    fixes.push(DiagnosticFix {
+                        title: format!("rename `{original}` to `{}`", plan.replacement),
+                        applicability: FixApplicability::MachineApplicable,
+                        edits: plan
+                            .spans
+                            .into_iter()
+                            .map(|span| TextEdit {
+                                span,
+                                replacement: plan.replacement.clone(),
+                            })
+                            .collect(),
+                    });
+                }
+                for fix in &fixes {
+                    let edits = fix
+                        .edits
+                        .iter()
+                        .map(|edit| {
+                            json!({
+                                "range": {
+                                    "start": position(&source, edit.span.start),
+                                    "end": position(&source, edit.span.end)
+                                },
+                                "newText": edit.replacement
+                            })
                         })
-                        .collect(),
-                });
+                        .collect::<Vec<_>>();
+                    let mut changes = serde_json::Map::new();
+                    changes.insert(uri.clone(), Value::Array(edits));
+                    actions.push(json!({
+                        "title": fix.title,
+                        "kind": "quickfix",
+                        "diagnostics": [diagnostic_json(&uri, &source, diagnostic)],
+                        "isPreferred": fix.applicability == FixApplicability::MachineApplicable,
+                        "edit": { "changes": changes },
+                        "data": { "applicability": fix.applicability.to_string() }
+                    }));
+                }
             }
-            for fix in &fixes {
-                let edits = fix
+        }
+        if permits_extractions
+            && let Ok(refactorings) = document
+                .database
+                .refactorings(crate::ast::Span { start, end })
+        {
+            for refactoring in refactorings
+                .into_iter()
+                .filter(|refactoring| permits(refactoring.kind.lsp_kind()))
+            {
+                let edits = refactoring
                     .edits
                     .iter()
                     .map(|edit| {
@@ -345,12 +388,9 @@ impl LanguageServer {
                 let mut changes = serde_json::Map::new();
                 changes.insert(uri.clone(), Value::Array(edits));
                 actions.push(json!({
-                    "title": fix.title,
-                    "kind": "quickfix",
-                    "diagnostics": [diagnostic_json(&uri, &source, diagnostic)],
-                    "isPreferred": fix.applicability == FixApplicability::MachineApplicable,
-                    "edit": { "changes": changes },
-                    "data": { "applicability": fix.applicability.to_string() }
+                    "title": refactoring.title,
+                    "kind": refactoring.kind.lsp_kind(),
+                    "edit": { "changes": changes }
                 }));
             }
         }

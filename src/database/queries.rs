@@ -283,6 +283,13 @@ impl CompilerDatabase {
         crate::insight::signature_help(self, offset)
     }
 
+    pub fn refactorings(
+        &mut self,
+        selection: Span,
+    ) -> SemanticQueryResult<Vec<crate::refactor::Refactoring>> {
+        crate::refactor::extract_refactorings(self, selection)
+    }
+
     pub fn expression_type(&mut self, expression: ExprId) -> SemanticQueryResult<Option<TypeId>> {
         Ok(self
             .semantic_snapshot()?

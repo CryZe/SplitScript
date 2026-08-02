@@ -38,6 +38,11 @@ pub mod language {
     pub use crate::language::*;
 }
 
+/// Selection-based, editor-neutral source refactorings.
+pub mod refactor {
+    pub use crate::refactor::*;
+}
+
 /// In-process Language Server Protocol handler.
 pub mod lsp {
     pub use crate::lsp::*;

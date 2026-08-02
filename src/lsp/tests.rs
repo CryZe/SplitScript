@@ -42,6 +42,10 @@ fn advertises_full_sync_diagnostics_formatting_and_semantic_tokens() {
         "quickfix"
     );
     assert_eq!(
+        response[0]["result"]["capabilities"]["codeActionProvider"]["codeActionKinds"][1],
+        "refactor.extract"
+    );
+    assert_eq!(
         response[0]["result"]["capabilities"]["semanticTokensProvider"]["full"],
         true
     );
@@ -947,6 +951,144 @@ fn document_symbols_and_code_actions_preserve_compiler_structure() {
         }
     }));
     assert!(unrelated[0]["result"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn code_actions_extract_selected_expressions() {
+    let source = concat!(
+        "state \"game.exe\" {}\n",
+        "fn score(offset: i32) {\n",
+        "    return offset + 1\n",
+        "}\n"
+    );
+    let uri = "file:///refactor.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+
+    let start = source.find("offset + 1").unwrap();
+    let end = start + "offset + 1".len();
+    let (start_line, start_character) = position_parts(source, start);
+    let (end_line, end_character) = position_parts(source, end);
+    let actions = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 24,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": start_line, "character": start_character },
+                "end": { "line": end_line, "character": end_character }
+            },
+            "context": { "diagnostics": [], "only": ["refactor.extract"] }
+        }
+    }));
+    let actions = actions[0]["result"].as_array().unwrap();
+    assert_eq!(actions.len(), 2, "{actions:#?}");
+    assert_eq!(actions[0]["kind"], "refactor.extract.variable");
+    assert_eq!(actions[1]["kind"], "refactor.extract.function");
+    assert_eq!(
+        actions[1]["edit"]["changes"][uri][0]["newText"],
+        "extracted(offset)"
+    );
+
+    let function_only = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 25,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": start_line, "character": start_character },
+                "end": { "line": end_line, "character": end_character }
+            },
+            "context": {
+                "diagnostics": [],
+                "only": ["refactor.extract.function"]
+            }
+        }
+    }));
+    let function_only = function_only[0]["result"].as_array().unwrap();
+    assert_eq!(function_only.len(), 1);
+    assert_eq!(function_only[0]["kind"], "refactor.extract.function");
+
+    let quick_fixes = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 26,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": start_line, "character": start_character },
+                "end": { "line": end_line, "character": end_character }
+            },
+            "context": { "diagnostics": [], "only": ["quickfix"] }
+        }
+    }));
+    assert!(quick_fixes[0]["result"].as_array().unwrap().is_empty());
+
+    let statement_source = concat!(
+        "state \"game.exe\" {}\n",
+        "fn report(value: i32) {\n",
+        "    print(value)\n",
+        "    print(value + 1)\n",
+        "}\n"
+    );
+    let statement_uri = "file:///statement-refactor.split";
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": statement_uri,
+                "version": 1,
+                "text": statement_source
+            }
+        }),
+    ));
+    let statement_start = statement_source.find("print(value)").unwrap();
+    let statement_end =
+        statement_source.find("print(value + 1)").unwrap() + "print(value + 1)".len();
+    let (statement_start_line, statement_start_character) =
+        position_parts(statement_source, statement_start);
+    let (statement_end_line, statement_end_character) =
+        position_parts(statement_source, statement_end);
+    let statements = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 27,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": statement_uri },
+            "range": {
+                "start": {
+                    "line": statement_start_line,
+                    "character": statement_start_character
+                },
+                "end": {
+                    "line": statement_end_line,
+                    "character": statement_end_character
+                }
+            },
+            "context": {
+                "diagnostics": [],
+                "only": ["refactor.extract.function"]
+            }
+        }
+    }));
+    let statements = statements[0]["result"].as_array().unwrap();
+    assert_eq!(statements.len(), 1, "{statements:#?}");
+    assert_eq!(
+        statements[0]["edit"]["changes"][statement_uri][0]["newText"],
+        "extracted(value)"
+    );
 }
 
 #[test]

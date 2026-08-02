@@ -335,6 +335,7 @@ pub enum TypedStatementKind {
     Suspend {
         mode: SuspensionMode,
         binding: Option<ValueId>,
+        returns: bool,
         value: ExprId,
     },
     Expression(ExprId),
@@ -1315,11 +1316,13 @@ fn lower_block(
                         Stmt::Suspend {
                             mode,
                             binding,
+                            returns,
                             value,
                             ..
                         } => TypedStatementKind::Suspend {
                             mode: *mode,
                             binding: binding.as_ref().map(|binding| binding.id),
+                            returns: *returns,
                             value: value.id,
                         },
                         Stmt::Expression(expression) => {

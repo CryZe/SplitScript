@@ -168,6 +168,28 @@ impl Parser<'_> {
         }
         if self.eat_ident("return").is_some() {
             let start = self.previous().span.start;
+            if !self.line_break_before_current()
+                && (self.at_ident("await") || self.at_ident("retry"))
+            {
+                let mode = if self.eat_ident("await").is_some() {
+                    SuspensionMode::Await
+                } else {
+                    self.expect_ident("retry")?;
+                    SuspensionMode::Retry
+                };
+                let value = self.root_expression();
+                self.terminator()?;
+                return Ok(Stmt::Suspend {
+                    mode,
+                    binding: None,
+                    returns: true,
+                    value,
+                    span: Span {
+                        start,
+                        end: self.previous().span.end,
+                    },
+                });
+            }
             let value = if self.at(&TokenKind::Semicolon)
                 || self.at(&TokenKind::RBrace)
                 || self.line_break_before_current()
@@ -217,6 +239,7 @@ impl Parser<'_> {
             return Ok(Stmt::Suspend {
                 mode,
                 binding: None,
+                returns: false,
                 span: Span {
                     start,
                     end: self.previous().span.end,
@@ -322,6 +345,7 @@ impl Parser<'_> {
                     end: value.span.end.max(name_span.end),
                 },
             }),
+            returns: false,
             value,
             span,
         })

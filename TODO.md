@@ -242,6 +242,9 @@ tooling consumers only see the normalized immutable graph.
       The source spelling and semantic signature are established now, but
       variables, parameters, fields, and unpolled returns must not claim storage
       semantics until the backend can preserve and poll their frame identity.
+      At that point, promote `await` from its current statement forms (including
+      direct `return await operation`) to a generally composable expression over
+      an `async T` value, without introducing a second suspension model.
     - [ ] Give every reachable suspending `FunctionInstance` a typed GC frame
       containing its program counter, parameters/receiver, locals live across
       suspension, nested callee frame, and result storage. Plan these layouts

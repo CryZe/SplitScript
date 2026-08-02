@@ -457,4 +457,36 @@ fn answer() -> async i32 {
             error.message == "function `answer` is declared async but never suspends"
         }));
     }
+
+    #[test]
+    fn awaited_values_can_be_returned_directly() {
+        let source = r#"
+state "game.exe" {}
+
+fn loadUnity() {
+    return await Unity.il2cpp(2020)
+}
+"#;
+        let checked = crate::check(crate::lower(crate::parse(source).unwrap())).unwrap();
+        let function = &checked.syntax().functions[0];
+        assert!(matches!(
+            function.body.statements.as_slice(),
+            [crate::ast::Stmt::Suspend {
+                mode: crate::ast::SuspensionMode::Await,
+                returns: true,
+                ..
+            }]
+        ));
+        assert_eq!(
+            checked.effects().function(function.id).suspension,
+            SuspensionKind::Suspends
+        );
+        let result = checked.semantics().function_result(function.id).unwrap();
+        assert!(matches!(
+            checked.semantics().types().kind(result),
+            crate::types::TypeKind::Standard(_)
+        ));
+        crate::compile(source)
+            .expect("an unused async helper should compile without a parser error");
+    }
 }

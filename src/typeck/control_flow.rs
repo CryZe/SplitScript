@@ -20,7 +20,7 @@ pub(super) fn is_constant(expression: &Expr, resolutions: &ProgramResolutions) -
 
 pub(super) fn definitely_returns(block: &Block) -> bool {
     block.statements.iter().any(|statement| match statement {
-        Stmt::Return { .. } | Stmt::Throw { .. } => true,
+        Stmt::Return { .. } | Stmt::Throw { .. } | Stmt::Suspend { returns: true, .. } => true,
         Stmt::If {
             then_block,
             else_block: Some(else_block),
@@ -60,7 +60,10 @@ struct ValueReturnFinder(bool);
 
 impl<'ast> Visitor<'ast> for ValueReturnFinder {
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
-        if matches!(statement, Stmt::Return { value: Some(_), .. }) {
+        if matches!(
+            statement,
+            Stmt::Return { value: Some(_), .. } | Stmt::Suspend { returns: true, .. }
+        ) {
             self.0 = true;
         } else if !self.0 {
             visit::walk_stmt(self, statement);

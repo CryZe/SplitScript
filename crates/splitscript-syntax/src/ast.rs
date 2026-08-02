@@ -687,6 +687,9 @@ pub enum Stmt {
     Suspend {
         mode: SuspensionMode,
         binding: Option<SuspensionBinding>,
+        /// Completes the surrounding function or action with the suspended
+        /// operation's value instead of continuing with the next statement.
+        returns: bool,
         value: Expr,
         span: Span,
     },

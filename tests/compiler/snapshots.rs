@@ -348,6 +348,7 @@ fn render_typed_block(
                 mode,
                 binding,
                 value,
+                ..
             } => {
                 writeln!(
                     output,

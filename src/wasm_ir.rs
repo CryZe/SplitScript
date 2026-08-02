@@ -377,6 +377,8 @@ pub enum Terminator {
     Suspend {
         mode: SuspensionMode,
         binding: Option<ValueId>,
+        /// The completed value is the surrounding async body's result.
+        returns: bool,
         value: ExprId,
         /// State retried while the awaited operation remains pending.
         poll_state: AsyncStateId,
@@ -1423,6 +1425,7 @@ fn lower_async_statements(
             TypedStatementKind::Suspend {
                 mode,
                 binding,
+                returns,
                 value,
             } => {
                 result = Block {
@@ -1430,12 +1433,13 @@ fn lower_async_statements(
                     terminator: Terminator::Suspend {
                         mode: *mode,
                         binding: *binding,
+                        returns: *returns,
                         value: *value,
                         poll_state: AsyncStateId::ENTRY,
                         resume_state: AsyncStateId::ENTRY,
                         cancellation: suspension_cancellation(*mode, *value, typed_hir),
                         live_values: Vec::new(),
-                        continuation: Box::new(result),
+                        continuation: Box::new(if *returns { Block::default() } else { result }),
                     },
                 };
             }
@@ -1630,22 +1634,23 @@ fn lower_statements(
             TypedStatementKind::Suspend {
                 mode,
                 binding,
+                returns,
                 value,
             } => {
                 block.terminator = Terminator::Suspend {
                     mode: *mode,
                     binding: *binding,
+                    returns: *returns,
                     value: *value,
                     poll_state: AsyncStateId::ENTRY,
                     resume_state: AsyncStateId::ENTRY,
                     cancellation: suspension_cancellation(*mode, *value, typed_hir),
                     live_values: Vec::new(),
-                    continuation: Box::new(lower_statements(
-                        &statements[index + 1..],
-                        typed_hir,
-                        semantics,
-                        profile,
-                    )),
+                    continuation: Box::new(if *returns {
+                        Block::default()
+                    } else {
+                        lower_statements(&statements[index + 1..], typed_hir, semantics, profile)
+                    }),
                 };
                 return block;
             }

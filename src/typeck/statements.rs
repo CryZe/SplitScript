@@ -241,6 +241,7 @@ impl Checker {
             Stmt::Suspend {
                 mode,
                 binding,
+                returns,
                 value,
                 span,
             } => {
@@ -284,10 +285,14 @@ impl Checker {
                             }
                         },
                     };
-                    let expected = binding
-                        .as_ref()
-                        .and_then(|binding| binding.annotation)
-                        .map(|ty| self.syntax_type(ty));
+                    let expected = if *returns {
+                        Some(self.return_ty)
+                    } else {
+                        binding
+                            .as_ref()
+                            .and_then(|binding| binding.annotation)
+                            .map(|ty| self.syntax_type(ty))
+                    };
                     expected.map_or(Some(result), |expected| {
                         self.unify(result, expected, value.span)
                     })

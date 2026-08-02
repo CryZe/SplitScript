@@ -908,6 +908,45 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         checked_declaration_examples >= 7,
         "representative non-callable declarations should retain checked examples"
     );
+    let missing_declaration_examples = library
+        .namespaces()
+        .iter()
+        .map(|value| ("namespace", value.name, value.documentation))
+        .chain(
+            library
+                .capabilities()
+                .iter()
+                .map(|value| ("capability", value.name, value.documentation)),
+        )
+        .chain(
+            library
+                .type_constructors()
+                .iter()
+                .map(|value| ("type constructor", value.name, value.documentation)),
+        )
+        .chain(
+            library
+                .types()
+                .iter()
+                .map(|value| ("type", value.name, value.documentation)),
+        )
+        .chain(
+            library
+                .fields()
+                .iter()
+                .filter(|value| value.visibility == FieldVisibility::Public)
+                .map(|value| ("field", value.name, value.documentation)),
+        )
+        .chain(
+            library
+                .variants()
+                .iter()
+                .map(|value| ("variant", value.name, value.documentation)),
+        )
+        .filter(|(_, _, documentation)| documentation.examples.is_empty())
+        .map(|(kind, name, _)| format!("{kind} {name}"))
+        .collect::<Vec<_>>();
+    assert_eq!(missing_declaration_examples, Vec::<String>::new());
 }
 
 #[test]

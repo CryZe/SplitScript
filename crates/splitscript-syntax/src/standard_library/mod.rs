@@ -180,6 +180,9 @@ pub struct Documentation {
 pub struct Example {
     pub title: String,
     pub source: String,
+    /// Optional state-provider name used only to compile-check the focused
+    /// snippet. It is not part of rendered documentation.
+    pub state_provider: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

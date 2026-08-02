@@ -118,6 +118,14 @@ root {
 /// Accesses the attached game process.
 ///
 /// Process operations discover modules, read memory, follow pointers, and scan signatures.
+///
+/// # Example
+///
+/// Read the matched process identity
+///
+/// ```splitscript
+/// let executableName = process.name()
+/// ```
 @representation(scalar, i64)
 @valueUsage(localVariable, globalVariable)
 intrinsic type Process {
@@ -357,6 +365,14 @@ namespace timer {
 /// Discovers and inspects Unity runtimes.
 ///
 /// Unity operations attach to IL2CPP metadata and produce typed images, classes, and fields.
+///
+/// # Example
+///
+/// Enter Unity discovery through its namespace
+///
+/// ```splitscript
+/// let runtime = await Unity.il2cpp(2020)
+/// ```
 namespace Unity {
     /// Discovers an IL2CPP runtime.
     ///
@@ -380,6 +396,14 @@ namespace Unity {
 ///
 /// Numeric values provide minimum, maximum, clamping, ordered comparisons, and
 /// equality while preserving their inferred type.
+///
+/// # Example
+///
+/// Keep an integer below a limit
+///
+/// ```splitscript
+/// let cappedStage = 12.min(7)
+/// ```
 @behavior(declared)
 capability Numeric<T: Equatable> {
     /// Adds another value of the same numeric type.
@@ -478,6 +502,14 @@ capability Numeric<T: Equatable> {
 ///
 /// Integer operations and inference constraints accept only whole-number
 /// representations. Every integer is also numeric and displayable.
+///
+/// # Example
+///
+/// Preserve an exact integer width
+///
+/// ```splitscript
+/// let inventoryMask: u8 = 1 << 2
+/// ```
 @behavior(declared)
 capability Integer<T: Numeric + Display> {}
 
@@ -485,6 +517,14 @@ capability Integer<T: Numeric + Display> {}
 ///
 /// Signed values can represent numbers below zero and support all numeric
 /// operations.
+///
+/// # Example
+///
+/// Store a signed delta
+///
+/// ```splitscript
+/// let levelDelta: i32 = -4
+/// ```
 @behavior(declared)
 capability Signed<T: Numeric> {}
 
@@ -492,6 +532,14 @@ capability Signed<T: Numeric> {}
 ///
 /// Floating-point constraints accept f32 and f64 values and imply signed
 /// numeric behavior.
+///
+/// # Example
+///
+/// Round a floating-point value
+///
+/// ```splitscript
+/// let nearest = 2.5.round()
+/// ```
 @behavior(declared)
 capability Float<T: Signed> {
     /// Returns the magnitude of a floating-point value.
@@ -624,6 +672,14 @@ capability Float<T: Signed> {
 /// Supports equality comparison.
 ///
 /// Equality is available for values whose representation can be compared safely.
+///
+/// # Example
+///
+/// Compare two values
+///
+/// ```splitscript
+/// let sameRoom = 4 == 4
+/// ```
 @behavior(structuralEquality)
 capability Equatable<T> {}
 
@@ -637,7 +693,7 @@ capability Equatable<T> {}
 /// Display a value without an explicit string conversion
 ///
 /// ```splitscript
-/// print(42)
+/// let scoreText = `Score: {42}`
 /// ```
 @behavior(declared)
 capability Display<T> {}
@@ -645,6 +701,14 @@ capability Display<T> {}
 /// Supports deserialization from process memory.
 ///
 /// Primitive and record layouts with this capability can be selected by `process.read`.
+///
+/// # Example
+///
+/// Infer a readable memory type
+///
+/// ```splitscript
+/// let health = process.read<i32>(0x1234) else 0
+/// ```
 @behavior(structuralMemoryLayout)
 capability MemoryReadable<T> {}
 
@@ -653,6 +717,14 @@ capability MemoryReadable<T> {}
 /// `[T]` accepts any length, while `[T; N]` carries an exact length and can
 /// provide a fixed process-memory layout. Both forms use WebAssembly GC storage
 /// and expose the same generic length, access, and mutation operations.
+///
+/// # Example
+///
+/// Store a typed sequence
+///
+/// ```splitscript
+/// let inventory: [u8] = [1, 2, 3]
+/// ```
 typeConstructor Array<T> {
     /// Returns the number of array elements.
     ///
@@ -738,6 +810,14 @@ typeConstructor Option<T> {}
 /// Represents a value or an error.
 ///
 /// The postfix `!` type syntax constructs a Result value.
+///
+/// # Example
+///
+/// Store a successful result
+///
+/// ```splitscript
+/// let health: u32! = 100
+/// ```
 @mustUse("Result values must be handled so failures are not silently ignored.")
 typeConstructor Result<T> {}
 
@@ -977,6 +1057,15 @@ intrinsic type String {
 /// Stores a compiled process-memory signature.
 ///
 /// Signature values are created by signature literals and consumed by scanning operations.
+///
+/// # Example
+///
+/// Scan for a machine-code marker
+///
+/// ```splitscript
+/// let executable = await process.mainModule()
+/// let markerAddress = await executable.scan(sig"48 8B ?? 89")
+/// ```
 @representation(scalar, i64)
 @valueUsage()
 intrinsic type Signature {}
@@ -986,6 +1075,14 @@ intrinsic type Signature {}
 /// Durations carry normalized whole seconds and nanoseconds and are used for
 /// LiveSplit game time. The nanosecond component is always between zero and
 /// 999,999,999, including for negative durations.
+///
+/// # Example
+///
+/// Represent an exact delay
+///
+/// ```splitscript
+/// let delay = Duration.fromWholeSeconds(2)
+/// ```
 @representation(gcStruct)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
 @capabilities(Equatable)
@@ -1363,6 +1460,14 @@ struct Duration {
 /// Instants are suitable for elapsed-time measurements such as delayed splits
 /// and debouncing. They are unrelated to calendar time and have no meaningful
 /// absolute value.
+///
+/// # Example
+///
+/// Capture a monotonic timestamp
+///
+/// ```splitscript
+/// let detectedAt: Instant = Instant.now()
+/// ```
 @representation(gcStruct)
 @valueUsage(recordField, enumPayload, localVariable, globalVariable)
 @capabilities(Equatable)
@@ -1447,14 +1552,38 @@ struct Instant {
 /// Describes the native pointer width used by a process module.
 ///
 /// Pointer width controls how deep pointer paths decode intermediate addresses.
+///
+/// # Example
+///
+/// Select a 64-bit pointer layout
+///
+/// ```splitscript
+/// let pointerWidth = PointerSize.Bit64
+/// ```
 @representation(enum, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
 @capabilities(Equatable)
 enum PointerSize {
     /// Intermediate pointers contain 32-bit addresses.
+    ///
+    /// # Example
+    ///
+    /// Select 32-bit pointer decoding
+    ///
+    /// ```splitscript
+    /// let pointerWidth = PointerSize.Bit32
+    /// ```
     Bit32,
 
     /// Intermediate pointers contain 64-bit addresses.
+    ///
+    /// # Example
+    ///
+    /// Select 64-bit pointer decoding explicitly
+    ///
+    /// ```splitscript
+    /// let nativeWidth = PointerSize.Bit64
+    /// ```
     Bit64,
 }
 
@@ -1462,19 +1591,63 @@ enum PointerSize {
 ///
 /// A path keeps version-specific pointer data separate from state polling and
 /// resolves every intermediate pointer according to the executable's width.
+///
+/// # Example
+///
+/// Build a reusable pointer path
+///
+/// ```splitscript
+/// let healthPath = 0x1000.memoryPath([0x20, 0x18], 0x8, PointerSize.Bit64)
+/// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 struct MemoryPath {
     /// Returns the address at which traversal starts.
+    ///
+    /// # Example
+    ///
+    /// Inspect a path's starting address
+    ///
+    /// ```splitscript
+    /// let path = 0x1000.memoryPath([0x20], 0x8, PointerSize.Bit64)
+    /// let start = path.base
+    /// ```
     base: address,
 
     /// Returns the offsets that each end in an intermediate pointer read.
+    ///
+    /// # Example
+    ///
+    /// Inspect intermediate dereferences
+    ///
+    /// ```splitscript
+    /// let path = 0x2000.memoryPath([0x30, 0x10], 0x4, PointerSize.Bit32)
+    /// let offsets = path.dereferences
+    /// ```
     dereferences: [u64],
 
     /// Returns the offset applied after the final pointer read.
+    ///
+    /// # Example
+    ///
+    /// Inspect a path's final offset
+    ///
+    /// ```splitscript
+    /// let path = 0x3000.memoryPath([], 0x14, PointerSize.Bit64)
+    /// let trailingOffset = path.finalOffset
+    /// ```
     finalOffset: u64,
 
     /// Returns the native pointer width used during traversal.
+    ///
+    /// # Example
+    ///
+    /// Inspect a path's pointer width
+    ///
+    /// ```splitscript
+    /// let path = 0x4000.memoryPath([0x40], 0, PointerSize.Bit32)
+    /// let width = path.pointerSize
+    /// ```
     pointerSize: PointerSize,
 
     /// Resolves the path against the attached process.
@@ -1506,20 +1679,60 @@ struct MemoryPath {
 /// The components correspond to `major.minor.build.private` in a PE
 /// `VS_FIXEDFILEINFO` resource. Keeping the parts typed avoids depending on
 /// the inconsistent punctuation of legacy `FileVersionInfo` strings.
+///
+/// # Example
+///
+/// Compare a discovered version to a literal
+///
+/// ```splitscript
+/// let supported = v"1.2.3.4" == v"1.2.3.4"
+/// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
 @capabilities(Equatable, Display)
 struct FileVersion {
     /// Major version component.
+    ///
+    /// # Example
+    ///
+    /// Read the major version
+    ///
+    /// ```splitscript
+    /// let majorVersion = v"2.5.1.0".major
+    /// ```
     major: u16,
 
     /// Minor version component.
+    ///
+    /// # Example
+    ///
+    /// Read the minor version
+    ///
+    /// ```splitscript
+    /// let minorVersion = v"2.5.1.0".minor
+    /// ```
     minor: u16,
 
     /// Build version component.
+    ///
+    /// # Example
+    ///
+    /// Read the build version
+    ///
+    /// ```splitscript
+    /// let buildVersion = v"2.5.1.0".build
+    /// ```
     build: u16,
 
     /// Private version component.
+    ///
+    /// # Example
+    ///
+    /// Read the private version
+    ///
+    /// ```splitscript
+    /// let privateVersion = v"2.5.1.7".privatePart
+    /// ```
     privatePart: u16,
 
     /// Constructs a numeric Windows file version from its four components.
@@ -1573,6 +1786,14 @@ struct FileVersion {
 /// Describes a module loaded in the attached process.
 ///
 /// A module exposes its base address and mapped size for bounded memory discovery.
+///
+/// # Example
+///
+/// Discover the main executable module
+///
+/// ```splitscript
+/// let executable: Module = await process.mainModule()
+/// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 struct Module {
@@ -1589,6 +1810,15 @@ struct Module {
     address: address,
 
     /// Returns the mapped module size.
+    ///
+    /// # Example
+    ///
+    /// Read a discovered module's mapped size
+    ///
+    /// ```splitscript
+    /// let executable = await process.mainModule()
+    /// let mappedBytes = executable.size
+    /// ```
     size: u64,
 
     /// The host module identity used for metadata queries.
@@ -1819,6 +2049,14 @@ struct Module {
 @capabilities(Equatable)
 enum TimerState {
     /// The timer has not started.
+    ///
+    /// # Example
+    ///
+    /// Detect a timer waiting to start
+    ///
+    /// ```splitscript
+    /// let waiting = timer.state() == TimerState.NotRunning
+    /// ```
     NotRunning,
 
     /// The timer is running.
@@ -1833,31 +2071,99 @@ enum TimerState {
     Running,
 
     /// The timer is paused.
+    ///
+    /// # Example
+    ///
+    /// Detect a paused timer
+    ///
+    /// ```splitscript
+    /// let paused = timer.state() == TimerState.Paused
+    /// ```
     Paused,
 
     /// The timer has ended.
+    ///
+    /// # Example
+    ///
+    /// Detect a completed timer
+    ///
+    /// ```splitscript
+    /// let complete = timer.state() == TimerState.Ended
+    /// ```
     Ended,
 
     /// The host returned an unknown timer state.
+    ///
+    /// # Example
+    ///
+    /// Handle an unknown host state
+    ///
+    /// ```splitscript
+    /// let unrecognized = timer.state() == TimerState.Unknown
+    /// ```
     Unknown,
 }
 
 /// Describes an attached Unity IL2CPP runtime.
 ///
 /// The runtime stores resolved metadata roots, its version, and pointer size.
+///
+/// # Example
+///
+/// Discover a typed Unity runtime
+///
+/// ```splitscript
+/// let unityRuntime = await Unity.il2cpp(2020)
+/// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 struct UnityModule {
     /// Returns the IL2CPP assemblies metadata address.
+    ///
+    /// # Example
+    ///
+    /// Inspect the assemblies metadata root
+    ///
+    /// ```splitscript
+    /// let runtime = await Unity.il2cpp(2020)
+    /// let assembliesAddress = runtime.assemblies
+    /// ```
     assemblies: address,
 
     /// Returns the IL2CPP type-information table address.
+    ///
+    /// # Example
+    ///
+    /// Inspect the type-information table
+    ///
+    /// ```splitscript
+    /// let runtime = await Unity.il2cpp(2020)
+    /// let typeInformation = runtime.typeInfoTable
+    /// ```
     typeInfoTable: address,
 
     /// Returns the detected Unity metadata version.
+    ///
+    /// # Example
+    ///
+    /// Read the selected Unity layout version
+    ///
+    /// ```splitscript
+    /// let runtime = await Unity.il2cpp(2020)
+    /// let metadataVersion = runtime.version
+    /// ```
     version: u32,
 
     /// Returns the attached process pointer size.
+    ///
+    /// # Example
+    ///
+    /// Read the Unity process pointer size
+    ///
+    /// ```splitscript
+    /// let runtime = await Unity.il2cpp(2020)
+    /// let unityPointerBytes = runtime.pointerSize
+    /// ```
     pointerSize: u32,
 
     /// Finds an IL2CPP image.
@@ -1881,10 +2187,29 @@ struct UnityModule {
 /// Describes a Unity assembly image.
 ///
 /// An image retains its owning Unity runtime for subsequent class lookup.
+///
+/// # Example
+///
+/// Discover a typed Unity image
+///
+/// ```splitscript
+/// let runtime = await Unity.il2cpp(2020)
+/// let assemblyImage = await runtime.image("Assembly-CSharp")
+/// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 struct UnityImage {
     /// Returns the Unity image address.
+    ///
+    /// # Example
+    ///
+    /// Inspect a Unity image address
+    ///
+    /// ```splitscript
+    /// let runtime = await Unity.il2cpp(2020)
+    /// let image = await runtime.image("Assembly-CSharp")
+    /// let imageAddress = image.address
+    /// ```
     address: address,
 
     /// Retains the owning Unity runtime.
@@ -1911,10 +2236,31 @@ struct UnityImage {
 /// Describes a Unity runtime class.
 ///
 /// A class retains its owning Unity runtime for field and static-data discovery.
+///
+/// # Example
+///
+/// Discover a typed Unity class
+///
+/// ```splitscript
+/// let runtime = await Unity.il2cpp(2020)
+/// let image = await runtime.image("Assembly-CSharp")
+/// let playerClass = await image.class("Player")
+/// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 struct UnityClass {
     /// Returns the Unity class address.
+    ///
+    /// # Example
+    ///
+    /// Inspect a Unity class address
+    ///
+    /// ```splitscript
+    /// let runtime = await Unity.il2cpp(2020)
+    /// let image = await runtime.image("Assembly-CSharp")
+    /// let player = await image.class("Player")
+    /// let classAddress = player.address
+    /// ```
     address: address,
 
     /// Retains the owning Unity runtime.
@@ -1989,19 +2335,62 @@ struct UnityClass {
 /// Describes a Unity runtime field.
 ///
 /// A field exposes its byte offset and metadata index.
+///
+/// # Example
+///
+/// Discover a typed Unity field
+///
+/// ```splitscript
+/// let runtime = await Unity.il2cpp(2020)
+/// let image = await runtime.image("Assembly-CSharp")
+/// let player = await image.class("Player")
+/// let healthField = await player.fieldAny(["health", "_health"])
+/// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 struct UnityField {
     /// Returns the instance-field byte offset.
+    ///
+    /// # Example
+    ///
+    /// Read a discovered field offset
+    ///
+    /// ```splitscript
+    /// let runtime = await Unity.il2cpp(2020)
+    /// let image = await runtime.image("Assembly-CSharp")
+    /// let player = await image.class("Player")
+    /// let field = await player.fieldAny(["health", "_health"])
+    /// let healthOffset = field.offset
+    /// ```
     offset: u32,
 
     /// Returns the metadata field index.
+    ///
+    /// # Example
+    ///
+    /// Read a discovered field index
+    ///
+    /// ```splitscript
+    /// let runtime = await Unity.il2cpp(2020)
+    /// let image = await runtime.image("Assembly-CSharp")
+    /// let player = await image.class("Player")
+    /// let field = await player.fieldAny(["level", "_level"])
+    /// let levelFieldIndex = field.index
+    /// ```
     index: u32,
 }
 
 /// Retains a discovered GBA emulator memory mapping.
 ///
 /// The runtime-private mapping identifies the emulator backend and translates EWRAM and IWRAM addresses before each read.
+///
+/// # Example
+///
+/// Use the attached GBA memory provider
+///
+/// ```splitscript state GBA
+/// let emulator: GbaEmulator = gba
+/// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 struct GbaEmulator {
@@ -2044,12 +2433,28 @@ struct GbaEmulator {
 /// Exercises the generic standard-library record pipeline.
 ///
 /// This declaration exists only in tests and deliberately has no intrinsic implementation.
+///
+/// # Example
+///
+/// Read a probe record
+///
+/// ```splitscript
+/// let probe: CatalogRecordProbe = process.read(0x100) else return
+/// ```
 @testOnly
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 @capabilities(Equatable, MemoryReadable)
 struct CatalogRecordProbe {
     /// Returns the probe value.
+    ///
+    /// # Example
+    ///
+    /// Inspect a probe value
+    ///
+    /// ```splitscript
+    /// let probeValue = probe.value
+    /// ```
     value: u32,
 
     /// Builds the constructed-field test fixture.
@@ -2099,14 +2504,38 @@ struct CatalogRecordProbe {
 ///
 /// This declaration exists only in tests and verifies that catalog records use
 /// the same array and wrapper type machinery as ordinary source records.
+///
+/// # Example
+///
+/// Store a constructed-field probe
+///
+/// ```splitscript
+/// let fixture: CatalogConstructedFieldProbe = probe
+/// ```
 @testOnly
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
 struct CatalogConstructedFieldProbe {
     /// Returns the stored values.
+    ///
+    /// # Example
+    ///
+    /// Inspect fixed values
+    ///
+    /// ```splitscript
+    /// let fixedValues = fixture.values
+    /// ```
     values: [u64; 2],
 
     /// Returns the optional fallback value.
+    ///
+    /// # Example
+    ///
+    /// Inspect an optional fallback
+    ///
+    /// ```splitscript
+    /// let optionalFallback = fixture.fallback
+    /// ```
     fallback: u32?,
 }
 
@@ -2114,11 +2543,27 @@ struct CatalogConstructedFieldProbe {
 ///
 /// This declaration exists only in tests and verifies that catalog records
 /// preserve an exact array length while deriving `MemoryReadable`.
+///
+/// # Example
+///
+/// Read a fixed-memory probe
+///
+/// ```splitscript
+/// let memoryProbe: CatalogFixedMemoryProbe = process.read(0x200) else return
+/// ```
 @testOnly
 @representation(gcStruct, nullable)
 @valueUsage(localVariable)
 @capabilities(MemoryReadable)
 struct CatalogFixedMemoryProbe {
     /// Returns three adjacent native-endian values.
+    ///
+    /// # Example
+    ///
+    /// Inspect adjacent values
+    ///
+    /// ```splitscript
+    /// let adjacentValues = memoryProbe.values
+    /// ```
     values: [u16; 3],
 }

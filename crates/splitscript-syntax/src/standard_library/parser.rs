@@ -546,8 +546,26 @@ fn parse_documentation(lines: &[String]) -> Result<Documentation, &'static str> 
         let mut lines = example.iter().skip_while(|line| line.is_empty());
         let title = lines.next().cloned().unwrap_or_default();
         let remaining = lines.cloned().collect::<Vec<_>>();
-        let Some(fence_start) = remaining.iter().position(|line| line == "```splitscript") else {
+        let Some(fence_start) = remaining
+            .iter()
+            .position(|line| line.starts_with("```splitscript"))
+        else {
             return Err("a documentation example must contain a `splitscript` code fence");
+        };
+        let fence = &remaining[fence_start];
+        let state_provider = if fence == "```splitscript" {
+            None
+        } else if let Some(provider) = fence.strip_prefix("```splitscript state ")
+            && !provider.is_empty()
+            && provider
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        {
+            Some(provider.to_owned())
+        } else {
+            return Err(
+                "a documentation example fence must be `splitscript` or `splitscript state Provider`",
+            );
         };
         let Some(relative_end) = remaining[fence_start + 1..]
             .iter()
@@ -558,6 +576,7 @@ fn parse_documentation(lines: &[String]) -> Result<Documentation, &'static str> 
         examples.push(Example {
             title,
             source: remaining[fence_start + 1..fence_start + 1 + relative_end].join("\n"),
+            state_provider,
         });
     }
     Ok(Documentation {
@@ -609,6 +628,32 @@ struct Duration {
         assert_eq!(
             duration.functions[0].documentation.examples[0].source,
             "return Duration.fromSeconds(seconds)"
+        );
+    }
+
+    #[test]
+    fn parses_state_provider_example_context() {
+        let source = r#"
+/// GBA emulators.
+///
+/// Provides GBA-addressed memory access.
+///
+/// # Example
+///
+/// Use the attached emulator
+///
+/// ```splitscript state GBA
+/// let emulator: GbaEmulator = gba
+/// ```
+namespace gba {}
+"#;
+        let library = parse(source).expect("provider-qualified example should parse");
+        let Declaration::Namespace(gba) = &library.declarations[0] else {
+            panic!("expected a namespace")
+        };
+        assert_eq!(
+            gba.documentation.examples[0].state_provider.as_deref(),
+            Some("GBA")
         );
     }
 

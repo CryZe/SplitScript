@@ -240,7 +240,7 @@ tooling consumers only see the normalized immutable graph.
 
 ### Catalog completeness
 
-- [ ] Author focused, compiler-checked examples for namespaces, types, fields,
+- [x] Author focused, compiler-checked examples for namespaces, types, fields,
   variants, capabilities, and type constructors, then require examples for
   every public documented symbol. Do not pad symbols with shared test-like
   programs; the rendered snippet must teach that symbol specifically.
@@ -252,10 +252,12 @@ tooling consumers only see the normalized immutable graph.
     documentation never display test scaffolding. Namespace, capability, type
     constructor, type, field, enum, and variant examples exercise the first
     vertical slice through generation, validation, compilation, and hover.
-  - [ ] Author one distinct focused example for every remaining public
-    declaration, reject missing examples at loader and normalized-graph
-    validation boundaries, and add a uniqueness check across non-callable
-    symbols just like the existing callable/provider policy.
+  - [x] Author one distinct focused example for every remaining public
+    declaration. The loader and normalized graph now reject missing examples,
+    and visible-source uniqueness covers non-callable symbols together with
+    callables and providers. Every example is compiler checked; provider-bound
+    snippets can request a validated hidden fixture such as `state GBA` without
+    exposing that test scaffolding in hover or generated documentation.
 - [ ] Add a trusted custom-capability handler registry only when the first
   capability cannot be described by declared membership, structural equality,
   or structural memory layout. Bind and validate it like an intrinsic rather

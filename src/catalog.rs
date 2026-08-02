@@ -28,6 +28,7 @@ pub struct Example {
 enum ExampleValidation {
     CompleteProgram(&'static str),
     OnAttachBody,
+    ProviderOnAttachBody(&'static str),
 }
 
 impl Example {
@@ -54,11 +55,31 @@ impl Example {
         }
     }
 
+    pub const fn provider_on_attach_body(
+        title: &'static str,
+        source: &'static str,
+        provider: &'static str,
+    ) -> Self {
+        Self {
+            title,
+            source,
+            validation: ExampleValidation::ProviderOnAttachBody(provider),
+        }
+    }
+
     pub fn validation_program(self) -> String {
         match self.validation {
             ExampleValidation::CompleteProgram(source) => source.to_owned(),
-            ExampleValidation::OnAttachBody => {
-                let mut program = String::from("state \"example.exe\" {}\nonAttach {\n");
+            ExampleValidation::OnAttachBody | ExampleValidation::ProviderOnAttachBody(_) => {
+                let mut program = match self.validation {
+                    ExampleValidation::ProviderOnAttachBody(provider) => {
+                        format!("state {provider} {{}}\nonAttach {{\n")
+                    }
+                    ExampleValidation::OnAttachBody => {
+                        String::from("state \"example.exe\" {}\nonAttach {\n")
+                    }
+                    ExampleValidation::CompleteProgram(_) => unreachable!(),
+                };
                 for line in self.source.lines() {
                     program.push_str("    ");
                     program.push_str(line);
@@ -73,7 +94,7 @@ impl Example {
     pub const fn has_validation_source(self) -> bool {
         match self.validation {
             ExampleValidation::CompleteProgram(source) => !source.is_empty(),
-            ExampleValidation::OnAttachBody => true,
+            ExampleValidation::OnAttachBody | ExampleValidation::ProviderOnAttachBody(_) => true,
         }
     }
 }

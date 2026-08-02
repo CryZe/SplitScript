@@ -26,6 +26,7 @@ struct Validator<'a> {
     capabilities: HashSet<&'a str>,
     constructors: HashMap<&'a str, usize>,
     generated_items: HashSet<String>,
+    example_owners: HashMap<String, String>,
     errors: Vec<Error>,
 }
 
@@ -71,6 +72,7 @@ impl<'a> Validator<'a> {
             capabilities,
             constructors,
             generated_items,
+            example_owners: HashMap::new(),
             errors: Vec::new(),
         }
     }
@@ -87,7 +89,8 @@ impl<'a> Validator<'a> {
                     self.validate_struct(value)
                 }
                 Declaration::Enum(value) => {
-                    self.validate_documentation(&value.name, &value.documentation, false);
+                    let public = !has_attribute(&value.attributes, "testOnly");
+                    self.validate_documentation(&value.name, &value.documentation, false, public);
                     self.validate_attributes(
                         &value.name,
                         &value.attributes,
@@ -108,6 +111,7 @@ impl<'a> Validator<'a> {
                             &format!("{}.{}", value.name, variant.name),
                             &variant.documentation,
                             false,
+                            public,
                         );
                         self.validate_attributes(
                             &format!("{}.{}", value.name, variant.name),
@@ -120,7 +124,7 @@ impl<'a> Validator<'a> {
                     self.validate_attributes("root", &value.attributes, &[]);
                     self.validate_functions("root", &value.functions, &[]);
                 }
-                Declaration::Namespace(value) => self.validate_owner(value, &[]),
+                Declaration::Namespace(value) => self.validate_owner(value, &[], true),
                 Declaration::Capability(value) => {
                     self.validate_attributes(&value.name, &value.attributes, &["behavior"]);
                     self.require_name_attribute(
@@ -140,12 +144,12 @@ impl<'a> Validator<'a> {
                             value.name
                         ));
                     }
-                    self.validate_owner(value, &value.type_parameters);
+                    self.validate_owner(value, &value.type_parameters, true);
                 }
                 Declaration::TypeConstructor(value) => {
                     self.validate_attributes(&value.name, &value.attributes, &["mustUse"]);
                     self.validate_must_use(&value.name, &value.attributes);
-                    self.validate_owner(value, &value.type_parameters);
+                    self.validate_owner(value, &value.type_parameters, true);
                 }
                 Declaration::CoreExtension(value) => {
                     self.validate_attributes(&value.name, &value.attributes, &[]);
@@ -193,7 +197,8 @@ impl<'a> Validator<'a> {
     }
 
     fn validate_struct(&mut self, value: &StructDeclaration) {
-        self.validate_documentation(&value.name, &value.documentation, false);
+        let public = !has_attribute(&value.attributes, "testOnly");
+        self.validate_documentation(&value.name, &value.documentation, false, public);
         self.validate_attributes(
             &value.name,
             &value.attributes,
@@ -211,7 +216,8 @@ impl<'a> Validator<'a> {
                     value.name, field.name
                 ));
             }
-            self.validate_documentation(&owner, &field.documentation, false);
+            let public_field = public && !field.private;
+            self.validate_documentation(&owner, &field.documentation, false, public_field);
             self.validate_attributes(&owner, &field.attributes, &[]);
             self.validate_type(&owner, &field.ty, &[]);
         }
@@ -237,8 +243,13 @@ impl<'a> Validator<'a> {
         self.validate_functions(&owner.name, &owner.functions, &[]);
     }
 
-    fn validate_owner(&mut self, owner: &CallableOwnerDeclaration, inherited: &[TypeParameter]) {
-        self.validate_documentation(&owner.name, &owner.documentation, false);
+    fn validate_owner(
+        &mut self,
+        owner: &CallableOwnerDeclaration,
+        inherited: &[TypeParameter],
+        public: bool,
+    ) {
+        self.validate_documentation(&owner.name, &owner.documentation, false, public);
         self.validate_type_parameters(&owner.name, &owner.type_parameters);
         self.validate_functions(&owner.name, &owner.functions, inherited);
     }
@@ -260,7 +271,7 @@ impl<'a> Validator<'a> {
             if !names.insert(function.name.as_str()) {
                 self.error(format!("`{owner}` repeats function `{}`", function.name));
             }
-            self.validate_documentation(&qualified, &function.documentation, true);
+            self.validate_documentation(&qualified, &function.documentation, true, true);
             self.validate_attributes(
                 &qualified,
                 &function.attributes,
@@ -377,7 +388,12 @@ impl<'a> Validator<'a> {
                         parameter.name
                     ));
                 }
-                self.validate_documentation(&parameter_owner, &parameter.documentation, false);
+                self.validate_documentation(
+                    &parameter_owner,
+                    &parameter.documentation,
+                    false,
+                    false,
+                );
                 self.validate_attributes(&parameter_owner, &parameter.attributes, &["literal"]);
                 if let Some(rule) =
                     self.optional_name_attribute(&parameter_owner, &parameter.attributes, "literal")
@@ -429,7 +445,7 @@ impl<'a> Validator<'a> {
     }
 
     fn validate_provider(&mut self, value: &crate::StateProviderDeclaration) {
-        self.validate_documentation(&value.name, &value.documentation, true);
+        self.validate_documentation(&value.name, &value.documentation, true, true);
         self.validate_attributes(
             &value.name,
             &value.attributes,
@@ -599,15 +615,21 @@ impl<'a> Validator<'a> {
         }
     }
 
-    fn validate_documentation(&mut self, owner: &str, docs: &Documentation, example: bool) {
-        if docs.summary.trim().is_empty() || (example && docs.details.trim().is_empty()) {
+    fn validate_documentation(
+        &mut self,
+        owner: &str,
+        docs: &Documentation,
+        require_details: bool,
+        require_example: bool,
+    ) {
+        if docs.summary.trim().is_empty() || (require_details && docs.details.trim().is_empty()) {
             self.error(format!("`{owner}` has incomplete documentation"));
         }
-        if example && docs.examples.len() != 1 {
+        if require_example && docs.examples.len() != 1 {
             self.error(format!(
                 "`{owner}` must have exactly one focused documentation example"
             ));
-        } else if !example && docs.examples.len() > 1 {
+        } else if !require_example && docs.examples.len() > 1 {
             self.error(format!(
                 "`{owner}` must not have more than one focused documentation example"
             ));
@@ -615,6 +637,26 @@ impl<'a> Validator<'a> {
         for value in &docs.examples {
             if value.title.trim().is_empty() || value.source.trim().is_empty() {
                 self.error(format!("`{owner}` has an incomplete documentation example"));
+            }
+            if let Some(provider) = &value.state_provider
+                && !self.library.declarations.iter().any(|declaration| {
+                    matches!(
+                        declaration,
+                        Declaration::StateProvider(candidate) if candidate.name == *provider
+                    )
+                })
+            {
+                self.error(format!(
+                    "`{owner}` documentation example references unknown state provider `{provider}`"
+                ));
+            }
+            if let Some(previous) = self
+                .example_owners
+                .insert(value.source.clone(), owner.to_owned())
+            {
+                self.error(format!(
+                    "`{owner}` reuses the visible documentation example from `{previous}`"
+                ));
             }
         }
     }
@@ -858,6 +900,95 @@ root {
     }
 
     #[test]
+    fn public_declarations_require_focused_examples() {
+        let source = r#"
+/// A documented value.
+///
+/// Represents a public standard-library value.
+@representation(gcStruct)
+@valueUsage(localVariable)
+struct Value {
+    /// A public field.
+    ///
+    /// Stores the value.
+    field: u32,
+}
+"#;
+        let errors = generate_catalog(&parse(source).unwrap()).unwrap_err();
+        assert!(errors.iter().any(|error| {
+            error
+                .message
+                .contains("`Value` must have exactly one focused")
+        }));
+        assert!(errors.iter().any(|error| {
+            error
+                .message
+                .contains("`Value.field` must have exactly one focused")
+        }));
+    }
+
+    #[test]
+    fn example_context_must_name_a_declared_state_provider() {
+        let source = r#"
+/// Values.
+///
+/// Provides documented values.
+///
+/// # Example
+///
+/// Read a value
+///
+/// ```splitscript state Missing
+/// let value = 1
+/// ```
+namespace values {}
+"#;
+        let errors = generate_catalog(&parse(source).unwrap()).unwrap_err();
+        assert!(errors.iter().any(|error| {
+            error
+                .message
+                .contains("references unknown state provider `Missing`")
+        }));
+    }
+
+    #[test]
+    fn visible_examples_must_be_distinct() {
+        let source = r#"
+/// First namespace.
+///
+/// Provides the first API.
+///
+/// # Example
+///
+/// Use it
+///
+/// ```splitscript
+/// let value = 1
+/// ```
+namespace first {}
+
+/// Second namespace.
+///
+/// Provides the second API.
+///
+/// # Example
+///
+/// Use it too
+///
+/// ```splitscript
+/// let value = 1
+/// ```
+namespace second {}
+"#;
+        let errors = generate_catalog(&parse(source).unwrap()).unwrap_err();
+        assert!(errors.iter().any(|error| {
+            error
+                .message
+                .contains("reuses the visible documentation example")
+        }));
+    }
+
+    #[test]
     fn must_use_requires_a_reason_and_a_returned_value() {
         let malformed = r#"
 /// Optional values.
@@ -930,9 +1061,25 @@ root {
     fn generic_body_accepts_constructed_parameter_shapes() {
         let source = r#"
 /// Arrays.
+///
+/// # Example
+///
+/// Store values
+///
+/// ```splitscript
+/// let values: [u32] = []
+/// ```
 typeConstructor Array<T> {}
 
 /// Values.
+///
+/// # Example
+///
+/// Use values
+///
+/// ```splitscript
+/// let copiedValues: [u32] = []
+/// ```
 @behavior(declared)
 capability Values<T> {
     /// Copies values.

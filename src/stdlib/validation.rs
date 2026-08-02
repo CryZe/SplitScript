@@ -10,8 +10,8 @@ use crate::catalog::Documentation;
 
 use super::{
     declarations::{
-        CORE_TYPES, CoreTypeId, RuntimeRepresentation, StdlibCapability, StdlibField,
-        StdlibNamespace, StdlibType, StdlibTypeKind, StdlibVariant,
+        CORE_TYPES, CoreTypeId, FieldVisibility, RuntimeRepresentation, StdlibCapability,
+        StdlibField, StdlibNamespace, StdlibType, StdlibTypeKind, StdlibVariant,
     },
     ids::{StdlibCapabilityId, StdlibTypeConstructorId, StdlibTypeId},
     schema::TypeRef,
@@ -115,6 +115,7 @@ pub(super) fn validate(
             "namespace",
             namespace.name,
             &namespace.documentation,
+            true,
         );
     }
 
@@ -136,7 +137,7 @@ pub(super) fn validate(
                 ));
             }
         }
-        validate_documentation(&mut errors, "type", ty.name, &ty.documentation);
+        validate_documentation(&mut errors, "type", ty.name, &ty.documentation, true);
         let has_fields = fields.iter().any(|field| field.owner == ty.id);
         let has_variants = variants.iter().any(|variant| variant.owner == ty.id);
         match ty.kind {
@@ -178,7 +179,13 @@ pub(super) fn validate(
                 field.owner, field.name
             ));
         }
-        validate_documentation(&mut errors, "field", field.name, &field.documentation);
+        validate_documentation(
+            &mut errors,
+            "field",
+            field.name,
+            &field.documentation,
+            field.visibility == FieldVisibility::Public,
+        );
         if !type_ids.contains(&field.owner) {
             errors.push(format!(
                 "field `{:?}` has missing owner `{:?}`",
@@ -231,7 +238,13 @@ pub(super) fn validate(
                 variant.owner, variant.name
             ));
         }
-        validate_documentation(&mut errors, "variant", variant.name, &variant.documentation);
+        validate_documentation(
+            &mut errors,
+            "variant",
+            variant.name,
+            &variant.documentation,
+            true,
+        );
         if !type_ids.contains(&variant.owner) {
             errors.push(format!(
                 "variant `{:?}` has missing owner `{:?}`",
@@ -486,6 +499,7 @@ fn validate_documentation<Id>(
     kind: &str,
     name: &str,
     documentation: &Documentation<Id>,
+    require_example: bool,
 ) {
     if documentation.summary.trim().is_empty() {
         errors.push(format!("{kind} `{name}` has no documentation summary"));
@@ -493,7 +507,11 @@ fn validate_documentation<Id>(
     if documentation.details.trim().is_empty() {
         errors.push(format!("{kind} `{name}` has no documentation details"));
     }
-    if documentation.examples.len() > 1 {
+    if require_example && documentation.examples.len() != 1 {
+        errors.push(format!(
+            "{kind} `{name}` must have exactly one focused documentation example"
+        ));
+    } else if !require_example && documentation.examples.len() > 1 {
         errors.push(format!(
             "{kind} `{name}` has more than one focused documentation example"
         ));

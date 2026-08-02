@@ -612,6 +612,63 @@ impl StandardLibrary {
         let mut qualified_names = HashSet::new();
         let mut call_shapes = HashSet::new();
         let mut example_sources = HashSet::new();
+        for namespace in NAMESPACES {
+            record_example_sources(
+                "namespace",
+                namespace.name,
+                namespace.documentation,
+                &mut example_sources,
+                &mut errors,
+            );
+        }
+        for capability in CAPABILITIES {
+            record_example_sources(
+                "capability",
+                capability.name,
+                capability.documentation,
+                &mut example_sources,
+                &mut errors,
+            );
+        }
+        for constructor in TYPE_CONSTRUCTORS {
+            record_example_sources(
+                "type constructor",
+                constructor.name,
+                constructor.documentation,
+                &mut example_sources,
+                &mut errors,
+            );
+        }
+        for ty in TYPES {
+            record_example_sources(
+                "type",
+                ty.name,
+                ty.documentation,
+                &mut example_sources,
+                &mut errors,
+            );
+        }
+        for field in FIELDS
+            .iter()
+            .filter(|field| field.visibility == FieldVisibility::Public)
+        {
+            record_example_sources(
+                "field",
+                field.name,
+                field.documentation,
+                &mut example_sources,
+                &mut errors,
+            );
+        }
+        for variant in VARIANTS {
+            record_example_sources(
+                "variant",
+                variant.name,
+                variant.documentation,
+                &mut example_sources,
+                &mut errors,
+            );
+        }
         let mut provider_names = HashSet::new();
         let mut provider_values = HashSet::new();
         let mut source_state_provider = None;
@@ -1210,9 +1267,9 @@ fn validate_named_declarations<T, I>(
         if documentation.summary.trim().is_empty() || documentation.details.trim().is_empty() {
             errors.push(format!("{kind} `{name}` has incomplete documentation"));
         }
-        if documentation.examples.len() > 1 {
+        if documentation.examples.len() != 1 {
             errors.push(format!(
-                "{kind} `{name}` has more than one focused documentation example"
+                "{kind} `{name}` must have exactly one focused documentation example"
             ));
         }
         for example in documentation.examples {
@@ -1224,6 +1281,22 @@ fn validate_named_declarations<T, I>(
                     "{kind} `{name}` has an incomplete documentation example"
                 ));
             }
+        }
+    }
+}
+
+fn record_example_sources(
+    kind: &str,
+    name: &str,
+    documentation: Documentation<StdlibSymbolId>,
+    example_sources: &mut HashSet<&'static str>,
+    errors: &mut Vec<String>,
+) {
+    for example in documentation.examples {
+        if !example_sources.insert(example.source) {
+            errors.push(format!(
+                "{kind} `{name}` reuses another symbol's visible example"
+            ));
         }
     }
 }

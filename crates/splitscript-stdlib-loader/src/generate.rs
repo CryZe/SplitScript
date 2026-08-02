@@ -191,10 +191,22 @@ impl<'a> CatalogGenerator<'a> {
             .examples
             .iter()
             .map(|example| {
-                format!(
-                    "Example::on_attach_body({}, {})",
-                    quote(&example.title),
-                    quote(&example.source)
+                example.state_provider.as_ref().map_or_else(
+                    || {
+                        format!(
+                            "Example::on_attach_body({}, {})",
+                            quote(&example.title),
+                            quote(&example.source)
+                        )
+                    },
+                    |provider| {
+                        format!(
+                            "Example::provider_on_attach_body({}, {}, {})",
+                            quote(&example.title),
+                            quote(&example.source),
+                            quote(provider)
+                        )
+                    },
                 )
             })
             .collect::<Vec<_>>()
@@ -895,6 +907,14 @@ stateProvider GBA as gba { "mGBA" }
     fn source_body_generates_an_ordinary_hidden_function() {
         let source = r#"
 /// Duration.
+///
+/// # Example
+///
+/// Store a duration
+///
+/// ```splitscript
+/// let delay: Duration = Duration.fromFrames(120, 60)
+/// ```
 @representation(gcStruct)
 @valueUsage(localVariable)
 struct Duration {
@@ -930,21 +950,53 @@ struct Duration {
     fn standard_types_can_name_a_source_defined_display_implementation() {
         let source = r#"
 /// Displayable values.
+///
+/// # Example
+///
+/// Interpolate a value
+///
+/// ```splitscript
+/// let text = `{42}`
+/// ```
 @behavior(declared)
 capability Display<T> {}
 
 /// Text.
+///
+/// # Example
+///
+/// Store text
+///
+/// ```splitscript
+/// let text: String = "value"
+/// ```
 @representation(gcArray, u8, mutable, nullable)
 @valueUsage(localVariable)
 @capabilities(Display)
 intrinsic type String {}
 
 /// A file version.
+///
+/// # Example
+///
+/// Store a version
+///
+/// ```splitscript
+/// let version: FileVersion = fileVersion
+/// ```
 @representation(gcStruct, nullable)
 @valueUsage(localVariable)
 @capabilities(Display)
 struct FileVersion {
     /// Major component.
+    ///
+    /// # Example
+    ///
+    /// Read the major component
+    ///
+    /// ```splitscript
+    /// let major = version.major
+    /// ```
     major: u16,
 
     /// Formats the version.
@@ -1008,6 +1060,14 @@ typeConstructor Option<T> {}
     fn generic_capability_body_is_preserved_as_a_typed_template() {
         let source = r#"
 /// Numeric values.
+///
+/// # Example
+///
+/// Add numbers
+///
+/// ```splitscript
+/// let total = 1 + 2
+/// ```
 @behavior(declared)
 capability Numeric<T> {
     /// Restricts a value.
@@ -1045,15 +1105,47 @@ capability Numeric<T> {
     fn capability_constraints_generate_super_capabilities() {
         let source = r#"
 /// Displayable values.
+///
+/// # Example
+///
+/// Display a value
+///
+/// ```splitscript
+/// let text = `{1}`
+/// ```
 @behavior(declared)
 capability Display<T> {}
 /// Equatable values.
+///
+/// # Example
+///
+/// Compare values
+///
+/// ```splitscript
+/// let equal = 1 == 1
+/// ```
 @behavior(structuralEquality)
 capability Equatable<T> {}
 /// Numeric values.
+///
+/// # Example
+///
+/// Add values
+///
+/// ```splitscript
+/// let total = 1 + 3
+/// ```
 @behavior(declared)
 capability Numeric<T: Equatable> {}
 /// Integer values.
+///
+/// # Example
+///
+/// Shift a value
+///
+/// ```splitscript
+/// let mask = 1 << 2
+/// ```
 @behavior(declared)
 capability Integer<T: Numeric + Display> {}
 "#;

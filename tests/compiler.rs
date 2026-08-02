@@ -9,8 +9,8 @@ use splitscript::{
             ResolvedRecordFieldId, ResolvedValue,
         },
         stdlib::{
-            Availability, CancellationKind, CoreTypeId, Effect, Implementation, IntrinsicId,
-            StandardBinaryOperator, StandardLibrary, StdlibFieldId, StdlibItemId,
+            Availability, CancellationKind, CoreTypeId, Effect, FieldVisibility, Implementation,
+            IntrinsicId, StandardBinaryOperator, StandardLibrary, StdlibFieldId, StdlibItemId,
             StdlibStateProviderId, StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
             SuspensionKind,
         },

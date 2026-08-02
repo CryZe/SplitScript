@@ -457,7 +457,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         &compilation_syntax,
         &output.semantics,
         context.standard_library(),
-        document.source().len(),
+        hir::visible_expression_count(&syntax),
         syntax.functions.len(),
     );
     output
@@ -513,7 +513,7 @@ pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
                 &compilation_syntax,
                 &recovered.output.semantics,
                 context.standard_library(),
-                document.source().len(),
+                hir::visible_expression_count(&syntax),
                 syntax.functions.len(),
             );
             recovered

@@ -9,22 +9,19 @@ use crate::{
         CapabilityBehavior, ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem,
         StdlibTypeConstructorId, TypeRef,
     },
-    types::{BuiltinType, TypeKind},
+    types::TypeKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallCandidate {
     pub item: &'static StdlibItem,
-    pub type_arguments: Vec<(&'static str, BuiltinType)>,
 }
 
 impl CallCandidate {
     pub const fn receiver(&self) -> Option<TypeRef> {
         match self.item.kind {
-            ItemKind::Method { receiver } | ItemKind::TypedMethod { receiver, .. } => {
-                Some(receiver)
-            }
-            ItemKind::Function | ItemKind::TypedFunction { .. } => None,
+            ItemKind::Method { receiver } => Some(receiver),
+            ItemKind::Function => None,
         }
     }
 }
@@ -33,11 +30,6 @@ impl CallCandidate {
 pub trait StandardLibrarySemanticExt {
     fn function_candidates(&self, path: &[String]) -> Vec<CallCandidate>;
     fn method_candidates(&self, name: &str) -> Vec<CallCandidate>;
-    fn method_candidates_with_selector(
-        &self,
-        name: &str,
-        selector: Option<&str>,
-    ) -> Vec<CallCandidate>;
     fn methods_for_type(&self, receiver: &TypeKind) -> Vec<&'static StdlibItem>;
     fn resolve_path(&self, path: &[String]) -> Option<CallCandidate>;
 }
@@ -47,57 +39,17 @@ impl StandardLibrarySemanticExt for StandardLibrary {
         let qualified_name = path.join(".");
         if let Some(item) = self.item_by_name(&qualified_name) {
             return match item.kind {
-                ItemKind::Function | ItemKind::TypedFunction { .. } => vec![CallCandidate {
-                    item,
-                    type_arguments: Vec::new(),
-                }],
-                ItemKind::Method { .. } | ItemKind::TypedMethod { .. } => Vec::new(),
+                ItemKind::Function => vec![CallCandidate { item }],
+                ItemKind::Method { .. } => Vec::new(),
             };
         }
 
-        let Some((type_name, item_path)) = path.split_last() else {
-            return Vec::new();
-        };
-        let Some(item) = self.item_by_name(&item_path.join(".")) else {
-            return Vec::new();
-        };
-        let ItemKind::TypedFunction { type_parameter } = item.kind else {
-            return Vec::new();
-        };
-        let Some(argument) = memory_type(self, type_name) else {
-            return Vec::new();
-        };
-        vec![CallCandidate {
-            item,
-            type_arguments: vec![(type_parameter, argument)],
-        }]
+        Vec::new()
     }
 
     fn method_candidates(&self, name: &str) -> Vec<CallCandidate> {
-        self.method_candidates_with_selector(name, None)
-    }
-
-    fn method_candidates_with_selector(
-        &self,
-        name: &str,
-        selector: Option<&str>,
-    ) -> Vec<CallCandidate> {
         self.method_items_named(name)
-            .filter_map(|item| {
-                let type_arguments = match (item.kind, selector) {
-                    (ItemKind::Method { .. }, None) => Vec::new(),
-                    (ItemKind::TypedMethod { .. }, None) => Vec::new(),
-                    (ItemKind::TypedMethod { type_parameter, .. }, Some(selector)) => {
-                        vec![(type_parameter, memory_type(self, selector)?)]
-                    }
-                    (ItemKind::Method { .. }, Some(_))
-                    | (ItemKind::Function | ItemKind::TypedFunction { .. }, _) => return None,
-                };
-                Some(CallCandidate {
-                    item,
-                    type_arguments,
-                })
-            })
+            .map(|item| CallCandidate { item })
             .collect()
     }
 
@@ -118,8 +70,8 @@ fn catalog_method_accepts(
     receiver: &TypeKind,
 ) -> bool {
     let declared = match item.kind {
-        ItemKind::Method { receiver } | ItemKind::TypedMethod { receiver, .. } => receiver,
-        ItemKind::Function | ItemKind::TypedFunction { .. } => return false,
+        ItemKind::Method { receiver } => receiver,
+        ItemKind::Function => return false,
     };
     match declared {
         TypeRef::Core(expected) => {
@@ -132,6 +84,9 @@ fn catalog_method_accepts(
                     && matches!(receiver, TypeKind::Option { .. }))
                 || (constructor == StdlibTypeConstructorId::Result
                     && matches!(receiver, TypeKind::Result { .. }))
+        }
+        TypeRef::FixedArray { length, .. } => {
+            matches!(receiver, TypeKind::Array { length: Some(actual), .. } if *actual == length)
         }
         TypeRef::Standard(expected) => {
             matches!(receiver, TypeKind::Standard(actual) if *actual == expected)
@@ -172,17 +127,6 @@ fn semantic_type_may_have_capability(
         }
         TypeKind::GenericParameter { .. } => false,
     }
-}
-
-fn memory_type(library: &StandardLibrary, name: &str) -> Option<BuiltinType> {
-    library
-        .core_types()
-        .iter()
-        .find(|ty| {
-            ty.name == name
-                && library.core_type_has_capability(ty.id, StdlibCapabilityId::MemoryReadable)
-        })
-        .map(|ty| ty.id)
 }
 
 #[cfg(test)]

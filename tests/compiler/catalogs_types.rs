@@ -222,7 +222,7 @@ fn user_code_cannot_construct_runtime_private_standard_library_records() {
     let diagnostics = splitscript::check(splitscript::lower(parsed)).unwrap_err();
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic.message.contains(
-            "standard-library type `Duration` can only be constructed by its own library methods",
+            "standard-library type `Duration` can only be constructed by standard-library source",
         )
     }));
 }
@@ -335,7 +335,7 @@ fn native_processes_are_typed_provider_values_and_methods_use_the_receiver() {
         whileAttached {
             let attached = keepProcess(process)
             let name = attached.name()
-            let value: u32! = attached.read.u32(0x1000)
+            let value: u32! = attached.read<u32>(0x1000)
         }
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
@@ -515,11 +515,11 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     ));
     assert!(!library.core_type_has_capability(
         splitscript::compiler::stdlib::CoreTypeId::F64,
-        splitscript::compiler::stdlib::StdlibCapabilityId::StringCast,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Display,
     ));
     assert!(library.type_has_capability(
         splitscript::compiler::stdlib::StdlibTypeId::String,
-        splitscript::compiler::stdlib::StdlibCapabilityId::Interpolatable,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Display,
     ));
     assert_eq!(
         library.item_by_name("Numeric.clamp").map(|item| item.id),
@@ -1279,7 +1279,7 @@ fn semantic_capabilities_query_declared_and_derived_types_by_type_id() {
     ));
     assert!(capabilities.has(
         string,
-        splitscript::compiler::stdlib::StdlibCapabilityId::Interpolatable,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Display,
         checked.semantics(),
     ));
 }

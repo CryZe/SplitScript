@@ -182,11 +182,11 @@ fn resetRunProgress() {
 
 whileAttached {
     setVariable("Hearts", heartsText(current.visualHearts))
-    setVariable("Rupees", current.visualRupees as String)
-    setVariable("Keys", current.visualKeys as String)
-    setVariable("Tiger Scrolls", current.tigerScrolls as String)
-    setVariable("Mysterious Shells", current.mysteriousShells as String)
-    setVariable("Bombs", current.bombs as String)
+    setVariable("Rupees", current.visualRupees)
+    setVariable("Keys", current.visualKeys)
+    setVariable("Tiger Scrolls", current.tigerScrolls)
+    setVariable("Mysterious Shells", current.mysteriousShells)
+    setVariable("Bombs", current.bombs)
 
     let timerState = timer.state()
     if timerState == TimerState.Running || timerState == TimerState.Paused {
@@ -216,6 +216,7 @@ split {
             DelayedSplit.GetFourSword => "Get Four Sword",
             DelayedSplit.Inactive => "Delayed split"
         })
+
         delayedSplit = DelayedSplit.Inactive
         return true
     }
@@ -390,6 +391,7 @@ split {
         debug print("Get DHC Big Key")
         return true
     }
+
     if current.scene == 0x8B
         && old.vaati3Phases == 1
         && current.vaati3Phases == 0

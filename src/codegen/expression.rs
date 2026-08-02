@@ -10,8 +10,8 @@ use crate::{
     intrinsic_registry::RuntimeHelperId,
     memory::MemoryLayouts,
     semantic::{
-        FunctionInstance, ResolvedMember, ResolvedRecordFieldId, ResolvedRecordId, ResolvedValue,
-        SemanticModel, ValueConversionKind,
+        FunctionInstance, ResolvedMember, ResolvedReceiver, ResolvedRecordFieldId,
+        ResolvedRecordId, ResolvedValue, SemanticModel, ValueConversionKind,
     },
     stdlib::{IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibTypeId},
     types::{EnumTypeId, ResolvedArrayType, TypeId},
@@ -25,7 +25,7 @@ use super::{
     emit_struct_get, emit_typed_struct_get, enum_variant_payload, global_plan::RuntimeGlobals,
     imports::Abi, memory_plan::AbiReadScratch, record_field_type, resolved_intrinsic,
     result_value_type, runtime_helpers::emit_value_equality, script_functions::emit_action_default,
-    semantic_type, try_array_element_type, value_type,
+    semantic_type, standard_field_type, try_array_element_type, value_type,
 };
 
 #[derive(Default)]
@@ -424,26 +424,24 @@ pub(super) fn compile_assignment(
     }
 }
 
-fn resolved_receiver(
-    target: &wasm_ir::CallTarget,
+fn resolved_receiver<'a>(
+    target: &'a wasm_ir::CallTarget,
     context: &ExprContext<'_>,
-) -> (ResolvedValue, Type, Vec<ResolvedMember>) {
-    let (receiver, receiver_type, receiver_members) = match target {
+) -> (&'a ResolvedReceiver, Type) {
+    let (receiver, receiver_type) = match target {
         wasm_ir::CallTarget::UserMethod {
             receiver,
             receiver_type,
-            receiver_members,
             ..
-        } => (*receiver, *receiver_type, receiver_members.clone()),
+        } => (receiver, *receiver_type),
         wasm_ir::CallTarget::Intrinsic {
             receiver: Some(receiver),
             receiver_type: Some(receiver_type),
-            receiver_members,
             ..
-        } => (*receiver, *receiver_type, receiver_members.clone()),
+        } => (receiver, *receiver_type),
         _ => unreachable!("only method calls have receivers"),
     };
-    (receiver, context.ty(receiver_type), receiver_members)
+    (receiver, context.ty(receiver_type))
 }
 
 pub(super) fn compile_receiver(
@@ -451,9 +449,22 @@ pub(super) fn compile_receiver(
     target: &wasm_ir::CallTarget,
     context: &ExprContext<'_>,
 ) -> Type {
-    let (receiver, receiver_type, receiver_members) = resolved_receiver(target, context);
-    let lowered_type = compile_resolved_path(function, receiver, &receiver_members, context);
-    debug_assert_eq!(lowered_type, receiver_type);
+    let (receiver, receiver_type) = resolved_receiver(target, context);
+    match receiver {
+        ResolvedReceiver::Path { root, members } => {
+            let lowered_type = compile_resolved_path(function, *root, members, context);
+            debug_assert_eq!(lowered_type, receiver_type);
+        }
+        ResolvedReceiver::Expression {
+            expression,
+            members,
+        } => {
+            compile_expr(function, *expression, context);
+            let base_type = context.expression_type(*expression);
+            let lowered_type = emit_path_fields(function, members, base_type, context);
+            debug_assert_eq!(lowered_type, receiver_type);
+        }
+    }
     receiver_type
 }
 
@@ -666,7 +677,7 @@ fn emit_path_fields(
                 (
                     context.gc.index(owner_type),
                     field_index,
-                    Type::from_declared(declaration.ty),
+                    standard_field_type(declaration.id, context.semantics),
                 )
             }
             ResolvedMember::RecordField(field) => {
@@ -1309,7 +1320,7 @@ fn compile_expr_unconverted(
         },
         Some(builtin) => match builtin {
             IntrinsicId::Print => {
-                compile_expr(function, args[0], context);
+                compile_as_string(function, args[0], context);
                 function.instruction(&Instruction::Call(
                     context
                         .runtime_helpers
@@ -1317,7 +1328,7 @@ fn compile_expr_unconverted(
                 ));
             }
             IntrinsicId::StringLength => {
-                compile_expr(function, args[0], context);
+                compile_receiver(function, target, context);
                 function
                     .instruction(&Instruction::RefAsNonNull)
                     .instruction(&Instruction::ArrayLen);
@@ -1332,7 +1343,7 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::TimerSetVariable => {
                 compile_expr(function, args[0], context);
-                compile_expr(function, args[1], context);
+                compile_as_string(function, args[1], context);
                 function.instruction(&Instruction::Call(
                     context
                         .runtime_helpers
@@ -1395,7 +1406,10 @@ fn compile_expr_unconverted(
                     function.instruction(&Instruction::End);
                 }
             }
-            IntrinsicId::NextTick | IntrinsicId::ProcessModule => {
+            IntrinsicId::NextTick
+            | IntrinsicId::ProcessClosed
+            | IntrinsicId::ProcessMainModule
+            | IntrinsicId::ProcessModule => {
                 unreachable!("suspending functions are lowered as awaits")
             }
             IntrinsicId::ProcessRead => {
@@ -1830,6 +1844,15 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
     } else if source != target {
         unreachable!("type checking rejected unsupported cast `{source:?} as {target:?}`");
     }
+}
+
+fn compile_as_string(function: &mut Function, expression: ExprId, context: &ExprContext<'_>) {
+    emit_cast(
+        function,
+        expression,
+        Type::Standard(StdlibTypeId::String),
+        context,
+    );
 }
 
 fn emit_narrow_i32(function: &mut Function, target: Type) {

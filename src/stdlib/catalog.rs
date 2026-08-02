@@ -9,7 +9,7 @@ use crate::catalog::{Documentation, Example};
 
 use super::{
     declarations::{
-        CapabilityBehavior, CoreTypeId, DeclaredTypeRef, FieldVisibility, RuntimeRepresentation,
+        CapabilityBehavior, CoreTypeId, FieldVisibility, RuntimeRepresentation,
         StateProviderAttachment, StateProviderProcesses, StdlibCapability, StdlibField,
         StdlibNamespace, StdlibOwner, StdlibStateProvider, StdlibSymbolId, StdlibType,
         StdlibTypeConstructor, StdlibTypeKind, StdlibVariant, ValueUsage,
@@ -52,7 +52,7 @@ whileAttached {
     let values = ["a", "b"]
     let joined = String.concat(values)
     print(joined)
-    setVariable("Length", String.length(joined) as String)
+    setVariable("Length", joined.byteLength() as String)
     let state = timer.state()
     let running = timer.isRunning()
     setTickRate(60.0)
@@ -91,7 +91,7 @@ onAttach {
     let marker = await module.scan(sig"48 8B ?? 89")
     let rangedMarker = await process.scan(module.address, module.size, sig"48 8B ?? 89")
     let object = retry process.follow(module.address, [0x100, 0x20])
-    let health = retry process.read.i32(object.offset(0x10))
+    let health = retry process.read<i32>(object.offset(0x10))
     let target = retry process.readRelative32(marker.offset(3))
     let moduleTarget = retry module.readRelative32(0x400)
     let scene = retry process.readManagedString(target, 64)
@@ -156,7 +156,7 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::SetTickRate
         | StdlibItemId::TimerState
         | StdlibItemId::TimerIsRunning
-        | StdlibItemId::StringLength
+        | StdlibItemId::StringByteLength
         | StdlibItemId::StringConcat => BASIC_EXAMPLE,
         _ => BASIC_EXAMPLE,
     }
@@ -312,11 +312,20 @@ mod tests {
                         item.name
                     );
                 }
-                Implementation::LibraryBody { .. } => assert!(
-                    source.contains(&format!("fn {}(", item.name)),
-                    "`{}` must have a source body",
-                    item.qualified_name
-                ),
+                Implementation::LibraryBody { .. } => {
+                    let declaration = format!("fn {}", item.name);
+                    let position = source.find(&declaration).unwrap_or_else(|| {
+                        panic!("`{}` must have a source body", item.qualified_name)
+                    });
+                    assert!(
+                        matches!(
+                            source.as_bytes().get(position + declaration.len()),
+                            Some(b'(' | b'<')
+                        ),
+                        "`{}` must have a source body",
+                        item.qualified_name
+                    );
+                }
             }
         }
     }
@@ -345,7 +354,7 @@ mod tests {
         );
         assert_eq!(
             library.render_signature(StdlibItemId::ProcessRead),
-            "Process.read(address: address) -> T! where T: MemoryReadable"
+            "Process.read<T>(address: address) -> T! where T: MemoryReadable"
         );
         assert_eq!(
             library.render_signature(StdlibItemId::ArrayGet),
@@ -380,6 +389,61 @@ mod tests {
             library.capability(StdlibCapabilityId::Numeric).behavior,
             CapabilityBehavior::Declared
         );
+        assert_eq!(
+            library
+                .capability(StdlibCapabilityId::Numeric)
+                .super_capabilities,
+            [StdlibCapabilityId::Equatable]
+        );
+        assert_eq!(
+            library
+                .capability(StdlibCapabilityId::Integer)
+                .super_capabilities,
+            [StdlibCapabilityId::Numeric, StdlibCapabilityId::Display]
+        );
+        assert!(
+            library.capability_implies(StdlibCapabilityId::Integer, StdlibCapabilityId::Numeric)
+        );
+        assert!(
+            library.capability_implies(StdlibCapabilityId::Integer, StdlibCapabilityId::Display)
+        );
+        assert!(
+            library.capability_implies(StdlibCapabilityId::Integer, StdlibCapabilityId::Equatable)
+        );
+        assert!(library.capability_implies(StdlibCapabilityId::Float, StdlibCapabilityId::Numeric));
+        assert!(
+            !library.capability_implies(StdlibCapabilityId::Float, StdlibCapabilityId::Display)
+        );
+        assert_eq!(
+            library.minimal_capabilities(&[
+                StdlibCapabilityId::Integer,
+                StdlibCapabilityId::Numeric,
+                StdlibCapabilityId::Equatable,
+                StdlibCapabilityId::Display,
+            ]),
+            [StdlibCapabilityId::Integer]
+        );
+        assert!(
+            !library
+                .core_type(CoreTypeId::U32)
+                .capabilities
+                .contains(&StdlibCapabilityId::Numeric)
+        );
+        assert!(
+            !library
+                .core_type(CoreTypeId::U32)
+                .capabilities
+                .contains(&StdlibCapabilityId::Display)
+        );
+        assert!(
+            !library
+                .core_type(CoreTypeId::U32)
+                .capabilities
+                .contains(&StdlibCapabilityId::Equatable)
+        );
+        assert!(library.core_type_has_capability(CoreTypeId::U32, StdlibCapabilityId::Numeric));
+        assert!(library.core_type_has_capability(CoreTypeId::U32, StdlibCapabilityId::Display));
+        assert!(library.core_type_has_capability(CoreTypeId::U32, StdlibCapabilityId::Equatable));
 
         let schema = include_str!("schema.rs");
         let retired_constraint = ["enum Type", "Constraint"].concat();

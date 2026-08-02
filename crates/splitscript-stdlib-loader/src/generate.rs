@@ -102,8 +102,17 @@ impl<'a> CatalogGenerator<'a> {
                     "structuralMemoryLayout" => "StructuralMemoryLayout",
                     other => other,
                 };
+                let super_capabilities = owner
+                    .type_parameters
+                    .first()
+                    .map(|parameter| parameter.constraints.as_slice())
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|capability| format!("StdlibCapabilityId::{}", ident(capability)))
+                    .collect::<Vec<_>>()
+                    .join(",");
                 output.push_str(&format!(
-                    "StdlibCapability {{ id: StdlibCapabilityId::{}, name: {}, behavior: CapabilityBehavior::{behavior}, documentation: documentation({}, {}) }},\n",
+                    "StdlibCapability {{ id: StdlibCapabilityId::{}, name: {}, super_capabilities: &[{super_capabilities}], behavior: CapabilityBehavior::{behavior}, documentation: documentation({}, {}) }},\n",
                     ident(&owner.name), quote(&owner.name),
                     quote(&owner.documentation.summary), quote(&owner.documentation.details)
                 ));
@@ -208,7 +217,7 @@ impl<'a> CatalogGenerator<'a> {
                 "StdlibField {{ id: StdlibFieldId::{}{}, owner: StdlibTypeId::{owner}, name: {}, ty: {}, visibility: FieldVisibility::{}, documentation: documentation({}, {}) }},\n",
                 owner, ident(&field.name),
                 quote(&field.name),
-                self.declared_type(&field.ty),
+                self.type_ref(&field.ty, &[]),
                 if field.private {
                     "RuntimePrivate"
                 } else {
@@ -249,7 +258,16 @@ impl<'a> CatalogGenerator<'a> {
                         "StdlibOwner::Capability(StdlibCapabilityId::{})",
                         ident(&owner.name)
                     ),
-                    "TypeRef::Parameter(\"T\")",
+                    &format!(
+                        "TypeRef::Parameter({})",
+                        quote(
+                            &owner
+                                .type_parameters
+                                .first()
+                                .expect("validated capabilities have one type parameter")
+                                .name
+                        )
+                    ),
                     Some(&owner.type_parameters),
                 ),
                 Declaration::TypeConstructor(owner) => self.emit_functions(
@@ -321,24 +339,14 @@ impl<'a> CatalogGenerator<'a> {
             } else {
                 &function.type_parameters
             };
-            let kind =
-                if let Some(selector) = optional_attribute_name(&function.attributes, "selector") {
-                    if function.is_static {
-                        format!(
-                            "ItemKind::TypedFunction {{ type_parameter: {} }}",
-                            quote(selector)
-                        )
-                    } else {
-                        format!(
-                            "ItemKind::TypedMethod {{ receiver: {receiver}, type_parameter: {} }}",
-                            quote(selector)
-                        )
-                    }
-                } else if function.is_static {
-                    "ItemKind::Function".to_owned()
-                } else {
-                    format!("ItemKind::Method {{ receiver: {receiver} }}")
-                };
+            let kind = if function.is_static {
+                "ItemKind::Function".to_owned()
+            } else {
+                format!("ItemKind::Method {{ receiver: {receiver} }}")
+            };
+            if has_attribute(&owner.attributes, "testOnly") {
+                output.push_str("#[cfg(test)] ");
+            }
             self.emit_item(
                 output,
                 function,
@@ -387,10 +395,11 @@ impl<'a> CatalogGenerator<'a> {
             )
         };
         output.push_str(&format!(
-                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, signature: Signature {{ type_parameters: {}, parameters: &[{}], result: {} }}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, validation_fixture(StdlibItemId::{id}))], related: &[] }}, implementation: {implementation} }},\n",
+                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, validation_fixture(StdlibItemId::{id}))], related: &[] }}, implementation: {implementation} }},\n",
                 quote(&function.name),
                 quote(&qualified_name),
                 self.type_parameters(type_parameters, owner),
+                function.type_parameters.len(),
                 function.parameters.iter().map(|parameter| self.parameter(parameter, type_parameters)).collect::<Vec<_>>().join(","),
                 self.type_ref(&function.result, type_parameters),
                 quote(&function.documentation.summary), quote(&function.documentation.details),
@@ -404,10 +413,10 @@ impl<'a> CatalogGenerator<'a> {
         owner: &CallableOwnerDeclaration,
     ) -> String {
         let values = parameters.iter().map(|parameter| {
-            let constraints = if !parameter.constraints.is_empty() {
-                parameter.constraints.clone()
-            } else if self.library.declarations.iter().any(|declaration| matches!(declaration, Declaration::Capability(candidate) if candidate.name == owner.name)) {
+            let constraints = if self.library.declarations.iter().any(|declaration| matches!(declaration, Declaration::Capability(candidate) if candidate.name == owner.name)) {
                 vec![owner.name.clone()]
+            } else if !parameter.constraints.is_empty() {
+                parameter.constraints.clone()
             } else {
                 Vec::new()
             };
@@ -454,17 +463,6 @@ impl<'a> CatalogGenerator<'a> {
         )
     }
 
-    fn declared_type(&self, ty: &Type) -> String {
-        let Type::Name(name) = ty else {
-            unreachable!("validated standard-library fields have nominal types")
-        };
-        if is_core_type(name) {
-            format!("DeclaredTypeRef::Core(CoreTypeId::{})", ident(name))
-        } else {
-            format!("DeclaredTypeRef::Standard(StdlibTypeId::{})", ident(name))
-        }
-    }
-
     fn type_ref(&self, ty: &Type, parameters: &[TypeParameter]) -> String {
         match ty {
             Type::Option(value) => format!(
@@ -477,6 +475,10 @@ impl<'a> CatalogGenerator<'a> {
             ),
             Type::Array(element) => format!(
                 "TypeRef::Application {{ constructor: StdlibTypeConstructorId::Array, arguments: &[{}] }}",
+                self.type_ref(element, parameters)
+            ),
+            Type::FixedArray { element, length } => format!(
+                "TypeRef::FixedArray {{ element: &{}, length: {length} }}",
                 self.type_ref(element, parameters)
             ),
             Type::Application {
@@ -907,6 +909,29 @@ capability Numeric<T> {
     }
 
     #[test]
+    fn capability_constraints_generate_super_capabilities() {
+        let source = r#"
+/// Displayable values.
+@behavior(declared)
+capability Display<T> {}
+/// Equatable values.
+@behavior(structuralEquality)
+capability Equatable<T> {}
+/// Numeric values.
+@behavior(declared)
+capability Numeric<T: Equatable> {}
+/// Integer values.
+@behavior(declared)
+capability Integer<T: Numeric + Display> {}
+"#;
+        let generated = generate_catalog(&parse(source).unwrap()).unwrap();
+        assert!(generated.contains(
+            "super_capabilities: &[StdlibCapabilityId::Numeric,StdlibCapabilityId::Display]"
+        ));
+        assert!(generated.contains("super_capabilities: &[StdlibCapabilityId::Equatable]"));
+    }
+
+    #[test]
     fn bundled_source_generates_final_typed_catalog_arrays() {
         let source = include_str!("../../../stdlib/standard.split");
         let generated = generate_catalog(&parse(source).unwrap()).unwrap();
@@ -921,7 +946,10 @@ capability Numeric<T> {
         }
         assert!(generated.contains("StateProviderProcesses::SourceState"));
         assert!(generated.contains("StateProviderAttachment::Identity"));
-        assert!(generated.contains("ItemKind::TypedMethod"));
+        assert!(generated.contains("ItemKind::Method"));
+        assert!(generated.contains(
+            "TypeRef::FixedArray { element: &TypeRef::Core(CoreTypeId::U16), length: 3 }"
+        ));
         assert!(!generated.contains(&retired_invocation));
     }
 }

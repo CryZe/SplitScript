@@ -251,6 +251,7 @@ pub enum TypedExpressionKind {
     },
     Call {
         source_path: Vec<String>,
+        receiver: Option<ExprId>,
         arguments: Vec<ExprId>,
     },
 }
@@ -376,9 +377,27 @@ pub struct TypedProgram {
     state_sources: Vec<(ValueId, ExprId)>,
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
-    visible_source_len: usize,
+    visible_expression_count: usize,
     visible_function_count: usize,
     library_functions: HashMap<StdlibItemId, FunctionId>,
+}
+
+pub(crate) fn visible_expression_count(program: &SyntaxProgram) -> usize {
+    #[derive(Default)]
+    struct Counter {
+        count: usize,
+    }
+
+    impl<'ast> SyntaxVisitor<'ast> for Counter {
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            self.count = self.count.max(expression.id.index() + 1);
+            visit::walk_expr(self, expression);
+        }
+    }
+
+    let mut counter = Counter::default();
+    counter.visit_program(program);
+    counter.count
 }
 
 impl TypedProgram {
@@ -387,7 +406,7 @@ impl TypedProgram {
         syntax: &SyntaxProgram,
         semantics: &SemanticModel,
         standard_library: StandardLibrary,
-        visible_source_len: usize,
+        visible_expression_count: usize,
         visible_function_count: usize,
     ) -> Self {
         let mut builder = TypedBodyBuilder {
@@ -495,7 +514,7 @@ impl TypedProgram {
             state_sources,
             setting_choice_defaults,
             setting_choice_options,
-            visible_source_len,
+            visible_expression_count,
             visible_function_count,
             library_functions,
         }
@@ -526,7 +545,7 @@ impl TypedProgram {
     pub fn expressions(&self) -> impl Iterator<Item = &TypedExpression> {
         self.expressions
             .iter()
-            .filter(|expression| expression.span.end <= self.visible_source_len)
+            .filter(|expression| expression.id.index() < self.visible_expression_count)
     }
 
     pub(crate) fn all_expressions(&self) -> impl Iterator<Item = &TypedExpression> {
@@ -534,10 +553,7 @@ impl TypedProgram {
     }
 
     pub(crate) fn visible_expression_count(&self) -> usize {
-        self.expressions()
-            .map(|expression| expression.id.index() + 1)
-            .max()
-            .unwrap_or(0)
+        self.visible_expression_count
     }
 
     pub fn call(&self, id: ExprId) -> Option<&ResolvedCall> {
@@ -918,7 +934,14 @@ pub fn walk_typed_expression<V: TypedVisitor>(
             visit_expression(*left);
             visit_expression(*right);
         }
-        TypedExpressionKind::Call { arguments, .. } => {
+        TypedExpressionKind::Call {
+            receiver,
+            arguments,
+            ..
+        } => {
+            if let Some(receiver) = receiver {
+                visit_expression(*receiver);
+            }
             for argument in arguments {
                 visit_expression(*argument);
             }
@@ -968,7 +991,13 @@ fn lower_expression_kind(
                 };
                 (variant.clone(), None)
             }
-            ExprKind::Call { callee, args, .. } => {
+            ExprKind::Call {
+                callee,
+                receiver,
+                args,
+                ..
+            } => {
+                debug_assert!(receiver.is_none());
                 let [_, variant] = callee.as_slice() else {
                     unreachable!("resolved enum constructors have two segments")
                 };
@@ -1124,8 +1153,14 @@ fn lower_expression_kind(
             left: left.id,
             right: right.id,
         },
-        ExprKind::Call { callee, args, .. } => TypedExpressionKind::Call {
+        ExprKind::Call {
+            callee,
+            receiver,
+            args,
+            ..
+        } => TypedExpressionKind::Call {
             source_path: callee.clone(),
+            receiver: receiver.as_ref().map(|receiver| receiver.id),
             arguments: args.iter().map(|argument| argument.id).collect(),
         },
     }

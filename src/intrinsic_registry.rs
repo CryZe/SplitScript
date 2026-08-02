@@ -20,10 +20,7 @@ pub(crate) const MAX_NATIVE_STRING_BYTES: u32 = 4_096;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CallableShape {
     Function,
-    #[allow(dead_code)]
-    TypedFunction,
     Method,
-    TypedMethod,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +99,6 @@ pub(crate) struct ContractParameter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct IntrinsicSignature {
     pub(crate) type_parameter_constraints: Option<&'static [StdlibCapabilityId]>,
-    pub(crate) typed_selector: Option<u8>,
     pub(crate) receiver: Option<ContractTypeRef>,
     pub(crate) parameters: [Option<ContractParameter>; 3],
     pub(crate) result: ContractTypeRef,
@@ -126,31 +122,19 @@ impl IntrinsicSignature {
             .map(|parameter| parameter.name)
             .collect::<Vec<_>>();
         let declared_receiver = match kind {
-            ItemKind::Method { receiver } | ItemKind::TypedMethod { receiver, .. } => {
-                Some(receiver)
-            }
-            ItemKind::Function | ItemKind::TypedFunction { .. } => None,
+            ItemKind::Method { receiver } => Some(receiver),
+            ItemKind::Function => None,
         };
         if !matches_optional_type(self.receiver, declared_receiver, &names) {
             return false;
         }
-        let declared_selector = match kind {
-            ItemKind::TypedFunction { type_parameter }
-            | ItemKind::TypedMethod { type_parameter, .. } => names
-                .iter()
-                .position(|name| *name == type_parameter)
-                .and_then(|index| u8::try_from(index).ok()),
-            ItemKind::Function | ItemKind::Method { .. } => None,
-        };
-        self.typed_selector == declared_selector
-            && self
-                .parameters
-                .iter()
-                .flatten()
-                .zip(signature.parameters)
-                .all(|(required, declared)| {
-                    required.rule == declared.rule && matches_type(required.ty, declared.ty, &names)
-                })
+        self.parameters
+            .iter()
+            .flatten()
+            .zip(signature.parameters)
+            .all(|(required, declared)| {
+                required.rule == declared.rule && matches_type(required.ty, declared.ty, &names)
+            })
             && matches_type(self.result, signature.result, &names)
     }
 }
@@ -240,9 +224,7 @@ impl IntrinsicContract {
         matches!(
             (self.shape, kind),
             (CallableShape::Function, ItemKind::Function)
-                | (CallableShape::TypedFunction, ItemKind::TypedFunction { .. })
                 | (CallableShape::Method, ItemKind::Method { .. })
-                | (CallableShape::TypedMethod, ItemKind::TypedMethod { .. })
         )
     }
 }
@@ -253,7 +235,9 @@ const fn scratch(ty: ScratchType, slots: u8) -> Option<ScratchPolicy> {
 
 const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
     match id {
-        IntrinsicId::ProcessModule => scratch(ScratchType::Core(CoreTypeId::U64), 2),
+        IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => {
+            scratch(ScratchType::Core(CoreTypeId::U64), 2)
+        }
         IntrinsicId::ProcessFollow
         | IntrinsicId::ProcessScan
         | IntrinsicId::ProcessReadRelative32
@@ -289,11 +273,14 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
     use RuntimeHelperId as Runtime;
 
     match id {
-        IntrinsicId::Print => &[Helper(Runtime::PrintString)],
-        IntrinsicId::TimerSetVariable => &[Helper(Runtime::TimerSetVariable)],
+        IntrinsicId::Print => &[Helper(Runtime::PrintString), Helper(Runtime::FormatI64)],
+        IntrinsicId::TimerSetVariable => &[
+            Helper(Runtime::TimerSetVariable),
+            Helper(Runtime::FormatI64),
+        ],
         IntrinsicId::RuntimeSetTickRate => &[HostImport(Host::RuntimeSetTickRate)],
         IntrinsicId::TimerState => &[HostImport(Host::TimerGetState)],
-        IntrinsicId::ProcessModule => &[
+        IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => &[
             HostImport(Host::ProcessGetModuleAddress),
             HostImport(Host::ProcessGetModuleSize),
         ],
@@ -321,6 +308,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::ArraySet
         | IntrinsicId::AddressAdd
         | IntrinsicId::ProcessName
+        | IntrinsicId::ProcessClosed
         | IntrinsicId::StringLength => &[],
     }
 }
@@ -391,6 +379,7 @@ const NO_TYPE_PARAMETERS: Option<&[StdlibCapabilityId]> = None;
 const UNCONSTRAINED_T: Option<&[StdlibCapabilityId]> = Some(&[]);
 const NUMERIC_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Numeric]);
 const MEMORY_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::MemoryReadable]);
+const DISPLAY_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Display]);
 
 const fn value(ty: ContractTypeRef) -> ContractParameter {
     ContractParameter {
@@ -405,14 +394,12 @@ const fn literal(ty: ContractTypeRef, rule: ParameterRule) -> ContractParameter 
 
 const fn signature(
     type_parameter_constraints: Option<&'static [StdlibCapabilityId]>,
-    typed_selector: Option<u8>,
     receiver: Option<ContractTypeRef>,
     parameters: [Option<ContractParameter>; 3],
     result: ContractTypeRef,
 ) -> IntrinsicSignature {
     IntrinsicSignature {
         type_parameter_constraints,
-        typed_selector,
         receiver,
         parameters,
         result,
@@ -453,7 +440,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::Print => contract!(
             Print,
             Function,
-            signature(NO_TYPE_PARAMETERS, None, None, params![value(STRING)], VOID),
+            signature(DISPLAY_T, None, params![value(T)], VOID),
             RUNTIME_WRITE,
             Everywhere,
             HostBoundary
@@ -461,13 +448,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::TimerSetVariable => contract!(
             TimerSetVariable,
             Function,
-            signature(
-                NO_TYPE_PARAMETERS,
-                None,
-                None,
-                params![value(STRING), value(STRING)],
-                VOID,
-            ),
+            signature(DISPLAY_T, None, params![value(STRING), value(T)], VOID,),
             TIMER_WRITE,
             Everywhere,
             HostBoundary
@@ -475,7 +456,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::RuntimeSetTickRate => contract!(
             RuntimeSetTickRate,
             Function,
-            signature(NO_TYPE_PARAMETERS, None, None, params![value(F64)], VOID),
+            signature(NO_TYPE_PARAMETERS, None, params![value(F64)], VOID),
             RUNTIME_WRITE,
             Everywhere,
             HostBoundary
@@ -484,7 +465,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             contract!(
                 NextTick,
                 Function,
-                signature(NO_TYPE_PARAMETERS, None, None, params![], VOID),
+                signature(NO_TYPE_PARAMETERS, None, params![], VOID),
                 NEXT_TICK,
                 OnAttach,
                 Suspension
@@ -493,7 +474,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::NumericMin => contract!(
             NumericMin,
             Method,
-            signature(NUMERIC_T, None, Some(T), params![value(T)], T),
+            signature(NUMERIC_T, Some(T), params![value(T)], T),
             PURE,
             Everywhere,
             RepresentationPrimitive
@@ -501,7 +482,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::NumericMax => contract!(
             NumericMax,
             Method,
-            signature(NUMERIC_T, None, Some(T), params![value(T)], T),
+            signature(NUMERIC_T, Some(T), params![value(T)], T),
             PURE,
             Everywhere,
             RepresentationPrimitive
@@ -509,7 +490,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::ArrayLength => contract!(
             ArrayLength,
             Method,
-            signature(UNCONSTRAINED_T, None, Some(T_ARRAY), params![], U32),
+            signature(UNCONSTRAINED_T, Some(T_ARRAY), params![], U32),
             PURE,
             Everywhere,
             RepresentationPrimitive
@@ -517,7 +498,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::ArrayGet => contract!(
             ArrayGet,
             Method,
-            signature(UNCONSTRAINED_T, None, Some(T_ARRAY), params![value(U32)], T,),
+            signature(UNCONSTRAINED_T, Some(T_ARRAY), params![value(U32)], T,),
             PURE,
             Everywhere,
             RepresentationPrimitive
@@ -527,7 +508,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 UNCONSTRAINED_T,
-                None,
                 Some(T_ARRAY),
                 params![value(U32), value(T)],
                 VOID,
@@ -541,7 +521,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(ADDRESS),
                 params![value(U64)],
                 ADDRESS,
@@ -553,23 +532,32 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::ProcessName => contract!(
             ProcessName,
             Method,
-            signature(
-                NO_TYPE_PARAMETERS,
-                None,
-                Some(PROCESS_TYPE),
-                params![],
-                STRING,
-            ),
+            signature(NO_TYPE_PARAMETERS, Some(PROCESS_TYPE), params![], STRING,),
             ATTACHED_ALLOCATES,
             Everywhere,
             RepresentationPrimitive
+        ),
+        IntrinsicId::ProcessMainModule => contract!(
+            ProcessMainModule,
+            Method,
+            signature(NO_TYPE_PARAMETERS, Some(PROCESS_TYPE), params![], MODULE,),
+            PROCESS_SUSPEND,
+            OnAttach,
+            Suspension
+        ),
+        IntrinsicId::ProcessClosed => contract!(
+            ProcessClosed,
+            Method,
+            signature(NO_TYPE_PARAMETERS, Some(PROCESS_TYPE), params![], VOID,),
+            NEXT_TICK,
+            OnAttach,
+            Suspension
         ),
         IntrinsicId::ProcessModule => contract!(
             ProcessModule,
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(PROCESS_TYPE),
                 params![literal(STRING, ParameterRule::StringLiteral)],
                 MODULE,
@@ -580,10 +568,9 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::ProcessRead => contract!(
             ProcessRead,
-            TypedMethod,
+            Method,
             signature(
                 MEMORY_T,
-                Some(0),
                 Some(PROCESS_TYPE),
                 params![value(ADDRESS)],
                 T_RESULT
@@ -597,7 +584,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(PROCESS_TYPE),
                 params![value(ADDRESS), value(U64_ARRAY)],
                 ADDRESS_RESULT,
@@ -611,7 +597,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(PROCESS_TYPE),
                 params![
                     value(ADDRESS),
@@ -629,7 +614,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(PROCESS_TYPE),
                 params![value(ADDRESS)],
                 ADDRESS_RESULT,
@@ -643,7 +627,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(PROCESS_TYPE),
                 params![value(ADDRESS), value(U32)],
                 STRING_RESULT,
@@ -657,7 +640,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(PROCESS_TYPE),
                 params![value(ADDRESS), value(U32)],
                 STRING_RESULT,
@@ -669,7 +651,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::TimerState => contract!(
             TimerState,
             Function,
-            signature(NO_TYPE_PARAMETERS, None, None, params![], TIMER_STATE),
+            signature(NO_TYPE_PARAMETERS, None, params![], TIMER_STATE),
             TIMER_READ,
             Everywhere,
             HostBoundary
@@ -677,21 +659,15 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::UnityIl2Cpp => contract!(
             UnityIl2Cpp,
             Function,
-            signature(
-                NO_TYPE_PARAMETERS,
-                None,
-                None,
-                params![value(U32)],
-                UNITY_MODULE,
-            ),
+            signature(NO_TYPE_PARAMETERS, None, params![value(U32)], UNITY_MODULE,),
             PROCESS_SUSPEND,
             OnAttach,
             Suspension
         ),
         IntrinsicId::StringLength => contract!(
             StringLength,
-            Function,
-            signature(NO_TYPE_PARAMETERS, None, None, params![value(STRING)], U32),
+            Method,
+            signature(NO_TYPE_PARAMETERS, Some(STRING), params![], U32,),
             PURE,
             Everywhere,
             RepresentationPrimitive
@@ -701,7 +677,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Function,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 None,
                 params![value(STRING_ARRAY)],
                 STRING,
@@ -715,7 +690,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(MODULE),
                 params![literal(SIGNATURE, ParameterRule::SignatureLiteral)],
                 ADDRESS,
@@ -729,7 +703,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(UNITY_MODULE),
                 params![value(STRING)],
                 UNITY_IMAGE,
@@ -743,7 +716,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(UNITY_IMAGE),
                 params![value(STRING)],
                 UNITY_CLASS,
@@ -757,7 +729,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(UNITY_CLASS),
                 params![value(STRING)],
                 U32,
@@ -771,7 +742,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(UNITY_CLASS),
                 params![value(STRING_ARRAY)],
                 UNITY_FIELD,
@@ -783,13 +753,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::UnityClassStaticTable => contract!(
             UnityClassStaticTable,
             Method,
-            signature(
-                NO_TYPE_PARAMETERS,
-                None,
-                Some(UNITY_CLASS),
-                params![],
-                ADDRESS,
-            ),
+            signature(NO_TYPE_PARAMETERS, Some(UNITY_CLASS), params![], ADDRESS,),
             PROCESS_SUSPEND,
             OnAttach,
             Suspension
@@ -799,7 +763,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
-                None,
                 Some(UNITY_CLASS),
                 params![value(STRING_ARRAY)],
                 ADDRESS,
@@ -811,13 +774,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::GbaAttach => contract!(
             GbaAttach,
             Function,
-            signature(
-                NO_TYPE_PARAMETERS,
-                None,
-                None,
-                params![],
-                GBA_EMULATOR_RESULT,
-            ),
+            signature(NO_TYPE_PARAMETERS, None, params![], GBA_EMULATOR_RESULT,),
             PROCESS,
             Everywhere,
             Retryable
@@ -825,13 +782,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::GbaEmulatorRead => contract!(
             GbaEmulatorRead,
             Method,
-            signature(
-                MEMORY_T,
-                None,
-                Some(GBA_EMULATOR),
-                params![value(U32)],
-                T_RESULT,
-            ),
+            signature(MEMORY_T, Some(GBA_EMULATOR), params![value(U32)], T_RESULT,),
             PROCESS,
             Everywhere,
             Retryable
@@ -877,6 +828,7 @@ mod tests {
                 name: "Value",
                 constraints: &[StdlibCapabilityId::MemoryReadable],
             }],
+            explicit_type_parameters: 1,
             parameters: &[Parameter {
                 name: "address",
                 ty: TypeRef::Core(CoreTypeId::Address),
@@ -886,9 +838,8 @@ mod tests {
             result: result_of_value,
         };
         assert!(read.signature.matches(
-            ItemKind::TypedMethod {
+            ItemKind::Method {
                 receiver: TypeRef::Standard(StdlibTypeId::Process),
-                type_parameter: "Value",
             },
             valid,
         ));
@@ -898,9 +849,8 @@ mod tests {
             ..valid
         };
         assert!(!read.signature.matches(
-            ItemKind::TypedMethod {
+            ItemKind::Method {
                 receiver: TypeRef::Standard(StdlibTypeId::Process),
-                type_parameter: "Value",
             },
             wrong_result,
         ));
@@ -908,6 +858,7 @@ mod tests {
         let module = contract(IntrinsicId::ProcessModule);
         let wrong_rule = Signature {
             type_parameters: &[],
+            explicit_type_parameters: 0,
             parameters: &[Parameter {
                 name: "name",
                 ty: TypeRef::Standard(StdlibTypeId::String),

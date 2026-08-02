@@ -17,22 +17,37 @@ use crate::{
 };
 
 use super::{
-    Checker, DeferredMemberPath, MethodReceiver, PathResolution, catalog_type_argument,
-    closest_name,
+    CallSyntax, Checker, DeferredMemberPath, MethodReceiver, PathResolution, ResolvedReceiver,
+    catalog_type_argument, closest_name,
     context::{CallableContext, ExpressionMode},
 };
 
 impl Checker {
     pub(super) fn call(
         &mut self,
-        callee: &[String],
-        name_span: Span,
+        call: CallSyntax<'_>,
         args: &[Expr],
         expected: Option<Type>,
         expression: ExprId,
         span: Span,
     ) -> Option<Type> {
-        if callee == ["Some"] {
+        let CallSyntax {
+            callee,
+            name_span,
+            postfix_receiver,
+            type_arguments,
+        } = call;
+        if !type_arguments.is_empty()
+            && postfix_receiver.is_none()
+            && matches!(callee, [name] if matches!(name.as_str(), "Some" | "Ok" | "Err"))
+        {
+            self.error(
+                format!("`{}` does not accept explicit type arguments", callee[0]),
+                span,
+            );
+            return None;
+        }
+        if postfix_receiver.is_none() && callee == ["Some"] {
             if args.len() != 1 {
                 self.error("`Some` expects one value", span);
                 return None;
@@ -64,7 +79,7 @@ impl Checker {
             return self.expect_expression(expression, ty, expected, span);
         }
 
-        if callee == ["Ok"] {
+        if postfix_receiver.is_none() && callee == ["Ok"] {
             if args.len() != 1 {
                 self.error("`Ok` expects one value", span);
                 return None;
@@ -96,7 +111,7 @@ impl Checker {
             return self.expect_expression(expression, ty, expected, span);
         }
 
-        if callee == ["Err"] {
+        if postfix_receiver.is_none() && callee == ["Err"] {
             if args.len() != 1 {
                 self.error("`Err` expects one error message", span);
                 return None;
@@ -148,6 +163,19 @@ impl Checker {
             return None;
         }
 
+        if let Some(receiver) = postfix_receiver {
+            return self.postfix_method_call(
+                receiver,
+                callee,
+                name_span,
+                type_arguments,
+                args,
+                expected,
+                expression,
+                span,
+            );
+        }
+
         let standard_library = self.standard_library.clone();
         let mut function_candidates = standard_library.function_candidates(callee);
         if function_candidates.len() > 1 {
@@ -155,10 +183,25 @@ impl Checker {
             return None;
         }
         if let Some(candidate) = function_candidates.pop() {
-            return self.catalog_call(&candidate, None, args, expected, expression, span);
+            return self.catalog_call(
+                &candidate,
+                None,
+                type_arguments,
+                args,
+                expected,
+                expression,
+                span,
+            );
         }
         let (display_name, signature_id, signature_result, parameters, resolved_call) =
             if let [name] = callee {
+                if !type_arguments.is_empty() {
+                    self.error(
+                        "explicit type arguments are currently supported on standard-library calls",
+                        span,
+                    );
+                    return None;
+                }
                 let Some(signature) = self.declarations.functions.get(name).cloned() else {
                     let suggestion = self.function_name_suggestion(callee);
                     self.unknown_function(callee, name_span, span, suggestion.as_deref());
@@ -191,26 +234,7 @@ impl Checker {
                     self.unknown_function(callee, name_span, span, Some(&suggestion));
                     return None;
                 }
-                let typed_method = if callee.len() >= 3 {
-                    let selector = callee.last().unwrap();
-                    let method = &callee[callee.len() - 2];
-                    let candidates =
-                        standard_library.method_candidates_with_selector(method, Some(selector));
-                    (!candidates.is_empty()).then_some((
-                        method,
-                        selector,
-                        &callee[..callee.len() - 2],
-                    ))
-                } else {
-                    None
-                };
-                let (method, receiver_path, selector) =
-                    if let Some((method, selector, receiver)) = typed_method {
-                        (method, receiver, Some(selector.as_str()))
-                    } else {
-                        let (method, receiver) = callee.split_last().unwrap();
-                        (method, receiver, None)
-                    };
+                let (method, receiver_path) = callee.split_last().unwrap();
                 let receiver = self.path(receiver_path, span, None)?;
                 let receiver_value = receiver
                     .value
@@ -220,7 +244,7 @@ impl Checker {
                     .expect("method receiver types must be known while resolving a call");
                 let receiver_type = self.shallow_type(receiver.ty);
                 let mut candidates = standard_library
-                    .method_candidates_with_selector(method, selector)
+                    .method_candidates(method)
                     .into_iter()
                     .filter(|candidate| self.catalog_candidate_may_apply(candidate, receiver_type))
                     .collect::<Vec<_>>();
@@ -233,14 +257,24 @@ impl Checker {
                         &candidate,
                         Some(MethodReceiver {
                             ty: receiver_type,
-                            value: receiver_value,
-                            members: receiver_members,
+                            value: ResolvedReceiver::Path {
+                                root: receiver_value,
+                                members: receiver_members,
+                            },
                         }),
+                        type_arguments,
                         args,
                         expected,
                         expression,
                         span,
                     );
+                }
+                if !type_arguments.is_empty() {
+                    self.error(
+                        "explicit type arguments are currently supported on standard-library calls",
+                        span,
+                    );
+                    return None;
                 }
                 let Some(signature) = self
                     .declarations
@@ -279,9 +313,11 @@ impl Checker {
                         function: signature.id,
                         type_arguments: signature.type_arguments,
                         signature: concrete_signature,
-                        receiver: receiver_value,
+                        receiver: ResolvedReceiver::Path {
+                            root: receiver_value,
+                            members: receiver_members,
+                        },
                         receiver_type,
-                        receiver_members,
                     },
                 )
             };
@@ -309,6 +345,122 @@ impl Checker {
         }
         let result = self.expect_expression(expression, signature_result, expected, span)?;
         self.semantics.resolve_call(expression, resolved_call);
+        Some(result)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn postfix_method_call(
+        &mut self,
+        written_receiver: &Expr,
+        callee: &[String],
+        name_span: Span,
+        type_arguments: &[crate::ast::TypeRef],
+        args: &[Expr],
+        expected: Option<Type>,
+        expression: ExprId,
+        span: Span,
+    ) -> Option<Type> {
+        let standard_library = self.standard_library.clone();
+        let base_type = self.expr(written_receiver, None)?;
+        let base_type = self.shallow_type(base_type);
+        let method = callee.last().expect("postfix calls name a method");
+        let (receiver_type, receiver_members) =
+            self.resolve_members(base_type, &callee[..callee.len() - 1], span)?;
+        let method_receiver = MethodReceiver {
+            ty: receiver_type,
+            value: ResolvedReceiver::Expression {
+                expression: written_receiver.id,
+                members: receiver_members,
+            },
+        };
+        let mut candidates = standard_library
+            .method_candidates(method)
+            .into_iter()
+            .filter(|candidate| self.catalog_candidate_may_apply(candidate, receiver_type))
+            .collect::<Vec<_>>();
+        if candidates.len() > 1 {
+            self.ambiguous_catalog_call(std::slice::from_ref(method), &candidates, span);
+            return None;
+        }
+        if let Some(candidate) = candidates.pop() {
+            return self.catalog_call(
+                &candidate,
+                Some(method_receiver),
+                type_arguments,
+                args,
+                expected,
+                expression,
+                span,
+            );
+        }
+        if !type_arguments.is_empty() {
+            self.error(
+                "explicit type arguments are currently supported on standard-library calls",
+                span,
+            );
+            return None;
+        }
+        let Some(signature) = self
+            .declarations
+            .methods
+            .get(&(receiver_type, method.to_owned()))
+            .cloned()
+        else {
+            let suggestion = self.method_name_suggestion(receiver_type, method);
+            self.unknown_method(
+                receiver_type,
+                method,
+                name_span,
+                span,
+                suggestion.as_deref(),
+            );
+            return None;
+        };
+        let signature = if self.active_function_component.contains(&signature.id) {
+            signature.monomorphic_call()
+        } else {
+            signature.instantiate(&mut self.inference)
+        };
+        if self.declarations.debug_functions.contains(&signature.id)
+            && !self.debug_context.is_debug()
+        {
+            self.error(
+                format!("debug-only method `{method}` can only be called from debug code"),
+                span,
+            );
+        }
+        let parameters = signature.params.iter().copied().skip(1).collect::<Vec<_>>();
+        if args.len() != parameters.len() {
+            self.error(
+                format!(
+                    "`{method}` expects {} arguments, found {}",
+                    parameters.len(),
+                    args.len()
+                ),
+                span,
+            );
+            return None;
+        }
+        for (argument, parameter) in args.iter().zip(parameters) {
+            self.expr(argument, Some(parameter));
+        }
+        let concrete_signature = signature
+            .params
+            .iter()
+            .copied()
+            .chain([signature.result])
+            .collect();
+        let result = self.expect_expression(expression, signature.result, expected, span)?;
+        self.semantics.resolve_call(
+            expression,
+            PendingResolvedCall::UserMethod {
+                function: signature.id,
+                type_arguments: signature.type_arguments,
+                signature: concrete_signature,
+                receiver: method_receiver.value,
+                receiver_type,
+            },
+        );
         Some(result)
     }
 
@@ -344,13 +496,10 @@ impl Checker {
         let standard_library = self.standard_library.clone();
         let mut candidates = Vec::new();
         for item in standard_library.items() {
-            let (ItemKind::Method { .. } | ItemKind::TypedMethod { .. }) = item.kind else {
+            let ItemKind::Method { .. } = item.kind else {
                 continue;
             };
-            let candidate = CallCandidate {
-                item,
-                type_arguments: Vec::new(),
-            };
+            let candidate = CallCandidate { item };
             if self.catalog_candidate_may_apply(&candidate, receiver) {
                 candidates.push(item.name.to_owned());
             }
@@ -424,36 +573,72 @@ impl Checker {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn catalog_call(
         &mut self,
         candidate: &CallCandidate,
         receiver: Option<MethodReceiver>,
+        explicit_type_arguments: &[crate::ast::TypeRef],
         args: &[Expr],
         expected: Option<Type>,
         expression: ExprId,
         span: Span,
     ) -> Option<Type> {
         let item = candidate.item;
+        if !explicit_type_arguments.is_empty()
+            && explicit_type_arguments.len() != item.signature.explicit_type_parameters
+        {
+            self.error(
+                format!(
+                    "`{}` expects {} type arguments, found {}",
+                    item.qualified_name,
+                    item.signature.explicit_type_parameters,
+                    explicit_type_arguments.len()
+                ),
+                span,
+            );
+            return None;
+        }
         let mut variables = HashMap::new();
-        for parameter in item.signature.type_parameters {
+        for (index, parameter) in item.signature.type_parameters.iter().enumerate() {
             let requirements = parameter
                 .constraints
                 .iter()
                 .fold(Requirements::none(), |requirements, constraint| {
                     requirements | Requirements::capability(*constraint)
                 });
-            let ty = candidate
-                .type_arguments
-                .iter()
-                .find(|(name, _)| *name == parameter.name)
-                .map(|(_, ty)| self.inference.known_builtin(*ty))
+            let explicitly_selected = index < item.signature.explicit_type_parameters
+                && explicit_type_arguments.get(index).is_some();
+            let ty = (index < item.signature.explicit_type_parameters)
+                .then(|| explicit_type_arguments.get(index))
+                .flatten()
+                .map(|ty| self.syntax_type(*ty))
                 .unwrap_or_else(|| self.fresh_inference(requirements.clone(), None));
             if !requirements.is_empty() {
-                self.require(ty, requirements, span)?;
+                if explicitly_selected {
+                    if self.inference.require(ty, requirements).is_err() {
+                        let required = parameter
+                            .constraints
+                            .iter()
+                            .map(|capability| self.standard_library.capability(*capability).name)
+                            .collect::<Vec<_>>()
+                            .join(" + ");
+                        let selected = self.type_name(ty);
+                        self.error(
+                            format!(
+                                "type `{selected}` does not satisfy the required `{required}` capability"
+                            ),
+                            span,
+                        );
+                        return None;
+                    }
+                } else {
+                    self.require(ty, requirements, span)?;
+                }
             }
             variables.insert(parameter.name, ty);
         }
-        if item.id == StdlibItemId::ProcessRead && candidate.type_arguments.is_empty() {
+        if item.id == StdlibItemId::ProcessRead && explicit_type_arguments.is_empty() {
             self.inferred_process_reads.push((variables["T"], span));
         }
         let mut concrete_signature = Vec::new();
@@ -521,11 +706,8 @@ impl Checker {
                 item: item.id,
                 type_arguments,
                 signature: concrete_signature,
-                receiver: receiver.as_ref().map(|receiver| receiver.value),
+                receiver: receiver.as_ref().map(|receiver| receiver.value.clone()),
                 receiver_type: receiver.as_ref().map(|receiver| receiver.ty),
-                receiver_members: receiver
-                    .map(|receiver| receiver.members)
-                    .unwrap_or_default(),
             },
         );
         Some(result)
@@ -556,6 +738,10 @@ impl Checker {
                         && matches!(receiver, Type::Option(_)))
                     || (constructor == StdlibTypeConstructorId::Result
                         && matches!(receiver, Type::Result(_)))
+            }
+            CatalogTypeRef::FixedArray { length, .. } => {
+                matches!(receiver, Type::Variable(_))
+                    || matches!(receiver, Type::Array(array) if self.inference.array_length(array) == Some(length))
             }
             CatalogTypeRef::Parameter(name) => candidate
                 .item
@@ -606,6 +792,10 @@ impl Checker {
             CatalogTypeRef::Core(core) => self.declared_type(DeclaredTypeRef::Core(core)),
             CatalogTypeRef::Standard(standard) => self.standard_type(standard),
             CatalogTypeRef::Parameter(name) => variables[name],
+            CatalogTypeRef::FixedArray { element, length } => {
+                let element = self.catalog_type(*element, variables);
+                Type::Array(self.inference.array_type_with_length(element, Some(length)))
+            }
             CatalogTypeRef::Application {
                 constructor,
                 arguments,
@@ -852,7 +1042,7 @@ impl Checker {
             && let Some(field) = self.standard_library.public_field(owner, field)
         {
             return Some((
-                self.declared_type(field.ty),
+                self.standard_field_type(field.id),
                 ResolvedMember::StandardField(field.id),
             ));
         }

@@ -295,7 +295,7 @@ fn strict_and_recovering_checks_share_post_type_validation() {
 
     let source = r#"
         fn readValue() -> f32! {
-            return process.read.f32(0)
+            return process.read<f32>(0)
         }
         state "game.exe" {}
         onDetached {
@@ -458,7 +458,7 @@ fn compiler_database_exposes_types_resolutions_and_references() {
     use splitscript::{
         compiler::ast::{ExprKind, StateSource, Stmt},
         compiler::hir::{DeclarationId, ExpressionResolution},
-        compiler::semantic::{ResolvedCall, ResolvedValue},
+        compiler::semantic::{ResolvedCall, ResolvedReceiver, ResolvedValue},
         compiler::stdlib::StdlibItemId,
         compiler::types::{BuiltinType, TypeKind},
         tooling::database::{
@@ -540,7 +540,10 @@ fn compiler_database_exposes_types_resolutions_and_references() {
     assert!(matches!(
         database.resolved_call(min_call).unwrap(),
         Some(ResolvedCall::StandardLibrary {
-            receiver: Some(ResolvedValue::Variable(target)),
+            receiver: Some(ResolvedReceiver::Path {
+                root: ResolvedValue::Variable(target),
+                ..
+            }),
             ..
         }) if target == global
     ));
@@ -603,7 +606,10 @@ fn compiler_database_exposes_types_resolutions_and_references() {
     assert!(matches!(
         min_analysis.resolution,
         Some(ExpressionResolution::Call(ResolvedCall::StandardLibrary {
-            receiver: Some(ResolvedValue::Variable(target)),
+            receiver: Some(ResolvedReceiver::Path {
+                root: ResolvedValue::Variable(target),
+                ..
+            }),
             ..
         })) if target == global
     ));
@@ -794,7 +800,7 @@ fn document_symbols_preserve_source_order_and_domain_hierarchy() {
     let source = r#"
         record Point { x: i32 }
         let global = 1
-        state "game.exe" { level = process.read.i32(0) }
+        state "game.exe" { level = process.read<i32>(0) }
         settings {
             "General" {
                 "Timing" {
@@ -1069,6 +1075,47 @@ fn compiler_database_resolves_expression_segments_to_definitions() {
             splitscript::tooling::language::LanguageItemId::WhileAttached
         ))
     );
+}
+
+#[test]
+fn postfix_expression_receivers_preserve_member_and_method_navigation() {
+    use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
+
+    let source = r#"
+        record Counter { value: i32 }
+        record Wrapper { counter: Counter }
+        state "game.exe" {}
+
+        fn wrapper() -> Wrapper {
+            return Wrapper { counter: Counter { value: 41 } }
+        }
+
+        fn Counter.increment() -> i32 {
+            return self.value + 1
+        }
+
+        whileAttached {
+            print(wrapper().counter.increment() as String)
+        }
+    "#;
+    let mut database = CompilerDatabase::new(source);
+    let checked = database.check().expect("postfix receiver should check");
+    let counter_field = checked.syntax().records[1].fields[0].id;
+    let increment = checked.syntax().functions[1].id;
+    let call = source.find("wrapper().counter.increment()").unwrap();
+    let counter = call + "wrapper().".len();
+    let method = counter + "counter.".len();
+
+    assert!(matches!(
+        database.definition_at(counter).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if definition.id == SourceDefinitionId::RecordField(counter_field)
+    ));
+    assert!(matches!(
+        database.definition_at(method).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if definition.id == SourceDefinitionId::Function(increment)
+    ));
 }
 
 #[test]

@@ -1293,9 +1293,9 @@ not another collection of `process.read` branches inside code generation.
 
 ### One generic `process.read`
 
-- [x] Replace primitive-specific calls such as `process.read.i32(address)` with
+- [x] Replace primitive-specific calls such as `process.read<i32>(address)` with
   `process.read(address)` and infer the result from its expected type.
-- [x] Keep suffix paths such as `process.read.i32(address)` as the explicit type
+- [x] Add generic calls such as `process.read<i32>(address)` as the explicit type
   escape hatch for contexts where inference has no constraint.
 - [x] Make synchronous and retried reads share the same type-directed API and
   clear failure semantics.

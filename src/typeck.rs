@@ -23,8 +23,8 @@ use crate::{
     inference::{InferenceContext, Requirements, Type},
     resolution::ProgramResolutions,
     semantic::{
-        ResolvedEnumVariantId, ResolvedMember, ResolvedValue, SemanticBuilder, SemanticModel,
-        ValueConversionKind,
+        ResolvedEnumVariantId, ResolvedMember, ResolvedReceiver, ResolvedValue, SemanticBuilder,
+        SemanticModel, ValueConversionKind,
     },
     stdlib::{
         DeclaredTypeRef, StandardLibrary, StdlibStateProviderId, StdlibTypeConstructorId,
@@ -53,8 +53,14 @@ struct DeferredMemberPath {
 
 struct MethodReceiver {
     ty: Type,
-    value: ResolvedValue,
-    members: Vec<ResolvedMember>,
+    value: ResolvedReceiver,
+}
+
+struct CallSyntax<'a> {
+    callee: &'a [String],
+    name_span: Span,
+    postfix_receiver: Option<&'a crate::ast::Expr>,
+    type_arguments: &'a [TypeRef],
 }
 
 pub struct CheckOutput {
@@ -149,6 +155,7 @@ struct Checker {
     deferred_member_paths: Vec<DeferredMemberPath>,
     none_policy: NonePolicy,
     semantics: SemanticBuilder,
+    standard_field_types: HashMap<crate::stdlib::StdlibFieldId, Type>,
     active_function_component: HashSet<FunctionId>,
 }
 
@@ -273,6 +280,10 @@ impl Checker {
 
     fn declared_type(&self, ty: DeclaredTypeRef) -> Type {
         inference_type_for_declared(self.inference.type_store(), ty)
+    }
+
+    fn standard_field_type(&self, field: crate::stdlib::StdlibFieldId) -> Type {
+        self.standard_field_types[&field]
     }
 
     fn expected_value_type(&mut self, ty: Type) -> Type {

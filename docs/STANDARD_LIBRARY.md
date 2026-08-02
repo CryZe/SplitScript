@@ -204,6 +204,14 @@ variant, and callable IDs are generated from the same declaration rows as their
 names, ownership, documentation, and representation metadata.
 
 Catalog-declared capabilities are executable contracts rather than labels.
+Capabilities can build on other capabilities in the privileged source. For
+For example, `Numeric<T: Equatable>` makes equality part of the numeric
+contract, while `Integer<T: Numeric + Display>` makes every integer numeric,
+equatable through that numeric relationship, and displayable. The
+compiler follows this hierarchy transitively for type checking and method
+completion, while inferred constraints and rendered signatures retain only the
+strongest non-redundant capabilities. Concrete integer types consequently
+declare `Integer` once instead of separately repeating those memberships.
 `MemoryReadable` GC records derive their naturally aligned field layout from
 catalog field declarations through the same semantic-`TypeId` layout engine as
 source records. `Equatable` catalog records similarly receive generated
@@ -227,11 +235,11 @@ bounds, numeric defaulting, and inferred array layouts. The checker translates
 solver failures into source diagnostics; syntax and editor APIs never expose
 these temporary types.
 
-Free functions, typed paths, and type-directed methods are exposed as
+Free functions and type-directed methods are exposed as
 declarative `CallCandidate` values. `process.read(address)` leaves its named
-generic parameter open for bidirectional inference, while an explicit typed
-path such as `process.read.u16(address)` seeds `T = u16`. Method candidates
-include ordinary and typed methods, carry their receiver type scheme and
+generic parameter open for bidirectional inference, while an explicit generic
+call such as `process.read<u16>(address)` seeds `T = u16`. Method candidates
+carry their receiver type scheme and
 capability constraints, and retain the selected receiver value through Wasm
 lowering. The checker uses
 one catalog-call path to instantiate that scheme and submit receiver,
@@ -303,7 +311,7 @@ and `!=`, and passed to APIs such as `print`.
 ```text
 let message = "Assembly-CSharp is ready"
 
-if (String.length(message) != 0) {
+if (message.byteLength() != 0) {
     print(message)
 }
 ```
@@ -363,7 +371,7 @@ let image = await unity.image("Assembly-CSharp")
 let gameManager = await image.class("GameManager")
 let instanceOffset = await gameManager.field("Instance")
 let staticTable = await gameManager.staticTable()
-let instance = retry process.read.address(staticTable.offset(instanceOffset))
+let instance = retry process.read<address>(staticTable.offset(instanceOffset))
 ```
 
 `UnityModule` exposes `assemblies`, `typeInfoTable`, `version`, and
@@ -410,11 +418,11 @@ strings are decoded with
 memory access as an error. The unit limit bounds decoding, while malformed
 surrogate sequences become the Unicode replacement character.
 
-Numeric conversions and integer formatting use `value as Type`. JavaScript-style
-template strings such as `` `{stage}-{act}` `` apply the same `as String`
-conversion automatically to non-String interpolations. `String.concat` remains
-available as the underlying collection helper.
-`setVariable`, `timer.state`, and `setTickRate` wrap their ASR host calls.
+Numeric conversions and integer formatting use `value as Type`. The `Display`
+capability is the single contract for `as String`, JavaScript-style template
+strings such as `` `{stage}-{act}` ``, `print`, and `setVariable`.
+`String.concat` remains available as the underlying collection helper.
+`timer.state` and `setTickRate` wrap their ASR host calls.
 `timer.state()` returns the exhaustive `TimerState` enum with
 `NotRunning`, `Running`, `Paused`, `Ended`, and `Unknown`; raw host integers are
 normalized only at the ABI boundary. `Duration.fromSeconds` converts Unity's

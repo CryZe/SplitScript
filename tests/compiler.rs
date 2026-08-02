@@ -5,8 +5,8 @@ use splitscript::{
     compiler::{
         abi::{AbiCatalog, AbiEffect, AbiImportId, AbiOwnership},
         semantic::{
-            ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedRecordFieldId,
-            ResolvedValue,
+            ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedReceiver,
+            ResolvedRecordFieldId, ResolvedValue,
         },
         stdlib::{
             Availability, CancellationKind, CoreTypeId, Effect, Implementation, StandardLibrary,

@@ -64,7 +64,7 @@ whileAttached {
 }"#;
 
 const STATE_SOURCE: &str = r#"state "game.exe" {
-    score = process.read.i32(0x1000)
+    score = process.read<i32>(0x1000)
 }
 
 split {
@@ -136,11 +136,11 @@ whileAttached {
 const FAILURE_SOURCE: &str = r#"state "game.exe" {}
 
 fn readOrZero() {
-    return process.read.i32(0x1000) else 0
+    return process.read<i32>(0x1000) else 0
 }
 
 fn forwarded() -> i32! {
-    return process.read.i32(0x1000)?
+    return process.read<i32>(0x1000)?
 }
 
 fn unavailable() -> i32! {
@@ -158,7 +158,7 @@ whileAttached {
 const ASYNC_SOURCE: &str = r#"state "game.exe" {}
 
 fn readMarker() {
-    return process.read.i32(0x3000)
+    return process.read<i32>(0x3000)
 }
 
 onAttach {
@@ -235,7 +235,7 @@ focused_example!(
 focused_example!(
     STATE_DECL_EXAMPLE,
     "Read transactional state",
-    "state \"game.exe\" {\n    score = process.read.i32(0x1000)\n}",
+    "state \"game.exe\" {\n    score = process.read<i32>(0x1000)\n}",
     STATE_SOURCE
 );
 focused_example!(
@@ -259,7 +259,7 @@ focused_example!(
 focused_example!(
     ELSE_EXAMPLE,
     "Provide a read fallback",
-    "let health = process.read.i32(healthAddress) else 0",
+    "let health = process.read<i32>(healthAddress) else 0",
     FAILURE_SOURCE
 );
 focused_example!(
@@ -325,7 +325,7 @@ focused_example!(
 focused_example!(
     PROPAGATE_EXAMPLE,
     "Forward a read error",
-    "let health = process.read.i32(healthAddress)?",
+    "let health = process.read<i32>(healthAddress)?",
     FAILURE_SOURCE
 );
 focused_example!(
@@ -391,7 +391,7 @@ focused_example!(
 focused_example!(
     RESULT_TYPE_EXAMPLE,
     "Return a fallible value",
-    "fn readHealth() -> i32! {\n    return process.read.i32(healthAddress)?\n}",
+    "fn readHealth() -> i32! {\n    return process.read<i32>(healthAddress)?\n}",
     TYPES_AND_LITERALS_SOURCE
 );
 const DOCUMENTATION_COMMENT_EXAMPLES: &[Example] = &[

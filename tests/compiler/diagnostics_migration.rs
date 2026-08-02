@@ -148,7 +148,7 @@ fn familiar_function_and_string_spellings_have_machine_applicable_fixes() {
         }
 
         function string.isEmpty() {
-            return string.length(self) == 0
+            return self.byteLength() == 0
         }
 
         function elapsed() -> TimeSpan {
@@ -166,7 +166,7 @@ fn familiar_function_and_string_spellings_have_machine_applicable_fixes() {
     "#;
     let recovered = splitscript::parse_recovering(source).unwrap();
 
-    assert_eq!(recovered.diagnostics().len(), 12);
+    assert_eq!(recovered.diagnostics().len(), 11);
     for diagnostic in recovered.diagnostics() {
         let spelling = &source[diagnostic.span.start..diagnostic.span.end];
         let (replacement, message, title) = match spelling {

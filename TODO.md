@@ -349,6 +349,10 @@ type `GbaEmulator`; scripts never retain or attach the emulator themselves.
   represented in the catalog. Begin with memory reading, formatting/
   interpolation, equality, and numeric operations; decide separately whether
   user code can declare or implement traits.
+- [x] Add source-defined standard-library capability inheritance. Declarations
+  such as `Numeric<T: Equatable>` and `Integer<T: Numeric + Display>` now drive transitive
+  satisfaction, method availability, inference, and minimal rendered bounds;
+  catalog validation rejects unknown, duplicate, and cyclic relationships.
 - [ ] Keep trait declarations, implementations, docs, and method lookup in the
   source-defined standard-library model rather than a parallel checker table.
 - [ ] Add structural anonymous record values/types after named-record layout
@@ -377,9 +381,14 @@ executable name.
   scripts contain as many as 46 layouts. Module size is common (276 files), but
   file/product versions, executable hashes, signatures, process identity, and
   custom memory discovery are also real selectors.
-  - [ ] Preserve expression-backed state fields and expression `if` as the
+  - [x] Preserve expression-backed state fields and expression `if` as the
     preferred escape hatch for small, irregular, or already-discovered layouts.
-    Do not force every conditional read through a new declaration form.
+    Do not force every conditional read through a new declaration form. The
+    corpus-derived `examples/abzu.split` port demonstrates the intended small
+    case: `process.mainModule()` selects a typed `AbzuBuild` and one inferred
+    address global, while a single ordinary state expression reads it. Both
+    supported builds and the never-ready unsupported-build path have runtime
+    coverage; no layout DSL improves this shape.
   - [ ] Separate named memory layouts from layout detection. Layout declarations
     should co-locate concise `at` fields, documentation, and a stable source
     identity; a distinct implicitly-suspending attachment selector should use
@@ -406,16 +415,46 @@ executable name.
     minimum useful rule. Large scripts often repeat nearly identical pointer
     paths across dozens of versions, but unrestricted inheritance would make
     the selected memory layout difficult to audit.
+  - [x] Allow source-defined standard-library structs to contain constructed
+    field types such as `[u64]`, `T?`, `T!`, and other catalog type
+    applications. Fields now use the same recursive catalog `TypeRef` as
+    signatures, receive stable per-program semantic types, participate in
+    recursive Wasm-GC reachability/layout and structural capability validation,
+    and render through the shared documentation/tooling path. Privileged
+    standard-library bodies may construct any standard record while user code
+    still cannot. `MemoryPath` and its width-aware `resolve()` implementation
+    now live entirely in `stdlib/standard.split`; the Alan Wake port exercises
+    Steam, GOG, Epic, and unsupported PE32 builds at runtime without a
+    compiler-owned path type.
+  - [x] Extend privileged catalog type syntax with exact array lengths so a
+    standard-library field or signature can spell `[T; N]`. Ordinary source
+    already had fixed arrays; privileged parsing now preserves the length in a
+    dedicated catalog `TypeRef`, validates and generates it recursively, interns
+    the same exact semantic array layout, renders it in documentation/tooling,
+    and carries it through fixed process-memory and Wasm-GC planning. A
+    source-defined catalog method and record field exercise `[u64; 2]` without
+    erasing it to `[u64]`.
+  - [x] Generalize calls so postfix methods work on every expression receiver,
+    not only identifier paths. Alan Wake naturally needs
+    `selectedLayout().level.resolve()`. Calls now distinguish resolved path
+    receivers from arbitrary receiver expressions throughout syntax, semantic
+    resolution, typed HIR, Wasm IR, tooling, and codegen. Postfix receivers are
+    visited before arguments and emitted exactly once. Generic catalog calls use
+    ordinary `<...>` type arguments without a turbofish or dotted pseudo-path.
+    The Alan Wake port calls `MemoryPath.resolve()` directly
+    and no longer needs its temporary `resolvePath(...)` wrapper.
 - [ ] Complete the read-only process/module identity surface needed for safe
   version probes. `Module.address` and `Module.size` already cover common size
-  checks. First expose the exact configured process candidate through which
-  attachment succeeded; the generated attach loop already knows this identity,
-  and selectors need it when several executables share a version label. Keep it
-  distinct from the executable path exposed by the host ABI. Then add module
-  enumeration/search, path or host-supplied file/product-version identity, and
-  a deterministic executable fingerprint as corpus ports require them. Prefer
-  host-provided metadata/fingerprinting over unrestricted filesystem access or
-  reading and hashing an entire module from Wasm.
+  checks.
+  - [x] Expose the exact configured process candidate through which attachment
+    succeeded as `process.name()`. Keep it distinct from a filesystem path.
+  - [x] Expose `await process.mainModule()` using that matched candidate, so
+    common `modules.First().ModuleMemorySize` selectors do not repeat executable
+    strings or need a special module-size grammar.
+  - [ ] Add module enumeration/search, path or host-supplied file/product-version
+    identity, and a deterministic executable fingerprint as corpus ports require
+    them. Prefer host-provided metadata/fingerprinting over unrestricted
+    filesystem access or reading and hashing an entire module from Wasm.
 - [ ] Make the existing attach-time-discovered state-source pattern a documented
   first-class contract. Scripts can already scan/follow/resolve into globals in
   `onAttach` and use expression-backed state fields; add a canonical recipe,
@@ -527,9 +566,23 @@ executable name.
 - [ ] Broaden suspending control flow incrementally from real ports (nested
   loops, matches, and future combinators), adding a runtime conformance test
   for each new shape.
+- [x] Add `await process.closed()` as the explicit “ignore this attachment for
+  the rest of its lifetime” operation. It is available only in `onAttach`, never
+  asks the host to detach, never completes normally, and relies on the existing
+  process-close cancellation boundary to discard its async frame before
+  `onDetached` and a later attachment. The Abzu fixture uses it for unsupported
+  builds and verifies that state polling never begins. Do not expose a general
+  detach operation until a separate use case defines how it could avoid an
+  immediate automatic reattachment cycle.
 - [ ] Design explicit `catch` boundaries later. `throw` should propagate to the
   nearest catch or return a `Result` from the function when uncaught; postfix
   `?` remains ergonomic propagation built on the same semantics.
+- [ ] Define the payload-free result spelling and representation before exposing
+  fallible procedures. `void!` currently parses and type-checks far enough to
+  reach a backend layout assertion because `Result` assumes a value slot. Either
+  support it as a proper unit result throughout inference, GC layout, matching,
+  and propagation or reject it with a source diagnostic; user input must never
+  reach the backend assertion.
 - [ ] Extend `debug` to additional declaration kinds only when a concrete use
   case defines reachability, type-checking, and release-erasure behavior.
 

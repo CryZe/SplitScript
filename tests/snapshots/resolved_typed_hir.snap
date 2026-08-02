@@ -24,9 +24,9 @@ expressions:
   e7: Point = record 0 fields=[("x", ExprId(5)), ("y", ExprId(6))] resolve=RecordLiteral { record: Source(RecordId(0)), fields: [Source(RecordFieldId(0)), Source(RecordFieldId(1))] }
   e8: Event = enum 0.Moved payload=Some(ExprId(7)) resolve=EnumConstructor { variant: Source(EnumVariantId(1)) }
   e9: Event = path next resolve=ValuePath { root: Some(Variable(ValueId(3))), members: [] }
-  e10: i32? = call pointX args=[ExprId(9)] resolve=Call(UserFunction { function: FunctionId(0), type_arguments: [], signature: [TypeId(25), TypeId(30)] })
+  e10: i32? = call pointX args=[ExprId(9)] resolve=Call(UserFunction { function: FunctionId(0), type_arguments: [], signature: [TypeId(_), TypeId(_)] })
   e11: i32 = int 0 suffix=None
   e12: i32 = fallback e10 else=e11
   e13: i32 = path x resolve=ValuePath { root: Some(Variable(ValueId(4))), members: [] }
   e14: String = interpolate [text "x=", e13 conversion=ToString<i32>]
-  e15: void = call print args=[ExprId(14)] resolve=Call(StandardLibrary { item: Print, type_arguments: [], signature: [TypeId(14), TypeId(0)], receiver: None, receiver_type: None, receiver_members: [] })
+  e15: void = call print args=[ExprId(14)] resolve=Call(StandardLibrary { item: Print, type_arguments: [TypeId(_)], signature: [TypeId(_), TypeId(_)], receiver: None, receiver_type: None })

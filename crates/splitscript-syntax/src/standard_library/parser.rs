@@ -3,7 +3,7 @@ use super::{
     EnumDeclaration, Error, Example, FieldDeclaration, FunctionDeclaration, Library, Parameter,
     StateProviderDeclaration, StructDeclaration, Type, TypeParameter, VariantDeclaration,
 };
-use crate::{SyntaxMode, Token, TokenCursor, TokenKind, lex};
+use crate::{SyntaxMode, Token, TokenCursor, TokenKind, lex, parser::parse_integer};
 
 pub fn parse(source: &str) -> Result<Library, Vec<Error>> {
     let tokens = lex(source, SyntaxMode::StandardLibrary).map_err(|error| {
@@ -364,11 +364,33 @@ impl Parser<'_> {
     fn ty(&mut self) -> Result<Type, Error> {
         let mut ty = if self.eat(&TokenKind::LBracket) {
             let element = self.ty()?;
+            let length = if self.eat(&TokenKind::Semicolon) {
+                let token = self.current().clone();
+                let TokenKind::Int(text) = &token.kind else {
+                    return Err(self.error("expected a fixed array length after `;`"));
+                };
+                let (value, suffix) = parse_integer(text).map_err(|message| self.error(message))?;
+                if suffix.is_some_and(|ty| !ty.is_integer()) {
+                    return Err(self.error("a fixed array length must be an integer"));
+                }
+                let value = u32::try_from(value)
+                    .map_err(|_| self.error("a fixed array length must fit in `u32`"))?;
+                self.bump();
+                Some(value)
+            } else {
+                None
+            };
             self.expect(
                 TokenKind::RBracket,
                 "expected `]` after the array element type",
             )?;
-            Type::Array(Box::new(element))
+            match length {
+                Some(length) => Type::FixedArray {
+                    element: Box::new(element),
+                    length,
+                },
+                None => Type::Array(Box::new(element)),
+            }
         } else {
             let name = self.ident("expected a type")?;
             if self.eat(&TokenKind::Lt) {
@@ -588,6 +610,29 @@ struct Duration {
             duration.functions[0].documentation.examples[0].source,
             "return Duration.fromSeconds(seconds)"
         );
+    }
+
+    #[test]
+    fn preserves_exact_array_lengths_in_privileged_types() {
+        let source = r#"
+/// Fixed memory block.
+struct Block {
+    /// Four bytes.
+    bytes: [u8; 4],
+
+    /// Keeps exactly two values.
+    static fn pair(values: [u64; 2]) -> [u64; 2] {
+        return values
+    }
+}
+"#;
+        let library = parse(source).expect("fixed arrays should parse");
+        let Declaration::Struct(block) = &library.declarations[0] else {
+            panic!("expected a struct")
+        };
+        assert_eq!(block.fields[0].ty.to_string(), "[u8; 4]");
+        assert_eq!(block.functions[0].parameters[0].ty.to_string(), "[u64; 2]");
+        assert_eq!(block.functions[0].result.to_string(), "[u64; 2]");
     }
 
     #[test]

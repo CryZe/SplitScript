@@ -78,6 +78,10 @@ impl TypeRef {
                     )
                 }
             }
+            Self::FixedArray { element, length } => format!(
+                "[{}; {length}]",
+                element.render_with(library, substitutions)
+            ),
         }
     }
 }
@@ -181,7 +185,7 @@ impl StandardLibrary {
     }
 
     pub fn core_type_has_capability(&self, ty: CoreTypeId, capability: StdlibCapabilityId) -> bool {
-        self.core_type(ty).capabilities.contains(&capability)
+        self.capabilities_satisfy(self.core_type(ty).capabilities, capability)
     }
 
     pub fn capabilities(&self) -> &'static [StdlibCapability] {
@@ -194,6 +198,61 @@ impl StandardLibrary {
             .get(&id)
             .copied()
             .expect("every standard-library capability ID must have a declaration")
+    }
+
+    /// Whether providing `capability` also provides `required`, following the
+    /// hierarchy authored in the standard-library source.
+    pub fn capability_implies(
+        &self,
+        capability: StdlibCapabilityId,
+        required: StdlibCapabilityId,
+    ) -> bool {
+        let mut pending = vec![capability];
+        let mut visited = HashSet::new();
+        while let Some(candidate) = pending.pop() {
+            if candidate == required {
+                return true;
+            }
+            if visited.insert(candidate) {
+                pending.extend_from_slice(self.capability(candidate).super_capabilities);
+            }
+        }
+        false
+    }
+
+    /// Whether any directly provided capability transitively provides the
+    /// requested capability.
+    pub fn capabilities_satisfy(
+        &self,
+        capabilities: &[StdlibCapabilityId],
+        required: StdlibCapabilityId,
+    ) -> bool {
+        capabilities
+            .iter()
+            .any(|capability| self.capability_implies(*capability, required))
+    }
+
+    /// Removes duplicate and transitively implied constraints while preserving
+    /// the declaration order of the strongest remaining capabilities.
+    pub fn minimal_capabilities(
+        &self,
+        capabilities: &[StdlibCapabilityId],
+    ) -> Vec<StdlibCapabilityId> {
+        let mut unique = Vec::new();
+        for capability in capabilities {
+            if !unique.contains(capability) {
+                unique.push(*capability);
+            }
+        }
+        unique
+            .iter()
+            .copied()
+            .filter(|candidate| {
+                !unique
+                    .iter()
+                    .any(|other| other != candidate && self.capability_implies(*other, *candidate))
+            })
+            .collect()
     }
 
     pub fn type_constructors(&self) -> &'static [StdlibTypeConstructor] {
@@ -245,7 +304,7 @@ impl StandardLibrary {
     }
 
     pub fn type_has_capability(&self, ty: StdlibTypeId, capability: StdlibCapabilityId) -> bool {
-        self.type_decl(ty).capabilities.contains(&capability)
+        self.capabilities_satisfy(self.type_decl(ty).capabilities, capability)
     }
 
     pub fn render_declared_type(&self, ty: DeclaredTypeRef) -> &'static str {
@@ -253,6 +312,10 @@ impl StandardLibrary {
             DeclaredTypeRef::Core(core) => self.core_type(core).name,
             DeclaredTypeRef::Standard(standard) => self.type_decl(standard).name,
         }
+    }
+
+    pub fn render_type(&self, ty: TypeRef) -> String {
+        ty.render(self)
     }
 
     pub fn fields(&self) -> &'static [StdlibField] {
@@ -402,17 +465,34 @@ impl StandardLibrary {
         let item = self.item(id);
         let signature = item.signature;
         let mut rendered = match item.kind {
-            ItemKind::Function | ItemKind::TypedFunction { .. } => {
-                format!("{}(", item.qualified_name)
-            }
-            ItemKind::Method { receiver } | ItemKind::TypedMethod { receiver, .. } => {
-                format!(
-                    "{}.{}(",
-                    receiver.render_with(self, substitutions),
-                    item.name
-                )
-            }
+            ItemKind::Function => item.qualified_name.to_owned(),
+            ItemKind::Method { receiver } => format!(
+                "{}.{}",
+                receiver.render_with(self, substitutions),
+                item.name
+            ),
         };
+        if signature.explicit_type_parameters != 0 {
+            rendered.push('<');
+            for (index, parameter) in signature
+                .type_parameters
+                .iter()
+                .take(signature.explicit_type_parameters)
+                .enumerate()
+            {
+                if index != 0 {
+                    rendered.push_str(", ");
+                }
+                rendered.push_str(
+                    substitutions
+                        .iter()
+                        .find(|(name, _)| *name == parameter.name)
+                        .map_or(parameter.name, |(_, replacement)| replacement),
+                );
+            }
+            rendered.push('>');
+        }
+        rendered.push('(');
         for (index, parameter) in signature.parameters.iter().enumerate() {
             if index != 0 {
                 rendered.push_str(", ");
@@ -442,7 +522,11 @@ impl StandardLibrary {
                 if !parameter.constraints.is_empty() {
                     rendered.push_str(": ");
                 }
-                for (constraint_index, constraint) in parameter.constraints.iter().enumerate() {
+                for (constraint_index, constraint) in self
+                    .minimal_capabilities(parameter.constraints)
+                    .iter()
+                    .enumerate()
+                {
                     if constraint_index != 0 {
                         rendered.push_str(" + ");
                     }
@@ -474,13 +558,14 @@ impl StandardLibrary {
     }
 
     pub fn validate(&self) -> Vec<String> {
-        let mut errors = validation::validate(NAMESPACES, TYPES, FIELDS, VARIANTS);
+        let mut errors = validation::validate(CAPABILITIES, NAMESPACES, TYPES, FIELDS, VARIANTS);
         validate_named_declarations(
             "capability",
             CAPABILITIES,
             |value| (value.id, value.name, value.documentation),
             &mut errors,
         );
+        validate_capability_hierarchy(CAPABILITIES, &mut errors);
         validate_named_declarations(
             "type constructor",
             TYPE_CONSTRUCTORS,
@@ -554,8 +639,6 @@ impl StandardLibrary {
                             item.kind,
                             ItemKind::Method {
                                 receiver: TypeRef::Standard(receiver)
-                            } | ItemKind::TypedMethod {
-                                receiver: TypeRef::Standard(receiver), ..
                             } if receiver == provider.process_type
                         )
                         && item.signature.parameters.len() == 1
@@ -747,17 +830,8 @@ impl StandardLibrary {
                         .expect("functions have source paths")
                         .join(".")
                 ),
-                ItemKind::TypedFunction { .. } => format!(
-                    "typed function {}[.*]",
-                    path.as_ref()
-                        .expect("typed functions have source paths")
-                        .join(".")
-                ),
                 ItemKind::Method { receiver } => {
                     format!("method {}.{}", receiver.render(self), item.name)
-                }
-                ItemKind::TypedMethod { receiver, .. } => {
-                    format!("typed method {}.{}[.*]", receiver.render(self), item.name)
                 }
             };
             if let Some(path) = &path
@@ -794,9 +868,7 @@ impl StandardLibrary {
                     }
                 }
             }
-            if let ItemKind::Method { receiver } | ItemKind::TypedMethod { receiver, .. } =
-                item.kind
-            {
+            if let ItemKind::Method { receiver } = item.kind {
                 validate_catalog_type_ref(
                     receiver,
                     item.signature.type_parameters,
@@ -834,10 +906,8 @@ impl StandardLibrary {
                 errors.push(format!("`{}` has no examples", item.qualified_name));
             }
             let example_call = match item.kind {
-                ItemKind::Function => format!("{}(", item.qualified_name),
-                ItemKind::TypedFunction { .. } => format!("{}.", item.qualified_name),
-                ItemKind::Method { .. } => format!(".{}(", item.name),
-                ItemKind::TypedMethod { .. } => format!(".{}.", item.name),
+                ItemKind::Function => item.qualified_name.to_owned(),
+                ItemKind::Method { .. } => format!(".{}", item.name),
             };
             for example in item.documentation.examples {
                 if example.title.trim().is_empty()
@@ -1014,7 +1084,80 @@ fn validate_catalog_type_ref(
                 validate_catalog_type_ref(*argument, parameters, item, errors);
             }
         }
+        TypeRef::FixedArray { element, .. } => {
+            validate_catalog_type_ref(*element, parameters, item, errors);
+        }
     }
+}
+
+fn validate_capability_hierarchy(capabilities: &[StdlibCapability], errors: &mut Vec<String>) {
+    for capability in capabilities {
+        let mut supers = HashSet::new();
+        for super_capability in capability.super_capabilities {
+            if !supers.insert(*super_capability) {
+                errors.push(format!(
+                    "capability `{}` repeats super capability `{:?}`",
+                    capability.name, super_capability
+                ));
+            }
+            if !capabilities
+                .iter()
+                .any(|candidate| candidate.id == *super_capability)
+            {
+                errors.push(format!(
+                    "capability `{}` references unknown super capability `{:?}`",
+                    capability.name, super_capability
+                ));
+            }
+        }
+    }
+
+    let mut completed = HashSet::new();
+    for capability in capabilities {
+        let mut active = HashSet::new();
+        if generated_capability_hierarchy_has_cycle(
+            capability.id,
+            capabilities,
+            &mut active,
+            &mut completed,
+        ) {
+            errors.push(format!(
+                "capability hierarchy contains a cycle through `{}`",
+                capability.name
+            ));
+            break;
+        }
+    }
+}
+
+fn generated_capability_hierarchy_has_cycle(
+    capability: StdlibCapabilityId,
+    capabilities: &[StdlibCapability],
+    active: &mut HashSet<StdlibCapabilityId>,
+    completed: &mut HashSet<StdlibCapabilityId>,
+) -> bool {
+    if completed.contains(&capability) {
+        return false;
+    }
+    if !active.insert(capability) {
+        return true;
+    }
+    let cyclic = capabilities
+        .iter()
+        .find(|candidate| candidate.id == capability)
+        .into_iter()
+        .flat_map(|candidate| candidate.super_capabilities.iter().copied())
+        .any(|super_capability| {
+            generated_capability_hierarchy_has_cycle(
+                super_capability,
+                capabilities,
+                active,
+                completed,
+            )
+        });
+    active.remove(&capability);
+    completed.insert(capability);
+    cyclic
 }
 
 fn validate_named_declarations<T, I>(

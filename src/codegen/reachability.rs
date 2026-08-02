@@ -6,9 +6,7 @@ use crate::{
         ResultTypeId,
     },
     semantic::{FunctionInstance, SemanticModel},
-    stdlib::{
-        DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibTypeId,
-    },
+    stdlib::{RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
     types::{TypeId, TypeKind},
     wasm_ir::{self, BodyOwner, Visitor},
 };
@@ -236,7 +234,15 @@ impl Reachability {
                 _ => {}
             }
         }
-        reachable.require_types(type_roots, program, enums, semantics);
+        // Standard GC structs are currently emitted as one recursive catalog
+        // group. Their constructed field layouts therefore need matching
+        // dynamic GC types even when no user expression reaches the owner.
+        type_roots.extend(standard_library.fields().iter().map(|field| {
+            semantics
+                .standard_field_type(field.id)
+                .expect("checked standard fields have semantic types")
+        }));
+        reachable.require_types(type_roots, program, enums, semantics, standard_library);
         reachable
     }
 
@@ -298,6 +304,7 @@ impl Reachability {
         program: &Program,
         enums: &[EnumDecl],
         semantics: &SemanticModel,
+        standard_library: &StandardLibrary,
     ) {
         let mut pending = roots.into_iter().collect::<Vec<_>>();
         let mut visited = BTreeSet::new();
@@ -306,9 +313,19 @@ impl Reachability {
                 continue;
             }
             match semantics.types().kind(ty) {
-                TypeKind::Builtin(_)
-                | TypeKind::Standard(_)
-                | TypeKind::GenericParameter { .. } => {}
+                TypeKind::Builtin(_) | TypeKind::GenericParameter { .. } => {}
+                TypeKind::Standard(standard) => {
+                    if matches!(
+                        standard_library.type_decl(*standard).representation,
+                        RuntimeRepresentation::GcStruct { .. }
+                    ) {
+                        pending.extend(standard_library.fields_of(*standard).map(|field| {
+                            semantics
+                                .standard_field_type(field.id)
+                                .expect("checked standard fields have semantic types")
+                        }));
+                    }
+                }
                 TypeKind::Record(record) => {
                     self.gc_records.insert(*record);
                     let declaration = program
@@ -379,11 +396,10 @@ impl Reachability {
                         )
                         && self.equality_standard_records.insert(*standard)
                     {
-                        pending.extend(library.fields_of(*standard).map(|field| match field.ty {
-                            DeclaredTypeRef::Core(core) => semantics.types().id_for_core(core),
-                            DeclaredTypeRef::Standard(standard) => {
-                                semantics.types().id_for_standard(standard)
-                            }
+                        pending.extend(library.fields_of(*standard).map(|field| {
+                            semantics
+                                .standard_field_type(field.id)
+                                .expect("checked standard fields have semantic types")
                         }));
                     }
                 }

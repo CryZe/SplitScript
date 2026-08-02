@@ -103,8 +103,10 @@ pub(super) fn resolved_value_id(value: ResolvedValue) -> Option<ValueId> {
 
 fn call_receiver(call: &ResolvedCall) -> Option<ResolvedValue> {
     match call {
-        ResolvedCall::UserMethod { receiver, .. } => Some(*receiver),
-        ResolvedCall::StandardLibrary { receiver, .. } => *receiver,
+        ResolvedCall::UserMethod { receiver, .. } => receiver.path().map(|(root, _)| root),
+        ResolvedCall::StandardLibrary { receiver, .. } => receiver
+            .as_ref()
+            .and_then(|receiver| receiver.path().map(|(root, _)| root)),
         ResolvedCall::UserFunction { .. }
         | ResolvedCall::ResultError { .. }
         | ResolvedCall::OptionSome { .. }

@@ -129,6 +129,8 @@ struct SyntaxLayoutCollector<'a> {
     continuations: Vec<ContinuationRange>,
     join_before: HashSet<usize>,
     break_after: HashSet<usize>,
+    generic_opens: HashSet<usize>,
+    generic_closes: HashSet<usize>,
 }
 
 impl SyntaxLayoutCollector<'_> {
@@ -295,6 +297,25 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
         {
             self.mark_top_level_commas(opening.span.start, expression.span.end);
         }
+        if let ExprKind::Call {
+            name_span,
+            type_arguments,
+            ..
+        } = &expression.kind
+            && !type_arguments.is_empty()
+        {
+            let mut angles = self.document.tokens().filter(|token| {
+                name_span.end <= token.span.start
+                    && token.span.end <= expression.span.end
+                    && matches!(token.kind, TokenKind::Lt | TokenKind::Gt)
+            });
+            if let Some(open) = angles.next() {
+                self.generic_opens.insert(open.span.start);
+            }
+            if let Some(close) = angles.next() {
+                self.generic_closes.insert(close.span.start);
+            }
+        }
         visit::walk_expr(self, expression);
     }
 }
@@ -309,6 +330,8 @@ struct Formatter<'a> {
     previous_was_generic_close: bool,
     gap_line_breaks: usize,
     generic_depth: usize,
+    generic_opens: HashSet<usize>,
+    generic_closes: HashSet<usize>,
     bracket_depth: usize,
     multiline_headers: Vec<HeaderRange>,
     continuations: Vec<ContinuationRange>,
@@ -333,6 +356,8 @@ impl<'a> Formatter<'a> {
             continuations: Vec::new(),
             join_before: HashSet::new(),
             break_after: HashSet::new(),
+            generic_opens: HashSet::new(),
+            generic_closes: HashSet::new(),
         };
         layout.visit_program(syntax);
         Self {
@@ -345,6 +370,8 @@ impl<'a> Formatter<'a> {
             previous_was_generic_close: false,
             gap_line_breaks: 0,
             generic_depth: 0,
+            generic_opens: layout.generic_opens,
+            generic_closes: layout.generic_closes,
             bracket_depth: 0,
             multiline_headers,
             continuations: layout.continuations,
@@ -390,13 +417,8 @@ impl<'a> Formatter<'a> {
         self.output.push_str(self.document.text(current.span()));
         self.line_start = self.output.ends_with(['\n', '\r']);
 
-        let current_is_generic_open = matches!(current_token, Some(TokenKind::Lt))
-            && matches!(
-                self.previous.and_then(token_kind),
-                Some(TokenKind::Ident(name)) if name == "Array"
-            );
-        let current_is_generic_close =
-            matches!(current_token, Some(TokenKind::Gt)) && self.generic_depth > 0;
+        let current_is_generic_open = self.generic_opens.contains(&current.span().start);
+        let current_is_generic_close = self.generic_closes.contains(&current.span().start);
         if current_is_generic_open {
             self.generic_depth += 1;
         } else if current_is_generic_close {
@@ -439,6 +461,12 @@ impl<'a> Formatter<'a> {
             Separation::Newline
         };
 
+        if self.generic_opens.contains(&current.span().start)
+            || self.generic_closes.contains(&previous.span().start)
+        {
+            return Separation::None;
+        }
+
         if self.is_multiline_block_opening(current) {
             return Separation::Newline;
         }
@@ -448,7 +476,11 @@ impl<'a> Formatter<'a> {
         }
 
         if self.break_after.contains(&previous.span().end) && !is_comment(current) {
-            return Separation::Newline;
+            return if matches!(current_token, Some(TokenKind::RBrace)) {
+                Separation::Newline
+            } else {
+                preserved_break
+            };
         }
 
         if self.gap_line_breaks > 0
@@ -1060,6 +1092,34 @@ whileAttached {
     }
 
     #[test]
+    fn preserves_intentional_blank_lines_between_control_flow_statements() {
+        let separated = r#"state "game.exe" {}
+split {
+    if first {
+        return true
+    }
+
+    if second {
+        return true
+    }
+}
+"#;
+        assert_eq!(format_source(separated).unwrap(), separated);
+
+        let compact = r#"state "game.exe" {}
+split {
+    if first {
+        return true
+    }
+    if second {
+        return true
+    }
+}
+"#;
+        assert_eq!(format_source(compact).unwrap(), compact);
+    }
+
+    #[test]
     fn indents_state_reads_and_breaks_match_arms() {
         let source = r#"state "game.exe" {
 value = process.read(
@@ -1201,15 +1261,34 @@ settings {
             include_str!("../examples/lunistice.split"),
             include_str!("../examples/hello_lunistice.split"),
             include_str!("../examples/lso_desktop_settings.split"),
+            include_str!("../examples/minish_cap.split"),
         ] {
             let formatted = format_source(source).unwrap();
             crate::parse(&formatted).unwrap();
             assert_eq!(format_source(&formatted).unwrap(), formatted);
         }
+        let minish_cap = include_str!("../examples/minish_cap.split");
+        assert_eq!(format_source(minish_cap).unwrap(), minish_cap);
         assert!(
             format_source(include_str!("../examples/lunistice.split"))
                 .unwrap()
                 .contains("state [\"Lunistice.exe\"")
         );
+    }
+
+    #[test]
+    fn keeps_generic_call_arguments_attached_without_a_turbofish() {
+        let source = r#"state "game.exe"{}
+whileAttached{let value=process.read<[u8;4]> (0);print<u32> (value.get(0))}"#;
+        let expected = r#"state "game.exe" {}
+whileAttached {
+    let value = process.read<[u8; 4]>(0);
+    print<u32>(value.get(0))
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
 }

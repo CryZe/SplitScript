@@ -10,13 +10,15 @@ use crate::catalog::Documentation;
 
 use super::{
     declarations::{
-        CORE_TYPES, CoreTypeId, DeclaredTypeRef, RuntimeRepresentation, StdlibField,
+        CORE_TYPES, CoreTypeId, RuntimeRepresentation, StdlibCapability, StdlibField,
         StdlibNamespace, StdlibType, StdlibTypeKind, StdlibVariant,
     },
-    ids::{StdlibCapabilityId, StdlibTypeId},
+    ids::{StdlibCapabilityId, StdlibTypeConstructorId, StdlibTypeId},
+    schema::TypeRef,
 };
 
 pub(super) fn validate(
+    capabilities: &[StdlibCapability],
     namespaces: &[StdlibNamespace],
     types: &[StdlibType],
     fields: &[StdlibField],
@@ -42,18 +44,20 @@ pub(super) fn validate(
         if !core_type_names.insert(ty.name) {
             errors.push(format!("duplicate core type name `{}`", ty.name));
         }
-        let mut capabilities = HashSet::new();
+        let mut declared_capabilities = HashSet::new();
         for capability in ty.capabilities {
-            if !capabilities.insert(capability) {
+            if !declared_capabilities.insert(capability) {
                 errors.push(format!(
                     "core type `{}` repeats capability `{:?}`",
                     ty.name, capability
                 ));
             }
         }
-        let declared_readable = ty
-            .capabilities
-            .contains(&StdlibCapabilityId::MemoryReadable);
+        let declared_readable = declared_capabilities_satisfy(
+            ty.capabilities,
+            StdlibCapabilityId::MemoryReadable,
+            capabilities,
+        );
         if declared_readable != ty.memory_layout.is_some() {
             errors.push(format!(
                 "core type `{}` must declare MemoryReadable and a memory layout together",
@@ -123,9 +127,9 @@ pub(super) fn validate(
         if !type_names.insert(ty.name) {
             errors.push(format!("duplicate standard type name `{}`", ty.name));
         }
-        let mut capabilities = HashSet::new();
+        let mut declared_capabilities = HashSet::new();
         for capability in ty.capabilities {
-            if !capabilities.insert(capability) {
+            if !declared_capabilities.insert(capability) {
                 errors.push(format!(
                     "standard type `{}` repeats capability `{:?}`",
                     ty.name, capability
@@ -181,41 +185,33 @@ pub(super) fn validate(
                 field.id, field.owner
             ));
         }
-        match field.ty {
-            DeclaredTypeRef::Core(referenced) if !core_type_ids.contains(&referenced) => {
-                errors.push(format!(
-                    "field `{:?}` references missing core type `{:?}`",
-                    field.id, referenced
-                ));
-            }
-            DeclaredTypeRef::Standard(referenced) if !type_ids.contains(&referenced) => {
-                errors.push(format!(
-                    "field `{:?}` references missing type `{:?}`",
-                    field.id, referenced
-                ));
-            }
-            DeclaredTypeRef::Core(_) | DeclaredTypeRef::Standard(_) => {}
-        }
+        validate_field_type(field.ty, field.id, &core_type_ids, &type_ids, &mut errors);
     }
 
     for ty in types.iter().filter(|ty| {
-        ty.capabilities
-            .contains(&StdlibCapabilityId::MemoryReadable)
+        declared_capabilities_satisfy(
+            ty.capabilities,
+            StdlibCapabilityId::MemoryReadable,
+            capabilities,
+        )
     }) {
         let mut visiting = HashSet::new();
-        if let Err(reason) = validate_standard_memory_layout(ty.id, &mut visiting, types, fields) {
+        if let Err(reason) =
+            validate_standard_memory_layout(ty.id, &mut visiting, capabilities, types, fields)
+        {
             errors.push(format!(
                 "standard type `{}` declares MemoryReadable but {reason}",
                 ty.name
             ));
         }
     }
-    for ty in types
-        .iter()
-        .filter(|ty| ty.capabilities.contains(&StdlibCapabilityId::Equatable))
-    {
+    for ty in types.iter().filter(|ty| {
+        declared_capabilities_satisfy(ty.capabilities, StdlibCapabilityId::Equatable, capabilities)
+    }) {
         let mut visiting = HashSet::new();
-        if let Err(reason) = validate_standard_equality(ty.id, &mut visiting, types, fields) {
+        if let Err(reason) =
+            validate_standard_equality(ty.id, &mut visiting, capabilities, types, fields)
+        {
             errors.push(format!(
                 "standard type `{}` declares Equatable but {reason}",
                 ty.name
@@ -250,6 +246,7 @@ pub(super) fn validate(
 fn validate_standard_memory_layout(
     ty: StdlibTypeId,
     visiting: &mut HashSet<StdlibTypeId>,
+    capabilities: &[StdlibCapability],
     types: &[StdlibType],
     fields: &[StdlibField],
 ) -> Result<(), String> {
@@ -257,10 +254,11 @@ fn validate_standard_memory_layout(
         .iter()
         .find(|declaration| declaration.id == ty)
         .expect("validated standard type references have declarations");
-    if !declaration
-        .capabilities
-        .contains(&StdlibCapabilityId::MemoryReadable)
-    {
+    if !declared_capabilities_satisfy(
+        declaration.capabilities,
+        StdlibCapabilityId::MemoryReadable,
+        capabilities,
+    ) {
         return Err(format!(
             "referenced type `{}` is not MemoryReadable",
             declaration.name
@@ -284,27 +282,11 @@ fn validate_standard_memory_layout(
             if declared_fields.is_empty() {
                 Err("it has no readable fields".to_owned())
             } else {
-                declared_fields
-                    .into_iter()
-                    .try_for_each(|field| match field.ty {
-                        DeclaredTypeRef::Core(core) => CORE_TYPES
-                            .iter()
-                            .find(|declaration| declaration.id == core)
-                            .and_then(|declaration| declaration.memory_layout)
-                            .map(|_| ())
-                            .ok_or_else(|| {
-                                format!("field `{}` has no fixed memory layout", field.name)
-                            }),
-                        DeclaredTypeRef::Standard(standard) => {
-                            validate_standard_memory_layout(standard, visiting, types, fields)
-                                .map_err(|reason| {
-                                    format!(
-                                        "field `{}` is not readable because {reason}",
-                                        field.name
-                                    )
-                                })
-                        }
-                    })
+                declared_fields.into_iter().try_for_each(|field| {
+                    validate_memory_type(field.ty, visiting, capabilities, types, fields).map_err(
+                        |reason| format!("field `{}` is not readable because {reason}", field.name),
+                    )
+                })
             }
         }
         RuntimeRepresentation::GcArray { .. } | RuntimeRepresentation::Enum { .. } => {
@@ -318,6 +300,7 @@ fn validate_standard_memory_layout(
 fn validate_standard_equality(
     ty: StdlibTypeId,
     visiting: &mut HashSet<StdlibTypeId>,
+    capabilities: &[StdlibCapability],
     types: &[StdlibType],
     fields: &[StdlibField],
 ) -> Result<(), String> {
@@ -325,10 +308,11 @@ fn validate_standard_equality(
         .iter()
         .find(|declaration| declaration.id == ty)
         .expect("validated standard type references have declarations");
-    if !declaration
-        .capabilities
-        .contains(&StdlibCapabilityId::Equatable)
-    {
+    if !declared_capabilities_satisfy(
+        declaration.capabilities,
+        StdlibCapabilityId::Equatable,
+        capabilities,
+    ) {
         return Err(format!(
             "referenced type `{}` is not Equatable",
             declaration.name
@@ -341,29 +325,22 @@ fn validate_standard_equality(
         RuntimeRepresentation::Scalar { storage } => CORE_TYPES
             .iter()
             .find(|core| core.id == storage)
-            .filter(|core| core.capabilities.contains(&StdlibCapabilityId::Equatable))
+            .filter(|core| {
+                declared_capabilities_satisfy(
+                    core.capabilities,
+                    StdlibCapabilityId::Equatable,
+                    capabilities,
+                )
+            })
             .map(|_| ())
             .ok_or_else(|| "its scalar storage is not Equatable".to_owned()),
         RuntimeRepresentation::GcStruct { .. } => fields
             .iter()
             .filter(|field| field.owner == ty)
-            .try_for_each(|field| match field.ty {
-                DeclaredTypeRef::Core(core) => CORE_TYPES
-                    .iter()
-                    .find(|declaration| declaration.id == core)
-                    .filter(|declaration| {
-                        declaration
-                            .capabilities
-                            .contains(&StdlibCapabilityId::Equatable)
-                    })
-                    .map(|_| ())
-                    .ok_or_else(|| format!("field `{}` is not Equatable", field.name)),
-                DeclaredTypeRef::Standard(standard) => validate_standard_equality(
-                    standard, visiting, types, fields,
+            .try_for_each(|field| {
+                validate_equality_type(field.ty, visiting, capabilities, types, fields).map_err(
+                    |reason| format!("field `{}` is not Equatable because {reason}", field.name),
                 )
-                .map_err(|reason| {
-                    format!("field `{}` is not Equatable because {reason}", field.name)
-                }),
             }),
         RuntimeRepresentation::Enum { .. } => Ok(()),
         RuntimeRepresentation::GcArray { .. } if declaration.kind == StdlibTypeKind::Intrinsic => {
@@ -377,6 +354,131 @@ fn validate_standard_equality(
     };
     visiting.remove(&ty);
     result
+}
+
+fn validate_field_type(
+    ty: TypeRef,
+    field: super::StdlibFieldId,
+    core_types: &HashSet<CoreTypeId>,
+    standard_types: &HashSet<StdlibTypeId>,
+    errors: &mut Vec<String>,
+) {
+    match ty {
+        TypeRef::Core(referenced) if !core_types.contains(&referenced) => errors.push(format!(
+            "field `{field:?}` references missing core type `{referenced:?}`"
+        )),
+        TypeRef::Standard(referenced) if !standard_types.contains(&referenced) => errors.push(
+            format!("field `{field:?}` references missing type `{referenced:?}`"),
+        ),
+        TypeRef::Application { arguments, .. } => {
+            for argument in arguments {
+                validate_field_type(*argument, field, core_types, standard_types, errors);
+            }
+        }
+        TypeRef::FixedArray { element, .. } => {
+            validate_field_type(*element, field, core_types, standard_types, errors);
+        }
+        TypeRef::Parameter(parameter) => errors.push(format!(
+            "field `{field:?}` references undeclared type parameter `{parameter}`"
+        )),
+        TypeRef::Core(_) | TypeRef::Standard(_) => {}
+    }
+}
+
+fn validate_memory_type(
+    ty: TypeRef,
+    visiting: &mut HashSet<StdlibTypeId>,
+    capabilities: &[StdlibCapability],
+    types: &[StdlibType],
+    fields: &[StdlibField],
+) -> Result<(), String> {
+    match ty {
+        TypeRef::Core(core) => CORE_TYPES
+            .iter()
+            .find(|declaration| declaration.id == core)
+            .and_then(|declaration| declaration.memory_layout)
+            .map(|_| ())
+            .ok_or_else(|| "it has no fixed memory layout".to_owned()),
+        TypeRef::Standard(standard) => {
+            validate_standard_memory_layout(standard, visiting, capabilities, types, fields)
+        }
+        TypeRef::FixedArray { element, length } if length != 0 => {
+            validate_memory_type(*element, visiting, capabilities, types, fields)
+        }
+        TypeRef::FixedArray { .. } => {
+            Err("zero-length arrays cannot be read from process memory".to_owned())
+        }
+        TypeRef::Application { .. } => {
+            Err("constructed fields have no fixed process-memory layout".to_owned())
+        }
+        TypeRef::Parameter(_) => {
+            Err("generic fields have no fixed process-memory layout".to_owned())
+        }
+    }
+}
+
+fn validate_equality_type(
+    ty: TypeRef,
+    visiting: &mut HashSet<StdlibTypeId>,
+    capabilities: &[StdlibCapability],
+    types: &[StdlibType],
+    fields: &[StdlibField],
+) -> Result<(), String> {
+    match ty {
+        TypeRef::Core(core) => CORE_TYPES
+            .iter()
+            .find(|declaration| declaration.id == core)
+            .filter(|declaration| {
+                declared_capabilities_satisfy(
+                    declaration.capabilities,
+                    StdlibCapabilityId::Equatable,
+                    capabilities,
+                )
+            })
+            .map(|_| ())
+            .ok_or_else(|| "its core type is not Equatable".to_owned()),
+        TypeRef::Standard(standard) => {
+            validate_standard_equality(standard, visiting, capabilities, types, fields)
+        }
+        TypeRef::Application {
+            constructor: StdlibTypeConstructorId::Option | StdlibTypeConstructorId::Result,
+            arguments: [value],
+        } => validate_equality_type(*value, visiting, capabilities, types, fields),
+        TypeRef::Application { .. } => Err("its constructed type is not Equatable".to_owned()),
+        TypeRef::FixedArray { .. } => Err("its fixed array type is not Equatable".to_owned()),
+        TypeRef::Parameter(_) => Err("its generic type is not Equatable".to_owned()),
+    }
+}
+
+fn declared_capabilities_satisfy(
+    declared: &[StdlibCapabilityId],
+    required: StdlibCapabilityId,
+    capabilities: &[StdlibCapability],
+) -> bool {
+    declared
+        .iter()
+        .any(|provided| capability_implies(*provided, required, capabilities, &mut HashSet::new()))
+}
+
+fn capability_implies(
+    provided: StdlibCapabilityId,
+    required: StdlibCapabilityId,
+    capabilities: &[StdlibCapability],
+    visited: &mut HashSet<StdlibCapabilityId>,
+) -> bool {
+    provided == required
+        || (visited.insert(provided)
+            && capabilities
+                .iter()
+                .find(|capability| capability.id == provided)
+                .is_some_and(|capability| {
+                    capability
+                        .super_capabilities
+                        .iter()
+                        .any(|super_capability| {
+                            capability_implies(*super_capability, required, capabilities, visited)
+                        })
+                }))
 }
 
 fn validate_documentation<Id>(

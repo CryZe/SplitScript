@@ -385,7 +385,7 @@ fn csharp_numeric_type(name: &str) -> Option<&'static str> {
     })
 }
 
-fn parse_integer(text: &str) -> Result<(u64, Option<TypeRef>), String> {
+pub(crate) fn parse_integer(text: &str) -> Result<(u64, Option<TypeRef>), String> {
     const SUFFIXES: [&str; 8] = ["u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8"];
     let (digits, suffix) = SUFFIXES
         .iter()

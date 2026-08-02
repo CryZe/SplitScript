@@ -14,7 +14,7 @@ fn if_expressions_infer_branches_bidirectionally_and_lower_to_wasm() {
             selected = if useText {
                 Selected.Text("DLC")
             } else {
-                Selected.Number(process.read.u16(0x1234 as address) else 0)
+                Selected.Number(process.read<u16>(0x1234 as address) else 0)
             }
         }
 
@@ -439,17 +439,33 @@ fn numeric_bounds_reject_non_numeric_receivers_and_wrong_arity() {
 }
 
 #[test]
-fn print_is_a_regular_builtin_available_in_actions() {
+fn runtime_text_outputs_accept_display_values() {
     let source = r#"
         state "game.exe" {}
         whileAttached {
             print("tick")
+            print(42)
+            print(-7i64)
+            setVariable("Score", 9u16)
         }
     "#;
-    let wasm = splitscript::compile(source).expect("print should work in whileAttached");
+    let wasm = splitscript::compile(source)
+        .expect("print and setVariable should display supported values");
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
-        .expect("print action should produce valid Wasm");
+        .expect("generic runtime text output should produce valid Wasm");
+
+    for call in ["print(true)", "setVariable(\"Flag\", true)"] {
+        let source = format!("state \"game.exe\" {{}} whileAttached {{ {call} }}");
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("values that cannot be displayed should be rejected");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("does not satisfy the inferred constraints")),
+            "{diagnostics:#?}"
+        );
+    }
 }
 
 #[test]
@@ -458,7 +474,7 @@ fn strings_are_gc_values_with_content_equality_and_length() {
         state "game.exe" {}
         whileAttached {
             let message = "tick"
-            if (message == "tick" && message != "tock" && String.length(message) == 4u32) {
+            if (message == "tick" && message != "tock" && message.byteLength() == 4u32) {
                 print(message)
             }
         }
@@ -497,7 +513,7 @@ fn template_strings_reject_values_without_string_casts() {
             return `value={value}`
         }
     "#;
-    let diagnostics = splitscript::compile(source).expect_err("bool has no supported String cast");
+    let diagnostics = splitscript::compile(source).expect_err("bool does not implement Display");
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
@@ -520,7 +536,7 @@ fn user_functions_are_typed_and_can_call_forward_declarations() {
 
         whileAttached {
             let label = "level"
-            if (isFinalLevel(13) && String.length(label) == 5u32) {
+            if (isFinalLevel(13) && label.byteLength() == 5u32) {
                 print(label)
             }
         }
@@ -587,12 +603,14 @@ fn user_function_and_method_calls_expose_stable_callable_ids() {
                 .copied()
                 .chain(checked.semantics().function_result(method_target))
                 .collect(),
-            receiver: ResolvedValue::Variable(counter.id),
+            receiver: ResolvedReceiver::Path {
+                root: ResolvedValue::Variable(counter.id),
+                members: Vec::new(),
+            },
             receiver_type: checked
                 .semantics()
                 .expression_type(counter.value.id)
                 .expect("the method receiver has a semantic type"),
-            receiver_members: Vec::new(),
         })
     );
 
@@ -668,7 +686,13 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
         panic!("expected the payload method call to resolve");
     };
     assert_eq!(*function, method_target);
-    assert_eq!(*receiver, ResolvedValue::Variable(binding.id));
+    assert_eq!(
+        receiver,
+        &ResolvedReceiver::Path {
+            root: ResolvedValue::Variable(binding.id),
+            members: Vec::new(),
+        }
+    );
 
     let lowered = splitscript::lower_wasm(&checked);
     let splitscript::compiler::wasm_ir::ExpressionKind::Match {
@@ -800,18 +824,16 @@ fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
     let splitscript::compiler::ast::Stmt::Variable(method) = &statements[3] else {
         panic!("expected the nested receiver binding");
     };
-    let Some(ResolvedCall::UserMethod {
-        receiver,
-        receiver_members,
-        ..
-    }) = checked.semantics().call(method.value.id)
+    let Some(ResolvedCall::UserMethod { receiver, .. }) = checked.semantics().call(method.value.id)
     else {
         panic!("expected a resolved nested method receiver");
     };
-    assert_eq!(*receiver, ResolvedValue::Variable(outer.id));
     assert_eq!(
-        receiver_members,
-        &[ResolvedMember::RecordField(outer_inner)]
+        receiver,
+        &ResolvedReceiver::Path {
+            root: ResolvedValue::Variable(outer.id),
+            members: vec![ResolvedMember::RecordField(outer_inner)],
+        }
     );
 
     let splitscript::compiler::ast::Stmt::Variable(address) = &statements[4] else {

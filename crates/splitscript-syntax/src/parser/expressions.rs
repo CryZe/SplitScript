@@ -4,8 +4,8 @@
 
 use super::{
     BinaryOp, DelimiterDepth, Diagnostic, EnumReference, Expr, ExprKind, FallbackBranch,
-    InterpolatedPart, MatchArm, MatchPattern, Parser, PatternBinding, Span, TokenKind, UnaryOp,
-    assignment_operator, parse_integer,
+    InterpolatedPart, MatchArm, MatchPattern, Parser, PatternBinding, Span, TokenKind, TypeRef,
+    UnaryOp, assignment_operator, parse_integer,
 };
 
 impl Parser<'_> {
@@ -13,6 +13,37 @@ impl Parser<'_> {
         let mut left = self.prefix()?;
         let mut saw_comparison = false;
         loop {
+            if (self.at(&TokenKind::LParen) || self.begins_generic_call(left.span.end))
+                && matches!(&left.kind, ExprKind::Member { .. })
+            {
+                let start = left.span;
+                let ExprKind::Member {
+                    receiver,
+                    name,
+                    name_span,
+                } = left.kind
+                else {
+                    unreachable!()
+                };
+                let mut callee = Vec::new();
+                let receiver = flatten_postfix_receiver(*receiver, &mut callee);
+                callee.push(name);
+                let type_arguments = self.call_type_arguments(left.span.end)?;
+                self.expect(TokenKind::LParen, "expected `(` after generic arguments")?;
+                let (args, end) =
+                    self.expression_list(TokenKind::RParen, "expected `)` after arguments", false);
+                left = self.new_expr(
+                    ExprKind::Call {
+                        callee,
+                        name_span,
+                        receiver: Some(Box::new(receiver)),
+                        type_arguments,
+                        args,
+                    },
+                    start.join(end),
+                );
+                continue;
+            }
             if self.eat(&TokenKind::Dot).is_some() {
                 let (name, name_span) = self.expect_any_ident("expected a field name after `.`")?;
                 let span = left.span.join(name_span);
@@ -349,7 +380,9 @@ impl Parser<'_> {
                     path.push(name);
                     name_span = span;
                 }
-                if self.eat(&TokenKind::LParen).is_some() {
+                if self.at(&TokenKind::LParen) || self.begins_generic_call(name_span.end) {
+                    let type_arguments = self.call_type_arguments(name_span.end)?;
+                    self.expect(TokenKind::LParen, "expected `(` after generic arguments")?;
                     let (args, end) = self.expression_list(
                         TokenKind::RParen,
                         "expected `)` after arguments",
@@ -359,6 +392,8 @@ impl Parser<'_> {
                         ExprKind::Call {
                             callee: path,
                             name_span,
+                            receiver: None,
+                            type_arguments,
                             args,
                         },
                         token.span.join(end),
@@ -395,6 +430,49 @@ impl Parser<'_> {
         self.expect(TokenKind::Colon, "expected `:` after the field name")?;
         let value = self.expression(0)?;
         Ok((name, value))
+    }
+
+    /// Recognizes the unambiguous, whitespace-free call spelling `name<T>(...)`.
+    /// Requiring `<` to touch the callee keeps ordinary comparisons such as
+    /// `value < limit` out of the generic-call grammar without a turbofish.
+    fn begins_generic_call(&self, callee_end: usize) -> bool {
+        if !self.at(&TokenKind::Lt) || self.current().span.start != callee_end {
+            return false;
+        }
+        let mut offset = 1usize;
+        let mut brackets = 0usize;
+        loop {
+            match self.peek(offset).kind {
+                TokenKind::LBracket => brackets += 1,
+                TokenKind::RBracket if brackets > 0 => brackets -= 1,
+                TokenKind::Gt if brackets == 0 => {
+                    let open = self.peek(offset + 1);
+                    return open.kind == TokenKind::LParen;
+                }
+                TokenKind::Semicolon if brackets == 0 => return false,
+                TokenKind::Eof | TokenKind::LBrace | TokenKind::RBrace => {
+                    return false;
+                }
+                _ => {}
+            }
+            offset += 1;
+        }
+    }
+
+    fn call_type_arguments(&mut self, callee_end: usize) -> Result<Vec<TypeRef>, Diagnostic> {
+        if !self.begins_generic_call(callee_end) {
+            return Ok(Vec::new());
+        }
+        self.bump();
+        let mut arguments = Vec::new();
+        loop {
+            arguments.push(self.parse_type("expected a type argument after `<`")?.0);
+            if self.eat(&TokenKind::Comma).is_some() {
+                continue;
+            }
+            self.expect(TokenKind::Gt, "expected `>` after type arguments")?;
+            return Ok(arguments);
+        }
     }
 
     pub(super) fn interpolated_expression(&mut self, expression_start: usize) -> Option<Expr> {
@@ -977,5 +1055,17 @@ impl Parser<'_> {
             TokenKind::Percent => (9, BinaryOp::Rem),
             _ => return None,
         })
+    }
+}
+
+fn flatten_postfix_receiver(receiver: Expr, members: &mut Vec<String>) -> Expr {
+    let Expr { id, kind, span } = receiver;
+    match kind {
+        ExprKind::Member { receiver, name, .. } => {
+            let receiver = flatten_postfix_receiver(*receiver, members);
+            members.push(name);
+            receiver
+        }
+        kind => Expr { id, kind, span },
     }
 }

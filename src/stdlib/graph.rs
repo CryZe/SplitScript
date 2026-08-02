@@ -129,20 +129,12 @@ impl StandardLibraryGraph {
         let variants_by_owner = group(VARIANTS, |variant| variant.owner);
         let methods = ITEMS
             .iter()
-            .filter(|item| {
-                matches!(
-                    item.kind,
-                    ItemKind::Method { .. } | ItemKind::TypedMethod { .. }
-                )
-            })
+            .filter(|item| matches!(item.kind, ItemKind::Method { .. }))
             .collect();
         let methods_by_name = group(
-            ITEMS.iter().filter(|item| {
-                matches!(
-                    item.kind,
-                    ItemKind::Method { .. } | ItemKind::TypedMethod { .. }
-                )
-            }),
+            ITEMS
+                .iter()
+                .filter(|item| matches!(item.kind, ItemKind::Method { .. })),
             |item| item.name,
         );
 

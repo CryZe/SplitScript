@@ -161,7 +161,10 @@ fn wasm_ir_owns_scalar_expression_operations_and_resolved_paths() {
     let mut saw_unary = false;
     let mut saw_binary = false;
     let mut saw_cast = false;
-    for expression in lowered.expressions() {
+    for typed in checked.typed_hir().expressions() {
+        let expression = lowered
+            .expression(typed.id)
+            .expect("visible typed expressions should have Wasm IR plans");
         match &expression.kind {
             ExpressionKind::Path { root, .. } => {
                 assert!(root.is_some());
@@ -213,7 +216,10 @@ fn wasm_ir_owns_gc_constructors_interpolation_and_signatures() {
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
     let lowered = splitscript::lower_wasm(&checked);
     let mut saw = [false; 6];
-    for expression in lowered.expressions() {
+    for typed in checked.typed_hir().expressions() {
+        let expression = lowered
+            .expression(typed.id)
+            .expect("visible typed expressions should have Wasm IR plans");
         match &expression.kind {
             ExpressionKind::String(_) => saw[0] = true,
             ExpressionKind::InterpolatedString(parts) => {
@@ -380,7 +386,7 @@ fn context_free_null_and_err_request_wrapper_annotations() {
 fn else_unwraps_options_and_results_with_value_or_return_fallbacks() {
     use splitscript::{
         compiler::hir::{TypedExpressionKind, TypedFallbackBranch},
-        compiler::wasm_ir::{ExpressionKind, FallbackBranch, LocalPurpose},
+        compiler::wasm_ir::{BodyOwner, ExpressionKind, FallbackBranch, LocalPurpose},
     };
 
     let source = r#"
@@ -413,12 +419,21 @@ fn else_unwraps_options_and_results_with_value_or_return_fallbacks() {
         }
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
-    let fallback_count = checked
+    let fallbacks = checked
         .typed_hir()
         .expressions()
         .filter(|expression| matches!(expression.kind, TypedExpressionKind::Fallback { .. }))
-        .count();
-    assert_eq!(fallback_count, 5);
+        .collect::<Vec<_>>();
+    let fallback_count = fallbacks.len();
+    assert_eq!(
+        fallback_count,
+        5,
+        "unexpected visible fallback spans: {:?}",
+        fallbacks
+            .iter()
+            .map(|expression| expression.span)
+            .collect::<Vec<_>>()
+    );
 
     let lowered = splitscript::lower_wasm(&checked);
     let mut branches = [false; 3];
@@ -455,6 +470,12 @@ fn else_unwraps_options_and_results_with_value_or_return_fallbacks() {
     assert!(branches.into_iter().all(|branch| branch));
     let planned_fallbacks = lowered
         .bodies()
+        .filter(|body| match &body.owner {
+            BodyOwner::Function(function) => {
+                function.function.index() < checked.syntax().functions.len()
+            }
+            BodyOwner::Action(_) => true,
+        })
         .flat_map(|body| &body.locals)
         .filter(|local| matches!(local.purpose, LocalPurpose::FallbackValue(_)))
         .count();
@@ -472,7 +493,7 @@ fn question_mark_propagates_to_function_and_state_field_boundaries() {
     let source = r#"
         state "game.exe" {
             selected = if readMemory {
-                process.read.u16(0x1000)?
+                process.read<u16>(0x1000)?
             } else {
                 7
             }
@@ -654,7 +675,7 @@ fn declared_record_enum_and_array_layouts_are_semantic_facts() {
 }
 
 #[test]
-fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
+fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
     let library = StandardLibrary::new();
     let process_type = library
         .type_by_name("Process")
@@ -678,7 +699,7 @@ fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
             .public_field(unity_image.id, "address")
             .expect("UnityImage.address should be declared")
             .ty,
-        splitscript::compiler::stdlib::DeclaredTypeRef::Core(
+        splitscript::compiler::stdlib::TypeRef::Core(
             splitscript::compiler::stdlib::CoreTypeId::Address
         )
     );
@@ -687,12 +708,11 @@ fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
         "runtime ownership slots must not leak into the public member surface"
     );
     let read = library
-        .method_candidates_with_selector("read", Some("u16"))
+        .method_candidates("read")
         .into_iter()
         .next()
-        .expect("typed process reads should resolve through the catalog");
+        .expect("generic process reads should resolve through the catalog");
     assert_eq!(read.item.id, StdlibItemId::ProcessRead);
-    assert_eq!(read.type_arguments, [("T", BuiltinType::U16)]);
     let get = library.method_candidates("get");
     assert_eq!(get.len(), 1);
     assert_eq!(get[0].item.id, StdlibItemId::ArrayGet);
@@ -714,7 +734,7 @@ fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
     assert!(library.method_candidates("missing").is_empty());
     assert_eq!(
         library.render_signature(read.item.id),
-        "Process.read(address: address) -> T! where T: MemoryReadable"
+        "Process.read<T>(address: address) -> T! where T: MemoryReadable"
     );
     let managed_string = library
         .method_candidates("readManagedString")
@@ -744,6 +764,17 @@ fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
     assert_eq!(
         library.operation_semantics(next_tick.id).cancellation,
         CancellationKind::ProcessClose
+    );
+    let process_closed = library
+        .item_by_name("Process.closed")
+        .expect("Process.closed should be catalog-backed");
+    assert_eq!(
+        library.render_signature(process_closed.id),
+        "Process.closed() -> void"
+    );
+    assert_eq!(
+        library.render_operation_semantics(process_closed.id),
+        "available in onAttach; suspends; requires an attached process; cancels when the process closes"
     );
 
     let field_any = library
@@ -793,12 +824,31 @@ fn catalog_queries_expose_typed_paths_effects_and_docs_for_editor_tooling() {
 }
 
 #[test]
+fn process_closed_is_only_available_while_attaching() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                await process.closed()
+            }
+        "#,
+    )
+    .expect_err("waiting out an attachment should only be valid in onAttach");
+    assert!(
+        diagnostics.iter().any(
+            |diagnostic| diagnostic.message == "`Process.closed` must be awaited in `onAttach`"
+        ),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn process_operations_reject_detached_lifecycle_use() {
     let errors = splitscript::compile(
         r#"
             state "game.exe" {}
             onDetached {
-                let value = process.read.i32(0x1000) else 0
+                let value = process.read<i32>(0x1000) else 0
                 print(value as String)
             }
         "#,
@@ -869,7 +919,7 @@ fn immediate_process_failures_are_results_and_not_awaitable_intrinsics() {
         r#"
             state "game.exe" {}
             onAttach {
-                let value = await process.read.i32(0x1000)
+                let value = await process.read<i32>(0x1000)
             }
         "#,
     )
@@ -891,7 +941,7 @@ fn attached_process_requirements_propagate_through_function_call_graphs() {
         }
 
         fn Reader.readValue() {
-            return process.read.i32(self.address) else 0
+            return process.read<i32>(self.address) else 0
         }
 
         fn relay(reader: Reader) {
@@ -941,4 +991,46 @@ fn attached_process_requirements_propagate_through_function_call_graphs() {
         error.message
             == "`recursiveRelay` requires an attached process and is unavailable in `onDetached`"
     }));
+}
+
+#[test]
+fn explicit_generic_calls_accept_named_and_constructed_types() {
+    let source = r#"
+        state "game.exe" {}
+
+        record Header {
+            marker: u32
+        }
+
+        whileAttached {
+            let header = process.read<Header>(0)
+            let bytes = process.read<[u8; 4]>(4)
+            print<u32>((header else Header { marker: 0 }).marker)
+            print<u8>((bytes else [0, 0, 0, 0]).get(0))
+        }
+    "#;
+    splitscript::compile(source)
+        .expect("explicit generic calls should accept every MemoryReadable source type");
+
+    let errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached { let value = process.read<String>(0) }
+        "#,
+    )
+    .expect_err("generic constraints still apply to explicit type arguments");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("MemoryReadable")),
+        "{errors:#?}"
+    );
+
+    splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached { let value = process.read.u32(0) }
+        "#,
+    )
+    .expect_err("the former dotted type-selector syntax must not remain available");
 }

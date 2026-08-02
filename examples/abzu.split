@@ -1,0 +1,42 @@
+// Small version differences do not need a dedicated layout declaration. The
+// attachment block selects one typed build and one discovered address, while
+// the ordinary state expression keeps snapshot rotation transactional.
+enum AbzuBuild {
+    Steam
+    Epic
+}
+
+state "AbzuGame-Win64-Shipping.exe" {
+    loading = process.read(loadingAddress)
+}
+
+let loadingAddress = 0
+let build = AbzuBuild.Steam
+
+onAttach {
+    let executable = await process.mainModule()
+
+    if executable.size == 47_570_944 {
+        build = AbzuBuild.Steam
+        loadingAddress = executable.address + 0x029020f4
+    } else if executable.size == 47_501_312 {
+        build = AbzuBuild.Epic
+        loadingAddress = executable.address + 0x028ea104
+    } else {
+        print(`unsupported ABZÛ module size {executable.size}`)
+        await process.closed()
+    }
+
+    setVariable("Build", match build {
+        AbzuBuild.Steam => "Steam",
+        AbzuBuild.Epic => "Epic"
+    })
+}
+
+isLoading {
+    return current.loading == 1
+}
+
+split {
+    return old.loading == 0 && current.loading == 1
+}

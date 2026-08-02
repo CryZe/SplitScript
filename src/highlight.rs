@@ -405,11 +405,20 @@ impl HighlightCollector<'_> {
             return;
         }
 
+        let resolution = self
+            .semantics
+            .and_then(|semantics| semantics.call(expression.id));
+        let call_suffix_width = usize::from(call);
+
         let resolved_value = self.semantics.and_then(|model| {
             model.value(expression.id).or_else(|| {
                 model.call(expression.id).and_then(|call| match call {
-                    ResolvedCall::StandardLibrary { receiver, .. } => *receiver,
-                    ResolvedCall::UserMethod { receiver, .. } => Some(*receiver),
+                    ResolvedCall::StandardLibrary { receiver, .. } => receiver
+                        .as_ref()
+                        .and_then(|receiver| receiver.path().map(|(root, _)| root)),
+                    ResolvedCall::UserMethod { receiver, .. } => {
+                        receiver.path().map(|(root, _)| root)
+                    }
                     ResolvedCall::UserFunction { .. }
                     | ResolvedCall::OptionSome { .. }
                     | ResolvedCall::ResultSuccess { .. }
@@ -458,11 +467,29 @@ impl HighlightCollector<'_> {
         // take precedence over those source-wide name heuristics. Members are
         // a suffix because roots such as `current.field` can consume more than
         // one written path segment before ordinary record/standard fields.
-        if let Some(members) = self
-            .semantics
-            .and_then(|model| model.path_members(expression.id))
-        {
-            for (span, member) in spans.iter().rev().take(members.len()).rev().zip(members) {
+        let resolved_receiver = resolution.and_then(|call| match call {
+            ResolvedCall::UserMethod { receiver, .. } => Some(receiver),
+            ResolvedCall::StandardLibrary {
+                receiver: Some(receiver),
+                ..
+            } => Some(receiver),
+            _ => None,
+        });
+        let expression_receiver =
+            resolved_receiver.is_some_and(|receiver| receiver.expression().is_some());
+        if let Some(members) = self.semantics.and_then(|model| {
+            model
+                .path_members(expression.id)
+                .or_else(|| resolved_receiver.map(|receiver| receiver.members()))
+        }) {
+            let start = if call && expression_receiver {
+                0
+            } else {
+                spans
+                    .len()
+                    .saturating_sub(call_suffix_width + members.len())
+            };
+            for (span, member) in spans.iter().skip(start).take(members.len()).zip(members) {
                 let modifiers = match member {
                     ResolvedMember::StandardField(_) => {
                         MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY
@@ -473,7 +500,13 @@ impl HighlightCollector<'_> {
             }
         }
 
-        for span in spans.iter().skip(1) {
+        let unresolved_member_start = usize::from(!expression_receiver);
+        let unresolved_member_end = spans.len().saturating_sub(call_suffix_width);
+        for span in spans
+            .iter()
+            .take(unresolved_member_end)
+            .skip(unresolved_member_start)
+        {
             self.entries.entry(span.start).or_insert(SemanticHighlight {
                 span: *span,
                 kind: SemanticTokenKind::Property,
@@ -482,9 +515,6 @@ impl HighlightCollector<'_> {
         }
         if call {
             let target = *spans.last().unwrap();
-            let resolution = self
-                .semantics
-                .and_then(|semantics| semantics.call(expression.id));
             let kind = match resolution {
                 Some(
                     ResolvedCall::OptionSome { .. }
@@ -876,7 +906,7 @@ enum Mode {
 }
 
 state "game.exe" {
-    level = process.read.i32(0)
+    level = process.read<i32>(0)
     mapName at 0x100 as utf8(32)
 }
 
@@ -1099,6 +1129,91 @@ fn inspect(module: Module, marker: Marker) {
                 .expect("the resolved field should be highlighted");
             assert_eq!(highlight.kind, SemanticTokenKind::Property);
             assert_eq!(highlight.modifiers, expected_modifiers);
+        }
+    }
+
+    #[test]
+    fn inferred_and_explicit_memory_reads_highlight_their_written_call_shape() {
+        let source = r#"state "game.exe" {
+    inferred: u32 = process.read(0x100)
+    selected: u32 = process.read<u32>(0x104)
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let index = database.semantic_highlights().unwrap();
+
+        let highlight_at = |offset| {
+            index
+                .highlights()
+                .iter()
+                .find(|highlight| highlight.span.start == offset)
+                .copied()
+                .expect("the resolved call segment should have a semantic token")
+        };
+
+        let inferred = source.find("process.read(0x100)").unwrap();
+        let inferred_process = highlight_at(inferred);
+        assert_eq!(inferred_process.kind, SemanticTokenKind::Variable);
+        assert_eq!(inferred_process.modifiers, MODIFIER_READONLY);
+        let inferred_read = highlight_at(inferred + "process.".len());
+        assert_eq!(inferred_read.kind, SemanticTokenKind::Method);
+        assert_eq!(inferred_read.modifiers, MODIFIER_DEFAULT_LIBRARY);
+
+        let selected = source.find("process.read<u32>(0x104)").unwrap();
+        let selected_process = highlight_at(selected);
+        assert_eq!(selected_process.kind, SemanticTokenKind::Variable);
+        assert_eq!(selected_process.modifiers, MODIFIER_READONLY);
+        let selected_read = highlight_at(selected + "process.".len());
+        assert_eq!(selected_read.kind, SemanticTokenKind::Method);
+        assert_eq!(selected_read.modifiers, MODIFIER_DEFAULT_LIBRARY);
+        let selected_type = highlight_at(selected + "process.read<".len());
+        assert_eq!(selected_type.kind, SemanticTokenKind::Type);
+        assert_eq!(selected_type.modifiers, 0);
+    }
+
+    #[test]
+    fn highlights_fields_and_methods_on_expression_receivers() {
+        let source = r#"record Path {
+    address: address
+}
+fn Path.resolve() { return self.address }
+record Layout {
+    isLoading: Path
+    level: Path
+    video: Path
+}
+fn selectedLayout() {
+    return Layout {
+        isLoading: Path { address: 1 },
+        level: Path { address: 2 },
+        video: Path { address: 3 }
+    }
+}
+state "game.exe" {
+    loading: address = selectedLayout().isLoading.resolve()
+    level: address = selectedLayout().level.resolve()
+    video: address = selectedLayout().video.resolve()
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let index = database.semantic_highlights().unwrap();
+
+        for field in ["isLoading", "level", "video"] {
+            let path = format!("selectedLayout().{field}.resolve");
+            let field_start = source.find(&path).unwrap() + "selectedLayout().".len();
+            let field_highlight = index
+                .highlights()
+                .iter()
+                .find(|highlight| highlight.span.start == field_start)
+                .expect("the expression-receiver field should have a semantic token");
+            assert_eq!(field_highlight.kind, SemanticTokenKind::Property);
+            assert_eq!(field_highlight.modifiers, MODIFIER_READONLY);
+
+            let method_start = field_start + field.len() + 1;
+            let method_highlight = index
+                .highlights()
+                .iter()
+                .find(|highlight| highlight.span.start == method_start)
+                .expect("the expression-receiver method should have a semantic token");
+            assert_eq!(method_highlight.kind, SemanticTokenKind::Method);
         }
     }
 

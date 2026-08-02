@@ -13,6 +13,7 @@ use crate::{
 use super::super::{
     EqualityFunctions, GcLayout, RuntimeHelperPlan, Type, emit_typed_struct_get,
     enum_variant_payload, option_value_type, record_field_type, result_value_type,
+    standard_field_type,
 };
 #[allow(clippy::too_many_arguments)]
 pub(in crate::codegen) fn compile_equality(
@@ -37,6 +38,7 @@ pub(in crate::codegen) fn compile_equality(
         if equality_functions.standard_records.contains_key(&record.id) {
             equality.push(compile_standard_record_equality(
                 record.id,
+                semantics,
                 equality_functions,
                 string_equality,
                 gc,
@@ -176,6 +178,7 @@ fn compile_record_equality(
 
 fn compile_standard_record_equality(
     record: StdlibTypeId,
+    semantics: &SemanticModel,
     equality_functions: &EqualityFunctions,
     string_eq: u32,
     gc: &GcLayout,
@@ -186,7 +189,7 @@ fn compile_standard_record_equality(
 
     function.instruction(&Instruction::I32Const(1));
     for (field_index, field) in gc.standard_library.fields_of(record).enumerate() {
-        let field_ty = Type::from_declared(field.ty);
+        let field_ty = standard_field_type(field.id, semantics);
         function
             .instruction(&Instruction::LocalGet(0))
             .instruction(&Instruction::RefAsNonNull);

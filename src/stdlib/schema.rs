@@ -122,6 +122,10 @@ pub enum TypeRef {
         constructor: super::ids::StdlibTypeConstructorId,
         arguments: &'static [TypeRef],
     },
+    FixedArray {
+        element: &'static TypeRef,
+        length: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,21 +152,15 @@ pub struct Parameter {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemKind {
     Function,
-    TypedFunction {
-        type_parameter: &'static str,
-    },
-    Method {
-        receiver: TypeRef,
-    },
-    TypedMethod {
-        receiver: TypeRef,
-        type_parameter: &'static str,
-    },
+    Method { receiver: TypeRef },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Signature {
     pub type_parameters: &'static [TypeParameter],
+    /// Number of type parameters written on the callable itself. Remaining
+    /// parameters are inherited from its receiver and are inferred from it.
+    pub explicit_type_parameters: usize,
     pub parameters: &'static [Parameter],
     pub result: TypeRef,
 }

@@ -262,7 +262,7 @@ fn debug_bindings_support_suspension_and_are_erased_from_release() {
     for binding in [
         "debug let module = await process.module(\"debug-only.dll\")\n\
          debug print(module.address as String)",
-        "debug let marker = retry process.read.i32(0)\n\
+        "debug let marker = retry process.read<i32>(0)\n\
          debug print(marker as String)",
     ] {
         let source = format!(r#"state "game.exe" {{}} onAttach {{ {binding} }}"#);

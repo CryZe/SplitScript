@@ -55,11 +55,16 @@ impl CapabilityAnalysis {
             TypeKind::GenericParameter { .. }
         ) && semantics
             .generic_parameter_constraints(ty)
-            .contains(&capability)
+            .iter()
+            .any(|provided| {
+                self.standard_library
+                    .capability_implies(*provided, capability)
+            })
         {
             return Ok(());
         }
-        match self.standard_library.capability(capability).behavior {
+        let declaration = self.standard_library.capability(capability);
+        match declaration.behavior {
             CapabilityBehavior::StructuralEquality => self.equality.require(ty, semantics),
             CapabilityBehavior::StructuralMemoryLayout => {
                 self.memory.layout(ty, semantics).map(|_| ())
@@ -83,7 +88,11 @@ impl CapabilityAnalysis {
                     "type `{kind:?}` does not provide capability `{capability:?}`"
                 )),
             },
+        }?;
+        for super_capability in declaration.super_capabilities {
+            self.require(ty, *super_capability, semantics)?;
         }
+        Ok(())
     }
 
     pub fn has(

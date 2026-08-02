@@ -102,7 +102,7 @@ fn diagnostics_expose_stable_stage_codes_and_severity() {
     let semantic = splitscript::compile(
         r#"
             state "game.exe" {}
-            onDetached { process.read.i32(0x1000) }
+            onDetached { process.read<i32>(0x1000) }
         "#,
     )
     .expect_err("process access requires an attachment");
@@ -218,7 +218,7 @@ fn render_typed_hir_snapshot(checked: &splitscript::CheckedProgram) -> String {
         let kind = snapshot_expression_kind(checked, &expression.kind);
         write!(output, "  e{}: {ty} = {kind}", expression.id.index()).unwrap();
         if let Some(resolution) = &expression.resolution {
-            write!(output, " resolve={resolution:?}").unwrap();
+            write!(output, " resolve={}", stable_resolution_debug(resolution)).unwrap();
         }
         if let Some(conversion) = expression.conversion {
             write!(
@@ -233,6 +233,24 @@ fn render_typed_hir_snapshot(checked: &splitscript::CheckedProgram) -> String {
         writeln!(output).unwrap();
     }
     output
+}
+
+fn stable_resolution_debug(
+    resolution: &splitscript::compiler::hir::ExpressionResolution,
+) -> String {
+    let mut rendered = format!("{resolution:?}");
+    let mut search_from = 0;
+    while let Some(relative_start) = rendered[search_from..].find("TypeId(") {
+        let start = search_from + relative_start;
+        let value_start = start + "TypeId(".len();
+        let Some(relative_end) = rendered[value_start..].find(')') else {
+            break;
+        };
+        let end = value_start + relative_end;
+        rendered.replace_range(value_start..end, "_");
+        search_from = value_start + 1;
+    }
+    rendered
 }
 
 fn render_typed_block(
@@ -441,6 +459,7 @@ fn snapshot_expression_kind(
         TypedExpressionKind::Call {
             source_path,
             arguments,
+            ..
         } => format!("call {} args={arguments:?}", source_path.join(".")),
     }
 }

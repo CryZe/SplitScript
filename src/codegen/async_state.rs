@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use wasm_encoder::{BlockType, Function, Instruction};
+use wasm_encoder::{BlockType, Function, Instruction, ValType};
 
 use crate::{
     abi::AbiImportId,
@@ -295,36 +295,53 @@ fn compile_suspension_poll(
     let unity_field_local = primary_scratch;
     match resolved_intrinsic(target) {
         Some(IntrinsicId::NextTick) => {}
-        Some(IntrinsicId::ProcessModule) => {
-            let wasm_ir::ExpressionKind::String(name) = &context
-                .wasm_ir
-                .expression(args[0])
-                .expect("module name belongs to Wasm IR")
-                .kind
-            else {
-                unreachable!();
-            };
-            let (ptr, len) = strings.get(name);
+        Some(IntrinsicId::ProcessClosed) => {
             compile_receiver(function, target, context);
             function
-                .instruction(&Instruction::I32Const(ptr as i32))
-                .instruction(&Instruction::I32Const(len as i32))
-                .instruction(&Instruction::Call(
-                    abi.function(AbiImportId::ProcessGetModuleAddress),
-                ))
+                .instruction(&Instruction::Drop)
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::Return);
+        }
+        Some(IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule) => {
+            let module_name = if resolved_intrinsic(target) == Some(IntrinsicId::ProcessModule) {
+                let wasm_ir::ExpressionKind::String(name) = &context
+                    .wasm_ir
+                    .expression(args[0])
+                    .expect("module name belongs to Wasm IR")
+                    .kind
+                else {
+                    unreachable!();
+                };
+                Some(name.as_str())
+            } else {
+                None
+            };
+            emit_process_module_query(
+                function,
+                target,
+                module_name,
+                AbiImportId::ProcessGetModuleAddress,
+                abi,
+                strings,
+                context,
+            );
+            function
                 .instruction(&Instruction::LocalTee(module_address_local))
                 .instruction(&Instruction::I64Eqz)
                 .instruction(&Instruction::If(BlockType::Empty))
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::Return)
                 .instruction(&Instruction::End);
-            compile_receiver(function, target, context);
+            emit_process_module_query(
+                function,
+                target,
+                module_name,
+                AbiImportId::ProcessGetModuleSize,
+                abi,
+                strings,
+                context,
+            );
             function
-                .instruction(&Instruction::I32Const(ptr as i32))
-                .instruction(&Instruction::I32Const(len as i32))
-                .instruction(&Instruction::Call(
-                    abi.function(AbiImportId::ProcessGetModuleSize),
-                ))
                 .instruction(&Instruction::LocalTee(module_size_local))
                 .instruction(&Instruction::I64Eqz)
                 .instruction(&Instruction::If(BlockType::Empty))
@@ -762,6 +779,49 @@ fn compile_suspension_poll(
             }
         }
         _ => unreachable!("type checking only permits awaitable builtins"),
+    }
+}
+
+fn emit_process_module_query(
+    function: &mut Function,
+    target: &wasm_ir::CallTarget,
+    module_name: Option<&str>,
+    import: AbiImportId,
+    abi: &Abi,
+    strings: &StringPool,
+    context: &ExprContext<'_>,
+) {
+    if let Some(name) = module_name {
+        let (ptr, len) = strings.get(name);
+        compile_receiver(function, target, context);
+        function
+            .instruction(&Instruction::I32Const(ptr as i32))
+            .instruction(&Instruction::I32Const(len as i32))
+            .instruction(&Instruction::Call(abi.function(import)));
+        return;
+    }
+
+    let names = &context.state.processes;
+    debug_assert!(!names.is_empty());
+    for (index, name) in names.iter().enumerate() {
+        function
+            .instruction(&Instruction::GlobalGet(
+                context.runtime_globals.process_name,
+            ))
+            .instruction(&Instruction::I32Const(index as i32))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::If(BlockType::Result(ValType::I64)));
+        let (ptr, len) = strings.get(name);
+        compile_receiver(function, target, context);
+        function
+            .instruction(&Instruction::I32Const(ptr as i32))
+            .instruction(&Instruction::I32Const(len as i32))
+            .instruction(&Instruction::Call(abi.function(import)))
+            .instruction(&Instruction::Else);
+    }
+    function.instruction(&Instruction::Unreachable);
+    for _ in names {
+        function.instruction(&Instruction::End);
     }
 }
 

@@ -242,7 +242,7 @@ fn semantic_tokens_cover_language_domains_and_use_utf16_deltas() {
     let source = concat!(
         "// 🦊\n",
         "enum Mode { Active }\n",
-        "state \"game.exe\" { level = process.read.i32(0) }\n",
+        "state \"game.exe\" { level = process.read<i32>(0) }\n",
         "settings { \"General\" { \"Enabled\" => enabled: true } }\n",
         "debug fn inspect(mode: Mode) { debug print(mode as String) }\n",
         "whileAttached {\n",
@@ -826,7 +826,7 @@ fn prepare_rename_and_rename_emit_validated_workspace_edits() {
 fn document_symbols_and_code_actions_preserve_compiler_structure() {
     let symbols_source = concat!(
         "record Point { x: i32 }\n",
-        "state \"game.exe\" { level = process.read.i32(0) }\n",
+        "state \"game.exe\" { level = process.read<i32>(0) }\n",
         "settings { \"General\" { \"Enabled\" => enabled: true } }\n",
         "whileAttached {}\n"
     );

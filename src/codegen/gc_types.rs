@@ -14,7 +14,8 @@ use crate::{
 
 use super::{
     GcLayout, Type, array_element_type, async_frame::AsyncFrameLayout, enum_variant_payload,
-    option_value_type, reachability, record_field_type, result_value_type, value_type,
+    option_value_type, reachability, record_field_type, result_value_type, standard_field_type,
+    value_type,
 };
 
 pub(super) struct EncodedTypes {
@@ -93,7 +94,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                 fields: standard_library
                     .fields_of(declaration.id)
                     .map(|field| FieldType {
-                        element_type: layout.storage_type(Type::from_declared(field.ty)),
+                        element_type: layout.storage_type(standard_field_type(field.id, semantics)),
                         mutable: false,
                     })
                     .collect(),

@@ -9,9 +9,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     ast::{RecordDecl, RecordFieldId, RecordId},
     semantic::SemanticModel,
-    stdlib::{
-        DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibFieldId,
-    },
+    stdlib::{RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibFieldId},
     types::{BuiltinType, TypeId, TypeKind},
 };
 
@@ -350,7 +348,9 @@ impl MemoryLayouts {
                                 (
                                     MemoryFieldId::Standard(field.id),
                                     field.name.to_owned(),
-                                    declared_type_id(field.ty, semantics),
+                                    semantics
+                                        .standard_field_type(field.id)
+                                        .expect("checked standard fields have semantic types"),
                                 )
                             })
                             .collect::<Vec<_>>(),
@@ -446,13 +446,6 @@ impl MemoryLayouts {
             ),
             kind => Err(format!("`{kind:?}` has no fixed process-memory layout")),
         }
-    }
-}
-
-fn declared_type_id(ty: DeclaredTypeRef, semantics: &SemanticModel) -> TypeId {
-    match ty {
-        DeclaredTypeRef::Core(core) => semantics.types().id_for_core(core),
-        DeclaredTypeRef::Standard(standard) => semantics.types().id_for_standard(standard),
     }
 }
 

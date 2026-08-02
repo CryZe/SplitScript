@@ -169,7 +169,29 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
             visit(*left);
             visit(*right);
         }
-        ExpressionKind::Call { arguments, .. } => {
+        ExpressionKind::Call { target, arguments } => {
+            let receiver = match target {
+                super::CallTarget::UserMethod {
+                    receiver:
+                        crate::semantic::ResolvedReceiver::Expression {
+                            expression: receiver,
+                            ..
+                        },
+                    ..
+                }
+                | super::CallTarget::Intrinsic {
+                    receiver:
+                        Some(crate::semantic::ResolvedReceiver::Expression {
+                            expression: receiver,
+                            ..
+                        }),
+                    ..
+                } => Some(*receiver),
+                _ => None,
+            };
+            if let Some(receiver) = receiver {
+                visit(receiver);
+            }
             arguments.iter().copied().for_each(&mut visit);
         }
         ExpressionKind::If {

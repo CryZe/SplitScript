@@ -134,6 +134,12 @@ impl<'a> Validator<'a> {
                             )
                         },
                     );
+                    if value.type_parameters.len() != 1 {
+                        self.error(format!(
+                            "capability `{}` must declare exactly one type parameter",
+                            value.name
+                        ));
+                    }
                     self.validate_owner(value, &value.type_parameters);
                 }
                 Declaration::TypeConstructor(value) => {
@@ -151,6 +157,36 @@ impl<'a> Validator<'a> {
                     self.validate_functions(&value.name, &value.functions, &[]);
                 }
                 Declaration::StateProvider(value) => self.validate_provider(value),
+            }
+        }
+        self.validate_capability_hierarchy();
+    }
+
+    fn validate_capability_hierarchy(&mut self) {
+        let hierarchy = self
+            .library
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                Declaration::Capability(capability) => Some((
+                    capability.name.as_str(),
+                    capability
+                        .type_parameters
+                        .first()
+                        .map(|parameter| parameter.constraints.as_slice())
+                        .unwrap_or_default(),
+                )),
+                _ => None,
+            })
+            .collect::<HashMap<_, _>>();
+        let mut completed = HashSet::new();
+        for capability in hierarchy.keys().copied() {
+            let mut active = HashSet::new();
+            if capability_hierarchy_has_cycle(capability, &hierarchy, &mut active, &mut completed) {
+                self.error(format!(
+                    "capability hierarchy contains a cycle through `{capability}`"
+                ));
+                break;
             }
         }
     }
@@ -176,17 +212,7 @@ impl<'a> Validator<'a> {
             }
             self.validate_documentation(&owner, &field.documentation, false);
             self.validate_attributes(&owner, &field.attributes, &[]);
-            match &field.ty {
-                Type::Name(name)
-                    if PrimitiveType::parse(name).is_some()
-                        || self.types.contains(name.as_str()) => {}
-                Type::Name(name) => {
-                    self.error(format!("field `{owner}` references unknown type `{name}`"))
-                }
-                ty => self.error(format!(
-                    "field `{owner}` must use a fixed nominal type, not `{ty}`"
-                )),
-            }
+            self.validate_type(&owner, &field.ty, &[]);
         }
         let owner = CallableOwnerDeclaration {
             name: value.name.clone(),
@@ -221,7 +247,7 @@ impl<'a> Validator<'a> {
                 self.error(format!("`{owner}` repeats function `{}`", function.name));
             }
             self.validate_documentation(&qualified, &function.documentation, true);
-            self.validate_attributes(&qualified, &function.attributes, &["intrinsic", "selector"]);
+            self.validate_attributes(&qualified, &function.attributes, &["intrinsic"]);
             let intrinsic = self
                 .optional_name_attribute(&qualified, &function.attributes, "intrinsic")
                 .is_some();
@@ -240,16 +266,6 @@ impl<'a> Validator<'a> {
             } else {
                 &function.type_parameters
             };
-            if let Some(selector) =
-                self.optional_name_attribute(&qualified, &function.attributes, "selector")
-                && !parameters
-                    .iter()
-                    .any(|parameter| parameter.name == selector)
-            {
-                self.error(format!(
-                    "`{qualified}` selects unknown type parameter `{selector}`"
-                ));
-            }
             let mut parameter_names = HashSet::new();
             for parameter in &function.parameters {
                 let parameter_owner = format!("{qualified}.{}", parameter.name);
@@ -272,16 +288,6 @@ impl<'a> Validator<'a> {
                 self.validate_type(&parameter_owner, &parameter.ty, parameters);
             }
             self.validate_type(&format!("{qualified} result"), &function.result, parameters);
-            if function.body.is_some()
-                && function
-                    .attributes
-                    .iter()
-                    .any(|attribute| attribute.name == "selector")
-            {
-                self.error(format!(
-                    "`{qualified}` uses a source body, but typed selectors are not supported yet"
-                ));
-            }
         }
     }
 
@@ -351,7 +357,13 @@ impl<'a> Validator<'a> {
                     parameter.name
                 ));
             }
+            let mut constraints = HashSet::new();
             for constraint in &parameter.constraints {
+                if !constraints.insert(constraint.as_str()) {
+                    self.error(format!(
+                        "`{owner}` repeats capability constraint `{constraint}`"
+                    ));
+                }
                 if !self.capabilities.contains(constraint.as_str()) {
                     self.error(format!(
                         "`{owner}` references unknown capability `{constraint}`"
@@ -369,6 +381,10 @@ impl<'a> Validator<'a> {
                     || parameters.iter().any(|parameter| parameter.name == *name) => {}
             Type::Name(name) => self.error(format!("`{owner}` references unknown type `{name}`")),
             Type::Array(element) => {
+                self.require_constructor(owner, "Array", 1);
+                self.validate_type(owner, element, parameters);
+            }
+            Type::FixedArray { element, .. } => {
                 self.require_constructor(owner, "Array", 1);
                 self.validate_type(owner, element, parameters);
             }
@@ -558,6 +574,31 @@ fn declaration_name(declaration: &Declaration) -> &str {
     }
 }
 
+fn capability_hierarchy_has_cycle<'a>(
+    capability: &'a str,
+    hierarchy: &HashMap<&'a str, &'a [String]>,
+    active: &mut HashSet<&'a str>,
+    completed: &mut HashSet<&'a str>,
+) -> bool {
+    if completed.contains(capability) {
+        return false;
+    }
+    if !active.insert(capability) {
+        return true;
+    }
+    let cyclic = hierarchy
+        .get(capability)
+        .into_iter()
+        .flat_map(|supers| supers.iter())
+        .filter(|super_capability| hierarchy.contains_key(super_capability.as_str()))
+        .any(|super_capability| {
+            capability_hierarchy_has_cycle(super_capability, hierarchy, active, completed)
+        });
+    active.remove(capability);
+    completed.insert(capability);
+    cyclic
+}
+
 fn declaration_items(declaration: &Declaration) -> Vec<String> {
     let (prefix, functions) = match declaration {
         Declaration::Root(value) => (String::new(), value.functions.as_slice()),
@@ -716,5 +757,24 @@ capability Values<T> {
         let generated = generate_catalog(&parse(source).unwrap()).unwrap();
         assert!(generated.contains("Implementation::LibraryBody"));
         assert!(generated.contains("TypeRef::Application"));
+    }
+
+    #[test]
+    fn capability_hierarchy_rejects_cycles() {
+        let source = r#"
+/// First capability.
+@behavior(declared)
+capability First<T: Second> {}
+/// Second capability.
+@behavior(declared)
+capability Second<T: First> {}
+"#;
+        let errors = generate_catalog(&parse(source).unwrap()).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("hierarchy contains a cycle")),
+            "{errors:#?}"
+        );
     }
 }

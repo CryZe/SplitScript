@@ -31,10 +31,11 @@ whileAttached {
     }
     debug print("debug statement")
     debug print(`debug local {debugCount}`)
+    debug print(debugCount)
     debug debugMessage()
     debug debugValue.trace()
     debug while false {
         print("debug loop")
     }
-    setVariable("Profile Value", count as String)
+    setVariable("Profile Value", count)
 }

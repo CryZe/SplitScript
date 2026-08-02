@@ -24,7 +24,7 @@ use crate::{
     },
     intrinsic_registry::{self, ScratchPolicy, ScratchType},
     semantic::{
-        FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember,
+        FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedReceiver,
         ResolvedRecordFieldId, ResolvedRecordId, ResolvedValue, ResolvedWrapperPattern,
         SemanticModel, ValueConversion,
     },
@@ -153,17 +153,15 @@ pub enum CallTarget {
     },
     UserMethod {
         function: FunctionInstance,
-        receiver: ResolvedValue,
+        receiver: ResolvedReceiver,
         receiver_type: TypeId,
-        receiver_members: Vec<ResolvedMember>,
     },
     Intrinsic {
         item: crate::stdlib::StdlibItemId,
         intrinsic: IntrinsicId,
         type_arguments: Vec<TypeId>,
-        receiver: Option<ResolvedValue>,
+        receiver: Option<ResolvedReceiver>,
         receiver_type: Option<TypeId>,
-        receiver_members: Vec<ResolvedMember>,
     },
     ResultError {
         result: ResultTypeId,
@@ -701,16 +699,14 @@ fn lower_call_target(
             signature,
             receiver,
             receiver_type,
-            receiver_members,
         } => CallTarget::UserMethod {
             function: FunctionInstance {
                 function: *function,
                 type_arguments: type_arguments.clone(),
                 signature: signature.clone(),
             },
-            receiver: *receiver,
+            receiver: receiver.clone(),
             receiver_type: *receiver_type,
-            receiver_members: receiver_members.clone(),
         },
         ResolvedCall::StandardLibrary {
             item,
@@ -718,15 +714,13 @@ fn lower_call_target(
             signature,
             receiver,
             receiver_type,
-            receiver_members,
         } => match typed_hir.standard_library().item(*item).implementation {
             Implementation::Intrinsic(intrinsic) => CallTarget::Intrinsic {
                 item: *item,
                 intrinsic,
                 type_arguments: type_arguments.clone(),
-                receiver: *receiver,
+                receiver: receiver.clone(),
                 receiver_type: *receiver_type,
-                receiver_members: receiver_members.clone(),
             },
             Implementation::LibraryBody { .. } => {
                 let function = typed_hir
@@ -736,9 +730,8 @@ fn lower_call_target(
                 if receiver.is_some() {
                     CallTarget::UserMethod {
                         function,
-                        receiver: receiver.expect("method calls have receivers"),
+                        receiver: receiver.clone().expect("method calls have receivers"),
                         receiver_type: receiver_type.expect("method calls have receiver types"),
-                        receiver_members: receiver_members.clone(),
                     }
                 } else {
                     CallTarget::UserFunction { function }
@@ -1068,7 +1061,7 @@ fn collect_expression_values(
                             ..
                         },
                     ..
-                } => Some(*receiver),
+                } => receiver.path().map(|(root, _)| root),
                 _ => None,
             };
             if let Some(ResolvedValue::Variable(value)) = root

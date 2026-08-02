@@ -258,6 +258,10 @@ impl InferenceContext {
         requirements: Requirements,
         largest_literal: Option<u64>,
     ) -> Type {
+        let requirements = Requirements(
+            self.standard_library
+                .minimal_capabilities(requirements.as_slice()),
+        );
         let id = self.variables.len() as u32;
         self.variables.push(Variable {
             parent: id,
@@ -396,8 +400,7 @@ impl InferenceContext {
             StdlibCapabilityId::Integer,
             StdlibCapabilityId::Numeric,
             StdlibCapabilityId::Signed,
-            StdlibCapabilityId::StringCast,
-            StdlibCapabilityId::Interpolatable,
+            StdlibCapabilityId::Display,
         ])
     }
 
@@ -451,6 +454,10 @@ impl InferenceContext {
                 let variable = self.root(variable);
                 let combined =
                     self.variables[variable as usize].requirements.clone() | requirements;
+                let combined = Requirements(
+                    self.standard_library
+                        .minimal_capabilities(combined.as_slice()),
+                );
                 if !requirements_are_possible(&self.standard_library, &self.types, &combined) {
                     return Err(error("incompatible type constraints"));
                 }
@@ -485,8 +492,7 @@ impl InferenceContext {
                 StdlibCapabilityId::Integer,
                 StdlibCapabilityId::Numeric,
                 StdlibCapabilityId::Signed,
-                StdlibCapabilityId::StringCast,
-                StdlibCapabilityId::Interpolatable,
+                StdlibCapabilityId::Display,
             ]) {
                 Some(self.known_builtin(BuiltinType::I32))
             } else {
@@ -811,8 +817,11 @@ impl InferenceContext {
         let right_variable = self.variables[right as usize].clone();
         let left_variable = self.variables[left as usize].clone();
         self.variables[right as usize].parent = left;
-        self.variables[left as usize].requirements =
-            left_variable.requirements.clone() | right_variable.requirements.clone();
+        let requirements = left_variable.requirements.clone() | right_variable.requirements.clone();
+        self.variables[left as usize].requirements = Requirements(
+            self.standard_library
+                .minimal_capabilities(requirements.as_slice()),
+        );
         self.variables[left as usize].largest_literal = left_variable
             .largest_literal
             .max(right_variable.largest_literal);

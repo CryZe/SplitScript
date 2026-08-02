@@ -704,6 +704,8 @@ pub enum ExprKind {
     Call {
         callee: Vec<String>,
         name_span: Span,
+        receiver: Option<Box<Expr>>,
+        type_arguments: Vec<TypeRef>,
         args: Vec<Expr>,
     },
 }

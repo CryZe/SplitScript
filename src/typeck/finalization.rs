@@ -185,7 +185,7 @@ impl Checker {
                 .any(|variable| generalized.contains(variable));
             if !belongs_to_scheme && self.inference.is_unbound_without_default(ty) {
                 self.error(
-                    "cannot infer the memory type read by `process.read`; add a result annotation such as `let value: i32! = process.read(address)`, or use `process.read.i32(address)`",
+                    "cannot infer the memory type read by `process.read`; add a result annotation such as `let value: i32! = process.read(address)`, or use `process.read<i32>(address)`",
                     span,
                 );
             }

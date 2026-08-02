@@ -311,7 +311,7 @@ fn global_types_are_inferred_from_uses_and_assignments() {
         let largeCounter = 0
 
         state "game.exe" {
-            value: i32 = process.read.i32(base.offset(fieldOffset))
+            value: i32 = process.read<i32>(base.offset(fieldOffset))
         }
 
         fn consumeU64(value: u64) {}
@@ -331,7 +331,7 @@ fn global_types_are_inferred_from_uses_and_assignments() {
 fn state_field_types_are_inferred_from_expressions_and_uses() {
     let source = r#"
         state "game.exe" {
-            expressionValue = process.read.u16(0)
+            expressionValue = process.read<u16>(0)
             usageValue = 0
             pointerValue at 0x1234
         }

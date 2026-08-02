@@ -349,7 +349,9 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 .function_type_parameters(function.id)
                 .iter()
                 .filter_map(|parameter| {
-                    let constraints = semantics.generic_parameter_constraints(*parameter);
+                    let constraints = context
+                        .standard_library
+                        .minimal_capabilities(semantics.generic_parameter_constraints(*parameter));
                     (!constraints.is_empty()).then(|| {
                         format!(
                             "{}: {}",
@@ -545,7 +547,7 @@ fn render_stdlib_symbol_hover(library: StandardLibrary, symbol: StdlibSymbolId) 
                     "{}.{}: {}",
                     owner.name,
                     declaration.name,
-                    library.render_declared_type(declaration.ty)
+                    library.render_type(declaration.ty)
                 ),
                 &declaration.documentation,
             )
@@ -590,9 +592,11 @@ fn append_examples(markdown: &mut String, examples: &[crate::catalog::Example]) 
     }
 }
 
+#[derive(Debug)]
 struct CallSite {
     open: Span,
     callee: Vec<String>,
+    explicit_type_arguments: Vec<String>,
     method_dot: Option<usize>,
     active_parameter: usize,
 }
@@ -613,22 +617,51 @@ fn active_call(document: &SourceDocument, offset: usize) -> Option<CallSite> {
         }
     }
     let open_index = *parentheses.last()?;
-    let (callee, method_dot) = callee_before(&tokens, open_index)?;
+    let (callee, explicit_type_arguments, method_dot) = callee_before(&tokens, open_index)?;
     let active_parameter = active_parameter(&tokens[open_index + 1..]);
     Some(CallSite {
         open: tokens[open_index].span,
         callee,
+        explicit_type_arguments,
         method_dot,
         active_parameter,
     })
 }
 
-fn callee_before(tokens: &[&Token], open: usize) -> Option<(Vec<String>, Option<usize>)> {
-    let method_dot = open
-        .checked_sub(2)
+fn callee_before(
+    tokens: &[&Token],
+    open: usize,
+) -> Option<(Vec<String>, Vec<String>, Option<usize>)> {
+    let mut cursor = open.checked_sub(1)?;
+    let mut explicit_type_arguments = Vec::new();
+    if tokens[cursor].kind == TokenKind::Gt {
+        let mut depth = 1usize;
+        while cursor > 0 {
+            cursor -= 1;
+            match tokens[cursor].kind {
+                TokenKind::Gt => depth += 1,
+                TokenKind::Lt => {
+                    depth -= 1;
+                    if depth == 0 {
+                        cursor = cursor.checked_sub(1)?;
+                        break;
+                    }
+                }
+                TokenKind::Ident(ref name) if depth == 1 => {
+                    explicit_type_arguments.push(name.clone())
+                }
+                _ => {}
+            }
+        }
+        if depth != 0 {
+            return None;
+        }
+        explicit_type_arguments.reverse();
+    }
+    let method_dot = cursor
+        .checked_sub(1)
         .filter(|index| tokens[*index].kind == TokenKind::Dot)
         .map(|index| tokens[index].span.start);
-    let mut cursor = open.checked_sub(1)?;
     let mut reversed = Vec::new();
     while let TokenKind::Ident(name) = &tokens[cursor].kind {
         reversed.push(name.clone());
@@ -645,7 +678,7 @@ fn callee_before(tokens: &[&Token], open: usize) -> Option<(Vec<String>, Option<
     }
     (!reversed.is_empty()).then(|| {
         reversed.reverse();
-        (reversed, method_dot)
+        (reversed, explicit_type_arguments, method_dot)
     })
 }
 
@@ -654,24 +687,7 @@ fn infer_method_call(
     call: &CallSite,
     compiler_context: &crate::CompilerContext,
 ) -> Option<(StdlibItemId, Vec<TypeId>, SemanticContext)> {
-    let selector_candidate = if call.callee.len() >= 3 {
-        let selector = call.callee.last()?;
-        let method = &call.callee[call.callee.len() - 2];
-        compiler_context
-            .standard_library()
-            .method_candidates_with_selector(method, Some(selector))
-            .into_iter()
-            .next()
-            .map(|candidate| (method.as_str(), candidate))
-    } else {
-        None
-    };
-    let selector_dot = call.method_dot?;
-    let method_dot = if selector_candidate.is_some() {
-        source[..selector_dot].rfind('.')?
-    } else {
-        selector_dot
-    };
+    let method_dot = call.method_dot?;
     let line_end = source[call.open.start..]
         .find('\n')
         .map_or(source.len(), |relative| call.open.start + relative);
@@ -679,33 +695,36 @@ fn infer_method_call(
     probe_source.push_str(&source[..method_dot]);
     probe_source.push_str(&source[line_end..]);
     let mut probe = CompilerDatabase::with_context(compiler_context.clone(), probe_source);
-    let analysis = probe.analysis_at(method_dot.checked_sub(1)?).ok()??;
-    let semantic = semantic_context(&mut probe)?;
+    let line_start = source[..method_dot]
+        .rfind(['\n', '\r'])
+        .map_or(0, |offset| offset + 1);
+    let analysis = (line_start..method_dot)
+        .rev()
+        .find_map(|offset| probe.analysis_at(offset).ok().flatten());
+    let analysis = analysis?;
+    let semantic = semantic_context(&mut probe);
+    let semantic = semantic?;
     let applicable = compiler_context
         .standard_library()
         .methods_for_type(&analysis.type_kind);
-    let (item, type_arguments) = if let Some((method_name, candidate)) = selector_candidate {
-        let item = candidate.item;
-        if item.name != method_name || !applicable.iter().any(|method| method.id == item.id) {
-            return None;
-        }
-        let type_arguments = candidate
-            .type_arguments
-            .iter()
-            .map(|(_, ty)| semantic.semantics().types().id_for_core(*ty))
-            .collect();
-        (item, type_arguments)
+    let method_name = call.callee.last()?;
+    let item = applicable.into_iter().find(|item| {
+        matches!(item.kind, crate::stdlib::ItemKind::Method { .. }) && item.name == method_name
+    })?;
+    let type_arguments = if call.explicit_type_arguments.is_empty() {
+        inferred_method_type_arguments(item, analysis.ty, &analysis.type_kind)
     } else {
-        let method_name = call.callee.last()?;
-        let item = applicable.into_iter().find(|item| {
-            matches!(
-                item.kind,
-                crate::stdlib::ItemKind::Method { .. }
-                    | crate::stdlib::ItemKind::TypedMethod { .. }
-            ) && item.name == method_name
-        })?;
-        let type_arguments = inferred_method_type_arguments(item, analysis.ty, &analysis.type_kind);
-        (item, type_arguments)
+        call.explicit_type_arguments
+            .iter()
+            .filter_map(|name| {
+                compiler_context
+                    .standard_library()
+                    .core_types()
+                    .iter()
+                    .find(|ty| ty.name == name)
+                    .map(|ty| semantic.semantics().types().id_for_core(ty.id))
+            })
+            .collect()
     };
     Some((item.id, type_arguments, semantic))
 }
@@ -716,9 +735,8 @@ fn inferred_method_type_arguments(
     receiver_kind: &TypeKind,
 ) -> Vec<TypeId> {
     let declared = match item.kind {
-        crate::stdlib::ItemKind::Method { receiver }
-        | crate::stdlib::ItemKind::TypedMethod { receiver, .. } => receiver,
-        crate::stdlib::ItemKind::Function | crate::stdlib::ItemKind::TypedFunction { .. } => {
+        crate::stdlib::ItemKind::Method { receiver } => receiver,
+        crate::stdlib::ItemKind::Function => {
             return Vec::new();
         }
     };
@@ -896,7 +914,7 @@ whileAttached {
 
     #[test]
     fn language_hover_is_served_from_the_language_catalog() {
-        let source = "state \"game.exe\" {}\nwhileAttached { retry process.read.i32(0) }";
+        let source = "state \"game.exe\" {}\nwhileAttached { retry process.read<i32>(0) }";
         let offset = source.find("retry").unwrap() + 1;
         let mut database = CompilerDatabase::new(source);
         let hover = database.hover(offset).unwrap().expect("language hover");
@@ -942,6 +960,40 @@ whileAttached {
                 .contains("configured process name that matched during attachment")
         );
         assert!(hover.markdown.contains("requires an attached process"));
+    }
+
+    #[test]
+    fn main_module_hover_explains_matched_process_identity() {
+        let source = "state [\"game.exe\", \"demo.exe\"] {}\nonAttach { let executable = await process.mainModule() }";
+        let offset = source.find("mainModule").unwrap() + 1;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(offset)
+            .unwrap()
+            .expect("process.mainModule hover");
+        assert!(hover.markdown.contains("Process.mainModule() -> Module"));
+        assert!(hover.markdown.contains("main executable module"));
+        assert!(hover.markdown.contains("available in onAttach; suspends"));
+    }
+
+    #[test]
+    fn process_closed_hover_explains_inert_attachment_waiting() {
+        let source = "state \"game.exe\" {}\nonAttach { await process.closed() }";
+        let offset = source.find("closed").unwrap() + 1;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(offset)
+            .unwrap()
+            .expect("process.closed hover");
+        assert!(hover.markdown.contains("Process.closed() -> void"));
+        assert!(
+            hover
+                .markdown
+                .contains("never closes or detaches the process itself")
+        );
+        assert!(hover.markdown.contains(
+            "available in onAttach; suspends; requires an attached process; cancels when the process closes"
+        ));
     }
 
     #[test]
@@ -1136,7 +1188,7 @@ whileAttached {
     fn source_function_hover_renders_propagated_effects_after_semantic_validation_errors() {
         let source = r#"
 fn readValue() -> f32! {
-    return process.read.f32(0)
+    return process.read<f32>(0)
 }
 fn bar() -> f32! {
     return readValue()
@@ -1214,6 +1266,54 @@ whileAttached {
     }
 
     #[test]
+    fn string_conversion_and_interpolation_share_the_display_capability() {
+        let source = r#"
+fn twoDigits(value) {
+    if value == 0 {
+        return "00"
+    }
+    if value < 10 {
+        return `0{value}`
+    }
+    return value as String
+}
+state "game.exe" {}
+whileAttached {
+    let value = twoDigits(7u32)
+}
+"#;
+        let offset = source.rfind("twoDigits").unwrap();
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(offset)
+            .unwrap()
+            .expect("generic function hover");
+        assert_eq!(
+            hover.markdown.lines().nth(1),
+            Some("fn twoDigits(value: T) -> String where T: Integer"),
+            "{}",
+            hover.markdown
+        );
+    }
+
+    #[test]
+    fn integer_hierarchy_removes_redundant_lunistice_level_text_bounds() {
+        let source = include_str!("../examples/lunistice.split");
+        let offset = source.find("levelText").unwrap();
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(offset)
+            .unwrap()
+            .expect("levelText function hover");
+        assert_eq!(
+            hover.markdown.lines().nth(1),
+            Some("fn levelText(level: T) -> String where T: Integer"),
+            "{}",
+            hover.markdown
+        );
+    }
+
+    #[test]
     fn signature_help_tracks_nested_arguments_and_inferred_types() {
         let source = r#"
 state "game.exe" {}
@@ -1254,20 +1354,39 @@ whileAttached {
     }
 
     #[test]
-    fn signature_help_probes_typed_methods_on_captured_process_values() {
+    fn signature_help_resolves_explicit_types_on_captured_process_values() {
         let source = concat!(
             "state \"game.exe\" {}\n",
             "whileAttached {\n",
             "    let attached = process\n",
-            "    let value = attached.read.u32(\n",
+            "    let value = attached.read<u32>(\n",
             "}\n"
         );
-        let offset = source.find("read.u32(").unwrap() + "read.u32(".len();
+        let offset = source.find("read<u32>(").unwrap() + "read<u32>(".len();
         let mut database = CompilerDatabase::new(source);
         let help = database
             .signature_help(offset)
             .unwrap()
-            .expect("typed method signature help");
+            .expect("explicit generic method signature help");
+        assert!(help.signatures[0].label.starts_with("Process.read"));
+        assert!(help.signatures[0].label.contains("-> u32!"));
+    }
+
+    #[test]
+    fn signature_help_resolves_explicit_types_on_expression_receivers() {
+        let source = concat!(
+            "state \"game.exe\" {}\n",
+            "fn attachedProcess() { return process }\n",
+            "whileAttached {\n",
+            "    let value = attachedProcess().read<u32>(\n",
+            "}\n"
+        );
+        let offset = source.find("read<u32>(").unwrap() + "read<u32>(".len();
+        let mut database = CompilerDatabase::new(source);
+        let help = database
+            .signature_help(offset)
+            .unwrap()
+            .expect("expression receiver should retain generic method signature help");
         assert!(help.signatures[0].label.starts_with("Process.read"));
         assert!(help.signatures[0].label.contains("-> u32!"));
     }

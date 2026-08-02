@@ -9,7 +9,7 @@
 /// ```splitscript
 /// state "game.exe" {}
 /// whileAttached {
-///     let health = process.read.i32(0x1234) else 0
+///     let health = process.read<i32>(0x1234) else 0
 /// }
 /// ```
 @processType(Process)
@@ -55,12 +55,12 @@ root {
     /// Write to the runtime log
     ///
     /// ```splitscript
-    /// print("Attached to the game")
+    /// print(42)
     /// ```
     @intrinsic(Print)
-    fn print(
-        /// The message to write to the runtime log.
-        message: String,
+    fn print<T: Display>(
+        /// The value to write to the runtime log.
+        message: T,
     ) -> void;
 
     /// Sets a LiveSplit custom variable.
@@ -72,14 +72,15 @@ root {
     /// Expose a layout variable
     ///
     /// ```splitscript
-    /// setVariable("Level", levelName)
+    /// setVariable("Points", 42)
     /// ```
     @intrinsic(TimerSetVariable)
-    fn setVariable(
+    fn setVariable<T: Display>(
         /// The variable name.
         name: String,
-        /// The displayed value.
-        value: String,
+        /// The displayed value. It is converted to text using the same rules
+        /// as string interpolation.
+        value: T,
     ) -> void;
 
     /// Changes the autosplitter tick rate.
@@ -136,6 +137,40 @@ intrinsic type Process {
     @intrinsic(ProcessName)
     fn name() -> String;
 
+    /// Waits for the main executable module.
+    ///
+    /// The module name comes from the exact process candidate that matched
+    /// during attachment. This is useful for version probes based on the main
+    /// module's address or mapped size without repeating executable names.
+    ///
+    /// # Example
+    ///
+    /// Inspect the main module
+    ///
+    /// ```splitscript
+    /// let executable = await process.mainModule()
+    /// ```
+    @intrinsic(ProcessMainModule)
+    fn mainModule() -> Module;
+
+    /// Ignores the current attachment until the process closes.
+    ///
+    /// This suspension never closes or detaches the process itself and never
+    /// completes normally. When the process closes, the automatic process
+    /// lifetime boundary cancels `onAttach` before it can resume.
+    ///
+    /// # Example
+    ///
+    /// Ignore an unsupported build
+    ///
+    /// ```splitscript
+    /// if unsupported {
+    ///     await process.closed()
+    /// }
+    /// ```
+    @intrinsic(ProcessClosed)
+    fn closed() -> void;
+
     /// Waits for a process module.
     ///
     /// Suspends attachment until both module address and size are available.
@@ -156,17 +191,16 @@ intrinsic type Process {
 
     /// Reads a fixed-layout value from process memory.
     ///
-    /// The expected MemoryReadable type selects a fixed-size primitive or record layout. A synchronous read returns T!; retry polls until a value is available and yields T. Use a suffix such as process.read.i32 when context cannot determine a primitive type.
+    /// The expected MemoryReadable type selects a fixed-size primitive or record layout. A synchronous read returns T!; retry polls until a value is available and yields T. Use an explicit type argument such as process.read<i32> when context cannot determine the type.
     ///
     /// # Example
     ///
     /// Read a typed value
     ///
     /// ```splitscript
-    /// let health = process.read.i32(player.offset(0x20)) else 0
+    /// let health = process.read<i32>(player.offset(0x20)) else 0
     /// ```
     @intrinsic(ProcessRead)
-    @selector(T)
     fn read<T: MemoryReadable>(
         /// The target address to read.
         address: address,
@@ -330,9 +364,10 @@ namespace Unity {
 
 /// Supports ordered numeric operations.
 ///
-/// Numeric values provide minimum, maximum, and clamping operations while preserving their inferred type.
+/// Numeric values provide minimum, maximum, clamping, ordered comparisons, and
+/// equality while preserving their inferred type.
 @behavior(declared)
-capability Numeric<T> {
+capability Numeric<T: Equatable> {
     /// Returns the smaller of two numeric values.
     ///
     /// Both values have the same inferred numeric type and are evaluated once.
@@ -391,21 +426,24 @@ capability Numeric<T> {
 
 /// Identifies integral numeric types.
 ///
-/// Integer operations and inference constraints accept only whole-number representations.
+/// Integer operations and inference constraints accept only whole-number
+/// representations. Every integer is also numeric and displayable.
 @behavior(declared)
-capability Integer<T> {}
+capability Integer<T: Numeric + Display> {}
 
 /// Identifies signed numeric types.
 ///
-/// Signed values can represent numbers below zero.
+/// Signed values can represent numbers below zero and support all numeric
+/// operations.
 @behavior(declared)
-capability Signed<T> {}
+capability Signed<T: Numeric> {}
 
 /// Identifies floating-point types.
 ///
-/// Floating-point constraints accept f32 and f64 values.
+/// Floating-point constraints accept f32 and f64 values and imply signed
+/// numeric behavior.
 @behavior(declared)
-capability Float<T> {}
+capability Float<T: Signed> {}
 
 /// Supports equality comparison.
 ///
@@ -413,17 +451,12 @@ capability Float<T> {}
 @behavior(structuralEquality)
 capability Equatable<T> {}
 
-/// Supports explicit conversion to String.
+/// Supports conversion to a user-facing textual representation.
 ///
-/// Values with this capability may be converted with an `as String` cast.
+/// An `as String` cast, string interpolation, `print`, and `setVariable` all
+/// display values through this single capability.
 @behavior(declared)
-capability StringCast<T> {}
-
-/// Supports insertion into interpolated strings.
-///
-/// Interpolated strings convert values with this capability into their textual representation.
-@behavior(declared)
-capability Interpolatable<T> {}
+capability Display<T> {}
 
 /// Supports deserialization from process memory.
 ///
@@ -549,6 +582,34 @@ extend address {
         /// The full-width address offset.
         offset: u64,
     ) -> address;
+
+    /// Builds a pointer path rooted at this address.
+    ///
+    /// Each dereference offset is applied before reading the next native
+    /// pointer. The final offset is applied without another dereference.
+    ///
+    /// # Example
+    ///
+    /// Describe a player health path
+    ///
+    /// ```splitscript
+    /// let health = module.address.memoryPath([0x100, 0x20], 0x18, pointerSize)
+    /// ```
+    fn memoryPath(
+        /// Offsets that each end in a native pointer read.
+        dereferences: [u64],
+        /// Offset applied after the final pointer read.
+        finalOffset: u64,
+        /// Native pointer width used by the target executable.
+        pointerSize: PointerSize,
+    ) -> MemoryPath {
+        return MemoryPath {
+            base: self,
+            dereferences: dereferences,
+            finalOffset: finalOffset,
+            pointerSize: pointerSize
+        }
+    }
 }
 
 /// Stores immutable UTF-8 text.
@@ -556,7 +617,7 @@ extend address {
 /// String literals, interpolation, process decoders, and timer variables use garbage-collected strings.
 @representation(gcArray, u8, mutable, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
-@capabilities(Equatable, Interpolatable)
+@capabilities(Equatable, Display)
 intrinsic type String {
     /// Returns a string's UTF-8 byte length.
     ///
@@ -567,13 +628,10 @@ intrinsic type String {
     /// Measure UTF-8 text
     ///
     /// ```splitscript
-    /// let byteLength = String.length(levelName)
+    /// let byteLength = levelName.byteLength()
     /// ```
     @intrinsic(StringLength)
-    static fn length(
-        /// The string whose UTF-8 byte length is returned.
-        value: String,
-    ) -> u32;
+    fn byteLength() -> u32;
 
     /// Concatenates an array of strings.
     ///
@@ -714,6 +772,63 @@ struct Duration {
     }
 }
 
+/// Describes the native pointer width used by a process module.
+///
+/// Pointer width controls how deep pointer paths decode intermediate addresses.
+@representation(enum, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@capabilities(Equatable)
+enum PointerSize {
+    /// Intermediate pointers contain 32-bit addresses.
+    Bit32,
+
+    /// Intermediate pointers contain 64-bit addresses.
+    Bit64,
+}
+
+/// Describes a native pointer chain rooted at an address.
+///
+/// A path keeps version-specific pointer data separate from state polling and
+/// resolves every intermediate pointer according to the executable's width.
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct MemoryPath {
+    /// Returns the address at which traversal starts.
+    base: address,
+
+    /// Returns the offsets that each end in an intermediate pointer read.
+    dereferences: [u64],
+
+    /// Returns the offset applied after the final pointer read.
+    finalOffset: u64,
+
+    /// Returns the native pointer width used during traversal.
+    pointerSize: PointerSize,
+
+    /// Resolves the path against the attached process.
+    ///
+    /// Failed and null intermediate pointer reads propagate as a Result error.
+    ///
+    /// # Example
+    ///
+    /// Resolve a discovered path
+    ///
+    /// ```splitscript
+    /// let healthAddress = health.resolve() else return
+    /// ```
+    fn resolve() -> address! {
+        let current = self.base
+        for offset in self.dereferences {
+            let pointerAddress = current.add(offset)
+            current = match self.pointerSize {
+                PointerSize.Bit32 => process.read<u32>(pointerAddress)? as address,
+                PointerSize.Bit64 => process.read<u64>(pointerAddress)? as address
+            }
+        }
+        return Ok(current.add(self.finalOffset))
+    }
+}
+
 /// Describes a module loaded in the attached process.
 ///
 /// A module exposes its base address and mapped size for bounded memory discovery.
@@ -725,6 +840,42 @@ struct Module {
 
     /// Returns the mapped module size.
     size: u64,
+
+    /// Determines the pointer width of a Windows PE module.
+    ///
+    /// The DOS, PE, and optional-header signatures are validated before the
+    /// PE32 or PE32+ pointer width is returned. Unsupported binary formats and
+    /// failed reads are returned as errors.
+    ///
+    /// # Example
+    ///
+    /// Inspect a module's pointer width
+    ///
+    /// ```splitscript
+    /// let pointerSize = retry executable.pointerSize()
+    /// ```
+    fn pointerSize() -> PointerSize! {
+        let dosMagic = process.read<u16>(self.address)?
+        if dosMagic != 0x5a4d {
+            throw "module does not have a DOS header"
+        }
+
+        let peOffset = process.read<u32>(self.address.add(0x3c))?
+        let peHeader = self.address.add(peOffset as u64)
+        let peMagic = process.read<u32>(peHeader)?
+        if peMagic != 0x00004550 {
+            throw "module does not have a PE header"
+        }
+
+        let optionalMagic = process.read<u16>(peHeader.add(0x18))?
+        if optionalMagic == 0x010b {
+            return Ok(PointerSize.Bit32)
+        }
+        if optionalMagic == 0x020b {
+            return Ok(PointerSize.Bit64)
+        }
+        throw "module has an unsupported PE optional header"
+    }
 
     /// Scans a module for a signature.
     ///
@@ -996,4 +1147,74 @@ struct GbaEmulator {
 struct CatalogRecordProbe {
     /// Returns the probe value.
     value: u32,
+
+    /// Builds the constructed-field test fixture.
+    ///
+    /// Preserves both constructed values through an ordinary source-defined
+    /// standard-library body.
+    ///
+    /// # Example
+    ///
+    /// Build a constructed-field fixture
+    ///
+    /// ```splitscript
+    /// let values = probe.constructed([3, 5], Some(8))
+    /// ```
+    fn constructed(
+        /// Values stored by the fixture.
+        values: [u64; 2],
+        /// Optional fallback stored by the fixture.
+        fallback: u32?,
+    ) -> CatalogConstructedFieldProbe {
+        return CatalogConstructedFieldProbe {
+            values: values,
+            fallback: fallback
+        }
+    }
+
+    /// Preserves an exact two-element array through generic inference.
+    ///
+    /// Returns the same pair without widening it to an unsized array.
+    ///
+    /// # Example
+    ///
+    /// Keep a pair
+    ///
+    /// ```splitscript
+    /// let pair = probe.fixedPair([3, 5])
+    /// ```
+    fn fixedPair<T>(
+        /// Values stored in the pair.
+        values: [T; 2],
+    ) -> [T; 2] {
+        return values
+    }
+}
+
+/// Exercises constructed field types in standard-library records.
+///
+/// This declaration exists only in tests and verifies that catalog records use
+/// the same array and wrapper type machinery as ordinary source records.
+@testOnly
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct CatalogConstructedFieldProbe {
+    /// Returns the stored values.
+    values: [u64; 2],
+
+    /// Returns the optional fallback value.
+    fallback: u32?,
+}
+
+/// Exercises fixed-array fields in structural process-memory layouts.
+///
+/// This declaration exists only in tests and verifies that catalog records
+/// preserve an exact array length while deriving `MemoryReadable`.
+@testOnly
+@representation(gcStruct, nullable)
+@valueUsage(localVariable)
+@capabilities(MemoryReadable)
+struct CatalogFixedMemoryProbe {
+    /// Returns three adjacent native-endian values.
+    values: [u16; 3],
 }

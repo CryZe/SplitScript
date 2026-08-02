@@ -30,7 +30,7 @@ state ["Lunistice.exe", "Lunistice-Demo.exe"] {
     levelTime = process.read(timerInstance.offset(levelTimeOffset))
     levelTimeParts = process.read(timerInstance.offset(levelTimeVectorOffset))
     timerStopped = process.read(timerInstance.offset(timerStoppedOffset))
-    character = process.read.u32(timerInstance.offset(characterOffset))
+    character = process.read<u32>(timerInstance.offset(characterOffset))
 }
 
 let gameManagerInstance = 0
@@ -184,8 +184,8 @@ whileAttached {
     }
     lastTimerState = timerState
 
-    setVariable("Points", current.points as String)
-    setVariable("Resets", current.deaths as String)
+    setVariable("Points", current.points)
+    setVariable("Resets", current.deaths)
     setVariable("Level Time", levelTimeText(current.levelTimeParts))
     setVariable(levelOrSceneVariable(current.levelOrScene), levelOrSceneText(current.levelOrScene))
     setVariable("Character", characterName(current.character, isDlcDemo))

@@ -10,7 +10,10 @@ use crate::{
     catalog::Documentation,
     database::{CompilerDatabase, SemanticQueryResult},
     documentation::StandardLibraryDocumentation,
+    hir::ExpressionResolution,
     language::{LanguageCatalog, LanguageItem, LanguageItemId, LanguageItemKind},
+    lexer::{self, TokenKind},
+    semantic::ResolvedCall,
     stdlib::{ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibNamespace, TypeRef},
     stdlib_semantic::StandardLibrarySemanticExt,
     types::TypeKind,
@@ -60,11 +63,74 @@ pub(crate) fn complete(
     let syntax = database.recovering_parse()?.syntax().clone();
     if let Some(completions) = complete_state_decoder(&source, offset) {
         Ok(completions)
+    } else if let Some(completions) =
+        complete_type_argument(&source, &syntax, offset, &standard_library)
+    {
+        Ok(completions)
     } else if let Some(context) = member_context(&source, offset) {
         Ok(complete_member(&source, &syntax, context, compiler_context))
     } else {
         Ok(complete_root(&source, &syntax, offset, standard_library))
     }
+}
+
+fn complete_type_argument(
+    source: &str,
+    syntax: &Program,
+    offset: usize,
+    library: &StandardLibrary,
+) -> Option<CompletionList> {
+    let replacement = identifier_span(source, offset);
+    let before = &source[..replacement.start];
+    let open = before.rfind('<')?;
+    let name_end = open;
+    let mut name_start = name_end;
+    while name_start > 0 && is_identifier_byte(source.as_bytes()[name_start - 1]) {
+        name_start -= 1;
+    }
+    if name_start == name_end {
+        return None;
+    }
+    let name = &source[name_start..name_end];
+    let is_generic_call = library
+        .items()
+        .iter()
+        .any(|item| item.name == name && item.signature.explicit_type_parameters != 0);
+    if !is_generic_call || source[open + 1..replacement.start].contains(['>', '(', ')', '{', '}']) {
+        return None;
+    }
+
+    let prefix = source[replacement.start..offset].to_owned();
+    let mut builder = CompletionBuilder::new(prefix, replacement);
+    for ty in library.core_types() {
+        builder.add(simple_completion(
+            ty.name,
+            CompletionKind::Type,
+            "primitive type",
+        ));
+    }
+    for ty in library.types() {
+        builder.add(simple_completion(
+            ty.name,
+            CompletionKind::Type,
+            "standard-library type",
+        ));
+    }
+    for record in &syntax.records {
+        builder.add(simple_completion(
+            &record.name,
+            CompletionKind::Struct,
+            "record type",
+        ));
+    }
+    for enumeration in &syntax.enums {
+        builder.add(simple_completion(
+            &enumeration.name,
+            CompletionKind::Enum,
+            "enum type",
+        ));
+    }
+    Some(builder.finish())
 }
 
 fn complete_state_decoder(source: &str, offset: usize) -> Option<CompletionList> {
@@ -199,41 +265,6 @@ fn complete_member(
         .map(String::as_str)
         .collect::<Vec<_>>();
 
-    if let Some((method_name, receiver_path)) = path.split_last()
-        && !receiver_path.is_empty()
-        && let Some(previous_dot) = source[..context.dot].rfind('.')
-    {
-        let receiver_context = MemberContext {
-            receiver_path: receiver_path
-                .iter()
-                .map(|segment| (*segment).to_owned())
-                .collect(),
-            dot: previous_dot,
-            prefix: String::new(),
-            replacement: Span {
-                start: previous_dot + 1,
-                end: context.replacement.end,
-            },
-        };
-        if let Some((receiver, _, _)) =
-            infer_receiver(source, &receiver_context, compiler_context.clone())
-            && standard_library
-                .methods_for_type(&receiver)
-                .into_iter()
-                .any(|item| {
-                    item.name == *method_name && matches!(item.kind, ItemKind::TypedMethod { .. })
-                })
-        {
-            for ty in memory_read_type_names() {
-                builder.add(simple_completion(
-                    ty,
-                    CompletionKind::Type,
-                    "memory read type",
-                ));
-            }
-        }
-    }
-
     match path.as_slice() {
         ["current"] | ["old"] => {
             if let Some(state) = &syntax.state {
@@ -295,31 +326,12 @@ fn complete_member(
                 );
             }
         }
-        [provider_name, method_name] => {
-            if let Some(provider) = selected_provider(syntax, &standard_library)
-                && provider.value_name == *provider_name
-                && standard_library
-                    .method_candidates_with_selector(method_name, None)
-                    .iter()
-                    .any(|candidate| {
-                        matches!(candidate.item.kind, ItemKind::TypedMethod {
-                            receiver: TypeRef::Standard(receiver), ..
-                        } if receiver == provider.process_type)
-                    })
-            {
-                for ty in memory_read_type_names() {
-                    builder.add(simple_completion(
-                        ty,
-                        CompletionKind::Type,
-                        "memory read type",
-                    ));
-                }
-            }
-        }
         _ => {}
     }
 
-    add_standard_library_path_members(&mut builder, &path, &standard_library);
+    if !path.is_empty() {
+        add_standard_library_path_members(&mut builder, &path, &standard_library);
+    }
 
     if let Some((receiver, constraints, probe_syntax)) =
         infer_receiver(source, &context, compiler_context)
@@ -500,29 +512,6 @@ fn add_standard_library_path_members(
         namespace.path.len() == prefix.len() + 1 && namespace.path[..prefix.len()] == *prefix
     }) {
         builder.add(stdlib_namespace_completion(namespace));
-    }
-
-    for item in library.items() {
-        if !matches!(item.kind, ItemKind::TypedFunction { .. }) {
-            continue;
-        }
-        if library
-            .item_path(item)
-            .is_some_and(|declared| declared == prefix)
-        {
-            for ty in memory_read_type_names() {
-                let documentation =
-                    StandardLibraryDocumentation::generate_with_library(library, item.id, &[]);
-                builder.add(CompletionItem {
-                    label: (*ty).to_owned(),
-                    kind: CompletionKind::Type,
-                    detail: Some(format!("{}.{ty}", item.qualified_name)),
-                    documentation: Some(documentation.summary_markdown()),
-                    insert_text: function_snippet(ty, item),
-                    is_snippet: true,
-                });
-            }
-        }
     }
 }
 
@@ -912,9 +901,8 @@ fn add_inferred_methods(
                         .methods()
                         .filter(|item| {
                             let receiver = match item.kind {
-                                ItemKind::Method { receiver }
-                                | ItemKind::TypedMethod { receiver, .. } => receiver,
-                                ItemKind::Function | ItemKind::TypedFunction { .. } => {
+                                ItemKind::Method { receiver } => receiver,
+                                ItemKind::Function => {
                                     return false;
                                 }
                             };
@@ -926,10 +914,10 @@ fn add_inferred_methods(
                                 .iter()
                                 .find(|candidate| candidate.name == parameter)
                                 .is_some_and(|parameter| {
-                                    parameter
-                                        .constraints
-                                        .iter()
-                                        .all(|constraint| generic_constraints.contains(constraint))
+                                    parameter.constraints.iter().all(|constraint| {
+                                        standard_library
+                                            .capabilities_satisfy(generic_constraints, *constraint)
+                                    })
                                 })
                         })
                         .collect::<Vec<_>>()
@@ -937,7 +925,7 @@ fn add_inferred_methods(
                 .unwrap_or_default(),
         );
     for item in methods {
-        let (ItemKind::Method { .. } | ItemKind::TypedMethod { .. }) = item.kind else {
+        let ItemKind::Method { .. } = item.kind else {
             unreachable!()
         };
         builder.add(stdlib_completion(
@@ -1001,21 +989,111 @@ fn infer_receiver(
     context: &MemberContext,
     compiler_context: crate::CompilerContext,
 ) -> Option<(TypeKind, Vec<StdlibCapabilityId>, Program)> {
+    let receiver_offset = context.dot.checked_sub(1)?;
+    // When completing `receiver.method`, analysis at the end of `receiver`
+    // can resolve the surrounding call. Its recorded receiver type is the
+    // type whose methods we need. For `receiver.method().`, however, the
+    // completed call is itself the new receiver, so its result type is the
+    // correct one. Non-path receivers have no textual receiver segments.
+    let use_resolved_call_receiver = !context.receiver_path.is_empty();
+    if let Some(receiver) = analyze_receiver_source(
+        source.to_owned(),
+        receiver_offset,
+        compiler_context.clone(),
+        use_resolved_call_receiver,
+    ) {
+        return Some(receiver);
+    }
+
     let mut probe_source = String::with_capacity(source.len());
     probe_source.push_str(&source[..context.dot]);
-    probe_source.push_str(&source[context.replacement.end..]);
-    let mut probe = CompilerDatabase::with_context(compiler_context, probe_source);
-    let receiver_offset = context.dot.checked_sub(1)?;
-    let analysis = probe.analysis_at(receiver_offset).ok()??;
-    let constraints = probe
-        .semantic_snapshot()
-        .ok()?
+    let suffix_start = completion_probe_suffix_end(source, context.replacement.end);
+    probe_source.push_str(&source[suffix_start..]);
+    analyze_receiver_source(probe_source, receiver_offset, compiler_context, false)
+}
+
+fn analyze_receiver_source(
+    source: String,
+    receiver_offset: usize,
+    compiler_context: crate::CompilerContext,
+    use_resolved_call_receiver: bool,
+) -> Option<(TypeKind, Vec<StdlibCapabilityId>, Program)> {
+    let mut database = CompilerDatabase::with_context(compiler_context, source);
+    let analysis = database.analysis_at(receiver_offset).ok()??;
+    let snapshot = database.semantic_snapshot().ok()?;
+    let resolved_call_receiver = match &analysis.resolution {
+        Some(ExpressionResolution::Call(ResolvedCall::UserMethod { receiver_type, .. })) => {
+            Some(*receiver_type)
+        }
+        Some(ExpressionResolution::Call(ResolvedCall::StandardLibrary {
+            receiver_type: Some(receiver_type),
+            ..
+        })) => Some(*receiver_type),
+        _ => None,
+    };
+    let receiver_type = if use_resolved_call_receiver {
+        resolved_call_receiver?
+    } else {
+        analysis.ty
+    };
+    let constraints = snapshot
         .semantics()
-        .generic_parameter_constraints(analysis.ty)
+        .generic_parameter_constraints(receiver_type)
         .to_vec();
-    let receiver = analysis.type_kind;
-    let syntax = probe.recovering_parse().ok()?.syntax().clone();
+    let receiver = snapshot.semantics().types().kind(receiver_type).clone();
+    let syntax = database.recovering_parse().ok()?.syntax().clone();
     Some((receiver, constraints, syntax))
+}
+
+/// Removes an already-written call and propagation suffix from a completion
+/// probe. When completion is manually requested on `receiver.method()`, the
+/// identifier replacement alone would leave `receiver()` and infer the wrong
+/// expression (or fail to type it entirely). The probe needs the type of the
+/// expression before the member dot, regardless of whether the member text is
+/// partial or already followed by its postfix syntax.
+fn completion_probe_suffix_end(source: &str, identifier_end: usize) -> usize {
+    let Ok(lexed) = lexer::lex_lossless(source) else {
+        return identifier_end;
+    };
+    let tokens = lexed.tokens().collect::<Vec<_>>();
+    let Some(mut index) = tokens
+        .iter()
+        .position(|token| token.span.start >= identifier_end)
+    else {
+        return identifier_end;
+    };
+    if !matches!(tokens[index].kind, TokenKind::LParen) {
+        return identifier_end;
+    }
+
+    let mut depth = 0_u32;
+    let mut end = identifier_end;
+    while let Some(token) = tokens.get(index) {
+        match token.kind {
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen => {
+                depth -= 1;
+                if depth == 0 {
+                    end = token.span.end;
+                    index += 1;
+                    break;
+                }
+            }
+            TokenKind::Eof => return identifier_end,
+            _ => {}
+        }
+        index += 1;
+    }
+    if depth != 0 {
+        return identifier_end;
+    }
+    if tokens
+        .get(index)
+        .is_some_and(|token| matches!(token.kind, TokenKind::Question))
+    {
+        end = tokens[index].span.end;
+    }
+    end
 }
 
 fn member_context(source: &str, offset: usize) -> Option<MemberContext> {
@@ -1071,12 +1149,6 @@ fn floor_char_boundary(source: &str, mut offset: usize) -> usize {
         offset -= 1;
     }
     offset
-}
-
-fn memory_read_type_names() -> &'static [&'static str] {
-    &[
-        "bool", "i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "f32", "f64", "address",
-    ]
 }
 
 fn simple_completion(label: &str, kind: CompletionKind, detail: &str) -> CompletionItem {
@@ -1150,7 +1222,8 @@ whileAttached {
     Mode.Ac
     process.re
     process.na
-    process.read.i
+    process.main
+    process.cl
     number.cl
     current.position.co
     current.position.x
@@ -1162,7 +1235,8 @@ whileAttached {
         assert!(labels(&mut database, "Mode.Ac").contains(&"Active".to_owned()));
         assert!(labels(&mut database, "process.re").contains(&"read".to_owned()));
         assert!(labels(&mut database, "process.na").contains(&"name".to_owned()));
-        assert!(labels(&mut database, "process.read.i").contains(&"i32".to_owned()));
+        assert!(labels(&mut database, "process.main").contains(&"mainModule".to_owned()));
+        assert!(labels(&mut database, "process.cl").contains(&"closed".to_owned()));
         assert!(labels(&mut database, "number.cl").contains(&"clamp".to_owned()));
         assert!(labels(&mut database, "module.ad").contains(&"address".to_owned()));
         assert!(labels(&mut database, "current.position.co").contains(&"coordinate".to_owned()));
@@ -1175,16 +1249,123 @@ whileAttached {
     }
 
     #[test]
-    fn typed_method_selectors_complete_on_captured_process_values() {
+    fn completes_methods_after_fields_on_expression_receivers() {
+        let source = r#"
+record Path {
+    address: address
+}
+
+fn Path.resolve() {
+    return self.address
+}
+
+record Layout {
+    isLoading: Path
+}
+
+fn selectedLayout() {
+    return Layout {
+        isLoading: Path { address: 0x1000 }
+    }
+}
+
+state "game.exe" {
+    loading: bool = selectedLayout().isLoading.resolve()
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        assert!(
+            labels(&mut database, "selectedLayout().isLoading.resolve")
+                .contains(&"resolve".to_owned())
+        );
+    }
+
+    #[test]
+    fn completes_catalog_methods_on_existing_expression_receiver_calls() {
+        let source = r#"
+record Layout {
+    isLoading: MemoryPath
+}
+
+fn selectedLayout(layout: Layout) {
+    return layout
+}
+
+fn inspect(layout: Layout) {
+    selectedLayout(layout).isLoading.resolve()
+}
+
+state "game.exe" {}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        assert!(
+            labels(&mut database, "selectedLayout(layout).isLoading.resolve")
+                .contains(&"resolve".to_owned())
+        );
+    }
+
+    #[test]
+    fn completes_array_methods_on_snapshot_fields() {
+        let source = include_str!("../examples/minish_cap.split");
+        let mut database = CompilerDatabase::new(source);
+        let completions = labels(&mut database, "old.inventory.get");
+        assert!(completions.contains(&"get".to_owned()));
+
+        let element_source = source.replacen("old.inventory.get(5)", "old.inventory.get(5).", 1);
+        let mut database = CompilerDatabase::new(element_source);
+        let element = labels(&mut database, "old.inventory.get(5).");
+        assert!(element.contains(&"min".to_owned()), "{element:#?}");
+        assert!(element.contains(&"max".to_owned()), "{element:#?}");
+        assert!(element.contains(&"clamp".to_owned()), "{element:#?}");
+        for array_method in ["get", "set", "length", "isEmpty"] {
+            assert!(
+                !element.contains(&array_method.to_owned()),
+                "array method `{array_method}` leaked onto u8 completion: {element:#?}"
+            );
+        }
+
+        let incomplete = r#"
+state "game.exe" {
+    inventory: [u8; 6] at 0x1000
+}
+
+split {
+    old.inventory.
+}
+"#;
+        let mut database = CompilerDatabase::new(incomplete);
+        let completions = labels(&mut database, "old.inventory.");
+        assert!(completions.contains(&"get".to_owned()));
+        assert!(completions.contains(&"length".to_owned()));
+        assert!(completions.contains(&"isEmpty".to_owned()));
+    }
+
+    #[test]
+    fn completes_string_members_in_match_arms_and_on_inferred_locals() {
+        let source = include_str!("../examples/minish_cap.split");
+
+        let literal_source = source.replacen("2 => \"½\"", "2 => \"½\".", 1);
+        let mut database = CompilerDatabase::new(literal_source);
+        let literal = labels(&mut database, "2 => \"½\".");
+        assert!(literal.contains(&"byteLength".to_owned()), "{literal:#?}");
+
+        let local_source = source.replacen("return fraction\n", "return fraction.\n", 1);
+        let mut database = CompilerDatabase::new(local_source);
+        let local = labels(&mut database, "return fraction.");
+        assert!(local.contains(&"byteLength".to_owned()), "{local:#?}");
+    }
+
+    #[test]
+    fn generic_type_arguments_complete_on_captured_process_values() {
         let source = r#"
 state "game.exe" {}
 whileAttached {
     let attached = process
-    attached.read.i
+    attached.read<i
 }
 "#;
         let mut database = CompilerDatabase::new(source);
-        let completions = labels(&mut database, "attached.read.i");
+        let completions = labels(&mut database, "attached.read<i");
         assert!(completions.contains(&"i32".to_owned()));
         assert!(completions.contains(&"i64".to_owned()));
     }
@@ -1205,6 +1386,23 @@ fn smaller(value, other) {
         assert!(completions.contains(&"max".to_owned()));
         assert!(completions.contains(&"clamp".to_owned()));
         assert!(!completions.contains(&"length".to_owned()));
+    }
+
+    #[test]
+    fn inherited_capabilities_complete_super_capability_methods() {
+        let source = r#"
+state "game.exe" {}
+fn masked(value) {
+    let result = value & 1
+    value.
+    return result
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let completions = labels(&mut database, "\n    value.");
+        assert!(completions.contains(&"min".to_owned()));
+        assert!(completions.contains(&"max".to_owned()));
+        assert!(completions.contains(&"clamp".to_owned()));
     }
 
     #[test]

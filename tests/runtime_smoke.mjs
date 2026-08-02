@@ -13,13 +13,19 @@ const variables = [];
 const tickRates = [];
 let modulePolls = 0;
 let moduleSizePolls = 0;
+const moduleAddressNames = [];
+const moduleSizeNames = [];
 let scanReads = 0;
 let scalarReads = 0;
 const attachNames = [];
 let instance;
 const gameAssembly = new Uint8Array(0x2000);
+gameAssembly.set([0x4d, 0x5a], 0x00);
 gameAssembly.set([0x48, 0x8b, 0x7c, 0x89], 0x0ffe);
 const gameAssemblyView = new DataView(gameAssembly.buffer);
+gameAssemblyView.setUint32(0x3c, 0x80, true);
+gameAssemblyView.setUint32(0x80, 0x00004550, true);
+gameAssemblyView.setUint16(0x98, 0x020b, true);
 gameAssemblyView.setBigUint64(0x100, 0x1200n, true);
 gameAssemblyView.setBigUint64(0x220, 0x1300n, true);
 gameAssemblyView.setInt32(0x310, 42, true);
@@ -104,8 +110,16 @@ const env = {
         }
         return 1;
     },
-    process_get_module_address: () => (++modulePolls < 3 ? 0n : 0x1000n),
-    process_get_module_size: () => {
+    process_get_module_address(_process, pointer, length) {
+        moduleAddressNames.push(decoder.decode(
+            new Uint8Array(instance.exports.memory.buffer, pointer, length),
+        ));
+        return ++modulePolls < 3 ? 0n : 0x1000n;
+    },
+    process_get_module_size(_process, pointer, length) {
+        moduleSizeNames.push(decoder.decode(
+            new Uint8Array(instance.exports.memory.buffer, pointer, length),
+        ));
         moduleSizePolls += 1;
         return 0x2000n;
     },
@@ -146,12 +160,25 @@ if (moduleSizePolls !== 2) {
     throw new Error(`expected two module-size polls, got ${moduleSizePolls}`);
 }
 
+if (moduleAddressNames.join(",") !== [
+    "Lunistice-Demo.exe",
+    "Lunistice-Demo.exe",
+    "Lunistice-Demo.exe",
+    "GameAssembly.dll",
+].join(",")) {
+    throw new Error(`unexpected module-address names: ${JSON.stringify(moduleAddressNames)}`);
+}
+
+if (moduleSizeNames.join(",") !== "Lunistice-Demo.exe,GameAssembly.dll") {
+    throw new Error(`unexpected module-size names: ${JSON.stringify(moduleSizeNames)}`);
+}
+
 if (scanReads !== 13) {
     throw new Error(`expected thirteen bulk/scan reads, got ${scanReads}`);
 }
 
-if (scalarReads !== 24) {
-    throw new Error(`expected twenty-four scalar reads, got ${scalarReads}`);
+if (scalarReads !== 28) {
+    throw new Error(`expected twenty-eight scalar reads, got ${scalarReads}`);
 }
 
 if (attachNames.join(",") !== "Lunistice.exe,Lunistice-Demo.exe") {
@@ -176,6 +203,8 @@ if (tickRates.length !== 1 || tickRates[0] !== 120) {
 console.log(
     JSON.stringify({
         attachNames,
+        moduleAddressNames,
+        moduleSizeNames,
         modulePolls,
         moduleSizePolls,
         scanReads,

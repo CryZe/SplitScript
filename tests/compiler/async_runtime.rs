@@ -220,7 +220,7 @@ fn retry_is_first_class_suspending_control_flow_for_result_expressions() {
         state "game.exe" {}
 
         fn readMarker() {
-            return process.read.i32(0x3000)
+            return process.read<i32>(0x3000)
         }
 
         onAttach {
@@ -337,7 +337,7 @@ fn signature_literals_are_typed_validated_and_scannable() {
 }
 
 #[test]
-fn typed_process_reads_and_pointer_following_work_in_sync_and_async_code() {
+fn explicit_process_reads_and_pointer_following_work_in_sync_and_async_code() {
     let source = r#"
         state "game.exe" {}
         onAttach {
@@ -345,8 +345,8 @@ fn typed_process_reads_and_pointer_following_work_in_sync_and_async_code() {
             let table = await process.scan(module.address, module.size, sig"48 8B ?? 00")
             let target = retry process.readRelative32(table + 0x3)
             let object = retry process.follow(module.address, [0x10u64, 0x28u64])
-            let kind = retry process.read.u32(object + 0x8)
-            if (target != 0 && kind == 7u32 && (process.read.bool(object + 0xc) else false)) {
+            let kind = retry process.read<u32>(object + 0x8)
+            if (target != 0 && kind == 7u32 && (process.read<bool>(object + 0xc) else false)) {
                 print("object ready")
             }
         }
@@ -458,7 +458,7 @@ fn generic_process_read_infers_memory_types_bidirectionally() {
     assert!(errors.iter().any(|error| {
         error.message.contains("cannot infer the memory type")
             && error.message.contains("let value: i32!")
-            && error.message.contains("process.read.i32")
+            && error.message.contains("process.read<i32>")
     }));
 }
 
@@ -688,8 +688,8 @@ fn fixed_arrays_have_exact_memory_layouts_and_use_ordinary_array_methods() {
 fn expression_backed_state_fields_use_discovered_addresses_and_rotate_snapshots() {
     let source = r#"
         state "game.exe" {
-            points: i32 = process.read.i32(gameManager.offset(pointsOffset))
-            stopped: bool = process.read.bool(timerInstance.offset(stoppedOffset))
+            points: i32 = process.read<i32>(gameManager.offset(pointsOffset))
+            stopped: bool = process.read<bool>(timerInstance.offset(stoppedOffset))
         }
 
         let gameManager: address = 0
@@ -743,7 +743,7 @@ fn unity_il2cpp_attachment_is_typed_and_suspension_safe() {
             let instanceOffset: u32 = await gameManager.field("Instance")
             let levelField: UnityField = await gameManager.fieldAny(["currentLevel", "_currentScene"])
             let staticTable: address = await gameManager.staticTable()
-            let instance = retry process.read.address(staticTable.offset(instanceOffset))
+            let instance = retry process.read<address>(staticTable.offset(instanceOffset))
             let singleton = await gameManager.staticInstance(["Instance", "_instance"])
             if (unity.assemblies != 0
                 && unity.typeInfoTable != 0

@@ -13,6 +13,7 @@ use super::ids::{
     IntrinsicId, StdlibCapabilityId, StdlibFieldId, StdlibItemId, StdlibNamespaceId,
     StdlibStateProviderId, StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
 };
+use super::schema::TypeRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StdlibOwner {
@@ -166,6 +167,8 @@ pub enum CapabilityBehavior {
 pub struct StdlibCapability {
     pub id: StdlibCapabilityId,
     pub name: &'static str,
+    /// Capabilities guaranteed by this capability.
+    pub super_capabilities: &'static [StdlibCapabilityId],
     pub behavior: CapabilityBehavior,
     pub documentation: Documentation<StdlibSymbolId>,
 }
@@ -194,7 +197,7 @@ pub struct StdlibField {
     pub id: StdlibFieldId,
     pub owner: StdlibTypeId,
     pub name: &'static str,
-    pub ty: DeclaredTypeRef,
+    pub ty: TypeRef,
     pub visibility: FieldVisibility,
     pub documentation: Documentation<StdlibSymbolId>,
 }
@@ -212,27 +215,16 @@ const BOOL_CAPABILITIES: &[StdlibCapabilityId] = &[
     StdlibCapabilityId::MemoryReadable,
 ];
 const SIGNED_INTEGER_CAPABILITIES: &[StdlibCapabilityId] = &[
-    StdlibCapabilityId::Numeric,
     StdlibCapabilityId::Integer,
     StdlibCapabilityId::Signed,
-    StdlibCapabilityId::Equatable,
-    StdlibCapabilityId::StringCast,
-    StdlibCapabilityId::Interpolatable,
     StdlibCapabilityId::MemoryReadable,
 ];
 const UNSIGNED_INTEGER_CAPABILITIES: &[StdlibCapabilityId] = &[
-    StdlibCapabilityId::Numeric,
     StdlibCapabilityId::Integer,
-    StdlibCapabilityId::Equatable,
-    StdlibCapabilityId::StringCast,
-    StdlibCapabilityId::Interpolatable,
     StdlibCapabilityId::MemoryReadable,
 ];
 const FLOAT_CAPABILITIES: &[StdlibCapabilityId] = &[
-    StdlibCapabilityId::Numeric,
-    StdlibCapabilityId::Signed,
     StdlibCapabilityId::Float,
-    StdlibCapabilityId::Equatable,
     StdlibCapabilityId::MemoryReadable,
 ];
 
@@ -373,5 +365,51 @@ mod tests {
         Validator::new_with_features(WasmFeatures::all())
             .validate_all(&wasm)
             .expect("the catalog representation should produce a valid Wasm GC record");
+    }
+
+    #[test]
+    fn constructed_catalog_fields_share_semantics_tooling_and_gc_layouts() {
+        let source = r#"
+            state "probe.exe" {}
+
+            whileAttached {
+                let seed: CatalogRecordProbe = process.read(0x100) else return
+                let constructed = seed.constructed([3, 5], Some(8))
+                let pair = seed.fixedPair([13, 21])
+                let memory: CatalogFixedMemoryProbe = process.read(0x200) else return
+                let fallback = constructed.fallback else 0
+                print(`{constructed.values.length()}:{pair.length()}:{memory.values.length()}:{fallback}`)
+            }
+        "#;
+        let library = StandardLibrary::new();
+        let record = library
+            .type_by_name("CatalogConstructedFieldProbe")
+            .expect("the constructed-field fixture should be generated");
+        let values = library
+            .public_field(record.id, "values")
+            .expect("the array field should be discoverable");
+        assert_eq!(library.render_type(values.ty), "[u64; 2]");
+
+        let mut database = CompilerDatabase::new(source);
+        database
+            .check()
+            .expect("constructed standard fields should use ordinary type inference");
+
+        let offset = source.find("constructed.values").unwrap() + "constructed.".len();
+        let hover = database
+            .hover(offset)
+            .unwrap()
+            .expect("constructed standard fields should provide hover");
+        assert!(
+            hover
+                .markdown
+                .contains("CatalogConstructedFieldProbe.values: [u64; 2]")
+        );
+
+        let wasm = crate::compile(source)
+            .expect("constructed standard fields should lower through ordinary Wasm GC layouts");
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&wasm)
+            .expect("constructed standard fields should produce valid Wasm GC");
     }
 }

@@ -49,9 +49,8 @@ pub enum ResolvedCall {
         function: FunctionId,
         type_arguments: Vec<TypeId>,
         signature: Vec<TypeId>,
-        receiver: ResolvedValue,
+        receiver: ResolvedReceiver,
         receiver_type: TypeId,
-        receiver_members: Vec<ResolvedMember>,
     },
     StandardLibrary {
         item: StdlibItemId,
@@ -60,9 +59,8 @@ pub enum ResolvedCall {
         /// Library source bodies use this to instantiate their inferred hidden
         /// function template without reconstructing catalog types downstream.
         signature: Vec<TypeId>,
-        receiver: Option<ResolvedValue>,
+        receiver: Option<ResolvedReceiver>,
         receiver_type: Option<TypeId>,
-        receiver_members: Vec<ResolvedMember>,
     },
     ResultError {
         result: crate::ast::ResultTypeId,
@@ -118,6 +116,46 @@ pub enum ResolvedValue {
     OldState(ValueId),
     Setting(ValueId),
     OldSetting(ValueId),
+}
+
+/// The value on which a method is invoked.
+///
+/// Plain source paths retain their declaration root and resolved fields for
+/// navigation and direct lowering. General postfix calls instead retain the
+/// receiver expression, which is evaluated exactly once before the explicit
+/// arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedReceiver {
+    Path {
+        root: ResolvedValue,
+        members: Vec<ResolvedMember>,
+    },
+    Expression {
+        expression: ExprId,
+        members: Vec<ResolvedMember>,
+    },
+}
+
+impl ResolvedReceiver {
+    pub fn path(&self) -> Option<(ResolvedValue, &[ResolvedMember])> {
+        match self {
+            Self::Path { root, members } => Some((*root, members)),
+            Self::Expression { .. } => None,
+        }
+    }
+
+    pub fn expression(&self) -> Option<ExprId> {
+        match self {
+            Self::Expression { expression, .. } => Some(*expression),
+            Self::Path { .. } => None,
+        }
+    }
+
+    pub fn members(&self) -> &[ResolvedMember] {
+        match self {
+            Self::Path { members, .. } | Self::Expression { members, .. } => members,
+        }
+    }
 }
 
 /// A field selected after the root of a resolved value path.
@@ -179,6 +217,7 @@ pub struct SemanticModel {
     generic_parameter_constraints: HashMap<TypeId, Vec<crate::stdlib::StdlibCapabilityId>>,
     specialized_types: HashMap<(FunctionInstance, TypeId), TypeId>,
     record_field_types: HashMap<RecordFieldId, TypeId>,
+    standard_field_types: HashMap<StdlibFieldId, TypeId>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<TypeId>>,
     array_element_types: HashMap<ArrayTypeId, TypeId>,
     state_poll_results: HashMap<ValueId, TypeId>,
@@ -581,6 +620,10 @@ impl SemanticModel {
             .map(|(field, ty)| (*field, *ty))
     }
 
+    pub fn standard_field_type(&self, field: StdlibFieldId) -> Option<TypeId> {
+        self.standard_field_types.get(&field).copied()
+    }
+
     pub fn enum_variant_payload(&self, variant: EnumVariantId) -> Option<TypeId> {
         self.enum_variant_payloads.get(&variant).copied().flatten()
     }
@@ -686,17 +729,15 @@ pub(crate) enum PendingResolvedCall {
         function: FunctionId,
         type_arguments: Vec<Type>,
         signature: Vec<Type>,
-        receiver: ResolvedValue,
+        receiver: ResolvedReceiver,
         receiver_type: Type,
-        receiver_members: Vec<ResolvedMember>,
     },
     StandardLibrary {
         item: StdlibItemId,
         type_arguments: Vec<Type>,
         signature: Vec<Type>,
-        receiver: Option<ResolvedValue>,
+        receiver: Option<ResolvedReceiver>,
         receiver_type: Option<Type>,
-        receiver_members: Vec<ResolvedMember>,
     },
     ResultError {
         result: crate::ast::ResultTypeId,
@@ -725,6 +766,7 @@ pub(crate) struct SemanticBuilder {
     value_types: HashMap<ValueId, Type>,
     function_results: HashMap<FunctionId, Type>,
     record_field_types: HashMap<RecordFieldId, Type>,
+    standard_field_types: HashMap<StdlibFieldId, Type>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<Type>>,
     array_element_types: HashMap<ArrayTypeId, Type>,
     state_poll_results: HashMap<ValueId, Type>,
@@ -799,6 +841,11 @@ impl SemanticBuilder {
     pub(crate) fn resolve_record_field_type(&mut self, field: RecordFieldId, ty: Type) {
         let previous = self.record_field_types.insert(field, ty);
         debug_assert!(previous.is_none(), "record field IDs must be unique");
+    }
+
+    pub(crate) fn resolve_standard_field_type(&mut self, field: StdlibFieldId, ty: Type) {
+        let previous = self.standard_field_types.insert(field, ty);
+        debug_assert!(previous.is_none(), "standard field IDs must be unique");
     }
 
     pub(crate) fn resolve_enum_variant_payload(
@@ -946,6 +993,7 @@ impl SemanticBuilder {
             value_types,
             function_results,
             record_field_types,
+            standard_field_types,
             enum_variant_payloads,
             array_element_types,
             state_poll_results,
@@ -998,7 +1046,6 @@ impl SemanticBuilder {
                         signature,
                         receiver,
                         receiver_type,
-                        receiver_members,
                     } => ResolvedCall::UserMethod {
                         function,
                         type_arguments: type_arguments
@@ -1016,7 +1063,6 @@ impl SemanticBuilder {
                             options,
                             results,
                         ),
-                        receiver_members,
                     },
                     PendingResolvedCall::StandardLibrary {
                         item,
@@ -1024,7 +1070,6 @@ impl SemanticBuilder {
                         signature,
                         receiver,
                         receiver_type,
-                        receiver_members,
                     } => ResolvedCall::StandardLibrary {
                         item,
                         type_arguments: type_arguments
@@ -1038,7 +1083,6 @@ impl SemanticBuilder {
                         receiver,
                         receiver_type: receiver_type
                             .map(|ty| types.intern_inferred(resolve(ty), arrays, options, results)),
-                        receiver_members,
                     },
                     PendingResolvedCall::ResultError { result } => {
                         let result = resolved_result_layout(resolve(Type::Result(result)), &types);
@@ -1084,6 +1128,15 @@ impl SemanticBuilder {
             })
             .collect();
         let record_field_types = record_field_types
+            .into_iter()
+            .map(|(field, ty)| {
+                (
+                    field,
+                    types.intern_inferred(resolve(ty), arrays, options, results),
+                )
+            })
+            .collect();
+        let standard_field_types = standard_field_types
             .into_iter()
             .map(|(field, ty)| {
                 (
@@ -1188,6 +1241,7 @@ impl SemanticBuilder {
             generic_parameter_constraints: HashMap::new(),
             specialized_types: HashMap::new(),
             record_field_types,
+            standard_field_types,
             enum_variant_payloads,
             array_element_types,
             state_poll_results,

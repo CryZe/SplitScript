@@ -372,7 +372,7 @@ Compiler-implemented calls also have an independent trusted registry in
 `intrinsic_registry.rs`. `IntrinsicId::ALL` is generated with the public IDs,
 while an exhaustive Rust match requires one contract for every implementation.
 Before user code is checked, catalog validation compares each public binding's
-callable kind, generic capability bounds, typed selector, method receiver,
+callable kind, explicit and receiver-inherited generic parameters, method receiver,
 recursive parameter/result types, literal-only parameter rules, exact effects,
 and availability with that contract. Generic parameters are matched by ordinal,
 so cosmetic names do not become ABI. The contract also classifies host-boundary, representation,

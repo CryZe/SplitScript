@@ -10,7 +10,7 @@ use crate::{
     inference::{Requirements, Type},
     semantic::{ResolvedRecordFieldId, ResolvedRecordId, ResolvedWrapperPattern},
     signature::parse_signature,
-    stdlib::{RuntimeRepresentation, StdlibCapabilityId, StdlibOwner, StdlibTypeId},
+    stdlib::{Implementation, RuntimeRepresentation, StdlibCapabilityId, StdlibTypeId},
     types::EnumTypeId,
 };
 
@@ -81,7 +81,7 @@ impl Checker {
                         let value_type = self.expr(value, None)?;
                         self.require(
                             value_type,
-                            Requirements::capability(StdlibCapabilityId::Interpolatable),
+                            Requirements::capability(StdlibCapabilityId::Display),
                             value.span,
                         );
                     }
@@ -192,13 +192,15 @@ impl Checker {
                     )?
                 } else if let Some(declaration) = self.standard_library.type_by_name(name).copied()
                 {
-                    let owns_type = matches!(
+                    let privileged_library_body = matches!(
                         &self.callable,
                         super::context::CallableContext::LibraryFunction(item)
-                            if self.standard_library.item(*item).owner
-                                == StdlibOwner::Type(declaration.id)
+                            if matches!(
+                                self.standard_library.item(*item).implementation,
+                                Implementation::LibraryBody { .. }
+                            )
                     );
-                    if !owns_type
+                    if !privileged_library_body
                         || !matches!(
                             declaration.representation,
                             RuntimeRepresentation::GcStruct { .. }
@@ -206,7 +208,7 @@ impl Checker {
                     {
                         self.error(
                             format!(
-                                "standard-library type `{name}` can only be constructed by its own library methods"
+                                "standard-library type `{name}` can only be constructed by standard-library source"
                             ),
                             expr.span,
                         );
@@ -231,7 +233,7 @@ impl Checker {
                         if let Some(field) =
                             declared_fields.iter().find(|field| field.name == *name)
                         {
-                            self.expr(value, Some(self.declared_type(field.ty)));
+                            self.expr(value, Some(self.standard_field_type(field.id)));
                             resolved_fields.push(ResolvedRecordFieldId::Standard(field.id));
                         } else {
                             self.expr(value, None);
@@ -690,7 +692,7 @@ impl Checker {
                 } else if target == self.standard_type(StdlibTypeId::String) {
                     self.require(
                         source,
-                        Requirements::capability(StdlibCapabilityId::StringCast),
+                        Requirements::capability(StdlibCapabilityId::Display),
                         expr.span,
                     )?;
                 } else {
@@ -709,15 +711,33 @@ impl Checker {
             ExprKind::Call {
                 callee,
                 name_span,
+                receiver,
+                type_arguments,
                 args,
             } => {
                 if let Some(enumeration) = self.resolutions.expression_enum(expr.id) {
+                    debug_assert!(receiver.is_none());
+                    if !type_arguments.is_empty() {
+                        self.error("enum variants do not accept type arguments", expr.span);
+                        return None;
+                    }
                     let [_, variant] = callee.as_slice() else {
                         unreachable!("resolved enum constructors have two segments")
                     };
                     self.enum_constructor(expr.id, enumeration, variant, args, expected, expr.span)?
                 } else {
-                    self.call(callee, *name_span, args, expected, expr.id, expr.span)?
+                    self.call(
+                        super::CallSyntax {
+                            callee,
+                            name_span: *name_span,
+                            postfix_receiver: receiver.as_deref(),
+                            type_arguments,
+                        },
+                        args,
+                        expected,
+                        expr.id,
+                        expr.span,
+                    )?
                 }
             }
         };

@@ -620,7 +620,7 @@ Arrays can be traversed directly without manually managing an index:
 
 ```text
 for byte in header {
-    print(byte as String)
+    print(byte)
 }
 ```
 
@@ -798,7 +798,7 @@ user helper whose Result type and value type are inferred:
 
 ```text
 fn readMarker() {
-    return process.read.i32(0x3000)
+    return process.read<i32>(0x3000)
 }
 
 onAttach {
@@ -901,12 +901,24 @@ pseudo-types. This leaves room for explicit `utf16(...)` or fixed-length
 decoders when real ports require their distinct semantics.
 
 When no context determines the representation, add an annotation or use an
-explicit suffix such as `process.read.u8(address)`. The supported suffixes are
-`bool`, all fixed-width integer types, `f32`, `f64`, and `address`. Named records
-are selected with an annotation or other expected-type context. An ambiguous
-generic read produces a diagnostic showing both fixes. `address` is nominal
+explicit type argument such as `process.read<u8>(address)`. Any
+`MemoryReadable` type can be written there, including named records and
+fixed-length arrays. An ambiguous generic read produces a diagnostic showing
+both fixes. `address` is nominal
 rather than an alias for `u64`, preventing a module size or counter from being
 passed where a target pointer is required.
+
+Generic calls put type arguments directly after the callable name:
+
+```text
+let header = process.read<Header>(address) else return
+let bytes = process.read<[u8; 16]>(address) else return
+```
+
+There is no Rust-style `::` turbofish. The opening `<` must touch the callable
+name. This keeps `value < limit` an ordinary comparison while making
+`read<u32>(address)` unambiguous; the formatter removes any remaining spaces
+around the generic call delimiters.
 
 `process.follow(base, offsets)` reads a non-null 64-bit pointer at every
 successive `current + offset` location. `process.readRelative32(location)`
@@ -923,7 +935,7 @@ let found = await process.scan(target, 0x200, sig"48 8B ?? ??")
 `print` is a regular typed builtin available in every action block and writes
 through the runtime debug-message API. Its argument is any `String` expression,
 not only a literal. Strings use content equality with `==` and `!=`, and
-`String.length(value)` returns their UTF-8 byte length. A message after the final await in
+`value.byteLength()` returns a string's UTF-8 byte length. A message after the final await in
 `onAttach` therefore prints once per successful process attachment, while a
 message in `whileAttached` prints every attached tick.
 
@@ -937,8 +949,8 @@ character.
 JavaScript-inspired template strings use backticks and `{expression}`, without
 JavaScript's `$` marker. Existing strings are inserted directly. Every other
 interpolated value is converted by the same rules as `value as String`; integer
-widths and `address` are currently supported, while values without a String cast
-are compile-time errors. Template strings may contain multiple interpolations,
+widths and `address` are currently supported, while values without the `Display`
+capability produce compile-time errors. Template strings may contain multiple interpolations,
 nested expressions, and newlines. Literal braces are written as `\{` and `\}`.
 
 ```text
@@ -947,8 +959,11 @@ let levelTime = `{minutes as u32}:{twoDigits(seconds as u32)}`
 ```
 
 `String.concat` remains available as the lower-level collection operation.
-`setVariable(key, value)`, `timer.state()`, and `setTickRate(f64)` expose the
-corresponding ASR facilities without linear-memory pointers in source code.
+`print(value)` and `setVariable(key, value)` accept any `Display` value
+and apply these same conversions at the runtime boundary, so numeric values and
+addresses do not need an explicit `as String` cast. `timer.state()` and
+`setTickRate(f64)` expose the corresponding ASR facilities without
+linear-memory pointers in source code.
 `timer.state()` returns `TimerState`, a
 compiler-provided enum with `NotRunning`, `Running`, `Paused`, `Ended`, and
 `Unknown`. Match it like any other enum; the raw host integer is not visible to

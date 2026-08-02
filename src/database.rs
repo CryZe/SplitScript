@@ -190,21 +190,21 @@ fn definition_for_resolution(
                 };
             }
             match call {
-                ResolvedCall::UserMethod {
-                    receiver,
-                    receiver_members,
-                    ..
-                }
+                ResolvedCall::UserMethod { receiver, .. }
                 | ResolvedCall::StandardLibrary {
                     receiver: Some(receiver),
-                    receiver_members,
                     ..
-                } => definition_for_value_path(
-                    definitions,
-                    Some(*receiver),
-                    receiver_members,
-                    segment,
-                ),
+                } => receiver
+                    .path()
+                    .and_then(|(root, members)| {
+                        definition_for_value_path(definitions, Some(root), members, segment)
+                    })
+                    .or_else(|| {
+                        receiver
+                            .members()
+                            .get(segment)
+                            .and_then(|member| definition_for_member(definitions, member))
+                    }),
                 ResolvedCall::UserFunction { .. }
                 | ResolvedCall::StandardLibrary { receiver: None, .. }
                 | ResolvedCall::ResultError { .. }
@@ -277,16 +277,21 @@ fn source_definition_for_resolution(
                 };
             }
             match call {
-                ResolvedCall::UserMethod {
-                    receiver,
-                    receiver_members,
-                    ..
-                }
+                ResolvedCall::UserMethod { receiver, .. }
                 | ResolvedCall::StandardLibrary {
                     receiver: Some(receiver),
-                    receiver_members,
                     ..
-                } => source_definition_for_value_path(Some(*receiver), receiver_members, segment),
+                } => receiver
+                    .path()
+                    .and_then(|(root, members)| {
+                        source_definition_for_value_path(Some(root), members, segment)
+                    })
+                    .or_else(|| {
+                        receiver
+                            .members()
+                            .get(segment)
+                            .and_then(source_definition_for_member)
+                    }),
                 ResolvedCall::UserFunction { .. }
                 | ResolvedCall::StandardLibrary { receiver: None, .. }
                 | ResolvedCall::ResultError { .. }

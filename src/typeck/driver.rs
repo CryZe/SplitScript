@@ -84,7 +84,7 @@ fn initialize_checker(
         )
     });
 
-    Checker {
+    let mut checker = Checker {
         standard_library,
         resolutions: resolutions.clone(),
         errors: Vec::new(),
@@ -111,6 +111,15 @@ fn initialize_checker(
         deferred_member_paths: Vec::new(),
         none_policy: NonePolicy::OptionalOnly,
         semantics: SemanticBuilder::with_state_provider(resolutions.state_provider()),
+        standard_field_types: std::collections::HashMap::new(),
         active_function_component: std::collections::HashSet::new(),
+    };
+    let fields = checker.standard_library.fields().to_vec();
+    let variables = std::collections::HashMap::new();
+    for field in fields {
+        let ty = checker.catalog_type(field.ty, &variables);
+        checker.standard_field_types.insert(field.id, ty);
+        checker.semantics.resolve_standard_field_type(field.id, ty);
     }
+    checker
 }

@@ -22,7 +22,7 @@ fn LevelOrScene.isFirst() {
 fn greetingIsValid(greeting: Greeting) {
     greeting.signature.set(1, 0x8b)
     return greeting.version == 1
-        && String.length(greeting.message) == 30
+        && greeting.message.byteLength() == 30
         && greeting.location.isFirst()
         && greeting.signature.length() == 3
         && greeting.signature.get(0) == 0x48
@@ -37,7 +37,8 @@ onAttach {
         location: LevelOrScene.Scene("Shrine01"),
         signature: [0x48, 0x00, 0x01]
     }
-    let gameAssembly = await process.module("GameAssembly.dll")
+    let gameAssembly = await process.mainModule()
+    let pointerSize = retry gameAssembly.pointerSize()
     let marker = await gameAssembly.scan(sig"48 8B ?? 89")
     let rangedMarker = await process.scan(
         gameAssembly.address + 0xff0,
@@ -59,6 +60,7 @@ onAttach {
 
     if (gameAssembly.address == 0x1000
         && gameAssembly.size == 0x2000
+        && pointerSize == PointerSize.Bit64
         && marker == 0x1ffe
         && rangedMarker == marker
         && object == 0x1300
@@ -74,7 +76,7 @@ onAttach {
         && managedScene == "Shrine01 🦊"
         && executable == "Lunistice-Demo.exe"
         && formatted == "-42:7"
-        && (process.read.u8(marker) else 0) == 0x48
+        && (process.read<u8>(marker) else 0) == 0x48
         && greetingIsValid(greeting)) {
         print(greeting.message)
     }

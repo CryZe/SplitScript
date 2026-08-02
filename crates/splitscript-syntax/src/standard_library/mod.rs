@@ -122,6 +122,10 @@ pub enum Type {
         arguments: Vec<Type>,
     },
     Array(Box<Type>),
+    FixedArray {
+        element: Box<Type>,
+        length: u32,
+    },
     Option(Box<Type>),
     Result(Box<Type>),
 }
@@ -144,6 +148,9 @@ impl fmt::Display for Type {
                 formatter.write_str(">")
             }
             Self::Array(element) => write!(formatter, "[{element}]"),
+            Self::FixedArray { element, length } => {
+                write!(formatter, "[{element}; {length}]")
+            }
             Self::Option(value) => write!(formatter, "{value}?"),
             Self::Result(value) => write!(formatter, "{value}!"),
         }

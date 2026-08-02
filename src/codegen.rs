@@ -447,6 +447,15 @@ fn record_field_type(field: RecordFieldId, semantics: &SemanticModel) -> Type {
     )
 }
 
+fn standard_field_type(field: crate::stdlib::StdlibFieldId, semantics: &SemanticModel) -> Type {
+    semantic_type(
+        semantics
+            .standard_field_type(field)
+            .expect("checked standard fields have semantic types"),
+        semantics,
+    )
+}
+
 fn enum_variant_payload(variant: EnumVariantId, semantics: &SemanticModel) -> Option<Type> {
     semantics
         .enum_variant_payload(variant)

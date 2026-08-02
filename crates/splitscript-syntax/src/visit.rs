@@ -281,7 +281,18 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
             visitor.visit_expr(left);
             visitor.visit_expr(right);
         }
-        ExprKind::Call { args, .. } => {
+        ExprKind::Call {
+            receiver,
+            type_arguments,
+            args,
+            ..
+        } => {
+            if let Some(receiver) = receiver {
+                visitor.visit_expr(receiver);
+            }
+            for argument in type_arguments {
+                visitor.visit_type_ref(argument);
+            }
             for argument in args {
                 visitor.visit_expr(argument);
             }
@@ -593,7 +604,18 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
             folder.fold_expr(left);
             folder.fold_expr(right);
         }
-        ExprKind::Call { args, .. } => {
+        ExprKind::Call {
+            receiver,
+            type_arguments,
+            args,
+            ..
+        } => {
+            if let Some(receiver) = receiver {
+                folder.fold_expr(receiver);
+            }
+            for argument in type_arguments {
+                folder.fold_type_ref(argument);
+            }
             for argument in args {
                 folder.fold_expr(argument);
             }

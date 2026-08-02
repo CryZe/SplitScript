@@ -1,0 +1,91 @@
+// A medium-sized version matrix represented entirely with ordinary typed
+// SplitScript. MemoryPath itself is source-defined standard-library code; only
+// the game-specific version matrix remains in this script.
+enum AlanWakeBuild {
+    Steam
+    GOG
+    Epic
+}
+
+record AlanWakeLayout {
+    isLoading: MemoryPath
+    level: MemoryPath
+    video: MemoryPath
+}
+
+fn directPath(base, offset, pointerSize) {
+    return base.memoryPath([], offset, pointerSize)
+}
+
+fn pointerPath(base, dereferences, finalOffset, pointerSize) {
+    return base.memoryPath(dereferences, finalOffset, pointerSize)
+}
+
+fn alanWakeLayout(build, base, pointerSize) {
+    return match build {
+        AlanWakeBuild.Steam => AlanWakeLayout {
+            isLoading: directPath(base, 0x36ba34, pointerSize),
+            level: pointerPath(base, [0x36d8b4, 0x3f0], 0x174, pointerSize),
+            video: pointerPath(base, [0x2c0934], 0x5c8, pointerSize)
+        },
+        AlanWakeBuild.GOG => AlanWakeLayout {
+            isLoading: directPath(base, 0x36ca74, pointerSize),
+            level: pointerPath(base, [0x36e618], 0x208, pointerSize),
+            video: pointerPath(base, [0x2c1974], 0x5c8, pointerSize)
+        },
+        AlanWakeBuild.Epic => AlanWakeLayout {
+            isLoading: directPath(base, 0x36aa74, pointerSize),
+            level: pointerPath(base, [0x36c618], 0x208, pointerSize),
+            video: pointerPath(base, [0x2bf974], 0x5c8, pointerSize)
+        }
+    }
+}
+
+fn selectedLayout() {
+    return alanWakeLayout(build, executableBase, pointerSize)
+}
+
+state "AlanWake.exe" {
+    isLoading: bool = process.read<bool>(selectedLayout().isLoading.resolve()?)?
+    level: u8 = process.read<u8>(selectedLayout().level.resolve()?)?
+    video: i32 = process.read<i32>(selectedLayout().video.resolve()?)?
+}
+
+let build = AlanWakeBuild.Steam
+let executableBase: address = 0x0
+let pointerSize = PointerSize.Bit32
+
+onAttach {
+    let executable = await process.mainModule()
+    let detectedPointerSize = retry executable.pointerSize()
+    pointerSize = detectedPointerSize
+
+    if pointerSize != PointerSize.Bit32 {
+        print("unsupported 64-bit Alan Wake executable")
+        await process.closed()
+    }
+    if executable.size == 3_805_184 {
+        build = AlanWakeBuild.Steam
+    } else if executable.size == 3_809_280 {
+        build = AlanWakeBuild.GOG
+    } else if executable.size == 3_801_088 {
+        build = AlanWakeBuild.Epic
+    } else {
+        print(`unsupported Alan Wake module size {executable.size}`)
+        await process.closed()
+    }
+    executableBase = executable.address
+    setVariable("Build", match build {
+        AlanWakeBuild.Steam => "Steam",
+        AlanWakeBuild.GOG => "GOG",
+        AlanWakeBuild.Epic => "Epic"
+    })
+}
+
+isLoading {
+    return current.isLoading
+}
+
+split {
+    return old.level != current.level
+}

@@ -19,7 +19,7 @@ fn body_source(item: &StdlibItem, library: &StandardLibrary) -> String {
         unreachable!("body source is only generated for source-defined library items")
     };
     let mut parameters = Vec::new();
-    if let ItemKind::Method { receiver } | ItemKind::TypedMethod { receiver, .. } = item.kind {
+    if let ItemKind::Method { receiver } = item.kind {
         parameters.push(render_parameter("self", receiver, library));
     }
     parameters.extend(
@@ -56,6 +56,7 @@ fn contains_type_parameter(ty: TypeRef) -> bool {
         TypeRef::Application { arguments, .. } => {
             arguments.iter().copied().any(contains_type_parameter)
         }
+        TypeRef::FixedArray { element, .. } => contains_type_parameter(*element),
         TypeRef::Core(_) | TypeRef::Standard(_) => false,
     }
 }

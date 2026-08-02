@@ -10,7 +10,7 @@ use super::{
     StdlibCapabilityId, StdlibField, StdlibFieldId, StdlibItem, StdlibItemId, StdlibNamespace,
     StdlibNamespaceId, StdlibOwner, StdlibStateProvider, StdlibStateProviderId, StdlibSymbolId,
     StdlibType, StdlibTypeConstructor, StdlibTypeConstructorId, StdlibTypeId, StdlibVariant,
-    StdlibVariantId,
+    StdlibVariantId, TypeRef,
     catalog::{
         CAPABILITIES, FIELDS, ITEMS, NAMESPACES, STATE_PROVIDERS, TYPE_CONSTRUCTORS, TYPES,
         VARIANTS,
@@ -222,6 +222,29 @@ impl StandardLibraryGraph {
             );
         }
         for ty in TYPES {
+            if let Some(display) = ty.display {
+                match self.items.get(&display).copied() {
+                    Some(item)
+                        if item.owner == StdlibOwner::Type(ty.id)
+                            && matches!(
+                                item.kind,
+                                ItemKind::Method {
+                                    receiver: TypeRef::Standard(receiver)
+                                } if receiver == ty.id
+                            )
+                            && item.signature.parameters.is_empty()
+                            && item.signature.result == TypeRef::Standard(StdlibTypeId::String)
+                            && ty.capabilities.contains(&StdlibCapabilityId::Display) => {}
+                    Some(item) => errors.push(format!(
+                        "type `{}` has invalid display implementation `{}`",
+                        ty.name, item.qualified_name
+                    )),
+                    None => errors.push(format!(
+                        "type `{}` references missing display implementation `{:?}`",
+                        ty.name, display
+                    )),
+                }
+            }
             self.push_child(StdlibOwner::Root, StdlibSymbolId::Type(ty.id));
         }
         for field in FIELDS {

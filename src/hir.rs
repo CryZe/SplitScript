@@ -51,8 +51,16 @@ impl DeclarationIndex {
     pub(crate) fn lower(syntax: &SyntaxProgram) -> Self {
         let mut program = Self::default();
         if let Some(state) = &syntax.state {
-            for field in &state.fields {
+            for field in state.canonical_fields() {
                 program.push(DeclarationId::StateField(field.id), &field.name, field.span);
+            }
+            if let (Some(value), Some(enumeration)) = (state.layout_value, &state.layout_enum) {
+                program.push(DeclarationId::Global(value), "layout", state.span);
+                program.push(
+                    DeclarationId::Enum(enumeration.id),
+                    &enumeration.name,
+                    enumeration.span,
+                );
             }
         }
         for setting in &syntax.settings {
@@ -459,7 +467,7 @@ impl TypedProgram {
         let state_sources = syntax
             .state
             .iter()
-            .flat_map(|state| &state.fields)
+            .flat_map(|state| state.all_fields())
             .filter_map(|field| match &field.source {
                 crate::ast::StateSource::Expression(expression) => Some((field.id, expression.id)),
                 crate::ast::StateSource::Pointer(_) => None,
@@ -1185,8 +1193,7 @@ fn enum_type_for_variant(
     match variant {
         ResolvedEnumVariantId::Source(variant) => EnumTypeId::Source(
             syntax
-                .enums
-                .iter()
+                .enum_declarations()
                 .find(|enumeration| {
                     enumeration
                         .variants

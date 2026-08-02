@@ -53,7 +53,7 @@ impl BackendDependencies {
                     dependencies.require_intrinsic(direct_read);
                 }
             }
-            for field in &state.fields {
+            for field in state.all_fields() {
                 if let StateSource::Pointer(path) = &field.source {
                     dependencies.require_import(AbiImportId::ProcessRead);
                     if path.decoder.is_some() {

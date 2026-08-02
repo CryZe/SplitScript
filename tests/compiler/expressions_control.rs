@@ -469,6 +469,27 @@ fn runtime_text_outputs_accept_display_values() {
 }
 
 #[test]
+fn standard_types_can_supply_source_defined_display_implementations() {
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let version = v"1.2.3.4"
+            print(version)
+            setVariable("Version", version)
+            let cast = version as String
+            let interpolated = `version {version}`
+            print(cast)
+            print(interpolated)
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("every Display entry point should use the catalog implementation");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("source-defined Display calls should produce valid Wasm");
+}
+
+#[test]
 fn strings_are_gc_values_with_content_equality_and_length() {
     let source = r#"
         state "game.exe" {}

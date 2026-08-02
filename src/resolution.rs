@@ -169,8 +169,7 @@ pub(crate) fn resolve_program(
     }
 
     let mut enums = program
-        .enums
-        .iter()
+        .enum_declarations()
         .map(|enumeration| (enumeration.name.clone(), EnumTypeId::Source(enumeration.id)))
         .collect::<HashMap<_, _>>();
     for ty in standard_library.types() {
@@ -184,15 +183,16 @@ pub(crate) fn resolve_program(
     let type_names = program
         .type_names()
         .filter_map(|(id, name, _)| {
-            let resolved = if let Some(record) =
-                program.records.iter().find(|item| item.name == *name)
-            {
-                ResolvedTypeRef::Record(record.id)
-            } else if let Some(enumeration) = program.enums.iter().find(|item| item.name == *name) {
-                ResolvedTypeRef::Enum(enumeration.id)
-            } else {
-                ResolvedTypeRef::Standard(standard_library.type_by_name(name)?.id)
-            };
+            let resolved =
+                if let Some(record) = program.records.iter().find(|item| item.name == *name) {
+                    ResolvedTypeRef::Record(record.id)
+                } else if let Some(enumeration) =
+                    program.enum_declarations().find(|item| item.name == *name)
+                {
+                    ResolvedTypeRef::Enum(enumeration.id)
+                } else {
+                    ResolvedTypeRef::Standard(standard_library.type_by_name(name)?.id)
+                };
             Some((id, resolved))
         })
         .collect::<HashMap<_, _>>();

@@ -19,7 +19,7 @@ use declarations::{Binding, DeclarationEnvironment};
 
 use crate::{
     Diagnostic,
-    ast::{EnumDecl, ExprId, FunctionId, Program, Span, TypeRef},
+    ast::{EnumDecl, ExprId, FunctionId, Program, Span, TypeRef, ValueId},
     inference::{InferenceContext, Requirements, Type},
     resolution::ProgramResolutions,
     semantic::{
@@ -144,6 +144,7 @@ struct Checker {
     declarations: DeclarationEnvironment,
     inference: InferenceContext,
     provider_value: Option<(StdlibStateProviderId, Type)>,
+    layout_value: Option<ValueId>,
     scopes: Vec<HashMap<String, Binding>>,
     return_ty: Type,
     callable: CallableContext,

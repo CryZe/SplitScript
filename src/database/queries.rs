@@ -498,7 +498,7 @@ impl CompilerDatabase {
                     .state
                     .as_ref()
                     .into_iter()
-                    .flat_map(|state| &state.fields)
+                    .flat_map(|state| state.all_fields())
                     .filter_map(|field| match &field.source {
                         crate::ast::StateSource::Pointer(path) => path.decoder,
                         crate::ast::StateSource::Expression(_) => None,

@@ -88,7 +88,7 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
 
 fn check_state_expressions(checker: &mut Checker, program: &Program) {
     checker.with_expression_mode(ExpressionMode::StateSource, |checker| {
-        for field in &program.state.as_ref().unwrap().fields {
+        for field in program.state.as_ref().unwrap().all_fields() {
             let StateSource::Expression(expression) = &field.source else {
                 continue;
             };
@@ -282,7 +282,7 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
             );
             continue;
         }
-        let return_ty = action_return_type(checker, action.kind);
+        let return_ty = action_return_type(checker, program, action.kind);
         checker.with_callable_context(
             CallableContext::Action(action.kind),
             return_ty,
@@ -293,14 +293,67 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
                 checker.block(&action.body, false);
             },
         );
+        if action.kind == ActionKind::OnAttach
+            && program
+                .state
+                .as_ref()
+                .is_some_and(|state| !state.layouts.is_empty())
+            && !layout_selection_is_terminal(checker, &action.body)
+        {
+            checker.error(
+                "`onAttach` must return a layout on every completing path",
+                action.span,
+            );
+        }
+    }
+    if program
+        .state
+        .as_ref()
+        .is_some_and(|state| !state.layouts.is_empty())
+        && !actions.contains(&ActionKind::OnAttach)
+    {
+        checker.error(
+            "named state layouts require an `onAttach` block that returns the selected layout",
+            program.state.as_ref().unwrap().span,
+        );
     }
 }
 
-fn action_return_type(checker: &Checker, action: ActionKind) -> Type {
-    match action {
-        ActionKind::OnDetached | ActionKind::OnAttach | ActionKind::WhileAttached => {
-            checker.core_type(CoreTypeId::Void)
+fn layout_selection_is_terminal(checker: &Checker, block: &crate::ast::Block) -> bool {
+    block.statements.iter().any(|statement| match statement {
+        crate::ast::Stmt::Return { .. } | crate::ast::Stmt::Throw { .. } => true,
+        crate::ast::Stmt::If {
+            then_block,
+            else_block: Some(else_block),
+            ..
+        } => {
+            layout_selection_is_terminal(checker, then_block)
+                && layout_selection_is_terminal(checker, else_block)
         }
+        crate::ast::Stmt::Suspend { value, .. } => checker
+            .semantics
+            .standard_library_item(value.id)
+            .is_some_and(|item| {
+                checker.standard_library.item(item).implementation
+                    == crate::stdlib::Implementation::Intrinsic(
+                        crate::stdlib::IntrinsicId::ProcessClosed,
+                    )
+            }),
+        _ => false,
+    })
+}
+
+fn action_return_type(checker: &Checker, program: &Program, action: ActionKind) -> Type {
+    match action {
+        ActionKind::OnDetached | ActionKind::WhileAttached => checker.core_type(CoreTypeId::Void),
+        ActionKind::OnAttach => program
+            .state
+            .as_ref()
+            .and_then(|state| state.layout_enum.as_ref())
+            .map_or_else(
+                || checker.core_type(CoreTypeId::Void),
+                |enumeration| checker.enum_type(crate::types::EnumTypeId::Source(enumeration.id)),
+            ),
         ActionKind::Start | ActionKind::Split | ActionKind::Reset | ActionKind::IsLoading => {
             checker.core_type(CoreTypeId::Bool)
         }

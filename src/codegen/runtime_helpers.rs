@@ -103,6 +103,15 @@ pub(super) fn build_read_managed_string(inputs: &RuntimeHelperInputs<'_>) -> Fun
     )
 }
 
+pub(super) fn build_module_path(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_module_path(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::StringFromMemory),
+        inputs.gc,
+        inputs.memory.scratch(),
+    )
+}
+
 pub(super) fn build_unity_attach(inputs: &RuntimeHelperInputs<'_>) -> Function {
     unity::compile_unity_attach(
         inputs.abi,

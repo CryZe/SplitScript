@@ -51,7 +51,7 @@ impl CompilerDatabase {
     pub fn rename_target_at(&mut self, offset: usize) -> SemanticQueryResult<Option<RenameTarget>> {
         let definitions = self.definition_index()?;
         if let Some(reference) = definitions.reference_at(offset) {
-            return Ok(definitions.get(reference.target).and_then(|definition| {
+            let target = definitions.get(reference.target).and_then(|definition| {
                 (!matches!(
                     definition.id,
                     SourceDefinitionId::State | SourceDefinitionId::Settings
@@ -61,9 +61,16 @@ impl CompilerDatabase {
                     name: definition.name.clone(),
                     span: reference.span,
                 })
-            }));
+            });
+            if target
+                .as_ref()
+                .is_some_and(|target| self.is_generated_layout_symbol(target.id))
+            {
+                return Ok(None);
+            }
+            return Ok(target);
         }
-        Ok(match self.definition_at(offset)? {
+        let target = match self.definition_at(offset)? {
             Some(DefinitionTarget::Source(definition)) => {
                 if matches!(
                     definition.id,
@@ -86,7 +93,8 @@ impl CompilerDatabase {
                 | DefinitionTarget::Language(_),
             )
             | None => None,
-        })
+        };
+        Ok(target.filter(|target| !self.is_generated_layout_symbol(target.id)))
     }
 
     /// Validates an identity-preserving source rename and returns every exact
@@ -135,6 +143,18 @@ impl CompilerDatabase {
             }
         }
         Ok(spans)
+    }
+
+    fn is_generated_layout_symbol(&mut self, id: SourceDefinitionId) -> bool {
+        let Ok(parsed) = self.recovering_parse() else {
+            return false;
+        };
+        let Some(state) = &parsed.syntax().state else {
+            return false;
+        };
+        matches!(id, SourceDefinitionId::Value(value) if state.layout_value == Some(value))
+            || matches!(id, SourceDefinitionId::Enum(enumeration)
+                if state.layout_enum.as_ref().is_some_and(|layout| layout.id == enumeration))
     }
 }
 

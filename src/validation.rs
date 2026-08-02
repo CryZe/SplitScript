@@ -134,7 +134,7 @@ pub(crate) fn validate(
     }
 
     if let Some(state) = &syntax.state {
-        for field in &state.fields {
+        for field in state.all_fields() {
             if matches!(
                 field.source,
                 StateSource::Pointer(ref path) if path.decoder.is_none()

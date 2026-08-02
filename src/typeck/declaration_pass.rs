@@ -11,7 +11,11 @@ use crate::{
     types::EnumTypeId,
 };
 
-use super::{Checker, control_flow::contains_value_return, declarations::FunctionSignature};
+use super::{
+    Checker,
+    control_flow::contains_value_return,
+    declarations::{Binding, FunctionSignature},
+};
 
 pub(super) fn collect(checker: &mut Checker, program: &Program) {
     collect_state_fields(checker, program);
@@ -25,21 +29,8 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
     let provider = checker
         .provider_value
         .map(|(provider, _)| checker.standard_library.state_provider(provider));
-    for field in &state.fields {
-        let ty = if let Some(annotation) = field.annotation {
-            checker.syntax_type(annotation)
-        } else {
-            checker.fresh_inference(Requirements::none(), None)
-        };
-        if let Some(standard) = checker.standard_type_id(ty) {
-            let declaration = checker.standard_library.type_decl(standard);
-            if !declaration.value_usage.state_field {
-                checker.error(
-                    format!("{} cannot be stored in a state field", declaration.name),
-                    field.span,
-                );
-            }
-        }
+    for field in state.canonical_fields() {
+        let ty = collect_state_field_type(checker, field, provider);
         checker.semantics.resolve_value_type(field.id, ty);
         if checker
             .declarations
@@ -52,77 +43,150 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
                 field.span,
             );
         }
-        if let StateSource::Pointer(path) = &field.source {
-            if path.offsets.is_empty() {
-                checker.error("a pointer path needs at least one offset", field.span);
-            }
-            if let Some(StateMemoryDecoder::Utf8 { max_bytes, span }) = path.decoder {
-                let string = checker.standard_type(StdlibTypeId::String);
-                checker.unify(ty, string, field.span);
-                if max_bytes == 0 {
-                    checker.error("a UTF-8 state read must allow at least one byte", span);
-                } else if max_bytes > MAX_NATIVE_STRING_BYTES {
-                    checker.error(
-                        format!("a UTF-8 state read is limited to {MAX_NATIVE_STRING_BYTES} bytes"),
-                        span,
-                    );
-                }
-            } else {
-                checker.require(
-                    ty,
-                    Requirements::capability(StdlibCapabilityId::MemoryReadable),
+    }
+
+    for layout in state.layouts.iter().skip(1) {
+        let mut seen = HashSet::new();
+        for field in &layout.fields {
+            let ty = collect_state_field_type(checker, field, provider);
+            checker.semantics.resolve_value_type(field.id, ty);
+            if !seen.insert(field.name.clone()) {
+                checker.error(
+                    format!("duplicate state field `{}` in this layout", field.name),
                     field.span,
                 );
+                continue;
             }
-            if let Some(provider) = provider
-                && checker
-                    .standard_library
-                    .item(provider.direct_read)
-                    .signature
-                    .parameters[0]
-                    .ty
-                    == crate::stdlib::TypeRef::Core(CoreTypeId::U32)
-            {
-                if path.decoder.is_some() {
-                    checker.error(
-                        format!(
-                            "`state {}` does not yet support decoded string fields",
-                            provider.name
-                        ),
-                        field.span,
-                    );
-                }
-                if path.module.is_some() {
-                    checker.error(
-                        format!(
-                            "`state {}` direct reads use hardware addresses and cannot name a module",
-                            provider.name
-                        ),
-                        field.span,
-                    );
-                }
-                if path.offsets.len() != 1 {
-                    checker.error(
-                        format!(
-                            "`state {}` direct reads currently require exactly one address",
-                            provider.name
-                        ),
-                        field.span,
-                    );
-                }
-                if path
-                    .offsets
-                    .first()
-                    .is_some_and(|address| *address > u32::MAX.into())
-                {
-                    checker.error(
-                        format!("`state {}` addresses must fit in `u32`", provider.name),
-                        field.span,
-                    );
-                }
+            let Some((_, expected)) = checker.declarations.state_fields.get(&field.name).copied()
+            else {
+                checker.error(
+                    format!(
+                        "state layout field `{}` is not present in the first layout",
+                        field.name
+                    ),
+                    field.span,
+                );
+                continue;
+            };
+            checker.unify(ty, expected, field.span);
+        }
+        for (name, (canonical, _)) in checker.declarations.state_fields.clone() {
+            if !seen.contains(&name) {
+                let span = state
+                    .canonical_fields()
+                    .iter()
+                    .find(|field| field.id == canonical)
+                    .map_or(layout.span, |field| field.span);
+                checker.error(format!("state layout is missing field `{name}`"), span);
             }
         }
     }
+
+    if let (Some(layout_enum), Some(layout_value)) = (&state.layout_enum, state.layout_value) {
+        let ty = checker.enum_type(EnumTypeId::Source(layout_enum.id));
+        checker.semantics.resolve_value_type(layout_value, ty);
+        checker.declarations.globals.insert(
+            "layout".to_owned(),
+            Binding {
+                id: Some(layout_value),
+                ty,
+                mutable: false,
+                debug_only: false,
+            },
+        );
+    }
+}
+
+fn collect_state_field_type(
+    checker: &mut Checker,
+    field: &crate::ast::StateField,
+    provider: Option<&crate::stdlib::StdlibStateProvider>,
+) -> Type {
+    let ty = if let Some(annotation) = field.annotation {
+        checker.syntax_type(annotation)
+    } else {
+        checker.fresh_inference(Requirements::none(), None)
+    };
+    if let Some(standard) = checker.standard_type_id(ty) {
+        let declaration = checker.standard_library.type_decl(standard);
+        if !declaration.value_usage.state_field {
+            checker.error(
+                format!("{} cannot be stored in a state field", declaration.name),
+                field.span,
+            );
+        }
+    }
+    if let StateSource::Pointer(path) = &field.source {
+        if path.offsets.is_empty() {
+            checker.error("a pointer path needs at least one offset", field.span);
+        }
+        if let Some(StateMemoryDecoder::Utf8 { max_bytes, span }) = path.decoder {
+            let string = checker.standard_type(StdlibTypeId::String);
+            checker.unify(ty, string, field.span);
+            if max_bytes == 0 {
+                checker.error("a UTF-8 state read must allow at least one byte", span);
+            } else if max_bytes > MAX_NATIVE_STRING_BYTES {
+                checker.error(
+                    format!("a UTF-8 state read is limited to {MAX_NATIVE_STRING_BYTES} bytes"),
+                    span,
+                );
+            }
+        } else {
+            checker.require(
+                ty,
+                Requirements::capability(StdlibCapabilityId::MemoryReadable),
+                field.span,
+            );
+        }
+        if let Some(provider) = provider
+            && checker
+                .standard_library
+                .item(provider.direct_read)
+                .signature
+                .parameters[0]
+                .ty
+                == crate::stdlib::TypeRef::Core(CoreTypeId::U32)
+        {
+            if path.decoder.is_some() {
+                checker.error(
+                    format!(
+                        "`state {}` does not yet support decoded string fields",
+                        provider.name
+                    ),
+                    field.span,
+                );
+            }
+            if path.module.is_some() {
+                checker.error(
+                    format!(
+                        "`state {}` direct reads use hardware addresses and cannot name a module",
+                        provider.name
+                    ),
+                    field.span,
+                );
+            }
+            if path.offsets.len() != 1 {
+                checker.error(
+                    format!(
+                        "`state {}` direct reads currently require exactly one address",
+                        provider.name
+                    ),
+                    field.span,
+                );
+            }
+            if path
+                .offsets
+                .first()
+                .is_some_and(|address| *address > u32::MAX.into())
+            {
+                checker.error(
+                    format!("`state {}` addresses must fit in `u32`", provider.name),
+                    field.span,
+                );
+            }
+        }
+    }
+    ty
 }
 
 fn collect_settings(checker: &mut Checker, program: &Program) {

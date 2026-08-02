@@ -48,6 +48,41 @@ Each tick, the compiler-generated runtime copies `current` to `old` before
 refreshing `current`. The fields form a WebAssembly GC struct, so the action code
 uses typed references rather than a linear-memory state layout.
 
+Games with multiple supported memory layouts can name each layout inside one
+state declaration. Every layout must expose the same field names and types; the
+field order may differ.
+
+```text
+state "game.exe" {
+    layout Steam {
+        level: u32 at 0x1000
+    }
+    layout GOG {
+        level: u32 at 0x2000
+    }
+}
+
+onAttach {
+    let module = await process.mainModule()
+    if module.size == 0x1000 {
+        return StateLayout.Steam
+    }
+    if module.size == 0x2000 {
+        return StateLayout.GOG
+    }
+    await process.closed()
+}
+```
+
+Named layouts generate the enum `StateLayout` and the read-only value `layout`.
+For such a state declaration, `onAttach` returns the selected enum variant;
+state polling does not begin until it does. Detection remains ordinary typed
+SplitScript, so it can use module metadata, signatures, reads, `await`, and
+`retry` rather than being limited to a special module-size grammar. Awaiting
+`process.closed()` is the explicit unsupported-build path: it keeps the current
+process attachment inert until process-lifetime cancellation occurs. Later
+lifecycle blocks can compare or exhaustively match `layout`.
+
 ## Variables and inference
 
 ```text
@@ -114,7 +149,7 @@ Supported value types are:
 - `[T; N]`, a mutable array with exactly `N` elements
 - `T?`, an optional value containing either `Some(T)` or `None`
 - `T!`, a result containing either `T` or a standard string error
-- the built-in GC reference types `Duration` and `Module`
+- the built-in GC reference types `Duration`, `FileVersion`, and `Module`
 - `Signature`, the compile-time-only type produced by `sig"..."`
 
 The usual arithmetic, comparison, logical, bitwise, and shift operators are
@@ -845,6 +880,23 @@ byte whose high nibble is `B`. Module scans read overlapping 4 KiB chunks and
 therefore find patterns crossing page boundaries. A missing pattern suspends
 and retries on the next tick; process closure cancels the whole initializer.
 
+Windows executable versions have their own checked `FileVersion` value and
+`v"major.minor.build.private"` literal. The literal requires exactly four
+decimal components, each within the `u16` range. It is therefore safe to use in
+typed build selection without parsing host-formatted version strings.
+
+```text
+let executable = await process.mainModule()
+let version = executable.fileVersion() else v"0.0.0.0"
+if version == v"1.5.0.0" {
+    return StateLayout.V1500
+}
+```
+
+The quotes deliberately bound the complete structured literal, as they do for
+`sig"..."`, so an omitted or malformed component receives one focused parser
+diagnostic rather than being interpreted as unrelated numeric/member syntax.
+
 ## Typed process memory
 
 `process.read(address)` infers its exact memory representation from an
@@ -908,6 +960,29 @@ both fixes. `address` is nominal
 rather than an alias for `u64`, preventing a module size or counter from being
 passed where a target pointer is required.
 
+`Module` values retain the identity used to discover them. In addition to
+`address` and `size`, `module.path()` returns the runtime's portable,
+host-provided filesystem path as `String!`. The operation is fallible because
+the host may not expose a path; it does not provide general filesystem access.
+
+```text
+let executable = await process.mainModule()
+let executablePath = executable.path() else "Unavailable"
+```
+
+For Windows PE modules, `module.fileVersion()` parses the bounded numeric
+`VS_FIXEDFILEINFO` resource directly from process memory. It returns an
+equatable `FileVersion` record with `major`, `minor`, `build`, and
+`privatePart` fields. This keeps version selection typed instead of relying on
+legacy version strings with inconsistent separators.
+
+```text
+let version = executable.fileVersion() else return
+if version.major == 1 && version.minor == 2 {
+    print("recognized executable version")
+}
+```
+
 Generic calls put type arguments directly after the callable name:
 
 ```text
@@ -949,19 +1024,25 @@ character.
 JavaScript-inspired template strings use backticks and `{expression}`, without
 JavaScript's `$` marker. Existing strings are inserted directly. Every other
 interpolated value is converted by the same rules as `value as String`; integer
-widths and `address` are currently supported, while values without the `Display`
+widths, `address`, and standard-library types with source-defined formatting
+such as `FileVersion` are supported, while values without the `Display`
 capability produce compile-time errors. Template strings may contain multiple interpolations,
 nested expressions, and newlines. Literal braces are written as `\{` and `\}`.
 
 ```text
 let level = `{stage}-{act}`
 let levelTime = `{minutes as u32}:{twoDigits(seconds as u32)}`
+let executableLabel = `version {version}`
 ```
 
 `String.concat` remains available as the lower-level collection operation.
 `print(value)` and `setVariable(key, value)` accept any `Display` value
 and apply these same conversions at the runtime boundary, so numeric values and
-addresses do not need an explicit `as String` cast. `timer.state()` and
+addresses do not need an explicit `as String` cast. A standard-library type can
+tag an ordinary source-defined method with `@display`; that one implementation
+then powers all four conversion entry points without a type-specific backend
+branch. `FileVersion` uses this mechanism to render
+`major.minor.build.private`. `timer.state()` and
 `setTickRate(f64)` expose the corresponding ASR facilities without
 linear-memory pointers in source code.
 `timer.state()` returns `TimerState`, a

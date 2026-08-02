@@ -427,6 +427,14 @@ impl Checker {
 
     pub(super) fn binding_for_use(&mut self, name: &str, span: Span) -> Option<Binding> {
         let binding = self.binding(name)?;
+        if binding.id == self.layout_value
+            && matches!(self.callable, CallableContext::Action(ActionKind::OnAttach))
+        {
+            self.error(
+                "`layout` is only available after `onAttach` has returned it",
+                span,
+            );
+        }
         if binding.debug_only && !self.debug_context.is_debug() {
             self.error(
                 format!("debug-only binding `{name}` can only be used from debug code"),

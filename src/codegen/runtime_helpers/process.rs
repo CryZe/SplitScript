@@ -657,6 +657,117 @@ pub(super) fn compile_read_managed_string(
     function
 }
 
+pub(super) fn compile_module_path(
+    abi: &Abi,
+    string_from_memory: u32,
+    gc: &GcLayout,
+    scratch: super::super::memory_plan::RuntimeScratch,
+) -> Function {
+    const MAX_MODULE_PATH_BYTES: i32 = 65_536;
+
+    let host_strings = scratch.host_strings_start;
+    let path_length_pointer = scratch.abi_read.destination(4);
+    let mut function = Function::new([(4, ValType::I32)]);
+    let process = 0;
+    let name = 1;
+    let name_length = 2;
+    let index = 3;
+    let path_length = 4;
+    let required_pages = 5;
+
+    function
+        .instruction(&Instruction::LocalGet(name))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalSet(name_length))
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(name_length))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Const(MAX_MODULE_PATH_BYTES))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Const(65_535))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Const(16))
+        .instruction(&Instruction::I32ShrU)
+        .instruction(&Instruction::LocalTee(required_pages))
+        .instruction(&Instruction::MemorySize(0))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(required_pages))
+        .instruction(&Instruction::MemorySize(0))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::MemoryGrow(0))
+        .instruction(&Instruction::Drop)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(name_length))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalGet(name))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::ArrayGetU(
+            gc.standard_index(StdlibTypeId::String),
+        ))
+        .instruction(&Instruction::I32Store8(memarg()))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(path_length_pointer))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Store(memarg()))
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(name_length))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(path_length_pointer))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetModulePath),
+        ))
+        .instruction(&Instruction::Drop)
+        .instruction(&Instruction::I32Const(path_length_pointer))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::LocalTee(path_length))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::LocalGet(path_length))
+        .instruction(&Instruction::I32Const(MAX_MODULE_PATH_BYTES))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(name_length))
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(name_length))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Const(path_length_pointer))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetModulePath),
+        ))
+        .instruction(&Instruction::I32Eqz);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(name_length))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalGet(path_length))
+        .instruction(&Instruction::Call(string_from_memory))
+        .instruction(&Instruction::End);
+    function
+}
+
 fn emit_empty_string_return(function: &mut Function, gc: &GcLayout) {
     function
         .instruction(&Instruction::ArrayNewFixed {

@@ -1,0 +1,37 @@
+// Port of the compact, versioned Martha Is Dead ASL load remover. The three
+// supported releases share one typed state interface while using different
+// pointer paths.
+state "MID-Win64-Shipping.exe" {
+    /// Demo memory layout.
+    layout Demo {
+        loader: i32 at "MID-Win64-Shipping.exe", 0x04a693d8, 0x4e0
+    }
+
+    /// Unreal Engine 4.27 memory layout.
+    layout V427 {
+        loader: i32 at "MID-Win64-Shipping.exe", 0x05cd4600, 0x4f8
+    }
+
+    /// Version 1.0401.01 memory layout.
+    layout V1040101 {
+        loader: i32 at "MID-Win64-Shipping.exe", 0x05ce0a38, 0x4e0
+    }
+}
+
+onAttach {
+    let executable = await process.mainModule()
+    if executable.size == 84_725_760 {
+        return StateLayout.Demo
+    } else if executable.size == 104_284_160 {
+        return StateLayout.V427
+    } else if executable.size == 104_288_256 {
+        return StateLayout.V1040101
+    }
+
+    print(`unsupported Martha Is Dead module size {executable.size}`)
+    await process.closed()
+}
+
+isLoading {
+    return current.loader == 0
+}

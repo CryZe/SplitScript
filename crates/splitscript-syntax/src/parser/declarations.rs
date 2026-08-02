@@ -6,7 +6,8 @@ use super::{
     Action, ActionKind, CoreTypeId, Diagnostic, EnumDecl, EnumId, EnumReference, EnumVariant,
     FunctionDecl, FunctionId, Parameter, Parser, PointerPath, RecordDecl, RecordField, RecordId,
     SettingChoiceOption, SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl, StateField,
-    StateMemoryDecoder, StateProviderRef, StateSource, TokenKind, TypeRef, csharp_numeric_type,
+    StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource, TokenKind, TypeRef,
+    csharp_numeric_type,
 };
 
 impl Parser<'_> {
@@ -250,9 +251,98 @@ impl Parser<'_> {
         )?;
         let body_depth = self.brace_depth_before(self.cursor.position());
         let mut fields = Vec::new();
+        let mut layouts = Vec::new();
+        let mut layout_variants = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
                 self.record_missing_closing("unterminated state declaration");
+                break;
+            }
+            let item_start = self.cursor.position();
+            let documentation = self.take_source_documentation();
+            if self.at(&TokenKind::RBrace) {
+                self.diagnostics.push(
+                    self.error("a documentation comment must precede a state field or layout"),
+                );
+                break;
+            }
+            if self.at_ident("layout") {
+                let parsed = self.state_layout_decl(documentation);
+                if let Some((layout, variant)) =
+                    self.recover_delimited_item(parsed, item_start, body_depth)
+                {
+                    layouts.push(layout);
+                    layout_variants.push(variant);
+                }
+            } else {
+                let parsed = self.state_field(documentation);
+                if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
+                    fields.push(field);
+                }
+            }
+        }
+        let end = self
+            .eat(&TokenKind::RBrace)
+            .map_or(self.current().span.end, |span| span.end);
+        if !fields.is_empty() && !layouts.is_empty() {
+            self.diagnostics.push(Diagnostic::new(
+                "a state declaration cannot mix fields and named layouts",
+                Span { start, end },
+            ));
+        }
+        let (layout_enum, layout_value) = if layouts.is_empty() {
+            (None, None)
+        } else {
+            let id = EnumId::from_index(self.next_enum_id);
+            self.next_enum_id += 1;
+            let name_span = Span {
+                start,
+                end: start + "state".len(),
+            };
+            (
+                Some(EnumDecl {
+                    id,
+                    name: "StateLayout".to_owned(),
+                    documentation: Some(
+                        "The memory layout selected for the attached game build.".to_owned(),
+                    ),
+                    name_span,
+                    variants: layout_variants,
+                    span: Span { start, end },
+                }),
+                Some(self.new_value_id()),
+            )
+        };
+        Ok(StateDecl {
+            provider,
+            processes,
+            fields,
+            layouts,
+            layout_enum,
+            layout_value,
+            span: Span { start, end },
+        })
+    }
+
+    fn state_layout_decl(
+        &mut self,
+        documentation: Option<String>,
+    ) -> Result<(StateLayoutDecl, EnumVariant), Diagnostic> {
+        let start = self.expect_ident("layout")?.start;
+        let (name, name_span) = self.expect_any_ident("expected a layout name")?;
+        let variant = EnumVariant {
+            id: self.new_enum_variant_id(),
+            name,
+            documentation,
+            payload: None,
+            span: name_span,
+        };
+        self.expect(TokenKind::LBrace, "expected `{` after the layout name")?;
+        let body_depth = self.brace_depth_before(self.cursor.position());
+        let mut fields = Vec::new();
+        while !self.at(&TokenKind::RBrace) {
+            if self.at(&TokenKind::Eof) {
+                self.record_missing_closing("unterminated state layout");
                 break;
             }
             let item_start = self.cursor.position();
@@ -262,91 +352,7 @@ impl Parser<'_> {
                     .push(self.error("a documentation comment must precede a state field"));
                 break;
             }
-            let parsed = (|| {
-                let (name, field_start) = self.expect_any_ident("expected a state field name")?;
-                let annotation = if self.eat(&TokenKind::Colon).is_some() {
-                    let (ty, type_span) = self.parse_type("expected a state field type")?;
-                    if !Self::type_can_be_stored_in_state(ty) {
-                        return Err(Diagnostic::new(
-                            format!("`{ty}` cannot be stored in state"),
-                            type_span,
-                        ));
-                    }
-                    Some(ty)
-                } else {
-                    None
-                };
-                let source = if self.eat(&TokenKind::Assign).is_some() {
-                    StateSource::Expression(self.root_expression())
-                } else {
-                    self.expect_ident("at")?;
-                    let module = if matches!(self.current().kind, TokenKind::String(_)) {
-                        let module = self.expect_string("expected a module name")?;
-                        self.expect(TokenKind::Comma, "expected an offset after the module")?;
-                        Some(module)
-                    } else {
-                        None
-                    };
-                    let mut offsets = vec![self.expect_u64("expected a pointer offset")?];
-                    while self.eat(&TokenKind::Comma).is_some() {
-                        offsets.push(self.expect_u64("expected a pointer offset")?);
-                    }
-                    let decoder = if let Some(start) = self.eat_ident("as") {
-                        let (name, name_span) =
-                            self.expect_any_ident("expected a state memory decoder after `as`")?;
-                        if name != "utf8" {
-                            return Err(Diagnostic::new(
-                                format!("unknown state memory decoder `{name}`"),
-                                name_span,
-                            ));
-                        }
-                        self.expect(TokenKind::LParen, "expected `(` after `utf8`")?;
-                        let max_bytes = self.expect_u64("expected a maximum UTF-8 byte count")?;
-                        let end = self
-                            .expect(
-                                TokenKind::RParen,
-                                "expected `)` after the maximum UTF-8 byte count",
-                            )?
-                            .end;
-                        let Ok(max_bytes) = u32::try_from(max_bytes) else {
-                            return Err(Diagnostic::new(
-                                "the maximum UTF-8 byte count must fit in `u32`",
-                                start.join(Span {
-                                    start: name_span.start,
-                                    end,
-                                }),
-                            ));
-                        };
-                        Some(StateMemoryDecoder::Utf8 {
-                            max_bytes,
-                            span: Span {
-                                start: start.start,
-                                end,
-                            },
-                        })
-                    } else {
-                        None
-                    };
-                    StateSource::Pointer(PointerPath {
-                        module,
-                        offsets,
-                        decoder,
-                    })
-                };
-                let end = self.previous().span.end;
-                self.terminator()?;
-                Ok(StateField {
-                    id: self.new_value_id(),
-                    name,
-                    documentation,
-                    annotation,
-                    source,
-                    span: Span {
-                        start: field_start.start,
-                        end,
-                    },
-                })
-            })();
+            let parsed = self.state_field(documentation);
             if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
                 fields.push(field);
             }
@@ -354,11 +360,99 @@ impl Parser<'_> {
         let end = self
             .eat(&TokenKind::RBrace)
             .map_or(self.current().span.end, |span| span.end);
-        Ok(StateDecl {
-            provider,
-            processes,
-            fields,
-            span: Span { start, end },
+        Ok((
+            StateLayoutDecl {
+                variant: variant.id,
+                fields,
+                span: Span { start, end },
+            },
+            variant,
+        ))
+    }
+
+    fn state_field(&mut self, documentation: Option<String>) -> Result<StateField, Diagnostic> {
+        let (name, field_start) = self.expect_any_ident("expected a state field name")?;
+        let annotation = if self.eat(&TokenKind::Colon).is_some() {
+            let (ty, type_span) = self.parse_type("expected a state field type")?;
+            if !Self::type_can_be_stored_in_state(ty) {
+                return Err(Diagnostic::new(
+                    format!("`{ty}` cannot be stored in state"),
+                    type_span,
+                ));
+            }
+            Some(ty)
+        } else {
+            None
+        };
+        let source = if self.eat(&TokenKind::Assign).is_some() {
+            StateSource::Expression(self.root_expression())
+        } else {
+            self.expect_ident("at")?;
+            let module = if matches!(self.current().kind, TokenKind::String(_)) {
+                let module = self.expect_string("expected a module name")?;
+                self.expect(TokenKind::Comma, "expected an offset after the module")?;
+                Some(module)
+            } else {
+                None
+            };
+            let mut offsets = vec![self.expect_u64("expected a pointer offset")?];
+            while self.eat(&TokenKind::Comma).is_some() {
+                offsets.push(self.expect_u64("expected a pointer offset")?);
+            }
+            let decoder = if let Some(start) = self.eat_ident("as") {
+                let (name, name_span) =
+                    self.expect_any_ident("expected a state memory decoder after `as`")?;
+                if name != "utf8" {
+                    return Err(Diagnostic::new(
+                        format!("unknown state memory decoder `{name}`"),
+                        name_span,
+                    ));
+                }
+                self.expect(TokenKind::LParen, "expected `(` after `utf8`")?;
+                let max_bytes = self.expect_u64("expected a maximum UTF-8 byte count")?;
+                let end = self
+                    .expect(
+                        TokenKind::RParen,
+                        "expected `)` after the maximum UTF-8 byte count",
+                    )?
+                    .end;
+                let Ok(max_bytes) = u32::try_from(max_bytes) else {
+                    return Err(Diagnostic::new(
+                        "the maximum UTF-8 byte count must fit in `u32`",
+                        start.join(Span {
+                            start: name_span.start,
+                            end,
+                        }),
+                    ));
+                };
+                Some(StateMemoryDecoder::Utf8 {
+                    max_bytes,
+                    span: Span {
+                        start: start.start,
+                        end,
+                    },
+                })
+            } else {
+                None
+            };
+            StateSource::Pointer(PointerPath {
+                module,
+                offsets,
+                decoder,
+            })
+        };
+        let end = self.previous().span.end;
+        self.terminator()?;
+        Ok(StateField {
+            id: self.new_value_id(),
+            name,
+            documentation,
+            annotation,
+            source,
+            span: Span {
+                start: field_start.start,
+                end,
+            },
         })
     }
 
@@ -795,6 +889,9 @@ impl Parser<'_> {
             provider: None,
             processes: vec![process],
             fields,
+            layouts: Vec::new(),
+            layout_enum: None,
+            layout_value: None,
             span: Span {
                 start,
                 end: self.previous().span.end,

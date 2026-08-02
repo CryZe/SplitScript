@@ -67,7 +67,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         composite_type: CompositeType {
             inner: CompositeInnerType::Struct(StructType {
                 fields: state
-                    .fields
+                    .canonical_fields()
                     .iter()
                     .map(|field| FieldType {
                         element_type: layout.storage_type(value_type(field.id, semantics)),

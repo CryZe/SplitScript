@@ -9,9 +9,10 @@ use crate::ast::{
 use crate::equality::EqualityCapabilities;
 use crate::intrinsic_registry;
 use crate::memory::{MemoryLayouts, MemoryTypeLayout};
-use crate::semantic::SemanticModel;
+use crate::semantic::{FunctionInstance, SemanticModel};
 use crate::stdlib::{
-    IntrinsicId, StandardLibrary, StateProviderAttachment, StateProviderProcesses, StdlibTypeId,
+    Implementation, IntrinsicId, StandardLibrary, StateProviderAttachment, StateProviderProcesses,
+    StdlibTypeId,
 };
 use crate::types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, TypeId, TypeKind};
 use crate::wasm_ir::{self, BodyOwner};
@@ -59,6 +60,31 @@ use self::update::compile_update;
 use crate::intrinsic_registry::RuntimeHelperId;
 
 const STATE_TYPE: u32 = 0;
+
+fn standard_display_function(
+    source: TypeId,
+    program: &Program,
+    semantics: &SemanticModel,
+    standard_library: &StandardLibrary,
+) -> Option<(StdlibTypeId, FunctionInstance)> {
+    let TypeKind::Standard(standard) = semantics.types().kind(source) else {
+        return None;
+    };
+    let item = standard_library.display_implementation(*standard)?;
+    let Implementation::LibraryBody { function_name, .. } = item.implementation else {
+        unreachable!("validated custom Display implementations have source bodies")
+    };
+    let function = program
+        .functions
+        .iter()
+        .find(|function| function.name == function_name)
+        .expect("custom Display bodies are injected into the program");
+    let string = semantics.types().id_for_standard(StdlibTypeId::String);
+    Some((
+        *standard,
+        semantics.function_instance(function.id, vec![source, string]),
+    ))
+}
 
 struct ConstructedTypes {
     enums: Vec<EnumDecl>,
@@ -176,9 +202,10 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             .body(BodyOwner::Action(action))
             .and_then(|body| body.cancellation_region)
     });
-    let reachability =
+    let mut reachability =
         reachability::Reachability::analyze(program, semantics, enums, wasm_ir, &standard_library);
     let dependencies = BackendDependencies::analyze(program, semantics, wasm_ir, &reachability);
+    reachability.require_runtime_helper_types(&dependencies, array_types, semantics);
     let static_data = StaticData::collect(
         program,
         &process_names,
@@ -226,6 +253,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         runtime_helpers,
         equality: equality_functions,
         users: user_functions,
+        displays: display_functions,
         reads: read_functions,
         actions: action_functions,
         start: start_function,
@@ -259,6 +287,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         runtime_globals,
         runtime_helpers: &runtime_helpers,
         functions: &user_functions,
+        display_functions: &display_functions,
         equality_functions: &equality_functions,
         records: &program.records,
         enums,
@@ -346,7 +375,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             .expect("reachable function instances have source declarations");
         codes.function(&compile_user_function(function, instance, &lowering));
     }
-    for field in &state.fields {
+    for field in state.ordered_read_fields() {
         codes.function(&compile_read(field, &abi, strings, &lowering));
     }
     for action in &program.actions {

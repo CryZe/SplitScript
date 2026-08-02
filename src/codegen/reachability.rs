@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     ast::{
@@ -6,8 +6,10 @@ use crate::{
         ResultTypeId,
     },
     semantic::{FunctionInstance, SemanticModel},
-    stdlib::{RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
-    types::{TypeId, TypeKind},
+    stdlib::{
+        IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibCapabilityId, StdlibTypeId,
+    },
+    types::{ResolvedArrayType, TypeId, TypeKind},
     wasm_ir::{self, BodyOwner, Visitor},
 };
 
@@ -27,6 +29,7 @@ pub(super) struct Reachability {
     gc_arrays: BTreeSet<ArrayTypeId>,
     gc_options: BTreeSet<OptionTypeId>,
     gc_results: BTreeSet<ResultTypeId>,
+    display_functions: BTreeMap<StdlibTypeId, FunctionInstance>,
 }
 
 impl Reachability {
@@ -109,13 +112,87 @@ impl Reachability {
                     );
                 }
             }
+
+            let specialize = |ty| {
+                owner
+                    .as_ref()
+                    .map_or(ty, |owner| semantics.specialize_type(owner, ty))
+            };
+            let mut display_sources = Vec::new();
+            match &expression.kind {
+                wasm_ir::ExpressionKind::Cast { value }
+                    if matches!(
+                        semantics.types().kind(specialize(expression.ty)),
+                        TypeKind::Standard(StdlibTypeId::String)
+                    ) =>
+                {
+                    display_sources.push(
+                        wasm_ir
+                            .expression(*value)
+                            .expect("cast operands belong to Wasm IR")
+                            .ty,
+                    );
+                }
+                wasm_ir::ExpressionKind::InterpolatedString(parts) => {
+                    display_sources.extend(parts.iter().filter_map(|part| match part {
+                        wasm_ir::InterpolatedPart::Expression {
+                            string_conversion_source,
+                            ..
+                        } => *string_conversion_source,
+                        wasm_ir::InterpolatedPart::Text(_) => None,
+                    }));
+                }
+                wasm_ir::ExpressionKind::Call { target, arguments } => {
+                    let converted = match target {
+                        wasm_ir::CallTarget::Intrinsic {
+                            intrinsic: IntrinsicId::Print,
+                            ..
+                        } => arguments.first(),
+                        wasm_ir::CallTarget::Intrinsic {
+                            intrinsic: IntrinsicId::TimerSetVariable,
+                            ..
+                        } => arguments.get(1),
+                        _ => None,
+                    };
+                    if let Some(argument) = converted {
+                        display_sources.push(
+                            wasm_ir
+                                .expression(*argument)
+                                .expect("call arguments belong to Wasm IR")
+                                .ty,
+                        );
+                    }
+                }
+                _ => {}
+            }
+            for source in display_sources.into_iter().map(specialize) {
+                let Some((standard, function)) =
+                    super::standard_display_function(source, program, semantics, standard_library)
+                else {
+                    continue;
+                };
+                reachable
+                    .display_functions
+                    .insert(standard, function.clone());
+                if reachable.functions.insert(function.clone()) {
+                    let body = wasm_ir
+                        .body(BodyOwner::Function(function.clone()))
+                        .expect("custom Display implementations have Wasm IR bodies");
+                    collect_block_expression_roots(
+                        &body.entry,
+                        wasm_ir,
+                        Some(function),
+                        &mut pending,
+                    );
+                }
+            }
         }
 
         // Type reachability includes every value shape referenced by emitted
         // storage or signatures, not only the result types of live expressions.
         let mut type_roots = Vec::new();
         if let Some(state) = &program.state {
-            for field in &state.fields {
+            for field in state.all_fields() {
                 type_roots.push(
                     semantics
                         .value_type(field.id)
@@ -182,18 +259,6 @@ impl Reachability {
                 ),
             );
         }
-        // Interpolation's concatenation helper receives a compiler-generated
-        // [String]; that layout is not the type of any source expression.
-        let string_array = semantics.types().iter().find_map(|(ty, kind)| {
-            let TypeKind::Array { element, .. } = kind else {
-                return None;
-            };
-            matches!(
-                semantics.types().kind(*element),
-                TypeKind::Standard(StdlibTypeId::String)
-            )
-            .then_some(ty)
-        });
         for (owner, id) in &reachable.expression_instances {
             let expression = wasm_ir
                 .expression(*id)
@@ -208,9 +273,6 @@ impl Reachability {
                 type_roots.extend([specialize(conversion.source), specialize(conversion.target)]);
             }
             match &expression.kind {
-                wasm_ir::ExpressionKind::InterpolatedString(_) => type_roots.push(
-                    string_array.expect("interpolation has a compiler-generated String array"),
-                ),
                 wasm_ir::ExpressionKind::Call { target, .. } => match target {
                     wasm_ir::CallTarget::UserMethod { receiver_type, .. } => {
                         type_roots.push(specialize(*receiver_type));
@@ -246,8 +308,30 @@ impl Reachability {
         reachable
     }
 
+    /// Retains constructed GC layouts referenced by the signatures of the
+    /// runtime helpers selected after expression reachability is known.
+    pub fn require_runtime_helper_types(
+        &mut self,
+        dependencies: &super::dependencies::BackendDependencies,
+        arrays: &[ResolvedArrayType],
+        semantics: &SemanticModel,
+    ) {
+        self.gc_arrays
+            .extend(super::runtime_helper_registry::required_array_layouts(
+                dependencies.helpers(),
+                arrays,
+                semantics,
+            ));
+    }
+
     pub fn functions(&self) -> impl Iterator<Item = &FunctionInstance> {
         self.functions.iter()
+    }
+
+    pub fn display_functions(&self) -> impl Iterator<Item = (StdlibTypeId, &FunctionInstance)> {
+        self.display_functions
+            .iter()
+            .map(|(ty, function)| (*ty, function))
     }
 
     pub fn contains_expression(&self, expression: ExprId) -> bool {

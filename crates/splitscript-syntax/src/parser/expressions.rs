@@ -327,6 +327,41 @@ impl Parser<'_> {
                         self.new_expr(ExprKind::Signature(value), token.span.join(signature_span))
                     );
                 }
+                if first == "v" {
+                    let version_span = self.current().span;
+                    let value = self.expect_string("expected a quoted version after `v`")?;
+                    let components = parse_file_version(&value)
+                        .map_err(|message| Diagnostic::new(message, version_span))?;
+                    let args = components
+                        .into_iter()
+                        .map(|value| {
+                            self.new_expr(
+                                ExprKind::Int {
+                                    value: u64::from(value),
+                                    suffix: None,
+                                },
+                                version_span,
+                            )
+                        })
+                        .collect();
+                    return Ok(self.new_expr(
+                        ExprKind::Call {
+                            callee: vec!["FileVersion".to_owned(), "fromParts".to_owned()],
+                            // The source spelling is a literal, not a visible
+                            // call site. Keep the lowering target out of
+                            // position-based tooling while preserving the
+                            // complete literal span on the expression.
+                            name_span: Span {
+                                start: token.span.end,
+                                end: token.span.end,
+                            },
+                            receiver: None,
+                            type_arguments: Vec::new(),
+                            args,
+                        },
+                        token.span.join(version_span),
+                    ));
+                }
                 let begins_record_literal = self.at(&TokenKind::LBrace)
                     && (matches!(self.peek(1).kind, TokenKind::RBrace)
                         || matches!(
@@ -1056,6 +1091,26 @@ impl Parser<'_> {
             _ => return None,
         })
     }
+}
+
+fn parse_file_version(value: &str) -> Result<[u16; 4], &'static str> {
+    let mut components = value.split('.');
+    let mut parsed = [0; 4];
+    for component in &mut parsed {
+        let Some(text) = components.next() else {
+            return Err("file-version literals require exactly four decimal components");
+        };
+        if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err("file-version components must be decimal integers");
+        }
+        *component = text
+            .parse()
+            .map_err(|_| "file-version components must fit in `u16`")?;
+    }
+    if components.next().is_some() {
+        return Err("file-version literals require exactly four decimal components");
+    }
+    Ok(parsed)
 }
 
 fn flatten_postfix_receiver(receiver: Expr, members: &mut Vec<String>) -> Expr {

@@ -13,7 +13,7 @@ use crate::{
         FunctionInstance, ResolvedMember, ResolvedReceiver, ResolvedRecordFieldId,
         ResolvedRecordId, ResolvedValue, SemanticModel, ValueConversionKind,
     },
-    stdlib::{IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibTypeId},
+    stdlib::{IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibTypeId},
     types::{EnumTypeId, ResolvedArrayType, TypeId},
     wasm_ir,
 };
@@ -47,6 +47,13 @@ pub(super) enum LocalStorage<'a> {
 }
 
 #[derive(Clone, Copy)]
+pub(super) enum BareReturn {
+    Void,
+    Action(ActionKind),
+    AsyncAttach,
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct ExprContext<'a> {
     pub standard_library: &'a StandardLibrary,
     pub abi: &'a Abi,
@@ -58,6 +65,7 @@ pub(super) struct ExprContext<'a> {
     pub runtime_globals: RuntimeGlobals,
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, u32>,
+    pub display_functions: &'a HashMap<StdlibTypeId, FunctionInstance>,
     pub equality_functions: &'a EqualityFunctions,
     pub records: &'a [RecordDecl],
     pub enums: &'a [EnumDecl],
@@ -72,6 +80,7 @@ pub(super) struct ExprContext<'a> {
     /// Concrete type arguments while emitting a generic function template.
     pub function_instance: Option<&'a FunctionInstance>,
     pub loop_control: Option<LoopControl>,
+    pub bare_return: BareReturn,
 }
 
 impl ExprContext<'_> {
@@ -494,7 +503,7 @@ fn compile_resolved_path(
             function.instruction(&Instruction::LocalGet(snapshot));
             let (index, field_type) = context
                 .state
-                .fields
+                .canonical_fields()
                 .iter()
                 .enumerate()
                 .find_map(|(index, state_field)| {
@@ -1506,6 +1515,29 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
+            IntrinsicId::ModulePath => {
+                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+                compile_receiver(function, target, context);
+                function
+                    .instruction(&Instruction::RefAsNonNull)
+                    .instruction(&Instruction::StructGet {
+                        struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
+                        field_index: context.gc.standard_field_index(StdlibFieldId::ModuleName),
+                    })
+                    .instruction(&Instruction::Call(
+                        context
+                            .runtime_helpers
+                            .function(RuntimeHelperId::ModulePath),
+                    ));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Standard(StdlibTypeId::String),
+                    Instruction::RefIsNull,
+                    "module path is unavailable",
+                    context,
+                );
+            }
             IntrinsicId::UnityIl2Cpp => {
                 unreachable!("Unity.il2cpp is lowered as an await")
             }
@@ -1631,6 +1663,16 @@ fn compile_fallback_branch(
         wasm_ir::FallbackBranch::Return(value) => {
             if let Some(value) = value {
                 compile_expr(function, value, context);
+            } else {
+                match context.bare_return {
+                    BareReturn::Void => {}
+                    BareReturn::Action(action) => {
+                        emit_action_default(function, action, context.gc);
+                    }
+                    BareReturn::AsyncAttach => {
+                        function.instruction(&Instruction::I32Const(1));
+                    }
+                }
             }
             function.instruction(&Instruction::Return);
         }
@@ -1763,6 +1805,13 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
 
     if target == Type::Standard(StdlibTypeId::String) {
         if source == target {
+            return;
+        }
+        if let Type::Standard(standard) = source
+            && let Some(display) = context.display_functions.get(&standard)
+        {
+            let display = context.called_instance(display);
+            function.instruction(&Instruction::Call(context.functions[&display]));
             return;
         }
         function

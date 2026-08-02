@@ -1,0 +1,42 @@
+// Port of the compact Borderlands load remover. It demonstrates typed PE file
+// version selection and a stable state interface across direct and PE32 pointer
+// layouts.
+state "Borderlands.exe" {
+    /// Original 1.0 executable layout.
+    layout V1000 {
+        isLoading1: bool at "Borderlands.exe", 0x01b98a74
+        isLoading2: bool at "Borderlands.exe", 0x01b97e38
+    }
+
+    /// Patched 1.5 executable layout, historically labelled 1.4.1 by the ASL.
+    layout V1500 {
+        isLoading1: bool = process.read<bool>(
+            executableBase.memoryPath([0x00480af0], 0, PointerSize.Bit32).resolve()?
+        )?
+        isLoading2: bool = process.read<bool>(
+            executableBase.memoryPath([0x001e1f1c], 0, PointerSize.Bit32).resolve()?
+        )?
+    }
+}
+
+let executableBase: address = 0x0
+
+onAttach {
+    let executable = await process.mainModule()
+    let version = executable.fileVersion() else v"0.0.0.0"
+
+    executableBase = executable.address
+    if version == v"1.0.0.0" {
+        return StateLayout.V1000
+    }
+    if version == v"1.5.0.0" {
+        return StateLayout.V1500
+    }
+
+    print(`unsupported Borderlands file version {version}`)
+    await process.closed()
+}
+
+isLoading {
+    return current.isLoading1 || current.isLoading2
+}

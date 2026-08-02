@@ -19,10 +19,11 @@ use super::{
     call_target,
     context::AttachContext,
     data_plan::{SignaturePool, StringPool},
-    emit_async_frame_ref, emit_memory_value, emit_typed_struct_get,
+    emit_async_frame_ref, emit_memory_value, emit_string_literal, emit_typed_struct_get,
     expression::{
-        ExprContext, LocalStorage, LoopControl, MatchLayout, compile_assignment, compile_expr,
-        compile_for_bind_and_advance, compile_for_has_next, compile_for_init, compile_receiver,
+        BareReturn, ExprContext, LocalStorage, LoopControl, MatchLayout, compile_assignment,
+        compile_expr, compile_for_bind_and_advance, compile_for_has_next, compile_for_init,
+        compile_receiver,
     },
     global_plan::RuntimeGlobals,
     imports::Abi,
@@ -77,6 +78,7 @@ pub(super) fn compile_async_attach(
         runtime_globals: runtime.lowering.runtime_globals,
         runtime_helpers: runtime.lowering.runtime_helpers,
         functions: runtime.lowering.functions,
+        display_functions: runtime.lowering.display_functions,
         equality_functions: runtime.lowering.equality_functions,
         records: runtime.lowering.records,
         enums: runtime.lowering.enums,
@@ -90,7 +92,15 @@ pub(super) fn compile_async_attach(
         gc: runtime.lowering.gc,
         function_instance: None,
         loop_control: None,
+        bare_return: BareReturn::AsyncAttach,
     };
+    let result_global = runtime
+        .lowering
+        .state
+        .layout_enum
+        .is_some()
+        .then_some(context.runtime_globals.selected_layout)
+        .flatten();
 
     let mut states = (0..wasm_body.async_state_count)
         .map(|_| None)
@@ -123,6 +133,7 @@ pub(super) fn compile_async_attach(
                 block,
                 1,
                 loop_targets.map(|targets| targets.control(1)),
+                result_global,
                 cancellation_region,
                 runtime,
                 layout,
@@ -147,6 +158,7 @@ pub(super) fn compile_async_attach(
                         }
                         .control(2),
                     ),
+                    result_global,
                     cancellation_region,
                     runtime,
                     layout,
@@ -191,6 +203,7 @@ pub(super) fn compile_async_attach(
                         }
                         .control(2),
                     ),
+                    result_global,
                     cancellation_region,
                     runtime,
                     layout,
@@ -352,7 +365,9 @@ fn compile_suspension_poll(
                 emit_async_frame_ref(function, context.runtime_globals);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
-                    .instruction(&Instruction::LocalGet(module_size_local))
+                    .instruction(&Instruction::LocalGet(module_size_local));
+                emit_module_name_value(function, module_name, context);
+                function
                     .instruction(&Instruction::StructNew(
                         context.gc.standard_index(StdlibTypeId::Module),
                     ))
@@ -782,6 +797,36 @@ fn compile_suspension_poll(
     }
 }
 
+fn emit_module_name_value(
+    function: &mut Function,
+    module_name: Option<&str>,
+    context: &ExprContext<'_>,
+) {
+    if let Some(name) = module_name {
+        emit_string_literal(function, name, context.gc);
+        return;
+    }
+
+    let names = &context.state.processes;
+    debug_assert!(!names.is_empty());
+    let string_type = context.gc.val_type(Type::Standard(StdlibTypeId::String));
+    for (index, name) in names.iter().enumerate() {
+        function
+            .instruction(&Instruction::GlobalGet(
+                context.runtime_globals.process_name,
+            ))
+            .instruction(&Instruction::I32Const(index as i32))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::If(BlockType::Result(string_type)));
+        emit_string_literal(function, name, context.gc);
+        function.instruction(&Instruction::Else);
+    }
+    function.instruction(&Instruction::Unreachable);
+    for _ in names {
+        function.instruction(&Instruction::End);
+    }
+}
+
 fn emit_process_module_query(
     function: &mut Function,
     target: &wasm_ir::CallTarget,
@@ -1057,6 +1102,7 @@ fn compile_async_flow(
     block: &wasm_ir::Block,
     loop_depth: u32,
     loop_control: Option<LoopControl>,
+    result_global: Option<u32>,
     cancellation_region: wasm_ir::CancellationRegion,
     runtime: &AttachContext<'_>,
     layout: &AsyncFrameLayout,
@@ -1086,6 +1132,7 @@ fn compile_async_flow(
                     then_block,
                     loop_depth + 1,
                     loop_control.map(|control| control.nested(1)),
+                    result_global,
                     cancellation_region,
                     runtime,
                     layout,
@@ -1097,6 +1144,7 @@ fn compile_async_flow(
                     else_block,
                     loop_depth + 1,
                     loop_control.map(|control| control.nested(1)),
+                    result_global,
                     cancellation_region,
                     runtime,
                     layout,
@@ -1120,6 +1168,7 @@ fn compile_async_flow(
                         break_depth: 1,
                         continue_depth: 0,
                     }),
+                    result_global,
                     cancellation_region,
                     runtime,
                     layout,
@@ -1160,6 +1209,7 @@ fn compile_async_flow(
                         break_depth: 1,
                         continue_depth: 0,
                     }),
+                    result_global,
                     cancellation_region,
                     runtime,
                     layout,
@@ -1208,7 +1258,16 @@ fn compile_async_flow(
             function.instruction(&Instruction::Br(loop_depth));
         }
         wasm_ir::Terminator::Return(value) => {
-            debug_assert!(value.is_none());
+            if let Some(global) = result_global {
+                compile_expr(
+                    function,
+                    value.expect("layout selection returns a typed layout"),
+                    context,
+                );
+                function.instruction(&Instruction::GlobalSet(global));
+            } else {
+                debug_assert!(value.is_none());
+            }
             function
                 .instruction(&Instruction::I32Const(1))
                 .instruction(&Instruction::Return);

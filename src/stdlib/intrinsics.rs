@@ -34,6 +34,7 @@ macro_rules! trusted_intrinsics {
             StringLength,
             StringConcat,
             ModuleScan,
+            ModulePath,
             UnityModuleImage,
             UnityImageClass,
             UnityClassField,

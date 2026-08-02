@@ -349,6 +349,15 @@ type `GbaEmulator`; scripts never retain or attach the emulator themselves.
   represented in the catalog. Begin with memory reading, formatting/
   interpolation, equality, and numeric operations; decide separately whether
   user code can declare or implement traits.
+- [x] Make nominal standard-library `Display` implementations source-driven.
+  A type declaring `Display` can tag one parameterless `String`-returning method
+  with `@display`; generated catalog metadata owns the implementation identity,
+  validates the contract, retains the ordinary hidden function through
+  reachability, and dispatches `as String`, interpolation, `print`, and
+  `setVariable` through the same body. `FileVersion.toString()` now renders the
+  dotted four-part version without any type-specific formatting branch in
+  codegen. Primitive formatting remains the built-in fallback; user-defined
+  trait implementations remain part of the broader trait design.
 - [x] Add source-defined standard-library capability inheritance. Declarations
   such as `Numeric<T: Equatable>` and `Integer<T: Numeric + Display>` now drive transitive
   satisfaction, method availability, inference, and minimal rendered bounds;
@@ -389,23 +398,33 @@ executable name.
     address global, while a single ordinary state expression reads it. Both
     supported builds and the never-ready unsupported-build path have runtime
     coverage; no layout DSL improves this shape.
-  - [ ] Separate named memory layouts from layout detection. Layout declarations
-    should co-locate concise `at` fields, documentation, and a stable source
-    identity; a distinct implicitly-suspending attachment selector should use
-    ordinary typed SplitScript expressions, `await`/`retry`, matches, process
-    metadata, module sizes, signatures, and reads to select exactly one layout.
-    Do not encode `when module(...).size == ...` as the only probe grammar.
-  - [ ] Generate a typed layout enum/value rather than exposing ASL's mutable
-    string `version`. Lifecycle code must be able to compare and exhaustively
-    match the selected layout without stringly-typed names. Decide the final
-    selector syntax together with its error policy: unsupported and ambiguous
-    builds must stay visibly unattached or fail with one useful diagnostic,
-    never silently fall back to the first declaration.
-  - [ ] Implement the first vertical slice for layouts with an identical field
-    name/type interface. Validate every layout against one canonical snapshot
-    shape and select its pointer sources before `onAttach` completes. This
-    covers roughly four fifths of the surveyed versioned scripts while keeping
-    `current.field` and `old.field` unchanged.
+  - [x] Separate named memory layouts from layout detection. `layout Name { ... }`
+    declarations co-locate concise `at` fields, documentation, and stable enum
+    variant identities. The existing implicitly-suspending `onAttach` block is
+    the selector: it uses ordinary typed SplitScript expressions, `await`/`retry`,
+    matches, process metadata, module sizes, signatures, and reads, then returns
+    exactly one generated layout variant. This keeps one attachment lifecycle
+    phase instead of adding a separate `selectLayout` action and does not encode
+    `when module(...).size == ...` as a privileged probe grammar.
+  - [x] Generate a typed `StateLayout` enum and read-only `layout` value rather
+    than exposing ASL's mutable string `version`. Lifecycle code can compare and
+    exhaustively match it. Named layouts require `onAttach` to return a variant
+    on every completing path; `await process.closed()` is recognized as the
+    explicit non-completing unsupported-build path, so there is no silent first-
+    layout fallback. `layout` is rejected inside `onAttach` before it exists.
+  - [x] Implement the first vertical slice for layouts with an identical field
+    name/type interface. Every layout is validated order-independently against
+    one canonical snapshot shape, and the selected variant dispatches each
+    transactional field read to the correct pointer source after `onAttach`
+    completes. `current.field` and `old.field` remain unchanged. Parser,
+    formatter, completion, hover, semantic highlighting, Wasm validation, and a
+    Steam/GOG/unsupported runtime fixture cover the complete feature.
+    The corpus-derived Martha Is Dead port additionally validates three real
+    legacy-ASL layouts, module-size selection, module-relative pointer paths,
+    load removal, and the unsupported-build lifecycle end to end.
+    The Borderlands port validates typed `FileVersion` selection and a shared
+    interface whose old build uses direct module offsets while its patched
+    build uses expression-backed PE32 pointer paths.
   - [ ] Design non-uniform layouts separately. The survey found 61 differing
     interfaces with stable field types and 28 with at least one same-named type
     conflict. Evaluate common-field projection plus typed variant payloads;
@@ -451,16 +470,39 @@ executable name.
   - [x] Expose `await process.mainModule()` using that matched candidate, so
     common `modules.First().ModuleMemorySize` selectors do not repeat executable
     strings or need a special module-size grammar.
-  - [ ] Add module enumeration/search, path or host-supplied file/product-version
-    identity, and a deterministic executable fingerprint as corpus ports require
-    them. Prefer host-provided metadata/fingerprinting over unrestricted
-    filesystem access or reading and hashing an entire module from Wasm.
+  - [ ] Add module enumeration/search, product-version identity, and a
+    deterministic executable fingerprint as corpus ports require them. Prefer
+    host-provided metadata/fingerprinting over unrestricted filesystem access
+    or reading and hashing an entire module from Wasm.
+    - [x] Preserve the queried module name privately in each `Module` value and
+      expose fallible `Module.path()`. It uses ASR's host-provided portable path
+      ABI, bounds the returned UTF-8 payload, and does not grant general file
+      access. Main-module values retain the actual matched process candidate;
+      named-module values retain their requested module identity.
+    - [x] Add source-defined `Module.fileVersion() -> FileVersion!` by porting
+      ASR's bounded PE-resource traversal into `standard.split`. The typed
+      `FileVersion` record exposes `major`, `minor`, `build`, and `privatePart`
+      components and is equatable, avoiding legacy `FileVersionInfo` strings
+      whose punctuation differs between games and APIs. Only typed process
+      reads remain intrinsic; DOS/PE validation, resource-directory loops,
+      `Result` propagation, and record construction are ordinary library code.
+      The checked `v"major.minor.build.private"` literal produces the same
+      typed value, validates exactly four decimal `u16` components at parse
+      time, and keeps version comparisons concise without exposing record
+      construction. The compiler lowers it through source-defined
+      `FileVersion.fromParts` rather than a second backend implementation.
 - [ ] Make the existing attach-time-discovered state-source pattern a documented
   first-class contract. Scripts can already scan/follow/resolve into globals in
   `onAttach` and use expression-backed state fields; add a canonical recipe,
   clearer typing/tooling, and specified behavior for temporarily unreadable and
   optional fields so authors do not recreate `MemoryWatcher` manually. Keep
   process-close cancellation and transactional snapshot rotation automatic.
+  The Borderlands port is a focused syntax-pressure case: its PE32 layout must
+  currently spell source-defined `MemoryPath` expressions because declarative
+  pointer paths have one implicit pointer width. Use it to decide whether
+  pointer width belongs on an individual path, a named layout, retained module
+  metadata, or a more general discovered state-source value; do not add an
+  `at32` pseudo-keyword.
 - [ ] Extend the existing signature APIs only where the corpus proves a gap:
   reusable scan targets, multiple/fallback signatures, range and memory-page
   selection, capture/offset transforms, relative-address decoding, and concise

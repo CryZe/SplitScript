@@ -576,7 +576,7 @@ fn emit_initial_state(
     gc: &GcLayout,
 ) {
     let state = program.state.as_ref().expect("checked programs have state");
-    for field in &state.fields {
+    for field in state.canonical_fields() {
         let ty = semantics
             .value_type(field.id)
             .expect("checked state fields have semantic types");

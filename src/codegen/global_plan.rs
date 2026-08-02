@@ -35,6 +35,8 @@ pub(super) struct RuntimeGlobals {
     /// `-1` means no process is attached.
     pub process_name: u32,
     pub provider_value: Option<u32>,
+    /// The typed enum value returned by `onAttach` for versioned state.
+    pub selected_layout: Option<u32>,
     pub current: u32,
     pub old: u32,
     pub attach_ready: u32,
@@ -104,6 +106,22 @@ pub(super) fn encode(
         );
         Some(index)
     });
+    let selected_layout = program
+        .state
+        .as_ref()
+        .and_then(|state| state.layout_enum.as_ref())
+        .map(|enumeration| {
+            let selected = section.len();
+            section.global(
+                GlobalType {
+                    val_type: gc.val_type(Type::Enum(enumeration.id)),
+                    mutable: true,
+                    shared: false,
+                },
+                &ConstExpr::ref_null(HeapType::Concrete(gc.index(Type::Enum(enumeration.id)))),
+            );
+            selected
+        });
     let nullable_state = ValType::Ref(RefType {
         nullable: true,
         heap_type: HeapType::Concrete(STATE_TYPE),
@@ -159,6 +177,16 @@ pub(super) fn encode(
 
     let mut variables = HashMap::new();
     let mut variable_types = HashMap::new();
+    if let Some(state) = &program.state
+        && let (Some(value), Some(global), Some(enumeration)) = (
+            state.layout_value,
+            selected_layout,
+            state.layout_enum.as_ref(),
+        )
+    {
+        variables.insert(value, global);
+        variable_types.insert(value, Type::Enum(enumeration.id));
+    }
     for variable in program
         .globals
         .iter()
@@ -207,6 +235,7 @@ pub(super) fn encode(
             process,
             process_name,
             provider_value,
+            selected_layout,
             current,
             old,
             attach_ready,

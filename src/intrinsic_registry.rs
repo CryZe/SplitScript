@@ -43,6 +43,7 @@ pub(crate) enum RuntimeHelperId {
     StringFromMemory,
     ReadUtf8String,
     ReadManagedString,
+    ModulePath,
     UnityAttach,
     CStringEquality,
     BackingFieldEquality,
@@ -261,6 +262,7 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::ProcessReadUtf8
         | IntrinsicId::ProcessReadManagedString
+        | IntrinsicId::ModulePath
         | IntrinsicId::GbaAttach => scratch(ScratchType::ResultValue, 1),
         IntrinsicId::GbaEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
         _ => None,
@@ -290,6 +292,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::ProcessReadRelative32 => &[Helper(Runtime::ReadRelative32)],
         IntrinsicId::ProcessReadUtf8 => &[Helper(Runtime::ReadUtf8String)],
         IntrinsicId::ProcessReadManagedString => &[Helper(Runtime::ReadManagedString)],
+        IntrinsicId::ModulePath => &[Helper(Runtime::ModulePath)],
         IntrinsicId::UnityIl2Cpp => &[Helper(Runtime::UnityAttach)],
         IntrinsicId::UnityModuleImage => &[Helper(Runtime::UnityGetImage)],
         IntrinsicId::UnityImageClass => &[Helper(Runtime::UnityGetClass)],
@@ -697,6 +700,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             PROCESS_SUSPEND,
             OnAttach,
             Suspension
+        ),
+        IntrinsicId::ModulePath => contract!(
+            ModulePath,
+            Method,
+            signature(NO_TYPE_PARAMETERS, Some(MODULE), params![], STRING_RESULT,),
+            PROCESS,
+            Everywhere,
+            Retryable
         ),
         IntrinsicId::UnityModuleImage => contract!(
             UnityModuleImage,

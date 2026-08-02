@@ -6,7 +6,7 @@ use crate::{
     ast::{ActionKind, EnumDecl, Program},
     equality::EqualityCapabilities,
     semantic::{FunctionInstance, SemanticModel},
-    stdlib::{RuntimeRepresentation, StandardLibrary},
+    stdlib::{RuntimeRepresentation, StandardLibrary, StdlibTypeId},
     types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType},
 };
 
@@ -23,6 +23,7 @@ pub(super) struct FunctionPlan<'a> {
     pub runtime_helpers: RuntimeHelperPlan,
     pub equality: EqualityFunctions,
     pub users: HashMap<FunctionInstance, u32>,
+    pub displays: HashMap<StdlibTypeId, FunctionInstance>,
     pub reads: Vec<u32>,
     pub actions: HashMap<ActionKind, u32>,
     pub start: u32,
@@ -178,10 +179,14 @@ pub(super) fn encode<'a>(
         users.insert(instance.clone(), index);
     }
 
-    let mut reads =
-        Vec::with_capacity(program.state.as_ref().map_or(0, |state| state.fields.len()));
+    let mut reads = Vec::with_capacity(
+        program
+            .state
+            .as_ref()
+            .map_or(0, |state| state.ordered_read_fields().len()),
+    );
     if let Some(state) = &program.state {
-        for field in &state.fields {
+        for field in state.ordered_read_fields() {
             let poll_result = semantic_type(
                 semantics
                     .state_poll_result(field.id)
@@ -223,6 +228,10 @@ pub(super) fn encode<'a>(
         runtime_helpers,
         equality,
         users,
+        displays: reachability
+            .display_functions()
+            .map(|(ty, function)| (ty, function.clone()))
+            .collect(),
         reads,
         actions,
         start,

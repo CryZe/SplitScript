@@ -24,9 +24,12 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     if !checker.errors.is_empty() {
         checker.inference.recover_unbound();
     }
-    for field in &program.state.as_ref().unwrap().fields {
+    for field in program.state.as_ref().unwrap().all_fields() {
         if matches!(field.source, StateSource::Pointer(_)) {
-            let field_type = checker.declarations.state_fields[&field.name].1;
+            let Some((_, field_type)) = checker.declarations.state_fields.get(&field.name).copied()
+            else {
+                continue;
+            };
             let poll_result = Type::Result(checker.inference.result_type(field_type));
             checker
                 .semantics

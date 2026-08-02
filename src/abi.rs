@@ -323,6 +323,21 @@ abi_catalog! {
         "Finds a module image size."
     ),
     import!(
+        ProcessGetModulePath,
+        "process_get_module_path",
+        &[
+            borrowed("process", AbiType::I64),
+            input("name_pointer"),
+            value("name_length", AbiType::I32),
+            output("path_pointer"),
+            output("path_length_pointer")
+        ],
+        &[value("success", AbiType::I32)],
+        PROCESS_READ,
+        "The process handle and module-name bytes are borrowed; the path and length buffers are written only for this call.",
+        "Returns a host-provided portable filesystem path for a module."
+    ),
+    import!(
         ProcessGetMemoryRangeCount,
         "process_get_memory_range_count",
         &[borrowed("process", AbiType::I64)],

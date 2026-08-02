@@ -6,8 +6,8 @@ use std::collections::HashSet;
 use crate::{
     Diagnostic,
     ast::{
-        Action, Expr, ExprKind, FunctionDecl, Program, SettingDecl, SettingKind, StateField, Stmt,
-        VariableDecl,
+        Action, Expr, ExprKind, FunctionDecl, Program, SettingDecl, SettingKind, StateDecl,
+        StateField, Stmt, VariableDecl,
     },
     lexer::{Lexeme, TokenKind, TriviaKind},
     syntax::SourceDocument,
@@ -220,6 +220,14 @@ impl SyntaxLayoutCollector<'_> {
 }
 
 impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
+    fn visit_state(&mut self, state: &'ast StateDecl) {
+        for layout in &state.layouts {
+            self.break_after.insert(layout.span.end);
+        }
+        self.break_after.insert(state.span.end);
+        visit::walk_state(self, state);
+    }
+
     fn visit_state_field(&mut self, field: &'ast StateField) {
         self.continuation_before_block(field.span.start, field.span.end);
         visit::walk_state_field(self, field);
@@ -744,7 +752,7 @@ fn needs_space(
     if matches!(previous, TokenKind::Minus) && matches!(current, TokenKind::Gt) {
         return false;
     }
-    if matches!(previous, TokenKind::Ident(name) if name == "sig")
+    if matches!(previous, TokenKind::Ident(name) if matches!(name.as_str(), "sig" | "v"))
         && matches!(current, TokenKind::String(_))
     {
         return false;
@@ -947,7 +955,7 @@ whileAttached {
     #[test]
     fn keeps_literal_spellings_templates_signatures_and_type_postfixes() {
         let source = r#"state "game.exe"{bytes:[u8;6] at 0x100}
-fn probe(value:[u8]!)->String{let missing:[u8]?=None;let fixed:[u8;3]=[1,2,3];let sigValue=sig"48 8B ??";return `{value.length()}:{fixed.length()}:{missing==None}:{sigValue as String}`}
+fn probe(value:[u8]!)->String{let missing:[u8]?=None;let fixed:[u8;3]=[1,2,3];let sigValue=sig"48 8B ??";let version=v"1.2.3.4";return `{value.length()}:{fixed.length()}:{missing==None}:{sigValue as String}`}
 fn nested()->[[u8]]{return [[1]]}
 fn fallible()->f32!{return Err("missing")}
 fn optional()->f32?{return None}"#;
@@ -966,6 +974,7 @@ fn optional()->f32?{return None}"#;
         assert!(!formatted.contains("f32!{"), "{formatted}");
         assert!(!formatted.contains("f32?{"), "{formatted}");
         assert!(formatted.contains("sig\"48 8B ??\""));
+        assert!(formatted.contains("v\"1.2.3.4\""));
         assert!(formatted.contains("`{value.length()}:"));
         assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
@@ -1263,17 +1272,40 @@ settings {
             include_str!("../examples/lso_desktop_settings.split"),
             include_str!("../examples/minish_cap.split"),
         ] {
-            let formatted = format_source(source).unwrap();
-            crate::parse(&formatted).unwrap();
-            assert_eq!(format_source(&formatted).unwrap(), formatted);
+            let source = source.replace("\r\n", "\n");
+            for input in [&source, &source.replace('\n', "\r\n")] {
+                let formatted = format_source(input).unwrap();
+                crate::parse(&formatted).unwrap();
+                assert_eq!(format_source(&formatted).unwrap(), formatted);
+            }
         }
-        let minish_cap = include_str!("../examples/minish_cap.split");
-        assert_eq!(format_source(minish_cap).unwrap(), minish_cap);
+        let minish_cap = include_str!("../examples/minish_cap.split").replace("\r\n", "\n");
+        assert_eq!(format_source(&minish_cap).unwrap(), minish_cap);
         assert!(
             format_source(include_str!("../examples/lunistice.split"))
                 .unwrap()
                 .contains("state [\"Lunistice.exe\"")
         );
+    }
+
+    #[test]
+    fn formats_named_state_layouts_and_their_selector() {
+        let source = r#"state "game.exe"{layout Steam{level:u32 at 0x100}layout GOG{level:u32 at 0x200}}onAttach{return StateLayout.Steam}"#;
+        let expected = r#"state "game.exe" {
+    layout Steam {
+        level: u32 at 0x100
+    }
+    layout GOG {
+        level: u32 at 0x200
+    }
+}
+onAttach {
+    return StateLayout.Steam
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
 
     #[test]

@@ -10,6 +10,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::{
     abi::{AbiCatalog, AbiEffect, AbiImportId},
+    ast::ArrayTypeId,
     intrinsic_registry::{self, DependencyRoot, RuntimeHelperId},
     stdlib::{Effect, EffectSet, IntrinsicId, StdlibTypeId},
     types::ResolvedArrayType,
@@ -93,6 +94,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(StringFromMemory, (I32, I32) -> (StringValue), deps [], imports [], build_string_from_memory),
     helper!(ReadUtf8String, (I64, I64, I32) -> (StringValue), deps [StringFromMemory], imports [ProcessRead], build_read_utf8_string),
     helper!(ReadManagedString, (I64, I64, I32) -> (StringValue), deps [], imports [ProcessRead], build_read_managed_string),
+    helper!(ModulePath, (I64, StringValue) -> (StringValue), deps [StringFromMemory], imports [ProcessGetModulePath], build_module_path),
     helper!(UnityAttach, (I64, I32) -> (Standard(StdlibTypeId::UnityModule)), deps [ScanProcessRange, ReadRelative32], imports [ProcessGetModuleAddress, ProcessGetModuleSize], build_unity_attach),
     helper!(CStringEquality, (I64, I64, StringValue, I32, I32) -> (I32), deps [], imports [ProcessRead], build_c_string_equality),
     helper!(BackingFieldEquality, (I64, I64, StringValue) -> (I32), deps [], imports [ProcessRead], build_backing_field_equality),
@@ -204,28 +206,50 @@ pub(super) fn resolve_signature(
         HelperValueType::I64 => ValType::I64,
         HelperValueType::String => gc.val_type(Type::Standard(StdlibTypeId::String)),
         HelperValueType::Standard(standard) => gc.val_type(Type::Standard(standard)),
-        HelperValueType::StringArray => gc.val_type(Type::Array(
-            arrays
-                .iter()
-                .find(|array| {
-                    try_array_element_type(array.id, semantics)
-                        == Some(Type::Standard(StdlibTypeId::String))
-                })
-                .expect("runtime String-array helper has a reachable layout")
-                .id,
-        )),
-        HelperValueType::U64Array => gc.val_type(Type::Array(
-            arrays
-                .iter()
-                .find(|array| try_array_element_type(array.id, semantics) == Some(Type::U64))
-                .expect("runtime u64-array helper has a reachable layout")
-                .id,
+        HelperValueType::StringArray | HelperValueType::U64Array => gc.val_type(Type::Array(
+            required_array_layout(ty, arrays, semantics)
+                .expect("runtime array helper has a reachable layout"),
         )),
     };
     (
         signature.params.iter().copied().map(resolve).collect(),
         signature.results.iter().copied().map(resolve).collect(),
     )
+}
+
+pub(super) fn required_array_layouts(
+    helpers: impl IntoIterator<Item = RuntimeHelperId>,
+    arrays: &[ResolvedArrayType],
+    semantics: &crate::semantic::SemanticModel,
+) -> impl Iterator<Item = ArrayTypeId> {
+    helpers
+        .into_iter()
+        .flat_map(|helper| {
+            let signature = descriptor(helper).signature;
+            signature.params.iter().chain(signature.results)
+        })
+        .filter_map(|ty| required_array_layout(*ty, arrays, semantics))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+}
+
+fn required_array_layout(
+    ty: HelperValueType,
+    arrays: &[ResolvedArrayType],
+    semantics: &crate::semantic::SemanticModel,
+) -> Option<ArrayTypeId> {
+    let element = match ty {
+        HelperValueType::StringArray => Type::Standard(StdlibTypeId::String),
+        HelperValueType::U64Array => Type::U64,
+        HelperValueType::I32
+        | HelperValueType::I64
+        | HelperValueType::String
+        | HelperValueType::Standard(_) => return None,
+    };
+    arrays
+        .iter()
+        .find(|array| try_array_element_type(array.id, semantics) == Some(element))
+        .map(|array| array.id)
 }
 
 #[cfg(test)]

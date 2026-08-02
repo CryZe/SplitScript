@@ -42,3 +42,5 @@ mod parser_recovery;
 mod profiles_codegen;
 #[path = "compiler/snapshots.rs"]
 mod snapshots;
+#[path = "compiler/state_layouts.rs"]
+mod state_layouts;

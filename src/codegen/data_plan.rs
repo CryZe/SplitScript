@@ -55,7 +55,7 @@ impl StaticData {
         for process in process_names {
             strings.intern(process);
         }
-        for field in &state.fields {
+        for field in state.all_fields() {
             if let StateSource::Pointer(path) = &field.source
                 && let Some(module) = &path.module
             {

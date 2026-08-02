@@ -260,9 +260,16 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
         SourceDefinitionId::Value(value) => {
             let ty = semantics.value_type(value)?;
             let ty = render_type(ty, context);
-            let (signature, description) = if let Some(global) =
-                syntax.globals.iter().find(|global| global.id == value)
+            let (signature, description) = if syntax
+                .state
+                .as_ref()
+                .is_some_and(|state| state.layout_value == Some(value))
             {
+                (
+                    format!("layout: {ty}"),
+                    "Read-only memory layout selected for the attached game build.".to_owned(),
+                )
+            } else if let Some(global) = syntax.globals.iter().find(|global| global.id == value) {
                 (
                     format!("let {}: {ty}", definition.name),
                     documented_description("Global variable", global.documentation.as_deref()),
@@ -270,7 +277,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             } else if let Some(field) = syntax
                 .state
                 .as_ref()
-                .and_then(|state| state.fields.iter().find(|field| field.id == value))
+                .and_then(|state| state.all_fields().find(|field| field.id == value))
             {
                 (
                     format!("current.{}: {ty}", definition.name),
@@ -414,7 +421,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             ))
         }
         SourceDefinitionId::EnumVariant(variant) => {
-            let enumeration = syntax.enums.iter().find(|enumeration| {
+            let enumeration = syntax.enum_declarations().find(|enumeration| {
                 enumeration
                     .variants
                     .iter()
@@ -914,7 +921,7 @@ whileAttached {
 
     #[test]
     fn language_hover_is_served_from_the_language_catalog() {
-        let source = "state \"game.exe\" {}\nwhileAttached { retry process.read<i32>(0) }";
+        let source = "state \"game.exe\" {}\nwhileAttached { let version = v\"1.2.3.4\"; retry process.read<i32>(0) }";
         let offset = source.find("retry").unwrap() + 1;
         let mut database = CompilerDatabase::new(source);
         let hover = database.hover(offset).unwrap().expect("language hover");
@@ -930,6 +937,17 @@ whileAttached {
                 .contains("let player = retry process.follow(module.address, [0x100, 0x20])")
         );
         assert!(!hover.markdown.contains("fn readMarker"));
+
+        let version = database
+            .hover(source.find("v\"").unwrap())
+            .unwrap()
+            .expect("version-literal hover");
+        assert!(version.markdown.contains("v\"major.minor.build.private\""));
+        assert!(
+            version
+                .markdown
+                .contains("exactly four decimal u16 components")
+        );
     }
 
     #[test]
@@ -994,6 +1012,33 @@ whileAttached {
         assert!(hover.markdown.contains(
             "available in onAttach; suspends; requires an attached process; cancels when the process closes"
         ));
+    }
+
+    #[test]
+    fn generated_state_layout_type_and_value_have_source_hover() {
+        let source = r#"
+state "game.exe" {
+    /// Steam build layout.
+    layout Steam { level: u32 at 0x100 }
+    layout GOG { level: u32 at 0x200 }
+}
+onAttach { return StateLayout.Steam }
+split { return layout == StateLayout.Steam }
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let layout = database
+            .hover(source.find("layout ==").unwrap() + 1)
+            .unwrap()
+            .expect("selected layout hover");
+        assert!(layout.markdown.contains("layout: StateLayout"));
+        assert!(layout.markdown.contains("Read-only memory layout"));
+
+        let variant = database
+            .hover(source.rfind("Steam").unwrap() + 1)
+            .unwrap()
+            .expect("generated layout variant hover");
+        assert!(variant.markdown.contains("StateLayout.Steam"));
+        assert!(variant.markdown.contains("Steam build layout."));
     }
 
     #[test]

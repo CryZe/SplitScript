@@ -79,6 +79,8 @@ whileAttached {
     print(current.mapName)
 }"#;
 
+const STATE_LAYOUT_SOURCE: &str = include_str!("../examples/state_layouts.split");
+
 const SETTINGS_SOURCE: &str = include_str!("../examples/lso_desktop_settings.split");
 
 const DOCUMENTATION_COMMENT_SOURCE: &str = r#"state "game.exe" {}
@@ -184,6 +186,7 @@ fn result() -> i32! {
 onAttach {
     let module = await process.module("GameAssembly.dll")
     let marker = await module.scan(sig"48 8B ?? B?")
+    let supportedVersion = v"1.2.3.4"
     let optionalMarker = Some(marker)
     let successfulValue = Ok(result() else 0)
     let text = (successfulValue else 0) as String
@@ -237,6 +240,12 @@ focused_example!(
     "Read transactional state",
     "state \"game.exe\" {\n    score = process.read<i32>(0x1000)\n}",
     STATE_SOURCE
+);
+focused_example!(
+    STATE_LAYOUT_EXAMPLE,
+    "Select a supported build",
+    "layout Steam {\n    value: u32 at 0x1000\n}",
+    STATE_LAYOUT_SOURCE
 );
 focused_example!(
     NATIVE_STRING_DECODER_EXAMPLE,
@@ -368,6 +377,12 @@ focused_example!(
     SIGNATURE_EXAMPLE,
     "Match machine code",
     "let marker = await module.scan(sig\"48 8B ?? B?\")",
+    TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    VERSION_EXAMPLE,
+    "Match a Windows file version",
+    "if version == v\"1.2.3.4\" { print(\"supported build\") }",
     TYPES_AND_LITERALS_SOURCE
 );
 focused_example!(
@@ -573,6 +588,15 @@ define_language_catalog! {
         STATE_DECL_EXAMPLE
     ),
     language_item!(
+        StateLayout,
+        "layout",
+        LanguageItemKind::Declaration,
+        "layout Name { field at address }",
+        "Declares one named memory layout for a supported game build.",
+        "Named layouts in one state block must expose the same field names and types. The compiler generates StateLayout and a read-only layout value. The implicitly suspending onAttach block returns the selected variant before polling begins; await process.closed() represents an unsupported build without falling back.",
+        STATE_LAYOUT_EXAMPLE
+    ),
+    language_item!(
         NativeStringDecoder,
         "utf8",
         LanguageItemKind::Syntax,
@@ -769,6 +793,15 @@ define_language_catalog! {
         "Constructs a checked signature literal.",
         "Signatures are parsed at compile time and support full-byte and nibble wildcards.",
         SIGNATURE_EXAMPLE
+    ),
+    language_item!(
+        VersionLiteral,
+        "v",
+        LanguageItemKind::Syntax,
+        "v\"major.minor.build.private\"",
+        "Constructs a checked Windows file-version literal.",
+        "A version literal contains exactly four decimal u16 components and has type FileVersion. The quoted boundary keeps malformed versions from being parsed as unrelated numeric or member expressions.",
+        VERSION_EXAMPLE
     ),
     language_item!(
         TemplateString,
@@ -968,7 +1001,7 @@ define_language_catalog! {
         OnAttach,
         "onAttach",
         "Initializes one attached process.",
-        "This action is implicitly suspending and owns process-lifetime cancellation for await and retry continuations.",
+        "This action is implicitly suspending and owns process-lifetime cancellation for await and retry continuations. When the state declaration contains named layouts, it returns the generated StateLayout variant that should be polled.",
         "onAttach {\n    let module = await process.module(\"GameAssembly.dll\")\n}"
     ),
     action_item!(

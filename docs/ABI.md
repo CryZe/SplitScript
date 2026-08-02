@@ -36,6 +36,7 @@ suite verifies the table below against the catalog renderer.
 | `process_read` | `(i64, i64, i32, i32) -> i32` |
 | `process_get_module_address` | `(i64, i32, i32) -> i64` |
 | `process_get_module_size` | `(i64, i32, i32) -> i64` |
+| `process_get_module_path` | `(i64, i32, i32, i32, i32) -> i32` |
 | `process_get_memory_range_count` | `(i64) -> i64` |
 | `process_get_memory_range_address` | `(i64, i64) -> i64` |
 | `process_get_memory_range_size` | `(i64, i64) -> i64` |

@@ -220,6 +220,8 @@ compile-time and output-size measurements are recorded in
   and `size` fields.
 - Compile-time checked `sig"..."` literals with byte/nibble wildcards and
   overlapping page-based module scans.
+- Checked `v"1.2.3.4"` Windows file-version literals and source-defined PE
+  resource parsing through `Module.fileVersion()`.
 - Nominal `address` values, typed synchronous/retried primitive reads,
   RIP-relative 32-bit address decoding, arbitrary-range scans, and reusable
   64-bit pointer traversal.

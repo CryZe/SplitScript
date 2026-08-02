@@ -38,11 +38,12 @@ pub enum SemanticTokenKind {
     StateField,
     Lifecycle,
     Signature,
+    Version,
     Debug,
 }
 
 impl SemanticTokenKind {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Keyword,
         Self::Type,
         Self::Struct,
@@ -64,6 +65,7 @@ impl SemanticTokenKind {
         Self::StateField,
         Self::Lifecycle,
         Self::Signature,
+        Self::Version,
         Self::Debug,
     ];
 
@@ -94,6 +96,7 @@ impl SemanticTokenKind {
             Self::StateField => "stateField",
             Self::Lifecycle => "lifecycle",
             Self::Signature => "signature",
+            Self::Version => "version",
             Self::Debug => "debug",
         }
     }
@@ -271,6 +274,9 @@ impl HighlightCollector<'_> {
                         TokenKind::Ident(name) if name == "sig" => {
                             Some(SemanticTokenKind::Signature)
                         }
+                        TokenKind::Ident(name) if name == "v" => {
+                            Some(SemanticTokenKind::Version)
+                        }
                         TokenKind::Ident(name) if matches!(name.as_str(), "true" | "false") => {
                             Some(SemanticTokenKind::Constant)
                         }
@@ -296,6 +302,10 @@ impl HighlightCollector<'_> {
                             if previous_token.is_some_and(|previous| {
                                 matches!(&previous.kind, TokenKind::Ident(name) if name == "sig")
                             }) => Some(SemanticTokenKind::Signature),
+                        TokenKind::String(_)
+                            if previous_token.is_some_and(|previous| {
+                                matches!(&previous.kind, TokenKind::Ident(name) if name == "v")
+                            }) => Some(SemanticTokenKind::Version),
                         TokenKind::String(_)
                         | TokenKind::TemplateStart
                         | TokenKind::TemplateChunk(_)
@@ -432,7 +442,16 @@ impl HighlightCollector<'_> {
                     self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
                 }
                 ResolvedValue::Variable(id) => {
-                    self.insert(spans[0], self.value_kind(id), 0);
+                    let readonly = self
+                        .syntax
+                        .state
+                        .as_ref()
+                        .is_some_and(|state| state.layout_value == Some(id));
+                    self.insert(
+                        spans[0],
+                        self.value_kind(id),
+                        if readonly { MODIFIER_READONLY } else { 0 },
+                    );
                 }
                 ResolvedValue::CurrentState(_) | ResolvedValue::OldState(_) => {
                     self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
@@ -613,7 +632,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                     else {
                         continue;
                     };
-                    let Some(enumeration) = self.syntax.enums.iter().find(|enumeration| {
+                    let Some(enumeration) = self.syntax.enum_declarations().find(|enumeration| {
                         enumeration
                             .variants
                             .iter()
@@ -800,6 +819,7 @@ fn is_keyword(name: &str) -> bool {
     matches!(
         name,
         "state"
+            | "layout"
             | "settings"
             | "record"
             | "enum"
@@ -923,6 +943,7 @@ debug fn inspect(mode: Mode) {
 whileAttached {
     let mode = Mode.Active
     let marker = await process.scan(0, 1, sig"48 ??")
+    let version = v"1.2.3.4"
     if current.level == 1 {
         inspect(mode)
     }
@@ -1047,6 +1068,14 @@ whileAttached {
             SemanticTokenKind::Signature,
             0
         ));
+        assert!(contains(
+            source,
+            &first,
+            "\"1.2.3.4\"",
+            SemanticTokenKind::Version,
+            0
+        ));
+        assert!(contains(source, &first, "v", SemanticTokenKind::Version, 0));
         assert!(first.highlights().iter().any(|highlight| {
             highlight.modifiers & MODIFIER_DEBUG != 0
                 && &source[highlight.span.start..highlight.span.end] == "print"
@@ -1064,6 +1093,41 @@ whileAttached {
             "utf8",
             SemanticTokenKind::Function,
             MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY
+        ));
+    }
+
+    #[test]
+    fn highlights_named_layouts_as_generated_enum_members() {
+        let source = r#"
+state "game.exe" {
+    layout Steam { level: u32 at 0x100 }
+    layout GOG { level: u32 at 0x200 }
+}
+onAttach { return StateLayout.Steam }
+split { return layout == StateLayout.Steam }
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+        assert!(contains(
+            source,
+            &highlights,
+            "layout",
+            SemanticTokenKind::Keyword,
+            0
+        ));
+        assert!(contains(
+            source,
+            &highlights,
+            "Steam",
+            SemanticTokenKind::EnumMember,
+            MODIFIER_DECLARATION | MODIFIER_READONLY
+        ));
+        assert!(contains(
+            source,
+            &highlights,
+            "StateLayout",
+            SemanticTokenKind::Enum,
+            0
         ));
     }
 

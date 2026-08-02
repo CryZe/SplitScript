@@ -829,6 +829,75 @@ struct MemoryPath {
     }
 }
 
+/// A four-part numeric Windows executable version.
+///
+/// The components correspond to `major.minor.build.private` in a PE
+/// `VS_FIXEDFILEINFO` resource. Keeping the parts typed avoids depending on
+/// the inconsistent punctuation of legacy `FileVersionInfo` strings.
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@capabilities(Equatable, Display)
+struct FileVersion {
+    /// Major version component.
+    major: u16,
+
+    /// Minor version component.
+    minor: u16,
+
+    /// Build version component.
+    build: u16,
+
+    /// Private version component.
+    privatePart: u16,
+
+    /// Constructs a numeric Windows file version from its four components.
+    ///
+    /// The `v"major.minor.build.private"` literal is the concise spelling for
+    /// calls with constant components.
+    ///
+    /// # Example
+    ///
+    /// Construct a dynamically discovered version
+    ///
+    /// ```splitscript
+    /// let version = FileVersion.fromParts(major, minor, build, privatePart)
+    /// ```
+    static fn fromParts(
+        /// Major version component.
+        major: u16,
+        /// Minor version component.
+        minor: u16,
+        /// Build version component.
+        build: u16,
+        /// Private version component.
+        privatePart: u16,
+    ) -> FileVersion {
+        return FileVersion {
+            major: major,
+            minor: minor,
+            build: build,
+            privatePart: privatePart,
+        }
+    }
+
+    /// Formats the version as `major.minor.build.private`.
+    ///
+    /// This is the standard-library implementation of `Display`, so casts,
+    /// interpolation, `print`, and `setVariable` all use the same spelling.
+    ///
+    /// # Example
+    ///
+    /// Format a discovered executable version explicitly
+    ///
+    /// ```splitscript
+    /// let text = version.toString()
+    /// ```
+    @display
+    fn toString() -> String {
+        return `{self.major}.{self.minor}.{self.build}.{self.privatePart}`
+    }
+}
+
 /// Describes a module loaded in the attached process.
 ///
 /// A module exposes its base address and mapped size for bounded memory discovery.
@@ -840,6 +909,138 @@ struct Module {
 
     /// Returns the mapped module size.
     size: u64,
+
+    /// The host module identity used for metadata queries.
+    private name: String,
+
+    /// Returns the module's host-provided filesystem path.
+    ///
+    /// The path uses the runtime's portable filesystem spelling. It is
+    /// metadata only: SplitScript does not grant scripts unrestricted host
+    /// filesystem access.
+    ///
+    /// # Example
+    ///
+    /// Inspect the executable path
+    ///
+    /// ```splitscript
+    /// let executable = await process.mainModule()
+    /// let path = executable.path() else "Unknown"
+    /// ```
+    @intrinsic(ModulePath)
+    fn path() -> String!;
+
+    /// Reads the numeric version from a Windows PE version resource.
+    ///
+    /// The parser validates the DOS and PE headers, follows the bounded
+    /// resource-directory hierarchy, and verifies `VS_FIXEDFILEINFO` before
+    /// returning its four numeric components. Missing resources, malformed
+    /// images, and failed memory reads are ordinary errors.
+    ///
+    /// # Example
+    ///
+    /// Select a known executable version
+    ///
+    /// ```splitscript
+    /// let version = executable.fileVersion() else return
+    /// if version == v"1.2.3.4" {
+    ///     print("recognized version 1.2.3.4")
+    /// }
+    /// ```
+    fn fileVersion() -> FileVersion! {
+        if process.read<u16>(self.address)? != 0x5a4d {
+            throw "module does not have a DOS header"
+        }
+
+        let peOffset = process.read<u32>(self.address.add(0x3c))?
+        let peHeader = self.address.add(peOffset as u64)
+        if process.read<u32>(peHeader)? != 0x00004550 {
+            throw "module does not have a PE header"
+        }
+
+        let optionalHeader = peHeader.add(0x18)
+        let optionalMagic = process.read<u16>(optionalHeader)?
+        if optionalMagic != 0x010b && optionalMagic != 0x020b {
+            throw "module has an unsupported PE optional header"
+        }
+        let resourceDirectoryOffset: u64 = if optionalMagic == 0x010b {
+            0x70
+        } else {
+            0x80
+        }
+
+        let resourceDirectory = process.read<[u32; 2]>(
+            optionalHeader.add(resourceDirectoryOffset)
+        )?
+        let resourceRva = resourceDirectory.get(0)
+        if resourceRva == 0 || resourceDirectory.get(1) == 0 {
+            throw "module does not have a resource directory"
+        }
+        let resourceBase = self.address.add(resourceRva as u64)
+
+        let typeHeader = process.read<[u16; 8]>(resourceBase)?
+        let typeEntryCount = typeHeader.get(6) + typeHeader.get(7)
+        let foundTypeDirectory: address? = None
+        let typeIndex: u16 = 0
+        while typeIndex < typeEntryCount {
+            let entry = resourceBase.add(0x10 + (typeIndex as u64) * 8)
+            let id = process.read<u32>(entry)?
+            let offset = process.read<u32>(entry.add(4))?
+            if id == 0x10 && offset & 0x8000_0000 != 0 {
+                foundTypeDirectory = resourceBase.add((offset & 0x7fff_ffff) as u64)
+                break
+            }
+            typeIndex += 1
+        }
+        let typeDirectory = foundTypeDirectory else return Err("module has no version resource")
+
+        let nameHeader = process.read<[u16; 8]>(typeDirectory)?
+        let nameEntryCount = nameHeader.get(6) + nameHeader.get(7)
+        let foundLanguageDirectory: address? = None
+        let nameIndex: u16 = 0
+        while nameIndex < nameEntryCount {
+            let entry = typeDirectory.add(0x10 + (nameIndex as u64) * 8)
+            let offset = process.read<u32>(entry.add(4))?
+            if offset & 0x8000_0000 != 0 {
+                foundLanguageDirectory = resourceBase.add((offset & 0x7fff_ffff) as u64)
+                break
+            }
+            nameIndex += 1
+        }
+        let languageDirectory = foundLanguageDirectory else return Err(
+            "module version resource has no name directory"
+        )
+
+        let languageHeader = process.read<[u16; 8]>(languageDirectory)?
+        let languageEntryCount = languageHeader.get(6) + languageHeader.get(7)
+        let foundDataEntry: address? = None
+        let languageIndex: u16 = 0
+        while languageIndex < languageEntryCount {
+            let entry = languageDirectory.add(0x10 + (languageIndex as u64) * 8)
+            let offset = process.read<u32>(entry.add(4))?
+            if offset & 0x8000_0000 == 0 {
+                foundDataEntry = resourceBase.add(offset as u64)
+                break
+            }
+            languageIndex += 1
+        }
+        let dataEntry = foundDataEntry else return Err(
+            "module version resource has no language entry"
+        )
+
+        let versionRva = process.read<u32>(dataEntry)?
+        let fixedInfo = self.address.add(versionRva as u64).add(0x28)
+        if process.read<u32>(fixedInfo)? != 0xfeef_04bd {
+            throw "module has invalid fixed file information"
+        }
+        let parts = process.read<[u16; 4]>(fixedInfo.add(8))?
+        return FileVersion.fromParts(
+            parts.get(1),
+            parts.get(0),
+            parts.get(3),
+            parts.get(2)
+        )
+    }
 
     /// Determines the pointer width of a Windows PE module.
     ///

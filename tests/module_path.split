@@ -1,0 +1,12 @@
+state ["game.exe", "game-demo.exe"] {}
+
+onAttach {
+    let executable = await process.mainModule()
+    let plugin = await process.module("plugin.dll")
+    setVariable("Executable Path", executable.path() else "Unavailable")
+    setVariable("Plugin Path", plugin.path() else "Unavailable")
+    let version = executable.fileVersion() else return
+    setVariable("File Version", version)
+    setVariable("Casted File Version", version as String)
+    print(version)
+}

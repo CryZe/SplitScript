@@ -205,13 +205,20 @@ names, ownership, documentation, and representation metadata.
 
 Catalog-declared capabilities are executable contracts rather than labels.
 Capabilities can build on other capabilities in the privileged source. For
-For example, `Numeric<T: Equatable>` makes equality part of the numeric
+example, `Numeric<T: Equatable>` makes equality part of the numeric
 contract, while `Integer<T: Numeric + Display>` makes every integer numeric,
 equatable through that numeric relationship, and displayable. The
 compiler follows this hierarchy transitively for type checking and method
 completion, while inferred constraints and rendered signatures retain only the
 strongest non-redundant capabilities. Concrete integer types consequently
 declare `Integer` once instead of separately repeating those memberships.
+Nominal standard-library types can connect a parameterless `String`-returning
+source method to `Display` with `@display`. The generated type declaration owns
+that implementation identity, catalog validation checks its receiver and
+signature, and reachability treats conversions as calls to the ordinary hidden
+library body. `FileVersion.toString()` is the first implementation: casts,
+interpolation, `print`, and `setVariable` all dispatch to it, while codegen has
+no `FileVersion` formatting case.
 `MemoryReadable` GC records derive their naturally aligned field layout from
 catalog field declarations through the same semantic-`TypeId` layout engine as
 source records. `Equatable` catalog records similarly receive generated
@@ -421,6 +428,8 @@ surrogate sequences become the Unicode replacement character.
 Numeric conversions and integer formatting use `value as Type`. The `Display`
 capability is the single contract for `as String`, JavaScript-style template
 strings such as `` `{stage}-{act}` ``, `print`, and `setVariable`.
+Standard-library nominal types may fulfill that contract with an `@display`
+source method; primitives retain their compact compiler implementation.
 `String.concat` remains available as the underlying collection helper.
 `timer.state` and `setTickRate` wrap their ASR host calls.
 `timer.state()` returns the exhaustive `TimerState` enum with

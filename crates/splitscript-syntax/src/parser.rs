@@ -15,7 +15,7 @@ use crate::{
         InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter,
         PatternBinding, PatternId, PointerPath, Program, RecordDecl, RecordField, RecordFieldId,
         RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption, SettingChoiceOptionId,
-        SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl, StateField,
+        SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl, StateField, StateLayoutDecl,
         StateMemoryDecoder, StateProviderRef, StateSource, Stmt, SuspensionBinding, SuspensionMode,
         TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
@@ -426,6 +426,31 @@ mod tests {
             Some(TypeRef::core(CoreTypeId::U32))
         );
         assert_eq!(program.actions[0].kind, ActionKind::Split);
+    }
+
+    #[test]
+    fn parses_named_state_layouts_and_their_generated_enum() {
+        let source = r#"
+            state "game.exe" {
+                /// Steam build.
+                layout Steam { level: u32 at 0x100 }
+                layout GOG { level: u32 at 0x200 }
+            }
+            onAttach { return StateLayout.Steam }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let state = program.state.unwrap();
+        assert!(state.fields.is_empty());
+        assert_eq!(state.layouts.len(), 2);
+        assert_eq!(state.layouts[0].fields[0].name, "level");
+        let enumeration = state.layout_enum.unwrap();
+        assert_eq!(enumeration.name, "StateLayout");
+        assert_eq!(enumeration.variants[0].name, "Steam");
+        assert_eq!(
+            enumeration.variants[0].documentation.as_deref(),
+            Some("Steam build.")
+        );
+        assert_eq!(program.actions[0].kind, ActionKind::OnAttach);
     }
 
     #[test]

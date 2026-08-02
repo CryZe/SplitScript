@@ -47,6 +47,7 @@ pub(super) fn compile_read(
             runtime_globals: lowering.runtime_globals,
             runtime_helpers: lowering.runtime_helpers,
             functions: lowering.functions,
+            display_functions: lowering.display_functions,
             equality_functions: lowering.equality_functions,
             records: lowering.records,
             enums: lowering.enums,
@@ -60,6 +61,7 @@ pub(super) fn compile_read(
             gc: lowering.gc,
             function_instance: None,
             loop_control: None,
+            bare_return: BareReturn::Void,
         };
         compile_expr(&mut function, planned.expression, &context);
         function.instruction(&Instruction::End);
@@ -377,6 +379,7 @@ pub(super) fn compile_user_function(
         runtime_globals: lowering.runtime_globals,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
+        display_functions: lowering.display_functions,
         equality_functions: lowering.equality_functions,
         records: lowering.records,
         enums: lowering.enums,
@@ -390,6 +393,7 @@ pub(super) fn compile_user_function(
         gc: lowering.gc,
         function_instance: Some(instance),
         loop_control: None,
+        bare_return: BareReturn::Void,
     };
     compile_block(&mut function, &wasm_body.entry, &context, None);
     if semantic_type(
@@ -446,6 +450,7 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
         runtime_globals: lowering.runtime_globals,
         runtime_helpers: lowering.runtime_helpers,
         functions: lowering.functions,
+        display_functions: lowering.display_functions,
         equality_functions: lowering.equality_functions,
         records: lowering.records,
         enums: lowering.enums,
@@ -459,6 +464,7 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
         gc: lowering.gc,
         function_instance: None,
         loop_control: None,
+        bare_return: BareReturn::Action(action.kind),
     };
     compile_block(&mut function, &wasm_body.entry, &context, Some(action.kind));
     emit_action_default(&mut function, action.kind, lowering.gc);
@@ -553,7 +559,7 @@ use super::{
     context::EmissionContext,
     data_plan::StringPool,
     emit_memory_value, emit_result_error, emit_result_success,
-    expression::{ExprContext, LocalStorage, MatchLayout, compile_block, compile_expr},
+    expression::{BareReturn, ExprContext, LocalStorage, MatchLayout, compile_block, compile_expr},
     imports::Abi,
     memarg, memory_plan, semantic_type, value_type,
 };

@@ -58,7 +58,7 @@ pub(super) fn compile_update(
         }),
     ));
     let state = program.state.as_ref().unwrap();
-    for field in &state.fields {
+    for field in state.canonical_fields() {
         let poll_result = semantic_type(
             semantics
                 .state_poll_result(field.id)
@@ -144,6 +144,15 @@ pub(super) fn compile_update(
         emit_provider_default(&mut function, provider_type, lowering);
         function.instruction(&Instruction::GlobalSet(provider_global));
     }
+    if let (Some(selected), Some(enumeration)) =
+        (globals.selected_layout, state.layout_enum.as_ref())
+    {
+        function
+            .instruction(&Instruction::RefNull(HeapType::Concrete(
+                lowering.gc.index(Type::Enum(enumeration.id)),
+            )))
+            .instruction(&Instruction::GlobalSet(selected));
+    }
     if let Some(region) = cancellation_region {
         emit_cancel_region(&mut function, region, lowering.gc, globals);
     }
@@ -204,7 +213,8 @@ pub(super) fn compile_update(
     function
         .instruction(&Instruction::StructNewDefault(STATE_TYPE))
         .instruction(&Instruction::LocalSet(candidate_state));
-    for (index, field) in state.fields.iter().enumerate() {
+    let canonical_fields = state.canonical_fields();
+    for (index, field) in canonical_fields.iter().enumerate() {
         let Type::Result(result_type) = semantic_type(
             semantics
                 .state_poll_result(field.id)
@@ -214,10 +224,40 @@ pub(super) fn compile_update(
             unreachable!("state poll-result types are Result layouts")
         };
         let poll_result_local = first_poll_result + index as u32;
+        if state.layouts.is_empty() {
+            function
+                .instruction(&Instruction::GlobalGet(globals.process))
+                .instruction(&Instruction::Call(read_functions[index]))
+                .instruction(&Instruction::LocalSet(poll_result_local));
+        } else {
+            let selected = globals
+                .selected_layout
+                .expect("named layouts have selected-layout storage");
+            let enumeration = state
+                .layout_enum
+                .as_ref()
+                .expect("named layouts generate a typed enum");
+            for layout_index in 0..state.layouts.len() {
+                function
+                    .instruction(&Instruction::GlobalGet(selected))
+                    .instruction(&Instruction::RefAsNonNull)
+                    .instruction(&Instruction::StructGet {
+                        struct_type_index: lowering.gc.index(Type::Enum(enumeration.id)),
+                        field_index: 0,
+                    })
+                    .instruction(&Instruction::I32Const(layout_index as i32))
+                    .instruction(&Instruction::I32Eq)
+                    .instruction(&Instruction::If(BlockType::Empty))
+                    .instruction(&Instruction::GlobalGet(globals.process))
+                    .instruction(&Instruction::Call(
+                        read_functions[layout_index * canonical_fields.len() + index],
+                    ))
+                    .instruction(&Instruction::LocalSet(poll_result_local))
+                    .instruction(&Instruction::End);
+            }
+        }
         function
-            .instruction(&Instruction::GlobalGet(globals.process))
-            .instruction(&Instruction::Call(read_functions[index]))
-            .instruction(&Instruction::LocalTee(poll_result_local))
+            .instruction(&Instruction::LocalGet(poll_result_local))
             .instruction(&Instruction::RefAsNonNull)
             .instruction(&Instruction::StructGet {
                 struct_type_index: lowering.gc.index(Type::Result(result_type)),

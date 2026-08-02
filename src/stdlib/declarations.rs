@@ -187,6 +187,9 @@ pub struct StdlibType {
     pub name: &'static str,
     pub kind: StdlibTypeKind,
     pub capabilities: &'static [StdlibCapabilityId],
+    /// Catalog method used for user-facing string conversion, when this type
+    /// supplies a source- or intrinsic-defined `Display` implementation.
+    pub display: Option<super::StdlibItemId>,
     pub representation: RuntimeRepresentation,
     pub value_usage: ValueUsage,
     pub documentation: Documentation<StdlibSymbolId>,

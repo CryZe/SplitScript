@@ -337,6 +337,35 @@ fn signature_literals_are_typed_validated_and_scannable() {
 }
 
 #[test]
+fn file_version_literals_are_typed_and_checked_at_parse_time() {
+    let source = r#"
+        state "game.exe" {}
+        fn supported(version: FileVersion) {
+            return version == v"1.5.0.0"
+        }
+    "#;
+    let wasm = splitscript::compile(source).expect("typed file-version literal should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("file-version equality should produce valid Wasm");
+
+    for (literal, expected) in [
+        ("1.2.3", "exactly four decimal components"),
+        ("1.two.3.4", "components must be decimal integers"),
+        ("1.2.3.65536", "components must fit in `u16`"),
+    ] {
+        let invalid = format!("state \"game.exe\" {{}}\nfn bad() {{ return v\"{literal}\" }}");
+        let diagnostics = splitscript::compile(&invalid).expect_err("invalid version must fail");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing `{expected}` diagnostic for {literal}: {diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
 fn explicit_process_reads_and_pointer_following_work_in_sync_and_async_code() {
     let source = r#"
         state "game.exe" {}

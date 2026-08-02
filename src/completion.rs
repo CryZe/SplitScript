@@ -268,7 +268,7 @@ fn complete_member(
     match path.as_slice() {
         ["current"] | ["old"] => {
             if let Some(state) = &syntax.state {
-                for field in &state.fields {
+                for field in state.canonical_fields() {
                     builder.add(simple_completion(
                         &field.name,
                         CompletionKind::StateField,
@@ -291,7 +291,7 @@ fn complete_member(
             }
         }
         [name] => {
-            if let Some(enumeration) = syntax.enums.iter().find(|item| item.name == *name) {
+            if let Some(enumeration) = syntax.enum_declarations().find(|item| item.name == *name) {
                 for variant in &enumeration.variants {
                     let (insert_text, is_snippet) = if variant.payload.is_some() {
                         (format!("{}(${{1:value}})", variant.name), true)
@@ -545,6 +545,17 @@ fn function_snippet(label: &str, item: &StdlibItem) -> String {
 }
 
 fn add_source_declarations(builder: &mut CompletionBuilder, syntax: &Program) {
+    if syntax
+        .state
+        .as_ref()
+        .is_some_and(|state| state.layout_value.is_some())
+    {
+        builder.add(simple_completion(
+            "layout",
+            CompletionKind::Variable,
+            "selected state layout",
+        ));
+    }
     for global in &syntax.globals {
         builder.add(simple_completion(
             &global.name,
@@ -579,7 +590,7 @@ fn add_source_declarations(builder: &mut CompletionBuilder, syntax: &Program) {
             "record type",
         ));
     }
-    for enumeration in &syntax.enums {
+    for enumeration in syntax.enum_declarations() {
         builder.add(simple_completion(
             &enumeration.name,
             CompletionKind::Enum,
@@ -1349,7 +1360,7 @@ split {
         let literal = labels(&mut database, "2 => \"½\".");
         assert!(literal.contains(&"byteLength".to_owned()), "{literal:#?}");
 
-        let local_source = source.replacen("return fraction\n", "return fraction.\n", 1);
+        let local_source = source.replacen("return fraction", "return fraction.", 1);
         let mut database = CompilerDatabase::new(local_source);
         let local = labels(&mut database, "return fraction.");
         assert!(local.contains(&"byteLength".to_owned()), "{local:#?}");
@@ -1440,6 +1451,23 @@ fn masked(value) {
         let all = database.completions(empty_prefix).unwrap();
         assert!(all.items.iter().any(|item| item.label == "whileAttached"));
         assert!(all.items.iter().all(|item| item.label != "utf8"));
+    }
+
+    #[test]
+    fn named_layouts_complete_the_generated_type_value_and_variants() {
+        let source = r#"
+state "game.exe" {
+    layout Steam { level: u32 at 0x100 }
+    layout GOG { level: u32 at 0x200 }
+}
+onAttach { return StateLayout. }
+split { lay }
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let variants = labels(&mut database, "StateLayout.");
+        assert!(variants.contains(&"Steam".to_owned()));
+        assert!(variants.contains(&"GOG".to_owned()));
+        assert!(labels(&mut database, "lay }").contains(&"layout".to_owned()));
     }
 
     #[test]

@@ -221,6 +221,18 @@ impl<'a> Validator<'a> {
             attributes: value.attributes.clone(),
             functions: value.functions.clone(),
         };
+        if owner
+            .functions
+            .iter()
+            .filter(|function| has_attribute(&function.attributes, "display"))
+            .count()
+            > 1
+        {
+            self.error(format!(
+                "standard-library type `{}` has multiple display implementations",
+                owner.name
+            ));
+        }
         self.validate_functions(&owner.name, &owner.functions, &[]);
     }
 
@@ -247,7 +259,62 @@ impl<'a> Validator<'a> {
                 self.error(format!("`{owner}` repeats function `{}`", function.name));
             }
             self.validate_documentation(&qualified, &function.documentation, true);
-            self.validate_attributes(&qualified, &function.attributes, &["intrinsic"]);
+            self.validate_attributes(&qualified, &function.attributes, &["intrinsic", "display"]);
+            if has_attribute(&function.attributes, "display") {
+                if function
+                    .attributes
+                    .iter()
+                    .find(|attribute| attribute.name == "display")
+                    .is_some_and(|attribute| !attribute.arguments.is_empty())
+                {
+                    self.error(format!(
+                        "`{qualified}` marker attribute `@display` does not accept arguments"
+                    ));
+                }
+                let owner_is_standard_type = self.types.contains(owner);
+                let owner_has_display = self.library.declarations.iter().any(|declaration| {
+                    matches!(
+                        declaration,
+                        Declaration::Struct(value) | Declaration::IntrinsicType(value)
+                            if value.name == owner
+                                && value.attributes.iter().any(|attribute| {
+                                    attribute.name == "capabilities"
+                                        && attribute.arguments.iter().any(|argument| {
+                                            matches!(
+                                                argument,
+                                                AttributeArgument::Name(capability)
+                                                    if capability == "Display"
+                                            )
+                                        })
+                                })
+                    )
+                });
+                if !owner_is_standard_type {
+                    self.error(format!(
+                        "`{qualified}` uses `@display` outside a standard-library type"
+                    ));
+                }
+                if function.is_static || !function.parameters.is_empty() {
+                    self.error(format!(
+                        "`{qualified}` display implementation must be a parameterless method"
+                    ));
+                }
+                if function.result != Type::Name("String".to_owned()) {
+                    self.error(format!(
+                        "`{qualified}` display implementation must return `String`"
+                    ));
+                }
+                if !owner_has_display {
+                    self.error(format!(
+                        "`{qualified}` provides a display implementation but `{owner}` does not declare `Display`"
+                    ));
+                }
+                if function.body.is_none() {
+                    self.error(format!(
+                        "`{qualified}` display implementation must have a source body"
+                    ));
+                }
+            }
             let intrinsic = self
                 .optional_name_attribute(&qualified, &function.attributes, "intrinsic")
                 .is_some();
@@ -572,6 +639,10 @@ fn declaration_name(declaration: &Declaration) -> &str {
         | Declaration::CoreExtension(value) => &value.name,
         Declaration::StateProvider(value) => &value.name,
     }
+}
+
+fn has_attribute(attributes: &[Attribute], name: &str) -> bool {
+    attributes.iter().any(|attribute| attribute.name == name)
 }
 
 fn capability_hierarchy_has_cycle<'a>(

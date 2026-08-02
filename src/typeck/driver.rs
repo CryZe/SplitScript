@@ -36,7 +36,7 @@ fn initialize_checker(
     standard_library: StandardLibrary,
 ) -> Checker {
     let records = program.records.clone();
-    let enums = program.enums.clone();
+    let enums = program.enum_declarations().cloned().collect::<Vec<_>>();
     let semantic_types = TypeStore::with_source_types(&standard_library, &records, &enums);
     let array_types = program
         .array_types
@@ -100,6 +100,7 @@ fn initialize_checker(
         ),
         inference,
         provider_value,
+        layout_value: program.state.as_ref().and_then(|state| state.layout_value),
         scopes: Vec::new(),
         return_ty: void_type,
         callable: CallableContext::TopLevel,

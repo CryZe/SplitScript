@@ -103,7 +103,7 @@ pub fn document_symbols(document: &SourceDocument, program: &Program) -> Vec<Doc
         }
     }));
 
-    symbols.extend(program.enums.iter().map(|enumeration| {
+    symbols.extend(program.enum_declarations().map(|enumeration| {
         DocumentSymbol {
             name: enumeration.name.clone(),
             detail: None,

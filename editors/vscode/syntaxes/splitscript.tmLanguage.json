@@ -47,6 +47,10 @@
           "match": "\\bsig\"(?:\\\\.|[^\"\\\\])*\""
         },
         {
+          "name": "constant.numeric.version.splitscript",
+          "match": "\\bv\"(?:\\\\.|[^\"\\\\])*\""
+        },
+        {
           "name": "string.quoted.double.splitscript",
           "begin": "\"",
           "end": "\"",

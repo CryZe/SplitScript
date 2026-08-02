@@ -185,11 +185,25 @@ impl<'a> CatalogGenerator<'a> {
 
     fn emit_type(&self, output: &mut String, declaration: &StructDeclaration, kind: &str) {
         let id = ident(&declaration.name);
+        let display = declaration
+            .functions
+            .iter()
+            .find(|function| has_attribute(&function.attributes, "display"))
+            .map_or_else(
+                || "None".to_owned(),
+                |function| {
+                    format!(
+                        "Some(StdlibItemId::{}{})",
+                        path_ident(&declaration.name),
+                        ident(&function.name)
+                    )
+                },
+            );
         if has_attribute(&declaration.attributes, "testOnly") {
             output.push_str("#[cfg(test)] ");
         }
         output.push_str(&format!(
-            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, kind: StdlibTypeKind::{kind}, capabilities: {}, representation: {}, value_usage: {}, documentation: documentation({}, {}) }},\n",
+            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, kind: StdlibTypeKind::{kind}, capabilities: {}, display: {display}, representation: {}, value_usage: {}, documentation: documentation({}, {}) }},\n",
             quote(&declaration.name), self.capabilities(&declaration.attributes),
             self.representation(&declaration.attributes), self.value_usage(&declaration.attributes),
             quote(&declaration.documentation.summary), quote(&declaration.documentation.details)
@@ -199,7 +213,7 @@ impl<'a> CatalogGenerator<'a> {
     fn emit_enum_type(&self, output: &mut String, declaration: &crate::EnumDeclaration) {
         let id = ident(&declaration.name);
         output.push_str(&format!(
-            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, kind: StdlibTypeKind::Enum, capabilities: {}, representation: {}, value_usage: {}, documentation: documentation({}, {}) }},\n",
+            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, kind: StdlibTypeKind::Enum, capabilities: {}, display: None, representation: {}, value_usage: {}, documentation: documentation({}, {}) }},\n",
             quote(&declaration.name), self.capabilities(&declaration.attributes),
             self.representation(&declaration.attributes), self.value_usage(&declaration.attributes),
             quote(&declaration.documentation.summary), quote(&declaration.documentation.details)
@@ -869,6 +883,50 @@ struct Duration {
         assert!(generated.contains("__splitscript_stdlib_DurationFromFrames"));
         assert!(generated.contains("return Duration.fromParts(frames / fps, 0)"));
         assert!(!generated.contains("IntrinsicId::DurationFromFrames"));
+    }
+
+    #[test]
+    fn standard_types_can_name_a_source_defined_display_implementation() {
+        let source = r#"
+/// Displayable values.
+@behavior(declared)
+capability Display<T> {}
+
+/// Text.
+@representation(gcArray, u8, mutable, nullable)
+@valueUsage(localVariable)
+@capabilities(Display)
+intrinsic type String {}
+
+/// A file version.
+@representation(gcStruct, nullable)
+@valueUsage(localVariable)
+@capabilities(Display)
+struct FileVersion {
+    /// Major component.
+    major: u16,
+
+    /// Formats the version.
+    ///
+    /// Uses dotted components.
+    ///
+    /// # Example
+    ///
+    /// Display a version
+    ///
+    /// ```splitscript
+    /// print(version)
+    /// ```
+    @display
+    fn toString() -> String {
+        return `{self.major}`
+    }
+}
+"#;
+        let generated = generate_catalog(&parse(source).unwrap()).unwrap();
+        assert!(generated.contains("display: Some(StdlibItemId::FileVersionToString)"));
+        assert!(generated.contains("Implementation::LibraryBody"));
+        assert!(generated.contains("__splitscript_stdlib_FileVersionToString"));
     }
 
     #[test]

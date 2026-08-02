@@ -572,6 +572,26 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             && let Some(definition) =
                 self.definition(SourceDefinitionId::State, "state", state.span)
         {
+            if let Some(value) = state.layout_value {
+                self.index.values.insert(
+                    value,
+                    SourceDefinition {
+                        id: SourceDefinitionId::Value(value),
+                        name: "layout".to_owned(),
+                        span: definition.span,
+                    },
+                );
+            }
+            if let Some(enumeration) = &state.layout_enum {
+                self.index.enums.insert(
+                    enumeration.id,
+                    SourceDefinition {
+                        id: SourceDefinitionId::Enum(enumeration.id),
+                        name: enumeration.name.clone(),
+                        span: definition.span,
+                    },
+                );
+            }
             self.insert_domain_definition(definition);
         }
         if let Some(span) = program.settings_span
@@ -598,7 +618,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                 let Some(variant) = self.semantics.setting_choice_option(option.id) else {
                     continue;
                 };
-                let Some(enumeration) = self.syntax.enums.iter().find(|enumeration| {
+                let Some(enumeration) = self.syntax.enum_declarations().find(|enumeration| {
                     enumeration
                         .variants
                         .iter()
@@ -775,7 +795,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             };
             if let Some(ResolvedEnumVariantId::Source(variant)) =
                 self.semantics.pattern_variant(arm.pattern_id)
-                && let Some(enumeration) = self.syntax.enums.iter().find(|enumeration| {
+                && let Some(enumeration) = self.syntax.enum_declarations().find(|enumeration| {
                     enumeration
                         .variants
                         .iter()
@@ -874,12 +894,13 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                         variant: ResolvedEnumVariantId::Source(variant),
                     } = resolution
                         && let Some(identifier) = segments.first()
-                        && let Some(enumeration) = self.syntax.enums.iter().find(|enumeration| {
-                            enumeration
-                                .variants
-                                .iter()
-                                .any(|candidate| candidate.id == variant)
-                        })
+                        && let Some(enumeration) =
+                            self.syntax.enum_declarations().find(|enumeration| {
+                                enumeration
+                                    .variants
+                                    .iter()
+                                    .any(|candidate| candidate.id == variant)
+                            })
                     {
                         self.add_reference(
                             SourceDefinitionId::Enum(enumeration.id),

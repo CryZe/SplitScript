@@ -1,0 +1,33 @@
+state "LayoutGame.exe" {
+    /// Steam build memory layout.
+    layout Steam {
+        value: u32 at 0x1000
+    }
+
+    /// GOG build memory layout.
+    layout GOG {
+        value: u32 at 0x2000
+    }
+}
+
+onAttach {
+    let module = await process.mainModule()
+    if module.size == 0x1000 {
+        return StateLayout.Steam
+    }
+    if module.size == 0x2000 {
+        return StateLayout.GOG
+    }
+    await process.closed()
+}
+
+whileAttached {
+    setVariable("Layout", match layout {
+        StateLayout.Steam => "Steam",
+        StateLayout.GOG => "GOG"
+    })
+}
+
+split {
+    return old.value == 0 && current.value == 1
+}

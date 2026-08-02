@@ -307,6 +307,12 @@ impl StandardLibrary {
         self.capabilities_satisfy(self.type_decl(ty).capabilities, capability)
     }
 
+    /// Returns the catalog-owned conversion used when a standard type
+    /// implements `Display` with its own source or intrinsic body.
+    pub fn display_implementation(&self, ty: StdlibTypeId) -> Option<&'static StdlibItem> {
+        self.type_decl(ty).display.map(|item| self.item(item))
+    }
+
     pub fn render_declared_type(&self, ty: DeclaredTypeRef) -> &'static str {
         match ty {
             DeclaredTypeRef::Core(core) => self.core_type(core).name,

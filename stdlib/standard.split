@@ -883,7 +883,7 @@ typeConstructor Result<T> {
     /// A successful result becomes the present option value. An error becomes
     /// `None`, discarding its diagnostic text. This is useful for state fields
     /// that are deliberately unavailable on some ticks; required fields should
-    /// keep their `T!` so a failed read skips the whole transactional snapshot.
+    /// keep their `T!` so a failed read retains the last accepted field value.
     ///
     /// # Example
     ///

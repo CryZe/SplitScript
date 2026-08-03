@@ -382,6 +382,16 @@ transitive operation metadata through the ordinary typed call graph, and
 caches that immutable overlay. User compilations recheck injected bodies
 against the cached result, so metadata is user-independent without creating a
 second effect language in the loader.
+Before operation analysis,
+[`validation/stdlib_bodies.rs`](../src/validation/stdlib_bodies.rs) proves every
+catalog call shape is a consistent instance of the hidden body's inferred type
+scheme.
+This directional check permits a body to infer a safely more-general template,
+while rejecting concrete narrowing, inconsistent receiver/parameter/result
+relationships, nested wrapper mismatches, and capability requirements not
+guaranteed by the public declaration. A malformed privileged body is therefore
+a catalog-construction error; it cannot survive until demand-driven
+specialization or backend emission.
 Catalog validation rejects empty sets, purity mixed with observable behavior,
 retry/suspend contradictions, cancellation without suspension/attachment,
 process reads without attachment, and non-suspending onAttach-only calls.

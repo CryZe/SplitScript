@@ -24,6 +24,8 @@ use crate::{
     visit::{self, Visitor as SyntaxVisitor},
 };
 
+mod stdlib_bodies;
+
 pub(crate) struct ValidationOutput {
     pub(crate) capabilities: CapabilityAnalysis,
     pub(crate) effects: OperationAnalysis,
@@ -45,6 +47,12 @@ pub(crate) fn validate(
         standard_library.clone(),
     );
     let mut diagnostics = Vec::new();
+    diagnostics.extend(stdlib_bodies::validate_signatures(
+        &standard_library,
+        syntax,
+        hir,
+        semantics,
+    ));
     diagnostics.extend(validate_function_instances(syntax, hir, semantics));
     diagnostics.extend(validate_future_storage(syntax, semantics, enum_types));
     diagnostics.extend(validate_must_use(&standard_library, hir, semantics));

@@ -1,5 +1,19 @@
 # SplitScript roadmap
 
+## 2026-08-03: source-body signature conformance
+
+- Added a semantic construction-time boundary for source-defined
+  standard-library bodies. Every public receiver, parameter, and completion
+  shape must be a consistent instance of the ordinary SplitScript body's
+  inferred function scheme before operation analysis begins.
+- The validator handles nested Array, Option, Result, and fixed-array shapes.
+  It permits safely more-general inferred templates while rejecting concrete
+  narrowing, inconsistent generic relationships, and undeclared inferred
+  capability requirements. Capability inheritance is respected.
+- Isolated this compiler-semantic responsibility in
+  `validation/stdlib_bodies.rs` and added focused fixtures so malformed
+  privileged source cannot reach monomorphization or Wasm code generation.
+
 ## 2026-08-03: initialized persistent state fields
 
 - Audited the original LiveSplit ASL refresh path and ASR watchers. Legacy ASL

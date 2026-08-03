@@ -72,10 +72,6 @@ General rules:
 
 ### Standard-library and type-system boundaries
 
-- [ ] Validate every source-defined standard-library body's inferred receiver,
-  parameters, and result scheme against its declared catalog signature before
-  code generation, including nested generic wrappers. A mismatch must be a
-  catalog construction error, never a monomorphization or backend panic.
 - [ ] Design the user-facing trait/type-class model around the existing
   source-defined capability graph. Begin with memory reading, `Display`,
   equality, numeric operations, and hashing; decide separately whether user

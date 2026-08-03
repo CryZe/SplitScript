@@ -14,6 +14,18 @@ struct RuntimeFixture {
     extra_arguments: &'static [&'static str],
 }
 
+struct CompileFixture {
+    source: &'static str,
+    output: &'static str,
+    profile: &'static str,
+}
+
+const COMPILE_FIXTURES: &[CompileFixture] = &[CompileFixture {
+    source: "examples/akibas_trip.split",
+    output: "akibas_trip.wasm",
+    profile: "release",
+}];
+
 const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
     RuntimeFixture {
         source: "examples/hello_lunistice.split",
@@ -467,6 +479,15 @@ fn check() -> Result<(), String> {
             fixture.profile,
         )?;
     }
+    for fixture in COMPILE_FIXTURES {
+        compile_once(
+            &root,
+            &compiler,
+            fixture.source,
+            &outputs.join(fixture.output),
+            fixture.profile,
+        )?;
+    }
     let lunistice_release = outputs.join("lunistice.release.wasm");
     compile_once(
         &root,
@@ -496,6 +517,11 @@ fn check() -> Result<(), String> {
         .iter()
         .map(|fixture| outputs.join(fixture.output))
         .collect::<Vec<_>>();
+    validated.extend(
+        COMPILE_FIXTURES
+            .iter()
+            .map(|fixture| outputs.join(fixture.output)),
+    );
     validated.extend([lunistice_release, debug.clone(), release.clone()]);
     validated.sort();
     validated.dedup();

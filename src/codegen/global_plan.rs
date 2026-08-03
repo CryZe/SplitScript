@@ -209,7 +209,12 @@ pub(super) fn encode(
                 global_type,
                 &ConstExpr::ref_null(HeapType::Concrete(gc.index(Type::Option(option)))),
             );
-        } else if ty.is_enum(wasm_ir.standard_library()) {
+        } else if ty.is_enum(wasm_ir.standard_library())
+            || matches!(
+                ty,
+                Type::Record(_) | Type::Array(_) | Type::Standard(StdlibTypeId::String)
+            )
+        {
             section.global(
                 global_type,
                 &ConstExpr::ref_null(HeapType::Concrete(gc.index(ty))),

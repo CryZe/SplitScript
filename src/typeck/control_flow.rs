@@ -8,7 +8,17 @@ use crate::{
 
 pub(super) fn is_constant(expression: &Expr, resolutions: &ProgramResolutions) -> bool {
     match &expression.kind {
-        ExprKind::None | ExprKind::Bool(_) | ExprKind::Int { .. } | ExprKind::Float(_) => true,
+        ExprKind::None
+        | ExprKind::Bool(_)
+        | ExprKind::Int { .. }
+        | ExprKind::Float(_)
+        | ExprKind::String(_) => true,
+        ExprKind::Array(elements) => elements
+            .iter()
+            .all(|element| is_constant(element, resolutions)),
+        ExprKind::Record { fields, .. } => fields
+            .iter()
+            .all(|(_, value)| is_constant(value, resolutions)),
         ExprKind::Path(_) => resolutions.expression_enum(expression.id).is_some(),
         ExprKind::Call { args, .. } => {
             args.is_empty() && resolutions.expression_enum(expression.id).is_some()

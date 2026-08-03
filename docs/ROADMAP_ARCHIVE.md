@@ -1,5 +1,33 @@
 # SplitScript roadmap
 
+## 2026-08-03: next production pressure case selected
+
+- Re-audited the manual ASL porting notes against the compiler-owned migration
+  capability index instead of treating every old deferral as a missing feature.
+- Selected Akiba's Trip: Undead & Undressed as the next maintained port:
+  records, fixed arrays, `for`, decimal rounding, and nested settings already
+  cover its data model, while typed data-driven settings lookup remains a
+  genuine, high-frequency corpus gap.
+- Kept growable collections out of the initial goal because this splitter's
+  coordinate tables are immutable; fixed arrays express their actual lifetime
+  and make settings identity the isolated language boundary.
+
+## 2026-08-03: one-time aggregate globals
+
+- Added global record, fixed-array, variable-array, and string constants whose
+  GC values are materialized exactly once in the WebAssembly module start
+  function instead of being reconstructed on every polling tick.
+- Split module-start emission out of settings code so enum globals, aggregate
+  globals, initial snapshots, async storage, and setting registration have one
+  explicit initialization boundary.
+- Added a backend regression that validates the generated Wasm GC and proves
+  the record, array, and string constructors run in `_start` before the globals
+  are observed.
+- Added the maintained Akiba's Trip: Undead & Undressed port with seven typed
+  mission-coordinate tables, source-faithful f32-to-f64 rounding, nested route
+  settings, and a temporary explicit setting-key match. Repository verification
+  now compiles and validates the port as a release artifact.
+
 This roadmap is ordered by dependency and impact, not merely implementation
 size. Language semantics should settle before editor tooling treats them as a
 stable public contract.

@@ -27,17 +27,22 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — select the next representative production port
+## Now — faithfully port Akiba's Trip: Undead & Undressed
 
-The faithful A Plague Tale port proved that several supposedly missing
-features already existed, while also exposing two real compiler bugs. The next
-goal is to apply the compiler-owned migration catalog, generated capability
-index, and first shape-aware diagnostics to the larger ASL corpus so stale
-notes and copied compilers stop rediscovering already-supported features.
-
-- [ ] Re-audit the next group of manual-port notes against the generated index,
-  select one unrelated production-scale port whose remaining blocker has high
-  corpus frequency, and make that faithful port the next goal.
+The maintained port now expresses its mission coordinates as named records and
+fixed arrays allocated once during module startup; no GC table is rebuilt on a
+polling tick. Its remaining recurring blocker is data-driven access to a
+statically declared settings table. The temporary `missionEnabled` match makes
+the intended behavior explicit, but copying that pattern across ports would be
+needlessly verbose and would hide the external setting-key relationship.
+- [ ] Design the smallest typed settings-key surface proven by the port. It
+  must support stable external numeric/string keys for compatible settings,
+  reject heterogeneous lookup, preserve ordinary `settings.name` access, and
+  keep hover, completion, rename, documentation, and host metadata tied to the
+  same setting declaration.
+- [ ] Implement that surface across syntax, type checking, code generation,
+  formatter, editor tooling, and migration guidance; then verify the port's
+  start, split, reset, and settings behavior with compiler and runtime tests.
 
 ## P0 — unblock the next representative native ports
 

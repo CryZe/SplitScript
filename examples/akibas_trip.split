@@ -1,0 +1,452 @@
+// Faithful port of the Akiba's Trip: Undead & Undressed autosplitter.
+// Mission splits are selected by the mission counter transition and the
+// player's rounded position. Route and individual-mission settings retain the
+// source autosplitter's defaults.
+
+/// A mission endpoint and its expected player position.
+record MissionPoint {
+    /// Stable mission number used by the autosplitter settings.
+    id: i32
+    /// Expected vertical coordinate.
+    y: f32
+    /// Expected depth coordinate.
+    z: f32
+    /// Expected horizontal coordinate.
+    x: f32
+}
+
+settings {
+    /// Splits after the prologue transition.
+    "M0 - Prologue" => mission0: true
+
+    "Chapter 1" {
+        /// Enables the Chapter 1 mission group.
+        "Enable Chapter 1" => chapter1: true
+        "M1 - To the Freedom Fighter Base MOGRA" => mission1: true
+        "M2 - Off to the Battle Arena" => mission2: true
+        "M3 - A Stranger on Junk Street" => mission3: true
+        "M4 - A Favor For Your Sister" => mission4: true
+        "M5 - Patrol the Side Streets with Shizuku" => mission5: true
+        "M6 - Shopping with Kati on the Side Streets" => mission6: true
+        "M7 - Rin's Street Performance" => mission7: true
+        "M8 - Patrolling with Shizuku, Tohko or Alone" => mission8: true
+        "M9 - Search for Shizuku" => mission9: true
+        "M10 - Train at the Battle Arena" => mission10: true
+        "M11 - Meet up with Everyone by the Station" => mission11: true
+        "M12 - Patrolling with Shizuku" => mission12: true
+        "M13 - Hurry to Electric Town Plaza!" => mission13: true
+    }
+
+    "Chapter 2" {
+        /// Enables the Chapter 2 mission group.
+        "Enable Chapter 2" => chapter2: true
+        "M14 - Return to MOGRA for Your Report" => mission14: true
+        "M15 - Go to Akimori Shrine with Shizuku" => mission15: true
+        "M16 - Head to Akihabara Park" => mission16: true
+        "M17 - Deliver the Goods" => mission17: true
+        "M18 - Cosplay Fest Begins!" => mission18: true
+        "M19 - Patrol Main Street Southwest with Kaito" => mission19: true
+        "M20 - Proceed As Instructed to Akimori Shrine" => mission20: true
+        "M21 - Patrol Yodobashi Area with Shizuku" => mission21: true
+        "M22 - To the Battle Arena where Zenya Amou Awaits!" => mission22: true
+    }
+
+    "Chapter 3 - Shizuku" {
+        /// Enables Shizuku's Chapter 3 route.
+        "Enable Shizuku Route" => chapter3Shizuku: false
+        "M23 - Patrol Akihabara Park with Shizuku" => mission123: false
+        "M24 - Hurry to the Suit Store with Shizuku!" => mission124: false
+        "M25 - Go Figurine Shopping with Shizuku" => mission125: false
+        "M26 - See What Ms. Kasugai is Up To" => mission126: false
+        "M27 - Operation Decoy, Commence!" => mission127: false
+    }
+
+    "Chapter 3 - Tohko" {
+        /// Enables Tohko's Chapter 3 route.
+        "Enable Tohko Route" => chapter3Tohko: true
+        "M23 - Patrolling Main Street Southwest with Tohko" => mission223: true
+        "M24 - Hurry to the Suit Store with Tohko!" => mission224: true
+        "M25 - Help Tohko Pick Out a Smartphone" => mission225: true
+        "M26 - Pass Rin's Challenge" => mission226: true
+        "M27 - Meet with Managing Director Sakaguchi" => mission227: true
+    }
+
+    "Chapter 3 - Rin" {
+        /// Enables Rin's Chapter 3 route.
+        "Enable Rin Route" => chapter3Rin: false
+        "M23 - Patrol Main Street Northwest with Rin" => mission323: false
+        "M24 - Hurry to the Suit Store with Rin!" => mission324: false
+        "M25 - Head to the Accessory Shop" => mission325: false
+        "M26 - Stop Tohko's Rampage!" => mission326: false
+        "M27 - Carry Out the Plan!" => mission327: false
+    }
+
+    "Chapter 3 - Shion" {
+        /// Enables Shion's Chapter 3 route.
+        "Enable Shion Route" => chapter3Shion: false
+        "M23 - Patrolling Junk Street with Rin and Kati" => mission423: false
+        "M24 - Go to Akihabara Park with Ms. Kasugai" => mission424: false
+        "M25 - Stop at GO!GO!CURRY with Ms. Kasugai" => mission425: false
+        "M26 - Return to the Organization's Hideout" => mission426: false
+        "M27 - Investigate the Missing Synthisters" => mission427: false
+        "M28 - Strategy Meeting at Akimori Shrine" => mission428: false
+        "M29 - Off to Confront Souga Kagutsuki!" => mission429: false
+        "M30 - Stop the Akiba Freedom Fighters' Advances!" => mission430: false
+        "M31 - Secure Radio Kaikan!" => mission431: false
+    }
+
+    "Endings" {
+        /// Enables ending splits.
+        "Enable Endings" => endings: true
+        "M28 - Shizuku, Tohko, Rin - Off to the Final Battle" => mission28: true
+        "M32 - Shion - Go to Radio Kaikan" => mission432: false
+        "Leave Akihabara" => mission500: false
+    }
+}
+
+state "AkibaUU" {
+    /// Increases after completing a main or side mission.
+    missionCounter: i32 at "AkibaUU.exe", 0x4F6CFC
+    /// Current map number.
+    mapNumber: i32 at "AkibaUU.exe", 0x5324DC
+    /// Player vertical coordinate.
+    positionY: f32 at "AkibaUU.exe", 0x465FE4
+    /// Player depth coordinate.
+    positionZ: f32 at "AkibaUU.exe", 0x465FE0
+    /// Player horizontal coordinate.
+    positionX: f32 at "AkibaUU.exe", 0x465FE8
+    /// Becomes 111 when the credits start.
+    creditsStart: i32 at "AkibaUU.exe", 0x481500
+    /// Becomes 151 or 223 when leaving Akihabara.
+    trainEnd: i32 at "AkibaUU.exe", 0x4ACA64
+}
+
+let chapter1Points: [MissionPoint; 13] = [
+    MissionPoint {
+        id: 1, y: 1.729497, z: -2.678275, x: 2.182908
+    },
+    MissionPoint {
+        id: 2, y: 1.44997, z: -3.382344, x: 6.325909
+    },
+    MissionPoint {
+        id: 3, y: 1.615439, z: -7.485596, x: 13.636044
+    },
+    MissionPoint {
+        id: 4, y: 1.284996, z: -6.429576, x: 14.7577
+    },
+    MissionPoint {
+        id: 5, y: 1.273742, z: -8.754382, x: 13.374955
+    },
+    MissionPoint {
+        id: 6, y: 1.604571, z: -8.925579, x: -118.675133
+    },
+    MissionPoint {
+        id: 7, y: 1.434686, z: -5.191771, x: 9.622315
+    },
+    MissionPoint {
+        id: 8, y: 1.526805, z: -6.715621, x: 13.143861
+    },
+    MissionPoint {
+        id: 9, y: 1.507847, z: -6.404016, x: 15.0073
+    },
+    MissionPoint {
+        id: 10, y: 1.178108, z: -3.25197, x: 9.506982
+    },
+    MissionPoint {
+        id: 11, y: 1.354699, z: 27.982529, x: 8.312622
+    },
+    MissionPoint {
+        id: 12, y: 1.179444, z: -1.225575, x: -36.363506
+    },
+    MissionPoint {
+        id: 13, y: 1.340432, z: 43.361782, x: -75.738457
+    }
+]
+
+let chapter2Points: [MissionPoint; 8] = [
+    MissionPoint {
+        id: 14, y: 1.753968, z: -3.575703, x: 12.967361
+    },
+    MissionPoint {
+        id: 15, y: 1.403322, z: -3.024755, x: 2.366887
+    },
+    MissionPoint {
+        id: 16, y: 1.903178, z: -5.590683, x: 11.821987
+    },
+    MissionPoint {
+        id: 17, y: 1.442598, z: -2.954975, x: 7.31093
+    },
+    MissionPoint {
+        id: 18, y: 1.555321, z: -5.148322, x: 13.262603
+    },
+    MissionPoint {
+        id: 19, y: 1.459551, z: -6.631887, x: 13.373309
+    },
+    MissionPoint {
+        id: 20, y: 1.474003, z: -7.64573, x: 10.132676
+    },
+    MissionPoint {
+        id: 21, y: 1.173435, z: 15.427427, x: -39.462936
+    }
+]
+
+let chapter2ZenyaPoints: [MissionPoint; 4] = [
+    MissionPoint {
+        id: 22, y: 1.420989, z: -8.703035, x: 10.144214
+    },
+    MissionPoint {
+        id: 22, y: 1.718277, z: -8.39325, x: 13.656679
+    },
+    MissionPoint {
+        id: 22, y: 1.620726, z: -4.492122, x: 14.412026
+    },
+    MissionPoint {
+        id: 22, y: 1.760053, z: -5.100903, x: 12.793765
+    }
+]
+
+let chapter3ShizukuPoints: [MissionPoint; 5] = [
+    MissionPoint {
+        id: 123, y: 1.521416, z: -8.861973, x: 12.929842
+    },
+    MissionPoint {
+        id: 124, y: 1.794408, z: -5.758067, x: 12.43737
+    },
+    MissionPoint {
+        id: 125, y: 1.550729, z: -3.143151, x: 1.906818
+    },
+    MissionPoint {
+        id: 126, y: 2.164646, z: -5.215629, x: 13.285363
+    },
+    MissionPoint {
+        id: 127, y: 1.246564, z: 13.13219, x: -69.59417
+    }
+]
+
+let chapter3TohkoPoints: [MissionPoint; 5] = [
+    MissionPoint {
+        id: 223, y: 1.548041, z: -5.745729, x: 12.256323
+    },
+    MissionPoint {
+        id: 224, y: 1.585566, z: -5.567666, x: 11.359394
+    },
+    MissionPoint {
+        id: 225, y: 1.42815, z: -7.247728, x: 9.722128
+    },
+    MissionPoint {
+        id: 226, y: 1.64619, z: -5.567641, x: 10.903448
+    },
+    MissionPoint {
+        id: 227, y: 1.124862, z: 13.81955, x: -69.386406
+    }
+]
+
+let chapter3RinPoints: [MissionPoint; 5] = [
+    MissionPoint {
+        id: 323, y: 1.425153, z: -9.590592, x: 13.756587
+    },
+    MissionPoint {
+        id: 324, y: 1.918821, z: -3.522397, x: 7.151635
+    },
+    MissionPoint {
+        id: 325, y: 1.545065, z: -5.712129, x: 11.259362
+    },
+    MissionPoint {
+        id: 326, y: 1.961876, z: -2.155976, x: 12.904745
+    },
+    MissionPoint {
+        id: 327, y: 1.327725, z: 13.811988, x: -69.378403
+    }
+]
+
+let chapter3ShionPoints: [MissionPoint; 6] = [
+    MissionPoint {
+        id: 423, y: 1.28227, z: -4.978224, x: 9.561569
+    },
+    MissionPoint {
+        id: 424, y: 0.0, z: 0.0, x: 0.0
+    },
+    MissionPoint {
+        id: 425, y: 1.502857, z: -8.490373, x: -61.773266
+    },
+    MissionPoint {
+        id: 426, y: 1.39258, z: 7.410832, x: 0.348735
+    },
+    MissionPoint {
+        id: 427, y: 1.307403, z: 0.875389, x: -17.276546
+    },
+    MissionPoint {
+        id: 428, y: 1.368003, z: 31.868629, x: -19.367922
+    }
+]
+
+/// Returns whether the individually numbered mission setting is enabled.
+///
+/// This explicit match is intentionally temporary: the production port uses
+/// it to define the semantics required from typed settings-key lookup.
+fn missionEnabled(id: i32) -> bool {
+    return match id {
+        0 => settings.mission0,
+        1 => settings.mission1,
+        2 => settings.mission2,
+        3 => settings.mission3,
+        4 => settings.mission4,
+        5 => settings.mission5,
+        6 => settings.mission6,
+        7 => settings.mission7,
+        8 => settings.mission8,
+        9 => settings.mission9,
+        10 => settings.mission10,
+        11 => settings.mission11,
+        12 => settings.mission12,
+        13 => settings.mission13,
+        14 => settings.mission14,
+        15 => settings.mission15,
+        16 => settings.mission16,
+        17 => settings.mission17,
+        18 => settings.mission18,
+        19 => settings.mission19,
+        20 => settings.mission20,
+        21 => settings.mission21,
+        22 => settings.mission22,
+        28 => settings.mission28,
+        123 => settings.mission123,
+        124 => settings.mission124,
+        125 => settings.mission125,
+        126 => settings.mission126,
+        127 => settings.mission127,
+        223 => settings.mission223,
+        224 => settings.mission224,
+        225 => settings.mission225,
+        226 => settings.mission226,
+        227 => settings.mission227,
+        323 => settings.mission323,
+        324 => settings.mission324,
+        325 => settings.mission325,
+        326 => settings.mission326,
+        327 => settings.mission327,
+        423 => settings.mission423,
+        424 => settings.mission424,
+        425 => settings.mission425,
+        426 => settings.mission426,
+        427 => settings.mission427,
+        428 => settings.mission428,
+        429 => settings.mission429,
+        430 => settings.mission430,
+        431 => settings.mission431,
+        432 => settings.mission432,
+        500 => settings.mission500,
+        _ => false
+    }
+}
+
+/// Checks one mission endpoint against the player's rounded position.
+fn atMissionPoint(point: MissionPoint, y: f64, z: f64, x: f64) -> bool {
+    return y ==(point.y as f64).roundTo(3)
+        && z ==(point.z as f64).roundTo(3)
+        && x ==(point.x as f64).roundTo(3)
+}
+
+/// Finds an enabled mission endpoint at the current rounded position.
+fn matchesMission(points: [MissionPoint], y: f64, z: f64, x: f64) -> bool {
+    for point in points {
+        if missionEnabled(point.id) && atMissionPoint(point, y, z, x) {
+            return true
+        }
+    }
+    return false
+}
+
+split {
+    // ASL's Math.Round promotes the memory-facing f32 values to f64.
+    let y =(current.positionY as f64).roundTo(3)
+    let z =(current.positionZ as f64).roundTo(3)
+    let x =(current.positionX as f64).roundTo(3)
+
+    if settings.mission0
+        && current.missionCounter == 0
+        && current.mapNumber == 3
+        && old.mapNumber == 25
+    {
+        return true
+    }
+
+    if settings.mission500
+        && current.mapNumber == 1
+        &&(current.trainEnd == 223 || current.trainEnd == 151)
+        && current.missionCounter == 0
+    {
+        return true
+    }
+
+    let missionCompleted = current.missionCounter != old.missionCounter
+    if missionCompleted {
+        if settings.chapter1 && matchesMission(chapter1Points, y, z, x) {
+            return true
+        }
+        if settings.chapter2
+            &&(matchesMission(chapter2Points, y, z, x)
+            || matchesMission(chapter2ZenyaPoints, y, z, x))
+        {
+            return true
+        }
+        if settings.chapter3Shizuku
+            && matchesMission(chapter3ShizukuPoints, y, z, x)
+        {
+            return true
+        }
+        if settings.chapter3Tohko && matchesMission(chapter3TohkoPoints, y, z, x) {
+            return true
+        }
+        if settings.chapter3Rin && matchesMission(chapter3RinPoints, y, z, x) {
+            return true
+        }
+        if settings.chapter3Shion {
+            if matchesMission(chapter3ShionPoints, y, z, x) {
+                return true
+            }
+            if settings.mission424
+                && current.mapNumber == 13
+                && y >= 1.0 && y <= 2.0
+                && z >= 60.0 && z <= 61.0
+                && x >= 46.0 && x <= 47.0
+            {
+                return true
+            }
+            if settings.mission429
+                && current.mapNumber == 16
+                && y >= -1.0 && y <= 1.0
+                && z >= 2.0 && z <= 4.0
+                && x >= -11.0 && x <= -9.0
+            {
+                return true
+            }
+            if settings.mission430
+                && current.mapNumber == 5
+                && y >= 1.0 && y <= 3.0
+                && z >= 14.0 && z <= 20.0
+                && x >= -165.0 && x <= -155.0
+            {
+                return true
+            }
+            if settings.mission431
+                && current.mapNumber == 3
+                && y >= 1.0 && y <= 3.0
+                && z >= -20.0 && z <= -5.0
+                && x >= 6.0 && x <= 12.0
+            {
+                return true
+            }
+        }
+    }
+
+    if settings.endings
+        &&(settings.mission28 || settings.mission432)
+        && y == 1.0
+        && z == 0.0
+        && x == 0.0
+        && current.creditsStart == 111
+    {
+        return current.creditsStart != old.creditsStart
+    }
+}

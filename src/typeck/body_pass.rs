@@ -40,7 +40,7 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
         }
         if !is_constant(&global.value, &checker.resolutions) {
             checker.error(
-                "global initializers must be None, numeric, boolean, or payload-free enum constants",
+                "global initializers must be literal values composed from None, numbers, booleans, strings, payload-free enums, records, or arrays",
                 global.value.span,
             );
         }
@@ -53,17 +53,17 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
         );
         if let Some(ty) = inferred {
             let unsupported_standard = checker.standard_type_id(ty).is_some_and(|standard| {
-                !checker
-                    .standard_library
-                    .type_decl(standard)
-                    .value_usage
-                    .global_variable
+                standard != StdlibTypeId::String
+                    && !checker
+                        .standard_library
+                        .type_decl(standard)
+                        .value_usage
+                        .global_variable
             });
             if unsupported_standard
-                || matches!(ty, Type::Array(_) | Type::Result(_))
+                || matches!(ty, Type::Result(_))
                 || matches!(ty, Type::Option(_))
                     && !matches!(global.value.kind, crate::ast::ExprKind::None)
-                || checker.source_record_id(ty).is_some()
             {
                 let ty = checker.type_name(ty);
                 checker.error(

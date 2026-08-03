@@ -34,6 +34,7 @@ mod global_plan;
 mod imports;
 mod memory_plan;
 mod module_assembly;
+mod module_start;
 mod reachability;
 mod runtime_helper_registry;
 mod runtime_helpers;
@@ -54,12 +55,12 @@ use self::dependencies::BackendDependencies;
 use self::equality_plan::EqualityFunctions;
 use self::gc_layout::GcLayout;
 use self::global_plan::SettingStorage;
+use self::module_start::compile_start;
 use self::runtime_helper_registry::RuntimeHelperPlan;
 use self::script_functions::{
     LocalPlanOptions, compile_action, compile_async_function_init, compile_read,
     compile_user_function, plan_wasm_locals,
 };
-use self::settings::compile_start;
 use self::update::compile_update;
 use crate::intrinsic_registry::RuntimeHelperId;
 
@@ -419,6 +420,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     codes.function(&compile_start(
         program,
         &settings_context,
+        &lowering,
         strings,
         &setting_indices,
         refresh_settings,

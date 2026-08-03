@@ -849,6 +849,92 @@ fn timer_state_is_a_compiler_provided_exhaustive_enum() {
 }
 
 #[test]
+fn aggregate_global_constants_are_materialized_once_at_module_start() {
+    let source = r#"
+        record Point {
+            x: f32
+            y: f32
+        }
+
+        let points: [Point; 2] = [
+            Point { x: 1.0, y: 2.0 },
+            Point { x: 3.0, y: 4.0 }
+        ]
+        let label = "route"
+
+        state "game.exe" {
+            selected: u32 at 0x100
+        }
+
+        split {
+            return label == "route"
+                && points.get(current.selected).x == 3.0
+        }
+    "#;
+
+    let wasm = splitscript::compile(source).expect("aggregate globals should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("aggregate globals should produce valid Wasm GC");
+
+    let mut imported_functions = 0_u32;
+    let mut start_function = None;
+    let mut defined_function = 0_u32;
+    let mut start_record_count = 0_u32;
+    let mut start_array_count = 0_u32;
+    let mut stores_constructed_array = false;
+    for payload in Parser::new(0).parse_all(&wasm) {
+        match payload.unwrap() {
+            Payload::ImportSection(section) => {
+                imported_functions += section.into_imports().count() as u32;
+            }
+            Payload::ExportSection(section) => {
+                for export in section {
+                    let export = export.unwrap();
+                    if export.name == "_start" {
+                        start_function = Some(export.index);
+                    }
+                }
+            }
+            Payload::CodeSectionEntry(body)
+                if Some(imported_functions + defined_function) == start_function =>
+            {
+                let mut constructed_array = false;
+                for operator in body.get_operators_reader().unwrap() {
+                    match operator.unwrap() {
+                        wasmparser::Operator::StructNew { .. } => start_record_count += 1,
+                        wasmparser::Operator::ArrayNewFixed { .. } => {
+                            start_array_count += 1;
+                            constructed_array = true;
+                        }
+                        wasmparser::Operator::GlobalSet { .. } if constructed_array => {
+                            stores_constructed_array = true;
+                        }
+                        _ => {}
+                    }
+                }
+                defined_function += 1;
+            }
+            Payload::CodeSectionEntry(_) => defined_function += 1,
+            _ => {}
+        }
+    }
+
+    assert!(
+        start_record_count >= 2,
+        "start should construct both records"
+    );
+    assert_eq!(
+        start_array_count, 2,
+        "start should construct the point array and string global once each"
+    );
+    assert!(
+        stores_constructed_array,
+        "start should store the constructed array in its source global"
+    );
+}
+
+#[test]
 fn enums_and_their_payloads_use_structural_equality() {
     let source = r#"
         record Position {

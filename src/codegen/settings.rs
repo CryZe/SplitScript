@@ -6,18 +6,17 @@ use wasm_encoder::{BlockType, Function, Instruction, ValType};
 
 use crate::{
     abi::AbiImportId,
-    ast::{EnumDecl, Program, RecordDecl, RecordId, SettingFileFilter, SettingKind, ValueId},
-    semantic::{ResolvedEnumVariantId, SemanticModel},
+    ast::{EnumDecl, Program, SettingFileFilter, SettingKind, ValueId},
+    semantic::SemanticModel,
     stdlib::{StandardLibrary, StdlibTypeId},
-    types::{TypeId, TypeKind},
+    types::TypeKind,
     wasm_ir,
 };
 
 use super::memory_plan::RuntimeScratch;
 use super::{
-    GcLayout, STATE_TYPE, SettingStorage, Type, data_plan::StringPool, emit_default,
-    emit_string_literal, enum_variant_payload, global_plan::RuntimeGlobals, imports::Abi, memarg,
-    semantic_type, value_type,
+    GcLayout, SettingStorage, Type, data_plan::StringPool, emit_default, emit_string_literal,
+    enum_variant_payload, global_plan::RuntimeGlobals, imports::Abi, memarg,
 };
 
 /// Settings-only view of the completed backend plans.
@@ -286,7 +285,7 @@ fn emit_setting_default(
     function.instruction(&Instruction::GlobalSet(global));
 }
 
-fn emit_setting_registration(
+pub(super) fn emit_setting_registration(
     function: &mut Function,
     setting: &crate::ast::SettingDecl,
     strings: &StringPool,
@@ -443,7 +442,7 @@ fn emit_setting_registration(
     }
 }
 
-fn emit_enum_variant(
+pub(super) fn emit_enum_variant(
     function: &mut Function,
     enumeration: crate::ast::EnumId,
     variant: crate::ast::EnumVariantId,
@@ -466,164 +465,4 @@ fn emit_enum_variant(
         }
     }
     function.instruction(&Instruction::StructNew(gc.index(Type::Enum(enumeration))));
-}
-
-pub(super) fn compile_start(
-    program: &Program,
-    lowering: &SettingsContext<'_>,
-    strings: &StringPool,
-    settings: &HashMap<ValueId, SettingStorage>,
-    refresh_settings: Option<u32>,
-    has_async_frame: bool,
-) -> Function {
-    let semantics = lowering.semantics;
-    let mut function = Function::new([]);
-    for variable in program
-        .globals
-        .iter()
-        .filter(|variable| lowering.wasm_ir.contains_global(variable.id))
-    {
-        let ty = value_type(variable.id, semantics);
-        if ty.is_enum(lowering.standard_library) {
-            let wasm_ir::ExpressionKind::Enum { variant, .. } = &lowering
-                .wasm_ir
-                .expression(variable.value.id)
-                .expect("global enum initializer belongs to Wasm IR")
-                .kind
-            else {
-                unreachable!("checked enum globals use enum constructors")
-            };
-            match (ty, variant) {
-                (Type::Enum(enumeration), ResolvedEnumVariantId::Source(variant)) => {
-                    emit_enum_variant(
-                        &mut function,
-                        enumeration,
-                        *variant,
-                        lowering.enums,
-                        semantics,
-                        lowering.gc,
-                    );
-                }
-                (Type::Standard(enumeration), ResolvedEnumVariantId::Standard(variant)) => {
-                    emit_standard_enum_variant(
-                        &mut function,
-                        enumeration,
-                        *variant,
-                        lowering.standard_library,
-                        lowering.gc,
-                    )
-                }
-                _ => unreachable!("checked enum globals use variants from the same declaration"),
-            }
-            function.instruction(&Instruction::GlobalSet(lowering.globals[&variable.id]));
-        }
-    }
-    emit_initial_state(&mut function, program, semantics, lowering.gc);
-    function.instruction(&Instruction::GlobalSet(lowering.runtime_globals.current));
-    emit_initial_state(&mut function, program, semantics, lowering.gc);
-    function.instruction(&Instruction::GlobalSet(lowering.runtime_globals.old));
-    if has_async_frame {
-        function
-            .instruction(&Instruction::StructNewDefault(
-                lowering.gc.async_frame_index(),
-            ))
-            .instruction(&Instruction::GlobalSet(
-                lowering.runtime_globals.async_frame,
-            ));
-    }
-    for setting in &program.settings {
-        emit_setting_registration(
-            &mut function,
-            setting,
-            strings,
-            settings.get(&setting.id).copied(),
-            lowering,
-        );
-    }
-    if let Some(refresh_settings) = refresh_settings {
-        function.instruction(&Instruction::Call(refresh_settings));
-    }
-    function.instruction(&Instruction::End);
-    function
-}
-
-fn emit_standard_enum_variant(
-    function: &mut Function,
-    enumeration: StdlibTypeId,
-    variant: crate::stdlib::StdlibVariantId,
-    standard_library: &StandardLibrary,
-    gc: &GcLayout,
-) {
-    let selected = standard_library
-        .variants_of(enumeration)
-        .position(|candidate| candidate.id == variant)
-        .expect("checked standard enum variants belong to their declaration");
-    function.instruction(&Instruction::I32Const(selected as i32));
-    for _ in standard_library.variants_of(enumeration) {
-        function.instruction(&Instruction::I32Const(0));
-    }
-    function.instruction(&Instruction::StructNew(gc.standard_index(enumeration)));
-}
-
-/// Constructs the source-language defaults for state instead of relying on
-/// Wasm's `struct.new_default`. In particular, a record is a non-null source
-/// value, so its default is a recursively defaulted record rather than a null
-/// GC reference that would trap when `old.record.field` is read on tick one.
-fn emit_initial_state(
-    function: &mut Function,
-    program: &Program,
-    semantics: &SemanticModel,
-    gc: &GcLayout,
-) {
-    let state = program.state.as_ref().expect("checked programs have state");
-    for field in state.canonical_fields() {
-        let ty = semantics
-            .value_type(field.id)
-            .expect("checked state fields have semantic types");
-        emit_source_default(
-            function,
-            ty,
-            &program.records,
-            semantics,
-            gc,
-            &mut Vec::new(),
-        );
-    }
-    function.instruction(&Instruction::StructNew(STATE_TYPE));
-}
-
-fn emit_source_default(
-    function: &mut Function,
-    ty: TypeId,
-    records: &[RecordDecl],
-    semantics: &SemanticModel,
-    gc: &GcLayout,
-    visiting: &mut Vec<RecordId>,
-) {
-    let TypeKind::Record(record) = semantics.types().kind(ty) else {
-        emit_default(function, semantic_type(ty, semantics), gc);
-        return;
-    };
-
-    if visiting.contains(record) {
-        // Recursive records cannot be constructed finitely. Other semantic
-        // passes reject them where a concrete default must be observed; keep
-        // code generation total for unreachable/default-only layouts.
-        emit_default(function, Type::Record(*record), gc);
-        return;
-    }
-
-    visiting.push(*record);
-    let declaration = records
-        .iter()
-        .find(|declaration| declaration.id == *record)
-        .expect("semantic record types belong to source declarations");
-    for field in &declaration.fields {
-        let field_type = semantics
-            .record_field_type(field.id)
-            .expect("checked record fields have semantic types");
-        emit_source_default(function, field_type, records, semantics, gc, visiting);
-    }
-    visiting.pop();
-    function.instruction(&Instruction::StructNew(gc.index(Type::Record(*record))));
 }

@@ -157,6 +157,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &["unknown"],
     },
     RuntimeFixture {
+        source: "examples/arietta_of_spirits.split",
+        output: "arietta_of_spirits.wasm",
+        profile: "release",
+        harness: "tests/arietta_of_spirits_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "examples/borderlands.split",
         output: "borderlands.wasm",
         profile: "release",

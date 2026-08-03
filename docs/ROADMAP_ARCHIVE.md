@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-03: faithful Arietta of Spirits port
+
+- Added a maintained port of the Arietta of Spirits 1.2.9.0 autosplitter. It
+  preserves stage-based start, split, and reset transitions together with
+  pause-menu load removal using two bounded native UTF-8 state fields.
+- Added release-Wasm host coverage for initial snapshot seeding, all timer
+  actions, process closure, the complete pointer paths, and independent
+  persistent-field advancement when one final string read fails.
+- Expanded the ASL porting guide with the compact example and the observed
+  bounded-string failure semantics. The fixture now runs in `cargo xtask check`.
+
 ## 2026-08-03: source-body signature conformance
 
 - Added a semantic construction-time boundary for source-defined

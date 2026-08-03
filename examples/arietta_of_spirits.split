@@ -1,0 +1,30 @@
+// Faithful port of the Arietta of Spirits 1.2.9.0 ASL autosplitter. It starts
+// when a run leaves the speedrun menu, splits on later stage transitions,
+// resets on returning to the menu, and removes time spent in the pause menu.
+
+state "Arietta of Spirits" {
+    /// Internal speedrun stage identifier used for lifecycle transitions.
+    speedrunStage at "Arietta of Spirits", 0x0261462C, 0x100 as utf8(128);
+    /// Text flag that is `YES` while the pause menu is open.
+    pauseMenuOpen at "Arietta of Spirits", 0x023D6DB4, 0x14, 0xC, 0x0 as utf8(8);
+}
+
+start {
+    return old.speedrunStage != current.speedrunStage
+        && old.speedrunStage == "SPEEDRUN_NONE"
+}
+
+split {
+    return old.speedrunStage != current.speedrunStage
+        && current.speedrunStage != ""
+        && current.speedrunStage != "SPEEDRUN_NONE"
+}
+
+reset {
+    return old.speedrunStage != current.speedrunStage
+        && current.speedrunStage == "SPEEDRUN_NONE"
+}
+
+isLoading {
+    return current.pauseMenuOpen == "YES"
+}

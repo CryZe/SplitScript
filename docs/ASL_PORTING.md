@@ -7,7 +7,10 @@ need a typed SplitScript design rather than a literal translation.
 The complete reference for the recipes below is
 [`examples/a_plague_tale_innocence.split`](../examples/a_plague_tale_innocence.split).
 `cargo xtask check` compiles that source in release mode and runs its Steam,
-Epic, Xbox, and unsupported-build fixtures.
+Epic, Xbox, and unsupported-build fixtures. The smaller
+[`examples/arietta_of_spirits.split`](../examples/arietta_of_spirits.split)
+example isolates bounded native strings, lifecycle transitions, and pause-menu
+load removal.
 
 ## Bounded native `stringN` state
 
@@ -45,6 +48,11 @@ map identifiers. Do not use `readManagedString` as a replacement for native
 UTF-16: that method reads the object layout of a Unity managed string. A future
 port that genuinely stores native UTF-16 or depends on replacement decoding
 should drive a distinct bounded decoder.
+
+The maintained Arietta of Spirits port uses independent `utf8(128)` and
+`utf8(8)` fields for its stage and pause-menu identifiers. Its host fixture
+also proves the persistent-watcher rule: a failed stage-string read retains
+that field while a successful pause flag from the same poll still advances.
 
 ## Version-labelled ASL states
 

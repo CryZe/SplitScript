@@ -156,10 +156,10 @@ impl CompilerDatabase {
         Ok(spans)
     }
 
-    /// Named state layouts contain separate read declarations for each
-    /// concrete layout, but those declarations expose one shared snapshot
-    /// field to source code. Renaming any declaration or use therefore needs
-    /// to edit every declaration with the same canonical field name.
+    /// Compatible declarations across named layouts expose one shared
+    /// snapshot field. Layout-specific declarations keep their own identity,
+    /// even when another layout happens to use the same spelling with a
+    /// conflicting type.
     fn logical_rename_ids(
         &mut self,
         target: SourceDefinitionId,
@@ -181,6 +181,9 @@ impl CompilerDatabase {
         else {
             return Ok(vec![SourceDefinitionId::Value(target)]);
         };
+        if !state.is_common_field(name) {
+            return Ok(vec![SourceDefinitionId::Value(target)]);
+        }
         Ok(state
             .all_fields()
             .filter(|field| field.name == name)

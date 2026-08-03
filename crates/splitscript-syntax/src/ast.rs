@@ -461,8 +461,9 @@ pub struct StateDecl {
     /// Fields of the ordinary single-layout form. This is empty when named
     /// layouts are present.
     pub fields: Vec<StateField>,
-    /// Versioned memory layouts. Every layout is required to expose the same
-    /// field interface by semantic analysis.
+    /// Versioned memory layouts. Semantic analysis projects compatible fields
+    /// into a common interface and retains missing or conflicting fields as
+    /// layout-specific declarations.
     pub layouts: Vec<StateLayoutDecl>,
     /// The generated enum represented by the named layout declarations.
     pub layout_enum: Option<EnumDecl>,
@@ -484,26 +485,35 @@ impl StateDecl {
             .chain(self.layouts.iter().flat_map(|layout| &layout.fields))
     }
 
-    /// Returns the concrete read declarations in canonical field order for
-    /// each layout. This is the backend ABI between read-function planning and
-    /// per-tick dispatch.
-    pub fn ordered_read_fields(&self) -> Vec<&StateField> {
+    /// Whether a field name is present in every layout without conflicting
+    /// explicit annotations, and can therefore be projected through the
+    /// common StateSnapshot interface.
+    pub fn is_common_field(&self, name: &str) -> bool {
         if self.layouts.is_empty() {
-            return self.fields.iter().collect();
+            return self.fields.iter().any(|field| field.name == name);
         }
-        let canonical = self.canonical_fields();
-        self.layouts
+        let declarations = self
+            .layouts
             .iter()
-            .flat_map(|layout| {
-                canonical.iter().map(|field| {
-                    layout
-                        .fields
-                        .iter()
-                        .find(|candidate| candidate.name == field.name)
-                        .expect("checked layouts expose the canonical state interface")
-                })
+            .map(|layout| layout.fields.iter().find(|field| field.name == name))
+            .collect::<Option<Vec<_>>>();
+        declarations.is_some_and(|declarations| {
+            let mut annotation = None;
+            declarations.iter().all(|field| match field.annotation {
+                Some(found) if annotation.is_some_and(|expected| expected != found) => false,
+                Some(found) => {
+                    annotation = Some(found);
+                    true
+                }
+                None => true,
             })
-            .collect()
+        })
+    }
+
+    pub fn common_fields(&self) -> impl Iterator<Item = &StateField> {
+        self.canonical_fields()
+            .iter()
+            .filter(|field| self.is_common_field(&field.name))
     }
 }
 

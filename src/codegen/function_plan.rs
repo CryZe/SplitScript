@@ -223,10 +223,10 @@ pub(super) fn encode<'a>(
         program
             .state
             .as_ref()
-            .map_or(0, |state| state.ordered_read_fields().len()),
+            .map_or(0, |state| state.all_fields().count()),
     );
     if let Some(state) = &program.state {
-        for field in state.ordered_read_fields() {
+        for field in state.all_fields() {
             let poll_result = semantic_type(
                 semantics
                     .state_poll_result(field.id)

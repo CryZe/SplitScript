@@ -51,7 +51,7 @@ impl DeclarationIndex {
     pub(crate) fn lower(syntax: &SyntaxProgram) -> Self {
         let mut program = Self::default();
         if let Some(state) = &syntax.state {
-            for field in state.canonical_fields() {
+            for field in state.all_fields() {
                 program.push(DeclarationId::StateField(field.id), &field.name, field.span);
             }
             if let (Some(value), Some(enumeration)) = (state.layout_value, &state.layout_enum) {

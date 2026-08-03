@@ -17,6 +17,7 @@ use crate::{
     stdlib::{ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibNamespace, TypeRef},
     stdlib_semantic::StandardLibrarySemanticExt,
     types::TypeKind,
+    visit::{self, Visitor},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -268,12 +269,23 @@ fn complete_member(
     match path.as_slice() {
         ["current"] | ["old"] => {
             if let Some(state) = &syntax.state {
-                for field in state.canonical_fields() {
+                for field in state.common_fields() {
                     builder.add(simple_completion(
                         &field.name,
                         CompletionKind::StateField,
                         "state field",
                     ));
+                }
+                if let Some(layout) = active_state_layout(syntax, source, context.dot) {
+                    for field in &layout.fields {
+                        if !state.is_common_field(&field.name) {
+                            builder.add(simple_completion(
+                                &field.name,
+                                CompletionKind::StateField,
+                                "layout-specific state field",
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -868,7 +880,7 @@ fn add_inferred_fields(
     match receiver {
         TypeKind::StateSnapshot => {
             if let Some(state) = &syntax.state {
-                for field in state.canonical_fields() {
+                for field in state.common_fields() {
                     builder.add(simple_completion(
                         &field.name,
                         CompletionKind::Property,
@@ -925,6 +937,135 @@ fn add_inferred_fields(
         | TypeKind::Result { .. }
         | TypeKind::Async { .. } => {}
     }
+}
+
+fn active_state_layout<'a>(
+    syntax: &'a Program,
+    source: &str,
+    offset: usize,
+) -> Option<&'a crate::ast::StateLayoutDecl> {
+    struct Finder<'a> {
+        syntax: &'a Program,
+        offset: usize,
+        variant: Option<crate::ast::EnumVariantId>,
+        match_start: Option<usize>,
+    }
+
+    impl<'ast> Visitor<'ast> for Finder<'ast> {
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if self.variant.is_none()
+                && let ExprKind::Match { value, arms } = &expression.kind
+                && matches!(&value.kind, ExprKind::Path(path) if path.as_slice() == ["layout"])
+                && contains_offset(expression.span, self.offset)
+                // Recovering member completion may end the arm's parsed value
+                // immediately before the dot. Arm starts and the enclosing
+                // match span remain reliable, so choose the latest arm that
+                // has begun at the cursor instead of requiring its shortened
+                // value span to contain the cursor.
+                && let Some(arm) = arms
+                    .iter()
+                    .rev()
+                    .find(|arm| arm.span.start <= self.offset)
+                && let MatchPattern::Enum { variant, .. } = &arm.pattern
+                && let Some(layout) = self.syntax.state.as_ref().and_then(|state| {
+                    state.layouts.iter().find(|layout| {
+                        state
+                            .layout_enum
+                            .as_ref()
+                            .and_then(|enumeration| {
+                                enumeration
+                                    .variants
+                                    .iter()
+                                    .find(|candidate| candidate.id == layout.variant)
+                            })
+                            .is_some_and(|candidate| candidate.name == *variant)
+                    })
+                })
+            {
+                self.variant = Some(layout.variant);
+                self.match_start = Some(expression.span.start);
+            }
+            visit::walk_expr(self, expression);
+        }
+    }
+
+    let mut finder = Finder {
+        syntax,
+        offset,
+        variant: None,
+        match_start: None,
+    };
+    finder.visit_program(syntax);
+    let variant = finder
+        .variant
+        .filter(|_| {
+            finder
+                .match_start
+                .is_some_and(|start| cursor_is_inside_braces(source, start, offset))
+        })
+        .or_else(|| {
+            let before = source.get(..offset)?;
+            let match_start = before.rfind("match layout")?;
+            if !cursor_is_inside_braces(source, match_start, offset) {
+                return None;
+            }
+            let state = syntax.state.as_ref()?;
+            state
+                .layouts
+                .iter()
+                .filter_map(|layout| {
+                    let name = state
+                        .layout_enum
+                        .as_ref()?
+                        .variants
+                        .iter()
+                        .find(|variant| variant.id == layout.variant)?
+                        .name
+                        .as_str();
+                    let marker = format!("StateLayout.{name}");
+                    let position = before.rfind(&marker)?;
+                    (match_start < position && before[position + marker.len()..].contains("=>"))
+                        .then_some((position, layout.variant))
+                })
+                .max_by_key(|(position, _)| *position)
+                .map(|(_, variant)| variant)
+        })?;
+    syntax
+        .state
+        .as_ref()?
+        .layouts
+        .iter()
+        .find(|layout| layout.variant == variant)
+}
+
+fn cursor_is_inside_braces(source: &str, start: usize, offset: usize) -> bool {
+    let Ok(lexed) = lexer::lex_lossless(source) else {
+        return false;
+    };
+    let tokens = lexed.tokens().collect::<Vec<_>>();
+    let Some(open) = tokens
+        .iter()
+        .position(|token| token.span.start >= start && matches!(token.kind, TokenKind::LBrace))
+    else {
+        return false;
+    };
+    let mut depth = 0_u32;
+    for token in tokens[open..]
+        .iter()
+        .take_while(|token| token.span.start < offset)
+    {
+        match token.kind {
+            TokenKind::LBrace => depth += 1,
+            TokenKind::RBrace => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    depth != 0
 }
 
 fn add_inferred_methods(
@@ -1424,6 +1565,41 @@ split {
         ] {
             assert!(local.contains(&member.to_owned()), "{local:#?}");
         }
+    }
+
+    #[test]
+    fn completes_only_the_refined_layout_fields_in_layout_match_arms() {
+        let source = r#"
+state "game.exe" {
+    layout V8 { loading: i32 at 0x100; bike: i16 at 0x104; },
+    layout V9 { loading: i32 at 0x200; bike: u16 at 0x204; video: u8 at 0x206; },
+}
+onAttach { return StateLayout.V8 }
+split {
+    return match layout {
+        StateLayout.V8 => current.,
+        StateLayout.V9 => old.,
+    }
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let v8 = labels(&mut database, "StateLayout.V8 => current.");
+        assert!(v8.contains(&"loading".to_owned()));
+        assert!(v8.contains(&"bike".to_owned()), "{v8:#?}");
+        assert!(!v8.contains(&"video".to_owned()));
+
+        let mut database = CompilerDatabase::new(source);
+        let v9 = labels(&mut database, "StateLayout.V9 => old.");
+        assert!(v9.contains(&"loading".to_owned()));
+        assert!(v9.contains(&"bike".to_owned()));
+        assert!(v9.contains(&"video".to_owned()));
+
+        let outside = format!("{source}\nwhileAttached {{ current. }}");
+        let mut database = CompilerDatabase::new(outside);
+        let outside = labels(&mut database, "whileAttached { current.");
+        assert!(outside.contains(&"loading".to_owned()));
+        assert!(!outside.contains(&"bike".to_owned()), "{outside:#?}");
+        assert!(!outside.contains(&"video".to_owned()));
     }
 
     #[test]

@@ -620,7 +620,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "layout Name { field at address }",
         "Declares one named memory layout for a supported game build.",
-        "Named layouts in one state block must expose the same field names and types. The compiler generates StateLayout and a read-only layout value. The implicitly suspending onAttach block returns the selected variant before polling begins; await process.closed() represents an unsupported build without falling back.",
+        "Fields with the same compatible type in every named layout form the common StateSnapshot interface. Missing fields and conflicting same-named types are available after a direct match on the generated read-only layout value refines the selected StateLayout variant. The implicitly suspending onAttach block returns that variant before polling begins; await process.closed() represents an unsupported build without falling back.",
         STATE_LAYOUT_EXAMPLE
     ),
     language_item!(

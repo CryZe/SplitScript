@@ -78,13 +78,14 @@ signatures, process identity, or discovered memory. `await process.closed()`
 keeps an unsupported attachment inert without detaching and immediately
 reattaching to the same process.
 
-Named layouts currently expose one common field interface. When an ASL layout
-omits a field because that feature is unavailable on a build, an honest typed
-default can preserve the common interface when consumers already treat it as
-unavailable. The A Plague Tale Xbox layout uses `cutsceneState: i32 = 0`, which
-preserves the original absence of its ending trigger. Do not invent a default
-when it could be mistaken for real game state; that case belongs in the planned
-non-uniform layout design.
+Compatible fields declared by every named layout expose one common interface.
+When a field is missing or the same name has a conflicting type, match the
+generated `layout` value and access the field only in the corresponding arm.
+The compiler gives each incompatible declaration its real physical type rather
+than turning it into an option or inventing a default. An honest typed default
+is still appropriate when consumers already define that value as unavailable;
+the A Plague Tale Xbox layout uses `cutsceneState: i32 = 0` for exactly that
+reason.
 
 ## Run-scoped one-shot splits
 

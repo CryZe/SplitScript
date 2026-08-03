@@ -403,7 +403,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     for (instance, layout) in async_frames.intrinsics() {
         codes.function(&compile_intrinsic_future_poll(instance, layout, &runtime));
     }
-    for field in state.ordered_read_fields() {
+    for field in state.all_fields() {
         codes.function(&compile_read(field, &abi, strings, &lowering));
     }
     for action in &program.actions {
@@ -497,6 +497,18 @@ fn value_type(value: ValueId, semantics: &SemanticModel) -> Type {
             .expect("checked value declarations have semantic types"),
         semantics,
     )
+}
+
+fn state_storage_index(field: ValueId, semantics: &SemanticModel) -> (u32, ValueId) {
+    let storage = semantics
+        .state_storage_field(field)
+        .expect("checked state fields have physical storage");
+    let index = semantics
+        .state_storage_fields()
+        .iter()
+        .position(|candidate| *candidate == storage)
+        .expect("physical state field belongs to the snapshot layout");
+    (index as u32, storage)
 }
 
 fn record_field_type(field: RecordFieldId, semantics: &SemanticModel) -> Type {

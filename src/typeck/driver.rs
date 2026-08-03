@@ -110,6 +110,7 @@ fn initialize_checker(
         inference,
         provider_value,
         layout_value: program.state.as_ref().and_then(|state| state.layout_value),
+        active_state_layout: None,
         scopes: Vec::new(),
         return_ty: none_type,
         callable: CallableContext::TopLevel,

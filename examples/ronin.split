@@ -1,0 +1,62 @@
+// Port of the compact Ronin autosplitter. Its two supported executable
+// versions share the loading field, while the bike field genuinely changes
+// signedness between versions.
+state "Ronin.exe" {
+    /// Version 8 memory layout.
+    layout V8 {
+        loading: i32 at "Ronin.exe", 0x002f01cc, 0x7dc, 0xc0;
+        bike: i16 at "Ronin.exe", 0x561758, 0x140;
+    },
+    /// Version 9 memory layout.
+    layout V9 {
+        loading: i32 at "Ronin.exe", 0x002f7228, 0x5c, 0x418, 0x5c, 0xb4;
+        bike: u16 at "Ronin.exe", 0x56a758, 0xe4;
+    },
+}
+
+let doubleTap: u32 = 0
+
+onAttach {
+    let executable = await process.mainModule()
+    if executable.size == 5_705_728 {
+        return StateLayout.V9
+    }
+    if executable.size == 5_668_864 {
+        return StateLayout.V8
+    }
+
+    print(`unsupported Ronin module size {executable.size}`)
+    await process.closed()
+}
+
+start {
+    if old.loading == 0 && current.loading == 1 {
+        timer.pauseGameTime()
+        return true
+    }
+}
+
+isLoading {
+    return current.loading == 1
+}
+
+split {
+    if doubleTap != 0 {
+        return false
+    }
+
+    let acquiredBike = match layout {
+        StateLayout.V8 => old.bike != 21_368 && current.bike == 21_368,
+        StateLayout.V9 => old.bike != 52_688 && current.bike == 52_688,
+    }
+    if acquiredBike {
+        doubleTap = 500
+        return true
+    }
+}
+
+whileAttached {
+    if doubleTap != 0 {
+        doubleTap -= 1
+    }
+}

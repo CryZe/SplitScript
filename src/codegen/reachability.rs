@@ -427,8 +427,7 @@ impl Reachability {
                             .state
                             .as_ref()
                             .expect("checked programs have state declarations")
-                            .canonical_fields()
-                            .iter()
+                            .all_fields()
                             .map(|field| {
                                 semantics
                                     .value_type(field.id)

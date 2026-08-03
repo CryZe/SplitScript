@@ -32,7 +32,7 @@ use super::{
     record_field_type, resolved_intrinsic, result_value_type,
     runtime_helpers::emit_value_equality,
     script_functions::emit_action_default,
-    semantic_type, standard_field_type, try_array_element_type, value_type,
+    semantic_type, standard_field_type, state_storage_index, try_array_element_type, value_type,
 };
 
 #[derive(Default)]
@@ -1008,16 +1008,8 @@ fn compile_resolved_path(
         ResolvedValue::CurrentState(field) | ResolvedValue::OldState(field) => {
             let snapshot = u32::from(matches!(value, ResolvedValue::OldState(_)));
             function.instruction(&Instruction::LocalGet(snapshot));
-            let (index, field_type) = context
-                .state
-                .canonical_fields()
-                .iter()
-                .enumerate()
-                .find_map(|(index, state_field)| {
-                    (state_field.id == field)
-                        .then_some((index as u32, value_type(state_field.id, context.semantics)))
-                })
-                .expect("resolved state field belongs to the checked state block");
+            let (index, storage) = state_storage_index(field, context.semantics);
+            let field_type = value_type(storage, context.semantics);
             emit_struct_get(function, index, field_type);
             field_type
         }
@@ -1210,18 +1202,8 @@ fn emit_path_fields(
     for field in fields {
         let (struct_type_index, field_index, field_type) = match field {
             ResolvedMember::StateField(field) => {
-                let (field_index, field_type) = context
-                    .state
-                    .canonical_fields()
-                    .iter()
-                    .enumerate()
-                    .find_map(|(index, state_field)| {
-                        (state_field.id == *field).then_some((
-                            index as u32,
-                            value_type(state_field.id, context.semantics),
-                        ))
-                    })
-                    .expect("resolved state field belongs to the checked state block");
+                let (field_index, storage) = state_storage_index(*field, context.semantics);
+                let field_type = value_type(storage, context.semantics);
                 debug_assert_eq!(current_type, Type::StateSnapshot);
                 (STATE_TYPE, field_index, field_type)
             }

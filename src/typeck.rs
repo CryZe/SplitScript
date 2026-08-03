@@ -146,6 +146,7 @@ struct Checker {
     inference: InferenceContext,
     provider_value: Option<(StdlibStateProviderId, Type)>,
     layout_value: Option<ValueId>,
+    active_state_layout: Option<crate::ast::EnumVariantId>,
     scopes: Vec<HashMap<String, Binding>>,
     return_ty: Type,
     callable: CallableContext,
@@ -166,6 +167,17 @@ impl Checker {
         self.provider_value.is_some_and(|(provider, _)| {
             self.standard_library.state_provider(provider).value_name == name
         })
+    }
+
+    fn with_state_layout<T>(
+        &mut self,
+        layout: Option<crate::ast::EnumVariantId>,
+        operation: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let previous = std::mem::replace(&mut self.active_state_layout, layout);
+        let output = operation(self);
+        self.active_state_layout = previous;
+        output
     }
 
     fn with_debug_context<T>(

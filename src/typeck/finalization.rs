@@ -26,7 +26,11 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     }
     for field in program.state.as_ref().unwrap().all_fields() {
         if matches!(field.source, StateSource::Pointer(_)) {
-            let Some((_, field_type)) = checker.declarations.state_fields.get(&field.name).copied()
+            let Some(field_type) = checker
+                .declarations
+                .state_fields_by_id
+                .get(&field.id)
+                .copied()
             else {
                 continue;
             };

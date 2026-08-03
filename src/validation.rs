@@ -1143,8 +1143,7 @@ fn expand_fully_observed_types(
                 if let Some(state) = &syntax.state {
                     pending.extend(
                         state
-                            .canonical_fields()
-                            .iter()
+                            .all_fields()
                             .filter_map(|field| semantics.value_type(field.id)),
                     );
                 }
@@ -1213,8 +1212,7 @@ fn expand_reachable_nominal_types(
                 if let Some(state) = &syntax.state {
                     pending.extend(
                         state
-                            .canonical_fields()
-                            .iter()
+                            .all_fields()
                             .filter_map(|field| semantics.value_type(field.id)),
                     );
                 }

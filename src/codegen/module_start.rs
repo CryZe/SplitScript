@@ -207,10 +207,9 @@ fn emit_initial_state(
     semantics: &SemanticModel,
     gc: &GcLayout,
 ) {
-    let state = program.state.as_ref().expect("checked programs have state");
-    for field in state.canonical_fields() {
+    for field in semantics.state_storage_fields() {
         let ty = semantics
-            .value_type(field.id)
+            .value_type(*field)
             .expect("checked state fields have semantic types");
         emit_source_default(
             function,

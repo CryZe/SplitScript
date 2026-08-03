@@ -151,7 +151,8 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         message: "SplitScript uses one `state` declaration with named layouts for game versions",
         primary_label: "merge this state declaration into named `layout` blocks",
         notes: &[
-            "each layout must expose one compatible state interface, and `onAttach` returns the selected `StateLayout` variant",
+            "compatible fields form a common interface; missing or conflicting fields are accessed after `match layout` refines the selected `StateLayout` variant",
+            "`onAttach` returns the selected `StateLayout` variant before polling begins",
             "merging is not automatic because versioned fields and pointer paths may differ semantically",
         ],
     },

@@ -27,31 +27,22 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — prove non-uniform state layouts with the next maintained port
+## Now — make attach-time-discovered state sources first-class
 
-- [ ] Re-audit the porting corpus for the smallest representative splitter
-  whose supported versions genuinely expose different state fields or
-  conflicting same-named field types; select that splitter before designing
-  syntax around hypothetical shapes.
-- [ ] Port it with an explicit typed representation for layout-specific data,
-  preserving common-field ergonomics without turning every field into an
-  option or hiding physical differences behind defaults.
+- [ ] Specify temporarily unreadable and optional discovered fields,
+  transactional snapshot behavior, and pointer width using the Borderlands
+  PE32 path as the pressure case rather than adding an `at32` pseudo-keyword.
+- [ ] Turn the resulting pattern into focused porting documentation and editor
+  guidance, then apply it to the next maintained port that discovers addresses
+  during `onAttach`.
 
 ## P0 — unblock the next representative native ports
 
 ### State layouts, discovery, and process identity
 
-- [ ] Design non-uniform named layouts from real ports. The corpus contains
-  layouts with missing fields and same-named type conflicts. Evaluate
-  common-field projection plus typed variant payloads; do not make every field
-  optional or erase conflicts merely to mimic ASL's dynamic state object.
 - [ ] Add layout sharing or overrides only if a maintained port proves that
   repeated pointer paths across many versions are materially unmaintainable.
   Keep the selected physical layout auditable.
-- [ ] Make attach-time-discovered state sources a documented first-class
-  pattern. Specify temporarily unreadable and optional fields, transactional
-  snapshot behavior, and pointer width. Use the Borderlands PE32 path as the
-  pressure case rather than adding an `at32` pseudo-keyword.
 - [ ] Complete safe process/module version probes as ports require them:
   module enumeration/search, product-version identity, and a deterministic
   executable fingerprint. Prefer host metadata over unrestricted filesystem

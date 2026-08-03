@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{EnumDecl, FunctionId, RecordDecl, ValueId},
+    ast::{EnumDecl, EnumVariantId, FunctionId, RecordDecl, ValueId},
     inference::Type,
 };
 
@@ -94,7 +94,17 @@ impl DeclarationEnvironment {
 }
 
 pub(super) struct DeclarationEnvironment {
+    /// Fields available on every named layout with one compatible type. For
+    /// ordinary state declarations this contains every field.
     pub(super) state_fields: HashMap<String, (ValueId, Type)>,
+    /// Every concrete state-field declaration, including declarations in
+    /// later named layouts that project into a common field.
+    pub(super) state_fields_by_id: HashMap<ValueId, Type>,
+    /// Concrete fields available after refining `layout` to a variant.
+    pub(super) layout_state_fields: HashMap<EnumVariantId, HashMap<String, (ValueId, Type)>>,
+    /// Concrete declarations mapped to their physical snapshot field. Common
+    /// declarations from later layouts map to the first layout's identity.
+    pub(super) state_storage_fields: HashMap<ValueId, ValueId>,
     pub(super) settings: HashMap<String, (ValueId, Type)>,
     pub(super) globals: HashMap<String, Binding>,
     pub(super) functions: HashMap<String, FunctionSignature>,
@@ -113,6 +123,9 @@ impl DeclarationEnvironment {
     ) -> Self {
         Self {
             state_fields: HashMap::new(),
+            state_fields_by_id: HashMap::new(),
+            layout_state_fields: HashMap::new(),
+            state_storage_fields: HashMap::new(),
             settings: HashMap::new(),
             globals: HashMap::new(),
             functions: HashMap::new(),

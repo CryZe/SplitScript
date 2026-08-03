@@ -2031,5 +2031,28 @@ and standard-library work.
 11. Add debug/release profiles as typed-HIR/lowering passes and expand them
     using real debugging workflows.
 12. Continue porting diverse autosplitters and measuring compile time/Wasm size
-    throughout every step; use the corpus to revise priorities rather than
-    waiting until the architecture is “finished.”
+   throughout every step; use the corpus to revise priorities rather than
+   waiting until the architecture is “finished.”
+
+## P0 — Non-uniform named state layouts and Ronin port (2026-08-03)
+
+A corpus audit of 1,593 versioned ASL scripts found 95 with genuinely missing
+fields or conflicting same-named field types. Ronin was selected as the
+smallest maintained pressure case with two real layouts: both expose
+`loading: i32`, while `bike` changes from `i16` in version 8 to `u16` in
+version 9.
+
+Named layouts now project only fields present everywhere with a compatible
+type into the common `StateSnapshot` interface. A direct exhaustive
+`match layout` refines both `old` and `current` to the selected layout, exposing
+missing or conflicting fields with their concrete types. The backend stores
+incompatible declarations in distinct Wasm GC struct fields and maps compatible
+declarations to one common slot; it does not introduce options or semantic
+defaults. Completion, hover/navigation identities, semantic highlighting, and
+rename preserve the same distinction.
+
+`examples/ronin.split` ports the original splitter through this model. Runtime
+fixtures cover both executable versions and an unsupported build, including
+their different pointer paths, signedness, start/game-time behavior, and bike
+split. The language reference, ASL porting guide, migration diagnostic, and
+language catalog document the refinement rule.

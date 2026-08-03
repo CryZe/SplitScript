@@ -80,6 +80,27 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &["unknown"],
     },
     RuntimeFixture {
+        source: "examples/ronin.split",
+        output: "ronin.wasm",
+        profile: "release",
+        harness: "tests/ronin_runtime.mjs",
+        extra_arguments: &["v8"],
+    },
+    RuntimeFixture {
+        source: "examples/ronin.split",
+        output: "ronin.wasm",
+        profile: "release",
+        harness: "tests/ronin_runtime.mjs",
+        extra_arguments: &["v9"],
+    },
+    RuntimeFixture {
+        source: "examples/ronin.split",
+        output: "ronin.wasm",
+        profile: "release",
+        harness: "tests/ronin_runtime.mjs",
+        extra_arguments: &["unknown"],
+    },
+    RuntimeFixture {
         source: "examples/martha_is_dead.split",
         output: "martha_is_dead.wasm",
         profile: "release",

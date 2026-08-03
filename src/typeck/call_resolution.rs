@@ -1063,8 +1063,8 @@ impl Checker {
             }
             [root, field, fields @ ..] if root == "current" || root == "old" => {
                 self.require_state_snapshot(span)?;
-                let Some((id, ty)) = self.declarations.state_fields.get(field).copied() else {
-                    self.error(format!("unknown state field `{field}`"), span);
+                let Some((id, ty)) = self.visible_state_field(field) else {
+                    self.unknown_state_field(field, span);
                     return None;
                 };
                 let (ty, members) = self.resolve_members_or_defer(ty, fields, span, expression)?;
@@ -1247,6 +1247,14 @@ impl Checker {
             return Some(resolved);
         }
         match ty {
+            Type::Known(id)
+                if matches!(
+                    self.inference.type_store().kind(id),
+                    TypeKind::StateSnapshot
+                ) =>
+            {
+                self.unknown_state_field(field, span)
+            }
             Type::Known(_) if self.source_record_id(ty).is_some() => {
                 self.error(format!("unknown record field `{field}`"), span)
             }
@@ -1269,10 +1277,8 @@ impl Checker {
                 if matches!(self.inference.type_store().kind(id), TypeKind::StateSnapshot)
         ) {
             return self
-                .declarations
-                .state_fields
-                .get(field)
-                .map(|(field, ty)| (*ty, ResolvedMember::StateField(*field)));
+                .visible_state_field(field)
+                .map(|(field, ty)| (ty, ResolvedMember::StateField(field)));
         }
         if matches!(
             ty,
@@ -1307,6 +1313,41 @@ impl Checker {
                     )
                 }),
             None => None,
+        }
+    }
+
+    fn visible_state_field(&self, name: &str) -> Option<(crate::ast::ValueId, Type)> {
+        self.declarations
+            .state_fields
+            .get(name)
+            .copied()
+            .or_else(|| {
+                self.active_state_layout.and_then(|layout| {
+                    self.declarations
+                        .layout_state_fields
+                        .get(&layout)
+                        .and_then(|fields| fields.get(name))
+                        .copied()
+                })
+            })
+    }
+
+    fn unknown_state_field(&mut self, name: &str, span: Span) {
+        let layouts = self
+            .declarations
+            .layout_state_fields
+            .values()
+            .filter(|fields| fields.contains_key(name))
+            .count();
+        if layouts != 0 {
+            self.error(
+                format!(
+                    "state field `{name}` is layout-specific; access it inside the corresponding `match layout` arm"
+                ),
+                span,
+            );
+        } else {
+            self.error(format!("unknown state field `{name}`"), span);
         }
     }
 

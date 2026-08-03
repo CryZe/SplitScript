@@ -262,6 +262,9 @@ pub struct SemanticModel {
     standard_field_types: HashMap<StdlibFieldId, TypeId>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<TypeId>>,
     array_element_types: HashMap<ArrayTypeId, TypeId>,
+    state_storage_fields: Vec<ValueId>,
+    state_storage_field_by_declaration: HashMap<ValueId, ValueId>,
+    state_layout_fields: HashMap<EnumVariantId, Vec<ValueId>>,
     state_poll_results: HashMap<ValueId, TypeId>,
     propagation_targets: HashMap<ExprId, TypeId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
@@ -326,6 +329,26 @@ impl SemanticModel {
 
     pub fn value_types(&self) -> impl Iterator<Item = (ValueId, TypeId)> + '_ {
         self.value_types.iter().map(|(value, ty)| (*value, *ty))
+    }
+
+    /// Physical fields in the generated StateSnapshot GC struct.
+    pub fn state_storage_fields(&self) -> &[ValueId] {
+        &self.state_storage_fields
+    }
+
+    /// Maps a concrete layout declaration to the physical snapshot field that
+    /// stores it. Common fields in later layouts project to the first
+    /// declaration's slot.
+    pub fn state_storage_field(&self, field: ValueId) -> Option<ValueId> {
+        self.state_storage_field_by_declaration.get(&field).copied()
+    }
+
+    /// Concrete declarations read when the selected named layout is active.
+    pub fn state_layout_fields(&self, layout: EnumVariantId) -> &[ValueId] {
+        self.state_layout_fields
+            .get(&layout)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 
     pub fn function_result(&self, function: FunctionId) -> Option<TypeId> {
@@ -867,6 +890,9 @@ pub(crate) struct SemanticBuilder {
     standard_field_types: HashMap<StdlibFieldId, Type>,
     enum_variant_payloads: HashMap<EnumVariantId, Option<Type>>,
     array_element_types: HashMap<ArrayTypeId, Type>,
+    state_storage_fields: Vec<ValueId>,
+    state_storage_field_by_declaration: HashMap<ValueId, ValueId>,
+    state_layout_fields: HashMap<EnumVariantId, Vec<ValueId>>,
     state_poll_results: HashMap<ValueId, Type>,
     propagation_targets: HashMap<ExprId, Type>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
@@ -973,6 +999,18 @@ impl SemanticBuilder {
     pub(crate) fn resolve_value_type(&mut self, value: ValueId, ty: Type) {
         let previous = self.value_types.insert(value, ty);
         debug_assert!(previous.is_none(), "value IDs must be unique");
+    }
+
+    pub(crate) fn resolve_state_layout(
+        &mut self,
+        storage_fields: Vec<ValueId>,
+        storage_field_by_declaration: HashMap<ValueId, ValueId>,
+        layout_fields: HashMap<EnumVariantId, Vec<ValueId>>,
+    ) {
+        debug_assert!(self.state_storage_fields.is_empty());
+        self.state_storage_fields = storage_fields;
+        self.state_storage_field_by_declaration = storage_field_by_declaration;
+        self.state_layout_fields = layout_fields;
     }
 
     pub(crate) fn resolve_function_result(&mut self, function: FunctionId, ty: Type) {
@@ -1145,6 +1183,9 @@ impl SemanticBuilder {
             standard_field_types,
             enum_variant_payloads,
             array_element_types,
+            state_storage_fields,
+            state_storage_field_by_declaration,
+            state_layout_fields,
             state_poll_results,
             propagation_targets,
             path_members,
@@ -1430,6 +1471,9 @@ impl SemanticBuilder {
             standard_field_types,
             enum_variant_payloads,
             array_element_types,
+            state_storage_fields,
+            state_storage_field_by_declaration,
+            state_layout_fields,
             state_poll_results,
             propagation_targets,
             path_members,

@@ -8,7 +8,9 @@ use crate::{
         SuspensionMode, UnaryOp,
     },
     inference::{Requirements, Type},
-    semantic::{ResolvedRecordFieldId, ResolvedRecordId, ResolvedWrapperPattern},
+    semantic::{
+        ResolvedEnumVariantId, ResolvedRecordFieldId, ResolvedRecordId, ResolvedWrapperPattern,
+    },
     signature::parse_signature,
     stdlib::{Implementation, RuntimeRepresentation, StdlibCapabilityId, StdlibTypeId},
     types::EnumTypeId,
@@ -281,6 +283,11 @@ impl Checker {
             }
             ExprKind::Match { value, arms } => {
                 let value_type = self.expr(value, None)?;
+                let refines_state_layout = matches!(
+                    &value.kind,
+                    ExprKind::Path(path)
+                        if path.as_slice() == ["layout"] && self.layout_value.is_some()
+                );
                 let mut unguarded_patterns = HashSet::new();
                 let mut has_unguarded_wildcard = false;
                 let mut result_type = expected;
@@ -289,6 +296,7 @@ impl Checker {
                         self.error("unreachable match arm after `_`", arm.span);
                     }
                     self.scopes.push(HashMap::new());
+                    let mut state_layout = None;
                     let pattern_key = match &arm.pattern {
                         MatchPattern::Enum {
                             variant, binding, ..
@@ -311,6 +319,19 @@ impl Checker {
                                         arm.pattern_id,
                                         declared_variant.id,
                                     );
+                                    if refines_state_layout
+                                        && matches!(
+                                            declared_variant.id,
+                                            ResolvedEnumVariantId::Source(_)
+                                        )
+                                    {
+                                        let ResolvedEnumVariantId::Source(variant) =
+                                            declared_variant.id
+                                        else {
+                                            unreachable!()
+                                        };
+                                        state_layout = Some(variant);
+                                    }
                                     match (declared_variant.payload, binding) {
                                         (Some(payload_type), Some(binding)) => {
                                             self.semantics
@@ -471,10 +492,16 @@ impl Checker {
                         },
                         MatchPattern::Wildcard => "wildcard".to_owned(),
                     };
-                    if let Some(guard) = &arm.guard {
-                        self.expr(guard, Some(self.core_type(crate::stdlib::CoreTypeId::Bool)));
-                    }
-                    let arm_type = self.expr(&arm.value, result_type);
+                    let state_layout = state_layout.or(self.active_state_layout);
+                    let arm_type = self.with_state_layout(state_layout, |checker| {
+                        if let Some(guard) = &arm.guard {
+                            checker.expr(
+                                guard,
+                                Some(checker.core_type(crate::stdlib::CoreTypeId::Bool)),
+                            );
+                        }
+                        checker.expr(&arm.value, result_type)
+                    });
                     self.scopes.pop();
                     if result_type.is_none() {
                         result_type = arm_type;

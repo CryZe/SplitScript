@@ -64,20 +64,16 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         async_frames,
         reachability,
     });
-    let state = program
-        .state
-        .as_ref()
-        .expect("checked programs have a state block");
     let mut recursive_types = vec![SubType {
         is_final: true,
         supertype_idx: None,
         composite_type: CompositeType {
             inner: CompositeInnerType::Struct(StructType {
-                fields: state
-                    .canonical_fields()
+                fields: semantics
+                    .state_storage_fields()
                     .iter()
                     .map(|field| FieldType {
-                        element_type: layout.storage_type(value_type(field.id, semantics)),
+                        element_type: layout.storage_type(value_type(*field, semantics)),
                         mutable: true,
                     })
                     .collect(),

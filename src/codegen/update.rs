@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     GcLayout, STATE_TYPE, Type, data_plan::StringPool, emit_typed_struct_get,
-    global_plan::RuntimeGlobals, imports::Abi, semantic_type, value_type,
+    global_plan::RuntimeGlobals, imports::Abi, semantic_type, state_storage_index, value_type,
 };
 
 /// Per-tick runtime view of the completed backend plans.
@@ -58,7 +58,8 @@ pub(super) fn compile_update(
         }),
     ));
     let state = program.state.as_ref().unwrap();
-    for field in state.canonical_fields() {
+    let all_fields = state.all_fields().collect::<Vec<_>>();
+    for field in &all_fields {
         let poll_result = semantic_type(
             semantics
                 .state_poll_result(field.id)
@@ -213,73 +214,52 @@ pub(super) fn compile_update(
     function
         .instruction(&Instruction::StructNewDefault(STATE_TYPE))
         .instruction(&Instruction::LocalSet(candidate_state));
-    let canonical_fields = state.canonical_fields();
-    for (index, field) in canonical_fields.iter().enumerate() {
-        let Type::Result(result_type) = semantic_type(
-            semantics
-                .state_poll_result(field.id)
-                .expect("checked state fields have poll-result types"),
-            semantics,
-        ) else {
-            unreachable!("state poll-result types are Result layouts")
-        };
-        let poll_result_local = first_poll_result + index as u32;
-        if state.layouts.is_empty() {
-            function
-                .instruction(&Instruction::GlobalGet(globals.process))
-                .instruction(&Instruction::Call(read_functions[index]))
-                .instruction(&Instruction::LocalSet(poll_result_local));
-        } else {
-            let selected = globals
-                .selected_layout
-                .expect("named layouts have selected-layout storage");
-            let enumeration = state
-                .layout_enum
-                .as_ref()
-                .expect("named layouts generate a typed enum");
-            for layout_index in 0..state.layouts.len() {
-                function
-                    .instruction(&Instruction::GlobalGet(selected))
-                    .instruction(&Instruction::RefAsNonNull)
-                    .instruction(&Instruction::StructGet {
-                        struct_type_index: lowering.gc.index(Type::Enum(enumeration.id)),
-                        field_index: 0,
-                    })
-                    .instruction(&Instruction::I32Const(layout_index as i32))
-                    .instruction(&Instruction::I32Eq)
-                    .instruction(&Instruction::If(BlockType::Empty))
-                    .instruction(&Instruction::GlobalGet(globals.process))
-                    .instruction(&Instruction::Call(
-                        read_functions[layout_index * canonical_fields.len() + index],
-                    ))
-                    .instruction(&Instruction::LocalSet(poll_result_local))
-                    .instruction(&Instruction::End);
-            }
+    if state.layouts.is_empty() {
+        for (read_index, field) in all_fields.iter().enumerate() {
+            emit_state_field_poll(
+                &mut function,
+                field.id,
+                read_functions[read_index],
+                first_poll_result + read_index as u32,
+                candidate_state,
+                lowering,
+            );
         }
-        function
-            .instruction(&Instruction::LocalGet(poll_result_local))
-            .instruction(&Instruction::RefAsNonNull)
-            .instruction(&Instruction::StructGet {
-                struct_type_index: lowering.gc.index(Type::Result(result_type)),
-                field_index: 1,
-            })
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::Return)
-            .instruction(&Instruction::End)
-            .instruction(&Instruction::LocalGet(candidate_state))
-            .instruction(&Instruction::RefAsNonNull)
-            .instruction(&Instruction::LocalGet(poll_result_local))
-            .instruction(&Instruction::RefAsNonNull);
-        emit_typed_struct_get(
-            &mut function,
-            lowering.gc.index(Type::Result(result_type)),
-            0,
-            value_type(field.id, semantics),
-        );
-        function.instruction(&Instruction::StructSet {
-            struct_type_index: STATE_TYPE,
-            field_index: index as u32,
-        });
+    } else {
+        let selected = globals
+            .selected_layout
+            .expect("named layouts have selected-layout storage");
+        let enumeration = state
+            .layout_enum
+            .as_ref()
+            .expect("named layouts generate a typed enum");
+        for (layout_index, layout) in state.layouts.iter().enumerate() {
+            function
+                .instruction(&Instruction::GlobalGet(selected))
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: lowering.gc.index(Type::Enum(enumeration.id)),
+                    field_index: 0,
+                })
+                .instruction(&Instruction::I32Const(layout_index as i32))
+                .instruction(&Instruction::I32Eq)
+                .instruction(&Instruction::If(BlockType::Empty));
+            for field in &layout.fields {
+                let read_index = all_fields
+                    .iter()
+                    .position(|candidate| candidate.id == field.id)
+                    .expect("layout fields belong to the read-function plan");
+                emit_state_field_poll(
+                    &mut function,
+                    field.id,
+                    read_functions[read_index],
+                    first_poll_result + read_index as u32,
+                    candidate_state,
+                    lowering,
+                );
+            }
+            function.instruction(&Instruction::End);
+        }
     }
     function
         .instruction(&Instruction::GlobalGet(globals.current))
@@ -392,6 +372,53 @@ pub(super) fn compile_update(
         .instruction(&Instruction::End)
         .instruction(&Instruction::End);
     function
+}
+
+fn emit_state_field_poll(
+    function: &mut Function,
+    field: crate::ast::ValueId,
+    read_function: u32,
+    poll_result_local: u32,
+    candidate_state: u32,
+    lowering: &UpdateContext<'_>,
+) {
+    let semantics = lowering.semantics;
+    let Type::Result(result_type) = semantic_type(
+        semantics
+            .state_poll_result(field)
+            .expect("checked state fields have poll-result types"),
+        semantics,
+    ) else {
+        unreachable!("state poll-result types are Result layouts")
+    };
+    function
+        .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
+        .instruction(&Instruction::Call(read_function))
+        .instruction(&Instruction::LocalSet(poll_result_local))
+        .instruction(&Instruction::LocalGet(poll_result_local))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: lowering.gc.index(Type::Result(result_type)),
+            field_index: 1,
+        })
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(candidate_state))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(poll_result_local))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_typed_struct_get(
+        function,
+        lowering.gc.index(Type::Result(result_type)),
+        0,
+        value_type(field, semantics),
+    );
+    let (field_index, _) = state_storage_index(field, semantics);
+    function.instruction(&Instruction::StructSet {
+        struct_type_index: STATE_TYPE,
+        field_index,
+    });
 }
 
 fn emit_provider_default(function: &mut Function, ty: StdlibTypeId, context: &UpdateContext<'_>) {

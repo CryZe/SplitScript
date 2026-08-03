@@ -91,7 +91,7 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
             let StateSource::Expression(expression) = &field.source else {
                 continue;
             };
-            let field_type = checker.declarations.state_fields[&field.name].1;
+            let field_type = checker.declarations.state_fields_by_id[&field.id];
             let boundary = contains_propagation(expression)
                 .then(|| Type::Result(checker.inference.result_type(field_type)));
             let (actual, failure) = checker.with_failure_context(
@@ -230,9 +230,9 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
 fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {
     let environment_types = checker
         .declarations
-        .state_fields
+        .state_fields_by_id
         .values()
-        .map(|(_, ty)| *ty)
+        .copied()
         .chain(checker.declarations.settings.values().map(|(_, ty)| *ty))
         .chain(
             checker

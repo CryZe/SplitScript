@@ -60,8 +60,9 @@ refreshing `current`. The fields form a WebAssembly GC struct, so the action cod
 uses typed references rather than a linear-memory state layout.
 
 Games with multiple supported memory layouts can name each layout inside one
-state declaration. Every layout must expose the same field names and types; the
-field order may differ.
+state declaration. Fields present in every layout with a compatible type form
+the common snapshot interface; field order may differ. A missing field or a
+same-named field with a conflicting type remains specific to its layout.
 
 ```text
 state "game.exe" {
@@ -93,6 +94,39 @@ SplitScript, so it can use module metadata, signatures, reads, `await`, and
 `process.closed()` is the explicit unsupported-build path: it keeps the current
 process attachment inert until process-lifetime cancellation occurs. Later
 lifecycle blocks can compare or exhaustively match `layout`.
+
+Layout-specific fields become available when a direct `match layout` arm proves
+which memory layout is active. The refinement applies to both `old` and
+`current`, because the selected layout is stable for the attachment:
+
+```text
+state "Ronin.exe" {
+    layout V8 {
+        loading: i32 at 0x100;
+        bike: i16 at 0x104;
+    },
+    layout V9 {
+        loading: i32 at 0x200;
+        bike: u16 at 0x204;
+    },
+}
+
+isLoading {
+    return current.loading == 1
+}
+
+split {
+    return match layout {
+        StateLayout.V8 => old.bike != 21_368 && current.bike == 21_368,
+        StateLayout.V9 => old.bike != 52_688 && current.bike == 52_688,
+    }
+}
+```
+
+The incompatible `bike` declarations occupy distinct typed fields in the Wasm
+GC snapshot. They are not optional and the compiler does not synthesize a
+default to hide the physical difference. Accessing `current.bike` without a
+layout refinement is an error.
 
 ## Variables and inference
 

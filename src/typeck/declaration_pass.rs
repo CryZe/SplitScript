@@ -29,55 +29,85 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
     let provider = checker
         .provider_value
         .map(|(provider, _)| checker.standard_library.state_provider(provider));
-    for field in state.canonical_fields() {
-        let ty = collect_state_field_type(checker, field, provider);
-        checker.semantics.resolve_value_type(field.id, ty);
-        if checker
-            .declarations
-            .state_fields
-            .insert(field.name.clone(), (field.id, ty))
-            .is_some()
-        {
-            checker.error(
-                format!("duplicate state field `{}`", field.name),
-                field.span,
-            );
-        }
-    }
-
-    for layout in state.layouts.iter().skip(1) {
-        let mut seen = HashSet::new();
-        for field in &layout.fields {
+    if state.layouts.is_empty() {
+        for field in &state.fields {
             let ty = collect_state_field_type(checker, field, provider);
             checker.semantics.resolve_value_type(field.id, ty);
-            if !seen.insert(field.name.clone()) {
+            checker.declarations.state_fields_by_id.insert(field.id, ty);
+            checker
+                .declarations
+                .state_storage_fields
+                .insert(field.id, field.id);
+            if checker
+                .declarations
+                .state_fields
+                .insert(field.name.clone(), (field.id, ty))
+                .is_some()
+            {
                 checker.error(
-                    format!("duplicate state field `{}` in this layout", field.name),
+                    format!("duplicate state field `{}`", field.name),
                     field.span,
                 );
-                continue;
             }
-            let Some((_, expected)) = checker.declarations.state_fields.get(&field.name).copied()
-            else {
-                checker.error(
-                    format!(
-                        "state layout field `{}` is not present in the first layout",
-                        field.name
-                    ),
-                    field.span,
-                );
-                continue;
-            };
-            checker.unify(ty, expected, field.span);
         }
-        for (name, (canonical, _)) in checker.declarations.state_fields.clone() {
-            if !seen.contains(&name) {
-                let span = state
-                    .canonical_fields()
-                    .iter()
-                    .find(|field| field.id == canonical)
-                    .map_or(layout.span, |field| field.span);
-                checker.error(format!("state layout is missing field `{name}`"), span);
+    } else {
+        // First collect every physical declaration independently. Layouts are
+        // allowed to omit names or use the same name with a different type.
+        for layout in &state.layouts {
+            let mut fields = HashMap::new();
+            for field in &layout.fields {
+                let ty = collect_state_field_type(checker, field, provider);
+                checker.semantics.resolve_value_type(field.id, ty);
+                checker.declarations.state_fields_by_id.insert(field.id, ty);
+                if fields.insert(field.name.clone(), (field.id, ty)).is_some() {
+                    checker.error(
+                        format!("duplicate state field `{}` in this layout", field.name),
+                        field.span,
+                    );
+                }
+            }
+            checker
+                .declarations
+                .layout_state_fields
+                .insert(layout.variant, fields);
+        }
+
+        // A name becomes part of StateSnapshot's common interface only when
+        // every layout declares it and explicit annotations do not conflict.
+        // Unannotated declarations still participate in bidirectional
+        // inference by unifying with the canonical declaration.
+        let first = &state.layouts[0];
+        for field in &first.fields {
+            let declarations = state
+                .layouts
+                .iter()
+                .map(|layout| layout.fields.iter().find(|item| item.name == field.name))
+                .collect::<Option<Vec<_>>>();
+            let is_common = state.is_common_field(&field.name);
+            if is_common {
+                let canonical_ty = checker.declarations.state_fields_by_id[&field.id];
+                checker
+                    .declarations
+                    .state_fields
+                    .insert(field.name.clone(), (field.id, canonical_ty));
+                for declaration in declarations.unwrap() {
+                    let ty = checker.declarations.state_fields_by_id[&declaration.id];
+                    checker.unify(ty, canonical_ty, declaration.span);
+                    checker
+                        .declarations
+                        .state_storage_fields
+                        .insert(declaration.id, field.id);
+                }
+            }
+        }
+
+        for layout in &state.layouts {
+            for field in &layout.fields {
+                checker
+                    .declarations
+                    .state_storage_fields
+                    .entry(field.id)
+                    .or_insert(field.id);
             }
         }
     }
@@ -95,6 +125,45 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
             },
         );
     }
+
+    let storage_fields = if state.layouts.is_empty() {
+        state.fields.iter().map(|field| field.id).collect()
+    } else {
+        let mut fields = state.layouts[0]
+            .fields
+            .iter()
+            .filter(|field| {
+                checker
+                    .declarations
+                    .state_fields
+                    .get(&field.name)
+                    .is_some_and(|(canonical, _)| *canonical == field.id)
+            })
+            .map(|field| field.id)
+            .collect::<Vec<_>>();
+        let common = fields.iter().copied().collect::<HashSet<_>>();
+        fields.extend(state.all_fields().filter_map(|field| {
+            (checker.declarations.state_storage_fields[&field.id] == field.id
+                && !common.contains(&field.id))
+            .then_some(field.id)
+        }));
+        fields
+    };
+    let layout_fields = state
+        .layouts
+        .iter()
+        .map(|layout| {
+            (
+                layout.variant,
+                layout.fields.iter().map(|field| field.id).collect(),
+            )
+        })
+        .collect();
+    checker.semantics.resolve_state_layout(
+        storage_fields,
+        checker.declarations.state_storage_fields.clone(),
+        layout_fields,
+    );
 }
 
 fn collect_state_field_type(

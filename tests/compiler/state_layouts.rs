@@ -40,22 +40,42 @@ fn named_state_layouts_select_a_typed_layout_and_validate() {
 }
 
 #[test]
-fn named_state_layouts_require_the_same_interface() {
+fn named_state_layouts_refine_layout_specific_fields_and_types() {
     let source = r#"
         state "game.exe" {
-            layout Steam { level: u32 at 0x100 },
-            layout GOG { loading: bool at 0x200 },
+            layout V8 {
+                loading: i32 at 0x100;
+                bike: i16 at 0x104;
+            },
+            layout V9 {
+                loading: i32 at 0x200;
+                bike: u16 at 0x204;
+                video: u8 at 0x206;
+            },
         }
-        onAttach { return StateLayout.Steam }
+        onAttach { return StateLayout.V8 }
+        isLoading { return current.loading == 1 }
+        split {
+            return match layout {
+                StateLayout.V8 => old.bike != 21368 && current.bike == 21368,
+                StateLayout.V9 => old.bike != 52688 && current.bike == 52688 && current.video == 0,
+            }
+        }
     "#;
 
-    let errors = splitscript::check(splitscript::parse(source).unwrap()).unwrap_err();
-    let messages = errors
-        .iter()
-        .map(|error| error.message.as_str())
-        .collect::<Vec<_>>();
-    assert!(messages.contains(&"state layout field `loading` is not present in the first layout"));
-    assert!(messages.contains(&"state layout is missing field `level`"));
+    let wasm =
+        splitscript::compile(source).expect("layout refinement should expose concrete fields");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("non-uniform state layout Wasm GC should validate");
+
+    let outside = source.replace(
+        "isLoading { return current.loading == 1 }",
+        "isLoading { return current.bike == 1 }",
+    );
+    let errors = splitscript::compile(&outside).expect_err("specific fields need refinement");
+    assert!(errors.iter().any(|error| error.message ==
+        "state field `bike` is layout-specific; access it inside the corresponding `match layout` arm"));
 }
 
 #[test]
@@ -170,4 +190,82 @@ fn renaming_a_named_layout_field_updates_the_shared_state_interface() {
 
     let use_site = source.find("current.level").unwrap() + "current.".len();
     assert_eq!(database.rename_at(use_site, "stage").unwrap(), spans);
+}
+
+#[test]
+fn renaming_a_conflicting_layout_field_keeps_the_other_layout_independent() {
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let source = r#"
+        state "game.exe" {
+            layout V8 { bike: i16 at 0x100 },
+            layout V9 { bike: u16 at 0x200 },
+        }
+        onAttach { return StateLayout.V8 }
+        split {
+            return match layout {
+                StateLayout.V8 => current.bike == 1,
+                StateLayout.V9 => current.bike == 2,
+            }
+        }
+    "#;
+    let first_declaration = source.find("bike: i16").unwrap();
+    let mut database = CompilerDatabase::new(source);
+    let spans = database.rename_at(first_declaration, "vehicle").unwrap();
+    assert_eq!(spans.len(), 2);
+    assert!(
+        spans
+            .iter()
+            .all(|span| &source[span.start..span.end] == "bike")
+    );
+    let v9_declaration = source.find("bike: u16").unwrap();
+    let v9_use = source.rfind("current.bike").unwrap() + "current.".len();
+    assert!(spans.iter().all(|span| span.start != v9_declaration));
+    assert!(spans.iter().all(|span| span.start != v9_use));
+}
+
+#[test]
+fn layout_refinement_drives_hover_and_definition_identity() {
+    use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget};
+
+    let source = r#"
+        state "game.exe" {
+            layout V8 { bike: i16 at 0x100 },
+            layout V9 { bike: u16 at 0x200 },
+        }
+        onAttach { return StateLayout.V8 }
+        split {
+            return match layout {
+                StateLayout.V8 => current.bike == 1,
+                StateLayout.V9 => current.bike == 2,
+            }
+        }
+    "#;
+    let uses = source
+        .match_indices("current.bike")
+        .map(|(offset, _)| offset + "current.".len())
+        .collect::<Vec<_>>();
+    let mut database = CompilerDatabase::new(source);
+    let v8_hover = database.hover(uses[0]).unwrap().unwrap();
+    let v9_hover = database.hover(uses[1]).unwrap().unwrap();
+    assert!(
+        v8_hover.markdown.contains("bike: i16"),
+        "{}",
+        v8_hover.markdown
+    );
+    assert!(
+        v9_hover.markdown.contains("bike: u16"),
+        "{}",
+        v9_hover.markdown
+    );
+
+    let DefinitionTarget::Source(v8) = database.definition_at(uses[0]).unwrap().unwrap() else {
+        panic!("V8 field should navigate to source")
+    };
+    let DefinitionTarget::Source(v9) = database.definition_at(uses[1]).unwrap().unwrap() else {
+        panic!("V9 field should navigate to source")
+    };
+    assert_ne!(v8.id, v9.id);
+    assert_eq!(&source[v8.span.start..v8.span.end], "bike");
+    assert_eq!(&source[v9.span.start..v9.span.end], "bike");
 }

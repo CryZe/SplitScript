@@ -161,7 +161,14 @@ impl TypeStore {
             store.intern(TypeKind::Builtin(core.id));
         }
         for standard in library.types() {
-            store.intern(TypeKind::Standard(standard.id));
+            // SettingsView's callable surface and documentation are authored
+            // in the standard library, but its fields are generated from this
+            // program's settings declaration. Keep one semantic identity for
+            // that program-shaped view instead of interning a second nominal
+            // type with the same source spelling.
+            if standard.id != StdlibTypeId::SettingsView {
+                store.intern(TypeKind::Standard(standard.id));
+            }
         }
         store.intern(TypeKind::StateSnapshot);
         store.intern(TypeKind::SettingsView);
@@ -208,6 +215,9 @@ impl TypeStore {
     }
 
     pub fn id_for_standard(&self, standard: StdlibTypeId) -> TypeId {
+        if standard == StdlibTypeId::SettingsView {
+            return self.id_for_settings_view();
+        }
         self.interned[&TypeKind::Standard(standard)]
     }
 

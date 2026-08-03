@@ -61,10 +61,11 @@ pub(crate) enum RuntimeHelperId {
     GbaAttach,
     GbaTranslateAddress,
     RefreshSettings,
+    SettingsEnabled,
 }
 
 impl RuntimeHelperId {
-    pub(crate) const COUNT: usize = Self::RefreshSettings as usize + 1;
+    pub(crate) const COUNT: usize = Self::SettingsEnabled as usize + 1;
 
     pub(crate) const fn index(self) -> usize {
         self as usize
@@ -287,6 +288,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
             Helper(Runtime::FormatI64),
         ],
         IntrinsicId::RuntimeSetTickRate => &[HostImport(Host::RuntimeSetTickRate)],
+        IntrinsicId::SettingsEnabled => &[Helper(Runtime::SettingsEnabled)],
         IntrinsicId::InstantNow => &[HostImport(Host::WasiClockTimeGet)],
         IntrinsicId::TimerState => &[HostImport(Host::TimerGetState)],
         IntrinsicId::TimerPauseGameTime => &[HostImport(Host::TimerPauseGameTime)],
@@ -363,6 +365,7 @@ const U64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U64);
 const F64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::F64);
 const ADDRESS: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Address);
 const STRING: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::String);
+const SETTINGS_VIEW: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SettingsView);
 const PROCESS_TYPE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Process);
 const SIGNATURE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Signature);
 const MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Module);
@@ -489,6 +492,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             RUNTIME_WRITE,
             Everywhere,
             HostBoundary
+        ),
+        IntrinsicId::SettingsEnabled => contract!(
+            SettingsEnabled,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(SETTINGS_VIEW),
+                params![value(STRING)],
+                BOOL,
+            ),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
         ),
         IntrinsicId::InstantNow => contract!(
             InstantNow,

@@ -11,6 +11,7 @@ macro_rules! trusted_intrinsics {
             Print,
             TimerSetVariable,
             RuntimeSetTickRate,
+            SettingsEnabled,
             InstantNow,
             NextTick,
             GbaAttach,

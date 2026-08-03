@@ -1289,6 +1289,11 @@ whileAttached {
             "state \"game.exe\" {}\nwhileAttached { let number: i32 = 4\nnumber.\n}",
         );
         assert!(labels(&mut bare, "number.").contains(&"min".to_owned()));
+
+        let mut keyed_settings = CompilerDatabase::new(
+            "state \"game.exe\" {}\nsettings { \"Flag\" => flag key \"flag\": true }\nwhileAttached { settings.en }",
+        );
+        assert!(labels(&mut keyed_settings, "settings.en").contains(&"enabled".to_owned()));
     }
 
     #[test]

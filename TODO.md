@@ -27,23 +27,15 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — faithfully port Akiba's Trip: Undead & Undressed
+## Now — prove non-uniform state layouts with the next maintained port
 
-The maintained port now expresses its mission coordinates as named records and
-fixed arrays allocated once during module startup; no GC table is rebuilt on a
-polling tick. Its remaining recurring blocker is data-driven access to a
-statically declared settings table. The temporary `missionEnabled` match makes
-the intended behavior explicit, but copying that pattern across ports would be
-needlessly verbose and would hide the external setting-key relationship.
-- [ ] Design the smallest typed settings-key surface proven by the port. It
-  must support stable external string keys for compatible settings (the exact
-  keys stored in the host settings map),
-  reject heterogeneous lookup, preserve ordinary `settings.name` access, and
-  keep hover, completion, rename, documentation, and host metadata tied to the
-  same setting declaration.
-- [ ] Implement that surface across syntax, type checking, code generation,
-  formatter, editor tooling, and migration guidance; then verify the port's
-  start, split, reset, and settings behavior with compiler and runtime tests.
+- [ ] Re-audit the porting corpus for the smallest representative splitter
+  whose supported versions genuinely expose different state fields or
+  conflicting same-named field types; select that splitter before designing
+  syntax around hypothetical shapes.
+- [ ] Port it with an explicit typed representation for layout-specific data,
+  preserving common-field ergonomics without turning every field into an
+  option or hiding physical differences behind defaults.
 
 ## P0 — unblock the next representative native ports
 
@@ -82,10 +74,11 @@ needlessly verbose and would hide the external setting-key relationship.
 - [ ] Decide the typed equivalent of a boolean-returning ASL `update` block.
   If it gates snapshot commit or lifecycle evaluation, expose that as an
   explicit polling guard rather than changing `whileAttached` ambiguously.
-- [ ] Extend settings for data-heavy ports: stable external/numeric keys,
-  typed dynamic lookup, conditional visibility or enablement, and repeated
-  tables. Preserve the label-first DSL, nested headings, choices, files, and
-  `///` tooltips; do not restore `settings.Add` or compact aliases.
+- [ ] Extend settings for data-heavy ports beyond the now-supported stable
+  external string keys and boolean lookup: conditional visibility or
+  enablement, and repeated tables. Preserve the label-first DSL, nested
+  headings, choices, files, and `///` tooltips; do not restore `settings.Add`
+  or compact aliases.
 - [ ] Add growable collections when the first faithful port requires them.
   Prioritize the smallest coherent slice of `List<T>`/`Set<T>`/`Map<K, V>` with
   lookup, insertion/removal, containment, clearing, and `for` iteration. Derive

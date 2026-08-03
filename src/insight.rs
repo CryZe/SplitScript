@@ -1365,6 +1365,29 @@ whileAttached {
     }
 
     #[test]
+    fn settings_key_lookup_hover_comes_from_the_standard_library() {
+        let source = r#"
+settings {
+    "Boss" => boss key "split-boss": true
+}
+state "game.exe" {}
+whileAttached {
+    let shouldSplit = settings.enabled("split-boss")
+}
+"#;
+        let offset = source.find("enabled(").unwrap();
+        let mut database = CompilerDatabase::new(source);
+        let hover = database.hover(offset).unwrap().expect("method hover");
+        assert!(
+            hover
+                .markdown
+                .contains("SettingsView.enabled(key: String) -> bool")
+        );
+        assert!(hover.markdown.contains("stable host-map key"));
+        assert!(hover.markdown.contains("**Effects:** pure"));
+    }
+
+    #[test]
     fn source_function_hover_renders_propagated_effects_after_semantic_validation_errors() {
         let source = r#"
 fn readValue() -> f32! {

@@ -233,6 +233,7 @@ impl InferenceContext {
         };
         match self.types.kind(id) {
             TypeKind::Standard(standard) => Some(*standard),
+            TypeKind::SettingsView => Some(StdlibTypeId::SettingsView),
             _ => None,
         }
     }

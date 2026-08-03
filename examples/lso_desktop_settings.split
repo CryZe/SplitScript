@@ -76,6 +76,13 @@ whileAttached {
     let currentSettings = settings
     let previousSettings = oldSettings
     setVariable("Auto Splitting", enabledName(currentSettings.enableAutoSplitting))
+    setVariable("Auto Splitting by Key", enabledName(currentSettings.enabled("auto-splitting")))
+    setVariable(
+        "Previous Auto Splitting by Key",
+        enabledName(previousSettings.enabled("auto-splitting"))
+    )
+    setVariable("Unknown Setting by Key", enabledName(currentSettings.enabled("missing")))
+    setVariable("Choice Setting by Key", enabledName(currentSettings.enabled("captureMode")))
     setVariable("Capture Source", captureModeName(currentSettings.captureMode))
     setVariable("Layout File", currentSettings.layoutFile)
 

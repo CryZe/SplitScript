@@ -112,6 +112,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(GbaAttach, (I64) -> (Standard(StdlibTypeId::GbaEmulator)), deps [ScanProcessRange], imports [ProcessRead, ProcessGetModuleAddress, ProcessGetModuleSize, ProcessGetMemoryRangeCount, ProcessGetMemoryRangeAddress, ProcessGetMemoryRangeSize, ProcessGetMemoryRangeFlags], build_gba_attach),
     helper!(GbaTranslateAddress, (I64, Standard(StdlibTypeId::GbaEmulator), I32, I32) -> (I64), deps [], imports [ProcessRead], build_gba_translate_address),
     helper!(RefreshSettings, () -> (), deps [], imports [], build_refresh_settings),
+    helper!(SettingsEnabled, (I32, StringValue) -> (I32), deps [], imports [], build_settings_enabled),
 ];
 
 const _: [(); RuntimeHelperId::COUNT] = [(); DESCRIPTORS.len()];

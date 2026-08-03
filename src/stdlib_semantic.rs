@@ -97,6 +97,10 @@ fn catalog_method_accepts(
         }
         TypeRef::Standard(expected) => {
             matches!(receiver, TypeKind::Standard(actual) if *actual == expected)
+                // SettingsView is program-shaped, but its shared methods are
+                // still declared by the source-defined standard-library type.
+                || (expected == crate::stdlib::StdlibTypeId::SettingsView
+                    && matches!(receiver, TypeKind::SettingsView))
         }
         TypeRef::Parameter(name) => item
             .signature

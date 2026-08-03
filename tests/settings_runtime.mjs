@@ -198,6 +198,14 @@ instance.exports.update();
 
 if (variables.get("Auto Splitting") !== "enabled")
   throw new Error("boolean default was not loaded");
+if (variables.get("Auto Splitting by Key") !== "enabled")
+  throw new Error("the explicit string key did not read the current boolean setting");
+if (variables.get("Previous Auto Splitting by Key") !== "enabled")
+  throw new Error("the explicit string key did not read the previous boolean setting");
+if (variables.get("Unknown Setting by Key") !== "disabled")
+  throw new Error("an unknown dynamic setting key should return false");
+if (variables.get("Choice Setting by Key") !== "disabled")
+  throw new Error("dynamic boolean lookup must not erase a choice setting's type");
 if (variables.get("Capture Source") !== "Executable Name")
   throw new Error("choice default was not loaded");
 if (variables.get("Layout File") !== "")
@@ -212,6 +220,10 @@ instance.exports.update();
 
 if (variables.get("Auto Splitting") !== "disabled")
   throw new Error("live boolean change was not observed");
+if (variables.get("Auto Splitting by Key") !== "disabled")
+  throw new Error("dynamic lookup did not observe the live boolean change");
+if (variables.get("Previous Auto Splitting by Key") !== "enabled")
+  throw new Error("oldSettings dynamic lookup did not retain the preceding value");
 if (variables.get("Capture Source") !== "Full Path")
   throw new Error("live choice change was not observed");
 if (variables.get("Layout File") !== "/mnt/c/layout.json")

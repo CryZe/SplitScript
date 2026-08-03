@@ -5,8 +5,8 @@
 
 /// A mission endpoint and its expected player position.
 record MissionPoint {
-    /// Stable mission number used by the autosplitter settings.
-    id: i32
+    /// Stable string key used by the autosplitter settings map.
+    settingKey: String
     /// Expected vertical coordinate.
     y: f32
     /// Expected depth coordinate.
@@ -123,222 +123,162 @@ state "AkibaUU" {
 
 let chapter1Points: [MissionPoint; 13] = [
     MissionPoint {
-        id: 1, y: 1.729497, z: -2.678275, x: 2.182908
+        settingKey: "1", y: 1.729497, z: -2.678275, x: 2.182908
     },
     MissionPoint {
-        id: 2, y: 1.44997, z: -3.382344, x: 6.325909
+        settingKey: "2", y: 1.44997, z: -3.382344, x: 6.325909
     },
     MissionPoint {
-        id: 3, y: 1.615439, z: -7.485596, x: 13.636044
+        settingKey: "3", y: 1.615439, z: -7.485596, x: 13.636044
     },
     MissionPoint {
-        id: 4, y: 1.284996, z: -6.429576, x: 14.7577
+        settingKey: "4", y: 1.284996, z: -6.429576, x: 14.7577
     },
     MissionPoint {
-        id: 5, y: 1.273742, z: -8.754382, x: 13.374955
+        settingKey: "5", y: 1.273742, z: -8.754382, x: 13.374955
     },
     MissionPoint {
-        id: 6, y: 1.604571, z: -8.925579, x: -118.675133
+        settingKey: "6", y: 1.604571, z: -8.925579, x: -118.675133
     },
     MissionPoint {
-        id: 7, y: 1.434686, z: -5.191771, x: 9.622315
+        settingKey: "7", y: 1.434686, z: -5.191771, x: 9.622315
     },
     MissionPoint {
-        id: 8, y: 1.526805, z: -6.715621, x: 13.143861
+        settingKey: "8", y: 1.526805, z: -6.715621, x: 13.143861
     },
     MissionPoint {
-        id: 9, y: 1.507847, z: -6.404016, x: 15.0073
+        settingKey: "9", y: 1.507847, z: -6.404016, x: 15.0073
     },
     MissionPoint {
-        id: 10, y: 1.178108, z: -3.25197, x: 9.506982
+        settingKey: "10", y: 1.178108, z: -3.25197, x: 9.506982
     },
     MissionPoint {
-        id: 11, y: 1.354699, z: 27.982529, x: 8.312622
+        settingKey: "11", y: 1.354699, z: 27.982529, x: 8.312622
     },
     MissionPoint {
-        id: 12, y: 1.179444, z: -1.225575, x: -36.363506
+        settingKey: "12", y: 1.179444, z: -1.225575, x: -36.363506
     },
     MissionPoint {
-        id: 13, y: 1.340432, z: 43.361782, x: -75.738457
+        settingKey: "13", y: 1.340432, z: 43.361782, x: -75.738457
     }
 ]
 
 let chapter2Points: [MissionPoint; 8] = [
     MissionPoint {
-        id: 14, y: 1.753968, z: -3.575703, x: 12.967361
+        settingKey: "14", y: 1.753968, z: -3.575703, x: 12.967361
     },
     MissionPoint {
-        id: 15, y: 1.403322, z: -3.024755, x: 2.366887
+        settingKey: "15", y: 1.403322, z: -3.024755, x: 2.366887
     },
     MissionPoint {
-        id: 16, y: 1.903178, z: -5.590683, x: 11.821987
+        settingKey: "16", y: 1.903178, z: -5.590683, x: 11.821987
     },
     MissionPoint {
-        id: 17, y: 1.442598, z: -2.954975, x: 7.31093
+        settingKey: "17", y: 1.442598, z: -2.954975, x: 7.31093
     },
     MissionPoint {
-        id: 18, y: 1.555321, z: -5.148322, x: 13.262603
+        settingKey: "18", y: 1.555321, z: -5.148322, x: 13.262603
     },
     MissionPoint {
-        id: 19, y: 1.459551, z: -6.631887, x: 13.373309
+        settingKey: "19", y: 1.459551, z: -6.631887, x: 13.373309
     },
     MissionPoint {
-        id: 20, y: 1.474003, z: -7.64573, x: 10.132676
+        settingKey: "20", y: 1.474003, z: -7.64573, x: 10.132676
     },
     MissionPoint {
-        id: 21, y: 1.173435, z: 15.427427, x: -39.462936
+        settingKey: "21", y: 1.173435, z: 15.427427, x: -39.462936
     }
 ]
 
 let chapter2ZenyaPoints: [MissionPoint; 4] = [
     MissionPoint {
-        id: 22, y: 1.420989, z: -8.703035, x: 10.144214
+        settingKey: "22", y: 1.420989, z: -8.703035, x: 10.144214
     },
     MissionPoint {
-        id: 22, y: 1.718277, z: -8.39325, x: 13.656679
+        settingKey: "22", y: 1.718277, z: -8.39325, x: 13.656679
     },
     MissionPoint {
-        id: 22, y: 1.620726, z: -4.492122, x: 14.412026
+        settingKey: "22", y: 1.620726, z: -4.492122, x: 14.412026
     },
     MissionPoint {
-        id: 22, y: 1.760053, z: -5.100903, x: 12.793765
+        settingKey: "22", y: 1.760053, z: -5.100903, x: 12.793765
     }
 ]
 
 let chapter3ShizukuPoints: [MissionPoint; 5] = [
     MissionPoint {
-        id: 123, y: 1.521416, z: -8.861973, x: 12.929842
+        settingKey: "123", y: 1.521416, z: -8.861973, x: 12.929842
     },
     MissionPoint {
-        id: 124, y: 1.794408, z: -5.758067, x: 12.43737
+        settingKey: "124", y: 1.794408, z: -5.758067, x: 12.43737
     },
     MissionPoint {
-        id: 125, y: 1.550729, z: -3.143151, x: 1.906818
+        settingKey: "125", y: 1.550729, z: -3.143151, x: 1.906818
     },
     MissionPoint {
-        id: 126, y: 2.164646, z: -5.215629, x: 13.285363
+        settingKey: "126", y: 2.164646, z: -5.215629, x: 13.285363
     },
     MissionPoint {
-        id: 127, y: 1.246564, z: 13.13219, x: -69.59417
+        settingKey: "127", y: 1.246564, z: 13.13219, x: -69.59417
     }
 ]
 
 let chapter3TohkoPoints: [MissionPoint; 5] = [
     MissionPoint {
-        id: 223, y: 1.548041, z: -5.745729, x: 12.256323
+        settingKey: "223", y: 1.548041, z: -5.745729, x: 12.256323
     },
     MissionPoint {
-        id: 224, y: 1.585566, z: -5.567666, x: 11.359394
+        settingKey: "224", y: 1.585566, z: -5.567666, x: 11.359394
     },
     MissionPoint {
-        id: 225, y: 1.42815, z: -7.247728, x: 9.722128
+        settingKey: "225", y: 1.42815, z: -7.247728, x: 9.722128
     },
     MissionPoint {
-        id: 226, y: 1.64619, z: -5.567641, x: 10.903448
+        settingKey: "226", y: 1.64619, z: -5.567641, x: 10.903448
     },
     MissionPoint {
-        id: 227, y: 1.124862, z: 13.81955, x: -69.386406
+        settingKey: "227", y: 1.124862, z: 13.81955, x: -69.386406
     }
 ]
 
 let chapter3RinPoints: [MissionPoint; 5] = [
     MissionPoint {
-        id: 323, y: 1.425153, z: -9.590592, x: 13.756587
+        settingKey: "323", y: 1.425153, z: -9.590592, x: 13.756587
     },
     MissionPoint {
-        id: 324, y: 1.918821, z: -3.522397, x: 7.151635
+        settingKey: "324", y: 1.918821, z: -3.522397, x: 7.151635
     },
     MissionPoint {
-        id: 325, y: 1.545065, z: -5.712129, x: 11.259362
+        settingKey: "325", y: 1.545065, z: -5.712129, x: 11.259362
     },
     MissionPoint {
-        id: 326, y: 1.961876, z: -2.155976, x: 12.904745
+        settingKey: "326", y: 1.961876, z: -2.155976, x: 12.904745
     },
     MissionPoint {
-        id: 327, y: 1.327725, z: 13.811988, x: -69.378403
+        settingKey: "327", y: 1.327725, z: 13.811988, x: -69.378403
     }
 ]
 
 let chapter3ShionPoints: [MissionPoint; 6] = [
     MissionPoint {
-        id: 423, y: 1.28227, z: -4.978224, x: 9.561569
+        settingKey: "423", y: 1.28227, z: -4.978224, x: 9.561569
     },
     MissionPoint {
-        id: 424, y: 0.0, z: 0.0, x: 0.0
+        settingKey: "424", y: 0.0, z: 0.0, x: 0.0
     },
     MissionPoint {
-        id: 425, y: 1.502857, z: -8.490373, x: -61.773266
+        settingKey: "425", y: 1.502857, z: -8.490373, x: -61.773266
     },
     MissionPoint {
-        id: 426, y: 1.39258, z: 7.410832, x: 0.348735
+        settingKey: "426", y: 1.39258, z: 7.410832, x: 0.348735
     },
     MissionPoint {
-        id: 427, y: 1.307403, z: 0.875389, x: -17.276546
+        settingKey: "427", y: 1.307403, z: 0.875389, x: -17.276546
     },
     MissionPoint {
-        id: 428, y: 1.368003, z: 31.868629, x: -19.367922
+        settingKey: "428", y: 1.368003, z: 31.868629, x: -19.367922
     }
 ]
-
-/// Returns whether the individually numbered mission setting is enabled.
-///
-/// This explicit match is intentionally temporary: the production port uses
-/// it to define the semantics required from typed settings-key lookup.
-fn missionEnabled(id: i32) -> bool {
-    return match id {
-        0 => settings.mission0,
-        1 => settings.mission1,
-        2 => settings.mission2,
-        3 => settings.mission3,
-        4 => settings.mission4,
-        5 => settings.mission5,
-        6 => settings.mission6,
-        7 => settings.mission7,
-        8 => settings.mission8,
-        9 => settings.mission9,
-        10 => settings.mission10,
-        11 => settings.mission11,
-        12 => settings.mission12,
-        13 => settings.mission13,
-        14 => settings.mission14,
-        15 => settings.mission15,
-        16 => settings.mission16,
-        17 => settings.mission17,
-        18 => settings.mission18,
-        19 => settings.mission19,
-        20 => settings.mission20,
-        21 => settings.mission21,
-        22 => settings.mission22,
-        28 => settings.mission28,
-        123 => settings.mission123,
-        124 => settings.mission124,
-        125 => settings.mission125,
-        126 => settings.mission126,
-        127 => settings.mission127,
-        223 => settings.mission223,
-        224 => settings.mission224,
-        225 => settings.mission225,
-        226 => settings.mission226,
-        227 => settings.mission227,
-        323 => settings.mission323,
-        324 => settings.mission324,
-        325 => settings.mission325,
-        326 => settings.mission326,
-        327 => settings.mission327,
-        423 => settings.mission423,
-        424 => settings.mission424,
-        425 => settings.mission425,
-        426 => settings.mission426,
-        427 => settings.mission427,
-        428 => settings.mission428,
-        429 => settings.mission429,
-        430 => settings.mission430,
-        431 => settings.mission431,
-        432 => settings.mission432,
-        500 => settings.mission500,
-        _ => false
-    }
-}
 
 /// Checks one mission endpoint against the player's rounded position.
 fn atMissionPoint(point: MissionPoint, y: f64, z: f64, x: f64) -> bool {
@@ -350,7 +290,7 @@ fn atMissionPoint(point: MissionPoint, y: f64, z: f64, x: f64) -> bool {
 /// Finds an enabled mission endpoint at the current rounded position.
 fn matchesMission(points: [MissionPoint], y: f64, z: f64, x: f64) -> bool {
     for point in points {
-        if missionEnabled(point.id) && atMissionPoint(point, y, z, x) {
+        if settings.enabled(point.settingKey) && atMissionPoint(point, y, z, x) {
             return true
         }
     }

@@ -125,6 +125,16 @@ onAttach {
     await nextTick()
     print("Initialization resumed")
 }"#;
+const SETTINGS_EXAMPLE: &str = r#"state "game.exe" {}
+settings {
+    "Enabled" => enabled: true
+    "Split boss" => splitBoss key "split-boss": true
+}
+whileAttached {
+    let direct = settings.enabled
+    let enabled = settings.enabled("split-boss")
+    let wasEnabled = oldSettings.enabled("split-boss")
+}"#;
 const GBA_EXAMPLE: &str = r#"state GBA {
     room: u8 at 0x03000010
 }"#;
@@ -136,6 +146,7 @@ const GBA_EXAMPLE: &str = r#"state GBA {
 const fn validation_fixture(item: StdlibItemId) -> &'static str {
     match item {
         StdlibItemId::NextTick => NEXT_TICK_EXAMPLE,
+        StdlibItemId::SettingsViewEnabled => SETTINGS_EXAMPLE,
         StdlibItemId::NumericAdd
         | StdlibItemId::NumericSubtract
         | StdlibItemId::NumericMin

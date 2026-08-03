@@ -114,11 +114,14 @@ starting map before `split` is evaluated. This reproduces an ASL `timer.OnStart`
 handler without a separate event API. The generated update loop runs
 `whileAttached` before timer-decision actions.
 
-Static settings should likewise use typed enum matching rather than a dynamic
-`settings[mapName]` lookup. If the original settings have a boolean parent,
-gate the child result explicitly; a quoted SplitScript heading is visual only.
-The complete A Plague Tale example preserves its **All Chapters** parent
-semantics this way.
+Prefer direct `settings.name` access when the setting is known statically. For
+data tables whose entries select among declared boolean settings, give each
+declaration its exact host-map string with `key "..."` and use
+`settings.enabled(key)`. This remains boolean-only and returns false for an
+unknown key; it is not a dynamically typed replacement for choice or file
+settings. If the original settings have a boolean parent, gate the child result
+explicitly; a quoted SplitScript heading is visual only. The complete A Plague
+Tale example preserves its **All Chapters** parent semantics this way.
 
 Use a growable `Set<T>` only when the keys are genuinely discovered or
 unbounded. A fixed 16-chapter route does not justify per-tick collection

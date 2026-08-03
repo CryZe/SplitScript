@@ -777,6 +777,12 @@ key. Script code always uses the readable declaration name, such as
 and data-driven lookup. Keys must be nonempty and unique across the complete
 settings block.
 
+`settings.enabled(key)` performs allocation-free data-driven lookup over the
+declared boolean settings, using those same host-map strings. `oldSettings`
+provides the corresponding method for the preceding snapshot. Unknown keys—or
+keys belonging to a choice or file setting—return `false`; the API therefore
+does not erase heterogeneous setting values into a dynamic type.
+
 Controls are registered during `_start`. At the beginning of every exported
 tick, including detached ticks, the compiler loads the current host settings
 map. User code sees the freshly decoded values through `settings`; the values

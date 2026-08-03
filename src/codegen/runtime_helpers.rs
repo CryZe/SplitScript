@@ -246,3 +246,7 @@ pub(super) fn build_refresh_settings(inputs: &RuntimeHelperInputs<'_>) -> Functi
         inputs.memory.scratch(),
     )
 }
+
+pub(super) fn build_settings_enabled(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    settings::compile_settings_enabled(inputs.program, inputs.settings_map, inputs.gc)
+}

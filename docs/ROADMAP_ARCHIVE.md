@@ -1,5 +1,26 @@
 # SplitScript roadmap
 
+## 2026-08-03: string-keyed settings and faithful Akiba runtime coverage
+
+- Added optional `key "host-key"` metadata to settings declarations. The key is
+  always the exact nonempty, globally unique string used for host registration,
+  persistence, tooltips, and live refresh; source code continues to use the
+  readable declaration identifier.
+- Declared the shared `SettingsView.enabled(key: String) -> bool` surface in
+  `stdlib/standard.split`. Its trusted backend implementation searches only
+  declared boolean settings in the already-refreshed current or previous
+  snapshot, returns false for unknown or heterogeneous keys, performs no host
+  query, and allocates no polling-time strings.
+- Replaced Akiba's Trip's temporary 50-way settings match with string keys in
+  its immutable mission records and `settings.enabled(point.settingKey)`.
+  Added release-Wasm runtime coverage for module-relative reads, exact host-key
+  registration, live enable/disable changes, chapter gating, coordinate
+  matching, and the prologue transition.
+- Added parser and semantic diagnostics, formatter/highlighting support,
+  standard-library completion and hover documentation, migration guidance,
+  and current/previous settings runtime checks. Repository-wide verification
+  passes with Akiba promoted from compile-only to a runtime fixture.
+
 ## 2026-08-03: next production pressure case selected
 
 - Re-audited the manual ASL porting notes against the compiler-owned migration

@@ -115,6 +115,45 @@ root {
     fn nextTick() -> None;
 }
 
+/// Selects either the current or previous values of the script's declared settings.
+///
+/// The compiler supplies `settings` and `oldSettings`; copying either value is
+/// allocation-free because the value only identifies one of the two snapshots.
+///
+/// # Example
+///
+/// Look up a boolean setting by its stable host key
+///
+/// ```splitscript
+/// if settings.enabled("split-boss") {
+///     print("Boss splitting is enabled")
+/// }
+/// ```
+@representation(scalar, i32)
+@valueUsage(localVariable, globalVariable)
+intrinsic type SettingsView {
+    /// Returns a declared boolean setting selected by its stable host-map key.
+    ///
+    /// Unknown keys and keys belonging to non-boolean settings return false.
+    /// The lookup reads the already-refreshed settings snapshot and does not
+    /// query the host or allocate.
+    ///
+    /// # Example
+    ///
+    /// Select a data-driven split
+    ///
+    /// ```splitscript
+    /// let missionKey = "42"
+    /// let shouldSplit = settings.enabled(missionKey)
+    /// ```
+    @intrinsic(SettingsEnabled)
+    fn enabled(
+        /// The exact string key declared with `key "..."`, or the setting's
+        /// source identifier when it has no explicit key.
+        key: String,
+    ) -> bool;
+}
+
 /// Accesses the attached game process.
 ///
 /// Process operations discover modules, read memory, follow pointers, and scan signatures.

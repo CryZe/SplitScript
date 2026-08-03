@@ -20,13 +20,16 @@ struct CompileFixture {
     profile: &'static str,
 }
 
-const COMPILE_FIXTURES: &[CompileFixture] = &[CompileFixture {
-    source: "examples/akibas_trip.split",
-    output: "akibas_trip.wasm",
-    profile: "release",
-}];
+const COMPILE_FIXTURES: &[CompileFixture] = &[];
 
 const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
+    RuntimeFixture {
+        source: "examples/akibas_trip.split",
+        output: "akibas_trip.wasm",
+        profile: "release",
+        harness: "tests/akibas_trip_runtime.mjs",
+        extra_arguments: &[],
+    },
     RuntimeFixture {
         source: "examples/hello_lunistice.split",
         output: "hello_lunistice.wasm",

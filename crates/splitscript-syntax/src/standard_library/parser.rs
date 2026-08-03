@@ -530,17 +530,9 @@ impl Parser<'_> {
 fn parse_documentation(lines: &[String]) -> Result<Documentation, &'static str> {
     let mut sections = lines.split(|line| line == "# Example");
     let prose = sections.next().unwrap_or_default();
-    let summary = prose.first().cloned().unwrap_or_default();
-    let mut detail_lines = prose
-        .iter()
-        .skip(1)
-        .skip_while(|line| line.is_empty())
-        .cloned()
-        .collect::<Vec<_>>();
-    while detail_lines.last().is_some_and(String::is_empty) {
-        detail_lines.pop();
-    }
-    let details = detail_lines.join("\n\n");
+    let mut paragraphs = documentation_paragraphs(prose).into_iter();
+    let summary = paragraphs.next().unwrap_or_default();
+    let details = paragraphs.collect::<Vec<_>>().join("\n\n");
     let mut examples = Vec::new();
     for example in sections {
         let mut lines = example.iter().skip_while(|line| line.is_empty());
@@ -586,6 +578,28 @@ fn parse_documentation(lines: &[String]) -> Result<Documentation, &'static str> 
     })
 }
 
+fn documentation_paragraphs(lines: &[String]) -> Vec<String> {
+    let mut paragraphs = Vec::new();
+    let mut paragraph = String::new();
+    for line in lines {
+        let line = line.trim();
+        if line.is_empty() {
+            if !paragraph.is_empty() {
+                paragraphs.push(std::mem::take(&mut paragraph));
+            }
+        } else {
+            if !paragraph.is_empty() {
+                paragraph.push(' ');
+            }
+            paragraph.push_str(line);
+        }
+    }
+    if !paragraph.is_empty() {
+        paragraphs.push(paragraph);
+    }
+    paragraphs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,6 +642,32 @@ struct Duration {
         assert_eq!(
             duration.functions[0].documentation.examples[0].source,
             "return Duration.fromSeconds(seconds)"
+        );
+    }
+
+    #[test]
+    fn joins_wrapped_doc_lines_but_preserves_explicit_paragraphs() {
+        let source = r#"
+/// Represents a precise span
+/// of time.
+///
+/// The first detail paragraph wraps
+/// across source lines.
+///
+/// The second detail paragraph remains separate.
+struct Duration {}
+"#;
+        let library = parse(source).expect("source should parse");
+        let Declaration::Struct(duration) = &library.declarations[0] else {
+            panic!("expected a struct")
+        };
+        assert_eq!(
+            duration.documentation.summary,
+            "Represents a precise span of time."
+        );
+        assert_eq!(
+            duration.documentation.details,
+            "The first detail paragraph wraps across source lines.\n\nThe second detail paragraph remains separate."
         );
     }
 

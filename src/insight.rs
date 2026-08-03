@@ -883,6 +883,26 @@ whileAttached {
     }
 
     #[test]
+    fn hover_reflows_wrapped_doc_comments_within_one_paragraph() {
+        let source = r#"
+state "game.exe" {}
+onDetached {
+    timer.pauseGameTime()
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(source.find("pauseGameTime").unwrap() + 2)
+            .unwrap()
+            .expect("timer hover");
+        assert!(hover.markdown.contains(
+            "This explicit operation is intended for lifecycle transitions such as ensuring game time does not advance after the attached process closes."
+        ));
+        assert!(!hover.markdown.contains("explicit\n\noperation"));
+        assert!(!hover.markdown.contains("game\n\ntime"));
+    }
+
+    #[test]
     fn hover_uses_derived_effects_for_source_defined_catalog_functions() {
         let source = r#"
 state "game.exe" {}

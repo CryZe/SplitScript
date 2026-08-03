@@ -55,6 +55,7 @@ impl CompilerDatabase {
     /// Language and standard-library catalog symbols are intentionally not
     /// renameable source declarations.
     pub fn rename_target_at(&mut self, offset: usize) -> SemanticQueryResult<Option<RenameTarget>> {
+        let offset = self.symbol_query_offset(offset)?;
         let definitions = self.definition_index()?;
         if let Some(reference) = definitions.reference_at(offset) {
             let target = definitions.get(reference.target).and_then(|definition| {
@@ -120,10 +121,14 @@ impl CompilerDatabase {
         }
 
         let definitions = self.definition_index().map_err(RenameError::Diagnostics)?;
-        let spans = definitions
-            .references_to(target.id)
+        let target_ids = self.logical_rename_ids(target.id)?;
+        let mut spans = target_ids
+            .iter()
+            .flat_map(|id| definitions.references_to(*id))
             .map(|reference| reference.span)
             .collect::<Vec<_>>();
+        spans.sort_by_key(|span| (span.start, span.end));
+        spans.dedup();
         if new_name == target.name {
             return Ok(spans);
         }
@@ -149,6 +154,38 @@ impl CompilerDatabase {
             }
         }
         Ok(spans)
+    }
+
+    /// Named state layouts contain separate read declarations for each
+    /// concrete layout, but those declarations expose one shared snapshot
+    /// field to source code. Renaming any declaration or use therefore needs
+    /// to edit every declaration with the same canonical field name.
+    fn logical_rename_ids(
+        &mut self,
+        target: SourceDefinitionId,
+    ) -> Result<Vec<SourceDefinitionId>, RenameError> {
+        let SourceDefinitionId::Value(target) = target else {
+            return Ok(vec![target]);
+        };
+        let parsed = self.parse().map_err(RenameError::Diagnostics)?;
+        let Some(state) = &parsed.syntax().state else {
+            return Ok(vec![SourceDefinitionId::Value(target)]);
+        };
+        if state.layouts.is_empty() {
+            return Ok(vec![SourceDefinitionId::Value(target)]);
+        }
+        let Some(name) = state
+            .all_fields()
+            .find(|field| field.id == target)
+            .map(|field| field.name.as_str())
+        else {
+            return Ok(vec![SourceDefinitionId::Value(target)]);
+        };
+        Ok(state
+            .all_fields()
+            .filter(|field| field.name == name)
+            .map(|field| SourceDefinitionId::Value(field.id))
+            .collect())
     }
 
     /// Plans an underscore-prefixed rename for a compiler warning.

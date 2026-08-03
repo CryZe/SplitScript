@@ -53,7 +53,7 @@ impl Parser<'_> {
                     payload,
                     span: variant_span.join(self.previous().span),
                 };
-                self.terminator()?;
+                self.require_comma_between("enum variants");
                 Ok(variant)
             })();
             if let Some(variant) = self.recover_delimited_item(parsed, item_start, body_depth) {
@@ -105,7 +105,7 @@ impl Parser<'_> {
                     ty,
                     span: field_start.join(type_span),
                 };
-                self.terminator()?;
+                self.require_comma_between("record fields");
                 Ok(field)
             })();
             if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
@@ -277,11 +277,13 @@ impl Parser<'_> {
                 {
                     layouts.push(layout);
                     layout_variants.push(variant);
+                    self.require_comma_between("state layouts");
                 }
             } else {
                 let parsed = self.state_field(documentation);
                 if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
                     fields.push(field);
+                    self.require_semicolon_between("state fields");
                 }
             }
         }
@@ -360,6 +362,7 @@ impl Parser<'_> {
             let parsed = self.state_field(documentation);
             if let Some(field) = self.recover_delimited_item(parsed, item_start, body_depth) {
                 fields.push(field);
+                self.require_semicolon_between("state fields");
             }
         }
         let end = self
@@ -408,7 +411,8 @@ impl Parser<'_> {
                 None
             };
             let mut offsets = vec![self.expect_u64("expected a pointer offset")?];
-            while self.eat(&TokenKind::Comma).is_some() {
+            while self.at(&TokenKind::Comma) && matches!(self.peek(1).kind, TokenKind::Int(_)) {
+                self.bump();
                 offsets.push(self.expect_u64("expected a pointer offset")?);
             }
             let pointer_end = self.previous().span.end;
@@ -491,7 +495,6 @@ impl Parser<'_> {
             })
         };
         let end = self.previous().span.end;
-        self.terminator()?;
         Ok(StateField {
             id: self.new_value_id(),
             name,
@@ -642,8 +645,7 @@ impl Parser<'_> {
             self.settings_dsl_entries(settings, heading_level + 1, heading_count)?;
             let end = self.expect(TokenKind::RBrace, "expected `}` after setting group")?;
             settings[title_index].span = label_token.span.join(end);
-            self.eat(&TokenKind::Comma);
-            self.eat(&TokenKind::Semicolon);
+            self.require_comma_between("settings");
             return Ok(());
         }
 
@@ -693,13 +695,7 @@ impl Parser<'_> {
             kind,
             span: label_token.span.join(end).join(name_span),
         });
-        if self.eat(&TokenKind::Comma).is_none()
-            && self.eat(&TokenKind::Semicolon).is_none()
-            && !self.at(&TokenKind::RBrace)
-            && !self.line_break_before_current()
-        {
-            return Err(self.error("expected a line break or `,` between settings"));
-        }
+        self.require_comma_between("settings");
         Ok(())
     }
 
@@ -776,12 +772,7 @@ impl Parser<'_> {
                     ));
                 }
                 let span = option_start.join(self.previous().span);
-                if self.eat(&TokenKind::Comma).is_none()
-                    && !self.at(&TokenKind::RBrace)
-                    && !self.line_break_before_current()
-                {
-                    return Err(self.error("expected a line break or `,` between choice options"));
-                }
+                self.require_comma_between("choice options");
                 Ok((enum_name, enum_span, description, variant, is_default, span))
             })();
             if let Some((enum_name, enum_span, description, variant, is_default, span)) =
@@ -855,12 +846,7 @@ impl Parser<'_> {
                         );
                     }
                 };
-                if self.eat(&TokenKind::Comma).is_none()
-                    && !self.at(&TokenKind::RBrace)
-                    && !self.line_break_before_current()
-                {
-                    return Err(self.error("expected a line break or `,` between file filters"));
-                }
+                self.require_comma_between("file filters");
                 Ok(filter)
             })();
             if let Some(filter) = self.recover_delimited_item(parsed, item_start, body_depth) {
@@ -885,6 +871,53 @@ impl Parser<'_> {
             span: name_span.join(body.span),
             body,
         })
+    }
+
+    fn require_comma_between(&mut self, items: &'static str) {
+        if self.previous().kind == TokenKind::Comma
+            || self.eat(&TokenKind::Comma).is_some()
+            || self.at(&TokenKind::RBrace)
+        {
+            return;
+        }
+        let insertion = Span {
+            start: self.previous().span.end,
+            end: self.previous().span.end,
+        };
+        self.record_missing(
+            Diagnostic::new(format!("expected `,` between {items}"), self.current().span)
+                .with_machine_applicable_fix("insert `,`", insertion, ","),
+        );
+    }
+
+    fn require_semicolon_between(&mut self, items: &'static str) {
+        if self.previous().kind == TokenKind::Semicolon
+            || self.eat(&TokenKind::Semicolon).is_some()
+            || self.at(&TokenKind::RBrace)
+        {
+            return;
+        }
+        let (title, edit) = if self.current().kind == TokenKind::Comma {
+            ("replace `,` with `;`", self.current().span)
+        } else if self.previous().kind == TokenKind::Comma {
+            ("replace `,` with `;`", self.previous().span)
+        } else {
+            (
+                "insert `;`",
+                Span {
+                    start: self.previous().span.end,
+                    end: self.previous().span.end,
+                },
+            )
+        };
+        let consume_current_comma = self.current().kind == TokenKind::Comma;
+        self.record_missing(
+            Diagnostic::new(format!("expected `;` between {items}"), self.current().span)
+                .with_machine_applicable_fix(title, edit, ";"),
+        );
+        if consume_current_comma {
+            self.bump();
+        }
     }
 
     pub(super) fn state_decl(&mut self) -> Result<StateDecl, Diagnostic> {
@@ -931,6 +964,9 @@ impl Parser<'_> {
                 loop {
                     offsets.push(self.expect_u64("expected a pointer offset")?);
                     if self.eat(&TokenKind::Comma).is_none() {
+                        break;
+                    }
+                    if self.at(&TokenKind::RParen) {
                         break;
                     }
                 }

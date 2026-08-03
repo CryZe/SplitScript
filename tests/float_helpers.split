@@ -8,7 +8,8 @@ whileAttached {
     if sample32.abs() == 1.25
         && sample32.floor() == -2
         && sample32.ceil() == -1
-        && whole32 == 2.0 {
+        && whole32 == 2.0
+    {
         passed += 1
     }
 
@@ -19,13 +20,15 @@ whileAttached {
         && 3.5.round() == 4
         && (-3.5).round() == -4
         && 2.49.round() == 2
-        && (-2.49).round() == -2 {
+        && (-2.49).round() == -2
+    {
         passed += 2
     }
 
     if 1.25.roundTo(1) == 1.2
         && (-1.25).roundTo(1) == -1.2
-        && 12.375.roundTo(2) == 12.38 {
+        && 12.375.roundTo(2) == 12.38
+    {
         passed += 4
     }
 
@@ -40,7 +43,8 @@ whileAttached {
         && infinity.roundTo(0) == infinity
         && nan.roundTo(0).isNaN()
         && sample32.isFinite()
-        && exactInteger.isFinite() {
+        && exactInteger.isFinite()
+    {
         passed += 8
     }
 

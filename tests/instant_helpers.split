@@ -21,7 +21,8 @@ whileAttached {
         && measured <= quarterSecond
         && backwards < measured
         && backwards == Duration.zero()
-        && startedAt.hasElapsed(halfSecond) {
+        && startedAt.hasElapsed(halfSecond)
+    {
         setVariable("Instant Helpers", "ok")
     }
 }

@@ -1095,9 +1095,9 @@ mod tests {
     fn extracts_contiguous_statements_into_a_function() {
         let source = concat!(
             "state \"game.exe\" {\n",
-            "    points: i32 = 0\n",
-            "    deaths: i32 = 0\n",
-            "    level: i32 = 0\n",
+            "    points: i32 = 0;\n",
+            "    deaths: i32 = 0;\n",
+            "    level: i32 = 0;\n",
             "}\n",
             "whileAttached {\n",
             "    setVariable(\"Points\", current.points)\n",

@@ -330,7 +330,6 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::FloatCeil
         | IntrinsicId::FloatRound
         | IntrinsicId::ArrayLength
-        | IntrinsicId::ArrayGet
         | IntrinsicId::ArraySet
         | IntrinsicId::AddressAdd
         | IntrinsicId::ProcessName
@@ -592,14 +591,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             ArrayLength,
             Method,
             signature(UNCONSTRAINED_T, Some(T_ARRAY), params![], U32),
-            PURE,
-            Everywhere,
-            RepresentationPrimitive
-        ),
-        IntrinsicId::ArrayGet => contract!(
-            ArrayGet,
-            Method,
-            signature(UNCONSTRAINED_T, Some(T_ARRAY), params![value(U32)], T,),
             PURE,
             Everywhere,
             RepresentationPrimitive

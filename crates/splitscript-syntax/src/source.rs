@@ -63,6 +63,25 @@ impl SourceDocument {
         })
     }
 
+    /// Returns the word-like token selected by an editor cursor.
+    ///
+    /// Editor cursors commonly sit at a symbol's half-open end, which may also
+    /// be the start of following punctuation. Prefer a word-like token directly
+    /// under the cursor, then accept the immediately preceding word-like token
+    /// when it ends exactly at the cursor. Whitespace farther away from a token
+    /// remains unselected.
+    pub fn symbol_token_at(&self, offset: usize) -> Option<&Token> {
+        let current = self.token_at(offset);
+        if current.is_some_and(|token| is_word_like(&token.kind)) {
+            return current;
+        }
+        let previous = offset
+            .checked_sub(1)
+            .and_then(|previous| self.token_at(previous))
+            .filter(|token| token.span.end == offset && is_word_like(&token.kind));
+        previous.or(current)
+    }
+
     pub fn trivia(&self) -> impl Iterator<Item = &Trivia> {
         self.lexemes.iter().filter_map(|lexeme| match lexeme {
             Lexeme::Trivia(trivia) => Some(trivia),
@@ -86,6 +105,18 @@ impl SourceDocument {
         }
         reconstructed
     }
+}
+
+fn is_word_like(kind: &crate::TokenKind) -> bool {
+    matches!(
+        kind,
+        crate::TokenKind::Ident(_)
+            | crate::TokenKind::Int(_)
+            | crate::TokenKind::Float(_)
+            | crate::TokenKind::String(_)
+            | crate::TokenKind::DocComment(_)
+            | crate::TokenKind::TemplateChunk(_)
+    )
 }
 
 #[cfg(test)]
@@ -134,5 +165,29 @@ mod tests {
         assert_eq!(dot.kind, TokenKind::Dot);
         assert!(document.token_at(source.find("gap").unwrap()).is_none());
         assert!(document.token_at(source.len()).is_none());
+    }
+
+    #[test]
+    fn selects_symbols_at_editor_cursor_boundaries() {
+        let source = "alpha.beta  gamma";
+        let document =
+            SourceDocument::from_lexed(source, lex_lossless(source, SyntaxMode::Program).unwrap());
+
+        let alpha_end = "alpha".len();
+        assert_eq!(
+            document.text(document.symbol_token_at(alpha_end).unwrap().span),
+            "alpha"
+        );
+        let beta_end = source.find("beta").unwrap() + "beta".len();
+        assert_eq!(
+            document.text(document.symbol_token_at(beta_end).unwrap().span),
+            "beta"
+        );
+        assert!(document.symbol_token_at(beta_end + 1).is_none());
+        let gamma = source.find("gamma").unwrap();
+        assert_eq!(
+            document.text(document.symbol_token_at(gamma).unwrap().span),
+            "gamma"
+        );
     }
 }

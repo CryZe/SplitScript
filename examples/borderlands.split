@@ -4,19 +4,18 @@
 state "Borderlands.exe" {
     /// Original 1.0 executable layout.
     layout V1000 {
-        isLoading1: bool at "Borderlands.exe", 0x01b98a74
-        isLoading2: bool at "Borderlands.exe", 0x01b97e38
-    }
-
+        isLoading1: bool at "Borderlands.exe", 0x01b98a74;
+        isLoading2: bool at "Borderlands.exe", 0x01b97e38;
+    },
     /// Patched 1.5 executable layout, historically labelled 1.4.1 by the ASL.
     layout V1500 {
         isLoading1: bool = process.read<bool>(
             executableBase.memoryPath([0x00480af0], 0, PointerSize.Bit32).resolve()?
-        )?
+        )?;
         isLoading2: bool = process.read<bool>(
             executableBase.memoryPath([0x001e1f1c], 0, PointerSize.Bit32).resolve()?
-        )?
-    }
+        )?;
+    },
 }
 
 let executableBase: address = 0x0

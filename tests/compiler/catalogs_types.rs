@@ -1036,16 +1036,16 @@ fn compiler_database_resolves_language_catalog_syntax() {
 
     let source = r#"
         enum Mode {
-            A
+            A,
             B
         }
 
         settings {
             /// Select the active mode.
             "Mode" => selected: choice {
-                "First" => Mode.A default
+                "First" => Mode.A default,
                 "Second" => Mode.B
-            }
+            },
             /// Select an input file.
             "Input" => input: file {
                 mime => "application/octet-stream"
@@ -1053,7 +1053,7 @@ fn compiler_database_resolves_language_catalog_syntax() {
         }
 
         state "game.exe" {
-            level: i32 at 0x1000
+            level: i32 at 0x1000;
             mapName at 0x2000 as utf8(32)
         }
 
@@ -1079,6 +1079,7 @@ fn compiler_database_resolves_language_catalog_syntax() {
         }
 
         whileAttached {
+            let firstByte = preserveBytes([1u8])[0]
             let timerState = TimerState.Running
             let levelChanged = current.level != old.level
             let settingChanged = settings.selected != oldSettings.selected
@@ -1115,6 +1116,11 @@ fn compiler_database_resolves_language_catalog_syntax() {
     assert_eq!(
         database.definition_at(array_type).unwrap(),
         Some(DefinitionTarget::Language(LanguageItemId::ArrayType))
+    );
+    let array_index = source.find("[0]").unwrap();
+    assert_eq!(
+        database.definition_at(array_index).unwrap(),
+        Some(DefinitionTarget::Language(LanguageItemId::ArrayIndex))
     );
     let propagation = source.find("fallible()?").unwrap() + "fallible()".len();
     assert_eq!(
@@ -1556,7 +1562,7 @@ fn source_record_and_enum_annotations_resolve_after_parsing() {
                 x: i32
             }
             enum Location {
-                Known(Point)
+                Known(Point),
                 Unknown
             }
             fn identity(point: Point) -> Point { return point }
@@ -1615,11 +1621,11 @@ fn semantic_capabilities_query_declared_and_derived_types_by_type_id() {
             r#"
             state "game.exe" {}
             record Pair {
-                left: i32
+                left: i32,
                 right: i32
             }
             enum MaybePair {
-                Pair(Pair)
+                Pair(Pair),
                 Empty
             }
             fn keep(value: MaybePair) -> MaybePair { return value }
@@ -1679,30 +1685,29 @@ fn semantic_type_ids_intern_constructed_generic_arguments() {
         state "game.exe" {}
         whileAttached {
             let matrix = [[1i32], [2i32]]
-            let row = matrix.get(0)
+            let row = matrix[0]
         }
     "#;
     let parsed = splitscript::parse(source).expect("source should parse");
     let checked = splitscript::check(parsed).expect("source should type-check");
-    let (_, call) = checked
-        .semantics()
-        .calls()
-        .find(|(_, call)| {
-            matches!(
-                call,
-                ResolvedCall::StandardLibrary {
-                    item: StdlibItemId::ArrayGet,
-                    ..
-                }
-            )
+    let row = checked
+        .syntax()
+        .actions
+        .iter()
+        .flat_map(|action| &action.body.statements)
+        .find_map(|statement| match statement {
+            splitscript::compiler::ast::Stmt::Variable(variable) if variable.name == "row" => {
+                Some(variable.id)
+            }
+            _ => None,
         })
-        .expect("the array get should be resolved");
-    let ResolvedCall::StandardLibrary { type_arguments, .. } = call else {
-        panic!("array.get should resolve to the standard library");
-    };
-    let TypeKind::Array { element, .. } = checked.semantics().types().kind(type_arguments[0])
-    else {
-        panic!("the generic argument should be an interned array type");
+        .expect("the row binding should exist");
+    let row = checked
+        .semantics()
+        .value_type(row)
+        .expect("the row binding should have a semantic type");
+    let TypeKind::Array { element, .. } = checked.semantics().types().kind(row) else {
+        panic!("the indexed row should retain its interned array type");
     };
     assert_eq!(
         checked.semantics().types().kind(*element),
@@ -1716,7 +1721,7 @@ fn option_and_result_annotations_are_distinct_interned_semantic_types() {
         state "game.exe" {}
 
         record Wrappers {
-            maybe: i32?
+            maybe: i32?,
             attempt: String!
         }
 

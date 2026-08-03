@@ -88,7 +88,7 @@ const ARRAY_EXAMPLE: &str = r#"state "game.exe" {}
 whileAttached {
     let bytes = [0x48u8, 0u8]
     bytes.set(1, 0x8bu8)
-    let first = bytes.get(0)
+    let first = bytes[0]
     let count = bytes.length()
 }"#;
 const ADDRESS_EXAMPLE: &str = r#"state "game.exe" {}
@@ -127,7 +127,7 @@ onAttach {
 }"#;
 const SETTINGS_EXAMPLE: &str = r#"state "game.exe" {}
 settings {
-    "Enabled" => enabled: true
+    "Enabled" => enabled: true,
     "Split boss" => splitBoss key "split-boss": true
 }
 whileAttached {
@@ -159,9 +159,7 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::FloatRoundTo
         | StdlibItemId::FloatIsNaN
         | StdlibItemId::FloatIsFinite => FLOAT_EXAMPLE,
-        StdlibItemId::ArrayLength | StdlibItemId::ArrayGet | StdlibItemId::ArraySet => {
-            ARRAY_EXAMPLE
-        }
+        StdlibItemId::ArrayLength | StdlibItemId::ArraySet => ARRAY_EXAMPLE,
         StdlibItemId::AddressOffset | StdlibItemId::AddressAdd => ADDRESS_EXAMPLE,
         StdlibItemId::ProcessModule
         | StdlibItemId::ProcessRead
@@ -264,10 +262,6 @@ mod tests {
         assert_eq!(
             library.item(StdlibItemId::NumericClamp).owner,
             StdlibOwner::Capability(StdlibCapabilityId::Numeric)
-        );
-        assert_eq!(
-            library.item(StdlibItemId::ArrayGet).owner,
-            StdlibOwner::TypeConstructor(StdlibTypeConstructorId::Array)
         );
         assert!(
             library
@@ -389,10 +383,6 @@ mod tests {
         assert_eq!(
             library.render_signature(StdlibItemId::ProcessRead),
             "Process.read<T>(address: address) -> T! where T: MemoryReadable"
-        );
-        assert_eq!(
-            library.render_signature(StdlibItemId::ArrayGet),
-            "[T].get(index: u32) -> T where T"
         );
         assert!(library.validate().is_empty());
     }

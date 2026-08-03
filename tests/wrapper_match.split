@@ -4,28 +4,28 @@ fn describeOptional(value: i32?) -> String {
     return match value {
         Some(present) if present > 10 => "large",
         Some(present) => present as String,
-        None => "none"
+        None => "none",
     }
 }
 
 fn describeResult(value: i32!) -> String {
     return match value {
         Ok(success) => success as String,
-        Err(error) => `error {error}`
+        Err(error) => `error {error}`,
     }
 }
 
 fn hasValue(value: i32?) -> bool {
     return match value {
         Some(_) => true,
-        None => false
+        None => false,
     }
 }
 
 fn succeeded(value: i32!) -> bool {
     return match value {
         Ok(_) => true,
-        Err(_) => false
+        Err(_) => false,
     }
 }
 

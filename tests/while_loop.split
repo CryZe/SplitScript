@@ -27,7 +27,7 @@ fn nestedControlFlow() -> i32 {
             inner += 1
             let innerValue = match inner {
                 3 => missing else break,
-                _ => inner
+                _ => inner,
             }
             score += selected * 10 + innerValue
         }
@@ -55,7 +55,11 @@ fn resultControl() -> i32 {
     let failure: i32! = Err("missing")
     while index < 3 {
         index += 1
-        let candidate: i32! = if index == 2 { failure } else { index }
+        let candidate: i32! = if index == 2 {
+            failure
+        } else {
+            index
+        }
         total += candidate else continue
     }
     return total

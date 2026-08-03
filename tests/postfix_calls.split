@@ -1,7 +1,7 @@
 state "game.exe" {}
 
 record Counter {
-    value: u32
+    value: u32,
 }
 
 let counterCalls = 0
@@ -14,13 +14,13 @@ fn Counter.add(amount: u32) -> u32 {
 fn counter() -> Counter {
     counterCalls += 1
     return Counter {
-        value: 40
+        value: 40,
     }
 }
 
 fn optionalCounter() -> Counter? {
     return Counter {
-        value: 38
+        value: 38,
     }
 }
 
@@ -32,23 +32,23 @@ fn attachedProcess() {
 whileAttached {
     let fromCall = counter().add(2)
     let fromLiteral = Counter {
-        value: 41
+        value: 41,
     }.add(1)
-    let fromMatch =(match true {
+    let fromMatch = (match true {
         true => Counter {
-            value: 39
+            value: 39,
         },
         false => Counter {
-            value: 0
-        }
+            value: 0,
+        },
     }).add(3)
-    let fromFallback =(optionalCounter() else Counter {
-        value: 0
+    let fromFallback = (optionalCounter() else Counter {
+        value: 0,
     }).add(4)
     let fromExplicitType = attachedProcess().read<u32>(0x100) else 0
 
     setVariable(
         "Postfix Calls",
-        `{fromCall},{counterCalls},{fromLiteral},{fromMatch},{fromFallback},{fromExplicitType},{processCalls}`
+        `{fromCall},{counterCalls},{fromLiteral},{fromMatch},{fromFallback},{fromExplicitType},{processCalls}`,
     )
 }

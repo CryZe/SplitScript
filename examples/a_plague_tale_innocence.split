@@ -5,115 +5,112 @@
 /// A chapter recognized from the game's current map identifier.
 enum Chapter {
     /// Chapter 2 — The Strangers.
-    Village
+    Village,
     /// Chapter 3 — Retribution.
-    Village2
+    Village2,
     /// Chapter 4 — The Apprentice.
-    Farm
+    Farm,
     /// Chapter 5 — The Ravens' Spoils.
-    Battlefield
+    Battlefield,
     /// Chapter 6 — Damaged Goods.
-    Battlefield2
+    Battlefield2,
     /// Chapter 7 — The Path Before Us.
-    ShelterForest
+    ShelterForest,
     /// Chapter 8 — Our Home.
-    ShelterMorning
+    ShelterMorning,
     /// Chapter 9 — In the Shadow of Ramparts.
-    University
+    University,
     /// Chapter 10 — The Way of Roses.
-    University2
+    University2,
     /// Chapter 11 — Alive.
-    ShelterSafe
+    ShelterSafe,
     /// Chapter 12 — All That Remains.
-    CorruptedDomain
+    CorruptedDomain,
     /// Chapter 13 — Penance.
-    Illusion
+    Illusion,
     /// Chapter 14 — Blood Ties.
-    Inquisition
+    Inquisition,
     /// Chapter 15 — Remembrance.
-    ShelterSiege
+    ShelterSiege,
     /// Chapter 16 — Coronation.
-    Cathedral
+    Cathedral,
     /// Chapter 17 — For Each Other.
-    Epilogue
+    Epilogue,
 }
 
 settings {
     /// Enables every chapter split as one group.
-    "All Chapters" => allChapters: true
-
+    "All Chapters" => allChapters: true,
     "Chapters" {
         /// Splits on the first visit to the Chapter 2 map.
-        "Chapter 2 - The Strangers" => splitVillage: true
+        "Chapter 2 - The Strangers" => splitVillage: true,
         /// Splits on the first visit to the Chapter 3 map.
-        "Chapter 3 - Retribution" => splitVillage2: true
+        "Chapter 3 - Retribution" => splitVillage2: true,
         /// Splits on the first visit to the Chapter 4 map.
-        "Chapter 4 - The Apprentice" => splitFarm: true
+        "Chapter 4 - The Apprentice" => splitFarm: true,
         /// Splits on the first visit to the Chapter 5 map.
-        "Chapter 5 - The Ravens' Spoils" => splitBattlefield: true
+        "Chapter 5 - The Ravens' Spoils" => splitBattlefield: true,
         /// Splits on the first visit to the Chapter 6 map.
-        "Chapter 6 - Damaged Goods" => splitBattlefield2: true
+        "Chapter 6 - Damaged Goods" => splitBattlefield2: true,
         /// Splits on the first visit to the Chapter 7 map.
-        "Chapter 7 - The Path Before Us" => splitShelterForest: true
+        "Chapter 7 - The Path Before Us" => splitShelterForest: true,
         /// Splits on the first visit to the Chapter 8 map.
-        "Chapter 8 - Our Home" => splitShelterMorning: true
+        "Chapter 8 - Our Home" => splitShelterMorning: true,
         /// Splits on the first visit to the Chapter 9 map.
-        "Chapter 9 - In the Shadow of Ramparts" => splitUniversity: true
+        "Chapter 9 - In the Shadow of Ramparts" => splitUniversity: true,
         /// Splits on the first visit to the Chapter 10 map.
-        "Chapter 10 - The Way of Roses" => splitUniversity2: true
+        "Chapter 10 - The Way of Roses" => splitUniversity2: true,
         /// Splits on the first visit to the Chapter 11 map.
-        "Chapter 11 - Alive" => splitShelterSafe: true
+        "Chapter 11 - Alive" => splitShelterSafe: true,
         /// Splits on the first visit to the Chapter 12 map.
-        "Chapter 12 - All That Remains" => splitCorruptedDomain: true
+        "Chapter 12 - All That Remains" => splitCorruptedDomain: true,
         /// Splits on the first visit to the Chapter 13 map.
-        "Chapter 13 - Penance" => splitIllusion: true
+        "Chapter 13 - Penance" => splitIllusion: true,
         /// Splits on the first visit to the Chapter 14 map.
-        "Chapter 14 - Blood Ties" => splitInquisition: true
+        "Chapter 14 - Blood Ties" => splitInquisition: true,
         /// Splits on the first visit to the Chapter 15 map.
-        "Chapter 15 - Remembrance" => splitShelterSiege: true
+        "Chapter 15 - Remembrance" => splitShelterSiege: true,
         /// Splits on the first visit to the Chapter 16 map.
-        "Chapter 16 - Coronation" => splitCathedral: true
+        "Chapter 16 - Coronation" => splitCathedral: true,
         /// Splits on the first visit to the Chapter 17 map.
-        "Chapter 17 - For Each Other" => splitEpilogue: true
-    }
+        "Chapter 17 - For Each Other" => splitEpilogue: true,
+    },
 }
 
 state "APlagueTaleInnocence_x64" {
     /// Steam executable layout.
     layout Steam {
         /// Whether the audio runtime reports a loading screen.
-        loading: bool at "WwiseLibPCx64R.dll", 0x262521
+        loading: bool at "WwiseLibPCx64R.dll", 0x262521;
         /// Player-control state used to detect a new run.
-        playerControl: i32 at "APlagueTaleInnocence_x64", 0x152E91C
+        playerControl: i32 at "APlagueTaleInnocence_x64", 0x152E91C;
         /// Bounded NUL-terminated map identifier.
-        map at "APlagueTaleInnocence_x64", 0x015206E0, 0x88, 0x0, 0xD0, 0x990, 0x260 as utf8(50)
+        map at "APlagueTaleInnocence_x64", 0x015206E0, 0x88, 0x0, 0xD0, 0x990, 0x260 as utf8(50);
         /// Cutscene state used by the final ending split.
-        cutsceneState: i32 at "APlagueTaleInnocence_x64", 0x164BC34
-    }
-
+        cutsceneState: i32 at "APlagueTaleInnocence_x64", 0x164BC34;
+    },
     /// Epic Games Store executable layout.
     layout Epic {
         /// Whether the audio runtime reports a loading screen.
-        loading: bool at "WwiseLibPCx64R.dll", 0x262521
+        loading: bool at "WwiseLibPCx64R.dll", 0x262521;
         /// Player-control state used to detect a new run.
-        playerControl: i32 at "APlagueTaleInnocence_x64", 0x152E6DC
+        playerControl: i32 at "APlagueTaleInnocence_x64", 0x152E6DC;
         /// Bounded NUL-terminated map identifier.
-        map at "APlagueTaleInnocence_x64", 0x016AADC0, 0x10, 0x110, 0xD8, 0x10, 0x30, 0x170, 0x260 as utf8(50)
+        map at "APlagueTaleInnocence_x64", 0x016AADC0, 0x10, 0x110, 0xD8, 0x10, 0x30, 0x170, 0x260 as utf8(50);
         /// Cutscene state used by the final ending split.
-        cutsceneState: i32 at "APlagueTaleInnocence_x64", 0x164B9F4
-    }
-
+        cutsceneState: i32 at "APlagueTaleInnocence_x64", 0x164B9F4;
+    },
     /// Xbox executable layout.
     layout Xbox {
         /// Whether the audio runtime reports a loading screen.
-        loading: bool at "WwiseLibPCx64R.dll", 0x262521
+        loading: bool at "WwiseLibPCx64R.dll", 0x262521;
         /// Player-control state used to detect a new run.
-        playerControl: i32 at "APlagueTaleInnocence_x64", 0x1744EBC
+        playerControl: i32 at "APlagueTaleInnocence_x64", 0x1744EBC;
         /// Bounded NUL-terminated map identifier.
-        map at "MessageBus.dll", 0x005C0DE0, 0x340, 0x668 as utf8(50)
+        map at "MessageBus.dll", 0x005C0DE0, 0x340, 0x668 as utf8(50);
         /// Xbox has no known cutscene-state address, so its ending trigger is unavailable.
-        cutsceneState: i32 = 0
-    }
+        cutsceneState: i32 = 0;
+    },
 }
 
 /// Bit set of chapter-entry splits already emitted during the current run.
@@ -164,22 +161,22 @@ fn chapterForMap(map: String) -> Chapter? {
 /// Returns the stable bit assigned to a chapter.
 fn chapterMask(chapter: Chapter) -> u32 {
     return match chapter {
-        Chapter.Village => 1u32 << 0,
-        Chapter.Village2 => 1u32 << 1,
-        Chapter.Farm => 1u32 << 2,
-        Chapter.Battlefield => 1u32 << 3,
-        Chapter.Battlefield2 => 1u32 << 4,
-        Chapter.ShelterForest => 1u32 << 5,
-        Chapter.ShelterMorning => 1u32 << 6,
-        Chapter.University => 1u32 << 7,
-        Chapter.University2 => 1u32 << 8,
-        Chapter.ShelterSafe => 1u32 << 9,
-        Chapter.CorruptedDomain => 1u32 << 10,
-        Chapter.Illusion => 1u32 << 11,
-        Chapter.Inquisition => 1u32 << 12,
-        Chapter.ShelterSiege => 1u32 << 13,
-        Chapter.Cathedral => 1u32 << 14,
-        Chapter.Epilogue => 1u32 << 15
+        Chapter.Village => 1 << 0,
+        Chapter.Village2 => 1 << 1,
+        Chapter.Farm => 1 << 2,
+        Chapter.Battlefield => 1 << 3,
+        Chapter.Battlefield2 => 1 << 4,
+        Chapter.ShelterForest => 1 << 5,
+        Chapter.ShelterMorning => 1 << 6,
+        Chapter.University => 1 << 7,
+        Chapter.University2 => 1 << 8,
+        Chapter.ShelterSafe => 1 << 9,
+        Chapter.CorruptedDomain => 1 << 10,
+        Chapter.Illusion => 1 << 11,
+        Chapter.Inquisition => 1 << 12,
+        Chapter.ShelterSiege => 1 << 13,
+        Chapter.Cathedral => 1 << 14,
+        Chapter.Epilogue => 1 << 15,
     }
 }
 
@@ -204,7 +201,7 @@ fn chapterEnabled(chapter: Chapter) -> bool {
         Chapter.Inquisition => settings.splitInquisition,
         Chapter.ShelterSiege => settings.splitShelterSiege,
         Chapter.Cathedral => settings.splitCathedral,
-        Chapter.Epilogue => settings.splitEpilogue
+        Chapter.Epilogue => settings.splitEpilogue,
     }
 }
 
@@ -212,7 +209,7 @@ fn chapterEnabled(chapter: Chapter) -> bool {
 fn resetRunProgress(map: String) {
     completedChapters = match chapterForMap(map) {
         Some(chapter) => chapterMask(chapter),
-        None => 0u32
+        None => 0,
     }
 }
 

@@ -203,12 +203,12 @@ fn wasm_ir_owns_gc_constructors_interpolation_and_signatures() {
         state "game.exe" {}
 
         record Pair {
-            left: i32
+            left: i32,
             right: i32
         }
 
         enum Event {
-            Empty
+            Empty,
             Value(i32)
         }
 
@@ -220,7 +220,7 @@ fn wasm_ir_owns_gc_constructors_interpolation_and_signatures() {
 
         whileAttached {
             let values = [1, 2, 3]
-            let pair = Pair { right: values.get(1), left: values.get(0) }
+            let pair = Pair { right: values[1], left: values[0] }
             let event = Event.Value(pair.left)
             print(`pair {pair.left}`)
         }
@@ -439,7 +439,7 @@ fn none_is_a_first_class_unit_across_wrappers_storage_and_async_code() {
         onAttach {
             let awaited: None = await waitOne()
             let values: [None; 2] = [globalUnit, awaited]
-            let boxed = UnitBox { value: values.get(0) }
+            let boxed = UnitBox { value: values[0] }
             let present = optional(true)
             let absent = optional(false)
             let succeeded = propagate(attempt(true)) else None
@@ -755,12 +755,12 @@ fn declared_record_enum_and_array_layouts_are_semantic_facts() {
         state "game.exe" {}
 
         record Inventory {
-            names: [String]
+            names: [String],
             code: u16
         }
 
         enum Lookup {
-            Missing
+            Missing,
             Found(Inventory)
         }
 
@@ -865,16 +865,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
         .next()
         .expect("generic process reads should resolve through the catalog");
     assert_eq!(read.item.id, StdlibItemId::ProcessRead);
-    let get = library.method_candidates("get");
-    assert_eq!(get.len(), 1);
-    assert_eq!(get[0].item.id, StdlibItemId::ArrayGet);
-    assert_eq!(
-        get[0].receiver(),
-        Some(splitscript::compiler::stdlib::TypeRef::Application {
-            constructor: splitscript::compiler::stdlib::StdlibTypeConstructorId::Array,
-            arguments: &[splitscript::compiler::stdlib::TypeRef::Parameter("T")],
-        })
-    );
+    assert!(library.method_candidates("get").is_empty());
     let min = library.method_candidates("min");
     assert_eq!(min.len(), 1);
     assert_eq!(min[0].item.id, StdlibItemId::NumericMin);
@@ -1021,8 +1012,8 @@ fn call_result_fields_parse_before_detached_effects_are_checked() {
         state "game.exe" {}
 
         record LevelTimeParts {
-            minutes: f32
-            seconds: f32
+            minutes: f32,
+            seconds: f32,
             hundredths: f32
         }
 
@@ -1161,7 +1152,7 @@ fn explicit_generic_calls_accept_named_and_constructed_types() {
             let header = process.read<Header>(0)
             let bytes = process.read<[u8; 4]>(4)
             print<u32>((header else Header { marker: 0 }).marker)
-            print<u8>((bytes else [0, 0, 0, 0]).get(0))
+            print<u8>((bytes else [0, 0, 0, 0])[0])
         }
     "#;
     splitscript::compile(source)

@@ -42,7 +42,7 @@ impl Parser<'_> {
                 let type_arguments = self.call_type_arguments(left.span.end)?;
                 self.expect(TokenKind::LParen, "expected `(` after generic arguments")?;
                 let (args, end) =
-                    self.expression_list(TokenKind::RParen, "expected `)` after arguments", false);
+                    self.expression_list(TokenKind::RParen, "expected `)` after arguments", true);
                 left = self.new_expr(
                     ExprKind::Call {
                         callee,
@@ -63,6 +63,20 @@ impl Parser<'_> {
                         receiver: Box::new(left),
                         name,
                         name_span,
+                    },
+                    span,
+                );
+                continue;
+            }
+            if let Some(opening) = self.eat(&TokenKind::LBracket) {
+                let index = self.required_expression(0)?;
+                let closing = self.expect(TokenKind::RBracket, "expected `]` after the index")?;
+                let span = left.span.join(closing);
+                left = self.new_expr(
+                    ExprKind::Index {
+                        receiver: Box::new(left),
+                        index: Box::new(index),
+                        bracket_span: opening.join(closing),
                     },
                     span,
                 );
@@ -458,7 +472,7 @@ impl Parser<'_> {
                     let (args, end) = self.expression_list(
                         TokenKind::RParen,
                         "expected `)` after arguments",
-                        false,
+                        true,
                     );
                     Ok(self.new_expr(
                         ExprKind::Call {
@@ -540,6 +554,9 @@ impl Parser<'_> {
         loop {
             arguments.push(self.parse_type("expected a type argument after `<`")?.0);
             if self.eat(&TokenKind::Comma).is_some() {
+                if self.eat(&TokenKind::Gt).is_some() {
+                    return Ok(arguments);
+                }
                 continue;
             }
             self.expect(TokenKind::Gt, "expected `>` after type arguments")?;

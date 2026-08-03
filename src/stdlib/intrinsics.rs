@@ -24,7 +24,6 @@ macro_rules! trusted_intrinsics {
             FloatCeil,
             FloatRound,
             ArrayLength,
-            ArrayGet,
             ArraySet,
             AddressAdd,
             ProcessName,

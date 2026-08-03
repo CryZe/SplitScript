@@ -6,8 +6,8 @@ use std::collections::HashSet;
 use crate::{
     Diagnostic,
     ast::{
-        Action, Expr, ExprKind, FunctionDecl, Program, SettingDecl, SettingKind, StateDecl,
-        StateField, Stmt, VariableDecl,
+        Action, EnumDecl, Expr, ExprKind, FunctionDecl, Program, RecordDecl, SettingDecl,
+        SettingKind, StateDecl, StateField, Stmt, VariableDecl,
     },
     lexer::{Lexeme, TokenKind, TriviaKind},
     syntax::SourceDocument,
@@ -131,6 +131,7 @@ struct SyntaxLayoutCollector<'a> {
     break_after: HashSet<usize>,
     generic_opens: HashSet<usize>,
     generic_closes: HashSet<usize>,
+    index_opens: HashSet<usize>,
 }
 
 impl SyntaxLayoutCollector<'_> {
@@ -217,15 +218,54 @@ impl SyntaxLayoutCollector<'_> {
             }
         }
     }
+
+    fn mark_declaration_items_vertical(
+        &mut self,
+        span: crate::ast::Span,
+        item_ends: impl IntoIterator<Item = usize>,
+    ) {
+        if let Some(opening) = self.document.tokens().find(|token| {
+            span.start <= token.span.start
+                && token.span.end <= span.end
+                && token.kind == TokenKind::LBrace
+        }) {
+            self.break_after.insert(opening.span.end);
+        }
+        for end in item_ends {
+            self.break_after.insert(end);
+            self.mark_separator_after(end);
+        }
+    }
 }
 
 impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
+    fn visit_record(&mut self, record: &'ast RecordDecl) {
+        self.mark_declaration_items_vertical(
+            record.span,
+            record.fields.iter().map(|field| field.span.end),
+        );
+        visit::walk_record(self, record);
+    }
+
+    fn visit_enum(&mut self, enumeration: &'ast EnumDecl) {
+        self.mark_declaration_items_vertical(
+            enumeration.span,
+            enumeration.variants.iter().map(|variant| variant.span.end),
+        );
+        visit::walk_enum(self, enumeration);
+    }
+
     fn visit_state(&mut self, state: &'ast StateDecl) {
         for layout in &state.layouts {
-            self.break_after.insert(layout.span.end);
+            self.mark_separator_after(layout.span.end);
+            for field in &layout.fields {
+                self.visit_state_field(field);
+            }
+        }
+        for field in &state.fields {
+            self.visit_state_field(field);
         }
         self.break_after.insert(state.span.end);
-        visit::walk_state(self, state);
     }
 
     fn visit_state_field(&mut self, field: &'ast StateField) {
@@ -324,6 +364,9 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
                 self.generic_closes.insert(close.span.start);
             }
         }
+        if let ExprKind::Index { bracket_span, .. } = &expression.kind {
+            self.index_opens.insert(bracket_span.start);
+        }
         visit::walk_expr(self, expression);
     }
 }
@@ -340,12 +383,16 @@ struct Formatter<'a> {
     generic_depth: usize,
     generic_opens: HashSet<usize>,
     generic_closes: HashSet<usize>,
+    index_opens: HashSet<usize>,
     bracket_depth: usize,
     multiline_headers: Vec<HeaderRange>,
     continuations: Vec<ContinuationRange>,
     delimiters: Vec<DelimiterRange>,
     break_after: HashSet<usize>,
     join_before: HashSet<usize>,
+    trailing_comma_before: HashSet<usize>,
+    trailing_semicolon_before: HashSet<usize>,
+    omitted_commas: HashSet<usize>,
     brace_stack: Vec<BraceFrame>,
     current_line_indentation: usize,
 }
@@ -366,8 +413,10 @@ impl<'a> Formatter<'a> {
             break_after: HashSet::new(),
             generic_opens: HashSet::new(),
             generic_closes: HashSet::new(),
+            index_opens: HashSet::new(),
         };
         layout.visit_program(syntax);
+        let trailing_punctuation = trailing_list_punctuation(document, syntax, &layout.break_after);
         Self {
             document,
             output: String::with_capacity(document.source().len()),
@@ -380,12 +429,16 @@ impl<'a> Formatter<'a> {
             generic_depth: 0,
             generic_opens: layout.generic_opens,
             generic_closes: layout.generic_closes,
+            index_opens: layout.index_opens,
             bracket_depth: 0,
             multiline_headers,
             continuations: layout.continuations,
             delimiters: delimiter_ranges(document),
             join_before: layout.join_before,
             break_after: layout.break_after,
+            trailing_comma_before: trailing_punctuation.commas,
+            trailing_semicolon_before: trailing_punctuation.semicolons,
+            omitted_commas: trailing_punctuation.omitted_commas,
             brace_stack: Vec::new(),
             current_line_indentation: 0,
         }
@@ -412,11 +465,34 @@ impl<'a> Formatter<'a> {
 
     fn write_lexeme(&mut self, current: &'a Lexeme) {
         let current_token = token_kind(current);
+        if matches!(current_token, Some(TokenKind::Comma))
+            && self.omitted_commas.contains(&current.span().start)
+        {
+            return;
+        }
         if matches!(current_token, Some(TokenKind::RBrace)) {
             self.indentation = self.brace_stack.last().map_or_else(
                 || self.indentation.saturating_sub(1),
                 |frame| frame.brace_indentation,
             );
+        }
+
+        if self.trailing_comma_before.contains(&current.span().start)
+            && !matches!(self.previous.and_then(token_kind), Some(TokenKind::Comma))
+            && self.previous.is_some_and(|previous| !is_comment(previous))
+        {
+            self.output.push(',');
+        }
+        if self
+            .trailing_semicolon_before
+            .contains(&current.span().start)
+            && !matches!(
+                self.previous.and_then(token_kind),
+                Some(TokenKind::Semicolon)
+            )
+            && self.previous.is_some_and(|previous| !is_comment(previous))
+        {
+            self.output.push(';');
         }
 
         let separation = self.separation(current);
@@ -472,6 +548,15 @@ impl<'a> Formatter<'a> {
         if self.generic_opens.contains(&current.span().start)
             || self.generic_closes.contains(&previous.span().start)
         {
+            return Separation::None;
+        }
+        if self.index_opens.contains(&current.span().start) && !is_comment(previous) {
+            return Separation::None;
+        }
+
+        // Commas terminate the preceding list item even when a recovery fix
+        // inserted one at the beginning of the following source line.
+        if matches!(current_token, Some(TokenKind::Comma)) {
             return Separation::None;
         }
 
@@ -619,6 +704,7 @@ impl<'a> Formatter<'a> {
 enum DelimiterKind {
     Parenthesis,
     Bracket,
+    Brace,
 }
 
 struct PendingDelimiter {
@@ -675,6 +761,279 @@ fn delimiter_ranges(document: &SourceDocument) -> Vec<DelimiterRange> {
         }
     }
     ranges
+}
+
+#[derive(Default)]
+struct TrailingPunctuation {
+    commas: HashSet<usize>,
+    semicolons: HashSet<usize>,
+    omitted_commas: HashSet<usize>,
+}
+
+fn trailing_list_punctuation(
+    document: &SourceDocument,
+    syntax: &Program,
+    break_after: &HashSet<usize>,
+) -> TrailingPunctuation {
+    #[derive(Debug)]
+    struct ListDelimiter {
+        kind: DelimiterKind,
+        has_direct_break: bool,
+        has_direct_comma: bool,
+        last_direct_comma: Option<usize>,
+        pending_break_after_comma: bool,
+    }
+
+    let mut stack = Vec::<ListDelimiter>::new();
+    let mut closings = HashSet::new();
+    let mut omitted_commas = HashSet::new();
+    for lexeme in document.lexemes() {
+        match lexeme {
+            Lexeme::Trivia(trivia)
+                if matches!(
+                    trivia.kind,
+                    TriviaKind::Whitespace | TriviaKind::BlockComment
+                ) && line_breaks(document.text(trivia.span)) > 0 =>
+            {
+                if let Some(delimiter) = stack.last_mut()
+                    && delimiter.last_direct_comma.is_some()
+                {
+                    delimiter.pending_break_after_comma = true;
+                }
+            }
+            Lexeme::Token(token) => {
+                let opening = match token.kind {
+                    TokenKind::LParen => Some(DelimiterKind::Parenthesis),
+                    TokenKind::LBracket => Some(DelimiterKind::Bracket),
+                    TokenKind::LBrace => Some(DelimiterKind::Brace),
+                    _ => None,
+                };
+                if let Some(kind) = opening {
+                    if let Some(parent) = stack.last_mut() {
+                        parent.has_direct_break |= parent.pending_break_after_comma;
+                        parent.pending_break_after_comma = false;
+                        parent.last_direct_comma = None;
+                    }
+                    stack.push(ListDelimiter {
+                        kind,
+                        has_direct_break: false,
+                        has_direct_comma: false,
+                        last_direct_comma: None,
+                        pending_break_after_comma: false,
+                    });
+                    continue;
+                }
+                if token.kind == TokenKind::Comma {
+                    if let Some(delimiter) = stack.last_mut() {
+                        delimiter.has_direct_comma = true;
+                        delimiter.has_direct_break |= break_after.contains(&token.span.end);
+                        delimiter.last_direct_comma = Some(token.span.start);
+                        delimiter.pending_break_after_comma = false;
+                    }
+                    continue;
+                }
+                let closing = match token.kind {
+                    TokenKind::RParen => Some(DelimiterKind::Parenthesis),
+                    TokenKind::RBracket => Some(DelimiterKind::Bracket),
+                    TokenKind::RBrace => Some(DelimiterKind::Brace),
+                    _ => None,
+                };
+                if let Some(kind) = closing
+                    && let Some(delimiter) = stack.pop()
+                    && delimiter.kind == kind
+                {
+                    if delimiter.has_direct_break && delimiter.has_direct_comma {
+                        closings.insert(token.span.start);
+                    } else if !delimiter.has_direct_break
+                        && let Some(comma) = delimiter.last_direct_comma
+                    {
+                        omitted_commas.insert(comma);
+                    }
+                    if let Some(parent) = stack.last_mut() {
+                        parent.last_direct_comma = None;
+                    }
+                    continue;
+                }
+                if let Some(delimiter) = stack.last_mut() {
+                    delimiter.has_direct_break |= delimiter.pending_break_after_comma;
+                    delimiter.pending_break_after_comma = false;
+                    delimiter.last_direct_comma = None;
+                }
+            }
+            Lexeme::Trivia(_) => {}
+        }
+    }
+    let mut collector = TrailingPunctuationCollector {
+        document,
+        punctuation: TrailingPunctuation {
+            commas: closings,
+            semicolons: HashSet::new(),
+            omitted_commas,
+        },
+    };
+    collector.visit_program(syntax);
+    collector.punctuation
+}
+
+struct TrailingPunctuationCollector<'a> {
+    document: &'a SourceDocument,
+    punctuation: TrailingPunctuation,
+}
+
+impl TrailingPunctuationCollector<'_> {
+    fn mark_comma(&mut self, span: crate::ast::Span) {
+        if let Some(closing) = nonempty_closing_brace(self.document, span) {
+            self.punctuation.commas.insert(closing);
+        }
+    }
+
+    fn mark_semicolon(&mut self, span: crate::ast::Span) {
+        if let Some(closing) = nonempty_closing_brace(self.document, span) {
+            self.punctuation.commas.remove(&closing);
+            self.punctuation.semicolons.insert(closing);
+        }
+    }
+
+    fn mark_comma_for_items(
+        &mut self,
+        span: crate::ast::Span,
+        items: impl IntoIterator<Item = crate::ast::Span>,
+        single_item_is_vertical: bool,
+    ) {
+        let items = items.into_iter().collect::<Vec<_>>();
+        let itemized = (items.len() == 1
+            && (single_item_is_vertical
+                || line_breaks(&self.document.source()[span.start..span.end]) > 0))
+            || items
+                .windows(2)
+                .any(|pair| line_breaks(&self.document.source()[pair[0].end..pair[1].start]) > 0);
+        if itemized {
+            self.mark_comma(span);
+            return;
+        }
+        if let Some(closing) = nonempty_closing_brace(self.document, span) {
+            self.punctuation.commas.remove(&closing);
+            if let Some(comma) = trailing_comma_before(self.document, span, closing) {
+                self.punctuation.omitted_commas.insert(comma);
+            }
+        }
+    }
+}
+
+impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
+    fn visit_program(&mut self, program: &'ast Program) {
+        if !program.settings.is_empty()
+            && let Some(span) = program.settings_span
+        {
+            self.mark_comma(span);
+        }
+        visit::walk_program(self, program);
+    }
+
+    fn visit_state(&mut self, state: &'ast StateDecl) {
+        if !state.fields.is_empty() {
+            self.mark_semicolon(state.span);
+        } else if !state.layouts.is_empty() {
+            self.mark_comma(state.span);
+        }
+        for layout in &state.layouts {
+            if !layout.fields.is_empty() {
+                self.mark_semicolon(layout.span);
+            }
+            for field in &layout.fields {
+                self.visit_state_field(field);
+            }
+        }
+        for field in &state.fields {
+            self.visit_state_field(field);
+        }
+    }
+
+    fn visit_record(&mut self, record: &'ast RecordDecl) {
+        if !record.fields.is_empty() {
+            self.mark_comma(record.span);
+        }
+        visit::walk_record(self, record);
+    }
+
+    fn visit_enum(&mut self, enumeration: &'ast EnumDecl) {
+        if !enumeration.variants.is_empty() {
+            self.mark_comma(enumeration.span);
+        }
+        visit::walk_enum(self, enumeration);
+    }
+
+    fn visit_setting(&mut self, setting: &'ast SettingDecl) {
+        match &setting.kind {
+            SettingKind::Title { .. } => {
+                self.mark_comma(setting.span);
+            }
+            SettingKind::Choice { options, .. } if !options.is_empty() => {
+                self.mark_comma(setting.span);
+            }
+            SettingKind::File { filters } if !filters.is_empty() => {
+                self.mark_comma(setting.span);
+            }
+            SettingKind::Bool { .. } | SettingKind::Choice { .. } | SettingKind::File { .. } => {}
+        }
+        visit::walk_setting(self, setting);
+    }
+
+    fn visit_expr(&mut self, expression: &'ast Expr) {
+        match &expression.kind {
+            ExprKind::Record { fields, .. } if !fields.is_empty() => {
+                self.mark_comma_for_items(
+                    expression.span,
+                    fields.iter().map(|(_, value)| value.span),
+                    false,
+                );
+            }
+            ExprKind::Match { arms, .. } if !arms.is_empty() => {
+                self.mark_comma(expression.span);
+            }
+            _ => {}
+        }
+        visit::walk_expr(self, expression);
+    }
+}
+
+fn nonempty_closing_brace(document: &SourceDocument, span: crate::ast::Span) -> Option<usize> {
+    let tokens = document
+        .tokens()
+        .filter(|token| span.start <= token.span.start && token.span.end <= span.end)
+        .collect::<Vec<_>>();
+    let closing_index = tokens
+        .iter()
+        .rposition(|token| token.kind == TokenKind::RBrace)?;
+    let mut depth = 0usize;
+    let mut opening_index = None;
+    for index in (0..closing_index).rev() {
+        match tokens[index].kind {
+            TokenKind::RBrace => depth += 1,
+            TokenKind::LBrace if depth == 0 => {
+                opening_index = Some(index);
+                break;
+            }
+            TokenKind::LBrace => depth -= 1,
+            _ => {}
+        }
+    }
+    let opening_index = opening_index?;
+    (opening_index + 1 < closing_index).then_some(tokens[closing_index].span.start)
+}
+
+fn trailing_comma_before(
+    document: &SourceDocument,
+    span: crate::ast::Span,
+    closing: usize,
+) -> Option<usize> {
+    document
+        .tokens()
+        .take_while(|token| token.span.start < closing)
+        .filter(|token| span.start <= token.span.start)
+        .last()
+        .filter(|token| token.kind == TokenKind::Comma)
+        .map(|token| token.span.start)
 }
 
 fn close_delimiter(
@@ -802,7 +1161,8 @@ fn needs_space(
     }
 
     if matches!(current, TokenKind::LParen) {
-        return matches!(previous, TokenKind::Ident(name) if matches!(name.as_str(), "if" | "while" | "match"));
+        return matches!(previous, TokenKind::Ident(name) if matches!(name.as_str(), "if" | "while" | "match"))
+            || (!previous_was_generic_close && is_spaced_operator(previous));
     }
     if matches!(current, TokenKind::LBracket) {
         return true;
@@ -841,6 +1201,10 @@ fn is_prefix_keyword(name: &str) -> bool {
 
 fn is_prefix_operator(current: &TokenKind, previous: Option<&TokenKind>) -> bool {
     matches!(current, TokenKind::Bang | TokenKind::Tilde)
+        && previous.is_none_or(|previous| {
+            is_prefix_boundary(previous)
+                || matches!(previous, TokenKind::Ident(name) if is_prefix_keyword(name))
+        })
         || matches!(current, TokenKind::Minus) && previous.is_none_or(is_prefix_boundary)
 }
 
@@ -953,9 +1317,41 @@ whileAttached {
     }
 
     #[test]
+    fn uses_trailing_commas_only_for_multiline_lists() {
+        let source = r#"record Point { x: i32, y: i32, }
+enum Mode { First, Second, }
+state "game.exe" { value = 1 }
+fn compact() { print(1, 2,) }
+fn multiline() {
+    print(
+        1,
+        2
+    )
+    let values = [
+        1,
+        2
+    ]
+}"#;
+
+        let formatted = format_source(source).unwrap();
+        assert!(
+            formatted.contains("record Point {\n    x: i32,\n    y: i32,\n}"),
+            "{formatted}"
+        );
+        assert!(
+            formatted.contains("enum Mode {\n    First,\n    Second,\n}"),
+            "{formatted}"
+        );
+        assert!(formatted.contains("print(1, 2)"), "{formatted}");
+        assert!(formatted.contains("        2,\n    )"), "{formatted}");
+        assert!(formatted.contains("        2,\n    ]"), "{formatted}");
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn keeps_literal_spellings_templates_signatures_and_type_postfixes() {
         let source = r#"state "game.exe"{bytes:[u8;6] at 0x100}
-fn probe(value:[u8]!)->String{let missing:[u8]?=None;let fixed:[u8;3]=[1,2,3];let sigValue=sig"48 8B ??";let version=v"1.2.3.4";return `{value.length()}:{fixed.length()}:{missing==None}:{sigValue as String}`}
+fn probe(value:[u8]!)->String{let missing:[u8]?=None;let outcome:i32! = Err("missing");let fixed:[u8;3]=[1,2,3];let sigValue=sig"48 8B ??";let version=v"1.2.3.4";return `{value.length()}:{fixed.length()}:{missing==None}:{sigValue as String}`}
 fn nested()->[[u8]]{return [[1]]}
 fn fallible()->f32!{return Err("missing")}
 fn optional()->f32?{return None}"#;
@@ -969,6 +1365,8 @@ fn optional()->f32?{return None}"#;
         );
         assert!(formatted.contains("value: [u8]!"), "{formatted}");
         assert!(formatted.contains("missing: [u8]? = None"));
+        assert!(formatted.contains("outcome: i32! = Err(\"missing\")"));
+        assert!(!formatted.contains("i32!="));
         assert!(formatted.contains("fn nested() -> [[u8]] {"), "{formatted}");
         assert!(formatted.contains("fn fallible() -> f32! {"), "{formatted}");
         assert!(formatted.contains("fn optional() -> f32? {"), "{formatted}");
@@ -985,10 +1383,25 @@ fn optional()->f32?{return None}"#;
     }
 
     #[test]
+    fn joins_array_indexes_to_their_receiver() {
+        let source = r#"state "game.exe" {}
+fn select(matrix: [[i32]], row: u32, column: u32) -> i32 {
+    return matrix [ row ] [ column ]
+}"#;
+        let formatted = format_source(source).unwrap();
+        assert!(
+            formatted.contains("return matrix[row][column]"),
+            "{formatted}"
+        );
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        crate::check(crate::lower(crate::parse(&formatted).unwrap())).unwrap();
+    }
+
+    #[test]
     fn formats_bounded_state_string_decoders_as_part_of_the_pointer_path() {
         let source = r#"state "game.exe"{mapName at "game.dll",0x100,0x20 as utf8(64)}"#;
         let expected = r#"state "game.exe" {
-    mapName at "game.dll", 0x100, 0x20 as utf8(64)
+    mapName at "game.dll", 0x100, 0x20 as utf8(64);
 }
 "#;
 
@@ -1040,14 +1453,14 @@ fn describe(point:Point){return point.x as String}
 "#;
         let expected = r#"state "game.exe" {
     /// Current stage.
-    stage: i32 at 0x100
+    stage: i32 at 0x100;
 }
 /// Shared counter.
 let count = 0
 /// Coordinate pair.
 record Point {
     /// Horizontal coordinate.
-    x: i32
+    x: i32,
 }
 /// Converts a point.
 fn describe(point: Point) {
@@ -1146,13 +1559,13 @@ return match value {0=>"zero",1=>`value {value+1}`,_=>"other"}
         let expected = r#"state "game.exe" {
     value = process.read(
         0x1000
-    )
+    );
 }
 fn describe(value) {
     return match value {
         0 => "zero",
         1 => `value {value + 1}`,
-        _ => "other"
+        _ => "other",
     }
 }
 "#;
@@ -1182,7 +1595,7 @@ return creditsTransition
         value
     } else {
         fallback
-    }
+    };
 }
 split {
     let creditsTransition = !isDlcDemo
@@ -1201,8 +1614,8 @@ split {
     fn block_indentation_supersedes_an_enclosing_multiline_call() {
         let source = r#"state "game.exe" {}
 enum DelayedSplit {
-Inactive
-ReceiveMinishCap
+Inactive,
+ReceiveMinishCap,
 GetFourSword
 }
 whileAttached {
@@ -1214,15 +1627,15 @@ DelayedSplit.Inactive => "Delayed split"
 }"#;
         let expected = r#"state "game.exe" {}
 enum DelayedSplit {
-    Inactive
-    ReceiveMinishCap
-    GetFourSword
+    Inactive,
+    ReceiveMinishCap,
+    GetFourSword,
 }
 whileAttached {
     debug print(match delayedSplit {
         DelayedSplit.ReceiveMinishCap => "Receive Minish Cap",
         DelayedSplit.GetFourSword => "Get Four Sword",
-        DelayedSplit.Inactive => "Delayed split"
+        DelayedSplit.Inactive => "Delayed split",
     })
 }
 "#;
@@ -1236,7 +1649,7 @@ whileAttached {
     fn indents_nested_settings_and_their_specialized_entries() {
         let source = r#"state "game.exe" {}
 enum Mode {
-A
+A,
 B
 }
 settings{"Group"{/// Enables the feature.
@@ -1245,8 +1658,8 @@ settings{"Group"{/// Enables the feature.
 =>mode:choice{"First"=>Mode.A,"Second"=>Mode.B default},"Input"=>input:file{"Text"=>"*.txt",mime=>"text/plain"}}}"#;
         let expected = r#"state "game.exe" {}
 enum Mode {
-    A
-    B
+    A,
+    B,
 }
 settings {
     "Group" {
@@ -1254,13 +1667,13 @@ settings {
         "Enabled" => enabled: true,
         "Mode" => mode: choice {
             "First" => Mode.A,
-            "Second" => Mode.B default
+            "Second" => Mode.B default,
         },
         "Input" => input: file {
             "Text" => "*.txt",
-            mime => "text/plain"
-        }
-    }
+            mime => "text/plain",
+        },
+    },
 }
 "#;
 
@@ -1295,14 +1708,14 @@ settings {
 
     #[test]
     fn formats_named_state_layouts_and_their_selector() {
-        let source = r#"state "game.exe"{layout Steam{level:u32 at 0x100}layout GOG{level:u32 at 0x200}}onAttach{return StateLayout.Steam}"#;
+        let source = r#"state "game.exe"{layout Steam{level:u32 at 0x100},layout GOG{level:u32 at 0x200}}onAttach{return StateLayout.Steam}"#;
         let expected = r#"state "game.exe" {
     layout Steam {
-        level: u32 at 0x100
-    }
+        level: u32 at 0x100;
+    },
     layout GOG {
-        level: u32 at 0x200
-    }
+        level: u32 at 0x200;
+    },
 }
 onAttach {
     return StateLayout.Steam
@@ -1316,11 +1729,26 @@ onAttach {
     #[test]
     fn keeps_generic_call_arguments_attached_without_a_turbofish() {
         let source = r#"state "game.exe"{}
-whileAttached{let value=process.read<[u8;4]> (0);print<u32> (value.get(0))}"#;
+whileAttached{let value=process.read<[u8;4]> (0);print<u32> (value [0])}"#;
         let expected = r#"state "game.exe" {}
 whileAttached {
     let value = process.read<[u8; 4]>(0);
-    print<u32>(value.get(0))
+    print<u32>(value[0])
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn spaces_grouped_operands_after_binary_operators() {
+        let source = r#"state "game.exe"{}
+fn atMissionPoint(point:MissionPoint,y:f64)->bool{return y==(point.y as f64).roundTo(3)}"#;
+        let expected = r#"state "game.exe" {}
+fn atMissionPoint(point: MissionPoint, y: f64) -> bool {
+    return y == (point.y as f64).roundTo(3)
 }
 "#;
 

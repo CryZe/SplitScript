@@ -558,7 +558,7 @@ fn match_arm_suspensions_are_selected_and_payloads_survive_resumption() {
         state "game.exe" {}
 
         enum Input {
-            Value(u32)
+            Value(u32),
             Missing
         }
 
@@ -1219,7 +1219,7 @@ fn result_mismatches_use_source_types_and_explain_unwrapping() {
 fn generic_process_read_infers_memory_types_bidirectionally() {
     let source = r#"
         state "game.exe" {
-            counter: i16 = process.read(0x1000)
+            counter: i16 = process.read(0x1000);
             inferred = process.read(0x1002)
         }
 
@@ -1319,18 +1319,18 @@ fn memory_readable_records_have_shared_layouts_and_single_read_lowering() {
 
     let source = r#"
         record Header {
-            tag: u8
-            count: u32
+            tag: u8,
+            count: u32,
             flags: u16
         }
 
         record Packet {
-            version: u16
+            version: u16,
             header: Header
         }
 
         state "game.exe" {
-            packet: Packet = process.read(0x1000)
+            packet: Packet = process.read(0x1000);
             packetFromPath: Packet at 0x3000
         }
 
@@ -1406,22 +1406,22 @@ fn fixed_arrays_have_exact_memory_layouts_and_use_ordinary_array_methods() {
 
     let source = r#"
         record Entry {
-            id: u16
+            id: u16,
             flags: u8
         }
 
         state "game.exe" {
-            bytes: [u8; 6] at 0x1000
+            bytes: [u8; 6] at 0x1000;
             entries: [Entry; 2] at 0x2000
         }
 
         fn firstByte(values: [u8]) {
-            return values.get(0)
+            return values[0]
         }
 
         whileAttached {
             let first = firstByte(current.bytes)
-            let entry = current.entries.get(1)
+            let entry = current.entries[1]
             print(`{current.bytes.length()}:{first}:{entry.id}`)
         }
     "#;
@@ -1502,7 +1502,7 @@ fn fixed_arrays_have_exact_memory_layouts_and_use_ordinary_array_methods() {
 fn expression_backed_state_fields_use_discovered_addresses_and_rotate_snapshots() {
     let source = r#"
         state "game.exe" {
-            points: i32 = process.read<i32>(gameManager.offset(pointsOffset))
+            points: i32 = process.read<i32>(gameManager.offset(pointsOffset));
             stopped: bool = process.read<bool>(timerInstance.offset(stoppedOffset))
         }
 
@@ -1703,7 +1703,7 @@ fn unreachable_gc_layouts_are_pruned_and_live_layouts_are_remapped() {
     let with_dead_layouts = splitscript::compile(
         r#"
             enum DeadEnum {
-                Empty
+                Empty,
                 Value(i32)
             }
             record DeadRecord { value: DeadEnum? }

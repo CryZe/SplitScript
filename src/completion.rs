@@ -785,6 +785,12 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
         | ExprKind::Unary { expr: value, .. } => {
             add_expression_bindings(builder, value, offset);
         }
+        ExprKind::Index {
+            receiver, index, ..
+        } => {
+            add_expression_bindings(builder, receiver, offset);
+            add_expression_bindings(builder, index, offset);
+        }
         ExprKind::Cast { expr, .. } => add_expression_bindings(builder, expr, offset),
         ExprKind::Binary { left, right, .. } => {
             add_expression_bindings(builder, left, offset);
@@ -1230,7 +1236,7 @@ record Position {
 }
 
 enum Mode {
-    Idle
+    Idle,
     Active(i32)
 }
 
@@ -1353,19 +1359,15 @@ state "game.exe" {}
     }
 
     #[test]
-    fn completes_array_methods_on_snapshot_fields() {
+    fn completes_array_members_and_indexed_elements_on_snapshot_fields() {
         let source = include_str!("../examples/minish_cap.split");
-        let mut database = CompilerDatabase::new(source);
-        let completions = labels(&mut database, "old.inventory.get");
-        assert!(completions.contains(&"get".to_owned()));
-
-        let element_source = source.replacen("old.inventory.get(5)", "old.inventory.get(5).", 1);
+        let element_source = source.replacen("old.inventory[5]", "old.inventory[5].", 1);
         let mut database = CompilerDatabase::new(element_source);
-        let element = labels(&mut database, "old.inventory.get(5).");
+        let element = labels(&mut database, "old.inventory[5].");
         assert!(element.contains(&"min".to_owned()), "{element:#?}");
         assert!(element.contains(&"max".to_owned()), "{element:#?}");
         assert!(element.contains(&"clamp".to_owned()), "{element:#?}");
-        for array_method in ["get", "set", "length", "isEmpty"] {
+        for array_method in ["set", "length", "isEmpty"] {
             assert!(
                 !element.contains(&array_method.to_owned()),
                 "array method `{array_method}` leaked onto u8 completion: {element:#?}"
@@ -1383,7 +1385,8 @@ split {
 "#;
         let mut database = CompilerDatabase::new(incomplete);
         let completions = labels(&mut database, "old.inventory.");
-        assert!(completions.contains(&"get".to_owned()));
+        assert!(!completions.contains(&"get".to_owned()));
+        assert!(completions.contains(&"set".to_owned()));
         assert!(completions.contains(&"length".to_owned()));
         assert!(completions.contains(&"isEmpty".to_owned()));
     }
@@ -1514,7 +1517,7 @@ fn masked(value) {
     fn named_layouts_complete_the_generated_type_value_and_variants() {
         let source = r#"
 state "game.exe" {
-    layout Steam { level: u32 at 0x100 }
+    layout Steam { level: u32 at 0x100 },
     layout GOG { level: u32 at 0x200 }
 }
 onAttach { return StateLayout. }

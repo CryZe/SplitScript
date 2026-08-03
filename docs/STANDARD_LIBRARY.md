@@ -63,7 +63,7 @@ state GBA {
 `[T; N]` carries its exact element count in the type. When `T` is
 `MemoryReadable`, the provider reads the complete fixed array in one host call
 and constructs the GC array only after that call succeeds. It otherwise uses
-the ordinary `[T]` methods, so `current.inventory.get(0)` reads the first byte
+ordinary array indexing, so `current.inventory[0]` reads the first byte
 from the already captured snapshot.
 
 Discovery covers VisualBoyAdvance/VBA-M, mGBA's contiguous mapping, NO$GBA,

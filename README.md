@@ -15,13 +15,13 @@ explicit debug or release profile.
 
 ```text
 state ["Lunistice.exe", "Lunistice-Demo.exe"] {
-    points: u32 at "GameAssembly.dll", 0x02dd53f0, 0xb8, 0x20, 0x12c
-    loading: bool at "GameAssembly.dll", 0x02dd5480, 0x10
+    points: u32 at "GameAssembly.dll", 0x02dd53f0, 0xb8, 0x20, 0x12c;
+    loading: bool at "GameAssembly.dll", 0x02dd5480, 0x10;
 }
 
 settings {
     /// Splits whenever the point counter changes.
-    "Split on Points" => splitOnPoints: true
+    "Split on Points" => splitOnPoints: true,
 }
 
 onAttach {
@@ -217,8 +217,8 @@ compile-time and output-size measurements are recorded in
 - Type-directed methods with an implicit `self` and nested receiver calls.
 - Demand-monomorphized generic function bodies and GC arrays, including the
   general `[T]` and exact-length `[T; N]` forms, inferred literals, and typed
-  `length`/`get`/`set` methods. Fixed arrays of readable elements support one
-  transactional typed process-memory read.
+  `array[index]` access plus `length`/`set` methods. Fixed arrays of readable
+  elements support one transactional typed process-memory read.
 - Inferred `for value in array` loops over `[T]` and `[T; N]`, with read-only
   scoped bindings, `break`/`continue`, single evaluation of the iterable, and
   suspension-safe `await`/`retry` bodies in `onAttach`.

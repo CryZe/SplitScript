@@ -218,15 +218,15 @@ fn csharp_numeric_type_names_have_machine_applicable_fixes() {
         state "game.exe" {}
 
         record CSharpNumbers {
-            signed8: sbyte
-            unsigned8: byte
-            signed16: short
-            unsigned16: ushort
-            signed32: int
-            unsigned32: uint
-            signed64: long
-            unsigned64: ulong
-            single: float
+            signed8: sbyte,
+            unsigned8: byte,
+            signed16: short,
+            unsigned16: ushort,
+            signed32: int,
+            unsigned32: uint,
+            signed64: long,
+            unsigned64: ulong,
+            single: float,
             doublePrecision: double
         }
 
@@ -392,7 +392,7 @@ fn asl_string_n_fields_offer_an_encoding_aware_rewrite() {
 
     let source = r#"
         state "game.exe" {
-            string50 map : "game.exe", 0x100, 0x20
+            string50 map : "game.exe", 0x100, 0x20;
             after: u32 at 0x200
         }
     "#;

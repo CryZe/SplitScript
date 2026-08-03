@@ -54,6 +54,7 @@ pub(crate) fn hover(
     database: &mut CompilerDatabase,
     offset: usize,
 ) -> SemanticQueryResult<Option<HoverInfo>> {
+    let offset = database.symbol_query_offset(offset)?;
     let standard_library = database.context().standard_library();
     let Some(token) = database.token_at(offset)? else {
         return Ok(None);
@@ -1078,7 +1079,7 @@ whileAttached {
         let source = r#"
 state "game.exe" {
     /// Steam build layout.
-    layout Steam { level: u32 at 0x100 }
+    layout Steam { level: u32 at 0x100 },
     layout GOG { level: u32 at 0x200 }
 }
 onAttach { return StateLayout.Steam }
@@ -1131,8 +1132,8 @@ split { return layout == StateLayout.Steam }
 record Point { x: i32 }
 let global = 1
 state "game.exe" {
-    point: Point = process.read(0)
-    inventory: [u8; 6] at 0x100
+    point: Point = process.read(0);
+    inventory: [u8; 6] at 0x100;
 }
 settings {
     "General" {

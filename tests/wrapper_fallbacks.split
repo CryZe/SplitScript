@@ -29,6 +29,6 @@ whileAttached {
     let thrown = throwFailure() else 31
     setVariable(
         "Fallbacks",
-        `{empty},{present},{failed},{propagatedFailure},{propagatedSuccess},{questionFailure},{questionSuccess},{thrown}`
+        `{empty},{present},{failed},{propagatedFailure},{propagatedSuccess},{questionFailure},{questionSuccess},{thrown}`,
     )
 }

@@ -1454,14 +1454,14 @@ not another collection of `process.read` branches inside code generation.
 
   ```text
   record LevelTimeParts {
-      minutes: f32
-      seconds: f32
-      hundredths: f32
+      minutes: f32,
+      seconds: f32,
+      hundredths: f32,
   }
 
   levelTimeParts: LevelTimeParts = process.read(
       timerInstance.offset(levelTimeVectorOffset)
-  )
+  );
   ```
 
 ### Managed strings

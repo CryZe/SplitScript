@@ -1017,6 +1017,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             | ExprKind::Fallback { .. }
             | ExprKind::Suspend { .. }
             | ExprKind::Propagate(_)
+            | ExprKind::Index { .. }
             | ExprKind::Unary { .. }
             | ExprKind::Binary { .. } => {}
         }

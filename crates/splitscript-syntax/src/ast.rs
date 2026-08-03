@@ -835,6 +835,11 @@ pub enum ExprKind {
         name: String,
         name_span: Span,
     },
+    Index {
+        receiver: Box<Expr>,
+        index: Box<Expr>,
+        bracket_span: Span,
+    },
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,

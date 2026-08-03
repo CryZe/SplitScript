@@ -1,6 +1,6 @@
 record Wrapped {
-    optional: i32?
-    result: i32!
+    optional: i32?,
+    result: i32!,
 }
 
 state "game.exe" {}
@@ -14,10 +14,18 @@ whileAttached {
     let someB: i32? = 7
     let someOther: i32? = 8
 
-    if noneA == noneB { score += 1 }
-    if noneA != someA { score += 1 }
-    if someA == someB { score += 1 }
-    if someA != someOther { score += 1 }
+    if noneA == noneB {
+        score += 1
+    }
+    if noneA != someA {
+        score += 1
+    }
+    if someA == someB {
+        score += 1
+    }
+    if someA != someOther {
+        score += 1
+    }
 
     let successA: i32! = 7
     let successB: i32! = 7
@@ -26,17 +34,37 @@ whileAttached {
     let errorB: i32! = Err("boom")
     let errorOther: i32! = Err("different")
 
-    if successA == successB { score += 1 }
-    if successA != successOther { score += 1 }
-    if successA != errorA { score += 1 }
-    if errorA == errorB { score += 1 }
-    if errorA != errorOther { score += 1 }
+    if successA == successB {
+        score += 1
+    }
+    if successA != successOther {
+        score += 1
+    }
+    if successA != errorA {
+        score += 1
+    }
+    if errorA == errorB {
+        score += 1
+    }
+    if errorA != errorOther {
+        score += 1
+    }
 
-    let wrappedA = Wrapped { optional: someA, result: errorA }
-    let wrappedB = Wrapped { optional: someB, result: errorB }
-    let wrappedOther = Wrapped { optional: someOther, result: errorB }
-    if wrappedA == wrappedB { score += 1 }
-    if wrappedA != wrappedOther { score += 1 }
+    let wrappedA = Wrapped {
+        optional: someA, result: errorA
+    }
+    let wrappedB = Wrapped {
+        optional: someB, result: errorB
+    }
+    let wrappedOther = Wrapped {
+        optional: someOther, result: errorB
+    }
+    if wrappedA == wrappedB {
+        score += 1
+    }
+    if wrappedA != wrappedOther {
+        score += 1
+    }
 
     setVariable("Wrapper Equality", score as String)
 }

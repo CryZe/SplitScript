@@ -2,35 +2,34 @@
 // resulting roots and field offsets feed the expression-backed state block,
 // which rotates `current` and `old` snapshots automatically.
 enum LevelOrScene {
-    Level(i32)
-    Scene(String)
+    Level(i32),
+    Scene(String),
 }
 
 record LevelTimeParts {
-    minutes: f32
-    seconds: f32
-    hundredths: f32
+    minutes: f32,
+    seconds: f32,
+    hundredths: f32,
 }
 
 state ["Lunistice.exe", "Lunistice-Demo.exe"] {
-    gameState = process.read(gameManagerInstance.offset(gameStateOffset))
-    points = process.read(gameManagerInstance.offset(pointsOffset))
-    deaths = process.read(gameManagerInstance.offset(deathsOffset))
+    gameState = process.read(gameManagerInstance.offset(gameStateOffset));
+    points = process.read(gameManagerInstance.offset(pointsOffset));
+    deaths = process.read(gameManagerInstance.offset(deathsOffset));
     levelOrScene = if isDlcDemo {
         LevelOrScene.Scene(process.readManagedString(
             process.read(gameManagerInstance.offset(levelOrSceneOffset))?,
-            16
+            16,
         )?)
     } else {
         LevelOrScene.Level(process.read(
             gameManagerInstance.offset(levelOrSceneOffset)
         )?)
-    }
-
-    levelTime: f32 = process.read(timerInstance.offset(levelTimeOffset))
-    levelTimeParts = process.read(timerInstance.offset(levelTimeVectorOffset))
-    timerStopped = process.read(timerInstance.offset(timerStoppedOffset))
-    character: u32 = process.read(timerInstance.offset(characterOffset))
+    };
+    levelTime: f32 = process.read(timerInstance.offset(levelTimeOffset));
+    levelTimeParts = process.read(timerInstance.offset(levelTimeVectorOffset));
+    timerStopped = process.read(timerInstance.offset(timerStoppedOffset));
+    character: u32 = process.read(timerInstance.offset(characterOffset));
 }
 
 let gameManagerInstance = 0
@@ -53,21 +52,21 @@ let lastTimerState = TimerState.NotRunning
 fn isFirstLevel(levelOrScene) {
     return match levelOrScene {
         LevelOrScene.Level(level) => level == 0,
-        LevelOrScene.Scene(scene) => scene == "Shrine01"
+        LevelOrScene.Scene(scene) => scene == "Shrine01",
     }
 }
 
 fn isFinalBaseLevel(levelOrScene) {
     return match levelOrScene {
         LevelOrScene.Level(level) => level >= 13,
-        LevelOrScene.Scene => false
+        LevelOrScene.Scene => false,
     }
 }
 
 fn isBaseCredits(levelOrScene) {
     return match levelOrScene {
         LevelOrScene.Level(level) => level == 2,
-        LevelOrScene.Scene => false
+        LevelOrScene.Scene => false,
     }
 }
 
@@ -98,14 +97,14 @@ fn levelText(level) {
 fn levelOrSceneVariable(levelOrScene) {
     return match levelOrScene {
         LevelOrScene.Level => "Level",
-        LevelOrScene.Scene => "Scene"
+        LevelOrScene.Scene => "Scene",
     }
 }
 
 fn levelOrSceneText(levelOrScene) {
     return match levelOrScene {
         LevelOrScene.Level(level) => levelText(level),
-        LevelOrScene.Scene(scene) => scene
+        LevelOrScene.Scene(scene) => scene,
     }
 }
 
@@ -121,7 +120,7 @@ fn characterName(character, dlcDemo) {
         5 if !dlcDemo => "Null",
         6 if dlcDemo => "Cres",
         7 if dlcDemo => "BoxBuddy",
-        _ => "Unknown"
+        _ => "Unknown",
     }
 }
 

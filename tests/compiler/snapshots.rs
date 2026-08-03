@@ -6,13 +6,13 @@ use super::*;
 fn resolved_and_typed_hir_snapshot() {
     let source = r#"
         record Point {
-            x: i32
-            y: i32
+            x: i32,
+            y: i32,
         }
 
         enum Event {
-            Idle
-            Moved(Point)
+            Idle,
+            Moved(Point),
         }
 
         state "game.exe" {
@@ -458,6 +458,9 @@ fn snapshot_expression_kind(
         TypedExpressionKind::Path(path) => format!("path {}", path.join(".")),
         TypedExpressionKind::Member { receiver, name, .. } => {
             format!("member e{}.{}", receiver.index(), name)
+        }
+        TypedExpressionKind::Index { receiver, index } => {
+            format!("index e{}[e{}]", receiver.index(), index.index())
         }
         TypedExpressionKind::Unary { op, expression } => {
             format!("{op:?} e{}", expression.index())

@@ -6,15 +6,15 @@ fn named_state_layouts_select_a_typed_layout_and_validate() {
         state "game.exe" {
             /// Steam memory layout.
             layout Steam {
-                level: u32 at 0x100
-                loading: bool at 0x104
-            }
+                level: u32 at 0x100;
+                loading: bool at 0x104;
+            },
 
             /// GOG memory layout.
             layout GOG {
-                loading: bool at 0x204
-                level: u32 at 0x200
-            }
+                loading: bool at 0x204;
+                level: u32 at 0x200;
+            },
         }
 
         onAttach {
@@ -43,8 +43,8 @@ fn named_state_layouts_select_a_typed_layout_and_validate() {
 fn named_state_layouts_require_the_same_interface() {
     let source = r#"
         state "game.exe" {
-            layout Steam { level: u32 at 0x100 }
-            layout GOG { loading: bool at 0x200 }
+            layout Steam { level: u32 at 0x100 },
+            layout GOG { loading: bool at 0x200 },
         }
         onAttach { return StateLayout.Steam }
     "#;
@@ -137,4 +137,37 @@ fn generated_layout_type_and_value_navigate_but_are_not_renameable() {
 
     let steam = source.rfind("Steam").unwrap() + 1;
     assert!(database.rename_target_at(steam).unwrap().is_some());
+}
+
+#[test]
+fn renaming_a_named_layout_field_updates_the_shared_state_interface() {
+    use splitscript::tooling::database::CompilerDatabase;
+
+    let source = r#"
+        state "game.exe" {
+            layout Steam { level: u32 at 0x100 },
+            layout GOG { level: u32 at 0x200 },
+        }
+        onAttach { return StateLayout.Steam }
+        split { return current.level != old.level }
+    "#;
+    let second_declaration = source.match_indices("level: u32").nth(1).unwrap().0;
+    let mut database = CompilerDatabase::new(source);
+
+    let spans = database.rename_at(second_declaration, "stage").unwrap();
+    assert_eq!(spans.len(), 4);
+    assert!(
+        spans
+            .iter()
+            .all(|span| &source[span.start..span.end] == "level")
+    );
+
+    let mut renamed = source.to_owned();
+    for span in spans.iter().rev() {
+        renamed.replace_range(span.start..span.end, "stage");
+    }
+    splitscript::compile(&renamed).expect("the renamed shared state interface should compile");
+
+    let use_site = source.find("current.level").unwrap() + "current.".len();
+    assert_eq!(database.rename_at(use_site, "stage").unwrap(), spans);
 }

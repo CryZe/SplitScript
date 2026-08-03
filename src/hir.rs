@@ -249,6 +249,10 @@ pub enum TypedExpressionKind {
         name: String,
         name_span: Span,
     },
+    Index {
+        receiver: ExprId,
+        index: ExprId,
+    },
     Unary {
         op: UnaryOp,
         expression: ExprId,
@@ -943,6 +947,10 @@ pub fn walk_typed_expression<V: TypedVisitor>(
         TypedExpressionKind::Suspend { value, .. }
         | TypedExpressionKind::Propagate { value, .. } => visit_expression(*value),
         TypedExpressionKind::Member { receiver, .. } => visit_expression(*receiver),
+        TypedExpressionKind::Index { receiver, index } => {
+            visit_expression(*receiver);
+            visit_expression(*index);
+        }
         TypedExpressionKind::Unary { expression, .. }
         | TypedExpressionKind::Cast { expression, .. } => visit_expression(*expression),
         TypedExpressionKind::Binary { left, right, .. } => {
@@ -1167,6 +1175,12 @@ fn lower_expression_kind(
             receiver: receiver.id,
             name: name.clone(),
             name_span: *name_span,
+        },
+        ExprKind::Index {
+            receiver, index, ..
+        } => TypedExpressionKind::Index {
+            receiver: receiver.id,
+            index: index.id,
         },
         ExprKind::Unary { op, expr } => TypedExpressionKind::Unary {
             op: *op,

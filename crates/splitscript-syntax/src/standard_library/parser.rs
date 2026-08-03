@@ -355,6 +355,9 @@ impl Parser<'_> {
                 if !self.eat(&TokenKind::Comma) {
                     break;
                 }
+                if self.at(&TokenKind::Gt) {
+                    break;
+                }
             }
             self.expect(TokenKind::Gt, "expected `>` after type parameters")?;
         }
@@ -398,6 +401,9 @@ impl Parser<'_> {
                 loop {
                     arguments.push(self.ty()?);
                     if self.eat(&TokenKind::Comma) {
+                        if self.at(&TokenKind::Gt) {
+                            break;
+                        }
                     } else {
                         break;
                     }
@@ -812,6 +818,25 @@ struct Module {
         assert_eq!(read.type_parameters[0].constraints, ["MemoryReadable"]);
         assert_eq!(read.parameters[0].attributes[0].name, "literal");
         assert_eq!(read.result.to_string(), "T!");
+    }
+
+    #[test]
+    fn accepts_trailing_commas_in_privileged_generic_lists() {
+        let source = r#"
+/// Generic container.
+typeConstructor Box<T,> {
+    /// Wraps a value.
+    fn wrap<U,>(value: U,) -> Box<U,>;
+}
+"#;
+        let library = parse(source).expect("trailing commas should parse");
+        let Declaration::TypeConstructor(box_type) = &library.declarations[0] else {
+            panic!("expected a type constructor")
+        };
+        assert_eq!(box_type.type_parameters[0].name, "T");
+        assert_eq!(box_type.functions[0].type_parameters[0].name, "U");
+        assert_eq!(box_type.functions[0].parameters[0].name, "value");
+        assert_eq!(box_type.functions[0].result.to_string(), "Box<U>");
     }
 
     #[test]

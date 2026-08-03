@@ -18,12 +18,14 @@ whileAttached {
     }
     if !text.contains("STRASSE")
         && !text.startsWith("traße")
-        && !text.endsWith("Complete!") {
+        && !text.endsWith("Complete!")
+    {
         matches += 16
     }
     if !"short".contains("a longer value")
         && !"short".startsWith("a longer value")
-        && !"short".endsWith("a longer value") {
+        && !"short".endsWith("a longer value")
+    {
         matches += 32
     }
     if (text.slice(1, 7) else "") == "traße" {
@@ -34,22 +36,22 @@ whileAttached {
     }
     let reversedFailed = match text.slice(6, 5) {
         Ok(_) => false,
-        Err(_) => true
+        Err(_) => true,
     }
     let outOfRangeFailed = match text.slice(0, 100) {
         Ok(_) => false,
-        Err(_) => true
+        Err(_) => true,
     }
     if reversedFailed && outOfRangeFailed {
         matches += 256
     }
     let invalidStartBoundary = match text.slice(5, 7) {
         Ok(_) => false,
-        Err(_) => true
+        Err(_) => true,
     }
     let invalidEndBoundary = match text.slice(1, 5) {
         Ok(_) => false,
-        Err(_) => true
+        Err(_) => true,
     }
     if invalidStartBoundary && invalidEndBoundary {
         matches += 512
@@ -57,19 +59,21 @@ whileAttached {
     if "lUnIsTiCe.ExE".equalsIgnoreAsciiCase("LUNISTICE.EXE")
         && "CAFé".equalsIgnoreAsciiCase("café")
         && !"Straße".equalsIgnoreAsciiCase("STRASSE")
-        && !"game.exe".equalsIgnoreAsciiCase("game-demo.exe") {
+        && !"game.exe".equalsIgnoreAsciiCase("game-demo.exe")
+    {
         matches += 1024
     }
     let emptySearchFailed = match "abc".replaceAll("", "-") {
         Ok(_) => false,
-        Err(_) => true
+        Err(_) => true,
     }
     if ("cat cat".replaceAll("cat", "dog") else "") == "dog dog"
         && ("Straße Straße".replaceAll("ße", "X") else "") == "StraX StraX"
         && ("aaa".replaceAll("a", "🙂") else "") == "🙂🙂🙂"
         && ("aaa".replaceAll("aa", "b") else "") == "ba"
         && ("unchanged".replaceAll("missing", "value") else "") == "unchanged"
-        && emptySearchFailed {
+        && emptySearchFailed
+    {
         matches += 2048
     }
 

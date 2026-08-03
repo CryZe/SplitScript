@@ -505,7 +505,9 @@ fn hover_and_signature_help_preserve_resolved_catalog_information() {
     assert!(markdown.contains("Runtime behavior"));
     assert!(markdown.contains("Examples"));
 
-    let value_offset = source.rfind("number").unwrap() + 2;
+    // A cursor immediately after the receiver is also positioned on the dot
+    // under half-open source coordinates.
+    let value_offset = source.rfind("number").unwrap() + "number".len();
     let (value_line, value_character) = position_parts(source, value_offset);
     let value_hover = server.handle(json!({
         "jsonrpc": "2.0",
@@ -647,7 +649,9 @@ fn definition_and_references_use_source_identities_and_utf16_ranges() {
         }),
     ));
 
-    let call = source.rfind("inspect").unwrap() + 2;
+    // The cursor immediately after the function name shares its position with
+    // the opening parenthesis.
+    let call = source.rfind("inspect").unwrap() + "inspect".len();
     let (line, character) = position_parts(source, call);
     let definition = server.handle(json!({
         "jsonrpc": "2.0",
@@ -778,7 +782,7 @@ fn prepare_rename_and_rename_emit_validated_workspace_edits() {
     );
     let uri = "file:///rename.split";
     let call = source.rfind("inspect").unwrap();
-    let (line, character) = position_parts(source, call + 2);
+    let (line, character) = position_parts(source, call + "inspect".len());
     let mut server = LanguageServer::default();
     initialize(&mut server);
     server.handle(notification(
@@ -1095,8 +1099,8 @@ fn code_actions_extract_selected_expressions() {
 fn unused_member_code_actions_apply_validated_multi_edit_suppressions() {
     let source = concat!(
         "record Pair {\n",
-        "    used: i32\n",
-        "    unused: i32\n",
+        "    used: i32,\n",
+        "    unused: i32,\n",
         "}\n",
         "state \"game.exe\" {}\n",
         "fn pair() -> Pair { return Pair { used: 1, unused: 2 } }\n",

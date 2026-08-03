@@ -16,12 +16,23 @@ It is statically typed. There is no JavaScript-style numeric supertype and no
 implicit widening between integer widths. This is important when values come
 from process memory.
 
+Closed comma-separated forms use punctuation rather than line breaks to
+separate items. This includes arguments, array and record literals, match arms,
+record fields, enum variants, state layouts, settings, choice options, and file
+filters. A trailing comma is always optional. The formatter adds one when it
+lays a list out across multiple lines and omits it for a compact one-line list.
+State fields are instead separated by semicolons because their unclosed pointer
+paths already use commas between offsets; the final semicolon is optional and
+the formatter adds it in multiline state blocks. Ordinary statements remain
+newline-terminated, with semicolons available when multiple statements share a
+line.
+
 ## State and pointer paths
 
 ```text
 state "game.exe" {
-    level: u16 at "game.exe", 0x1234, 0x20
-    score: u32 at 0x7ff612341000
+    level: u16 at "game.exe", 0x1234, 0x20;
+    score: u32 at 0x7ff612341000;
 }
 ```
 
@@ -55,11 +66,11 @@ field order may differ.
 ```text
 state "game.exe" {
     layout Steam {
-        level: u32 at 0x1000
-    }
+        level: u32 at 0x1000;
+    },
     layout GOG {
-        level: u32 at 0x2000
-    }
+        level: u32 at 0x2000;
+    },
 }
 
 onAttach {
@@ -529,9 +540,9 @@ fn isFinalLevel(level) {
 
 record Position {
     /// Horizontal position in world units.
-    x: f32
+    x: f32,
     /// Vertical position in world units.
-    y: f32
+    y: f32,
 }
 ```
 
@@ -568,9 +579,9 @@ fields; their source order does not matter.
 
 ```text
 record Digits {
-    minutes: f32
-    seconds: f32
-    hundredths: f32
+    minutes: f32,
+    seconds: f32,
+    hundredths: f32,
 }
 
 fn isFresh(value: Digits) -> bool {
@@ -580,7 +591,7 @@ fn isFresh(value: Digits) -> bool {
 let digits = Digits {
     seconds: 0.0,
     hundredths: 0.0,
-    minutes: 0.0
+    minutes: 0.0,
 }
 ```
 
@@ -607,14 +618,14 @@ and missing variants.
 
 ```text
 enum LevelOrScene {
-    Level(i32)
-    Scene(String)
+    Level(i32),
+    Scene(String),
 }
 
 fn isFirst(value: LevelOrScene) -> bool {
     return match value {
         LevelOrScene.Level(level) => level == 0,
-        LevelOrScene.Scene(scene) => scene == "Shrine01"
+        LevelOrScene.Scene(scene) => scene == "Shrine01",
     }
 }
 ```
@@ -629,7 +640,7 @@ fn characterName(character, dlcDemo) {
         3 if dlcDemo => "Accel",
         3 => "Erika",
         6 if dlcDemo => "Cres",
-        _ => "Unknown"
+        _ => "Unknown",
     }
 }
 ```
@@ -694,12 +705,13 @@ let inferred = [1, 2, 3] // [i32]
 let empty: [u16] = []
 
 bytes.set(1, 0x8b)
-let opcode = bytes.get(1)
+let opcode = bytes[1]
 let count = bytes.length()
 ```
 
-`length()` returns `u32`, `get(index)` returns `T`, and `set(index, value)`
-mutates the selected element. Wasm performs bounds checks. Arrays can contain
+`length()` returns `u32`, `array[index]` returns `T`, and `set(index, value)`
+mutates the selected element. The index is a `u32`, and Wasm performs bounds
+checks. Arrays can contain
 records, enums, strings, and other arrays, and can themselves be stored in
 records or continuation frames.
 
@@ -726,9 +738,9 @@ array and `[T!; N]` is a sized array of fallible values.
 
 ```text
 enum CaptureMode {
-    WindowTitle
-    ExecutableName
-    FullPath
+    WindowTitle,
+    ExecutableName,
+    FullPath,
 }
 
 settings {
@@ -736,26 +748,26 @@ settings {
     "General" {
         /// Can be changed while the splitter is running.
         "Enable Auto Splitting"
-            => enableAutoSplitting key "auto-splitting": true
+            => enableAutoSplitting key "auto-splitting": true,
 
         /// Chooses how the target application is identified.
         "Capture Source"
             => captureMode: choice {
-                "Window Title" => CaptureMode.WindowTitle
-                "Executable Name" => CaptureMode.ExecutableName default
-                "Full Path" => CaptureMode.FullPath
-            }
+                "Window Title" => CaptureMode.WindowTitle,
+                "Executable Name" => CaptureMode.ExecutableName default,
+                "Full Path" => CaptureMode.FullPath,
+            },
 
         /// Files used by the autosplitter.
         "Files" {
             /// Accepts image and JSON layout files.
             "Layout File" => layoutFile: file {
-                "Images" => "*.png *.jpg"
-                _ => "*.json"
-                mime => "image/*"
-            }
-        }
-    }
+                "Images" => "*.png *.jpg",
+                _ => "*.json",
+                mime => "image/*",
+            },
+        },
+    },
 }
 ```
 
@@ -856,7 +868,7 @@ let manager = 0
 let pointsOffset = 0
 
 state "game.exe" {
-    points: i32 = process.read(manager.offset(pointsOffset))
+    points: i32 = process.read(manager.offset(pointsOffset));
 }
 ```
 
@@ -1019,13 +1031,13 @@ so a state snapshot cannot observe a torn mixture of individually read fields.
 
 ```text
 record LevelTimeParts {
-    minutes: f32
-    seconds: f32
-    hundredths: f32
+    minutes: f32,
+    seconds: f32,
+    hundredths: f32,
 }
 
 state "game.exe" {
-    levelTimeParts: LevelTimeParts = process.read(timer.offset(levelTimeOffset))
+    levelTimeParts: LevelTimeParts = process.read(timer.offset(levelTimeOffset));
 }
 ```
 
@@ -1043,7 +1055,7 @@ resolved, and it infers the field as `String`:
 
 ```text
 state "game.exe" {
-    mapName at "game.dll", 0x1234, 0x20 as utf8(64)
+    mapName at "game.dll", 0x1234, 0x20 as utf8(64);
 }
 ```
 

@@ -36,13 +36,13 @@ pub struct LanguageItem {
 const DECLARATIONS_SOURCE: &str = r#"state "game.exe" {}
 
 record Position {
-    x: f32
-    y: f32
+    x: f32,
+    y: f32,
 }
 
 enum Mode {
-    Menu
-    Playing
+    Menu,
+    Playing,
 }
 
 fn modeName(mode: Mode) {
@@ -64,7 +64,7 @@ whileAttached {
 }"#;
 
 const STATE_SOURCE: &str = r#"state "game.exe" {
-    score = process.read<i32>(0x1000)
+    score = process.read<i32>(0x1000);
 }
 
 split {
@@ -72,7 +72,7 @@ split {
 }"#;
 
 const NATIVE_STRING_STATE_SOURCE: &str = r#"state "game.exe" {
-    mapName at "game.dll", 0x1234, 0x20 as utf8(64)
+    mapName at "game.dll", 0x1234, 0x20 as utf8(64);
 }
 
 whileAttached {
@@ -99,8 +99,8 @@ settings {
 const CONTROL_FLOW_SOURCE: &str = r#"state "game.exe" {}
 
 enum Mode {
-    Menu
-    Playing
+    Menu,
+    Playing,
 }
 
 fn modeName(mode: Mode) {
@@ -247,25 +247,25 @@ focused_example!(
 focused_example!(
     RECORD_EXAMPLE,
     "Group related values",
-    "record Position {\n    x: f32\n    y: f32\n}",
+    "record Position {\n    x: f32,\n    y: f32,\n}",
     DECLARATIONS_SOURCE
 );
 focused_example!(
     ENUM_EXAMPLE,
     "Describe distinct states",
-    "enum Mode {\n    Menu\n    Playing\n}",
+    "enum Mode {\n    Menu,\n    Playing,\n}",
     DECLARATIONS_SOURCE
 );
 focused_example!(
     STATE_DECL_EXAMPLE,
     "Read transactional state",
-    "state \"game.exe\" {\n    score = process.read<i32>(0x1000)\n}",
+    "state \"game.exe\" {\n    score = process.read<i32>(0x1000);\n}",
     STATE_SOURCE
 );
 focused_example!(
     STATE_LAYOUT_EXAMPLE,
     "Select a supported build",
-    "layout Steam {\n    value: u32 at 0x1000\n}",
+    "layout Steam {\n    value: u32 at 0x1000;\n}",
     STATE_LAYOUT_SOURCE
 );
 focused_example!(
@@ -277,7 +277,7 @@ focused_example!(
 focused_example!(
     SETTINGS_DECL_EXAMPLE,
     "Declare a toggle",
-    "settings {\n    \"Split bosses\" => splitBosses: true\n}",
+    "settings {\n    \"Split bosses\" => splitBosses: true,\n}",
     SETTINGS_SOURCE
 );
 focused_example!(
@@ -417,6 +417,12 @@ focused_example!(
     "Annotate an exact-length array",
     "let offsets: [u64; 2] = [0x100, 0x20]",
     TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    ARRAY_INDEX_EXAMPLE,
+    "Read an array element",
+    "let opcode = bytes[1]",
+    "state \"game.exe\" {}\nwhileAttached {\n    let bytes: [u8; 3] = [0x48, 0x8b, 0x01]\n    let opcode = bytes[1]\n    print(opcode)\n}"
 );
 focused_example!(
     OPTION_TYPE_EXAMPLE,
@@ -594,7 +600,7 @@ define_language_catalog! {
         Enum,
         "enum",
         LanguageItemKind::Declaration,
-        "enum Name { Variant Payload(Type) }",
+        "enum Name { Variant, Payload(Type) }",
         "Declares a nominal sum type.",
         "Enums support optional variant payloads, exhaustive match expressions, and structural equality when their payloads support it.",
         ENUM_EXAMPLE
@@ -603,7 +609,7 @@ define_language_catalog! {
         State,
         "state",
         LanguageItemKind::Declaration,
-        "state \"game.exe\" { field = expression } | state GBA { field at address }",
+        "state \"game.exe\" { field = expression; } | state GBA { field at address; }",
         "Declares process attachment and transactional watched state.",
         "Every state expression produces a Result. A tick commits a complete new snapshot only when all fields succeed.",
         STATE_DECL_EXAMPLE
@@ -839,8 +845,17 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "[Element] or [Element; Length]",
         "Names a garbage-collected array type.",
-        "[T] accepts any length. [T; N] carries an exact compile-time length, can be used wherever [T] is expected, and has a fixed process-memory layout when T is MemoryReadable. Both forms provide the same catalog-backed array methods.",
+        "[T] accepts any length. [T; N] carries an exact compile-time length, can be used wherever [T] is expected, and has a fixed process-memory layout when T is MemoryReadable.",
         ARRAY_TYPE_EXAMPLE
+    ),
+    language_item!(
+        ArrayIndex,
+        "array indexing",
+        LanguageItemKind::Syntax,
+        "array[index]",
+        "Reads an array element.",
+        "The receiver may be [T] or [T; N], the index is inferred as u32, and the result has type T. WebAssembly performs the bounds check.",
+        ARRAY_INDEX_EXAMPLE
     ),
     language_item!(
         OptionType,

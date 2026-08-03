@@ -12,7 +12,8 @@ whileAttached {
         && combined.totalSeconds() == 2.25
         && combined.totalMilliseconds() == 2_250.0
         && difference.wholeSeconds() == -2
-        && difference.subsecondNanoseconds() == 750_000_000 {
+        && difference.subsecondNanoseconds() == 750_000_000
+    {
         setVariable("Duration Helpers", "ok")
     }
 }

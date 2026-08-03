@@ -308,7 +308,17 @@ impl Checker {
         };
         let expected = self.shallow_type(expected);
         let actual_shallow = self.shallow_type(actual);
+        let none = self.core_type(crate::stdlib::CoreTypeId::None);
         let (kind, value) = match (expected, actual_shallow) {
+            (expected @ Type::Option(_), actual) if actual == none => {
+                self.semantics.resolve_value_conversion(
+                    expression,
+                    ValueConversionKind::NoneToOptional,
+                    actual,
+                    expected,
+                );
+                return Some(expected);
+            }
             (Type::Option(_), Type::Option(_)) | (Type::Result(_), Type::Result(_)) => {
                 return self.unify(actual, expected, span);
             }
@@ -605,7 +615,7 @@ mod tests {
             whileAttached {
                 let byte: u8 = 0x8b
                 let bytes = [0x48, byte]
-                if (0 == current.level && (1 + current.level) == 2 && bytes.get(0) == 0x48) {
+                if (0 == current.level && (1 + current.level) == 2 && bytes[0] == 0x48) {
                     print("inferred")
                 }
             }

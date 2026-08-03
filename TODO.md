@@ -266,6 +266,11 @@ remaining work is product hardening and distribution.
 - [ ] Complete remaining ordinary library gaps when a port needs them:
   multiplication/division/remainder operator roles, additional immutable String
   operations, and `Instant + Duration` with an explicit overflow contract.
+- [ ] Generalize first-class indexing beyond arrays only when another real type
+  needs it. Design an operator protocol with inferred index and output types
+  (the current single-receiver capability graph has no associated types), then
+  make its declarations, documentation, completion, and lowering catalog
+  driven rather than disguising the operation as a callable method.
 - [ ] Explore Unity managed strings as a readable wrapper/derived layout while
   preserving their pointer chasing, length validation, and UTF-16 conversion.
 - [ ] Add structural anonymous records only after named records prove materially

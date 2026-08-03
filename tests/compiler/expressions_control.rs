@@ -212,13 +212,13 @@ fn unused_bindings_warn_by_identity_and_support_intentional_underscores() {
 fn unused_declarations_follow_reachable_calls_and_global_reads() {
     let source = r#"
         enum LiveKind {
-            Active
+            Active,
             Dormant
         }
 
         record LiveRecord {
-            kind: LiveKind
-            ignored: i32
+            kind: LiveKind,
+            ignored: i32,
             _reserved: i32
         }
 
@@ -360,12 +360,12 @@ fn unused_declarations_follow_reachable_calls_and_global_reads() {
 fn structural_equality_observes_complete_record_and_enum_shapes() {
     let source = r#"
         record Pair {
-            left: i32
+            left: i32,
             right: i32
         }
 
         enum Mode {
-            First
+            First,
             Second
         }
 
@@ -404,7 +404,7 @@ fn structural_equality_observes_complete_record_and_enum_shapes() {
 fn if_expressions_infer_branches_bidirectionally_and_lower_to_wasm() {
     let source = r#"
         enum Selected {
-            Number(u16)
+            Number(u16),
             Text(String)
         }
 
@@ -1069,7 +1069,7 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
 
         record Counter { value: i32 }
         enum MaybeCounter {
-            Counter(Counter)
+            Counter(Counter),
             Empty
         }
 

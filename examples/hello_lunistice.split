@@ -1,21 +1,21 @@
 state ["Lunistice.exe", "Lunistice-Demo.exe"] {}
 
 enum LevelOrScene {
-    Level(i32)
-    Scene(String)
+    Level(i32),
+    Scene(String),
 }
 
 record Greeting {
-    version: u32
-    message: String
-    location: LevelOrScene
-    signature: [u8]
+    version: u32,
+    message: String,
+    location: LevelOrScene,
+    signature: [u8],
 }
 
 fn LevelOrScene.isFirst() {
     return match self {
         LevelOrScene.Level(level) => level == 0,
-        LevelOrScene.Scene(scene) => scene == "Shrine01"
+        LevelOrScene.Scene(scene) => scene == "Shrine01",
     }
 }
 
@@ -25,8 +25,8 @@ fn greetingIsValid(greeting: Greeting) {
         && greeting.message.byteLength() == 30
         && greeting.location.isFirst()
         && greeting.signature.length() == 3
-        && greeting.signature.get(0) == 0x48
-        && greeting.signature.get(1) == 0x8b
+        && greeting.signature[0] == 0x48
+        && greeting.signature[1] == 0x8b
 }
 
 onAttach {
@@ -35,7 +35,7 @@ onAttach {
         version: 1,
         message: "Hello, world from SplitScript!",
         location: LevelOrScene.Scene("Shrine01"),
-        signature: [0x48, 0x00, 0x01]
+        signature: [0x48, 0x00, 0x01],
     }
     let gameAssembly = await process.mainModule()
     let pointerSize = retry gameAssembly.pointerSize()
@@ -43,7 +43,7 @@ onAttach {
     let rangedMarker = await process.scan(
         gameAssembly.address + 0xff0,
         0x20,
-        sig"48 8B ?? 89"
+        sig"48 8B ?? 89",
     )
     let object = retry process.follow(gameAssembly.address, [0x100, 0x20])
     let answer = retry process.read(object + 0x10)
@@ -77,7 +77,8 @@ onAttach {
         && executable == "Lunistice-Demo.exe"
         && formatted == "-42:7"
         && (process.read<u8>(marker) else 0) == 0x48
-        && greetingIsValid(greeting)) {
+        && greetingIsValid(greeting))
+    {
         print(greeting.message)
     }
 }

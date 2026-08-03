@@ -125,6 +125,10 @@ pub enum ExpressionKind {
         receiver: ExprId,
         members: Vec<ResolvedMember>,
     },
+    Index {
+        receiver: ExprId,
+        index: ExprId,
+    },
     Unary {
         op: UnaryOp,
         operand: ExprId,
@@ -753,6 +757,10 @@ fn lower_expression(
                 members: members.clone(),
             }
         }
+        TypedExpressionKind::Index { receiver, index } => ExpressionKind::Index {
+            receiver: *receiver,
+            index: *index,
+        },
         TypedExpressionKind::Unary {
             op,
             expression: operand,
@@ -1989,6 +1997,10 @@ fn map_expression_children(
         ExpressionKind::Member { receiver, members } => ExpressionKind::Member {
             receiver: map(receiver),
             members,
+        },
+        ExpressionKind::Index { receiver, index } => ExpressionKind::Index {
+            receiver: map(receiver),
+            index: map(index),
         },
         ExpressionKind::Unary { op, operand } => ExpressionKind::Unary {
             op,

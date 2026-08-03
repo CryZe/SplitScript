@@ -1552,6 +1552,16 @@ fn compile_expr_unconverted(
             let lowered_type = emit_path_fields(function, members, receiver_type, context);
             debug_assert_eq!(lowered_type, ty);
         }
+        wasm_ir::ExpressionKind::Index { receiver, index } => {
+            compile_expr(function, *receiver, context);
+            let Type::Array(array_id) = context.expression_type(*receiver) else {
+                unreachable!("checked index receivers are arrays")
+            };
+            function.instruction(&Instruction::RefAsNonNull);
+            compile_expr(function, *index, context);
+            let element = array_element_type(array_id, context.semantics);
+            emit_array_get(function, context.gc.index(Type::Array(array_id)), element);
+        }
         wasm_ir::ExpressionKind::Unary { op, operand } => match op {
             UnaryOp::Not => {
                 compile_expr(function, *operand, context);
@@ -2414,7 +2424,7 @@ fn compile_expr_unconverted(
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::I64Add);
             }
-            IntrinsicId::ArrayLength | IntrinsicId::ArrayGet | IntrinsicId::ArraySet => {
+            IntrinsicId::ArrayLength | IntrinsicId::ArraySet => {
                 let receiver_type = compile_receiver(function, target, context);
                 let Type::Array(array_id) = receiver_type else {
                     unreachable!();
@@ -2426,10 +2436,6 @@ fn compile_expr_unconverted(
                 match builtin {
                     IntrinsicId::ArrayLength => {
                         function.instruction(&Instruction::ArrayLen);
-                    }
-                    IntrinsicId::ArrayGet => {
-                        let element = array_element_type(array_id, context.semantics);
-                        emit_array_get(function, context.gc.index(Type::Array(array_id)), element);
                     }
                     IntrinsicId::ArraySet => {
                         function.instruction(&Instruction::ArraySet(

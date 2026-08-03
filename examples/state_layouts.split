@@ -1,13 +1,12 @@
 state "LayoutGame.exe" {
     /// Steam build memory layout.
     layout Steam {
-        value: u32 at 0x1000
-    }
-
+        value: u32 at 0x1000;
+    },
     /// GOG build memory layout.
     layout GOG {
-        value: u32 at 0x2000
-    }
+        value: u32 at 0x2000;
+    },
 }
 
 onAttach {
@@ -24,7 +23,7 @@ onAttach {
 whileAttached {
     setVariable("Layout", match layout {
         StateLayout.Steam => "Steam",
-        StateLayout.GOG => "GOG"
+        StateLayout.GOG => "GOG",
     })
 }
 

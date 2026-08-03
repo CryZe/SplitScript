@@ -4,18 +4,16 @@
 state "MID-Win64-Shipping.exe" {
     /// Demo memory layout.
     layout Demo {
-        loader: i32 at "MID-Win64-Shipping.exe", 0x04a693d8, 0x4e0
-    }
-
+        loader: i32 at "MID-Win64-Shipping.exe", 0x04a693d8, 0x4e0;
+    },
     /// Unreal Engine 4.27 memory layout.
     layout V427 {
-        loader: i32 at "MID-Win64-Shipping.exe", 0x05cd4600, 0x4f8
-    }
-
+        loader: i32 at "MID-Win64-Shipping.exe", 0x05cd4600, 0x4f8;
+    },
     /// Version 1.0401.01 memory layout.
     layout V1040101 {
-        loader: i32 at "MID-Win64-Shipping.exe", 0x05ce0a38, 0x4e0
-    }
+        loader: i32 at "MID-Win64-Shipping.exe", 0x05ce0a38, 0x4e0;
+    },
 }
 
 onAttach {

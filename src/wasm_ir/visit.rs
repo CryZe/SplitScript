@@ -177,6 +177,10 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
         | ExpressionKind::FallbackSuccess { .. }
         | ExpressionKind::Path { .. } => {}
         ExpressionKind::Member { receiver, .. } => visit(*receiver),
+        ExpressionKind::Index { receiver, index } => {
+            visit(*receiver);
+            visit(*index);
+        }
         ExpressionKind::InterpolatedString(parts) => {
             for part in parts {
                 if let InterpolatedPart::Expression { expression, .. } = part {

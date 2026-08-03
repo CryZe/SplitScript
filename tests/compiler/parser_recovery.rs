@@ -146,14 +146,14 @@ fn recovering_parse_keeps_later_record_fields_and_enum_variants() {
     let source = r#"
         state "game.exe" {}
         record RecoveredRecord {
-            first: i32
-            missingColon i64
-            after: u32
+            first: i32,
+            missingColon i64,
+            after: u32,
         }
         enum RecoveredEnum {
-            First
-            Broken(i32
-            After
+            First,
+            Broken(i32,
+            After,
         }
         whileAttached { print("still parsed") }
     "#;
@@ -211,9 +211,9 @@ fn recovering_parse_keeps_later_state_fields_in_both_syntaxes() {
         (
             r#"
                 state "game.exe" {
-                    first: i32 at 0x10
-                    broken: i32 nope
-                    after: u32 at 0x20
+                    first: i32 at 0x10;
+                    broken: i32 nope,
+                    after: u32 at 0x20;
                 }
                 whileAttached { print("still parsed") }
             "#,
@@ -272,12 +272,12 @@ fn recovering_parse_keeps_neighboring_settings_in_the_settings_dsl() {
         state "game.exe" {}
         settings {
             "Group" {
-                "First" => first: true
-                "Broken" -> broken: true
+                "First" => first: true,
+                "Broken" -> broken: true,
                 /// Retained tooltip.
-                "After" => after: false
-            }
-            "Outside" => outside: true
+                "After" => after: false,
+            },
+            "Outside" => outside: true,
         }
         whileAttached { print("still parsed") }
     "#;
@@ -373,22 +373,22 @@ fn recovering_parse_keeps_valid_choice_options_and_file_filters() {
     let source = r#"
         state "game.exe" {}
         enum Mode {
-            A
-            B
-            C
+            A,
+            B,
+            C,
         }
         settings {
             "Mode" => mode: choice {
-                "A" => Mode.A default
-                "Broken" -> Mode.B
-                "C" => Mode.C
-            }
+                "A" => Mode.A default,
+                "Broken" -> Mode.B,
+                "C" => Mode.C,
+            },
             "File" => file: file {
-                "Save" => "*.sav"
-                "Broken" -> "*.bad"
-                mime => "application/octet-stream"
-            }
-            "After" => after: true
+                "Save" => "*.sav",
+                "Broken" -> "*.bad",
+                mime => "application/octet-stream",
+            },
+            "After" => after: true,
         }
         whileAttached { print("still parsed") }
     "#;
@@ -466,15 +466,15 @@ fn recovering_parse_keeps_valid_match_arms_and_enclosing_function() {
     let source = r#"
         state "game.exe" {}
         enum Mode {
-            A
-            B
-            C
+            A,
+            B,
+            C,
         }
         fn label(mode: Mode) {
             return match mode {
                 Mode.A => "A",
                 Mode.B -> "Broken",
-                Mode.C => "C"
+                Mode.C => "C",
             }
         }
         whileAttached { print(label(Mode.A)) }
@@ -684,8 +684,8 @@ fn recovering_parse_keeps_valid_record_fields_and_template_interpolations() {
 
     let source = r#"
         record Point {
-            x: i32
-            y: i32
+            x: i32,
+            y: i32,
         }
         state "game.exe" {}
         whileAttached {
@@ -948,8 +948,8 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
         let brokenGlobal = +
         let goodGlobal = 1
         state "game.exe" {
-            brokenState = +
-            goodState = 2
+            brokenState = +;
+            goodState = 2;
         }
         fn recovered() {
             let brokenLocal = +
@@ -966,7 +966,12 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
     "#;
     let recovered = splitscript::parse_recovering(source).unwrap();
 
-    assert_eq!(recovered.diagnostics().len(), 10);
+    assert_eq!(
+        recovered.diagnostics().len(),
+        10,
+        "{:#?}",
+        recovered.diagnostics()
+    );
     assert_eq!(recovered.syntax().globals.len(), 2);
     assert!(matches!(
         recovered.syntax().globals[0].value.kind,

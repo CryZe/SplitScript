@@ -16,7 +16,7 @@ fn compiler_stages_expose_lowered_declarations_without_mutating_syntax() {
 
         whileAttached {
             let inferred = [identity(current.level), 2]
-            print(`{inferred.get(0)}`)
+            print(`{inferred[0]}`)
         }
     "#;
 
@@ -426,11 +426,11 @@ fn linear_memory_grows_beyond_runtime_scratch_for_large_static_data() {
 #[test]
 fn linear_memory_moves_static_data_after_large_read_scratch() {
     let chunk_fields = (0..32)
-        .map(|index| format!("field{index}: u64"))
+        .map(|index| format!("field{index}: u64,"))
         .collect::<Vec<_>>()
         .join("\n");
     let large_fields = (0..260)
-        .map(|index| format!("chunk{index}: Chunk"))
+        .map(|index| format!("chunk{index}: Chunk,"))
         .collect::<Vec<_>>()
         .join("\n");
     let source = format!(

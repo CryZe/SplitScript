@@ -1029,8 +1029,8 @@ enum Mode {
 }
 
 state "game.exe" {
-    level = process.read<i32>(0)
-    mapName at 0x100 as utf8(32)
+    level = process.read<i32>(0);
+    mapName at 0x100 as utf8(32);
 }
 
 settings {
@@ -1238,7 +1238,7 @@ whileAttached {
     fn highlights_named_layouts_as_generated_enum_members() {
         let source = r#"
 state "game.exe" {
-    layout Steam { level: u32 at 0x100 }
+    layout Steam { level: u32 at 0x100 },
     layout GOG { level: u32 at 0x200 }
 }
 onAttach { return StateLayout.Steam }
@@ -1337,8 +1337,8 @@ fn inspect(module: Module, marker: Marker) {
     #[test]
     fn inferred_and_explicit_memory_reads_highlight_their_written_call_shape() {
         let source = r#"state "game.exe" {
-    inferred: u32 = process.read(0x100)
-    selected: u32 = process.read<u32>(0x104)
+    inferred: u32 = process.read(0x100);
+    selected: u32 = process.read<u32>(0x104);
 }"#;
         let mut database = CompilerDatabase::new(source);
         let index = database.semantic_highlights().unwrap();
@@ -1379,8 +1379,8 @@ fn inspect(module: Module, marker: Marker) {
 }
 fn Path.resolve() { return self.address }
 record Layout {
-    isLoading: Path
-    level: Path
+    isLoading: Path,
+    level: Path,
     video: Path
 }
 fn selectedLayout() {
@@ -1391,9 +1391,9 @@ fn selectedLayout() {
     }
 }
 state "game.exe" {
-    loading: address = selectedLayout().isLoading.resolve()
-    level: address = selectedLayout().level.resolve()
-    video: address = selectedLayout().video.resolve()
+    loading: address = selectedLayout().isLoading.resolve();
+    level: address = selectedLayout().level.resolve();
+    video: address = selectedLayout().video.resolve();
 }"#;
         let mut database = CompilerDatabase::new(source);
         let index = database.semantic_highlights().unwrap();
@@ -1454,13 +1454,13 @@ whileAttached {
     #[test]
     fn highlights_resolved_choice_setting_variants() {
         let source = r#"enum CaptureMode {
-    WindowTitle
+    WindowTitle,
     ExecutableName
 }
 state "game.exe" {}
 settings {
     "Capture Source" => captureMode: choice {
-        "Window Title" => CaptureMode.WindowTitle
+        "Window Title" => CaptureMode.WindowTitle,
         "Executable Name" => CaptureMode.ExecutableName default
     }
 }"#;

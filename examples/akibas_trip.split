@@ -6,119 +6,112 @@
 /// A mission endpoint and its expected player position.
 record MissionPoint {
     /// Stable string key used by the autosplitter settings map.
-    settingKey: String
+    settingKey: String,
     /// Expected vertical coordinate.
-    y: f32
+    y: f32,
     /// Expected depth coordinate.
-    z: f32
+    z: f32,
     /// Expected horizontal coordinate.
-    x: f32
+    x: f32,
 }
 
 settings {
     /// Splits after the prologue transition.
-    "M0 - Prologue" => mission0 key "0": true
-
+    "M0 - Prologue" => mission0 key "0": true,
     "Chapter 1" {
         /// Enables the Chapter 1 mission group.
-        "Enable Chapter 1" => chapter1: true
-        "M1 - To the Freedom Fighter Base MOGRA" => mission1 key "1": true
-        "M2 - Off to the Battle Arena" => mission2 key "2": true
-        "M3 - A Stranger on Junk Street" => mission3 key "3": true
-        "M4 - A Favor For Your Sister" => mission4 key "4": true
-        "M5 - Patrol the Side Streets with Shizuku" => mission5 key "5": true
-        "M6 - Shopping with Kati on the Side Streets" => mission6 key "6": true
-        "M7 - Rin's Street Performance" => mission7 key "7": true
-        "M8 - Patrolling with Shizuku, Tohko or Alone" => mission8 key "8": true
-        "M9 - Search for Shizuku" => mission9 key "9": true
-        "M10 - Train at the Battle Arena" => mission10 key "10": true
-        "M11 - Meet up with Everyone by the Station" => mission11 key "11": true
-        "M12 - Patrolling with Shizuku" => mission12 key "12": true
-        "M13 - Hurry to Electric Town Plaza!" => mission13 key "13": true
-    }
-
+        "Enable Chapter 1" => chapter1: true,
+        "M1 - To the Freedom Fighter Base MOGRA" => mission1 key "1": true,
+        "M2 - Off to the Battle Arena" => mission2 key "2": true,
+        "M3 - A Stranger on Junk Street" => mission3 key "3": true,
+        "M4 - A Favor For Your Sister" => mission4 key "4": true,
+        "M5 - Patrol the Side Streets with Shizuku" => mission5 key "5": true,
+        "M6 - Shopping with Kati on the Side Streets" => mission6 key "6": true,
+        "M7 - Rin's Street Performance" => mission7 key "7": true,
+        "M8 - Patrolling with Shizuku, Tohko or Alone" => mission8 key "8": true,
+        "M9 - Search for Shizuku" => mission9 key "9": true,
+        "M10 - Train at the Battle Arena" => mission10 key "10": true,
+        "M11 - Meet up with Everyone by the Station" => mission11 key "11": true,
+        "M12 - Patrolling with Shizuku" => mission12 key "12": true,
+        "M13 - Hurry to Electric Town Plaza!" => mission13 key "13": true,
+    },
     "Chapter 2" {
         /// Enables the Chapter 2 mission group.
-        "Enable Chapter 2" => chapter2: true
-        "M14 - Return to MOGRA for Your Report" => mission14 key "14": true
-        "M15 - Go to Akimori Shrine with Shizuku" => mission15 key "15": true
-        "M16 - Head to Akihabara Park" => mission16 key "16": true
-        "M17 - Deliver the Goods" => mission17 key "17": true
-        "M18 - Cosplay Fest Begins!" => mission18 key "18": true
-        "M19 - Patrol Main Street Southwest with Kaito" => mission19 key "19": true
-        "M20 - Proceed As Instructed to Akimori Shrine" => mission20 key "20": true
-        "M21 - Patrol Yodobashi Area with Shizuku" => mission21 key "21": true
-        "M22 - To the Battle Arena where Zenya Amou Awaits!" => mission22 key "22": true
-    }
-
+        "Enable Chapter 2" => chapter2: true,
+        "M14 - Return to MOGRA for Your Report" => mission14 key "14": true,
+        "M15 - Go to Akimori Shrine with Shizuku" => mission15 key "15": true,
+        "M16 - Head to Akihabara Park" => mission16 key "16": true,
+        "M17 - Deliver the Goods" => mission17 key "17": true,
+        "M18 - Cosplay Fest Begins!" => mission18 key "18": true,
+        "M19 - Patrol Main Street Southwest with Kaito" => mission19 key "19": true,
+        "M20 - Proceed As Instructed to Akimori Shrine" => mission20 key "20": true,
+        "M21 - Patrol Yodobashi Area with Shizuku" => mission21 key "21": true,
+        "M22 - To the Battle Arena where Zenya Amou Awaits!" => mission22 key "22": true,
+    },
     "Chapter 3 - Shizuku" {
         /// Enables Shizuku's Chapter 3 route.
-        "Enable Shizuku Route" => chapter3Shizuku: false
-        "M23 - Patrol Akihabara Park with Shizuku" => mission123 key "123": false
-        "M24 - Hurry to the Suit Store with Shizuku!" => mission124 key "124": false
-        "M25 - Go Figurine Shopping with Shizuku" => mission125 key "125": false
-        "M26 - See What Ms. Kasugai is Up To" => mission126 key "126": false
-        "M27 - Operation Decoy, Commence!" => mission127 key "127": false
-    }
-
+        "Enable Shizuku Route" => chapter3Shizuku: false,
+        "M23 - Patrol Akihabara Park with Shizuku" => mission123 key "123": false,
+        "M24 - Hurry to the Suit Store with Shizuku!" => mission124 key "124": false,
+        "M25 - Go Figurine Shopping with Shizuku" => mission125 key "125": false,
+        "M26 - See What Ms. Kasugai is Up To" => mission126 key "126": false,
+        "M27 - Operation Decoy, Commence!" => mission127 key "127": false,
+    },
     "Chapter 3 - Tohko" {
         /// Enables Tohko's Chapter 3 route.
-        "Enable Tohko Route" => chapter3Tohko: true
-        "M23 - Patrolling Main Street Southwest with Tohko" => mission223 key "223": true
-        "M24 - Hurry to the Suit Store with Tohko!" => mission224 key "224": true
-        "M25 - Help Tohko Pick Out a Smartphone" => mission225 key "225": true
-        "M26 - Pass Rin's Challenge" => mission226 key "226": true
-        "M27 - Meet with Managing Director Sakaguchi" => mission227 key "227": true
-    }
-
+        "Enable Tohko Route" => chapter3Tohko: true,
+        "M23 - Patrolling Main Street Southwest with Tohko" => mission223 key "223": true,
+        "M24 - Hurry to the Suit Store with Tohko!" => mission224 key "224": true,
+        "M25 - Help Tohko Pick Out a Smartphone" => mission225 key "225": true,
+        "M26 - Pass Rin's Challenge" => mission226 key "226": true,
+        "M27 - Meet with Managing Director Sakaguchi" => mission227 key "227": true,
+    },
     "Chapter 3 - Rin" {
         /// Enables Rin's Chapter 3 route.
-        "Enable Rin Route" => chapter3Rin: false
-        "M23 - Patrol Main Street Northwest with Rin" => mission323 key "323": false
-        "M24 - Hurry to the Suit Store with Rin!" => mission324 key "324": false
-        "M25 - Head to the Accessory Shop" => mission325 key "325": false
-        "M26 - Stop Tohko's Rampage!" => mission326 key "326": false
-        "M27 - Carry Out the Plan!" => mission327 key "327": false
-    }
-
+        "Enable Rin Route" => chapter3Rin: false,
+        "M23 - Patrol Main Street Northwest with Rin" => mission323 key "323": false,
+        "M24 - Hurry to the Suit Store with Rin!" => mission324 key "324": false,
+        "M25 - Head to the Accessory Shop" => mission325 key "325": false,
+        "M26 - Stop Tohko's Rampage!" => mission326 key "326": false,
+        "M27 - Carry Out the Plan!" => mission327 key "327": false,
+    },
     "Chapter 3 - Shion" {
         /// Enables Shion's Chapter 3 route.
-        "Enable Shion Route" => chapter3Shion: false
-        "M23 - Patrolling Junk Street with Rin and Kati" => mission423 key "423": false
-        "M24 - Go to Akihabara Park with Ms. Kasugai" => mission424 key "424": false
-        "M25 - Stop at GO!GO!CURRY with Ms. Kasugai" => mission425 key "425": false
-        "M26 - Return to the Organization's Hideout" => mission426 key "426": false
-        "M27 - Investigate the Missing Synthisters" => mission427 key "427": false
-        "M28 - Strategy Meeting at Akimori Shrine" => mission428 key "428": false
-        "M29 - Off to Confront Souga Kagutsuki!" => mission429 key "429": false
-        "M30 - Stop the Akiba Freedom Fighters' Advances!" => mission430 key "430": false
-        "M31 - Secure Radio Kaikan!" => mission431 key "431": false
-    }
-
+        "Enable Shion Route" => chapter3Shion: false,
+        "M23 - Patrolling Junk Street with Rin and Kati" => mission423 key "423": false,
+        "M24 - Go to Akihabara Park with Ms. Kasugai" => mission424 key "424": false,
+        "M25 - Stop at GO!GO!CURRY with Ms. Kasugai" => mission425 key "425": false,
+        "M26 - Return to the Organization's Hideout" => mission426 key "426": false,
+        "M27 - Investigate the Missing Synthisters" => mission427 key "427": false,
+        "M28 - Strategy Meeting at Akimori Shrine" => mission428 key "428": false,
+        "M29 - Off to Confront Souga Kagutsuki!" => mission429 key "429": false,
+        "M30 - Stop the Akiba Freedom Fighters' Advances!" => mission430 key "430": false,
+        "M31 - Secure Radio Kaikan!" => mission431 key "431": false,
+    },
     "Endings" {
         /// Enables ending splits.
-        "Enable Endings" => endings: true
-        "M28 - Shizuku, Tohko, Rin - Off to the Final Battle" => mission28 key "28": true
-        "M32 - Shion - Go to Radio Kaikan" => mission432 key "432": false
-        "Leave Akihabara" => mission500 key "500": false
-    }
+        "Enable Endings" => endings: true,
+        "M28 - Shizuku, Tohko, Rin - Off to the Final Battle" => mission28 key "28": true,
+        "M32 - Shion - Go to Radio Kaikan" => mission432 key "432": false,
+        "Leave Akihabara" => mission500 key "500": false,
+    },
 }
 
 state "AkibaUU" {
     /// Increases after completing a main or side mission.
-    missionCounter: i32 at "AkibaUU.exe", 0x4F6CFC
+    missionCounter: i32 at "AkibaUU.exe", 0x4F6CFC;
     /// Current map number.
-    mapNumber: i32 at "AkibaUU.exe", 0x5324DC
+    mapNumber: i32 at "AkibaUU.exe", 0x5324DC;
     /// Player vertical coordinate.
-    positionY: f32 at "AkibaUU.exe", 0x465FE4
+    positionY: f32 at "AkibaUU.exe", 0x465FE4;
     /// Player depth coordinate.
-    positionZ: f32 at "AkibaUU.exe", 0x465FE0
+    positionZ: f32 at "AkibaUU.exe", 0x465FE0;
     /// Player horizontal coordinate.
-    positionX: f32 at "AkibaUU.exe", 0x465FE8
+    positionX: f32 at "AkibaUU.exe", 0x465FE8;
     /// Becomes 111 when the credits start.
-    creditsStart: i32 at "AkibaUU.exe", 0x481500
+    creditsStart: i32 at "AkibaUU.exe", 0x481500;
     /// Becomes 151 or 223 when leaving Akihabara.
-    trainEnd: i32 at "AkibaUU.exe", 0x4ACA64
+    trainEnd: i32 at "AkibaUU.exe", 0x4ACA64;
 }
 
 let chapter1Points: [MissionPoint; 13] = [
@@ -160,7 +153,7 @@ let chapter1Points: [MissionPoint; 13] = [
     },
     MissionPoint {
         settingKey: "13", y: 1.340432, z: 43.361782, x: -75.738457
-    }
+    },
 ]
 
 let chapter2Points: [MissionPoint; 8] = [
@@ -187,7 +180,7 @@ let chapter2Points: [MissionPoint; 8] = [
     },
     MissionPoint {
         settingKey: "21", y: 1.173435, z: 15.427427, x: -39.462936
-    }
+    },
 ]
 
 let chapter2ZenyaPoints: [MissionPoint; 4] = [
@@ -202,7 +195,7 @@ let chapter2ZenyaPoints: [MissionPoint; 4] = [
     },
     MissionPoint {
         settingKey: "22", y: 1.760053, z: -5.100903, x: 12.793765
-    }
+    },
 ]
 
 let chapter3ShizukuPoints: [MissionPoint; 5] = [
@@ -220,7 +213,7 @@ let chapter3ShizukuPoints: [MissionPoint; 5] = [
     },
     MissionPoint {
         settingKey: "127", y: 1.246564, z: 13.13219, x: -69.59417
-    }
+    },
 ]
 
 let chapter3TohkoPoints: [MissionPoint; 5] = [
@@ -238,7 +231,7 @@ let chapter3TohkoPoints: [MissionPoint; 5] = [
     },
     MissionPoint {
         settingKey: "227", y: 1.124862, z: 13.81955, x: -69.386406
-    }
+    },
 ]
 
 let chapter3RinPoints: [MissionPoint; 5] = [
@@ -256,7 +249,7 @@ let chapter3RinPoints: [MissionPoint; 5] = [
     },
     MissionPoint {
         settingKey: "327", y: 1.327725, z: 13.811988, x: -69.378403
-    }
+    },
 ]
 
 let chapter3ShionPoints: [MissionPoint; 6] = [
@@ -277,14 +270,51 @@ let chapter3ShionPoints: [MissionPoint; 6] = [
     },
     MissionPoint {
         settingKey: "428", y: 1.368003, z: 31.868629, x: -19.367922
-    }
+    },
 ]
+
+enum MissionEnum {
+    /// Hi
+    ///
+    /// This is
+    /// a variant
+    C,
+    B,
+}
+
+fn noneFn() {
+    let x = None
+    let y: i32? = x
+    return x
+}
+
+fn bar() {
+    let foo = readPos()
+    return await foo
+}
+
+fn readPos() -> async [f32; 3] {
+    return retry process.read(0x100)
+}
+
+fn bar_baz(x: MissionEnum, y) {
+    debug let _ok = process.readUtf8(0x100, 4) else "sdf"
+    let value = MissionEnum.C
+    if value == y {
+        return y
+    }
+    return value
+}
+
+onDetached {
+}
 
 /// Checks one mission endpoint against the player's rounded position.
 fn atMissionPoint(point: MissionPoint, y: f64, z: f64, x: f64) -> bool {
-    return y ==(point.y as f64).roundTo(3)
-        && z ==(point.z as f64).roundTo(3)
-        && x ==(point.x as f64).roundTo(3)
+    bar_baz(MissionEnum.C, MissionEnum.B)
+    return y == (point.y as f64).roundTo(3)
+        && z == (point.z as f64).roundTo(3)
+        && x == (point.x as f64).roundTo(3)
 }
 
 /// Finds an enabled mission endpoint at the current rounded position.
@@ -299,9 +329,9 @@ fn matchesMission(points: [MissionPoint], y: f64, z: f64, x: f64) -> bool {
 
 split {
     // ASL's Math.Round promotes the memory-facing f32 values to f64.
-    let y =(current.positionY as f64).roundTo(3)
-    let z =(current.positionZ as f64).roundTo(3)
-    let x =(current.positionX as f64).roundTo(3)
+    let y = (current.positionY as f64).roundTo(3)
+    let z = (current.positionZ as f64).roundTo(3)
+    let x = (current.positionX as f64).roundTo(3)
 
     if settings.mission0
         && current.missionCounter == 0
@@ -313,7 +343,7 @@ split {
 
     if settings.mission500
         && current.mapNumber == 1
-        &&(current.trainEnd == 223 || current.trainEnd == 151)
+        && (current.trainEnd == 223 || current.trainEnd == 151)
         && current.missionCounter == 0
     {
         return true
@@ -325,7 +355,7 @@ split {
             return true
         }
         if settings.chapter2
-            &&(matchesMission(chapter2Points, y, z, x)
+            && (matchesMission(chapter2Points, y, z, x)
             || matchesMission(chapter2ZenyaPoints, y, z, x))
         {
             return true
@@ -381,7 +411,7 @@ split {
     }
 
     if settings.endings
-        &&(settings.mission28 || settings.mission432)
+        && (settings.mission28 || settings.mission432)
         && y == 1.0
         && z == 0.0
         && x == 0.0

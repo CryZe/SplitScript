@@ -2,12 +2,12 @@
 // attachment block selects one typed build and one discovered address, while
 // the ordinary state expression keeps snapshot rotation transactional.
 enum AbzuBuild {
-    Steam
-    Epic
+    Steam,
+    Epic,
 }
 
 state "AbzuGame-Win64-Shipping.exe" {
-    loading = process.read(loadingAddress)
+    loading = process.read(loadingAddress);
 }
 
 let loadingAddress = 0
@@ -29,7 +29,7 @@ onAttach {
 
     setVariable("Build", match build {
         AbzuBuild.Steam => "Steam",
-        AbzuBuild.Epic => "Epic"
+        AbzuBuild.Epic => "Epic",
     })
 }
 

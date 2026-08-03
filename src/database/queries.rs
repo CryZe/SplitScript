@@ -392,6 +392,22 @@ impl CompilerDatabase {
         Ok(recovered.source_document().token_at(offset).cloned())
     }
 
+    pub(crate) fn symbol_query_offset(&mut self, offset: usize) -> SemanticQueryResult<usize> {
+        let recovered = self.recovering_parse()?;
+        if recovered
+            .source_document()
+            .token_at(offset)
+            .is_some_and(|token| matches!(token.kind, TokenKind::Question | TokenKind::Bang))
+        {
+            return Ok(offset);
+        }
+        Ok(recovered
+            .source_document()
+            .symbol_token_at(offset)
+            .filter(|token| token.span.end == offset)
+            .map_or(offset, |token| token.span.end - 1))
+    }
+
     pub fn analysis_at(&mut self, offset: usize) -> SemanticQueryResult<Option<PositionAnalysis>> {
         let snapshot = self.semantic_snapshot()?;
         if let Some(checked) = snapshot.checked() {
@@ -445,6 +461,7 @@ impl CompilerDatabase {
         &mut self,
         offset: usize,
     ) -> SemanticQueryResult<Option<DefinitionTarget>> {
+        let offset = self.symbol_query_offset(offset)?;
         let definitions = self.definition_index()?;
         if let Some(reference) = definitions.reference_at(offset) {
             return Ok(definitions
@@ -590,7 +607,27 @@ impl CompilerDatabase {
                 }))
             }
             TokenKind::Bang => Some(language.item(LanguageItemId::ResultType)),
-            TokenKind::LBracket => Some(language.item(LanguageItemId::ArrayType)),
+            TokenKind::LBracket => {
+                let is_index = analysis.is_some_and(|analysis| {
+                    let Ok(snapshot) = self.semantic_snapshot() else {
+                        return false;
+                    };
+                    syntax_expression_by_id(snapshot.syntax(), analysis.expression).is_some_and(
+                        |expression| {
+                            matches!(
+                                expression.kind,
+                                ExprKind::Index { bracket_span, .. }
+                                    if bracket_span.start <= offset && offset < bracket_span.end
+                            )
+                        },
+                    )
+                });
+                Some(language.item(if is_index {
+                    LanguageItemId::ArrayIndex
+                } else {
+                    LanguageItemId::ArrayType
+                }))
+            }
             TokenKind::DocComment(_) => Some(language.item(LanguageItemId::DocumentationComment)),
             TokenKind::TemplateStart | TokenKind::TemplateChunk(_) | TokenKind::TemplateEnd => {
                 Some(language.item(LanguageItemId::TemplateString))

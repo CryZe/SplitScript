@@ -831,23 +831,6 @@ typeConstructor Array<T> {
         return self.length() == 0
     }
 
-    /// Returns an array element.
-    ///
-    /// Indexing uses WebAssembly's bounds checks.
-    ///
-    /// # Example
-    ///
-    /// Read an array element
-    ///
-    /// ```splitscript
-    /// let firstField = fieldNames.get(0)
-    /// ```
-    @intrinsic(ArrayGet)
-    fn get(
-        /// The zero-based element index.
-        index: u32,
-    ) -> T;
-
     /// Updates an array element.
     ///
     /// The array is evaluated once and updated in place.
@@ -1958,14 +1941,14 @@ struct Module {
         let resourceDirectory = process.read<[u32; 2]>(
             optionalHeader.add(resourceDirectoryOffset)
         )?
-        let resourceRva = resourceDirectory.get(0)
-        if resourceRva == 0 || resourceDirectory.get(1) == 0 {
+        let resourceRva = resourceDirectory[0]
+        if resourceRva == 0 || resourceDirectory[1] == 0 {
             throw "module does not have a resource directory"
         }
         let resourceBase = self.address.add(resourceRva as u64)
 
         let typeHeader = process.read<[u16; 8]>(resourceBase)?
-        let typeEntryCount = typeHeader.get(6) + typeHeader.get(7)
+        let typeEntryCount = typeHeader[6] + typeHeader[7]
         let foundTypeDirectory: address? = None
         let typeIndex: u16 = 0
         while typeIndex < typeEntryCount {
@@ -1981,7 +1964,7 @@ struct Module {
         let typeDirectory = foundTypeDirectory else return Err("module has no version resource")
 
         let nameHeader = process.read<[u16; 8]>(typeDirectory)?
-        let nameEntryCount = nameHeader.get(6) + nameHeader.get(7)
+        let nameEntryCount = nameHeader[6] + nameHeader[7]
         let foundLanguageDirectory: address? = None
         let nameIndex: u16 = 0
         while nameIndex < nameEntryCount {
@@ -1998,7 +1981,7 @@ struct Module {
         )
 
         let languageHeader = process.read<[u16; 8]>(languageDirectory)?
-        let languageEntryCount = languageHeader.get(6) + languageHeader.get(7)
+        let languageEntryCount = languageHeader[6] + languageHeader[7]
         let foundDataEntry: address? = None
         let languageIndex: u16 = 0
         while languageIndex < languageEntryCount {
@@ -2021,10 +2004,10 @@ struct Module {
         }
         let parts = process.read<[u16; 4]>(fixedInfo.add(8))?
         return FileVersion.fromParts(
-            parts.get(1),
-            parts.get(0),
-            parts.get(3),
-            parts.get(2)
+            parts[1],
+            parts[0],
+            parts[3],
+            parts[2]
         )
     }
 

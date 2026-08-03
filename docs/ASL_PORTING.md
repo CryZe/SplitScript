@@ -24,7 +24,7 @@ decoder on the state field:
 
 ```splitscript
 state "game.exe" {
-    map at "game.exe", 0x123456, 0x20, 0x18 as utf8(50)
+    map at "game.exe", 0x123456, 0x20, 0x18 as utf8(50);
 }
 ```
 
@@ -54,11 +54,11 @@ selected generated variant from `onAttach`:
 ```splitscript
 state "game.exe" {
     layout Steam {
-        loading: bool at "engine.dll", 0x1000
+        loading: bool at "engine.dll", 0x1000;
     }
 
     layout Epic {
-        loading: bool at "engine.dll", 0x2000
+        loading: bool at "engine.dll", 0x2000;
     }
 }
 
@@ -95,8 +95,8 @@ string keys:
 
 ```splitscript
 enum Chapter {
-    Village
-    Farm
+    Village,
+    Farm,
 }
 
 let completedChapters: u32 = 0
@@ -104,7 +104,7 @@ let completedChapters: u32 = 0
 fn chapterMask(chapter: Chapter) -> u32 {
     return match chapter {
         Chapter.Village => 1u32 << 0,
-        Chapter.Farm => 1u32 << 1
+        Chapter.Farm => 1u32 << 1,
     }
 }
 ```

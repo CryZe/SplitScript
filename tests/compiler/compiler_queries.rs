@@ -296,7 +296,7 @@ fn declaration_resolution_errors_do_not_poison_syntax_queries() {
     database.parse().expect("the syntax tree remains valid");
     assert_eq!(
         &*database.format().unwrap(),
-        "enum TimerState {\n    Custom\n}\nstate \"game.exe\" {}\n"
+        "enum TimerState {\n    Custom,\n}\nstate \"game.exe\" {}\n"
     );
     assert!(database.lower().is_ok());
 
@@ -384,7 +384,7 @@ fn enum_syntax_stays_named_while_semantics_publish_resolved_variants() {
 
     let source = r#"
         enum Mode {
-            Idle
+            Idle,
             Active
         }
         state "game.exe" { mode = Mode.Idle }
@@ -840,7 +840,7 @@ fn underscore_suppression_reuses_validated_identity_renames() {
 
     let source = r#"
         record Snapshot {
-            used: i32
+            used: i32,
             unusedField: i32
         }
 
@@ -1088,7 +1088,7 @@ fn compiler_database_resolves_expression_segments_to_definitions() {
     let source = r#"
         record Counter { value: i32 }
         enum Mode {
-            Idle
+            Idle,
             Active
         }
         let global = 1
@@ -1225,13 +1225,13 @@ fn choice_setting_enum_paths_use_resolved_source_identities() {
 
     let source = r#"
         enum CaptureMode {
-            WindowTitle
+            WindowTitle,
             ExecutableName
         }
         state "game.exe" {}
         settings {
             "Capture Source" => captureMode: choice {
-                "Window Title" => CaptureMode.WindowTitle
+                "Window Title" => CaptureMode.WindowTitle,
                 "Executable Name" => CaptureMode.ExecutableName default
             }
         }
@@ -1291,7 +1291,7 @@ fn compiler_database_resolves_type_record_and_pattern_syntax() {
         record Counter { value: i32 }
         record Wrapper { counter: Counter }
         enum Mode {
-            Idle
+            Idle,
             Active
         }
         enum Event {
@@ -1394,7 +1394,7 @@ fn setting_runtime_keys_are_nonempty_and_unique() {
     let duplicate = r#"
         state "game.exe" {}
         settings {
-            "First" => first key "shared": true
+            "First" => first key "shared": true,
             "Second" => shared: false
         }
     "#;

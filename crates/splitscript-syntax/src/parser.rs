@@ -419,7 +419,7 @@ mod tests {
         let source = r#"
             state "game.exe" {
                 /// Steam build.
-                layout Steam { level: u32 at 0x100 }
+                layout Steam { level: u32 at 0x100 },
                 layout GOG { level: u32 at 0x200 }
             }
             onAttach { return StateLayout.Steam }
@@ -465,10 +465,10 @@ mod tests {
         let source = r#"
             state "game.exe" {}
             record Arrays {
-                bytes: [u8]
-                nested: [[String]]
-                optional: [i32]?
-                fallibleElements: [u16!]
+                bytes: [u8],
+                nested: [[String]],
+                optional: [i32]?,
+                fallibleElements: [u16!],
                 fixedBytes: [u8; 6]
             }
         "#;
@@ -580,6 +580,37 @@ mod tests {
     }
 
     #[test]
+    fn array_indexes_are_postfix_expressions_and_can_be_chained() {
+        let source = r#"
+            state "game.exe" {}
+            whileAttached {
+                let value = matrix[outer + 1][inner]
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let Stmt::Variable(variable) = &program.actions[0].body.statements[0] else {
+            panic!("expected a variable declaration")
+        };
+        let ExprKind::Index {
+            receiver, index, ..
+        } = &variable.value.kind
+        else {
+            panic!("expected the second postfix index")
+        };
+        assert!(matches!(index.kind, ExprKind::Path(_)));
+        let ExprKind::Index {
+            receiver: matrix,
+            index: outer,
+            ..
+        } = &receiver.kind
+        else {
+            panic!("expected the first postfix index")
+        };
+        assert!(matches!(matrix.kind, ExprKind::Path(_)));
+        assert!(matches!(outer.kind, ExprKind::Binary { .. }));
+    }
+
+    #[test]
     fn builds_multiline_setting_tooltips_from_doc_comments() {
         let source = r#"
             state "game.exe" {}
@@ -603,8 +634,8 @@ mod tests {
         let source = r#"
             state "game.exe" {}
             settings {
-                "Mission" => mission key "42": true
-                "Boss" => boss key "final-boss": false
+                "Mission" => mission key "42": true,
+                "Boss" => boss key "final-boss": false,
                 "Ordinary" => ordinary: true
             }
         "#;
@@ -621,6 +652,73 @@ mod tests {
         assert_eq!(program.settings[0].runtime_key(), "42");
         assert_eq!(program.settings[1].runtime_key(), "final-boss");
         assert_eq!(program.settings[2].runtime_key(), "ordinary");
+    }
+
+    #[test]
+    fn declaration_lists_are_comma_delimited_and_accept_trailing_commas() {
+        let valid = r#"
+            enum Mode { First, Second, }
+            record Pair { left: i32, right: i32, }
+            settings {
+                "Mode" => mode: choice {
+                    "First" => Mode.First,
+                    "Second" => Mode.Second default,
+                },
+                "Input" => input: file {
+                    "Text" => "*.txt",
+                    mime => "text/plain",
+                },
+            }
+            state "game.exe" {
+                left: i32 at 0x100;
+                right: i32 at 0x104;
+            }
+            fn pair(left, right,) { print(left + right) }
+            whileAttached {
+                print(min(1, 2,))
+                process.read<i32,>(0x100,)
+                let values = [1, 2,]
+                let pair = Pair { left: 1, right: 2, }
+                print(match mode { Mode.First => 1, Mode.Second => 2, })
+            }
+        "#;
+        parse(valid, lex(valid, SyntaxMode::Program).unwrap())
+            .expect("every comma-separated construct should accept a trailing comma");
+
+        for source in [
+            "record Pair { left: i32 right: i32 }",
+            "record Pair { left: i32\nright: i32 }",
+            "enum Mode { First Second }",
+            "enum Mode { First\nSecond }",
+            "state \"game.exe\" { left: i32 at 0x100\nright: i32 at 0x104 }",
+            "state \"game.exe\" {} settings { \"A\" => a: true\n\"B\" => b: true }",
+        ] {
+            let error = parse(source, lex(source, SyntaxMode::Program).unwrap())
+                .expect_err("a line break must not substitute for a comma");
+            assert!(
+                error.message.starts_with("expected `,` between ")
+                    || error.message == "expected `;` between state fields"
+            );
+        }
+    }
+
+    #[test]
+    fn state_fields_use_semicolons_because_pointer_paths_use_commas() {
+        let valid = r#"
+            state "game.exe" {
+                map at "game.exe", 0x100, 0x20;
+                level: u32 at 0x200
+            }
+        "#;
+        parse(valid, lex(valid, SyntaxMode::Program).unwrap())
+            .expect("the final state-field semicolon should be optional");
+
+        let invalid = "state \"game.exe\" { first at 0x100, second at 0x200 }";
+        let error = parse(invalid, lex(invalid, SyntaxMode::Program).unwrap())
+            .expect_err("a comma must not separate state fields");
+        assert_eq!(error.message, "expected `;` between state fields");
+        assert_eq!(error.fixes[0].title, "replace `,` with `;`");
+        assert_eq!(error.fixes[0].edits[0].replacement, ";");
     }
 
     #[test]

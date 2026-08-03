@@ -8,7 +8,7 @@ fn user_function_types_are_inferred_across_bodies_and_call_sites() {
         state "game.exe" {}
 
         record Clock {
-            minutes: f32
+            minutes: f32,
             seconds: f32
         }
 
@@ -140,7 +140,7 @@ fn inferred_functions_are_independently_instantiated_at_each_call_site() {
             let small: i32 = addOne(1)
             let large: u64 = addOne(1)
             if successful {
-                print(`{numbers.length()}: {texts.get(0u32)} ({numberCount + textCount + boolCount + small as u32 + large as u32})`)
+                print(`{numbers.length()}: {texts[0u32]} ({numberCount + textCount + boolCount + small as u32 + large as u32})`)
             }
         }
     "#;
@@ -208,6 +208,25 @@ fn equality_infers_none_from_the_opposite_optional_operand() {
 }
 
 #[test]
+fn none_values_flow_through_locals_into_options() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let unit = None
+            let optional: i32? = unit
+            if optional == None { print("none") }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("the None unit value should convert to the empty side of any Option");
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("an erased None local converted to an Option should produce valid Wasm GC");
+}
+
+#[test]
 fn state_snapshots_flow_through_locals_parameters_and_returns() {
     let source = r#"
         state "game.exe" {
@@ -259,16 +278,16 @@ fn state_snapshots_flow_through_locals_parameters_and_returns() {
 fn settings_views_flow_through_locals_parameters_and_returns_without_gc_objects() {
     let source = r#"
         enum CaptureMode {
-            WindowTitle
+            WindowTitle,
             FullPath
         }
 
         settings {
             /// Enables splitting.
-            "Enabled" => enabled: true
+            "Enabled" => enabled: true,
             /// Selects the capture source.
             "Capture Mode" => captureMode: choice {
-                "Window Title" => CaptureMode.WindowTitle default
+                "Window Title" => CaptureMode.WindowTitle default,
                 "Full Path" => CaptureMode.FullPath
             }
         }
@@ -531,8 +550,8 @@ fn global_types_are_inferred_from_uses_and_assignments() {
 fn state_field_types_are_inferred_from_expressions_and_uses() {
     let source = r#"
         state "game.exe" {
-            expressionValue = process.read<u16>(0)
-            usageValue = 0
+            expressionValue = process.read<u16>(0);
+            usageValue = 0;
             pointerValue at 0x1234
         }
 
@@ -673,13 +692,13 @@ fn gc_records_support_nesting_functions_and_async_frames() {
         }
 
         record Digits {
-            minutes: f32
-            seconds: f32
+            minutes: f32,
+            seconds: f32,
             hundredths: f32
         }
 
         record TimerInfo {
-            digits: Digits
+            digits: Digits,
             character: String
         }
 
@@ -852,7 +871,7 @@ fn timer_state_is_a_compiler_provided_exhaustive_enum() {
 fn aggregate_global_constants_are_materialized_once_at_module_start() {
     let source = r#"
         record Point {
-            x: f32
+            x: f32,
             y: f32
         }
 
@@ -868,7 +887,7 @@ fn aggregate_global_constants_are_materialized_once_at_module_start() {
 
         split {
             return label == "route"
-                && points.get(current.selected).x == 3.0
+                && points[current.selected].x == 3.0
         }
     "#;
 
@@ -938,13 +957,13 @@ fn aggregate_global_constants_are_materialized_once_at_module_start() {
 fn enums_and_their_payloads_use_structural_equality() {
     let source = r#"
         record Position {
-            x: i32
+            x: i32,
             y: i32
         }
 
         enum Value {
-            Position(Position)
-            Label(String)
+            Position(Position),
+            Label(String),
             Empty
         }
 
@@ -994,7 +1013,7 @@ fn payload_enums_are_exhaustively_matched_and_survive_await() {
         state "game.exe" {}
 
         enum LevelOrScene {
-            Level(i32)
+            Level(i32),
             Scene(String)
         }
 
@@ -1025,7 +1044,7 @@ fn match_requires_every_enum_variant() {
     let source = r#"
         state "game.exe" {}
         enum Choice {
-            Yes
+            Yes,
             No
         }
         fn choose(value: Choice) -> bool {
@@ -1168,12 +1187,12 @@ fn methods_have_implicit_self_and_support_nested_receivers() {
         state "game.exe" {}
 
         record Digits {
-            minutes: f32
+            minutes: f32,
             seconds: f32
         }
 
         record TimerInfo {
-            digits: Digits
+            digits: Digits,
             stopped: bool
         }
 
@@ -1213,8 +1232,8 @@ fn generic_gc_arrays_infer_elements_and_support_core_methods() {
         fn ScanBuffer.prepare() -> bool {
             self.bytes.set(1u32, 0x8bu8)
             return self.bytes.length() == 3u32
-                && self.bytes.get(0u32) == 0x48u8
-                && self.bytes.get(1u32) == 0x8bu8
+                && self.bytes[0u32] == 0x48u8
+                && self.bytes[1u32] == 0x8bu8
         }
 
         onAttach {
@@ -1225,7 +1244,7 @@ fn generic_gc_arrays_infer_elements_and_support_core_methods() {
             }
             await process.module("GameAssembly.dll")
             if (buffer.prepare()
-                && inferred.get(2u32) == 3
+                && inferred[2u32] == 3
                 && empty.length() == 0u32) {
                 print("array")
             }
@@ -1235,4 +1254,62 @@ fn generic_gc_arrays_infer_elements_and_support_core_methods() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("monomorphized GC arrays should validate");
+}
+
+#[test]
+fn array_indexing_is_first_class_bidirectional_and_array_only() {
+    let source = r#"
+        state "game.exe" {}
+
+        record Point {
+            x: i32,
+        }
+
+        whileAttached {
+            let points: [Point] = [Point { x: 42 }]
+            let answer: i32 = points[0].x
+            let matrix = [[1u8, 2u8]]
+            let inferred = [0]
+            let inferredByte: u8 = inferred[0]
+            print(matrix[0][1])
+            print(answer)
+            print(inferredByte)
+        }
+    "#;
+    let wasm =
+        splitscript::compile(source).expect("indexing should infer receiver and result types");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("first-class indexing should produce valid Wasm GC array access");
+
+    let errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let invalid = 42[0]
+            }
+        "#,
+    )
+    .expect_err("non-array values must not be indexable");
+    assert!(errors.iter().any(|error| {
+        error
+            .message
+            .contains("cannot be indexed; expected an array")
+    }));
+
+    let errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let values = [1, 2]
+                let invalid = values.get(0)
+            }
+        "#,
+    )
+    .expect_err("the retired get method must not remain available");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("no method `get`"))
+    );
 }

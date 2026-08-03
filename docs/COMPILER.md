@@ -870,14 +870,18 @@ establish continuation regions; these stop at nested block braces so block
 bodies are not indented twice. Match, choice, and file blocks identify commas
 that terminate domain-specific entries. A delimiter pass separately records
 line breaks made directly inside each parenthesized or bracketed expression.
-This keeps
-multiline process-read arguments one level inside their call without
+Closed comma-separated lists receive a trailing comma when formatted across
+multiple lines, while compact lists do not. State fields instead receive a
+trailing semicolon because commas already join offsets in their pointer paths;
+named state-layout declarations remain an ordinary comma-separated list.
+These rules keep multiline process-read arguments one level inside their call without
 over-indenting a call merely because a nested argument is multiline. Braces
 in the settings DSL keep each label and `=>` on the same line, including
 boolean, choice, file, choice-option, and file-filter entries; nested block
 contents and closing braces are then anchored from that line. Interpolated
 string chunks remain byte-for-byte source text, while expressions inside
-`{...}` use the ordinary spacing rules.
+`{...}` use the ordinary spacing rules. Record fields and enum variants are
+always laid out one per line, including their trailing commas.
 
 The command-line frontend exposes the same operation as `splitc fmt <file>`.
 It writes only after parsing and formatting succeed and skips unchanged files.

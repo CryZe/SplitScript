@@ -1,7 +1,7 @@
 state "game.exe" {}
 
 record DebugValue {
-    value: i32
+    value: i32,
 }
 
 debug let debugBase = 40
@@ -23,7 +23,9 @@ onAttach {
 
 whileAttached {
     let count = 0
-    let debugValue = DebugValue { value: 7 }
+    let debugValue = DebugValue {
+        value: 7,
+    }
     debug let debugCount = debugBase + 2
     debug count += 1
     debug if count == 1 {

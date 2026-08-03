@@ -913,6 +913,47 @@ runtime unwraps all field results into a fresh GC snapshot and only then rotates
 matching ASR `Watcher` behavior and preventing partially updated values from
 triggering actions.
 
+Keep that required behavior for fields whose absence makes the snapshot
+incoherent. When one field is genuinely optional, make its value type optional
+and absorb only that read's error with the source-defined `Result.toOption()`:
+
+```text
+state "game.exe" {
+    level: u32 = process.read(levelAddress);
+    bonus: u32? = process.read<u32>(bonusAddress).toOption();
+}
+```
+
+A failed `level` read skips the complete tick. A failed `bonus` read commits
+the otherwise valid snapshot with `current.bonus == None`; a later successful
+read becomes a present `u32` without an explicit `Some` constructor. The error
+text is deliberately discarded, so `toOption()` should not be used merely to
+silence an unexpected failure.
+
+Discovery globals currently require an initializer because they exist for the
+whole script lifetime. State polling is gated until `onAttach` completes, so a
+typed sentinel such as `let levelAddress: address = 0x0` is safe when every
+completing attach path assigns it. Unsupported builds should remain suspended
+with `await process.closed()` rather than complete with an uninitialized
+address. The maintained ABZÛ example demonstrates this contract.
+
+Pointer width belongs to the resolved memory path, not to the state-field
+declaration. Use `PointerSize.Bit32` for a 32-bit target even when SplitScript
+and the host run on 64-bit systems:
+
+```text
+state "game.exe" {
+    loading: bool = process.read<bool>(
+        executableBase.memoryPath([0x00480af0], 0, PointerSize.Bit32).resolve()?
+    )?;
+}
+```
+
+This is why there is no separate `at32` spelling: static `at` paths use the
+attached process's native pointer width, while discovered or cross-width paths
+state their `PointerSize` exactly where traversal occurs. The maintained
+Borderlands PE32 layout has a host-executed fixture for this form.
+
 ## Structured async initialization
 
 `onAttach` is inherently suspending; it does not need an `async` modifier.

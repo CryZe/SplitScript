@@ -529,9 +529,10 @@ impl StandardLibrary {
             .type_parameters
             .iter()
             .filter(|parameter| {
-                !substitutions
-                    .iter()
-                    .any(|(name, _)| *name == parameter.name)
+                !parameter.constraints.is_empty()
+                    && !substitutions
+                        .iter()
+                        .any(|(name, _)| *name == parameter.name)
             })
             .collect::<Vec<_>>();
         if !unresolved.is_empty() {

@@ -877,7 +877,28 @@ typeConstructor Option<T> {}
 /// let health: u32! = 100
 /// ```
 @mustUse("Result values must be handled so failures are not silently ignored.")
-typeConstructor Result<T> {}
+typeConstructor Result<T> {
+    /// Converts a fallible value into an optional value.
+    ///
+    /// A successful result becomes the present option value. An error becomes
+    /// `None`, discarding its diagnostic text. This is useful for state fields
+    /// that are deliberately unavailable on some ticks; required fields should
+    /// keep their `T!` so a failed read skips the whole transactional snapshot.
+    ///
+    /// # Example
+    ///
+    /// Make one process read optional
+    ///
+    /// ```splitscript
+    /// let health: i32? = process.read<i32>(healthAddress).toOption()
+    /// ```
+    fn toOption() -> T? {
+        return match self {
+            Ok(value) => Some(value),
+            Err(_) => None,
+        }
+    }
+}
 
 extend address {
     /// Adds a field offset to an address.

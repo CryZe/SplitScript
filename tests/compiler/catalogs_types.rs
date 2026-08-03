@@ -32,6 +32,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::FloatIsFinite,
         StdlibItemId::NumericClamp,
         StdlibItemId::ArrayIsEmpty,
+        StdlibItemId::ResultToOption,
         StdlibItemId::AddressOffset,
     ] {
         assert!(matches!(
@@ -55,6 +56,36 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::compile(source).unwrap())
         .expect("a call through a source-defined library body should produce valid Wasm");
+}
+
+#[test]
+fn result_to_option_is_source_defined_and_preserves_generic_inference() {
+    let library = StandardLibrary::new();
+    assert_eq!(
+        library.render_signature(StdlibItemId::ResultToOption),
+        "T!.toOption() -> T?"
+    );
+    assert!(matches!(
+        library.item(StdlibItemId::ResultToOption).implementation,
+        Implementation::LibraryBody { .. }
+    ));
+
+    let source = r#"
+        state "game.exe" {
+            optional: i32? = process.read<i32>(0x1000).toOption()
+        }
+
+        whileAttached {
+            let text = match current.optional {
+                Some(value) => value as String,
+                None => "missing",
+            }
+            print(text)
+        }
+    "#;
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile(source).unwrap())
+        .expect("source-defined Result-to-Option conversion should produce valid Wasm GC");
 }
 
 #[test]

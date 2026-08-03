@@ -611,7 +611,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "state \"game.exe\" { field = expression; } | state GBA { field at address; }",
         "Declares process attachment and transactional watched state.",
-        "Every state expression produces a Result. A tick commits a complete new snapshot only when all fields succeed.",
+        "Every state expression produces a Result. A tick commits a complete new snapshot only when all required fields succeed. Deliberately optional reads can convert their own Result to an Option with `toOption()` without weakening the rest of the transaction.",
         STATE_DECL_EXAMPLE
     ),
     language_item!(

@@ -87,6 +87,55 @@ is still appropriate when consumers already define that value as unavailable;
 the A Plague Tale Xbox layout uses `cutsceneState: i32 = 0` for exactly that
 reason.
 
+## Attach-time-discovered addresses
+
+Keep discovery in `onAttach` and polling in the state declaration. Polling does
+not begin until `onAttach` completes, so a global address initializer is never
+observed when every completing path assigns the discovered address. An
+unsupported build should await process closure instead of completing:
+
+```splitscript
+let loadingAddress: address = 0x0
+
+state "game.exe" {
+    loading: i32 = process.read(loadingAddress);
+}
+
+onAttach {
+    let executable = await process.mainModule()
+    if executable.size == 47_570_944 {
+        loadingAddress = executable.address + 0x029020f4
+    } else {
+        print(`unsupported module size {executable.size}`)
+        await process.closed()
+    }
+}
+```
+
+Expression-backed fields remain one atomic snapshot. Leave required reads as
+`T!`; if any of them fails, `current` and `old` do not rotate and no lifecycle
+action observes a partial update. For a field that is semantically absent on
+some ticks, declare `T?` and convert just that read:
+
+```splitscript
+state "game.exe" {
+    requiredLevel: u32 = process.read(levelAddress);
+    optionalBonus: u32? = process.read<u32>(bonusAddress).toOption();
+}
+```
+
+`toOption()` discards the read error, maps it to `None`, and lets the rest of a
+valid transaction commit. Do not use it for a field whose failure invalidates
+the snapshot.
+
+Pointer width is a property of traversal. Static `at` fields use the attached
+process's native width. When a 64-bit host reads a PE32 or other 32-bit target,
+construct an explicit path with
+`base.memoryPath(offsets, finalOffset, PointerSize.Bit32)` and resolve it before
+the final read. This keeps mixed-width discovery auditable without an `at32`
+pseudo-keyword. See the maintained ABZÛ and Borderlands examples for the full
+discovery and PE32 forms.
+
 ## Run-scoped one-shot splits
 
 ASL frequently uses a `List<string>` or dictionary to prevent checkpoint loads

@@ -27,14 +27,19 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — make attach-time-discovered state sources first-class
+## Now — normalize watched state without mutating snapshots
 
-- [ ] Specify temporarily unreadable and optional discovered fields,
-  transactional snapshot behavior, and pointer width using the Borderlands
-  PE32 path as the pressure case rather than adding an `at32` pseudo-keyword.
-- [ ] Turn the resulting pattern into focused porting documentation and editor
-  guidance, then apply it to the next maintained port that discovers addresses
-  during `onAttach`.
+- [ ] Audit the original AAWCB and Aragami watcher workarounds, plus the manual
+  porting notes, to separate retain-last-valid, edge filtering, debounce, and
+  snapshot-commit gating into concrete behaviors rather than one vague
+  mutable-watcher feature.
+- [ ] Implement the smallest immutable normalization abstraction proven by the
+  selected maintained port. Keep `old` and `current` read-only, preserve atomic
+  snapshot rotation, and add compiler, runtime, documentation, and editor
+  coverage together.
+- [ ] Decide the typed equivalent of a boolean-returning ASL `update` block
+  from that evidence. If it gates snapshot commit or lifecycle evaluation,
+  expose the boundary explicitly rather than changing `whileAttached`.
 
 ## P0 — unblock the next representative native ports
 
@@ -59,12 +64,6 @@ General rules:
 
 ### Polling, mutable watcher patterns, and settings
 
-- [ ] Design an immutable state-normalization layer for ASL scripts that assign
-  `old` values back into `current`. Cover retain-last-valid, edge filtering,
-  debounce, and derived fields without making snapshots mutable.
-- [ ] Decide the typed equivalent of a boolean-returning ASL `update` block.
-  If it gates snapshot commit or lifecycle evaluation, expose that as an
-  explicit polling guard rather than changing `whileAttached` ambiguously.
 - [ ] Extend settings for data-heavy ports beyond the now-supported stable
   external string keys and boolean lookup: conditional visibility or
   enablement, and repeated tables. Preserve the label-first DSL, nested
@@ -77,6 +76,10 @@ General rules:
 
 ### Standard-library and type-system boundaries
 
+- [ ] Validate every source-defined standard-library body's inferred receiver,
+  parameters, and result scheme against its declared catalog signature before
+  code generation, including nested generic wrappers. A mismatch must be a
+  catalog construction error, never a monomorphization or backend panic.
 - [ ] Design the user-facing trait/type-class model around the existing
   source-defined capability graph. Begin with memory reading, `Display`,
   equality, numeric operations, and hashing; decide separately whether user

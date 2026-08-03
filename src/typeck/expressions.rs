@@ -401,26 +401,26 @@ impl Checker {
                             format!("int:{value}")
                         }
                         MatchPattern::None => {
-                            match self.shallow_type(value_type) {
-                                Type::Option(option) => {
-                                    self.semantics.resolve_wrapper_pattern(
-                                        arm.pattern_id,
-                                        ResolvedWrapperPattern::OptionNone(option),
-                                    );
-                                    format!("option:{option}:none")
-                                }
-                                ty => {
-                                    let ty = self.type_name(ty);
-                                    self.error(
-                                    format!("a `None` pattern requires an optional value, found `{ty}`"),
-                                    arm.span,
+                            if let Some(option) = self.infer_option_pattern(
+                                value_type,
+                                arm.span,
+                                "a `None` pattern requires an optional value",
+                            ) {
+                                self.semantics.resolve_wrapper_pattern(
+                                    arm.pattern_id,
+                                    ResolvedWrapperPattern::OptionNone(option),
                                 );
-                                    format!("invalid:{}", arm.pattern_id.index())
-                                }
+                                format!("option:{option}:none")
+                            } else {
+                                format!("invalid:{}", arm.pattern_id.index())
                             }
                         }
-                        MatchPattern::OptionSome(binding) => match self.shallow_type(value_type) {
-                            Type::Option(option) => {
+                        MatchPattern::OptionSome(binding) => {
+                            if let Some(option) = self.infer_option_pattern(
+                                value_type,
+                                arm.span,
+                                "a `Some(value)` pattern requires an optional value",
+                            ) {
                                 self.semantics.resolve_wrapper_pattern(
                                     arm.pattern_id,
                                     ResolvedWrapperPattern::OptionSome(option),
@@ -430,21 +430,16 @@ impl Checker {
                                     self.bind_pattern_value(binding, binding_type, arm.span);
                                 }
                                 format!("option:{option}:some")
-                            }
-                            ty => {
-                                let ty = self.type_name(ty);
-                                self.error(
-                                    format!(
-                                        "a `Some(value)` pattern requires an optional value, found `{ty}`"
-                                    ),
-                                    arm.span,
-                                );
+                            } else {
                                 format!("invalid:{}", arm.pattern_id.index())
                             }
-                        },
-                        MatchPattern::ResultSuccess(binding) => match self.shallow_type(value_type)
-                        {
-                            Type::Result(result) => {
+                        }
+                        MatchPattern::ResultSuccess(binding) => {
+                            if let Some(result) = self.infer_result_pattern(
+                                value_type,
+                                arm.span,
+                                "an `Ok(value)` pattern requires a result value",
+                            ) {
                                 self.semantics.resolve_wrapper_pattern(
                                     arm.pattern_id,
                                     ResolvedWrapperPattern::ResultSuccess(result),
@@ -454,19 +449,16 @@ impl Checker {
                                     self.bind_pattern_value(binding, binding_type, arm.span);
                                 }
                                 format!("result:{result}:success")
-                            }
-                            ty => {
-                                self.error(
-                                    format!(
-                                        "an `Ok(value)` pattern requires a result value, found `{ty}`"
-                                    ),
-                                    arm.span,
-                                );
+                            } else {
                                 format!("invalid:{}", arm.pattern_id.index())
                             }
-                        },
-                        MatchPattern::ResultError(binding) => match self.shallow_type(value_type) {
-                            Type::Result(result) => {
+                        }
+                        MatchPattern::ResultError(binding) => {
+                            if let Some(result) = self.infer_result_pattern(
+                                value_type,
+                                arm.span,
+                                "an `Err(error)` pattern requires a result value",
+                            ) {
                                 self.semantics.resolve_wrapper_pattern(
                                     arm.pattern_id,
                                     ResolvedWrapperPattern::ResultError(result),
@@ -479,17 +471,10 @@ impl Checker {
                                     );
                                 }
                                 format!("result:{result}:error")
-                            }
-                            ty => {
-                                self.error(
-                                        format!(
-                                            "an `Err(error)` pattern requires a result value, found `{ty}`"
-                                        ),
-                                        arm.span,
-                                    );
+                            } else {
                                 format!("invalid:{}", arm.pattern_id.index())
                             }
-                        },
+                        }
                         MatchPattern::Wildcard => "wildcard".to_owned(),
                     };
                     let state_layout = state_layout.or(self.active_state_layout);
@@ -914,6 +899,50 @@ impl Checker {
             self.expr(extra, None);
         }
         self.expect_expression(expression, self.enum_type(enumeration), expected, span)
+    }
+
+    fn infer_option_pattern(
+        &mut self,
+        value_type: Type,
+        span: Span,
+        requirement: &str,
+    ) -> Option<crate::ast::OptionTypeId> {
+        match self.shallow_type(value_type) {
+            Type::Option(option) => Some(option),
+            Type::Variable(_) => {
+                let value = self.fresh_inference(Requirements::none(), None);
+                let option = self.inference.option_type(value);
+                self.unify(value_type, Type::Option(option), span)?;
+                Some(option)
+            }
+            ty => {
+                let ty = self.type_name(ty);
+                self.error(format!("{requirement}, found `{ty}`"), span);
+                None
+            }
+        }
+    }
+
+    fn infer_result_pattern(
+        &mut self,
+        value_type: Type,
+        span: Span,
+        requirement: &str,
+    ) -> Option<crate::ast::ResultTypeId> {
+        match self.shallow_type(value_type) {
+            Type::Result(result) => Some(result),
+            Type::Variable(_) => {
+                let value = self.fresh_inference(Requirements::none(), None);
+                let result = self.inference.result_type(value);
+                self.unify(value_type, Type::Result(result), span)?;
+                Some(result)
+            }
+            ty => {
+                let ty = self.type_name(ty);
+                self.error(format!("{requirement}, found `{ty}`"), span);
+                None
+            }
+        }
     }
 
     pub(super) fn binary(

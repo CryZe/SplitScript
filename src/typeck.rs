@@ -321,6 +321,17 @@ impl Checker {
         let expected = self.shallow_type(expected);
         let actual_shallow = self.shallow_type(actual);
         let none = self.core_type(crate::stdlib::CoreTypeId::None);
+        let nested_wrapper_lift = match (expected, actual_shallow) {
+            (Type::Option(option), Type::Result(_)) => matches!(
+                self.shallow_type(self.inference.option_value(option)),
+                Type::Result(_) | Type::Variable(_)
+            ),
+            (Type::Result(result), Type::Option(_)) => matches!(
+                self.shallow_type(self.inference.result_value(result)),
+                Type::Option(_) | Type::Variable(_)
+            ),
+            _ => false,
+        };
         let (kind, value) = match (expected, actual_shallow) {
             (expected @ Type::Option(_), actual) if actual == none => {
                 self.semantics.resolve_value_conversion(
@@ -335,6 +346,14 @@ impl Checker {
                 return self.unify(actual, expected, span);
             }
             (Type::Variable(_), _) => return self.unify(actual, expected, span),
+            (Type::Option(option), Type::Result(_)) if nested_wrapper_lift => (
+                ValueConversionKind::LiftOption,
+                self.inference.option_value(option),
+            ),
+            (Type::Result(result), Type::Option(_)) if nested_wrapper_lift => (
+                ValueConversionKind::LiftResult,
+                self.inference.result_value(result),
+            ),
             (_, Type::Result(result)) => {
                 let value = self.inference.result_value(result);
                 if matches!(self.shallow_type(value), Type::Variable(_)) {

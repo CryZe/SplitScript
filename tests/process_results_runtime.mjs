@@ -35,6 +35,7 @@ const env = {
     process_read(_process, address, destination, size) {
         const numericAddress = Number(address);
         if (numericAddress === 0x3000
+            || (phase === 2 && numericAddress === 0x7000)
             || (phase === 1 && (numericAddress === 0x2000 || numericAddress === 0x5000))) {
             return 0;
         }
@@ -45,6 +46,8 @@ const env = {
                 ? 20 + phase
                 : numericAddress === 0x4000
                     ? 40 + phase
+                    : numericAddress === 0x7000
+                        ? 70 + phase
                     : 50 + phase;
         const view = new DataView(instance.exports.memory.buffer);
         if (numericAddress === 0x6000) {
@@ -85,10 +88,13 @@ phase = 1;
 instance.exports.update();
 phase = 2;
 instance.exports.update();
+phase = 3;
+instance.exports.update();
 
 const expected = [
-    "0,0,0,0,0,0->10,20,90,1,2,3:-1",
-    "10,20,90,1,2,3->12,22,94,3,4,5:-1",
+    "0,0,0,0,0,0,None->10,20,90,1,2,3,70:-1",
+    "10,20,90,1,2,3,70->12,22,94,3,4,5,None:-1",
+    "12,22,94,3,4,5,None->13,23,96,4,5,6,73:-1",
 ];
 if (JSON.stringify(snapshots) !== JSON.stringify(expected)) {
     throw new Error(`unexpected transactional snapshots: ${JSON.stringify({ expected, snapshots })}`);

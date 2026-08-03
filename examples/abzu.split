@@ -10,7 +10,10 @@ state "AbzuGame-Win64-Shipping.exe" {
     loading = process.read(loadingAddress);
 }
 
-let loadingAddress = 0
+// State polling cannot begin until onAttach completes. Every completing branch
+// below initializes this address; the unsupported branch remains suspended
+// until the process closes.
+let loadingAddress: address = 0x0
 let build = AbzuBuild.Steam
 
 onAttach {

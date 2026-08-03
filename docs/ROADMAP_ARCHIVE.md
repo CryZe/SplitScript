@@ -1,5 +1,24 @@
 # SplitScript roadmap
 
+## 2026-08-03: attach-time-discovered and optional state sources
+
+- Added the source-defined generic `Result<T>.toOption()` operation. It maps a
+  successful read to a present `T?` and a failed read to `None`, so one
+  deliberately optional field can be absent without weakening the required
+  fields in the same transactional snapshot.
+- Extended inference so `Some`/`None` and `Ok`/`Err` patterns can determine an
+  otherwise unconstrained wrapper input, and allowed nested wrapper lifts such
+  as `T?` into the outer `T?!` produced by a state poll. The standard-library
+  implementation uses the ordinary source checker and Wasm-GC lowering.
+- Expanded the host-executed process-result fixture: required failures still
+  skip the complete tick, while an optional read failure commits `None` and a
+  later successful read becomes present. Catalog tests keep `toOption()`
+  source-defined and its generic signature visible to editor tooling.
+- Documented the full attach-discovery contract using maintained ABZÛ and
+  Borderlands ports: polling begins only after `onAttach` completes,
+  unsupported builds wait for process closure, and PE32 traversal selects
+  `PointerSize.Bit32` on `MemoryPath` rather than introducing `at32` syntax.
+
 ## 2026-08-03: string-keyed settings and faithful Akiba runtime coverage
 
 - Added optional `key "host-key"` metadata to settings declarations. The key is

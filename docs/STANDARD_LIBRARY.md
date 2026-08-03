@@ -422,6 +422,12 @@ fixed-width primitives and both source- and catalog-declared records containing
 only readable fields. Record fields use declaration order and natural
 alignment; one host read obtains the complete layout before the compiler
 recursively constructs its GC value.
+`Result<T>.toOption()` is ordinary source-defined library composition over
+wrapper matching. It turns success into a present `T?` and error into `None`,
+which lets one intentionally unavailable state field commit as absent while
+all remaining required field failures continue to reject the transaction. It
+discards the error string and therefore is not a general replacement for
+handling or propagating failures.
 Immediate process operations return `T!`: fixed-layout reads, pointer following,
 relative-address decoding, and string decoding. They can be handled
 synchronously with `else` or `?`; `retry expression` polls any of them across

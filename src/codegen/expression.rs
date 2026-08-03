@@ -1378,7 +1378,10 @@ fn compile_expr_unconverted(
                     context.gc.index(Type::Option(option)),
                 )));
             }
-            _ => unreachable!("typed None expressions use the unit or nullable representation"),
+            _ => unreachable!(
+                "typed None expressions use the unit or nullable representation, found {ty:?} with conversion {:?}",
+                expression_ir.conversion
+            ),
         },
         wasm_ir::ExpressionKind::Bool(value) => {
             function.instruction(&Instruction::I32Const(*value as i32));

@@ -13,7 +13,7 @@ settings {
     "General" {
         /// Turns the example split logic on or off without unloading
         /// the auto splitter.
-        "Enable Auto Splitting" => enableAutoSplitting: true
+        "Enable Auto Splitting" => enableAutoSplitting key "auto-splitting": true
 
         /// Chooses how the target application should be identified.
         "Capture Source" => captureMode: choice {

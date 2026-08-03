@@ -119,7 +119,7 @@ pub(super) fn compile_refresh_settings(
             lowering.gc,
         );
 
-        let (key_ptr, key_len) = strings.get(&setting.name);
+        let (key_ptr, key_len) = strings.get(setting.runtime_key());
         function
             .instruction(&Instruction::LocalGet(map))
             .instruction(&Instruction::I32Const(key_ptr as i32))
@@ -296,7 +296,7 @@ pub(super) fn emit_setting_registration(
     let enums = lowering.enums;
     let semantics = lowering.semantics;
     let gc = lowering.gc;
-    let (key_ptr, key_len) = strings.get(&setting.name);
+    let (key_ptr, key_len) = strings.get(setting.runtime_key());
     let (description_ptr, description_len) = strings.get(&setting.description);
     match &setting.kind {
         SettingKind::Bool { default } => {

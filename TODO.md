@@ -36,7 +36,8 @@ statically declared settings table. The temporary `missionEnabled` match makes
 the intended behavior explicit, but copying that pattern across ports would be
 needlessly verbose and would hide the external setting-key relationship.
 - [ ] Design the smallest typed settings-key surface proven by the port. It
-  must support stable external numeric/string keys for compatible settings,
+  must support stable external string keys for compatible settings (the exact
+  keys stored in the host settings map),
   reject heterogeneous lookup, preserve ordinary `settings.name` access, and
   keep hover, completion, rename, documentation, and host metadata tied to the
   same setting declaration.

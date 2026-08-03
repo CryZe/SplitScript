@@ -630,9 +630,9 @@ define_language_catalog! {
         Settings,
         "settings",
         LanguageItemKind::Declaration,
-        "settings { \"Group\" { \"Label\" => name: value } }",
+        "settings { \"Group\" { \"Label\" => name key \"host-key\": value } }",
         "Declares live user settings.",
-        "Settings support nested headings, documentation-comment tooltips, booleans, choices, and file selectors. Current and previous values refresh every update.",
+        "Settings support nested headings, documentation-comment tooltips, booleans, choices, and file selectors. An optional quoted key is the exact stable string stored in the host settings map; otherwise the source identifier is used. Current and previous values refresh every update.",
         SETTINGS_DECL_EXAMPLE
     ),
     language_item!(

@@ -251,8 +251,8 @@ compile-time and output-size measurements are recorded in
 - Typed `print` calls in any action block.
 - Runtime variables, timer-state inspection, explicit game-time pause/resume,
   tick-rate control, and normalized duration conversion.
-- Live typed settings: nested titles and tooltips, booleans, enum-backed
-  choices, file selectors with glob/MIME filters, and automatic
+- Live typed settings: nested titles and tooltips, booleans, stable string
+  host-map keys, enum-backed choices, file selectors with glob/MIME filters, and automatic
   `settings`/`oldSettings` tick snapshots.
 - `whileAttached`, `start`, `split`, `reset`, `isLoading`, and `gameTime`
   actions, plus one-shot `onAttach` and `onDetached` lifecycle blocks.

@@ -15,9 +15,9 @@ use crate::{
         FunctionId, InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId,
         Parameter, PatternBinding, PatternId, PointerPath, Program, RecordDecl, RecordField,
         RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
-        SettingChoiceOptionId, SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl,
-        StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource, Stmt,
-        SuspensionMode, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
+        SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFileFilter, SettingKind,
+        Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
+        StateSource, Stmt, SuspensionMode, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::Diagnostic,
     migration::DUPLICATE_STATE_DIAGNOSTIC,
@@ -596,6 +596,44 @@ mod tests {
             program.settings[0].tooltip.as_deref(),
             Some("First line of the tooltip continues on this line.\nA second paragraph.")
         );
+    }
+
+    #[test]
+    fn parses_stable_string_setting_keys() {
+        let source = r#"
+            state "game.exe" {}
+            settings {
+                "Mission" => mission key "42": true
+                "Boss" => boss key "final-boss": false
+                "Ordinary" => ordinary: true
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        assert!(matches!(
+            &program.settings[0].external_key,
+            Some(SettingExternalKey { value, .. }) if value == "42"
+        ));
+        assert!(matches!(
+            &program.settings[1].external_key,
+            Some(SettingExternalKey { value, .. }) if value == "final-boss"
+        ));
+        assert!(program.settings[2].external_key.is_none());
+        assert_eq!(program.settings[0].runtime_key(), "42");
+        assert_eq!(program.settings[1].runtime_key(), "final-boss");
+        assert_eq!(program.settings[2].runtime_key(), "ordinary");
+    }
+
+    #[test]
+    fn rejects_non_string_setting_keys() {
+        let source = r#"
+            state "game.exe" {}
+            settings {
+                "Mission" => mission key 42: true
+            }
+        "#;
+        let error = parse(source, lex(source, SyntaxMode::Program).unwrap())
+            .expect_err("host settings-map keys are always strings");
+        assert_eq!(error.message, "expected a string setting key");
     }
 
     #[test]

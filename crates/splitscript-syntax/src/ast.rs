@@ -560,8 +560,32 @@ pub struct SettingDecl {
     pub name: String,
     pub description: String,
     pub tooltip: Option<String>,
+    /// Stable key used by the host settings map and data-driven lookup. When
+    /// absent, the source identifier remains the key.
+    pub external_key: Option<SettingExternalKey>,
     pub kind: SettingKind,
     pub span: Span,
+}
+
+impl SettingDecl {
+    pub fn runtime_key(&self) -> &str {
+        match &self.external_key {
+            Some(key) => &key.value,
+            None => &self.name,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingExternalKey {
+    pub value: String,
+    pub span: Span,
+}
+
+impl SettingExternalKey {
+    pub fn span(&self) -> Span {
+        self.span
+    }
 }
 
 #[derive(Debug, Clone)]

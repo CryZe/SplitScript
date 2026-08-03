@@ -1005,14 +1005,14 @@ fn optional()->f32?{return None}"#;
 
     #[test]
     fn preserves_ordinary_and_setting_documentation_comments() {
-        let source = "  // heading\r\nstate \"game.exe\"{} // process\r\n\r\nsettings{\r\n/// first line\r\n/// second line\r\n\"Enabled\"=>enabled:true // setting\r\n}\r\n/* footer */";
+        let source = "  // heading\r\nstate \"game.exe\"{} // process\r\n\r\nsettings{\r\n/// first line\r\n/// second line\r\n\"Enabled\"=>enabled key \"legacy-enabled\":true // setting\r\n}\r\n/* footer */";
         let expected = r#"// heading
 state "game.exe" {} // process
 
 settings {
     /// first line
     /// second line
-    "Enabled" => enabled: true // setting
+    "Enabled" => enabled key "legacy-enabled": true // setting
 }
 /* footer */
 "#;

@@ -63,7 +63,7 @@ impl StaticData {
             }
         }
         for setting in &program.settings {
-            strings.intern(&setting.name);
+            strings.intern(setting.runtime_key());
             strings.intern(&setting.description);
             if let Some(tooltip) = &setting.tooltip {
                 strings.intern(tooltip);

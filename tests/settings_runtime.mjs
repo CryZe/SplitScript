@@ -203,7 +203,7 @@ if (variables.get("Capture Source") !== "Executable Name")
 if (variables.get("Layout File") !== "")
   throw new Error("file default was not loaded");
 
-values.set("enableAutoSplitting", false);
+values.set("auto-splitting", false);
 values.set("captureMode", "FullPath");
 values.set("layoutFile", "/mnt/c/layout.json");
 values.set("liveReload", false);
@@ -240,7 +240,7 @@ if (filters.length !== 5)
 if (tooltips.size !== 9)
   throw new Error(`expected nine tooltips, got ${tooltips.size}`);
 if (
-  tooltips.get("enableAutoSplitting") !==
+  tooltips.get("auto-splitting") !==
   "Turns the example split logic on or off without unloading the auto splitter."
 )
   throw new Error("multiline documentation comments were not folded into a tooltip");

@@ -1,9 +1,9 @@
 //! Source declaration and signature collection before body checking.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{Program, SettingDecl, SettingKind, StateMemoryDecoder, StateSource},
+    ast::{Program, SettingDecl, SettingKind, Span, StateMemoryDecoder, StateSource},
     inference::{Requirements, Type},
     intrinsic_registry::MAX_NATIVE_STRING_BYTES,
     stdlib::{CoreTypeId, StdlibCapabilityId, StdlibTypeId},
@@ -190,7 +190,24 @@ fn collect_state_field_type(
 }
 
 fn collect_settings(checker: &mut Checker, program: &Program) {
+    let mut runtime_keys = HashMap::<String, Span>::new();
     for setting in &program.settings {
+        let runtime_key = setting.runtime_key();
+        let key_span = setting
+            .external_key
+            .as_ref()
+            .map_or(setting.span, crate::ast::SettingExternalKey::span);
+        if runtime_key.is_empty() {
+            checker.error("a setting key cannot be empty", key_span);
+        } else if runtime_keys
+            .insert(runtime_key.to_owned(), key_span)
+            .is_some()
+        {
+            checker.error(
+                format!("duplicate runtime setting key `{runtime_key}`"),
+                key_span,
+            );
+        }
         if let Some(ty) = setting_value_type(checker, setting) {
             checker.semantics.resolve_value_type(setting.id, ty);
             if checker

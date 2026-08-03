@@ -736,7 +736,7 @@ settings {
     "General" {
         /// Can be changed while the splitter is running.
         "Enable Auto Splitting"
-            => enableAutoSplitting: true
+            => enableAutoSplitting key "auto-splitting": true
 
         /// Chooses how the target application is identified.
         "Capture Source"
@@ -769,6 +769,13 @@ A boolean setting infers its type from `true` or `false`. A `choice` is backed
 by a payloadless enum, so matching it is exhaustive and type checked. A `file`
 setting is a `String` and can declare named glob filters, an unnamed fallback
 filter, and MIME filters.
+
+The optional `key "host-key"` clause gives a setting the exact string key used
+in the host settings map. Without it, the source identifier is also the host
+key. Script code always uses the readable declaration name, such as
+`settings.enableAutoSplitting`; the external key is metadata for persistence
+and data-driven lookup. Keys must be nonempty and unique across the complete
+settings block.
 
 Controls are registered during `_start`. At the beginning of every exported
 tick, including detached ticks, the compiler loads the current host settings

@@ -5,8 +5,9 @@
 use super::{
     Action, ActionKind, Diagnostic, EnumDecl, EnumId, EnumReference, EnumVariant, FunctionDecl,
     FunctionId, Parameter, Parser, PointerPath, RecordDecl, RecordField, RecordId,
-    SettingChoiceOption, SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl, StateField,
-    StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource, TokenKind, TypeRef,
+    SettingChoiceOption, SettingDecl, SettingExternalKey, SettingFileFilter, SettingKind, Span,
+    StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource,
+    TokenKind, TypeRef,
 };
 use crate::{
     diagnostic::{DiagnosticFix, FixApplicability, TextEdit},
@@ -634,6 +635,7 @@ impl Parser<'_> {
                 name,
                 description,
                 tooltip,
+                external_key: None,
                 kind: SettingKind::Title { heading_level },
                 span: label_token.span,
             });
@@ -647,6 +649,25 @@ impl Parser<'_> {
 
         self.expect(TokenKind::FatArrow, "expected `=>` after the setting label")?;
         let (name, name_span) = self.expect_any_ident("expected a setting name")?;
+        let external_key = if self.at_ident("key") {
+            self.bump();
+            let token = self.current().clone();
+            let key = match token.kind {
+                TokenKind::String(value) => {
+                    self.bump();
+                    SettingExternalKey {
+                        value,
+                        span: token.span,
+                    }
+                }
+                _ => {
+                    return Err(Diagnostic::new("expected a string setting key", token.span));
+                }
+            };
+            Some(key)
+        } else {
+            None
+        };
         self.expect(TokenKind::Colon, "expected `:` after the setting name")?;
         let (kind_name, kind_span) =
             self.expect_any_ident("expected a setting default, `choice`, or `file`")?;
@@ -668,6 +689,7 @@ impl Parser<'_> {
             name,
             description,
             tooltip,
+            external_key,
             kind,
             span: label_token.span.join(end).join(name_span),
         });

@@ -1388,3 +1388,35 @@ fn compiler_database_resolves_type_record_and_pattern_syntax() {
             if definition.id == SourceDefinitionId::RecordField(value_field)
     ));
 }
+
+#[test]
+fn setting_runtime_keys_are_nonempty_and_unique() {
+    let duplicate = r#"
+        state "game.exe" {}
+        settings {
+            "First" => first key "shared": true
+            "Second" => shared: false
+        }
+    "#;
+    let diagnostics = splitscript::compile(duplicate)
+        .expect_err("an explicit host key must not collide with an identifier key");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message == "duplicate runtime setting key `shared`" })
+    );
+
+    let empty = r#"
+        state "game.exe" {}
+        settings {
+            "Empty" => empty key "": true
+        }
+    "#;
+    let diagnostics =
+        splitscript::compile(empty).expect_err("the host settings map cannot use an empty key");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message == "a setting key cannot be empty")
+    );
+}

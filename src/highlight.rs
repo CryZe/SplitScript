@@ -942,6 +942,7 @@ fn is_keyword(name: &str) -> bool {
             | "match"
             | "as"
             | "at"
+            | "key"
             | "default"
             | "choice"
             | "file"
@@ -1034,7 +1035,7 @@ state "game.exe" {
 
 settings {
     "General" {
-        "Enabled" => enabled: true
+        "Enabled" => enabled key "legacy-enabled": true
     }
 }
 
@@ -1093,6 +1094,20 @@ whileAttached {
             "enabled",
             SemanticTokenKind::Setting,
             MODIFIER_DECLARATION
+        ));
+        assert!(contains(
+            source,
+            &first,
+            "key",
+            SemanticTokenKind::Keyword,
+            0
+        ));
+        assert!(contains(
+            source,
+            &first,
+            "\"legacy-enabled\"",
+            SemanticTokenKind::String,
+            0
         ));
         assert!(contains(
             source,

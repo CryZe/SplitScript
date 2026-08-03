@@ -27,18 +27,14 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — apply structured migration knowledge to real ports
+## Now — select the next representative production port
 
 The faithful A Plague Tale port proved that several supposedly missing
 features already existed, while also exposing two real compiler bugs. The next
-goal is to apply the new compiler-owned migration catalog and generated
-capability index to the larger ASL corpus so stale notes and copied compilers
-stop rediscovering already-supported features.
+goal is to apply the compiler-owned migration catalog, generated capability
+index, and first shape-aware diagnostics to the larger ASL corpus so stale
+notes and copied compilers stop rediscovering already-supported features.
 
-- [ ] Route the first high-confidence migration diagnostics through the same
-  entries, beginning with fixed `stringN` fields and duplicate
-  version-labelled `state` blocks. Preserve ordinary syntax recovery and avoid
-  cascades or rewrites of shadowed user symbols.
 - [ ] Re-audit the next group of manual-port notes against the generated index,
   select one unrelated production-scale port whose remaining blocker has high
   corpus frequency, and make that faithful port the next goal.
@@ -336,19 +332,17 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Route the first `stringN` and version-labelled-state diagnostics through the
-   structured migration catalog.
-2. Re-audit the manual notes with the generated index and select the next unrelated
+1. Re-audit the manual notes with the generated index and select the next unrelated
    production-scale port.
-3. Implement only gaps demonstrated by that port, with runtime and editor
+2. Implement only gaps demonstrated by that port, with runtime and editor
    coverage; promote only recurring
    game-independent patterns.
-4. In parallel with stable language semantics, establish the Wasmtime/DWARF
+3. In parallel with stable language semantics, establish the Wasmtime/DWARF
    compatibility fixture and land debug names plus source-line stepping.
-5. Harden and publish the bundled VSIX and native releases, then evaluate the
+4. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench.
-6. Add Unity Mono and the next emulator/engine provider from representative
+5. Add Unity Mono and the next emulator/engine provider from representative
    ports.
-7. Keep physical `None` aggregate specialization and sandbox-sensitive host
+6. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

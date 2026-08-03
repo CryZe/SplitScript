@@ -20,6 +20,7 @@ use crate::{
         SuspensionMode, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::Diagnostic,
+    migration::DUPLICATE_STATE_DIAGNOSTIC,
     source::{RecoveryNode, RecoveryNodeKind},
 };
 
@@ -193,8 +194,10 @@ impl Parser<'_> {
             }
             let recognized_start = self.is_top_level_start();
             let result = if self.at_ident("state") {
-                if program.state.is_some() {
-                    Err(self.error("only one `state(...)` declaration is allowed"))
+                if let Some(previous) = program.state.as_ref() {
+                    Err(self
+                        .migration_diagnostic(DUPLICATE_STATE_DIAGNOSTIC, self.current().span)
+                        .with_secondary_label(previous.span, "the first state declaration is here"))
                 } else {
                     let declaration = if matches!(self.peek(1).kind, TokenKind::LParen) {
                         self.state_decl()

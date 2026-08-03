@@ -8,6 +8,10 @@ use super::{
     SettingChoiceOption, SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl, StateField,
     StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource, TokenKind, TypeRef,
 };
+use crate::{
+    diagnostic::{DiagnosticFix, FixApplicability, TextEdit},
+    migration::ASL_STRING_N_FIELD_DIAGNOSTIC,
+};
 
 impl Parser<'_> {
     pub(super) fn enum_decl(&mut self) -> Result<EnumDecl, Diagnostic> {
@@ -371,8 +375,14 @@ impl Parser<'_> {
     }
 
     fn state_field(&mut self, documentation: Option<String>) -> Result<StateField, Diagnostic> {
-        let (name, field_start) = self.expect_any_ident("expected a state field name")?;
-        let annotation = if self.eat(&TokenKind::Colon).is_some() {
+        let legacy_string = self.legacy_string_field_prefix();
+        let (name, field_start) = if legacy_string.is_some() {
+            self.bump();
+            self.expect_any_ident("expected a field name after the ASL `stringN` type")?
+        } else {
+            self.expect_any_ident("expected a state field name")?
+        };
+        let annotation = if legacy_string.is_none() && self.eat(&TokenKind::Colon).is_some() {
             let (ty, _) = self.parse_type("expected a state field type")?;
             Some(ty)
         } else {
@@ -381,7 +391,14 @@ impl Parser<'_> {
         let source = if self.eat(&TokenKind::Assign).is_some() {
             StateSource::Expression(self.root_expression())
         } else {
-            self.expect_ident("at")?;
+            let legacy_colon = if legacy_string.is_some() {
+                self.eat(&TokenKind::Colon)
+            } else {
+                None
+            };
+            if legacy_colon.is_none() {
+                self.expect_ident("at")?;
+            }
             let module = if matches!(self.current().kind, TokenKind::String(_)) {
                 let module = self.expect_string("expected a module name")?;
                 self.expect(TokenKind::Comma, "expected an offset after the module")?;
@@ -393,7 +410,8 @@ impl Parser<'_> {
             while self.eat(&TokenKind::Comma).is_some() {
                 offsets.push(self.expect_u64("expected a pointer offset")?);
             }
-            let decoder = if let Some(start) = self.eat_ident("as") {
+            let pointer_end = self.previous().span.end;
+            let mut decoder = if let Some(start) = self.eat_ident("as") {
                 let (name, name_span) =
                     self.expect_any_ident("expected a state memory decoder after `as`")?;
                 if name != "utf8" {
@@ -429,6 +447,42 @@ impl Parser<'_> {
             } else {
                 None
             };
+            if let Some((type_name, type_span, max_bytes)) = legacy_string {
+                let mut edits = vec![TextEdit {
+                    span: Span {
+                        start: type_span.start,
+                        end: field_start.start,
+                    },
+                    replacement: String::new(),
+                }];
+                if let Some(colon) = legacy_colon {
+                    edits.push(TextEdit {
+                        span: colon,
+                        replacement: "at".to_owned(),
+                    });
+                }
+                if decoder.is_none() {
+                    edits.push(TextEdit {
+                        span: Span {
+                            start: pointer_end,
+                            end: pointer_end,
+                        },
+                        replacement: format!(" as utf8({max_bytes})"),
+                    });
+                    decoder = Some(StateMemoryDecoder::Utf8 {
+                        max_bytes,
+                        span: type_span,
+                    });
+                }
+                self.diagnostics.push(
+                    self.migration_diagnostic(ASL_STRING_N_FIELD_DIAGNOSTIC, type_span)
+                        .with_fix(DiagnosticFix {
+                            title: format!("rewrite `{type_name}` using explicit UTF-8 decoding"),
+                            applicability: FixApplicability::MaybeIncorrect,
+                            edits,
+                        }),
+                );
+            }
             StateSource::Pointer(PointerPath {
                 module,
                 offsets,
@@ -448,6 +502,23 @@ impl Parser<'_> {
                 end,
             },
         })
+    }
+
+    fn legacy_string_field_prefix(&self) -> Option<(String, Span, u32)> {
+        let TokenKind::Ident(type_name) = &self.current().kind else {
+            return None;
+        };
+        let digits = type_name.strip_prefix("string")?;
+        if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        let separator_is_path = matches!(self.peek(2).kind, TokenKind::Colon)
+            || matches!(&self.peek(2).kind, TokenKind::Ident(name) if name == "at");
+        if !matches!(self.peek(1).kind, TokenKind::Ident(_)) || !separator_is_path {
+            return None;
+        }
+        let max_bytes = digits.parse().ok()?;
+        Some((type_name.clone(), self.current().span, max_bytes))
     }
 
     pub(super) fn process_names(&mut self) -> Result<Vec<String>, Diagnostic> {

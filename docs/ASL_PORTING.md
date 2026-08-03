@@ -33,6 +33,12 @@ an ordinary immutable `String`. SplitScript resolves every pointer offset first,
 performs one bounded final read, stops at the first NUL byte, and rejects invalid
 UTF-8 transactionally. It deliberately does not expose `string50` as a type.
 
+When the parser encounters a type-first field such as
+`string50 map : 0x100`, it explains this distinction and offers a
+**maybe-incorrect** rewrite to `map at 0x100 as utf8(50)`. The edit is not
+preferred or machine-applicable because only the autosplitter author can verify
+the target encoding.
+
 That stricter malformed-input policy is equivalent for A Plague Tale's ASCII
 map identifiers. Do not use `readManagedString` as a replacement for native
 UTF-16: that method reads the object layout of a Unity managed string. A future

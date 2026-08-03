@@ -385,3 +385,106 @@ fn unrelated_unknown_methods_do_not_receive_noisy_suggestions() {
     );
     assert!(errors[0].fixes.is_empty());
 }
+
+#[test]
+fn asl_string_n_fields_offer_an_encoding_aware_rewrite() {
+    use splitscript::{FixApplicability, compiler::ast::StateMemoryDecoder};
+
+    let source = r#"
+        state "game.exe" {
+            string50 map : "game.exe", 0x100, 0x20
+            after: u32 at 0x200
+        }
+    "#;
+    let recovered = splitscript::parse_recovering(source).unwrap();
+    assert_eq!(recovered.diagnostics().len(), 1);
+    let diagnostic = &recovered.diagnostics()[0];
+    assert_eq!(
+        diagnostic.message,
+        "ASL `stringN` fields need an explicit SplitScript memory decoder"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "string50"
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("auto-detects UTF-16"))
+    );
+    assert_eq!(diagnostic.fixes.len(), 1);
+    let fix = &diagnostic.fixes[0];
+    assert_eq!(fix.applicability, FixApplicability::MaybeIncorrect);
+    assert_eq!(fix.edits.len(), 3);
+
+    let state = recovered.syntax().state.as_ref().unwrap();
+    assert_eq!(
+        state
+            .fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>(),
+        ["map", "after"]
+    );
+    assert!(matches!(
+        &state.fields[0].source,
+        splitscript::compiler::ast::StateSource::Pointer(path)
+            if matches!(path.decoder, Some(StateMemoryDecoder::Utf8 { max_bytes: 50, .. }))
+    ));
+
+    let mut fixed = source.to_owned();
+    for edit in fix.edits.iter().rev() {
+        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+    assert!(fixed.contains("map at \"game.exe\", 0x100, 0x20 as utf8(50)"));
+    splitscript::compile(&fixed).expect("the suggested explicit decoder syntax should compile");
+}
+
+#[test]
+fn string_n_like_field_names_are_not_treated_as_asl_types() {
+    let source = r#"
+        state "game.exe" {
+            string50: u32 at 0x100
+        }
+    "#;
+    let recovered = splitscript::parse_recovering(source).unwrap();
+    assert!(recovered.diagnostics().is_empty());
+    assert_eq!(
+        recovered.syntax().state.as_ref().unwrap().fields[0].name,
+        "string50"
+    );
+}
+
+#[test]
+fn duplicate_state_blocks_explain_named_version_layouts_without_cascades() {
+    let source = r#"
+        state "game.exe" {
+            first: u32 at 0x100
+        }
+        state "game.exe" {
+            second: u32 at 0x200
+        }
+        whileAttached { print(current.first) }
+    "#;
+    let recovered = splitscript::parse_recovering(source).unwrap();
+    assert_eq!(recovered.diagnostics().len(), 1);
+    let diagnostic = &recovered.diagnostics()[0];
+    assert_eq!(
+        diagnostic.message,
+        "SplitScript uses one `state` declaration with named layouts for game versions"
+    );
+    assert_eq!(diagnostic.labels.len(), 2);
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("StateLayout"))
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert_eq!(recovered.syntax().actions.len(), 1);
+    assert_eq!(
+        recovered.syntax().state.as_ref().unwrap().fields[0].name,
+        "first"
+    );
+}

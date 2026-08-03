@@ -6,7 +6,10 @@ use super::{
     ActionKind, Diagnostic, Parser, RecoveryNode, RecoveryNodeKind, Span, Token, TokenKind,
     parse_integer,
 };
-use crate::migration::{ForeignSpellingContext, foreign_spelling};
+use crate::migration::{
+    ForeignSpellingContext, MigrationDiagnosticId, diagnostic as migration_diagnostic,
+    foreign_spelling,
+};
 
 impl Parser<'_> {
     pub(super) fn terminator(&mut self) -> Result<(), Diagnostic> {
@@ -191,6 +194,17 @@ impl Parser<'_> {
                 .with_machine_applicable_fix(rule.fix_title, span, rule.replacement),
         );
         Some(rule.replacement)
+    }
+
+    pub(super) fn migration_diagnostic(&self, id: MigrationDiagnosticId, span: Span) -> Diagnostic {
+        let metadata = migration_diagnostic(id)
+            .expect("parser migration diagnostic IDs must exist in the migration catalog");
+        let mut diagnostic =
+            Diagnostic::new(metadata.message, span).with_primary_label(metadata.primary_label);
+        for note in metadata.notes {
+            diagnostic = diagnostic.with_note(*note);
+        }
+        diagnostic
     }
 
     pub(super) fn current_action_kind(&self) -> Option<ActionKind> {

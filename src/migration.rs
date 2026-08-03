@@ -2,7 +2,7 @@
 
 pub use splitscript_syntax::migration::{
     ForeignSpelling, ForeignSpellingContext, MigrationConcept, MigrationConceptId,
-    MigrationSupport, MigrationTarget, SourceLanguage,
+    MigrationDiagnostic, MigrationDiagnosticId, MigrationSupport, MigrationTarget, SourceLanguage,
 };
 
 use crate::{CompilerContext, language::LanguageCatalog};

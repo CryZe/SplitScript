@@ -19,6 +19,19 @@ impl MigrationConceptId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MigrationDiagnosticId(&'static str);
+
+impl MigrationDiagnosticId {
+    pub const fn new(value: &'static str) -> Self {
+        Self(value)
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SourceLanguage {
     Asl,
     CSharp,
@@ -106,6 +119,43 @@ pub struct MigrationConcept {
     pub cookbook_anchor: Option<&'static str>,
     pub spellings: &'static [ForeignSpelling],
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MigrationDiagnostic {
+    pub id: MigrationDiagnosticId,
+    pub concept: MigrationConceptId,
+    pub message: &'static str,
+    pub primary_label: &'static str,
+    pub notes: &'static [&'static str],
+}
+
+pub const ASL_STRING_N_FIELD_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.state.string-n-field");
+pub const DUPLICATE_STATE_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.state.duplicate-version-layout");
+
+pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
+    MigrationDiagnostic {
+        id: ASL_STRING_N_FIELD_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.state.string-n"),
+        message: "ASL `stringN` fields need an explicit SplitScript memory decoder",
+        primary_label: "this ASL pseudo-type combines a byte bound with automatic string decoding",
+        notes: &[
+            "`as utf8(N)` is appropriate only when the target bytes are UTF-8; ASL `stringN` auto-detects UTF-16 from the second byte and replacement-decodes malformed input",
+            "verify the game's in-memory encoding before accepting the suggested rewrite",
+        ],
+    },
+    MigrationDiagnostic {
+        id: DUPLICATE_STATE_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.state.version-label"),
+        message: "SplitScript uses one `state` declaration with named layouts for game versions",
+        primary_label: "merge this state declaration into named `layout` blocks",
+        notes: &[
+            "each layout must expose one compatible state interface, and `onAttach` returns the selected `StateLayout` variant",
+            "merging is not automatic because versioned fields and pointer paths may differ semantically",
+        ],
+    },
+];
 
 const ASL: &[SourceLanguage] = &[SourceLanguage::Asl];
 const CSHARP: &[SourceLanguage] = &[SourceLanguage::CSharp];
@@ -436,6 +486,10 @@ pub fn concept(id: MigrationConceptId) -> Option<&'static MigrationConcept> {
     CONCEPTS.iter().find(|concept| concept.id == id)
 }
 
+pub fn diagnostic(id: MigrationDiagnosticId) -> Option<&'static MigrationDiagnostic> {
+    DIAGNOSTICS.iter().find(|diagnostic| diagnostic.id == id)
+}
+
 pub fn foreign_spelling(
     spelling: &str,
     context: ForeignSpellingContext,
@@ -455,6 +509,7 @@ mod tests {
     #[test]
     fn concept_and_spelling_identities_are_unique() {
         let mut ids = HashSet::new();
+        let mut diagnostic_ids = HashSet::new();
         let mut spellings = HashSet::new();
         for concept in CONCEPTS {
             assert!(
@@ -473,6 +528,20 @@ mod tests {
                 );
                 assert!(!spelling.replacement.is_empty());
             }
+        }
+        for diagnostic in DIAGNOSTICS {
+            assert!(
+                diagnostic_ids.insert(diagnostic.id),
+                "duplicate diagnostic ID {}",
+                diagnostic.id.as_str()
+            );
+            assert!(
+                concept(diagnostic.concept).is_some(),
+                "diagnostic {} references an unknown concept",
+                diagnostic.id.as_str()
+            );
+            assert!(!diagnostic.message.trim().is_empty());
+            assert!(!diagnostic.primary_label.trim().is_empty());
         }
     }
 }

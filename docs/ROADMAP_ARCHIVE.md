@@ -88,6 +88,14 @@ and protected by a drift test. Existing `const`/`var`, `null`, `func`/
 `function`, `string`, `TimeSpan`, and C# numeric-type diagnostics now consume
 these entries without changing their machine-applicable edits.
 
+The first shape-aware rules are catalog-owned as well. A type-first ASL
+`stringN` state field recovers into an explicit bounded decoder and offers a
+non-preferred, maybe-incorrect UTF-8 rewrite with the ASL UTF-16/autodetection
+caveat. Duplicate state declarations explain named layouts and attach-time
+selection but deliberately offer no automatic merge. Regression tests preserve
+ordinary fields named like `string50`, later declarations, and focused
+single-diagnostic recovery.
+
 ## P0 — Maintainability audit and architectural convergence (2026-07-30)
 
 This audit covers the current compiler, standard library, backend, language

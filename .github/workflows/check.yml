@@ -41,7 +41,25 @@ jobs:
         run: npm ci
 
       - name: Install WebAssembly validation tools
-        run: cargo install wasm-tools --version 1.201.0 --locked
+        shell: pwsh
+        env:
+          WASM_TOOLS_VERSION: 1.201.0
+          WASM_TOOLS_SHA256: 9b80cf19d25603da8a8a0814c0d2bbfdc5b5fbd70d399c013237ed64661756a7
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "wasm-tools.zip"
+          $destination = Join-Path $env:RUNNER_TEMP "wasm-tools"
+          $url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v$env:WASM_TOOLS_VERSION/wasm-tools-$env:WASM_TOOLS_VERSION-x86_64-windows.zip"
+
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actualHash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actualHash -ne $env:WASM_TOOLS_SHA256) {
+            throw "wasm-tools archive checksum mismatch: $actualHash"
+          }
+
+          Expand-Archive -Path $archive -DestinationPath $destination
+          $binaryDirectory = Join-Path $destination "wasm-tools-$env:WASM_TOOLS_VERSION-x86_64-windows"
+          $binaryDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $binaryDirectory "wasm-tools.exe") --version
 
       - name: Reject tracked compiler artifacts
         shell: pwsh

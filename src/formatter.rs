@@ -1690,15 +1690,18 @@ settings {
             include_str!("../examples/lso_desktop_settings.split"),
             include_str!("../examples/minish_cap.split"),
         ] {
-            let source = source.replace("\r\n", "\n");
-            for input in [&source, &source.replace('\n', "\r\n")] {
-                let formatted = format_source(input).unwrap();
+            assert!(
+                !source.contains('\r'),
+                "tracked source fixtures must use canonical LF line endings"
+            );
+            for input in [source.to_owned(), source.replace('\n', "\r\n")] {
+                let formatted = format_source(&input).unwrap();
                 crate::parse(&formatted).unwrap();
                 assert_eq!(format_source(&formatted).unwrap(), formatted);
             }
         }
-        let minish_cap = include_str!("../examples/minish_cap.split").replace("\r\n", "\n");
-        assert_eq!(format_source(&minish_cap).unwrap(), minish_cap);
+        let minish_cap = include_str!("../examples/minish_cap.split");
+        assert_eq!(format_source(minish_cap).unwrap(), minish_cap);
         assert!(
             format_source(include_str!("../examples/lunistice.split"))
                 .unwrap()

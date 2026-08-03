@@ -100,15 +100,11 @@ impl AsyncFrameLayout {
             .find(|function| function.id == instance.function)
             .expect("reachable function instances have declarations");
         let completion = match body.abi {
-            wasm_ir::BodyAbi::AsyncFunction(wasm_ir::AsyncFunctionAbi {
-                completion: wasm_ir::AsyncCompletion::FrameValue(ty),
-            }) => Some(semantic_type(
-                semantics.specialize_type(instance, ty),
-                semantics,
-            )),
-            wasm_ir::BodyAbi::AsyncFunction(wasm_ir::AsyncFunctionAbi {
-                completion: wasm_ir::AsyncCompletion::Void,
-            }) => None,
+            wasm_ir::BodyAbi::AsyncFunction(wasm_ir::AsyncFunctionAbi { completion }) => {
+                let completion =
+                    semantic_type(semantics.specialize_type(instance, completion), semantics);
+                (completion != Type::None).then_some(completion)
+            }
             wasm_ir::BodyAbi::Direct | wasm_ir::BodyAbi::AttachPoll => {
                 unreachable!("only suspending functions receive typed future frames")
             }
@@ -226,6 +222,10 @@ impl AsyncFrameLayout {
         if self.fields.contains_key(&value) {
             return;
         }
+        if ty == Type::None {
+            self.fields.insert(value, (u32::MAX, ty));
+            return;
+        }
         let field = self.base_fields + self.types.len() as u32;
         self.fields.insert(value, (field, ty));
         self.types.push(ty);
@@ -241,14 +241,15 @@ impl AsyncFrameLayout {
     }
 
     pub(super) fn field(&self, destination: wasm_ir::SuspensionDestination) -> Option<(u32, Type)> {
-        match destination {
+        let field = match destination {
             wasm_ir::SuspensionDestination::SourceValue(value) => self.fields.get(&value).copied(),
             wasm_ir::SuspensionDestination::Temporary(temporary) => {
                 self.temporaries.get(&temporary).copied()
             }
             wasm_ir::SuspensionDestination::BodyResult => self.completion,
             wasm_ir::SuspensionDestination::Discard => None,
-        }
+        };
+        field.filter(|(field, _)| *field != u32::MAX)
     }
 }
 
@@ -413,7 +414,7 @@ impl AsyncFrameLayouts {
                 captured_arguments.insert(*argument, (field, ty));
             }
             let completion_type = semantic_type(specialize(*value), semantics);
-            let completion = (completion_type != Type::Void).then(|| {
+            let completion = (completion_type != Type::None).then(|| {
                 let field = 2 + types.len() as u32;
                 types.push(completion_type);
                 (field, completion_type)

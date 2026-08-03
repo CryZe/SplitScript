@@ -277,7 +277,9 @@ impl HighlightCollector<'_> {
                         TokenKind::Ident(name) if name == "v" => {
                             Some(SemanticTokenKind::Version)
                         }
-                        TokenKind::Ident(name) if matches!(name.as_str(), "true" | "false") => {
+                        TokenKind::Ident(name)
+                            if matches!(name.as_str(), "true" | "false" | "None") =>
+                        {
                             Some(SemanticTokenKind::Constant)
                         }
                         TokenKind::Ident(name) if is_keyword(name) => {
@@ -346,6 +348,56 @@ impl HighlightCollector<'_> {
                 && matches!(&token.kind, TokenKind::Ident(spelling) if spelling == name)
         }) {
             self.insert(token.span, kind, modifiers);
+        }
+    }
+
+    fn mark_none_type(&mut self, span: Span, ty: TypeRef) {
+        if !self.type_contains_none(ty) {
+            return;
+        }
+        let spans = self
+            .document
+            .tokens()
+            .filter(|token| {
+                span.start <= token.span.start
+                    && token.span.end <= span.end
+                    && matches!(&token.kind, TokenKind::Ident(name) if name == "None")
+            })
+            .map(|token| token.span)
+            .collect::<Vec<_>>();
+        for span in spans {
+            self.insert(span, SemanticTokenKind::Type, 0);
+        }
+    }
+
+    fn type_contains_none(&self, ty: TypeRef) -> bool {
+        match ty {
+            TypeRef::Core(crate::ast::PrimitiveType::None) => true,
+            TypeRef::Core(_) | TypeRef::Named(_) => false,
+            TypeRef::Array(id) => self
+                .syntax
+                .array_types
+                .iter()
+                .find(|array| array.id == id)
+                .is_some_and(|array| self.type_contains_none(array.element)),
+            TypeRef::Option(id) => self
+                .syntax
+                .option_types
+                .iter()
+                .find(|option| option.id == id)
+                .is_some_and(|option| self.type_contains_none(option.value)),
+            TypeRef::Result(id) => self
+                .syntax
+                .result_types
+                .iter()
+                .find(|result| result.id == id)
+                .is_some_and(|result| self.type_contains_none(result.value)),
+            TypeRef::Async(id) => self
+                .syntax
+                .async_types
+                .iter()
+                .find(|future| future.id == id)
+                .is_some_and(|future| self.type_contains_none(future.value)),
         }
     }
 
@@ -616,6 +668,19 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             SemanticTokenKind::StateField,
             MODIFIER_DECLARATION | MODIFIER_READONLY,
         );
+        if let Some(annotation) = field.annotation {
+            let end = match &field.source {
+                crate::ast::StateSource::Expression(value) => value.span.start,
+                crate::ast::StateSource::Pointer(_) => field.span.end,
+            };
+            self.mark_none_type(
+                Span {
+                    start: field.span.start,
+                    end,
+                },
+                annotation,
+            );
+        }
         if let crate::ast::StateSource::Pointer(path) = &field.source
             && let Some(crate::ast::StateMemoryDecoder::Utf8 { span, .. }) = path.decoder
         {
@@ -681,6 +746,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 SemanticTokenKind::Property,
                 MODIFIER_DECLARATION | MODIFIER_READONLY,
             );
+            self.mark_none_type(field.span, field.ty);
         }
         visit::walk_record(self, record);
     }
@@ -699,6 +765,9 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 SemanticTokenKind::EnumMember,
                 MODIFIER_DECLARATION | MODIFIER_READONLY,
             );
+            if let Some(payload) = variant.payload {
+                self.mark_none_type(variant.span, payload);
+            }
         }
         visit::walk_enum(self, enumeration);
     }
@@ -722,6 +791,14 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 SemanticTokenKind::Parameter,
                 MODIFIER_DECLARATION,
             );
+            if let Some(annotation) = parameter.annotation {
+                self.mark_none_type(parameter.span, annotation);
+            }
+        }
+        if let (Some(annotation), Some(span)) =
+            (function.return_annotation, function.return_annotation_span)
+        {
+            self.mark_none_type(span, annotation);
         }
         visit::walk_function(self, function);
     }
@@ -746,6 +823,15 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             SemanticTokenKind::Variable,
             MODIFIER_DECLARATION,
         );
+        if let Some(annotation) = variable.annotation {
+            self.mark_none_type(
+                Span {
+                    start: variable.name_span.end,
+                    end: variable.value.span.start,
+                },
+                annotation,
+            );
+        }
         visit::walk_variable(self, variable);
     }
 
@@ -757,6 +843,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             MODIFIER_DECLARATION,
         );
         if let Some(annotation) = &binding.annotation {
+            self.mark_none_type(binding.span, *annotation);
             self.visit_type_ref(annotation);
         }
     }
@@ -859,7 +946,6 @@ fn is_keyword(name: &str) -> bool {
             | "choice"
             | "file"
             | "mime"
-            | "None"
             | "Some"
             | "Ok"
             | "Err"
@@ -869,7 +955,7 @@ fn is_keyword(name: &str) -> bool {
 fn is_builtin_type(standard_library: &StandardLibrary, name: &str) -> bool {
     TypeRef::parse(name).is_some()
         || standard_library.type_by_name(name).is_some()
-        || matches!(name, "void" | "Array")
+        || name == "Array"
 }
 
 fn is_namespace(standard_library: &StandardLibrary, name: &str) -> bool {
@@ -956,7 +1042,13 @@ debug fn inspect(mode: Mode) {
     debug print(mode as String)
 }
 
+fn preserveUnit(value: None) -> None {
+    return value
+}
+
 whileAttached {
+    let unit: None = None
+    preserveUnit(unit)
     let mode = Mode.Active
     let marker = await process.scan(0, 1, sig"48 ??")
     let version = v"1.2.3.4"
@@ -1013,6 +1105,21 @@ whileAttached {
             source,
             &first,
             "true",
+            SemanticTokenKind::Keyword,
+            0
+        ));
+        assert!(contains(source, &first, "None", SemanticTokenKind::Type, 0));
+        assert!(contains(
+            source,
+            &first,
+            "None",
+            SemanticTokenKind::Constant,
+            0
+        ));
+        assert!(!contains(
+            source,
+            &first,
+            "None",
             SemanticTokenKind::Keyword,
             0
         ));

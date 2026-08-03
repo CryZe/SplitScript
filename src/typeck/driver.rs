@@ -71,7 +71,7 @@ fn initialize_checker(
             value: syntax_type(future.value, &semantic_types, resolutions),
         })
         .collect::<Vec<_>>();
-    let void_type = Type::Known(semantic_types.id_for_core(crate::stdlib::CoreTypeId::Void));
+    let none_type = Type::Known(semantic_types.id_for_core(crate::stdlib::CoreTypeId::None));
     let inference = InferenceContext::new(
         standard_library.clone(),
         semantic_types,
@@ -111,7 +111,7 @@ fn initialize_checker(
         provider_value,
         layout_value: program.state.as_ref().and_then(|state| state.layout_value),
         scopes: Vec::new(),
-        return_ty: void_type,
+        return_ty: none_type,
         callable: CallableContext::TopLevel,
         expression_mode: ExpressionMode::Normal,
         debug_context: DebugContext::Normal,

@@ -732,7 +732,7 @@ model mirrors the API hierarchy as cleanly as the consumer model does.
 ### One semantic type universe
 
 - [x] Restrict compiler-core types to genuine language primitives and
-  constructors: `void`, `bool`, fixed-width numbers, `address`, inference
+  constructors: `None`, `bool`, fixed-width numbers, `address`, inference
   variables, arrays, `T?`, and `T!`. Model `String`, `Duration`, `Module`,
   `TimerState`, and the Unity family as declared nominal library types;
   represent `Signature` as a single declared compile-time intrinsic type.

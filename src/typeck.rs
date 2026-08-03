@@ -477,7 +477,7 @@ fn catalog_type_argument(
 fn syntax_type(ty: TypeRef, types: &TypeStore, resolutions: &ProgramResolutions) -> Type {
     let ty = resolutions
         .type_ref(ty)
-        .unwrap_or(ResolvedTypeRef::Core(crate::stdlib::CoreTypeId::Void));
+        .unwrap_or(ResolvedTypeRef::Core(crate::stdlib::CoreTypeId::None));
     resolved_type_ref(ty, types)
 }
 

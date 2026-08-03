@@ -779,7 +779,7 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     );
     assert_eq!(
         library.render_signature(StdlibItemId::SetTickRate),
-        "setTickRate(hz: f64) -> void"
+        "setTickRate(hz: f64) -> None"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromSeconds),
@@ -1208,7 +1208,7 @@ fn compiler_database_resolves_language_catalog_syntax() {
     for (spelling, expected) in [
         ("Some(value)", LanguageItemId::SomeConstructor),
         ("Err(\"unavailable\")", LanguageItemId::ErrorConstructor),
-        ("None =>", LanguageItemId::NoneConstructor),
+        ("None =>", LanguageItemId::BuiltinType(BuiltinType::None)),
         ("choice {", LanguageItemId::ChoiceSetting),
         ("default", LanguageItemId::ChoiceSetting),
         ("file {", LanguageItemId::FileSetting),

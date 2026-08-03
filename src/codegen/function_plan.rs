@@ -170,8 +170,8 @@ pub(super) fn encode<'a>(
         let params = function
             .params
             .iter()
-            .map(|parameter| {
-                gc.val_type(semantic_type(
+            .filter_map(|parameter| {
+                let ty = semantic_type(
                     semantics.specialize_type(
                         instance,
                         semantics
@@ -179,7 +179,8 @@ pub(super) fn encode<'a>(
                             .expect("checked parameters have types"),
                     ),
                     semantics,
-                ))
+                );
+                (ty != Type::None).then(|| gc.val_type(ty))
             })
             .collect::<Vec<_>>();
         let body = wasm_ir
@@ -198,7 +199,7 @@ pub(super) fn encode<'a>(
             UserFunctionPlan {
                 call: declare(
                     params,
-                    (result != Type::Void)
+                    (result != Type::None)
                         .then(|| gc.val_type(result))
                         .into_iter()
                         .collect(),

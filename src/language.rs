@@ -371,12 +371,6 @@ focused_example!(
     TYPES_AND_LITERALS_SOURCE
 );
 focused_example!(
-    NONE_EXAMPLE,
-    "Return no value",
-    "fn selectedLevel() -> i32? {\n    return None\n}",
-    TYPES_AND_LITERALS_SOURCE
-);
-focused_example!(
     SOME_EXAMPLE,
     "Construct an optional value",
     "let selected: i32? = Some(7)",
@@ -777,15 +771,6 @@ define_language_catalog! {
         CAST_EXAMPLE
     ),
     language_item!(
-        NoneConstructor,
-        "None",
-        LanguageItemKind::Syntax,
-        "None",
-        "Constructs an absent optional value.",
-        "None needs T? context and is also the domain default for lifecycle actions where absence means that the timer value should remain unchanged.",
-        NONE_EXAMPLE
-    ),
-    language_item!(
         SomeConstructor,
         "Some",
         LanguageItemKind::Syntax,
@@ -868,6 +853,13 @@ define_language_catalog! {
     ),
     }
     builtins {
+    builtin_type_item!(
+        None,
+        "None",
+        "Stores the single unit value `None`.",
+        "None is the ordinary return type for procedures and functions without a returned data value. Plain unit parameters, results, locals, globals, and async completions are erased from the physical Wasm representation. The same value converts to the empty side of T?, while Some(None) remains a present unit value.",
+        "let unit: None = None"
+    ),
     builtin_type_item!(
         Bool,
         "bool",
@@ -1221,6 +1213,7 @@ impl LanguageCatalog {
             }
         }
         for builtin in [
+            BuiltinType::None,
             BuiltinType::Bool,
             BuiltinType::I8,
             BuiltinType::U8,

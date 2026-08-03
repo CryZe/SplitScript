@@ -61,7 +61,7 @@ root {
     fn print<T: Display>(
         /// The value to write to the runtime log.
         message: T,
-    ) -> void;
+    ) -> None;
 
     /// Sets a LiveSplit custom variable.
     ///
@@ -81,7 +81,7 @@ root {
         /// The displayed value. It is converted to text using the same rules
         /// as string interpolation.
         value: T,
-    ) -> void;
+    ) -> None;
 
     /// Changes the autosplitter tick rate.
     ///
@@ -98,7 +98,7 @@ root {
     fn setTickRate(
         /// The requested updates per second.
         hz: f64,
-    ) -> void;
+    ) -> None;
 
     /// Continues attachment on the next runtime update.
     ///
@@ -112,7 +112,7 @@ root {
     /// await nextTick()
     /// ```
     @intrinsic(NextTick)
-    fn nextTick() -> void;
+    fn nextTick() -> None;
 }
 
 /// Accesses the attached game process.
@@ -177,7 +177,7 @@ intrinsic type Process {
     /// }
     /// ```
     @intrinsic(ProcessClosed)
-    fn closed() -> void;
+    fn closed() -> None;
 
     /// Waits for a process module.
     ///
@@ -790,7 +790,7 @@ typeConstructor Array<T> {
         index: u32,
         /// The new element value.
         value: T,
-    ) -> void;
+    ) -> None;
 }
 
 /// Represents a value that may be absent.
@@ -2599,7 +2599,7 @@ struct CatalogSuspensionProbe {
     /// ```splitscript
     /// await CatalogSuspensionProbe.waitOneTick()
     /// ```
-    static fn waitOneTick() -> void {
+    static fn waitOneTick() -> None {
         await nextTick()
     }
 
@@ -2615,7 +2615,7 @@ struct CatalogSuspensionProbe {
     /// ```splitscript
     /// await CatalogSuspensionProbe.waitThroughHelper()
     /// ```
-    static fn waitThroughHelper() -> void {
+    static fn waitThroughHelper() -> None {
         await CatalogSuspensionProbe.waitOneTick()
     }
 }

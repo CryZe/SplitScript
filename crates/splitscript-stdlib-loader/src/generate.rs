@@ -289,7 +289,7 @@ impl<'a> CatalogGenerator<'a> {
                     owner,
                     "",
                     "StdlibOwner::Root",
-                    "TypeRef::Core(CoreTypeId::Void)",
+                    "TypeRef::Core(CoreTypeId::None)",
                     None,
                 ),
                 Declaration::Namespace(owner) => self.emit_functions(
@@ -300,7 +300,7 @@ impl<'a> CatalogGenerator<'a> {
                         "StdlibOwner::Namespace(StdlibNamespaceId::{})",
                         path_ident(&owner.name)
                     ),
-                    "TypeRef::Core(CoreTypeId::Void)",
+                    "TypeRef::Core(CoreTypeId::None)",
                     None,
                 ),
                 Declaration::Capability(owner) => self.emit_functions(
@@ -669,7 +669,7 @@ fn quote(value: &str) -> String {
 fn is_core_type(name: &str) -> bool {
     matches!(
         name,
-        "void"
+        "None"
             | "bool"
             | "i8"
             | "u8"
@@ -866,7 +866,7 @@ mod tests {
     #[test]
     fn source_paths_and_member_names_produce_existing_style_identities() {
         let source = r#"
-root { @intrinsic(Print) fn print() -> void; }
+root { @intrinsic(Print) fn print() -> None; }
 namespace process.read {
     @intrinsic(ProcessReadManagedString)
     fn managedString() -> String;

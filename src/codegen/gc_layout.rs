@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use wasm_encoder::{HeapType, RefType, StorageType, ValType};
+use wasm_encoder::{AbstractHeapType, HeapType, RefType, StorageType, ValType};
 
 use crate::{
     ast::{AsyncTypeId, EnumDecl, Program},
@@ -299,7 +299,13 @@ impl GcLayout {
 
     pub(super) fn val_type(&self, ty: Type) -> ValType {
         match ty {
-            Type::Void => unreachable!(),
+            Type::None => ValType::Ref(RefType {
+                nullable: true,
+                heap_type: HeapType::Abstract {
+                    shared: false,
+                    ty: AbstractHeapType::None,
+                },
+            }),
             Type::Bool
             | Type::I8
             | Type::U8

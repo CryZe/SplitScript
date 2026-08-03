@@ -229,8 +229,9 @@ tooling consumers only see the normalized immutable graph.
       helpers now exercise the same typed future ABI as user functions.
     - [x] Define a backend poll ABI that distinguishes `Pending` from `Ready`
       and carries the completed value without changing the ordinary synchronous
-      Wasm call ABI. `Pending = 0` and `Ready = 1`; non-void completion is
-      retained in the typed frame, a `T!` completes with its whole Result value
+      Wasm call ABI. `Pending = 0` and `Ready = 1`; non-unit completion values
+      are retained in the typed frame, while `async None` needs only `Ready`.
+      A `T!` completes with its whole Result value
       rather than a third error status, and dropping a process-owned frame
       cancels it without manufacturing completion. Wasm IR classifies direct,
       host `onAttach` poll, and async source-function bodies explicitly.
@@ -854,12 +855,25 @@ executable name.
 - [ ] Design explicit `catch` boundaries later. `throw` should propagate to the
   nearest catch or return a `Result` from the function when uncaught; postfix
   `?` remains ergonomic propagation built on the same semantics.
-- [ ] Define the payload-free result spelling and representation before exposing
-  fallible procedures. `void!` currently parses and type-checks far enough to
-  reach a backend layout assertion because `Result` assumes a value slot. Either
-  support it as a proper unit result throughout inference, GC layout, matching,
-  and propagation or reject it with a source diagnostic; user input must never
-  reach the backend assertion.
+- [x] Make `None` the canonical unit type and its sole value, removing `void`
+  completely rather than retaining a compatibility alias. Functions with no
+  result annotation default to `None`, may explicitly `return None`, and can
+  store/pass unit through globals, locals, parameters, records, arrays, futures,
+  options, and results. Context converts `None` to the empty side of `T?`, while
+  `Some(None)` is a distinct present unit. `None!` is the ordinary spelling for
+  a fallible procedure: `None` is success and `Err(message)` is failure. The
+  backend erases plain unit parameters, results, locals, globals, discarded
+  expressions, and async completion slots entirely. It materializes Wasm's
+  single-valued `(ref null none)` only where the current generic aggregate
+  representation needs a payload. Runtime and operator-level tests cover ABI
+  erasure, argument side effects, and completion across suspension.
+- [ ] Specialize aggregate layouts around zero-sized `None` payloads. Records
+  should omit unit fields, `Option<None>` should distinguish an empty null from
+  a present zero-field object, and `Result<None>` should omit its success
+  payload while retaining its tag and error. Define a length-preserving backing
+  representation for `[None]` before removing its element slots. Keep these
+  optimizations behind one physical-layout abstraction so construction, field
+  indices, equality, matching, DWARF, and codegen cannot disagree.
 - [ ] Extend `debug` to additional declaration kinds only when a concrete use
   case defines reachability, type-checking, and release-erasure behavior.
 

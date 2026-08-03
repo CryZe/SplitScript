@@ -169,7 +169,7 @@ mod tests {
             &[],
         );
         assert!(
-            suspending.signature.ends_with("() -> async void"),
+            suspending.signature.ends_with("() -> async None"),
             "{}",
             suspending.signature
         );

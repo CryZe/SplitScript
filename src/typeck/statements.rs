@@ -312,20 +312,16 @@ impl Checker {
                             binding.span,
                         );
                     }
-                    if ty == self.core_type(crate::stdlib::CoreTypeId::Void) {
-                        self.error("a suspended binding needs a value", binding.span);
-                    } else {
-                        self.semantics.resolve_value_type(binding.id, ty);
-                        self.scopes.last_mut().unwrap().insert(
-                            binding.name.clone(),
-                            Binding {
-                                id: Some(binding.id),
-                                ty,
-                                mutable: true,
-                                debug_only: self.debug_context.is_debug(),
-                            },
-                        );
-                    }
+                    self.semantics.resolve_value_type(binding.id, ty);
+                    self.scopes.last_mut().unwrap().insert(
+                        binding.name.clone(),
+                        Binding {
+                            id: Some(binding.id),
+                            ty,
+                            mutable: true,
+                            debug_only: self.debug_context.is_debug(),
+                        },
+                    );
                 }
             }
             Stmt::Expression(expr) => {
@@ -335,17 +331,14 @@ impl Checker {
     }
 
     pub(super) fn check_return(&mut self, value: Option<&Expr>, span: Span) {
-        let returns_void = self.return_ty == self.core_type(crate::stdlib::CoreTypeId::Void);
-        match (returns_void, self.return_ty, value) {
+        let returns_none = self.return_ty == self.core_type(crate::stdlib::CoreTypeId::None);
+        match (returns_none, self.return_ty, value) {
             (true, _, None) => {}
-            (true, _, Some(value)) => {
+            (true, _, Some(value)) if !self.callable.is_function() => {
                 self.expr(value, None);
-                self.error(
-                    format!("{} cannot return a value", self.callable.description()),
-                    span,
-                );
+                self.error("this lifecycle block cannot return a value", span);
             }
-            (false, expected, Some(value)) => {
+            (_, expected, Some(value)) => {
                 let policy = if !self.callable.is_function()
                     && matches!(
                         self.callable.action(),
@@ -405,7 +398,7 @@ impl Checker {
                     .value_usage
                     .local_variable
             });
-            if ty == self.core_type(crate::stdlib::CoreTypeId::Void) || unsupported_standard {
+            if unsupported_standard {
                 let ty = self.type_name(ty);
                 self.error(
                     format!("local variables cannot currently store `{ty}`"),

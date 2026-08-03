@@ -194,19 +194,17 @@ fn equality_infers_none_from_the_opposite_optional_operand() {
         .validate_all(&wasm)
         .expect("contextually typed None equality should produce valid Wasm GC");
 
-    let ambiguous = r#"
+    let unit = r#"
         state "game.exe" {}
         whileAttached {
-            if None == None { print("ambiguous") }
+            if None == None { print("equal") }
         }
     "#;
-    let diagnostics = splitscript::check(splitscript::parse(ambiguous).unwrap())
-        .expect_err("two untyped None values still need an annotation");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("cannot infer the value type of `None`")
-    }));
+    let checked = splitscript::check(splitscript::parse(unit).unwrap())
+        .expect("two None values compare as ordinary unit values");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("unit equality should preserve operand effects and fold to its sole outcome");
 }
 
 #[test]
@@ -623,9 +621,9 @@ fn action_fallthroughs_use_domain_defaults_and_null_is_scoped() {
     let diagnostics =
         splitscript::compile(invalid).expect_err("start must not expose a nullable result");
     assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("can only construct an optional value")
+        diagnostic.message.contains("types do not match")
+            && diagnostic.message.contains("None")
+            && diagnostic.message.contains("bool")
     }));
 }
 

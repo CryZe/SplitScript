@@ -300,10 +300,10 @@ impl<'a> Validator<'a> {
                 ));
             }
             if has_attribute(&function.attributes, "mustUse")
-                && function.result == Type::Name("void".to_owned())
+                && function.result == Type::Name("None".to_owned())
             {
                 self.error(format!(
-                    "`{qualified}` cannot be `@mustUse` because it returns `void`"
+                    "`{qualified}` cannot be `@mustUse` because it returns `None`"
                 ));
             }
             if has_attribute(&function.attributes, "display") {
@@ -887,7 +887,7 @@ struct Value {
 root {
     /// Prints.
     @intrinsic(Print)
-    fn print() -> void;
+    fn print() -> None;
 }
 "#;
         let errors = generate_catalog(&parse(source).unwrap()).unwrap_err();
@@ -1017,14 +1017,14 @@ root {
     /// ```
     @mustUse("Observe this value.")
     @intrinsic(Print)
-    fn print() -> void;
+    fn print() -> None;
 }
 "#;
         let errors = generate_catalog(&parse(void_callable).unwrap()).unwrap_err();
         assert!(errors.iter().any(|error| {
             error
                 .message
-                .contains("cannot be `@mustUse` because it returns `void`")
+                .contains("cannot be `@mustUse` because it returns `None`")
         }));
     }
 
@@ -1044,7 +1044,7 @@ root {
     /// print()
     /// ```
     @intrinsic(Print)
-    fn print() -> void {}
+    fn print() -> None {}
 }
 "#;
         let errors = generate_catalog(&parse(both).unwrap()).unwrap_err();

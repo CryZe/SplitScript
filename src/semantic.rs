@@ -97,6 +97,8 @@ fn resolved_result_layout(ty: Type, types: &TypeStore) -> ResultTypeId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueConversionKind {
+    NoneToOptional,
+    NoneToDomainNullable,
     LiftOption,
     LiftResult,
 }

@@ -780,7 +780,7 @@ struct Module {
 root {
     /// Logs text.
     @intrinsic(Print)
-    fn print(message: String) -> void;
+    fn print(message: String) -> None;
 }
 /// Reads memory.
 namespace process.read {}

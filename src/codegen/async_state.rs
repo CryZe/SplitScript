@@ -23,7 +23,7 @@ use super::{
     call_target,
     context::AttachContext,
     data_plan::{SignaturePool, StringPool},
-    emit_memory_value, emit_string_literal, emit_typed_struct_get,
+    emit_default, emit_memory_value, emit_string_literal, emit_typed_struct_get,
     expression::{
         BareReturn, ExprContext, IntrinsicCapture, LocalStorage, LoopControl, MatchLayout,
         compile_assignment, compile_expr, compile_fallback_condition, compile_for_bind_and_advance,
@@ -167,6 +167,7 @@ pub(super) fn compile_intrinsic_future_poll(
             frame,
             completion: layout.completion,
         },
+        materialize_none: true,
     };
 
     frame.emit(&mut function);
@@ -291,6 +292,7 @@ fn compile_async_body(
         function_instance,
         loop_control: None,
         bare_return,
+        materialize_none: true,
     };
 
     let mut states = (0..wasm_body.async_state_count)
@@ -1058,13 +1060,15 @@ fn compile_source_future_poll(
             .instruction(&Instruction::End);
 
         if let Some((destination_field, destination_type)) = parent_layout.field(destination) {
-            let (completion_field, completion_type) = child_layout
-                .completion
-                .expect("value-producing async callees have completion slots");
-            debug_assert_eq!(destination_type, completion_type);
             parent.emit(function);
-            emit_child_frame(function, parent, child_field, child_frame);
-            emit_typed_struct_get(function, child_frame, completion_field, completion_type);
+            if let Some((completion_field, completion_type)) = child_layout.completion {
+                debug_assert_eq!(destination_type, completion_type);
+                emit_child_frame(function, parent, child_field, child_frame);
+                emit_typed_struct_get(function, child_frame, completion_field, completion_type);
+            } else {
+                debug_assert_eq!(destination_type, Type::None);
+                emit_default(function, Type::None, context.gc);
+            }
             function.instruction(&Instruction::StructSet {
                 struct_type_index: parent.struct_type,
                 field_index: destination_field,
@@ -1104,13 +1108,15 @@ fn compile_source_future_poll(
             .instruction(&Instruction::End);
 
         if let Some((destination_field, destination_type)) = parent_layout.field(destination) {
-            let (completion_field, completion_type) = child_layout
-                .completion
-                .expect("value-producing intrinsic futures have completion slots");
-            debug_assert_eq!(destination_type, completion_type);
             parent.emit(function);
-            emit_child_frame(function, parent, child_field, child_frame);
-            emit_typed_struct_get(function, child_frame, completion_field, completion_type);
+            if let Some((completion_field, completion_type)) = child_layout.completion {
+                debug_assert_eq!(destination_type, completion_type);
+                emit_child_frame(function, parent, child_field, child_frame);
+                emit_typed_struct_get(function, child_frame, completion_field, completion_type);
+            } else {
+                debug_assert_eq!(destination_type, Type::None);
+                emit_default(function, Type::None, context.gc);
+            }
             function.instruction(&Instruction::StructSet {
                 struct_type_index: parent.struct_type,
                 field_index: destination_field,
@@ -1744,14 +1750,16 @@ fn compile_async_flow(
             match context.bare_return {
                 BareReturn::AsyncFuture { frame, completion } => {
                     if let Some(value) = value {
-                        let (field, _) =
-                            completion.expect("value-returning futures have completion slots");
-                        frame.emit(function);
-                        compile_expr(function, *value, context);
-                        function.instruction(&Instruction::StructSet {
-                            struct_type_index: frame.struct_type,
-                            field_index: field,
-                        });
+                        if let Some((field, _)) = completion {
+                            frame.emit(function);
+                            compile_expr(function, *value, context);
+                            function.instruction(&Instruction::StructSet {
+                                struct_type_index: frame.struct_type,
+                                field_index: field,
+                            });
+                        } else {
+                            compile_expr(function, *value, &context.erasing_none());
+                        }
                     }
                 }
                 BareReturn::AsyncAttach => {
@@ -1766,7 +1774,7 @@ fn compile_async_flow(
                         debug_assert!(value.is_none());
                     }
                 }
-                BareReturn::Void | BareReturn::Action(_) => {
+                BareReturn::None | BareReturn::Action(_) => {
                     unreachable!("direct bodies do not use the async state emitter")
                 }
             }

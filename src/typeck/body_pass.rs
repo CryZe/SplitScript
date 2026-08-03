@@ -60,7 +60,6 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
                     .global_variable
             });
             if unsupported_standard
-                || ty == checker.core_type(crate::stdlib::CoreTypeId::Void)
                 || matches!(ty, Type::Array(_) | Type::Result(_))
                 || matches!(ty, Type::Option(_))
                     && !matches!(global.value.kind, crate::ast::ExprKind::None)
@@ -180,12 +179,7 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
                     }
                     _ => None,
                 })
-                .unwrap_or_else(|| {
-                    CallableContext::Function(function.method_of.map_or_else(
-                        || format!("function `{}`", function.name),
-                        |receiver| format!("method `{receiver}.{}`", function.name),
-                    ))
-                });
+                .unwrap_or(CallableContext::Function);
             checker.with_callable_context(callable, signature.completion, failure, |checker| {
                 checker.scopes.clear();
                 checker.scopes.push(HashMap::new());
@@ -216,7 +210,7 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
                     }
                 }
                 checker.block(&function.body, false);
-                if signature.completion != checker.core_type(crate::stdlib::CoreTypeId::Void)
+                if signature.completion != checker.core_type(crate::stdlib::CoreTypeId::None)
                     && !definitely_returns(&function.body)
                 {
                     let result = checker.type_name(signature.completion);
@@ -357,13 +351,13 @@ fn layout_selection_is_terminal(checker: &Checker, block: &crate::ast::Block) ->
 
 fn action_return_type(checker: &Checker, program: &Program, action: ActionKind) -> Type {
     match action {
-        ActionKind::OnDetached | ActionKind::WhileAttached => checker.core_type(CoreTypeId::Void),
+        ActionKind::OnDetached | ActionKind::WhileAttached => checker.core_type(CoreTypeId::None),
         ActionKind::OnAttach => program
             .state
             .as_ref()
             .and_then(|state| state.layout_enum.as_ref())
             .map_or_else(
-                || checker.core_type(CoreTypeId::Void),
+                || checker.core_type(CoreTypeId::None),
                 |enumeration| checker.enum_type(crate::types::EnumTypeId::Source(enumeration.id)),
             ),
         ActionKind::Start | ActionKind::Split | ActionKind::Reset | ActionKind::IsLoading => {

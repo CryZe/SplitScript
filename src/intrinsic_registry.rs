@@ -354,7 +354,7 @@ const NEXT_TICK: EffectSet = EffectSet::one(Effect::RequiresAttachedProcess)
     .with(Effect::Suspends)
     .with(Effect::CancelsOnProcessClose);
 
-const VOID: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Void);
+const NONE: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::None);
 const BOOL: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Bool);
 const U32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U32);
 const U64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U64);
@@ -467,7 +467,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::Print => contract!(
             Print,
             Function,
-            signature(DISPLAY_T, None, params![value(T)], VOID),
+            signature(DISPLAY_T, None, params![value(T)], NONE),
             RUNTIME_WRITE,
             Everywhere,
             HostBoundary
@@ -475,7 +475,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::TimerSetVariable => contract!(
             TimerSetVariable,
             Function,
-            signature(DISPLAY_T, None, params![value(STRING), value(T)], VOID,),
+            signature(DISPLAY_T, None, params![value(STRING), value(T)], NONE,),
             TIMER_WRITE,
             Everywhere,
             HostBoundary
@@ -483,7 +483,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::RuntimeSetTickRate => contract!(
             RuntimeSetTickRate,
             Function,
-            signature(NO_TYPE_PARAMETERS, None, params![value(F64)], VOID),
+            signature(NO_TYPE_PARAMETERS, None, params![value(F64)], NONE),
             RUNTIME_WRITE,
             Everywhere,
             HostBoundary
@@ -500,7 +500,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             contract!(
                 NextTick,
                 Function,
-                signature(NO_TYPE_PARAMETERS, None, params![], VOID),
+                signature(NO_TYPE_PARAMETERS, None, params![], NONE),
                 NEXT_TICK,
                 OnAttach,
                 Suspension
@@ -593,7 +593,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 UNCONSTRAINED_T,
                 Some(T_ARRAY),
                 params![value(U32), value(T)],
-                VOID,
+                NONE,
             ),
             MUTATES,
             Everywhere,
@@ -631,7 +631,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::ProcessClosed => contract!(
             ProcessClosed,
             Method,
-            signature(NO_TYPE_PARAMETERS, Some(PROCESS_TYPE), params![], VOID,),
+            signature(NO_TYPE_PARAMETERS, Some(PROCESS_TYPE), params![], NONE,),
             NEXT_TICK,
             OnAttach,
             Suspension

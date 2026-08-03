@@ -912,6 +912,63 @@ fn stored_discovery_future_executes_and_is_cancelled_with_its_attachment() {
 }
 
 #[test]
+fn async_none_completion_is_status_only_but_remains_typed() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn waitOne() {
+            await nextTick()
+        }
+
+        onAttach {
+            let unit: None = await waitOne()
+            if unit == None {
+                print("unit ready")
+            }
+            await process.closed()
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
+
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["unit ready"]);
+}
+
+#[test]
+fn inferred_none_arguments_are_abi_erased_but_still_evaluated() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn produce() {
+            print("produced")
+        }
+
+        fn consume(value) {
+            if value == value {
+                print("consumed")
+            }
+        }
+
+        whileAttached {
+            consume(produce())
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["produced", "consumed"]);
+}
+
+#[test]
 fn source_futures_flow_through_parameters_and_records() {
     let source = r#"
         state "game.exe" {}

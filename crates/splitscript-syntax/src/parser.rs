@@ -7,7 +7,7 @@ mod statements;
 mod types;
 
 use crate::{
-    PrimitiveType as CoreTypeId, Token, TokenCursor, TokenKind,
+    Token, TokenCursor, TokenKind,
     ast::{
         Action, ActionKind, ArrayTypeDecl, ArrayTypeId, AssignmentId, AsyncTypeDecl, AsyncTypeId,
         BinaryOp, Block, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference, EnumVariant,
@@ -121,12 +121,6 @@ impl DelimiterDepth {
 }
 
 impl Parser<'_> {
-    fn type_can_be_stored_in_state(ty: TypeRef) -> bool {
-        // Nominal value-usage rules are resolution/type-checking facts. The
-        // parser only rejects the syntactically special non-value type.
-        ty != TypeRef::core(CoreTypeId::Void)
-    }
-
     fn new_expr(&mut self, kind: ExprKind, span: Span) -> Expr {
         let id = ExprId::from_index(self.next_expression_id);
         self.next_expression_id += 1;
@@ -409,7 +403,7 @@ pub(crate) fn parse_integer(text: &str) -> Result<(u64, Option<TypeRef>), String
 
 #[cfg(test)]
 mod tests {
-    use crate::{SyntaxMode, lex};
+    use crate::{PrimitiveType, SyntaxMode, lex};
 
     use super::*;
 
@@ -428,7 +422,7 @@ mod tests {
         let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
         assert_eq!(
             program.state.unwrap().fields[0].annotation,
-            Some(TypeRef::core(CoreTypeId::U32))
+            Some(TypeRef::core(PrimitiveType::U32))
         );
         assert_eq!(program.actions[0].kind, ActionKind::Split);
     }
@@ -504,7 +498,7 @@ mod tests {
                 .find(|array| array.id == bytes)
                 .unwrap()
                 .element,
-            TypeRef::core(CoreTypeId::U8)
+            TypeRef::core(PrimitiveType::U8)
         );
 
         let TypeRef::Array(nested) = fields[1].ty else {
@@ -541,7 +535,7 @@ mod tests {
             .iter()
             .find(|array| array.id == fixed_bytes)
             .unwrap();
-        assert_eq!(fixed_bytes.element, TypeRef::core(CoreTypeId::U8));
+        assert_eq!(fixed_bytes.element, TypeRef::core(PrimitiveType::U8));
         assert_eq!(fixed_bytes.length, Some(6));
     }
 

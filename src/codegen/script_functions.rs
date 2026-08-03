@@ -65,7 +65,8 @@ pub(super) fn compile_read(
             intrinsic_capture: None,
             function_instance: None,
             loop_control: None,
-            bare_return: BareReturn::Void,
+            bare_return: BareReturn::None,
+            materialize_none: true,
         };
         compile_expr(&mut function, planned.expression, &context);
         function.instruction(&Instruction::End);
@@ -329,29 +330,28 @@ pub(super) fn compile_user_function(
         .wasm_ir
         .body(BodyOwner::Function(instance.clone()))
         .expect("checked functions have Wasm IR bodies");
-    let mut locals = declaration
-        .params
-        .iter()
-        .enumerate()
-        .map(|(index, parameter)| {
-            (
-                parameter.id,
-                (
-                    index as u32,
-                    semantic_type(
-                        lowering.semantics.specialize_type(
-                            instance,
-                            lowering
-                                .semantics
-                                .value_type(parameter.id)
-                                .expect("checked parameters have types"),
-                        ),
-                        lowering.semantics,
-                    ),
-                ),
-            )
-        })
-        .collect::<HashMap<_, _>>();
+    let mut locals = HashMap::new();
+    let mut physical_parameter_count = 0;
+    for parameter in &declaration.params {
+        let ty = semantic_type(
+            lowering.semantics.specialize_type(
+                instance,
+                lowering
+                    .semantics
+                    .value_type(parameter.id)
+                    .expect("checked parameters have types"),
+            ),
+            lowering.semantics,
+        );
+        let index = if ty == Type::None {
+            u32::MAX
+        } else {
+            let index = physical_parameter_count;
+            physical_parameter_count += 1;
+            index
+        };
+        locals.insert(parameter.id, (index, ty));
+    }
     let mut local_types = Vec::new();
     let mut matches = MatchLayout::default();
     plan_wasm_locals(
@@ -360,7 +360,7 @@ pub(super) fn compile_user_function(
         &mut matches,
         &mut local_types,
         LocalPlanOptions {
-            parameter_count: declaration.params.len() as u32,
+            parameter_count: physical_parameter_count,
             semantics: lowering.semantics,
             instance: Some(instance),
             include_values: true,
@@ -401,10 +401,11 @@ pub(super) fn compile_user_function(
         intrinsic_capture: None,
         function_instance: Some(instance),
         loop_control: None,
-        bare_return: BareReturn::Void,
+        bare_return: BareReturn::None,
+        materialize_none: true,
     };
     compile_block(&mut function, &wasm_body.entry, &context, None);
-    if semantic_type(
+    let result = semantic_type(
         lowering.semantics.specialize_type(
             instance,
             lowering
@@ -413,8 +414,8 @@ pub(super) fn compile_user_function(
                 .expect("checked functions have result types"),
         ),
         lowering.semantics,
-    ) != Type::Void
-    {
+    );
+    if result != Type::None {
         function.instruction(&Instruction::Unreachable);
     }
     function.instruction(&Instruction::End);
@@ -477,6 +478,7 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
         function_instance: None,
         loop_control: None,
         bare_return: BareReturn::Action(action.kind),
+        materialize_none: true,
     };
     compile_block(&mut function, &wasm_body.entry, &context, Some(action.kind));
     emit_action_default(&mut function, action.kind, lowering.gc);
@@ -526,6 +528,12 @@ pub(super) fn plan_wasm_locals(
             }),
             options.semantics,
         );
+        if ty == Type::None
+            && let LocalPurpose::Value(value) = local.purpose
+        {
+            locals.insert(value, (u32::MAX, ty));
+            continue;
+        }
         types.push(ty);
         match local.purpose {
             LocalPurpose::Value(value) => {
@@ -583,6 +591,29 @@ pub(super) fn compile_async_function_init(
     layout: &AsyncFrameLayout,
     lowering: &EmissionContext<'_>,
 ) -> Function {
+    let mut next_parameter = 0;
+    let parameter_locals = declaration
+        .params
+        .iter()
+        .map(|parameter| {
+            let ty = semantic_type(
+                lowering.semantics.specialize_type(
+                    instance,
+                    lowering
+                        .semantics
+                        .value_type(parameter.id)
+                        .expect("checked parameters have types"),
+                ),
+                lowering.semantics,
+            );
+            let local = (ty != Type::None).then(|| {
+                let local = next_parameter;
+                next_parameter += 1;
+                local
+            });
+            (parameter.id, local)
+        })
+        .collect::<HashMap<_, _>>();
     let mut function = Function::new([]);
     function
         .instruction(&Instruction::I32Const(0))
@@ -591,20 +622,18 @@ pub(super) fn compile_async_function_init(
         ));
     for (position, ty) in layout.types.iter().copied().enumerate() {
         let field = position as u32 + layout.base_fields;
-        if let Some(parameter) =
-            declaration
-                .params
-                .iter()
-                .enumerate()
-                .find_map(|(parameter_index, parameter)| {
-                    layout
-                        .fields
-                        .get(&parameter.id)
-                        .is_some_and(|(candidate, _)| *candidate == field)
-                        .then_some(parameter_index as u32)
-                })
-        {
-            function.instruction(&Instruction::LocalGet(parameter));
+        if let Some(parameter) = declaration.params.iter().find_map(|parameter| {
+            layout
+                .fields
+                .get(&parameter.id)
+                .is_some_and(|(candidate, _)| *candidate == field)
+                .then_some(parameter.id)
+        }) {
+            if let Some(local) = parameter_locals[&parameter] {
+                function.instruction(&Instruction::LocalGet(local));
+            } else {
+                emit_default(&mut function, ty, lowering.gc);
+            }
         } else {
             emit_default(&mut function, ty, lowering.gc);
         }

@@ -29,10 +29,8 @@ use crate::{
         ResolvedRecordFieldId, ResolvedRecordId, ResolvedValue, ResolvedWrapperPattern,
         SemanticModel, ValueConversion,
     },
-    stdlib::{
-        CancellationKind, CoreTypeId, Implementation, IntrinsicId, StandardLibrary, SuspensionKind,
-    },
-    types::{BuiltinType, EnumTypeId, TypeId, TypeKind},
+    stdlib::{CancellationKind, Implementation, IntrinsicId, StandardLibrary, SuspensionKind},
+    types::{EnumTypeId, TypeId, TypeKind},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -286,7 +284,7 @@ pub struct Body {
 ///
 /// Keeping this independent of the completed value avoids inventing a `T`
 /// while an `async T` is pending. The ready value lives in the continuation
-/// frame described by [`AsyncCompletion`].
+/// frame described by [`AsyncFunctionAbi`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum PollStatus {
@@ -301,17 +299,12 @@ impl PollStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AsyncCompletion {
-    Void,
-    /// A completed `T` is retained in the function's typed frame. For `T!`,
-    /// this stores the complete Result value: failure is ordinary readiness,
-    /// not a third poll status.
-    FrameValue(TypeId),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AsyncFunctionAbi {
-    pub completion: AsyncCompletion,
+    /// The semantic completion type. Non-unit values are retained in the
+    /// function's typed frame; `None` is represented physically by `Ready`
+    /// alone. For `T!`, the frame stores the whole Result value; failure is
+    /// ordinary readiness, not a third poll status.
+    pub completion: TypeId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1002,15 +995,7 @@ fn lower_body(
                 .function_completion(instance.function)
                 .expect("checked functions have result types");
             let result = semantics.specialize_type(instance, result);
-            let completion = if matches!(
-                semantics.types().kind(result),
-                TypeKind::Builtin(CoreTypeId::Void)
-            ) {
-                AsyncCompletion::Void
-            } else {
-                AsyncCompletion::FrameValue(result)
-            };
-            BodyAbi::AsyncFunction(AsyncFunctionAbi { completion })
+            BodyAbi::AsyncFunction(AsyncFunctionAbi { completion: result })
         }
         BodyOwner::Function(_) => BodyAbi::Direct,
     };
@@ -1527,23 +1512,18 @@ struct NormalizedExpression {
 
 struct AsyncNormalizationContext<'a> {
     typed_hir: &'a TypedProgram,
-    semantics: &'a SemanticModel,
     wasm_ir: &'a mut Program,
 }
 
 fn normalize_expression_suspensions(
     expression: ExprId,
     typed_hir: &TypedProgram,
-    semantics: &SemanticModel,
+    _semantics: &SemanticModel,
     wasm_ir: &mut Program,
 ) -> NormalizedExpression {
     normalize_expression_suspensions_with(
         expression,
-        &mut AsyncNormalizationContext {
-            typed_hir,
-            semantics,
-            wasm_ir,
-        },
+        &mut AsyncNormalizationContext { typed_hir, wasm_ir },
     )
 }
 
@@ -1566,21 +1546,6 @@ fn normalize_expression_suspensions_with(
         } else {
             operand.value
         };
-        if matches!(
-            context.semantics.types().kind(original.ty),
-            TypeKind::Builtin(BuiltinType::Void)
-        ) {
-            steps.push(AsyncExpressionStep::Suspend {
-                mode,
-                destination: SuspensionDestination::Discard,
-                value: operand_value,
-                cancellation,
-            });
-            return NormalizedExpression {
-                value: expression,
-                steps,
-            };
-        }
         let storage_ty = original
             .conversion
             .map_or(original.ty, |conversion| conversion.source);
@@ -1895,22 +1860,14 @@ fn normalize_match_expression(
         };
     }
 
-    let is_void = matches!(
-        context.semantics.types().kind(original.ty),
-        TypeKind::Builtin(BuiltinType::Void)
-    );
-    let (destination, value) = if is_void {
-        (None, original.id)
-    } else {
-        let storage_ty = original
-            .conversion
-            .map_or(original.ty, |conversion| conversion.source);
-        let (temporary, value) =
-            context
-                .wasm_ir
-                .temporary_read(storage_ty, original.ty, original.conversion);
-        (Some(temporary), value)
-    };
+    let storage_ty = original
+        .conversion
+        .map_or(original.ty, |conversion| conversion.source);
+    let (temporary, value) =
+        context
+            .wasm_ir
+            .temporary_read(storage_ty, original.ty, original.conversion);
+    let destination = Some(temporary);
     let guard_suspends = arms.iter().any(|arm| {
         arm.guard
             .as_ref()
@@ -1963,22 +1920,14 @@ fn normalize_if_expression(
         return NormalizedExpression { value, steps };
     }
 
-    let is_void = matches!(
-        context.semantics.types().kind(original.ty),
-        TypeKind::Builtin(BuiltinType::Void)
-    );
-    let (destination, value) = if is_void {
-        (None, original.id)
-    } else {
-        let storage_ty = original
-            .conversion
-            .map_or(original.ty, |conversion| conversion.source);
-        let (temporary, value) =
-            context
-                .wasm_ir
-                .temporary_read(storage_ty, original.ty, original.conversion);
-        (Some(temporary), value)
-    };
+    let storage_ty = original
+        .conversion
+        .map_or(original.ty, |conversion| conversion.source);
+    let (temporary, value) =
+        context
+            .wasm_ir
+            .temporary_read(storage_ty, original.ty, original.conversion);
+    let destination = Some(temporary);
     let mut steps = condition.steps;
     steps.push(AsyncExpressionStep::If {
         condition: condition.value,
@@ -2592,18 +2541,11 @@ fn lower_async_statements(
             TypedStatementKind::Expression(expression) => {
                 let normalized =
                     normalize_expression_suspensions(*expression, typed_hir, semantics, wasm_ir);
-                let ty = typed_hir
-                    .expression(*expression)
-                    .expect("statement expression belongs to typed HIR")
-                    .ty;
                 result.statements.insert(
                     0,
                     Statement::Evaluate {
                         expression: normalized.value,
-                        discard_result: !matches!(
-                            semantics.types().kind(ty),
-                            TypeKind::Builtin(BuiltinType::Void)
-                        ),
+                        discard_result: true,
                     },
                 );
                 result = wrap_async_expression_steps(normalized.steps, result);
@@ -2933,16 +2875,9 @@ fn lower_statements(
                 return block;
             }
             TypedStatementKind::Expression(expression) => {
-                let ty = typed_hir
-                    .expression(*expression)
-                    .expect("statement expression belongs to typed HIR")
-                    .ty;
                 block.statements.push(Statement::Evaluate {
                     expression: *expression,
-                    discard_result: !matches!(
-                        semantics.types().kind(ty),
-                        TypeKind::Builtin(BuiltinType::Void)
-                    ),
+                    discard_result: true,
                 });
             }
         }
@@ -3303,9 +3238,7 @@ onAttach {
         let BodyAbi::AsyncFunction(abi) = asynchronous.abi else {
             panic!("expected an async source-function ABI")
         };
-        let AsyncCompletion::FrameValue(result) = abi.completion else {
-            panic!("Module completion needs typed frame storage")
-        };
+        let result = abi.completion;
         assert!(matches!(
             checked.semantics().types().kind(result),
             TypeKind::Standard(_)

@@ -95,6 +95,8 @@ fn option_and_result_values_use_explicit_typed_hir_conversions() {
             match conversion.kind {
                 ValueConversionKind::LiftOption => saw_option_lift = true,
                 ValueConversionKind::LiftResult => saw_result_lift = true,
+                ValueConversionKind::NoneToOptional | ValueConversionKind::NoneToDomainNullable => {
+                }
             }
             assert_ne!(conversion.source, conversion.target);
         }
@@ -366,25 +368,160 @@ fn wasm_ir_owns_backend_call_targets_intrinsics_and_arguments() {
 
 #[test]
 fn context_free_null_and_err_request_wrapper_annotations() {
-    for (initializer, expected_message) in [
-        ("None", "add a `T?` annotation"),
-        ("Err(\"failed\")", "add a `T!` annotation"),
-    ] {
-        let source = format!(
-            r#"
-                state "game.exe" {{}}
-                whileAttached {{ let value = {initializer} }}
-            "#
-        );
-        let errors = splitscript::check(splitscript::parse(&source).unwrap())
-            .expect_err("a wrapper constructor needs its contained type from context");
-        assert!(
-            errors
-                .iter()
-                .any(|error| error.message.contains(expected_message)),
-            "missing focused diagnostic in {errors:#?}"
-        );
-    }
+    let unit = r#"
+        state "game.exe" {}
+        whileAttached { let value = None }
+    "#;
+    splitscript::check(splitscript::parse(unit).unwrap())
+        .expect("None is the context-free unit value");
+
+    let result = r#"
+        state "game.exe" {}
+        whileAttached { let value = Err("failed") }
+    "#;
+    let errors = splitscript::check(splitscript::parse(result).unwrap())
+        .expect_err("Err still needs its successful type from context");
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("add a `T!` annotation"))
+    );
+}
+
+#[test]
+fn none_is_a_first_class_unit_across_wrappers_storage_and_async_code() {
+    let source = r#"
+        state "game.exe" {}
+
+        let globalUnit = None
+
+        record UnitBox {
+            value: None
+        }
+
+        fn identity(value: None) -> None {
+            return value
+        }
+
+        fn optional(flag: bool) -> None? {
+            if flag {
+                return Some(None)
+            }
+            return None
+        }
+
+        fn attempt(flag: bool) -> None! {
+            if !flag {
+                return Err("failed")
+            }
+            return None
+        }
+
+        fn propagate(value: None!) -> None! {
+            value?
+            return None
+        }
+
+        fn waitOne() {
+            await nextTick()
+        }
+
+        onAttach {
+            let awaited: None = await waitOne()
+            let values: [None; 2] = [globalUnit, awaited]
+            let boxed = UnitBox { value: values.get(0) }
+            let present = optional(true)
+            let absent = optional(false)
+            let succeeded = propagate(attempt(true)) else None
+            let same = attempt(true) == attempt(true)
+            if boxed.value == identity(succeeded) && same {
+                print("unit")
+            }
+            if present == absent {
+                print("unexpected")
+            }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("None should be a first-class unit value and type");
+    let none = checked.semantics().types().id_for_core(CoreTypeId::None);
+    assert_eq!(
+        checked
+            .semantics()
+            .value_type(checked.syntax().globals[0].id),
+        Some(none)
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("unit values should support erased and wrapped physical representations");
+}
+
+#[test]
+fn void_is_not_a_type_spelling() {
+    let source = r#"
+        state "game.exe" {}
+        fn legacy() -> void {}
+    "#;
+    let diagnostics = splitscript::compile(source).expect_err("void has no compatibility alias");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unknown type `void`"))
+    );
+}
+
+#[test]
+fn plain_none_calls_need_no_bottom_reference_values() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            let globalUnit = None
+
+            fn consume(value: None) -> None {
+                return value
+            }
+
+            whileAttached {
+                let localUnit = globalUnit
+                consume(localUnit)
+            }
+        "#,
+    )
+    .expect("unit parameters and results should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("erased unit parameters and results should preserve the Wasm ABI");
+
+    let bottom_nulls = Parser::new(0)
+        .parse_all(&wasm)
+        .filter_map(
+            |payload| match payload.expect("generated Wasm should parse") {
+                Payload::CodeSectionEntry(body) => Some(
+                    body.get_operators_reader()
+                        .expect("function operators should parse")
+                        .into_iter()
+                        .filter(|operator| {
+                            matches!(
+                                operator,
+                                Ok(wasmparser::Operator::RefNull {
+                                    hty: wasmparser::HeapType::Abstract {
+                                        ty: wasmparser::AbstractHeapType::None,
+                                        ..
+                                    }
+                                })
+                            )
+                        })
+                        .count(),
+                ),
+                _ => None,
+            },
+        )
+        .sum::<usize>();
+    assert_eq!(
+        bottom_nulls, 0,
+        "a plain None argument and result should be erased rather than materialized"
+    );
 }
 
 #[test]
@@ -763,7 +900,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
         .expect("nextTick should be catalog-backed");
     assert_eq!(
         library.render_signature(next_tick.id),
-        "nextTick() -> async void"
+        "nextTick() -> async None"
     );
     assert_eq!(
         library.operation_semantics(next_tick.id).suspension,
@@ -778,7 +915,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
         .expect("Process.closed should be catalog-backed");
     assert_eq!(
         library.render_signature(process_closed.id),
-        "Process.closed() -> async void"
+        "Process.closed() -> async None"
     );
     assert_eq!(
         library.render_operation_semantics(process_closed.id),

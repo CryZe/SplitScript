@@ -1,5 +1,6 @@
 use wasm_encoder::{
-    CodeSection, ConstExpr, Function, HeapType, Instruction, MemArg, RefType, ValType,
+    AbstractHeapType, CodeSection, ConstExpr, Function, HeapType, Instruction, MemArg, RefType,
+    ValType,
 };
 
 use crate::ast::{
@@ -764,6 +765,10 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
         expression
     };
     match &inner.kind {
+        wasm_ir::ExpressionKind::None => ConstExpr::ref_null(HeapType::Abstract {
+            shared: false,
+            ty: AbstractHeapType::None,
+        }),
         wasm_ir::ExpressionKind::Bool(value) => ConstExpr::i32_const(*value as i32),
         wasm_ir::ExpressionKind::Int(value) if ty == Type::F32 => ConstExpr::f32_const(
             (if negative {

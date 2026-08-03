@@ -30,7 +30,7 @@ state ["Lunistice.exe", "Lunistice-Demo.exe"] {
     levelTime: f32 = process.read(timerInstance.offset(levelTimeOffset))
     levelTimeParts = process.read(timerInstance.offset(levelTimeVectorOffset))
     timerStopped = process.read(timerInstance.offset(timerStoppedOffset))
-    character = process.read<u32>(timerInstance.offset(characterOffset))
+    character: u32 = process.read(timerInstance.offset(characterOffset))
 }
 
 let gameManagerInstance = 0
@@ -126,7 +126,7 @@ fn characterName(character, dlcDemo) {
 }
 
 onDetached {
-    setTickRate(1.0)
+    setTickRate(1)
 }
 
 onAttach {
@@ -171,7 +171,7 @@ onAttach {
 
     debug print("Found Timer")
 
-    setTickRate(120.0)
+    setTickRate(120)
 }
 
 whileAttached {
@@ -179,7 +179,7 @@ whileAttached {
     let timerStarted = lastTimerState == TimerState.NotRunning
         && timerState != TimerState.NotRunning
     if timerStarted {
-        runTimeSeconds = 0.0
+        runTimeSeconds = 0
         beyondFirstLevel = false
     }
     lastTimerState = timerState
@@ -200,7 +200,7 @@ start {
         && !current.timerStopped
         && isFirstLevel(current.levelOrScene)
     {
-        runTimeSeconds = 0.0
+        runTimeSeconds = 0
         beyondFirstLevel = false
         return true
     }
@@ -208,7 +208,7 @@ start {
 
 reset {
     if current.levelTime < old.levelTime && !beyondFirstLevel {
-        runTimeSeconds = 0.0
+        runTimeSeconds = 0
         beyondFirstLevel = false
         return true
     }

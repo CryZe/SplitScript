@@ -700,7 +700,7 @@ mod tests {
 
     #[test]
     fn privileged_punctuation_requires_standard_library_mode() {
-        let source = "@intrinsic(Print) fn print() -> void;";
+        let source = "@intrinsic(Print) fn print() -> None;";
         let error = lex(source, SyntaxMode::Program).unwrap_err();
         assert_eq!(error.span, Span { start: 0, end: 1 });
 

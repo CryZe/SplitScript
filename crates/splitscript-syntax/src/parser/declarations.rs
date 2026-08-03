@@ -3,8 +3,8 @@
 //! Declaration grammar.
 
 use super::{
-    Action, ActionKind, CoreTypeId, Diagnostic, EnumDecl, EnumId, EnumReference, EnumVariant,
-    FunctionDecl, FunctionId, Parameter, Parser, PointerPath, RecordDecl, RecordField, RecordId,
+    Action, ActionKind, Diagnostic, EnumDecl, EnumId, EnumReference, EnumVariant, FunctionDecl,
+    FunctionId, Parameter, Parser, PointerPath, RecordDecl, RecordField, RecordId,
     SettingChoiceOption, SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl, StateField,
     StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource, TokenKind, TypeRef,
     csharp_numeric_type,
@@ -187,12 +187,6 @@ impl Parser<'_> {
                 } else {
                     (None, param_start)
                 };
-                if annotation == Some(TypeRef::core(CoreTypeId::Void)) {
-                    return Err(Diagnostic::new(
-                        "parameters cannot have type `void`",
-                        type_span,
-                    ));
-                }
                 let parameter = Parameter {
                     id: self.new_value_id(),
                     name: param_name,
@@ -391,13 +385,7 @@ impl Parser<'_> {
     fn state_field(&mut self, documentation: Option<String>) -> Result<StateField, Diagnostic> {
         let (name, field_start) = self.expect_any_ident("expected a state field name")?;
         let annotation = if self.eat(&TokenKind::Colon).is_some() {
-            let (ty, type_span) = self.parse_type("expected a state field type")?;
-            if !Self::type_can_be_stored_in_state(ty) {
-                return Err(Diagnostic::new(
-                    format!("`{ty}` cannot be stored in state"),
-                    type_span,
-                ));
-            }
+            let (ty, _) = self.parse_type("expected a state field type")?;
             Some(ty)
         } else {
             None
@@ -850,12 +838,6 @@ impl Parser<'_> {
                         type_span,
                     ));
                 };
-                if !Self::type_can_be_stored_in_state(ty) {
-                    return Err(Diagnostic::new(
-                        format!("`{ty}` cannot be read from process memory"),
-                        type_span,
-                    ));
-                }
                 self.expect(TokenKind::LParen, "expected `(` after the memory type")?;
                 let module = if matches!(self.current().kind, TokenKind::String(_)) {
                     let module = self.expect_string("expected module name")?;

@@ -387,7 +387,7 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
         } else if contains_value_return(&function.body) {
             checker.fresh_inference(Requirements::none(), None)
         } else {
-            checker.core_type(crate::stdlib::CoreTypeId::Void)
+            checker.core_type(crate::stdlib::CoreTypeId::None)
         };
         let is_async = function.return_is_async
             || crate::typeck::control_flow::contains_suspension(&function.body);

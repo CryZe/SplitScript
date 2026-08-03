@@ -192,8 +192,13 @@ pub(super) fn encode(
         .iter()
         .filter(|variable| wasm_ir.contains_global(variable.id))
     {
-        let index = section.len();
         let ty = value_type(variable.id, semantics);
+        if ty == Type::None {
+            variables.insert(variable.id, u32::MAX);
+            variable_types.insert(variable.id, ty);
+            continue;
+        }
+        let index = section.len();
         let global_type = GlobalType {
             val_type: gc.val_type(ty),
             mutable: variable.mutable,

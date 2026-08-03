@@ -1042,7 +1042,7 @@ whileAttached {
             .hover(offset)
             .unwrap()
             .expect("process.closed hover");
-        assert!(hover.markdown.contains("Process.closed() -> async void"));
+        assert!(hover.markdown.contains("Process.closed() -> async None"));
         assert!(
             hover
                 .markdown
@@ -1187,7 +1187,7 @@ whileAttached {
             ),
             (
                 source.rfind("inspect").unwrap(),
-                "fn inspect(point: Point) -> void",
+                "fn inspect(point: Point) -> None",
                 "Function",
             ),
         ] {

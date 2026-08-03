@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
+use wasm_encoder::{AbstractHeapType, BlockType, Function, HeapType, Instruction, ValType};
 
 use crate::{
     abi::AbiImportId,
@@ -75,7 +75,7 @@ impl LocalStorage<'_> {
 
 #[derive(Clone, Copy)]
 pub(super) enum BareReturn {
-    Void,
+    None,
     Action(ActionKind),
     AsyncAttach,
     AsyncFuture {
@@ -114,6 +114,9 @@ pub(super) struct ExprContext<'a> {
     pub function_instance: Option<&'a FunctionInstance>,
     pub loop_control: Option<LoopControl>,
     pub bare_return: BareReturn,
+    /// Whether semantic unit values need a physical operand-stack value.
+    /// Discarded expressions and unit-returning ABIs erase `None` entirely.
+    pub materialize_none: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -123,6 +126,12 @@ pub(super) struct IntrinsicCapture<'a> {
 }
 
 impl ExprContext<'_> {
+    pub(super) fn erasing_none(&self) -> Self {
+        let mut context = *self;
+        context.materialize_none = false;
+        context
+    }
+
     pub(super) fn type_id(&self, ty: TypeId) -> TypeId {
         self.function_instance
             .map_or(ty, |instance| self.semantics.specialize_type(instance, ty))
@@ -399,8 +408,14 @@ fn compile_block_with_loop(
                 expression,
                 discard_result,
             } => {
-                compile_expr(function, *expression, context);
-                if *discard_result {
+                let ty = context.expression_type(*expression);
+                let expression_context = if *discard_result && ty == Type::None {
+                    context.erasing_none()
+                } else {
+                    *context
+                };
+                compile_expr(function, *expression, &expression_context);
+                if *discard_result && ty != Type::None {
                     function.instruction(&Instruction::Drop);
                 }
             }
@@ -425,7 +440,14 @@ fn compile_block_with_loop(
         }
         wasm_ir::Terminator::Return(value) => {
             if let Some(value) = value {
-                compile_expr(function, *value, context);
+                let return_context = if matches!(context.bare_return, BareReturn::None)
+                    && context.expression_type(*value) == Type::None
+                {
+                    context.erasing_none()
+                } else {
+                    *context
+                };
+                compile_expr(function, *value, &return_context);
             } else if let Some(action) = action {
                 emit_action_default(function, action, context.gc);
             }
@@ -486,6 +508,9 @@ fn compile_fallback_success(
     ty: Type,
     context: &ExprContext<'_>,
 ) {
+    if ty == Type::None && !context.materialize_none {
+        return;
+    }
     let source = context
         .wasm_ir
         .expression(source)
@@ -724,6 +749,10 @@ pub(super) fn compile_assignment(
     match context.locals {
         LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&target) => {
             let (field, ty) = frame_values[&target];
+            if ty == Type::None {
+                compile_expr(function, value, &context.erasing_none());
+                return;
+            }
             let frame = context.locals.frame();
             frame.emit(function);
             compile_assignment_value(function, operation, value, ty, context, |function| {
@@ -737,6 +766,10 @@ pub(super) fn compile_assignment(
         }
         LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&target) => {
             let (local, ty) = wasm_values[&target];
+            if ty == Type::None {
+                compile_expr(function, value, &context.erasing_none());
+                return;
+            }
             compile_assignment_value(function, operation, value, ty, context, |function| {
                 function.instruction(&Instruction::LocalGet(local));
             });
@@ -744,23 +777,25 @@ pub(super) fn compile_assignment(
         }
         LocalStorage::Wasm { values, .. } if values.contains_key(&target) => {
             let (local, ty) = values[&target];
+            if ty == Type::None {
+                compile_expr(function, value, &context.erasing_none());
+                return;
+            }
             compile_assignment_value(function, operation, value, ty, context, |function| {
                 function.instruction(&Instruction::LocalGet(local));
             });
             function.instruction(&Instruction::LocalSet(local));
         }
         _ => {
+            let ty = context.global_types[&target];
+            if ty == Type::None {
+                compile_expr(function, value, &context.erasing_none());
+                return;
+            }
             let global = context.globals[&target];
-            compile_assignment_value(
-                function,
-                operation,
-                value,
-                context.global_types[&target],
-                context,
-                |function| {
-                    function.instruction(&Instruction::GlobalGet(global));
-                },
-            );
+            compile_assignment_value(function, operation, value, ty, context, |function| {
+                function.instruction(&Instruction::GlobalGet(global));
+            });
             function.instruction(&Instruction::GlobalSet(global));
         }
     }
@@ -999,24 +1034,47 @@ fn compile_resolved_path(
         ResolvedValue::Variable(value) => match context.locals {
             LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&value) => {
                 let (field, ty) = frame_values[&value];
-                let frame = context.locals.frame();
-                frame.emit(function);
-                emit_typed_struct_get(function, frame.struct_type, field, ty);
+                if ty == Type::None {
+                    if context.materialize_none {
+                        emit_default(function, Type::None, context.gc);
+                    }
+                } else {
+                    let frame = context.locals.frame();
+                    frame.emit(function);
+                    emit_typed_struct_get(function, frame.struct_type, field, ty);
+                }
                 ty
             }
             LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&value) => {
                 let (local, ty) = wasm_values[&value];
-                function.instruction(&Instruction::LocalGet(local));
+                if ty == Type::None {
+                    if context.materialize_none {
+                        emit_default(function, Type::None, context.gc);
+                    }
+                } else {
+                    function.instruction(&Instruction::LocalGet(local));
+                }
                 ty
             }
             LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
                 let (local, ty) = values[&value];
-                function.instruction(&Instruction::LocalGet(local));
+                if ty == Type::None {
+                    if context.materialize_none {
+                        emit_default(function, Type::None, context.gc);
+                    }
+                } else {
+                    function.instruction(&Instruction::LocalGet(local));
+                }
                 ty
             }
             _ => {
-                function.instruction(&Instruction::GlobalGet(context.globals[&value]));
-                context.global_types[&value]
+                let ty = context.global_types[&value];
+                if ty != Type::None {
+                    function.instruction(&Instruction::GlobalGet(context.globals[&value]));
+                } else if context.materialize_none {
+                    emit_default(function, Type::None, context.gc);
+                }
+                ty
             }
         },
     };
@@ -1039,7 +1097,12 @@ fn compile_value_set(
 ) {
     match context.locals {
         LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&value) => {
-            let (field, _) = frame_values[&value];
+            let (field, ty) = frame_values[&value];
+            if ty == Type::None {
+                emit_value(function);
+                function.instruction(&Instruction::Drop);
+                return;
+            }
             let frame = context.locals.frame();
             frame.emit(function);
             emit_value(function);
@@ -1049,10 +1112,20 @@ fn compile_value_set(
             });
         }
         LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&value) => {
+            if wasm_values[&value].1 == Type::None {
+                emit_value(function);
+                function.instruction(&Instruction::Drop);
+                return;
+            }
             emit_value(function);
             function.instruction(&Instruction::LocalSet(wasm_values[&value].0));
         }
         LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
+            if values[&value].1 == Type::None {
+                emit_value(function);
+                function.instruction(&Instruction::Drop);
+                return;
+            }
             emit_value(function);
             function.instruction(&Instruction::LocalSet(values[&value].0));
         }
@@ -1207,8 +1280,12 @@ fn emit_path_fields(
                 )
             }
         };
-        function.instruction(&Instruction::RefAsNonNull);
-        emit_typed_struct_get(function, struct_type_index, field_index, field_type);
+        if field_type == Type::None && !context.materialize_none {
+            function.instruction(&Instruction::Drop);
+        } else {
+            function.instruction(&Instruction::RefAsNonNull);
+            emit_typed_struct_get(function, struct_type_index, field_index, field_type);
+        }
         current_type = field_type;
     }
     current_type
@@ -1218,8 +1295,10 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
     if let Some(capture) = context.intrinsic_capture
         && let Some(&(field, ty)) = capture.layout.arguments.get(&expression)
     {
-        capture.frame.emit(function);
-        emit_typed_struct_get(function, capture.frame.struct_type, field, ty);
+        if ty != Type::None || context.materialize_none {
+            capture.frame.emit(function);
+            emit_typed_struct_get(function, capture.frame.struct_type, field, ty);
+        }
         return;
     }
     let expression_ir = context
@@ -1230,6 +1309,25 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
     if let Some(conversion) = expression_ir.conversion {
         let source = context.ty(conversion.source);
         let target = context.ty(conversion.target);
+        match (conversion.kind, target) {
+            (ValueConversionKind::NoneToOptional, Type::Option(option)) => {
+                function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                    context.gc.index(Type::Option(option)),
+                )));
+                return;
+            }
+            (ValueConversionKind::NoneToDomainNullable, Type::Bool) => {
+                function.instruction(&Instruction::I32Const(-1));
+                return;
+            }
+            (ValueConversionKind::NoneToDomainNullable, Type::Standard(StdlibTypeId::Duration)) => {
+                function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                    context.gc.standard_index(StdlibTypeId::Duration),
+                )));
+                return;
+            }
+            _ => {}
+        }
         compile_expr_unconverted(function, expression_ir, source, context);
         match (conversion.kind, target) {
             (ValueConversionKind::LiftOption, Type::Option(option)) => {
@@ -1265,17 +1363,26 @@ fn compile_expr_unconverted(
     let expression = expression_ir.id;
     match &expression_ir.kind {
         wasm_ir::ExpressionKind::Suspend { destination, .. } => {
-            if ty != Type::Void {
+            if ty != Type::None || context.materialize_none {
                 compile_value_get(function, *destination, context);
             }
         }
         wasm_ir::ExpressionKind::Temporary(temporary) => {
-            compile_temporary_get(function, *temporary, context);
+            if ty != Type::None || context.materialize_none {
+                compile_temporary_get(function, *temporary, context);
+            }
         }
         wasm_ir::ExpressionKind::FallbackSuccess { source } => {
             compile_fallback_success(function, *source, ty, context);
         }
         wasm_ir::ExpressionKind::None => match ty {
+            Type::None if context.materialize_none => {
+                function.instruction(&Instruction::RefNull(HeapType::Abstract {
+                    shared: false,
+                    ty: AbstractHeapType::None,
+                }));
+            }
+            Type::None => {}
             Type::Bool => {
                 function.instruction(&Instruction::I32Const(-1));
             }
@@ -1289,7 +1396,7 @@ fn compile_expr_unconverted(
                     context.gc.index(Type::Option(option)),
                 )));
             }
-            _ => unreachable!("type checking only permits nullable action results"),
+            _ => unreachable!("typed None expressions use the unit or nullable representation"),
         },
         wasm_ir::ExpressionKind::Bool(value) => {
             function.instruction(&Instruction::I32Const(*value as i32));
@@ -1482,7 +1589,7 @@ fn compile_expr_unconverted(
             else_expr,
         } => {
             compile_expr(function, *condition, context);
-            let block_type = if ty == Type::Void {
+            let block_type = if ty == Type::None && !context.materialize_none {
                 BlockType::Empty
             } else {
                 BlockType::Result(context.gc.val_type(ty))
@@ -1499,7 +1606,11 @@ fn compile_expr_unconverted(
             let input_type = context.expression_type(*value);
             compile_expr(function, *value, context);
             function.instruction(&Instruction::LocalSet(input_local));
-            let result = BlockType::Result(context.gc.val_type(ty));
+            let result = if ty == Type::None && !context.materialize_none {
+                BlockType::Empty
+            } else {
+                BlockType::Result(context.gc.val_type(ty))
+            };
             match input_type {
                 Type::Option(option) => {
                     function
@@ -1508,11 +1619,18 @@ fn compile_expr_unconverted(
                         .instruction(&Instruction::If(result));
                     let nested_context = context.nested_loop_control(1);
                     compile_fallback_branch(function, *fallback, &nested_context);
-                    function
-                        .instruction(&Instruction::Else)
-                        .instruction(&Instruction::LocalGet(input_local))
-                        .instruction(&Instruction::RefAsNonNull);
-                    emit_typed_struct_get(function, context.gc.index(Type::Option(option)), 0, ty);
+                    function.instruction(&Instruction::Else);
+                    if ty != Type::None || context.materialize_none {
+                        function
+                            .instruction(&Instruction::LocalGet(input_local))
+                            .instruction(&Instruction::RefAsNonNull);
+                        emit_typed_struct_get(
+                            function,
+                            context.gc.index(Type::Option(option)),
+                            0,
+                            ty,
+                        );
+                    }
                     function.instruction(&Instruction::End);
                 }
                 Type::Result(result_type) => {
@@ -1528,16 +1646,18 @@ fn compile_expr_unconverted(
                     function.instruction(&Instruction::If(result));
                     let nested_context = context.nested_loop_control(1);
                     compile_fallback_branch(function, *fallback, &nested_context);
-                    function
-                        .instruction(&Instruction::Else)
-                        .instruction(&Instruction::LocalGet(input_local))
-                        .instruction(&Instruction::RefAsNonNull);
-                    emit_typed_struct_get(
-                        function,
-                        context.gc.index(Type::Result(result_type)),
-                        0,
-                        ty,
-                    );
+                    function.instruction(&Instruction::Else);
+                    if ty != Type::None || context.materialize_none {
+                        function
+                            .instruction(&Instruction::LocalGet(input_local))
+                            .instruction(&Instruction::RefAsNonNull);
+                        emit_typed_struct_get(
+                            function,
+                            context.gc.index(Type::Result(result_type)),
+                            0,
+                            ty,
+                        );
+                    }
                     function.instruction(&Instruction::End);
                 }
                 _ => unreachable!("typed fallback inputs are optional or result values"),
@@ -1580,23 +1700,25 @@ fn compile_expr_unconverted(
                     );
                 },
             );
-            function
-                .instruction(&Instruction::End)
-                .instruction(&Instruction::LocalGet(input_local))
-                .instruction(&Instruction::RefAsNonNull);
-            emit_typed_struct_get(
-                function,
-                context.gc.index(Type::Result(input_result)),
-                0,
-                ty,
-            );
+            function.instruction(&Instruction::End);
+            if ty != Type::None || context.materialize_none {
+                function
+                    .instruction(&Instruction::LocalGet(input_local))
+                    .instruction(&Instruction::RefAsNonNull);
+                emit_typed_struct_get(
+                    function,
+                    context.gc.index(Type::Result(input_result)),
+                    0,
+                    ty,
+                );
+            }
         }
         wasm_ir::ExpressionKind::Match { value, arms } => {
             let value_local = context.matches.values[&expression];
             let value_type = context.expression_type(*value);
             compile_expr(function, *value, context);
             function.instruction(&Instruction::LocalSet(value_local));
-            let block_type = if ty == Type::Void {
+            let block_type = if ty == Type::None && !context.materialize_none {
                 BlockType::Empty
             } else {
                 BlockType::Result(context.gc.val_type(ty))
@@ -1815,7 +1937,8 @@ fn compile_expr_unconverted(
         emit_numeric_method(function, intrinsic, receiver_type, temps, context.gc);
         return;
     }
-    match resolved_intrinsic(target) {
+    let intrinsic = resolved_intrinsic(target);
+    match intrinsic {
         None => match target {
             wasm_ir::CallTarget::UserMethod {
                 function: target_function,
@@ -1823,14 +1946,14 @@ fn compile_expr_unconverted(
             } => {
                 compile_receiver(function, target, context);
                 for argument in args {
-                    compile_expr(function, *argument, context);
+                    compile_user_argument(function, *argument, context);
                 }
                 let target_function = context.called_instance(target_function);
                 function.instruction(&Instruction::Call(context.functions[&target_function].call));
             }
             wasm_ir::CallTarget::UserFunction { function: target } => {
                 for argument in args {
-                    compile_expr(function, *argument, context);
+                    compile_user_argument(function, *argument, context);
                 }
                 let target = context.called_instance(target);
                 function.instruction(&Instruction::Call(context.functions[&target].call));
@@ -2307,6 +2430,20 @@ fn compile_expr_unconverted(
                 unreachable!("suspending receiver methods are lowered by await")
             }
         },
+    };
+    if ty == Type::None && context.materialize_none {
+        function.instruction(&Instruction::RefNull(HeapType::Abstract {
+            shared: false,
+            ty: AbstractHeapType::None,
+        }));
+    }
+}
+
+fn compile_user_argument(function: &mut Function, argument: ExprId, context: &ExprContext<'_>) {
+    if context.expression_type(argument) == Type::None {
+        compile_expr(function, argument, &context.erasing_none());
+    } else {
+        compile_expr(function, argument, context);
     }
 }
 
@@ -2320,13 +2457,16 @@ fn compile_fallback_branch(
         wasm_ir::FallbackBranch::Return(value) => {
             if let BareReturn::AsyncFuture { frame, completion } = context.bare_return {
                 if let Some(value) = value {
-                    let (field, _) = completion.expect("value-returning futures have result slots");
-                    frame.emit(function);
-                    compile_expr(function, value, context);
-                    function.instruction(&Instruction::StructSet {
-                        struct_type_index: frame.struct_type,
-                        field_index: field,
-                    });
+                    if let Some((field, _)) = completion {
+                        frame.emit(function);
+                        compile_expr(function, value, context);
+                        function.instruction(&Instruction::StructSet {
+                            struct_type_index: frame.struct_type,
+                            field_index: field,
+                        });
+                    } else {
+                        compile_expr(function, value, &context.erasing_none());
+                    }
                 }
                 frame.emit(function);
                 function
@@ -2340,7 +2480,7 @@ fn compile_fallback_branch(
                 compile_expr(function, value, context);
             } else {
                 match context.bare_return {
-                    BareReturn::Void => {}
+                    BareReturn::None => {}
                     BareReturn::Action(action) => {
                         emit_action_default(function, action, context.gc);
                     }
@@ -2611,6 +2751,13 @@ fn emit_binary(
     context: &ExprContext<'_>,
 ) {
     let operand_type = context.expression_type(left);
+    if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && operand_type == Type::None {
+        let operand_context = context.erasing_none();
+        compile_expr(function, left, &operand_context);
+        compile_expr(function, right, &operand_context);
+        function.instruction(&Instruction::I32Const(i32::from(op == BinaryOp::Eq)));
+        return;
+    }
     if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
         && matches!(operand_type, Type::Standard(_))
         && operand_type.is_enum(context.standard_library)

@@ -398,6 +398,7 @@ pub(in crate::codegen) fn emit_value_equality(
         Type::Enum(enumeration) => Instruction::Call(equality_functions.enums[&enumeration]),
         Type::Option(option) => Instruction::Call(equality_functions.options[&option]),
         Type::Result(result) => Instruction::Call(equality_functions.results[&result]),
+        Type::None => Instruction::RefEq,
         Type::F32 => Instruction::F32Eq,
         Type::F64 => Instruction::F64Eq,
         Type::I64 | Type::U64 | Type::Address => Instruction::I64Eq,

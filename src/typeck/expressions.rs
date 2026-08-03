@@ -23,21 +23,33 @@ impl Checker {
                 self.error("cannot type-check a recovered expression", expr.span);
                 return None;
             }
-            ExprKind::None => match expected.map(|ty| self.shallow_type(ty)) {
-                Some(expected @ Type::Option(_)) => expected,
-                Some(expected) if self.none_policy == NonePolicy::DomainNullable => expected,
-                Some(_) => {
-                    self.error("`None` can only construct an optional value", expr.span);
-                    return None;
+            ExprKind::None => {
+                let none = self.core_type(crate::stdlib::CoreTypeId::None);
+                match expected.map(|ty| self.shallow_type(ty)) {
+                    Some(expected @ Type::Option(_)) => {
+                        self.semantics.resolve_value_conversion(
+                            expr.id,
+                            crate::semantic::ValueConversionKind::NoneToOptional,
+                            none,
+                            expected,
+                        );
+                        expected
+                    }
+                    Some(expected) if self.none_policy == NonePolicy::DomainNullable => {
+                        self.semantics.resolve_value_conversion(
+                            expr.id,
+                            crate::semantic::ValueConversionKind::NoneToDomainNullable,
+                            none,
+                            expected,
+                        );
+                        expected
+                    }
+                    Some(expected) => {
+                        self.expect_expression(expr.id, none, Some(expected), expr.span)?
+                    }
+                    None => none,
                 }
-                None => {
-                    self.error(
-                        "cannot infer the value type of `None`; add a `T?` annotation",
-                        expr.span,
-                    );
-                    return None;
-                }
-            },
+            }
             ExprKind::Bool(_) => self.expect_expression(
                 expr.id,
                 self.core_type(crate::stdlib::CoreTypeId::Bool),

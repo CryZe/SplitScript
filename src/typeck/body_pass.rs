@@ -140,37 +140,26 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
             }
 
             if let Some(transform) = &field.transform {
-                checker.scopes.push(HashMap::from([
-                    (
-                        "value".to_owned(),
-                        Binding {
-                            id: Some(transform.value),
-                            ty: field_type,
-                            mutable: false,
-                            debug_only: false,
-                        },
-                    ),
-                    (
-                        "old".to_owned(),
-                        Binding {
-                            id: Some(transform.old),
-                            ty: field_type,
-                            mutable: false,
-                            debug_only: false,
-                        },
-                    ),
-                ]));
+                checker.scopes.push(HashMap::from([(
+                    "value".to_owned(),
+                    Binding {
+                        id: Some(transform.value),
+                        ty: field_type,
+                        mutable: false,
+                        debug_only: false,
+                    },
+                )]));
                 checker
                     .semantics
                     .resolve_value_type(transform.value, field_type);
-                checker
-                    .semantics
-                    .resolve_value_type(transform.old, field_type);
-                if let Some(actual) = checker.expr(&transform.expression, Some(field_type)) {
-                    checker.unify(actual, field_type, transform.expression.span);
-                } else {
+                let poll_result = Type::Result(checker.inference.result_type(field_type));
+                let (actual, _) = checker.with_failure_context(
+                    FailureContext::boundary(poll_result),
+                    |checker| checker.expr(&transform.expression, Some(poll_result)),
+                );
+                if actual.is_none() {
                     checker.error(
-                        "a state field filter must produce a value",
+                        "a state field filter must produce a value or an error",
                         transform.expression.span,
                     );
                 }

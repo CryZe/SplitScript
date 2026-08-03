@@ -414,9 +414,11 @@ apply.
 
 ## Watchers, strings, and timing
 
-Expression-backed state fields form transactional watchers. A fresh snapshot
-is committed only when every field's `T!` succeeds; actions see the committed
-`current` and prior `old` objects. `process.read(address)` infers its
+Expression-backed state fields form persistent watchers. Initialization waits
+for every required field to succeed in one poll and seeds `old == current`.
+Later, each successful `T!` advances that field and each error retains its last
+accepted value; actions see the resulting `current` and prior `old` objects.
+`process.read(address)` infers its
 `MemoryReadable` type from the field, annotation, or later usage. This includes
 fixed-width primitives and both source- and catalog-declared records containing
 only readable fields. Record fields use declaration order and natural

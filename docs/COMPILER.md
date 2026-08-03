@@ -497,8 +497,8 @@ for String decoding, refresh, and start rather than individual setting kinds.
 
 [`src/codegen/update.rs`](../src/codegen/update.rs) owns the exported per-tick
 runtime behavior. It emits process attachment and one-shot detached callbacks,
-process-close cancellation/reset, settings refresh, transactional state-field
-polling, snapshot rotation, lifecycle action ordering, nullable loading and
+process-close cancellation/reset, settings refresh, persistent state-field
+polling, first-snapshot seeding, snapshot rotation, lifecycle action ordering, nullable loading and
 game-time handling, and timer start/split/reset commands. Final assembly passes
 only resolved read/action function indices and receives one generated update
 body, keeping host lifecycle policy out of the section orchestrator.
@@ -536,7 +536,7 @@ entry latch. All emitters consume those roles rather than relying on raw global
 numbers or declaration order.
 
 [`src/codegen/script_functions.rs`](../src/codegen/script_functions.rs) emits
-ordinary source-defined bodies: transactional pointer and expression state
+ordinary source-defined bodies: fallible pointer and expression state
 reads, user functions, and non-async actions. It also owns deterministic
 Wasm-local assignment for values, match storage, fallback values, intrinsic
 scratch space, and suspension scratch space; expression and async lowering

@@ -498,11 +498,9 @@ impl Parser<'_> {
             (matches!(&source, StateSource::Pointer(_)) && self.at_ident("if")).then(|| {
                 let start = self.current().span;
                 let value = self.new_value_id();
-                let old = self.new_value_id();
                 let expression = self.root_expression();
                 StateTransform {
                     value,
-                    old,
                     span: Span {
                         start: start.start,
                         end: expression.span.end,

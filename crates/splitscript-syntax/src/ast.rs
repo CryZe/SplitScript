@@ -547,8 +547,6 @@ pub struct StateField {
 pub struct StateTransform {
     /// Implicit `value` binding containing the newly read candidate.
     pub value: ValueId,
-    /// Implicit `old` binding containing the last accepted value.
-    pub old: ValueId,
     pub expression: Expr,
     pub span: Span,
 }

@@ -194,6 +194,9 @@ const env = {
 
 ({ instance } = await WebAssembly.instantiate(bytes, { env }));
 instance.exports._start();
+// The first complete state poll initializes old and current without running
+// lifecycle code. The next poll observes the initialized settings snapshot.
+instance.exports.update();
 instance.exports.update();
 
 if (variables.get("Auto Splitting") !== "enabled")

@@ -106,10 +106,11 @@ hold the deterministic union of values live across individual suspension
 points. Replacing this frame on process exit cancels the old continuation and
 clears its state.
 
-Every state refresh is transactional. Reads populate a new GC state object;
-the runtime commits it as `current` and moves the prior object to `old` only if
-all primitive reads succeeded. A failed read skips the complete watcher tick,
-including user `whileAttached` code and timer actions.
+State initialization requires one poll in which every required field succeeds;
+the resulting GC object initializes both `old` and `current`, and lifecycle
+actions are skipped for that poll. Later refreshes populate a new GC state
+object field by field. Successful results advance, while failed results copy
+that field from `current`; unrelated fields can therefore advance independently.
 
 The module includes a `splitscript` custom section identifying compiler version,
 GC target, and host ABI.

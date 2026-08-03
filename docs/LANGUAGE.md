@@ -46,8 +46,7 @@ state ["game.exe", "game-demo.exe"] {}
 With a module name, the first offset is added to the module base. Every remaining
 offset follows a 64-bit pointer, adds the offset, and continues. Without a module
 name, the first value is an absolute address. The final read uses the declared
-width and signedness. A failed path produces that type's zero value for the
-current tick.
+width and signedness. A failed path rejects that field's candidate value.
 
 State field annotations are optional and participate in whole-program
 inference. Expression-backed fields normally obtain their type directly from
@@ -55,19 +54,22 @@ the right-hand side. A pointer-path field has no typed right-hand side, so its
 type must come from a `current`/`old` use or an explicit annotation. The
 compiler reports an ambiguity if neither provides enough information.
 
-Each tick, the compiler-generated runtime reads a complete candidate snapshot.
-Only when every required field succeeds does it rotate `current` to `old` and
-commit the candidate as `current`. The fields form a WebAssembly GC struct, so
-the action code uses typed references rather than a linear-memory state layout.
+After attachment, initialization waits for one poll in which every required
+field succeeds. That snapshot initializes both `old` and `current`, and
+lifecycle actions begin on the following poll. Consequently action code never
+observes synthetic zero-filled state. Later, each successful field advances;
+a failed field retains its last accepted value while successful sibling fields
+still advance. The resulting snapshots are WebAssembly GC structs, so action
+code uses typed references rather than a linear-memory state layout.
 
-A pointer-path field can use an ordinary trailing `if` expression to choose the
-value that is accepted before that atomic commit. Expression-backed fields
+A pointer-path field can use an ordinary trailing `if` expression to accept the
+raw value or produce an error. Expression-backed fields
 already have an ordinary right-hand side and should put the `if` there instead:
 
 ```text
 state "game.exe" {
     scene: i32 at 0x1000 if value == 7 || value == 8 {
-        old
+        Err("transient loading scene")
     } else {
         value
     };
@@ -75,12 +77,12 @@ state "game.exe" {
 }
 ```
 
-Inside this field-local expression, the read-only `value` and `old` bindings
-both have the field's inferred type. `value` is the raw candidate; `old` is the
-last committed value for that field. On the first successful poll after
-attachment, both are the raw candidate. The expression applies to one field,
-so retaining `scene` does not discard a new `entities` value from the same
-otherwise-valid tick. Snapshot `current` and `old` values stay read-only.
+Inside this field-local expression, the read-only `value` binding has the
+field's inferred type. A plain value is accepted and `Err(message)` rejects the
+candidate. Before initialization, any rejected required field leaves state
+uninitialized. Afterwards, rejection retains that field's last value without
+discarding a new `entities` value from the same poll. Snapshot `current` and
+`old` values stay read-only and are available only after initialization.
 
 Games with multiple supported memory layouts can name each layout inside one
 state declaration. Fields present in every layout with a compatible type form
@@ -930,15 +932,15 @@ state "game.exe" {
 ```
 
 Every state expression produces a `T!`: a plain value is lifted automatically,
-while a process read already returns a result. State refreshes are atomic: the
-runtime unwraps all field results into a fresh GC snapshot and only then rotates
-`current` and `old`. If any field returns an error, the entire tick is skipped,
-matching ASR `Watcher` behavior and preventing partially updated values from
-triggering actions.
+while a process read already returns a result. The first snapshot requires all
+required fields to succeed together and initializes `old` and `current` to the
+same value. On later polls, an error keeps that field's accepted value while
+successful fields advance. Put values that must advance atomically into one
+record- or array-valued state field; the whole aggregate is then one acceptance
+unit.
 
-Keep that required behavior for fields whose absence makes the snapshot
-incoherent. When one field is genuinely optional, make its value type optional
-and absorb only that read's error with the source-defined `Result.toOption()`:
+When one field is genuinely optional, make its value type optional and convert
+that read's error with the source-defined `Result.toOption()`:
 
 ```text
 state "game.exe" {
@@ -947,11 +949,11 @@ state "game.exe" {
 }
 ```
 
-A failed `level` read skips the complete tick. A failed `bonus` read commits
-the otherwise valid snapshot with `current.bonus == None`; a later successful
-read becomes a present `u32` without an explicit `Some` constructor. The error
-text is deliberately discarded, so `toOption()` should not be used merely to
-silence an unexpected failure.
+A failed `level` read retains its last accepted value after initialization. A
+failed `bonus` read is instead accepted as `current.bonus == None`; a later
+successful read becomes a present `u32` without an explicit `Some` constructor.
+The error text is deliberately discarded, so `toOption()` should not be used
+merely to silence an unexpected failure.
 
 Discovery globals currently require an initializer because they exist for the
 whole script lifetime. State polling is gated until `onAttach` completes, so a

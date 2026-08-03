@@ -34,6 +34,7 @@ const env = {
 
 ({ instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), { env }));
 instance.exports._start();
+instance.exports.update(); // Initialize old and current.
 instance.exports.update();
 
 const expected = "42,1,42,42,42,77,1";

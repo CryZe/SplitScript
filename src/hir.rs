@@ -387,7 +387,6 @@ pub struct GlobalInitializer {
 pub struct StateTransform {
     pub field: ValueId,
     pub value: ValueId,
-    pub old: ValueId,
     pub expression: ExprId,
 }
 
@@ -501,7 +500,6 @@ impl TypedProgram {
                 field.transform.as_ref().map(|transform| StateTransform {
                     field: field.id,
                     value: transform.value,
-                    old: transform.old,
                     expression: transform.expression.id,
                 })
             })

@@ -194,15 +194,17 @@ setGame({ state: 0, level: 1 });
 setTimer({ stopped: false, levelTime: 1, seconds: 1, character: dlc ? 6 : 1 });
 instance.exports.update();
 
-// A torn read must not rotate snapshots or run any actions/variable writes.
+// Failed fields retain their accepted values. The watcher tick still runs
+// against that stable snapshot, so ordinary actions and variable writes are
+// not suppressed by a transient read failure.
 const writesBeforeFailure = variableWrites;
 const timesBeforeFailure = gameTimes.length;
 setGame({ state: 0, points: 99, level: 1 });
 failReads = true;
 instance.exports.update();
 failReads = false;
-if (variableWrites !== writesBeforeFailure || gameTimes.length !== timesBeforeFailure) {
-    throw new Error("a failed state read still committed a watcher tick");
+if (variableWrites !== writesBeforeFailure + 5 || gameTimes.length !== timesBeforeFailure + 1) {
+    throw new Error("a failed state read did not retain values for an ordinary watcher tick");
 }
 if (variables.get("Points") !== "12") throw new Error("failed snapshot leaked partial state");
 

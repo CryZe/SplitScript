@@ -27,6 +27,7 @@ const env = {
 
 ({ instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), { env }));
 instance.exports._start();
+instance.exports.update(); // Initialize old and current.
 instance.exports.update();
 
 const expected = "4095";

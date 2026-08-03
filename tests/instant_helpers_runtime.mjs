@@ -47,6 +47,7 @@ const wasi = {
     wasi_snapshot_preview1: wasi,
 }));
 instance.exports._start();
+instance.exports.update(); // Initialize old and current.
 instance.exports.update();
 instance.exports.update();
 

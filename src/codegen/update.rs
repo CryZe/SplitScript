@@ -271,12 +271,21 @@ pub(super) fn compile_update(
         }
     }
     function
+        .instruction(&Instruction::GlobalGet(globals.state_ready))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(candidate_state))
+        .instruction(&Instruction::GlobalSet(globals.current))
+        .instruction(&Instruction::LocalGet(candidate_state))
+        .instruction(&Instruction::GlobalSet(globals.old))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::GlobalSet(globals.state_ready))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
         .instruction(&Instruction::GlobalGet(globals.current))
         .instruction(&Instruction::GlobalSet(globals.old))
         .instruction(&Instruction::LocalGet(candidate_state))
-        .instruction(&Instruction::GlobalSet(globals.current))
-        .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::GlobalSet(globals.state_ready));
+        .instruction(&Instruction::GlobalSet(globals.current));
 
     if let Some(update) = actions.get(&ActionKind::WhileAttached) {
         emit_action_args(&mut function, globals);
@@ -403,42 +412,25 @@ fn emit_state_field_poll(
     ) else {
         unreachable!("state poll-result types are Result layouts")
     };
+    let (field_index, _) = state_storage_index(field, semantics);
+    let field_type = value_type(field, semantics);
     function
         .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
         .instruction(&Instruction::Call(read_function))
-        .instruction(&Instruction::LocalSet(poll_result_local))
-        .instruction(&Instruction::LocalGet(poll_result_local))
-        .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::StructGet {
-            struct_type_index: lowering.gc.index(Type::Result(result_type)),
-            field_index: 1,
-        })
-        .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::Return)
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalGet(candidate_state))
-        .instruction(&Instruction::RefAsNonNull);
-    let (field_index, _) = state_storage_index(field, semantics);
-    let field_type = value_type(field, semantics);
-    emit_poll_value(
-        function,
-        poll_result_local,
-        result_type,
-        field_type,
-        lowering,
-    );
+        .instruction(&Instruction::LocalSet(poll_result_local));
+
+    // A filter is itself fallible. A failed raw read bypasses it so the
+    // original error reaches the field's acceptance boundary unchanged.
     if let Some(transform) = transform_function {
         function
-            .instruction(&Instruction::GlobalGet(
-                lowering.runtime_globals.state_ready,
-            ))
-            .instruction(&Instruction::If(BlockType::Result(
-                lowering.gc.val_type(field_type),
-            )))
-            .instruction(&Instruction::GlobalGet(lowering.runtime_globals.current))
-            .instruction(&Instruction::RefAsNonNull);
-        emit_typed_struct_get(function, STATE_TYPE, field_index, field_type);
-        function.instruction(&Instruction::Else);
+            .instruction(&Instruction::LocalGet(poll_result_local))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::StructGet {
+                struct_type_index: lowering.gc.index(Type::Result(result_type)),
+                field_index: 1,
+            })
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Else);
         emit_poll_value(
             function,
             poll_result_local,
@@ -447,13 +439,55 @@ fn emit_state_field_poll(
             lowering,
         );
         function
-            .instruction(&Instruction::End)
-            .instruction(&Instruction::Call(transform));
+            .instruction(&Instruction::Call(transform))
+            .instruction(&Instruction::LocalSet(poll_result_local))
+            .instruction(&Instruction::End);
     }
-    function.instruction(&Instruction::StructSet {
-        struct_type_index: STATE_TYPE,
-        field_index,
-    });
+
+    // Before initialization every required field must succeed in the same
+    // poll. Afterwards, an error retains this field's accepted value while
+    // successful sibling fields continue building the candidate snapshot.
+    function
+        .instruction(&Instruction::LocalGet(poll_result_local))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: lowering.gc.index(Type::Result(result_type)),
+            field_index: 1,
+        })
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::GlobalGet(
+            lowering.runtime_globals.state_ready,
+        ))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(candidate_state))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::GlobalGet(lowering.runtime_globals.current))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_typed_struct_get(function, STATE_TYPE, field_index, field_type);
+    function
+        .instruction(&Instruction::StructSet {
+            struct_type_index: STATE_TYPE,
+            field_index,
+        })
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(candidate_state))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_poll_value(
+        function,
+        poll_result_local,
+        result_type,
+        field_type,
+        lowering,
+    );
+    function
+        .instruction(&Instruction::StructSet {
+            struct_type_index: STATE_TYPE,
+            field_index,
+        })
+        .instruction(&Instruction::End);
 }
 
 fn emit_poll_value(

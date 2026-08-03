@@ -1788,7 +1788,7 @@ whileAttached {
     #[test]
     fn state_filter_bindings_complete_with_the_field_type() {
         let source = r#"state "game.exe" {
-    scene: i32 at 0x100 if value.min(7) == 7 { old } else { value }
+    scene: i32 at 0x100 if value.min(7) == 7 { Err("transient") } else { value }
 }"#;
         let mut database = CompilerDatabase::new(source);
         let completions = labels(&mut database, "value.");

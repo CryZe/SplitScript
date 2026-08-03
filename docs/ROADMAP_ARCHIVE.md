@@ -1,5 +1,24 @@
 # SplitScript roadmap
 
+## 2026-08-03: initialized persistent state fields
+
+- Audited the original LiveSplit ASL refresh path and ASR watchers. Legacy ASL
+  seeds `old` and `current` from one real read but substitutes zero or null for
+  failed fields; SplitScript now preserves the safe initialization behavior
+  without inheriting those failed-read defaults.
+- State initialization requires every required field to succeed in one poll,
+  seeds `old == current`, and skips lifecycle actions for that poll. Detaching
+  clears readiness so a new process can never inherit a previous process's
+  values.
+- Made the state-field assignment the persistent watcher boundary. Later
+  successes advance independently and errors retain that field's accepted
+  value, while `toOption()` deliberately accepts `None`. Record- and
+  array-valued fields remain the explicit unit for values that must advance
+  atomically.
+- Removed the fabricated field-local `old` binding. Pointer filters receive
+  only the raw `value` and return `Err(message)` to reject a transient candidate;
+  lifecycle `old` remains the full preceding snapshot.
+
 ## 2026-08-03: immutable per-field state filtering
 
 - Audited AAWCB, Aragami, and the wider ASL corpus and separated three

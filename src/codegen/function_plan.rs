@@ -244,7 +244,7 @@ pub(super) fn encode<'a>(
                     semantics,
                 );
                 let value = gc.val_type(ty);
-                declare(vec![value, value], vec![value])
+                declare(vec![value], vec![gc.val_type(poll_result)])
             }));
         }
     }

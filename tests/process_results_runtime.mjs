@@ -92,8 +92,11 @@ phase = 3;
 instance.exports.update();
 
 const expected = [
-    "0,0,0,0,0,0,None->10,20,90,1,2,3,70:-1",
-    "10,20,90,1,2,3,70->12,22,94,3,4,5,None:-1",
+    // Phase zero initializes both snapshots and remains silent. In phase one,
+    // failed required fields retain their accepted values while successful
+    // siblings advance. The optional read deliberately accepts None instead.
+    "10,20,90,1,2,3,70->11,20,90,2,3,4,71:-1",
+    "11,20,90,2,3,4,71->12,22,94,3,4,5,None:-1",
     "12,22,94,3,4,5,None->13,23,96,4,5,6,73:-1",
 ];
 if (JSON.stringify(snapshots) !== JSON.stringify(expected)) {

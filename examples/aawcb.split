@@ -32,7 +32,7 @@ settings {
 state "AndAllWouldCryBeware" {
     /// Current scene, retaining the last accepted value during loading scenes.
     scene: i32 at "UnityPlayer.dll", 0x10B88A4, 0x18, 0x0, 0x70 if value == 7 || value == 8 {
-        old
+        Err("transient loading scene")
     } else {
         value
     };

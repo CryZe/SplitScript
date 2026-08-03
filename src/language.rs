@@ -258,7 +258,7 @@ focused_example!(
 );
 focused_example!(
     STATE_DECL_EXAMPLE,
-    "Read transactional state",
+    "Read watched state",
     "state \"game.exe\" {\n    score = process.read<i32>(0x1000);\n}",
     STATE_SOURCE
 );
@@ -610,8 +610,8 @@ define_language_catalog! {
         "state",
         LanguageItemKind::Declaration,
         "state \"game.exe\" { field = expression; } | state GBA { field at address; }",
-        "Declares process attachment and transactional watched state.",
-        "Every state expression produces a Result. A tick commits a complete new snapshot only when all required fields succeed. Deliberately optional reads can convert their own Result to an Option with `toOption()` without weakening the rest of the transaction.",
+        "Declares process attachment and persistent watched state.",
+        "Every state expression produces a Result. Initialization requires all required fields to succeed in one poll and seeds old and current equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can convert their Result to an Option with `toOption()`.",
         STATE_DECL_EXAMPLE
     ),
     language_item!(
@@ -629,7 +629,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "field at address as utf8(maxBytes)",
         "Decodes a bounded native UTF-8 string state field.",
-        "This is state-layout sugar for a bounded read-and-decode operation, not a string-size type. It follows the complete pointer path, reads at most 4096 bytes once, stops at the first NUL byte, and fails the transactional state update when memory cannot be read or the bytes are not valid UTF-8. The field type is inferred as String.",
+        "This is state-layout sugar for a bounded read-and-decode operation, not a string-size type. It follows the complete pointer path, reads at most 4096 bytes once, stops at the first NUL byte, and rejects this field's candidate when memory cannot be read or the bytes are not valid UTF-8. The field type is inferred as String.",
         NATIVE_STRING_DECODER_EXAMPLE
     ),
     language_item!(
@@ -967,7 +967,7 @@ define_language_catalog! {
         LanguageItemKind::SnapshotRoot,
         "current.stateField",
         "Accesses the current committed state snapshot.",
-        "State fields refresh transactionally before whileAttached and timer-decision actions run.",
+        "State fields refresh before whileAttached and timer-decision actions run. A failed field retains its last accepted value.",
         "let level = current.level",
         STATE_SOURCE
     ),
@@ -977,7 +977,7 @@ define_language_catalog! {
         LanguageItemKind::SnapshotRoot,
         "old.stateField",
         "Accesses the previous committed state snapshot.",
-        "Old state retains the preceding successful snapshot, making change detection independent of failed process reads.",
+        "Old state contains the preceding emitted snapshot. A rejected field remains unchanged while successful sibling fields can advance.",
         "return current.level != old.level",
         STATE_SOURCE
     ),
@@ -1052,7 +1052,7 @@ define_language_catalog! {
         WhileAttached,
         "whileAttached",
         "Runs on every initialized attached update.",
-        "State and settings data has already refreshed transactionally when this action runs.",
+        "State and settings data has already refreshed when this action runs. The initialization poll is deliberately skipped.",
         "whileAttached {\n    setVariable(\"Level\", current.level as String)\n}"
     ),
     action_item!(

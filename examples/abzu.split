@@ -1,6 +1,6 @@
 // Small version differences do not need a dedicated layout declaration. The
 // attachment block selects one typed build and one discovered address, while
-// the ordinary state expression keeps snapshot rotation transactional.
+// the ordinary state expression groups the complete timer value into one field.
 enum AbzuBuild {
     Steam,
     Epic,

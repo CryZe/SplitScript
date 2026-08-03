@@ -31,7 +31,8 @@ const env = {
 
 ({ instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), { env }));
 instance.exports._start();
-for (let index = 0; index < 8; index += 1) {
+// One initialization poll followed by the eight observable helper steps.
+for (let index = 0; index < 9; index += 1) {
     instance.exports.update();
 }
 

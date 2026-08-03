@@ -134,8 +134,6 @@ fn state_transform_binding(
             let transform = field.transform.as_ref()?;
             if transform.value == value {
                 Some(("value", "Raw candidate for this state field."))
-            } else if transform.old == value {
-                Some(("old", "Last accepted value for this state field."))
             } else {
                 None
             }
@@ -290,7 +288,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
     match definition.id {
         SourceDefinitionId::State => Some(source_markdown(
             "current / old: state snapshot",
-            "Read-only transactional state values. `current` contains the latest committed state and `old` contains the preceding committed state.",
+            "Read-only state snapshots. `current` contains the latest accepted state and `old` contains the preceding snapshot; failed fields retain their accepted values.",
         )),
         SourceDefinitionId::Settings => Some(source_markdown(
             "settings / oldSettings: settings view",
@@ -1366,21 +1364,19 @@ whileAttached {
     #[test]
     fn state_filter_bindings_have_hover_documentation() {
         let source = r#"state "game.exe" {
-    scene: i32 at 0x100 if value == 7 { old } else { value };
-}"#;
+    scene: i32 at 0x100 if value == 7 { Err("transient") } else { value };
+        }"#;
         let mut database = CompilerDatabase::new(source);
-        for (needle, expected) in [("value ==", "value: i32"), ("old", "old: i32")] {
-            let offset = source.find(needle).unwrap();
-            let hover = database
-                .hover(offset)
-                .unwrap()
-                .unwrap_or_else(|| panic!("state filter hover for {needle}"));
-            assert!(
-                hover.markdown.contains(expected),
-                "missing `{expected}` in {}",
-                hover.markdown
-            );
-        }
+        let offset = source.find("value ==").unwrap();
+        let hover = database
+            .hover(offset)
+            .unwrap()
+            .expect("state filter hover for value");
+        assert!(
+            hover.markdown.contains("value: i32"),
+            "missing value type in {}",
+            hover.markdown
+        );
     }
 
     #[test]

@@ -30,8 +30,9 @@ state "game.exe" {
 
 The number is a maximum byte count, not part of the field's type. The result is
 an ordinary immutable `String`. SplitScript resolves every pointer offset first,
-performs one bounded final read, stops at the first NUL byte, and rejects invalid
-UTF-8 transactionally. It deliberately does not expose `string50` as a type.
+performs one bounded final read, stops at the first NUL byte, and rejects that
+field's candidate when UTF-8 is invalid. It deliberately does not expose
+`string50` as a type.
 
 When the parser encounters a type-first field such as
 `string50 map : 0x100`, it explains this distinction and offers a
@@ -112,10 +113,12 @@ onAttach {
 }
 ```
 
-Expression-backed fields remain one atomic snapshot. Leave required reads as
-`T!`; if any of them fails, `current` and `old` do not rotate and no lifecycle
-action observes a partial update. For a field that is semantically absent on
-some ticks, declare `T?` and convert just that read:
+Expression-backed fields are persistent watcher values. The initial snapshot
+waits for every required field to succeed together. Afterwards, a failed `T!`
+retains that field's last accepted value while successful siblings advance. If
+several values must advance atomically, read them as one record- or array-valued
+state field. For a field that is semantically absent on some ticks, declare
+`T?` and convert just that read:
 
 ```splitscript
 state "game.exe" {
@@ -124,9 +127,9 @@ state "game.exe" {
 }
 ```
 
-`toOption()` discards the read error, maps it to `None`, and lets the rest of a
-valid transaction commit. Do not use it for a field whose failure invalidates
-the snapshot.
+`toOption()` discards the read error and maps it to a successfully accepted
+`None`. This differs from leaving the result failed, which retains the last
+accepted field value after initialization.
 
 Pointer width is a property of traversal. Static `at` fields use the attached
 process's native width. When a 64-bit host reads a PE32 or other 32-bit target,
@@ -139,17 +142,16 @@ discovery and PE32 forms.
 ## Retaining the last accepted field value
 
 Some ASL `update` blocks overwrite one newly read watcher with its old value to
-filter a transient sentinel. Do not make `current` mutable and do not convert
-the sentinel into a failed state read: a failed read rejects every field in the
-transaction, while the original script may still accept unrelated values from
-that tick.
+filter a transient sentinel. Do not make `current` mutable. Reject that field's
+candidate instead; its accepted value stays unchanged while unrelated fields
+can advance.
 
 Use an ordinary trailing `if` on that pointer-path field instead:
 
 ```splitscript
 state "game.exe" {
     scene: i32 at "engine.dll", 0x1000 if value == 7 || value == 8 {
-        old
+        Err("transient loading scene")
     } else {
         value
     };
@@ -157,12 +159,11 @@ state "game.exe" {
 }
 ```
 
-`value` is the successfully read candidate and `old` is the last value
-accepted for that field. Both are read-only and have the field's inferred
-type. On the first successful poll after each attachment, both names contain
-the candidate, so no stale value leaks across processes. Each field is
-filtered independently and then the complete resulting snapshot commits
-atomically.
+`value` is the successfully read candidate and has the field's inferred type.
+A plain value accepts the candidate; `Err(message)` rejects it. Before the
+first snapshot, rejection leaves state uninitialized, so no fabricated old
+value or stale value from another process is observable. Afterwards, the field
+retains its accepted value and successful sibling fields continue to advance.
 
 The maintained
 [`examples/aawcb.split`](../examples/aawcb.split) port uses this to retain its

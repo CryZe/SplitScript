@@ -1,4 +1,4 @@
-/// Emits one transactional state-field polling body. Pointer-backed fields
+/// Emits one fallible state-field polling body. Pointer-backed fields
 /// perform host reads and expression-backed fields execute their Wasm-IR plan.
 pub(super) fn compile_read(
     field: &StateField,
@@ -227,8 +227,8 @@ pub(super) fn compile_read(
     function
 }
 
-/// Emits a per-field candidate transform. Its two parameters are the
-/// newly read value and the last accepted value, in that order.
+/// Emits a fallible per-field candidate transform. Its parameter is the newly
+/// read value and its result determines whether the field accepts that value.
 pub(super) fn compile_state_transform(
     field: &StateField,
     lowering: &EmissionContext<'_>,
@@ -251,7 +251,7 @@ pub(super) fn compile_state_transform(
         &mut matches,
         &mut local_types,
         LocalPlanOptions {
-            parameter_count: 2,
+            parameter_count: 1,
             semantics: lowering.semantics,
             instance: None,
             include_values: true,
@@ -264,7 +264,6 @@ pub(super) fn compile_state_transform(
     );
     let mut locals = planned_locals;
     locals.insert(transform.value, (0, field_type));
-    locals.insert(transform.old, (1, field_type));
     let context = ExprContext {
         standard_library: lowering.standard_library,
         abi: lowering.abi,

@@ -8,6 +8,8 @@ struct AsyncTestHost {
     messages: Vec<String>,
     raw_scene: i32,
     raw_entities: i32,
+    fail_scene_read: bool,
+    fail_entities_read: bool,
 }
 
 fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasmtime::Instance) {
@@ -52,6 +54,11 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
                         "process_get_module_size" => results[0] = Val::I64(0x200),
                         "process_read" => {
                             let address = parameters[1].unwrap_i64();
+                            if address == 0x7fff_0000 && caller.data().fail_scene_read
+                                || address == 0x7fff_0004 && caller.data().fail_entities_read
+                            {
+                                return Ok(());
+                            }
                             let pointer = parameters[2].unwrap_i32() as usize;
                             let length = parameters[3].unwrap_i32() as usize;
                             let value = match address {
@@ -98,6 +105,8 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
             messages: Vec::new(),
             raw_scene: 1,
             raw_entities: 7,
+            fail_scene_read: false,
+            fail_entities_read: false,
         },
     );
     let instance = linker
@@ -987,6 +996,8 @@ fn inferred_none_arguments_are_abi_erased_but_still_evaluated() {
         .unwrap();
 
     update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
+    update.call(&mut store, ()).unwrap();
     assert_eq!(store.data().messages, ["produced", "consumed"]);
 }
 
@@ -1581,7 +1592,7 @@ fn state_field_filters_retain_one_field_without_rejecting_the_snapshot() {
     splitscript::compile(
         r#"
             state "game.exe" {
-                scene = 1 if value == 1 { old } else { value };
+                scene = 1 if value == 1 { Err("transient") } else { value };
             }
         "#,
     )
@@ -1590,7 +1601,7 @@ fn state_field_filters_retain_one_field_without_rejecting_the_snapshot() {
     let source = r#"
         state "game.exe" {
             scene: i32 at 0x7fff0000 if value == 7 || value == 8 {
-                old
+                Err("transient loading scene")
             } else {
                 value
             };
@@ -1607,6 +1618,7 @@ fn state_field_filters_retain_one_field_without_rejecting_the_snapshot() {
         .unwrap();
 
     update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
     store.data_mut().raw_scene = 7;
     store.data_mut().raw_entities = 6;
     update.call(&mut store, ()).unwrap();
@@ -1614,7 +1626,19 @@ fn state_field_filters_retain_one_field_without_rejecting_the_snapshot() {
     store.data_mut().raw_entities = 5;
     update.call(&mut store, ()).unwrap();
 
-    assert_eq!(store.data().messages, ["1:7", "1:6", "5:5"]);
+    assert_eq!(store.data().messages, ["1:6", "5:5"]);
+
+    store.data_mut().raw_scene = 6;
+    store.data_mut().raw_entities = 4;
+    store.data_mut().fail_scene_read = true;
+    update.call(&mut store, ()).unwrap();
+    store.data_mut().fail_scene_read = false;
+    store.data_mut().raw_entities = 3;
+    store.data_mut().fail_entities_read = true;
+    update.call(&mut store, ()).unwrap();
+    store.data_mut().fail_entities_read = false;
+
+    assert_eq!(store.data().messages, ["1:6", "5:5", "5:4", "6:4"]);
 
     store.data_mut().process_open = false;
     update.call(&mut store, ()).unwrap();
@@ -1622,8 +1646,53 @@ fn state_field_filters_retain_one_field_without_rejecting_the_snapshot() {
     store.data_mut().raw_scene = 7;
     store.data_mut().raw_entities = 4;
     update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["1:6", "5:5", "5:4", "6:4"]);
 
-    assert_eq!(store.data().messages, ["1:7", "1:6", "5:5", "7:4"]);
+    store.data_mut().raw_scene = 9;
+    store.data_mut().raw_entities = 3;
+    update.call(&mut store, ()).unwrap();
+    store.data_mut().raw_scene = 10;
+    store.data_mut().raw_entities = 2;
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(store.data().messages, ["1:6", "5:5", "5:4", "6:4", "10:2"]);
+}
+
+#[test]
+fn state_initialization_requires_one_complete_poll_and_seeds_equal_snapshots() {
+    let source = r#"
+        state "game.exe" {
+            scene: i32 at 0x7fff0000;
+            entities: i32 at 0x7fff0004;
+        }
+
+        whileAttached {
+            print(`{old.scene}:{old.entities}->{current.scene}:{current.entities}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    store.data_mut().fail_scene_read = true;
+    update.call(&mut store, ()).unwrap();
+    store.data_mut().fail_scene_read = false;
+    store.data_mut().fail_entities_read = true;
+    store.data_mut().raw_scene = 2;
+    update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
+
+    store.data_mut().fail_entities_read = false;
+    store.data_mut().raw_scene = 3;
+    store.data_mut().raw_entities = 4;
+    update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
+
+    store.data_mut().raw_scene = 5;
+    store.data_mut().raw_entities = 6;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["3:4->5:6"]);
 }
 
 #[test]

@@ -176,7 +176,9 @@ if (mode === "unknown") {
             address !== expectedReads[index][0] || size !== expectedReads[index][1])) {
         throw new Error(`layout selected the wrong reads: ${stateReads.map(([address, size]) => `${address.toString(16)}:${size}`)}`);
     }
-    if (pauses !== 1 || resumes !== 1 || detaches !== 0 || messages.length !== 0) {
+    // The first complete poll initializes old and current without running
+    // lifecycle actions. Only the subsequent loading transition is emitted.
+    if (pauses !== 0 || resumes !== 1 || detaches !== 0 || messages.length !== 0) {
         throw new Error(`load removal behaved incorrectly: ${JSON.stringify({ pauses, resumes, detaches, messages })}`);
     }
 }

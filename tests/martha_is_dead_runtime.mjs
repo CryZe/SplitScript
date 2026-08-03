@@ -93,9 +93,14 @@ if (unknown) {
         throw new Error(`unsupported build was not inert: ${JSON.stringify({ reads, pauses, resumes, detaches, messages })}`);
     }
 } else {
+    // The first complete state read initializes old and current without
+    // running lifecycle actions. The next poll observes the initialized state.
+    instance.exports.update();
     loader = 0;
     instance.exports.update();
     const expectedReads = [
+        moduleBase + selected.pointerOffset,
+        loaderPointer + selected.finalOffset,
         moduleBase + selected.pointerOffset,
         loaderPointer + selected.finalOffset,
         moduleBase + selected.pointerOffset,

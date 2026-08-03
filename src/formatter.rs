@@ -1412,10 +1412,10 @@ fn select(matrix: [[i32]], row: u32, column: u32) -> i32 {
 
     #[test]
     fn formats_state_field_filters_as_part_of_the_field() {
-        let source = r#"state "game.exe"{scene:i32 at 0x1000 if value==7||value==8{old}else{value};entities:i32 at 0x2000}"#;
+        let source = r#"state "game.exe"{scene:i32 at 0x1000 if value==7||value==8{Err("transient")}else{value};entities:i32 at 0x2000}"#;
         let expected = r#"state "game.exe" {
     scene: i32 at 0x1000 if value == 7 || value == 8 {
-        old
+        Err("transient")
     } else {
         value
     };

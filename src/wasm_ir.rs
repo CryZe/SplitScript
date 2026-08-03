@@ -486,7 +486,6 @@ pub struct StateExpression {
 pub struct StateTransform {
     pub field: ValueId,
     pub value: ValueId,
-    pub old: ValueId,
     pub expression: ExprId,
     pub locals: Vec<Local>,
 }
@@ -576,7 +575,6 @@ impl Program {
             .map(|transform| StateTransform {
                 field: transform.field,
                 value: transform.value,
-                old: transform.old,
                 expression: transform.expression,
                 locals: plan_expression(transform.expression, &program, semantics),
             })

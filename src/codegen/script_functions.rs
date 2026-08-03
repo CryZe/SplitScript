@@ -227,6 +227,82 @@ pub(super) fn compile_read(
     function
 }
 
+/// Emits a per-field candidate normalizer. Its two parameters are the
+/// newly read value and the last accepted value, in that order.
+pub(super) fn compile_state_normalizer(
+    field: &StateField,
+    lowering: &EmissionContext<'_>,
+) -> Function {
+    let normalizer = field
+        .normalizer
+        .as_ref()
+        .expect("only normalized fields have normalizer bodies");
+    let planned = lowering
+        .wasm_ir
+        .state_normalizer(field.id)
+        .expect("checked state normalizers have Wasm IR plans");
+    let field_type = value_type(field.id, lowering.semantics);
+    let mut matches = MatchLayout::default();
+    let mut local_types = Vec::new();
+    let mut planned_locals = HashMap::new();
+    plan_wasm_locals(
+        &planned.locals,
+        &mut planned_locals,
+        &mut matches,
+        &mut local_types,
+        LocalPlanOptions {
+            parameter_count: 2,
+            semantics: lowering.semantics,
+            instance: None,
+            include_values: true,
+        },
+    );
+    let mut function = Function::new(
+        local_types
+            .into_iter()
+            .map(|ty| (1, lowering.gc.val_type(ty))),
+    );
+    let mut locals = planned_locals;
+    locals.insert(normalizer.value, (0, field_type));
+    locals.insert(normalizer.previous, (1, field_type));
+    let context = ExprContext {
+        standard_library: lowering.standard_library,
+        abi: lowering.abi,
+        state: lowering.state,
+        locals: LocalStorage::Wasm {
+            values: &locals,
+            temporaries: &matches.temporaries,
+        },
+        globals: lowering.globals,
+        global_types: lowering.global_types,
+        settings: lowering.settings,
+        runtime_globals: lowering.runtime_globals,
+        runtime_helpers: lowering.runtime_helpers,
+        functions: lowering.functions,
+        intrinsic_futures: lowering.intrinsic_futures,
+        display_functions: lowering.display_functions,
+        equality_functions: lowering.equality_functions,
+        records: lowering.records,
+        enums: lowering.enums,
+        arrays: lowering.arrays,
+        memory: lowering.memory,
+        abi_read: lowering.abi_read,
+        matches: &matches,
+        semantics: lowering.semantics,
+        wasm_ir: lowering.wasm_ir,
+        gc: lowering.gc,
+        async_frames: lowering.async_frames,
+        intrinsic_capture: None,
+        function_instance: None,
+        loop_control: None,
+        bare_return: BareReturn::None,
+        materialize_none: true,
+    };
+    compile_expr(&mut function, planned.expression, &context);
+    function.instruction(&Instruction::End);
+    function
+}
+
 fn compile_gba_direct_read(
     address: u32,
     field_type_id: crate::types::TypeId,

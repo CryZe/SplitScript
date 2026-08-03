@@ -410,9 +410,12 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "MemoryWatcher",
         sources: ASL,
         support: MigrationSupport::TypedPattern,
-        summary: "Declare polled memory in `state`; `old` and `current` expose transactional snapshots.",
-        targets: &[MigrationTarget::Language("state")],
-        cookbook_anchor: None,
+        summary: "Declare polled memory in `state`; use per-field `normalize` when a transient candidate should retain its last accepted value.",
+        targets: &[
+            MigrationTarget::Language("state"),
+            MigrationTarget::Language("normalize"),
+        ],
+        cookbook_anchor: Some("retaining-the-last-accepted-field-value"),
         spellings: &[],
     },
     MigrationConcept {

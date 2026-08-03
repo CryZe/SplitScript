@@ -6,8 +6,8 @@ use super::{
     Action, ActionKind, Diagnostic, EnumDecl, EnumId, EnumReference, EnumVariant, FunctionDecl,
     FunctionId, Parameter, Parser, PointerPath, RecordDecl, RecordField, RecordId,
     SettingChoiceOption, SettingDecl, SettingExternalKey, SettingFileFilter, SettingKind, Span,
-    StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource,
-    TokenKind, TypeRef,
+    StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateNormalizer, StateProviderRef,
+    StateSource, TokenKind, TypeRef,
 };
 use crate::{
     diagnostic::{DiagnosticFix, FixApplicability, TextEdit},
@@ -494,6 +494,20 @@ impl Parser<'_> {
                 decoder,
             })
         };
+        let normalizer = self.eat_ident("normalize").map(|start| {
+            let value = self.new_value_id();
+            let previous = self.new_value_id();
+            let expression = self.root_expression();
+            StateNormalizer {
+                value,
+                previous,
+                span: Span {
+                    start: start.start,
+                    end: expression.span.end,
+                },
+                expression,
+            }
+        });
         let end = self.previous().span.end;
         Ok(StateField {
             id: self.new_value_id(),
@@ -501,6 +515,7 @@ impl Parser<'_> {
             documentation,
             annotation,
             source,
+            normalizer,
             span: Span {
                 start: field_start.start,
                 end,
@@ -983,6 +998,7 @@ impl Parser<'_> {
                         offsets,
                         decoder: None,
                     }),
+                    normalizer: None,
                     span: Span {
                         start: field_start.start,
                         end,

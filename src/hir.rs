@@ -383,6 +383,14 @@ pub struct GlobalInitializer {
     pub debug_only: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct StateNormalizer {
+    pub field: ValueId,
+    pub value: ValueId,
+    pub previous: ValueId,
+    pub expression: ExprId,
+}
+
 #[derive(Debug, Clone)]
 pub struct TypedProgram {
     standard_library: StandardLibrary,
@@ -394,6 +402,7 @@ pub struct TypedProgram {
     action_bodies: Vec<ActionBody>,
     global_initializers: Vec<GlobalInitializer>,
     state_sources: Vec<(ValueId, ExprId)>,
+    state_normalizers: Vec<StateNormalizer>,
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
     visible_expression_count: usize,
@@ -484,6 +493,19 @@ impl TypedProgram {
                 crate::ast::StateSource::Pointer(_) => None,
             })
             .collect();
+        let state_normalizers = syntax
+            .state
+            .iter()
+            .flat_map(|state| state.all_fields())
+            .filter_map(|field| {
+                field.normalizer.as_ref().map(|normalizer| StateNormalizer {
+                    field: field.id,
+                    value: normalizer.value,
+                    previous: normalizer.previous,
+                    expression: normalizer.expression.id,
+                })
+            })
+            .collect();
 
         let mut setting_choice_defaults = HashMap::new();
         let mut setting_choice_options = HashMap::new();
@@ -531,6 +553,7 @@ impl TypedProgram {
             action_bodies,
             global_initializers,
             state_sources,
+            state_normalizers,
             setting_choice_defaults,
             setting_choice_options,
             visible_expression_count,
@@ -666,6 +689,10 @@ impl TypedProgram {
 
     pub fn state_sources(&self) -> impl Iterator<Item = (ValueId, ExprId)> + '_ {
         self.state_sources.iter().copied()
+    }
+
+    pub fn state_normalizers(&self) -> impl Iterator<Item = StateNormalizer> + '_ {
+        self.state_normalizers.iter().copied()
     }
 
     pub fn setting_choice_default(&self, setting: ValueId) -> Option<EnumVariantId> {
@@ -814,6 +841,14 @@ pub fn walk_typed_program<V: TypedVisitor>(visitor: &mut V, program: &TypedProgr
             program
                 .expression(expression)
                 .expect("state source belongs to typed HIR"),
+            program,
+        );
+    }
+    for normalizer in program.state_normalizers() {
+        visitor.visit_expression(
+            program
+                .expression(normalizer.expression)
+                .expect("state normalizer belongs to typed HIR"),
             program,
         );
     }

@@ -494,11 +494,14 @@ impl HighlightCollector<'_> {
                     self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
                 }
                 ResolvedValue::Variable(id) => {
-                    let readonly = self
-                        .syntax
-                        .state
-                        .as_ref()
-                        .is_some_and(|state| state.layout_value == Some(id));
+                    let readonly = self.syntax.state.as_ref().is_some_and(|state| {
+                        state.layout_value == Some(id)
+                            || state.all_fields().any(|field| {
+                                field.normalizer.as_ref().is_some_and(|normalizer| {
+                                    normalizer.value == id || normalizer.previous == id
+                                })
+                            })
+                    });
                     self.insert(
                         spans[0],
                         self.value_kind(id),
@@ -942,6 +945,7 @@ fn is_keyword(name: &str) -> bool {
             | "match"
             | "as"
             | "at"
+            | "normalize"
             | "key"
             | "default"
             | "choice"
@@ -1299,6 +1303,36 @@ whileAttached {
             "value",
             SemanticTokenKind::Variable,
             MODIFIER_DECLARATION | MODIFIER_READONLY
+        ));
+    }
+
+    #[test]
+    fn highlights_state_normalizer_context() {
+        let source = r#"state "game.exe" {
+    scene: i32 at 0x100 normalize if value == 7 { previous } else { value };
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let index = database.semantic_highlights().unwrap();
+        assert!(contains(
+            source,
+            &index,
+            "normalize",
+            SemanticTokenKind::Keyword,
+            0
+        ));
+        assert!(contains(
+            source,
+            &index,
+            "value",
+            SemanticTokenKind::Variable,
+            MODIFIER_READONLY
+        ));
+        assert!(contains(
+            source,
+            &index,
+            "previous",
+            SemanticTokenKind::Variable,
+            MODIFIER_READONLY
         ));
     }
 

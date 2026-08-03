@@ -99,6 +99,13 @@ fn expression_owners(wasm: &wasm_ir::Program) -> HashMap<ExprId, Option<crate::a
         }
         .visit_expression_id(expression.expression, wasm);
     }
+    for normalizer in wasm.state_normalizers() {
+        Collector {
+            owner: None,
+            owners: &mut owners,
+        }
+        .visit_expression_id(normalizer.expression, wasm);
+    }
     for (_, expression) in wasm.global_initializers() {
         Collector {
             owner: None,

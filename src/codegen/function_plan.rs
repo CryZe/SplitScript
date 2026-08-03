@@ -27,6 +27,7 @@ pub(super) struct FunctionPlan<'a> {
     pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
     pub displays: HashMap<StdlibTypeId, FunctionInstance>,
     pub reads: Vec<u32>,
+    pub normalizers: Vec<Option<u32>>,
     pub actions: HashMap<ActionKind, u32>,
     pub start: u32,
     pub update: u32,
@@ -225,6 +226,7 @@ pub(super) fn encode<'a>(
             .as_ref()
             .map_or(0, |state| state.all_fields().count()),
     );
+    let mut normalizers = Vec::with_capacity(reads.capacity());
     if let Some(state) = &program.state {
         for field in state.all_fields() {
             let poll_result = semantic_type(
@@ -234,6 +236,16 @@ pub(super) fn encode<'a>(
                 semantics,
             );
             reads.push(declare(vec![ValType::I64], vec![gc.val_type(poll_result)]));
+            normalizers.push(field.normalizer.as_ref().map(|_| {
+                let ty = semantic_type(
+                    semantics
+                        .value_type(field.id)
+                        .expect("checked state fields have types"),
+                    semantics,
+                );
+                let value = gc.val_type(ty);
+                declare(vec![value, value], vec![value])
+            }));
         }
     }
 
@@ -274,6 +286,7 @@ pub(super) fn encode<'a>(
             .map(|(ty, function)| (ty, function.clone()))
             .collect(),
         reads,
+        normalizers,
         actions,
         start,
         update,

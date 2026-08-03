@@ -27,10 +27,15 @@ pub(super) struct UpdateContext<'a> {
     pub provider_attach: Option<u32>,
 }
 
+pub(super) struct StatePollFunctions<'a> {
+    pub reads: &'a [u32],
+    pub normalizers: &'a [Option<u32>],
+}
+
 pub(super) fn compile_update(
     program: &Program,
     strings: &StringPool,
-    read_functions: &[u32],
+    state_functions: StatePollFunctions<'_>,
     actions: &HashMap<ActionKind, u32>,
     refresh_settings: Option<u32>,
     cancellation_region: Option<wasm_ir::CancellationRegion>,
@@ -131,7 +136,9 @@ pub(super) fn compile_update(
         .instruction(&Instruction::I64Const(0))
         .instruction(&Instruction::GlobalSet(globals.process))
         .instruction(&Instruction::I32Const(-1))
-        .instruction(&Instruction::GlobalSet(globals.process_name));
+        .instruction(&Instruction::GlobalSet(globals.process_name))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::GlobalSet(globals.state_ready));
     if let Some(provider_global) = globals.provider_value {
         let provider_type = semantics
             .state_provider()
@@ -219,7 +226,8 @@ pub(super) fn compile_update(
             emit_state_field_poll(
                 &mut function,
                 field.id,
-                read_functions[read_index],
+                state_functions.reads[read_index],
+                state_functions.normalizers[read_index],
                 first_poll_result + read_index as u32,
                 candidate_state,
                 lowering,
@@ -252,7 +260,8 @@ pub(super) fn compile_update(
                 emit_state_field_poll(
                     &mut function,
                     field.id,
-                    read_functions[read_index],
+                    state_functions.reads[read_index],
+                    state_functions.normalizers[read_index],
                     first_poll_result + read_index as u32,
                     candidate_state,
                     lowering,
@@ -265,7 +274,9 @@ pub(super) fn compile_update(
         .instruction(&Instruction::GlobalGet(globals.current))
         .instruction(&Instruction::GlobalSet(globals.old))
         .instruction(&Instruction::LocalGet(candidate_state))
-        .instruction(&Instruction::GlobalSet(globals.current));
+        .instruction(&Instruction::GlobalSet(globals.current))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::GlobalSet(globals.state_ready));
 
     if let Some(update) = actions.get(&ActionKind::WhileAttached) {
         emit_action_args(&mut function, globals);
@@ -378,6 +389,7 @@ fn emit_state_field_poll(
     function: &mut Function,
     field: crate::ast::ValueId,
     read_function: u32,
+    normalizer_function: Option<u32>,
     poll_result_local: u32,
     candidate_state: u32,
     lowering: &UpdateContext<'_>,
@@ -405,20 +417,61 @@ fn emit_state_field_poll(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(candidate_state))
-        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::RefAsNonNull);
+    let (field_index, _) = state_storage_index(field, semantics);
+    let field_type = value_type(field, semantics);
+    emit_poll_value(
+        function,
+        poll_result_local,
+        result_type,
+        field_type,
+        lowering,
+    );
+    if let Some(normalizer) = normalizer_function {
+        function
+            .instruction(&Instruction::GlobalGet(
+                lowering.runtime_globals.state_ready,
+            ))
+            .instruction(&Instruction::If(BlockType::Result(
+                lowering.gc.val_type(field_type),
+            )))
+            .instruction(&Instruction::GlobalGet(lowering.runtime_globals.current))
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(function, STATE_TYPE, field_index, field_type);
+        function.instruction(&Instruction::Else);
+        emit_poll_value(
+            function,
+            poll_result_local,
+            result_type,
+            field_type,
+            lowering,
+        );
+        function
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::Call(normalizer));
+    }
+    function.instruction(&Instruction::StructSet {
+        struct_type_index: STATE_TYPE,
+        field_index,
+    });
+}
+
+fn emit_poll_value(
+    function: &mut Function,
+    poll_result_local: u32,
+    result_type: crate::ast::ResultTypeId,
+    field_type: Type,
+    lowering: &UpdateContext<'_>,
+) {
+    function
         .instruction(&Instruction::LocalGet(poll_result_local))
         .instruction(&Instruction::RefAsNonNull);
     emit_typed_struct_get(
         function,
         lowering.gc.index(Type::Result(result_type)),
         0,
-        value_type(field, semantics),
+        field_type,
     );
-    let (field_index, _) = state_storage_index(field, semantics);
-    function.instruction(&Instruction::StructSet {
-        struct_type_index: STATE_TYPE,
-        field_index,
-    });
 }
 
 fn emit_provider_default(function: &mut Function, ty: StdlibTypeId, context: &UpdateContext<'_>) {
@@ -476,6 +529,8 @@ fn emit_cancel_region(
             function
                 .instruction(&Instruction::I32Const(0))
                 .instruction(&Instruction::GlobalSet(globals.attach_ready))
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::GlobalSet(globals.state_ready))
                 .instruction(&Instruction::StructNewDefault(gc.async_frame_index()))
                 .instruction(&Instruction::GlobalSet(globals.async_frame));
         }

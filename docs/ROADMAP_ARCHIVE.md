@@ -1,5 +1,25 @@
 # SplitScript roadmap
 
+## 2026-08-03: immutable per-field state normalization
+
+- Audited AAWCB, Aragami, and the wider ASL corpus and separated three
+  previously conflated behaviors. Aragami is ordinary persistent derived state
+  already modeled by `whileAttached`; AAWCB requires retaining one field's
+  last accepted value while other fields advance; boolean ASL `update` results
+  are a later lifecycle-evaluation gate and do not roll state back.
+- Added the postfix `normalize expression` state-field clause. Its read-only
+  `value` and `previous` bindings have the field's inferred type; the first
+  successful poll passes the raw candidate as both, and later polls use the
+  last committed field value. `current` and `old` remain immutable and the
+  complete normalized snapshot still commits atomically.
+- Added the faithful And All Would Cry Beware port. Its transient scenes 7 and
+  8 are filtered without discarding entity-count changes from the same tick,
+  eliminating the original mutation of `current.Scene`.
+- Added runtime coverage for independent field advancement, snapshot rotation,
+  and detach/re-attach initialization, plus formatter, catalog documentation,
+  semantic highlighting, typed hover, and completion coverage for the new DSL
+  context.
+
 ## 2026-08-03: attach-time-discovered and optional state sources
 
 - Added the source-defined generic `Result<T>.toOption()` operation. It maps a

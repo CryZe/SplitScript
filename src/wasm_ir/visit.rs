@@ -46,6 +46,9 @@ pub fn walk_program(visitor: &mut (impl Visitor + ?Sized), program: &Program) {
     for state in program.state_expressions() {
         visitor.visit_expression_id(state.expression, program);
     }
+    for normalizer in program.state_normalizers() {
+        visitor.visit_expression_id(normalizer.expression, program);
+    }
 }
 
 pub fn walk_block(visitor: &mut (impl Visitor + ?Sized), block: &Block, program: &Program) {

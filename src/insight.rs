@@ -59,7 +59,24 @@ pub(crate) fn hover(
     let Some(token) = database.token_at(offset)? else {
         return Ok(None);
     };
-    let Some(target) = database.definition_at(offset)? else {
+    let target = database.definition_at(offset)?;
+    if target.is_none()
+        && let Some(analysis) = database.analysis_at(offset)?
+        && let Some(ExpressionResolution::ValuePath {
+            root: Some(crate::semantic::ResolvedValue::Variable(value)),
+            members,
+        }) = analysis.resolution
+        && members.is_empty()
+        && let Some(context) = semantic_context(database)
+        && let Some((name, description)) = state_normalizer_binding(value, &context)
+    {
+        let ty = render_type(analysis.ty, &context);
+        return Ok(Some(HoverInfo {
+            span: token.span,
+            markdown: source_markdown(&format!("{name}: {ty}"), description),
+        }));
+    }
+    let Some(target) = target else {
         return Ok(None);
     };
     let markdown = match target {
@@ -102,6 +119,27 @@ pub(crate) fn hover(
         span: token.span,
         markdown,
     }))
+}
+
+fn state_normalizer_binding(
+    value: crate::ast::ValueId,
+    context: &SemanticContext,
+) -> Option<(&'static str, &'static str)> {
+    context
+        .syntax()
+        .state
+        .as_ref()?
+        .all_fields()
+        .find_map(|field| {
+            let normalizer = field.normalizer.as_ref()?;
+            if normalizer.value == value {
+                Some(("value", "Raw candidate for this state field."))
+            } else if normalizer.previous == value {
+                Some(("previous", "Last accepted value for this state field."))
+            } else {
+                None
+            }
+        })
 }
 
 pub(crate) fn signature_help(
@@ -1317,6 +1355,33 @@ whileAttached {
             ),
         ] {
             let hover = database.hover(offset).unwrap().expect("snapshot hover");
+            assert!(
+                hover.markdown.contains(expected),
+                "missing `{expected}` in {}",
+                hover.markdown
+            );
+        }
+    }
+
+    #[test]
+    fn state_normalizer_bindings_and_keyword_have_hover_documentation() {
+        let source = r#"state "game.exe" {
+    scene: i32 at 0x100 normalize if value == 7 { previous } else { value };
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        for (needle, expected) in [
+            (
+                "normalize",
+                "Normalizes one successfully read state-field candidate",
+            ),
+            ("value ==", "value: i32"),
+            ("previous", "previous: i32"),
+        ] {
+            let offset = source.find(needle).unwrap();
+            let hover = database
+                .hover(offset)
+                .unwrap()
+                .unwrap_or_else(|| panic!("normalizer hover for {needle}"));
             assert!(
                 hover.markdown.contains(expected),
                 "missing `{expected}` in {}",

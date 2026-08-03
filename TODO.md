@@ -27,19 +27,18 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — normalize watched state without mutating snapshots
+## Now — gate lifecycle evaluation without rolling back state
 
-- [ ] Audit the original AAWCB and Aragami watcher workarounds, plus the manual
-  porting notes, to separate retain-last-valid, edge filtering, debounce, and
-  snapshot-commit gating into concrete behaviors rather than one vague
-  mutable-watcher feature.
-- [ ] Implement the smallest immutable normalization abstraction proven by the
-  selected maintained port. Keep `old` and `current` read-only, preserve atomic
-  snapshot rotation, and add compiler, runtime, documentation, and editor
-  coverage together.
-- [ ] Decide the typed equivalent of a boolean-returning ASL `update` block
-  from that evidence. If it gates snapshot commit or lifecycle evaluation,
-  expose the boundary explicitly rather than changing `whileAttached`.
+- [ ] Add an explicit `shouldEvaluate` lifecycle block returning `bool` and
+  defaulting to `true`. It runs after snapshot commit and `whileAttached`; a
+  false result skips `isLoading`, `gameTime`, `reset`, `split`, and `start` for
+  that tick without rolling back state or suppressing ordinary per-tick work.
+- [ ] Port a representative ASL script whose boolean `update` block returns
+  false, and verify host-executed ordering for snapshot rotation,
+  `whileAttached`, the evaluation gate, and timer decisions.
+- [ ] Document the distinction between state-read failure, per-field
+  `normalize`, and `shouldEvaluate`, with focused migration diagnostics for an
+  ASL `update { return false; }` pattern.
 
 ## P0 — unblock the next representative native ports
 

@@ -1547,6 +1547,56 @@ fn expression_backed_state_fields_use_discovered_addresses_and_rotate_snapshots(
 }
 
 #[test]
+fn state_normalizers_retain_one_field_without_rejecting_the_snapshot() {
+    let source = r#"
+        let rawScene: i32 = 1
+        let rawEntities: i32 = 7
+        let phase = 0
+
+        state "game.exe" {
+            scene: i32 = rawScene normalize if value == 7 || value == 8 {
+                previous
+            } else {
+                value
+            };
+            entities: i32 = rawEntities;
+        }
+
+        whileAttached {
+            print(`{current.scene}:{current.entities}`)
+            if phase == 0 {
+                rawScene = 7
+                rawEntities = 6
+            } else if phase == 1 {
+                rawScene = 5
+                rawEntities = 5
+            } else if phase == 2 {
+                rawScene = 7
+                rawEntities = 4
+            }
+            phase += 1
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(store.data().messages, ["1:7", "1:6", "5:5"]);
+
+    store.data_mut().process_open = false;
+    update.call(&mut store, ()).unwrap();
+    store.data_mut().process_open = true;
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(store.data().messages, ["1:7", "1:6", "5:5", "7:4"]);
+}
+
+#[test]
 fn unity_il2cpp_attachment_is_typed_and_suspension_safe() {
     let source = r#"
         state "game.exe" {}

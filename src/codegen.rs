@@ -59,9 +59,9 @@ use self::module_start::compile_start;
 use self::runtime_helper_registry::RuntimeHelperPlan;
 use self::script_functions::{
     LocalPlanOptions, compile_action, compile_async_function_init, compile_read,
-    compile_user_function, plan_wasm_locals,
+    compile_state_normalizer, compile_user_function, plan_wasm_locals,
 };
-use self::update::compile_update;
+use self::update::{StatePollFunctions, compile_update};
 use crate::intrinsic_registry::RuntimeHelperId;
 
 const STATE_TYPE: u32 = 0;
@@ -269,6 +269,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         intrinsic_futures,
         displays: display_functions,
         reads: read_functions,
+        normalizers: normalizer_functions,
         actions: action_functions,
         start: start_function,
         update: update_function,
@@ -405,6 +406,9 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     }
     for field in state.all_fields() {
         codes.function(&compile_read(field, &abi, strings, &lowering));
+        if field.normalizer.is_some() {
+            codes.function(&compile_state_normalizer(field, &lowering));
+        }
     }
     for action in &program.actions {
         if action.kind == ActionKind::OnAttach {
@@ -429,7 +433,10 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     codes.function(&compile_update(
         program,
         strings,
-        &read_functions,
+        StatePollFunctions {
+            reads: &read_functions,
+            normalizers: &normalizer_functions,
+        },
         &action_functions,
         refresh_settings,
         cancellation_region,

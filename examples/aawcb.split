@@ -1,0 +1,65 @@
+// Faithful port of the And All Would Cry Beware autosplitter. The original
+// script filters transient loading scenes while still accepting entity-count
+// changes from the same poll.
+
+settings {
+    "Split when entering an area" {
+        /// Splits when entering the Wayfarer Offices.
+        "Wayfarer Offices" => wayfarerOffices key "5 -> 2": true,
+        /// Splits when entering the Mysterious Alien World.
+        "Mysterious Alien World" => mysteriousAlienWorld key "2 -> 3": true,
+        /// Splits when entering Rebekah's Lab.
+        "Rebekah's Lab" => rebekahsLab key "3 -> 4": false,
+        /// Splits when entering A Fresh Start.
+        "A Fresh Start" => aFreshStart key "4 -> 10": true,
+    },
+    "Split when doing certain events" {
+        /// Splits when picking up the pistol.
+        "Pick up Pistol" => pistol key "7-6": false,
+        /// Splits when picking up the green key.
+        "Pick up Green Key" => greenKey key "6-5": false,
+        /// Splits when destroying the elevator.
+        "Destroy Elevator" => elevator key "5-4": false,
+        /// Splits when defeating the security mech.
+        "Defeat Security Mech" => securityMech key "4-3": false,
+        /// Splits on any boss or the Fire Orb in the Mysterious Alien World.
+        "Mysterious Alien World event" => mawEvent key "MAW": false,
+        /// Splits when defeating transformed Rebekah.
+        "Defeat Transformed Rebekah" => transformedRebekah key "4 -> 11": false,
+    },
+}
+
+state "AndAllWouldCryBeware" {
+    /// Current scene, retaining the last accepted value during loading scenes.
+    scene: i32 at "UnityPlayer.dll", 0x10B88A4, 0x18, 0x0, 0x70 normalize if value == 7 || value == 8 {
+        previous
+    } else {
+        value
+    };
+    /// Number of tracked entities in the active scene.
+    entities: i32 at "UnityPlayer.dll", 0x106F6A0, 0x144, 0x84, 0x210;
+}
+
+start {
+    return old.scene == 1 && current.scene == 5
+}
+
+split {
+    if current.entities == old.entities - 1 {
+        if current.scene == 2 {
+            return settings.enabled(`{old.entities}-{current.entities}`)
+        } else if current.scene == 3 {
+            return settings.enabled("MAW")
+        }
+    }
+
+    if old.scene != current.scene {
+        return settings.enabled(`{old.scene} -> {current.scene}`)
+            || old.scene == 10 && current.scene == 9
+            || old.scene == 11 && current.scene == 9
+    }
+}
+
+reset {
+    return old.scene != 0 && current.scene == 0
+}

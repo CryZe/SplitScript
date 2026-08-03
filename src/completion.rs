@@ -1784,4 +1784,17 @@ whileAttached {
         assert!(labels(&mut database, "        ele").contains(&"element".to_owned()));
         assert!(!labels(&mut database, "    ele\n}").contains(&"element".to_owned()));
     }
+
+    #[test]
+    fn state_normalizer_bindings_complete_with_the_field_type() {
+        let source = r#"state "game.exe" {
+    scene: i32 at 0x100 normalize value.
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let completions = labels(&mut database, "value.");
+        assert!(completions.contains(&"min".to_owned()));
+        assert!(completions.contains(&"max".to_owned()));
+        assert!(completions.contains(&"clamp".to_owned()));
+        assert!(!completions.contains(&"length".to_owned()));
+    }
 }

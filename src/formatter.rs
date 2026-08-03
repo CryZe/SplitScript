@@ -1411,6 +1411,25 @@ fn select(matrix: [[i32]], row: u32, column: u32) -> i32 {
     }
 
     #[test]
+    fn formats_state_field_normalizers_as_part_of_the_field() {
+        let source = r#"state "game.exe"{scene:i32 at 0x1000 normalize if value==7||value==8{previous}else{value};entities:i32 at 0x2000}"#;
+        let expected = r#"state "game.exe" {
+    scene: i32 at 0x1000 normalize if value == 7 || value == 8 {
+        previous
+    } else {
+        value
+    };
+    entities: i32 at 0x2000;
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        crate::compile(&formatted).expect("formatted state normalizers should compile");
+    }
+
+    #[test]
     fn returns_parser_diagnostics_for_invalid_source() {
         let errors = format_source("state \"game.exe\" { let broken = }").unwrap_err();
         assert!(!errors.is_empty());

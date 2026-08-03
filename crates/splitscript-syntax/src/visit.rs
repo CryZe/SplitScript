@@ -141,6 +141,9 @@ pub fn walk_state_field<'ast, V: Visitor<'ast>>(visitor: &mut V, field: &'ast St
     if let StateSource::Expression(expression) = &field.source {
         visitor.visit_expr(expression);
     }
+    if let Some(normalizer) = &field.normalizer {
+        visitor.visit_expr(&normalizer.expression);
+    }
 }
 
 pub fn walk_setting<'ast, V: Visitor<'ast>>(_visitor: &mut V, _setting: &'ast SettingDecl) {}
@@ -473,6 +476,9 @@ pub fn walk_state_field_mut<F: Folder>(folder: &mut F, field: &mut StateField) {
     }
     if let StateSource::Expression(expression) = &mut field.source {
         folder.fold_expr(expression);
+    }
+    if let Some(normalizer) = &mut field.normalizer {
+        folder.fold_expr(&mut normalizer.expression);
     }
 }
 

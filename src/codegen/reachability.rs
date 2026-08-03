@@ -249,6 +249,9 @@ impl Reachability {
         for expression in wasm_ir.state_expressions() {
             type_roots.extend(expression.locals.iter().map(|local| local.ty));
         }
+        for normalizer in wasm_ir.state_normalizers() {
+            type_roots.extend(normalizer.locals.iter().map(|local| local.ty));
+        }
         for instance in &reachable.functions {
             let function = program
                 .functions

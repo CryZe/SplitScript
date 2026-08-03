@@ -136,6 +136,42 @@ the final read. This keeps mixed-width discovery auditable without an `at32`
 pseudo-keyword. See the maintained ABZÛ and Borderlands examples for the full
 discovery and PE32 forms.
 
+## Retaining the last accepted field value
+
+Some ASL `update` blocks overwrite one newly read watcher with its old value to
+filter a transient sentinel. Do not make `current` mutable and do not convert
+the sentinel into a failed state read: a failed read rejects every field in the
+transaction, while the original script may still accept unrelated values from
+that tick.
+
+Use a field normalizer instead:
+
+```splitscript
+state "game.exe" {
+    scene: i32 at "engine.dll", 0x1000 normalize if value == 7 || value == 8 {
+        previous
+    } else {
+        value
+    };
+    entities: i32 at "engine.dll", 0x2000;
+}
+```
+
+`value` is the successfully read candidate and `previous` is the last value
+accepted for that field. Both are read-only and have the field's inferred
+type. On the first successful poll after each attachment, both names contain
+the candidate, so no stale value leaks across processes. Each field is
+normalized independently and then the complete resulting snapshot commits
+atomically.
+
+The maintained
+[`examples/aawcb.split`](../examples/aawcb.split) port uses this to retain its
+scene during loading scenes 7 and 8 while the entity count continues to
+advance. By contrast, an ASL `update` block that returns `false` does not roll
+back state at all; it skips lifecycle decisions after the refresh. That pattern
+will map to the separate `shouldEvaluate` lifecycle gate rather than
+`normalize`.
+
 ## Run-scoped one-shot splits
 
 ASL frequently uses a `List<string>` or dictionary to prevent checkpoint loads

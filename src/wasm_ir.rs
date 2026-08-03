@@ -482,6 +482,15 @@ pub struct StateExpression {
     pub locals: Vec<Local>,
 }
 
+#[derive(Debug, Clone)]
+pub struct StateNormalizer {
+    pub field: ValueId,
+    pub value: ValueId,
+    pub previous: ValueId,
+    pub expression: ExprId,
+    pub locals: Vec<Local>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Program {
     standard_library: StandardLibrary,
@@ -489,6 +498,7 @@ pub struct Program {
     bodies: Vec<Body>,
     global_initializers: Vec<(ValueId, ExprId)>,
     state_expressions: Vec<StateExpression>,
+    state_normalizers: Vec<StateNormalizer>,
     expressions: Vec<Expression>,
     next_generated_expression: u32,
     next_temporary: u32,
@@ -521,6 +531,7 @@ impl Program {
             bodies: Vec::new(),
             global_initializers,
             state_expressions: Vec::new(),
+            state_normalizers: Vec::new(),
             expressions,
             next_generated_expression,
             next_temporary: 0,
@@ -558,6 +569,16 @@ impl Program {
                 field,
                 expression,
                 locals: plan_expression(expression, &program, semantics),
+            })
+            .collect();
+        program.state_normalizers = typed_hir
+            .state_normalizers()
+            .map(|normalizer| StateNormalizer {
+                field: normalizer.field,
+                value: normalizer.value,
+                previous: normalizer.previous,
+                expression: normalizer.expression,
+                locals: plan_expression(normalizer.expression, &program, semantics),
             })
             .collect();
         program
@@ -610,6 +631,16 @@ impl Program {
         self.state_expressions
             .iter()
             .find(|expression| expression.field == field)
+    }
+
+    pub fn state_normalizers(&self) -> impl Iterator<Item = &StateNormalizer> {
+        self.state_normalizers.iter()
+    }
+
+    pub fn state_normalizer(&self, field: ValueId) -> Option<&StateNormalizer> {
+        self.state_normalizers
+            .iter()
+            .find(|normalizer| normalizer.field == field)
     }
 
     pub fn expression(&self, id: ExprId) -> Option<&Expression> {

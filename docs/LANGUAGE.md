@@ -55,9 +55,30 @@ the right-hand side. A pointer-path field has no typed right-hand side, so its
 type must come from a `current`/`old` use or an explicit annotation. The
 compiler reports an ambiguity if neither provides enough information.
 
-Each tick, the compiler-generated runtime copies `current` to `old` before
-refreshing `current`. The fields form a WebAssembly GC struct, so the action code
-uses typed references rather than a linear-memory state layout.
+Each tick, the compiler-generated runtime reads a complete candidate snapshot.
+Only when every required field succeeds does it rotate `current` to `old` and
+commit the candidate as `current`. The fields form a WebAssembly GC struct, so
+the action code uses typed references rather than a linear-memory state layout.
+
+A field can normalize its successful raw candidate before that atomic commit:
+
+```text
+state "game.exe" {
+    scene: i32 at 0x1000 normalize if value == 7 || value == 8 {
+        previous
+    } else {
+        value
+    };
+    entities: i32 at 0x2000;
+}
+```
+
+Inside `normalize`, the read-only `value` and `previous` bindings both have the
+field's inferred type. `value` is the raw candidate; `previous` is the last
+committed value for that field. On the first successful poll after attachment,
+both are the raw candidate. Normalization is per field, so retaining `scene`
+does not discard a new `entities` value from the same otherwise-valid tick.
+`current` and `old` stay read-only.
 
 Games with multiple supported memory layouts can name each layout inside one
 state declaration. Fields present in every layout with a compatible type form

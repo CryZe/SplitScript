@@ -27,18 +27,15 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — gate lifecycle evaluation without rolling back state
+## Now — unblock the next representative native port
 
-- [ ] Add an explicit `shouldEvaluate` lifecycle block returning `bool` and
-  defaulting to `true`. It runs after snapshot commit and `whileAttached`; a
-  false result skips `isLoading`, `gameTime`, `reset`, `split`, and `start` for
-  that tick without rolling back state or suppressing ordinary per-tick work.
-- [ ] Port a representative ASL script whose boolean `update` block returns
-  false, and verify host-executed ordering for snapshot rotation,
-  `whileAttached`, the evaluation gate, and timer decisions.
-- [ ] Document the distinction between state-read failure, per-field
-  `normalize`, and `shouldEvaluate`, with focused migration diagnostics for an
-  ASL `update { return false; }` pattern.
+- [ ] Select the next manually reviewed ASL port whose blocker is shared by
+  multiple scripts, then implement the smallest ordinary language or
+  source-defined standard-library feature that makes the port faithful.
+- [ ] Keep boolean ASL `update { return false; }` behavior as corpus evidence,
+  but do not introduce a dedicated lifecycle keyword or block until a
+  maintained port proves that state-field expressions and `whileAttached`
+  cannot represent the behavior clearly.
 
 ## P0 — unblock the next representative native ports
 

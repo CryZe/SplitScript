@@ -59,7 +59,7 @@ use self::module_start::compile_start;
 use self::runtime_helper_registry::RuntimeHelperPlan;
 use self::script_functions::{
     LocalPlanOptions, compile_action, compile_async_function_init, compile_read,
-    compile_state_normalizer, compile_user_function, plan_wasm_locals,
+    compile_state_transform, compile_user_function, plan_wasm_locals,
 };
 use self::update::{StatePollFunctions, compile_update};
 use crate::intrinsic_registry::RuntimeHelperId;
@@ -269,7 +269,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         intrinsic_futures,
         displays: display_functions,
         reads: read_functions,
-        normalizers: normalizer_functions,
+        transforms: transform_functions,
         actions: action_functions,
         start: start_function,
         update: update_function,
@@ -406,8 +406,8 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     }
     for field in state.all_fields() {
         codes.function(&compile_read(field, &abi, strings, &lowering));
-        if field.normalizer.is_some() {
-            codes.function(&compile_state_normalizer(field, &lowering));
+        if field.transform.is_some() {
+            codes.function(&compile_state_transform(field, &lowering));
         }
     }
     for action in &program.actions {
@@ -435,7 +435,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         strings,
         StatePollFunctions {
             reads: &read_functions,
-            normalizers: &normalizer_functions,
+            transforms: &transform_functions,
         },
         &action_functions,
         refresh_settings,

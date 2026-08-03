@@ -68,7 +68,7 @@ pub(crate) fn hover(
         }) = analysis.resolution
         && members.is_empty()
         && let Some(context) = semantic_context(database)
-        && let Some((name, description)) = state_normalizer_binding(value, &context)
+        && let Some((name, description)) = state_transform_binding(value, &context)
     {
         let ty = render_type(analysis.ty, &context);
         return Ok(Some(HoverInfo {
@@ -121,7 +121,7 @@ pub(crate) fn hover(
     }))
 }
 
-fn state_normalizer_binding(
+fn state_transform_binding(
     value: crate::ast::ValueId,
     context: &SemanticContext,
 ) -> Option<(&'static str, &'static str)> {
@@ -131,11 +131,11 @@ fn state_normalizer_binding(
         .as_ref()?
         .all_fields()
         .find_map(|field| {
-            let normalizer = field.normalizer.as_ref()?;
-            if normalizer.value == value {
+            let transform = field.transform.as_ref()?;
+            if transform.value == value {
                 Some(("value", "Raw candidate for this state field."))
-            } else if normalizer.previous == value {
-                Some(("previous", "Last accepted value for this state field."))
+            } else if transform.old == value {
+                Some(("old", "Last accepted value for this state field."))
             } else {
                 None
             }
@@ -1364,24 +1364,17 @@ whileAttached {
     }
 
     #[test]
-    fn state_normalizer_bindings_and_keyword_have_hover_documentation() {
+    fn state_filter_bindings_have_hover_documentation() {
         let source = r#"state "game.exe" {
-    scene: i32 at 0x100 normalize if value == 7 { previous } else { value };
+    scene: i32 at 0x100 if value == 7 { old } else { value };
 }"#;
         let mut database = CompilerDatabase::new(source);
-        for (needle, expected) in [
-            (
-                "normalize",
-                "Normalizes one successfully read state-field candidate",
-            ),
-            ("value ==", "value: i32"),
-            ("previous", "previous: i32"),
-        ] {
+        for (needle, expected) in [("value ==", "value: i32"), ("old", "old: i32")] {
             let offset = source.find(needle).unwrap();
             let hover = database
                 .hover(offset)
                 .unwrap()
-                .unwrap_or_else(|| panic!("normalizer hover for {needle}"));
+                .unwrap_or_else(|| panic!("state filter hover for {needle}"));
             assert!(
                 hover.markdown.contains(expected),
                 "missing `{expected}` in {}",

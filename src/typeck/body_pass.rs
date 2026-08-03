@@ -139,21 +139,21 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
                 }
             }
 
-            if let Some(normalizer) = &field.normalizer {
+            if let Some(transform) = &field.transform {
                 checker.scopes.push(HashMap::from([
                     (
                         "value".to_owned(),
                         Binding {
-                            id: Some(normalizer.value),
+                            id: Some(transform.value),
                             ty: field_type,
                             mutable: false,
                             debug_only: false,
                         },
                     ),
                     (
-                        "previous".to_owned(),
+                        "old".to_owned(),
                         Binding {
-                            id: Some(normalizer.previous),
+                            id: Some(transform.old),
                             ty: field_type,
                             mutable: false,
                             debug_only: false,
@@ -162,16 +162,16 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
                 ]));
                 checker
                     .semantics
-                    .resolve_value_type(normalizer.value, field_type);
+                    .resolve_value_type(transform.value, field_type);
                 checker
                     .semantics
-                    .resolve_value_type(normalizer.previous, field_type);
-                if let Some(actual) = checker.expr(&normalizer.expression, Some(field_type)) {
-                    checker.unify(actual, field_type, normalizer.expression.span);
+                    .resolve_value_type(transform.old, field_type);
+                if let Some(actual) = checker.expr(&transform.expression, Some(field_type)) {
+                    checker.unify(actual, field_type, transform.expression.span);
                 } else {
                     checker.error(
-                        "a state normalizer must produce a value",
-                        normalizer.expression.span,
+                        "a state field filter must produce a value",
+                        transform.expression.span,
                     );
                 }
                 checker.scopes.pop();

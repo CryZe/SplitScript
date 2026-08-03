@@ -537,18 +537,18 @@ pub struct StateField {
     pub documentation: Option<String>,
     pub annotation: Option<TypeRef>,
     pub source: StateSource,
-    pub normalizer: Option<StateNormalizer>,
+    pub transform: Option<StateTransform>,
     pub span: Span,
 }
 
-/// A pure transformation applied to one successfully read state-field value
-/// before the transactional snapshot is committed.
+/// An optional ordinary expression that selects the value committed for one
+/// successfully read state-field candidate.
 #[derive(Debug, Clone)]
-pub struct StateNormalizer {
+pub struct StateTransform {
     /// Implicit `value` binding containing the newly read candidate.
     pub value: ValueId,
-    /// Implicit `previous` binding containing the last accepted value.
-    pub previous: ValueId,
+    /// Implicit `old` binding containing the last accepted value.
+    pub old: ValueId,
     pub expression: Expr,
     pub span: Span,
 }

@@ -227,20 +227,20 @@ pub(super) fn compile_read(
     function
 }
 
-/// Emits a per-field candidate normalizer. Its two parameters are the
+/// Emits a per-field candidate transform. Its two parameters are the
 /// newly read value and the last accepted value, in that order.
-pub(super) fn compile_state_normalizer(
+pub(super) fn compile_state_transform(
     field: &StateField,
     lowering: &EmissionContext<'_>,
 ) -> Function {
-    let normalizer = field
-        .normalizer
+    let transform = field
+        .transform
         .as_ref()
-        .expect("only normalized fields have normalizer bodies");
+        .expect("only filtered fields have transform bodies");
     let planned = lowering
         .wasm_ir
-        .state_normalizer(field.id)
-        .expect("checked state normalizers have Wasm IR plans");
+        .state_transform(field.id)
+        .expect("checked state transforms have Wasm IR plans");
     let field_type = value_type(field.id, lowering.semantics);
     let mut matches = MatchLayout::default();
     let mut local_types = Vec::new();
@@ -263,8 +263,8 @@ pub(super) fn compile_state_normalizer(
             .map(|ty| (1, lowering.gc.val_type(ty))),
     );
     let mut locals = planned_locals;
-    locals.insert(normalizer.value, (0, field_type));
-    locals.insert(normalizer.previous, (1, field_type));
+    locals.insert(transform.value, (0, field_type));
+    locals.insert(transform.old, (1, field_type));
     let context = ExprContext {
         standard_library: lowering.standard_library,
         abi: lowering.abi,

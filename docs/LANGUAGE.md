@@ -60,12 +60,14 @@ Only when every required field succeeds does it rotate `current` to `old` and
 commit the candidate as `current`. The fields form a WebAssembly GC struct, so
 the action code uses typed references rather than a linear-memory state layout.
 
-A field can normalize its successful raw candidate before that atomic commit:
+A pointer-path field can use an ordinary trailing `if` expression to choose the
+value that is accepted before that atomic commit. Expression-backed fields
+already have an ordinary right-hand side and should put the `if` there instead:
 
 ```text
 state "game.exe" {
-    scene: i32 at 0x1000 normalize if value == 7 || value == 8 {
-        previous
+    scene: i32 at 0x1000 if value == 7 || value == 8 {
+        old
     } else {
         value
     };
@@ -73,12 +75,12 @@ state "game.exe" {
 }
 ```
 
-Inside `normalize`, the read-only `value` and `previous` bindings both have the
-field's inferred type. `value` is the raw candidate; `previous` is the last
-committed value for that field. On the first successful poll after attachment,
-both are the raw candidate. Normalization is per field, so retaining `scene`
-does not discard a new `entities` value from the same otherwise-valid tick.
-`current` and `old` stay read-only.
+Inside this field-local expression, the read-only `value` and `old` bindings
+both have the field's inferred type. `value` is the raw candidate; `old` is the
+last committed value for that field. On the first successful poll after
+attachment, both are the raw candidate. The expression applies to one field,
+so retaining `scene` does not discard a new `entities` value from the same
+otherwise-valid tick. Snapshot `current` and `old` values stay read-only.
 
 Games with multiple supported memory layouts can name each layout inside one
 state declaration. Fields present in every layout with a compatible type form

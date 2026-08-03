@@ -71,8 +71,6 @@ split {
     return current.score > old.score
 }"#;
 
-const STATE_NORMALIZATION_SOURCE: &str = include_str!("../examples/aawcb.split");
-
 const NATIVE_STRING_STATE_SOURCE: &str = r#"state "game.exe" {
     mapName at "game.dll", 0x1234, 0x20 as utf8(64);
 }
@@ -239,12 +237,6 @@ focused_example!(
     "Infer a local type",
     "let retryDelay = 30",
     DECLARATIONS_SOURCE
-);
-focused_example!(
-    STATE_NORMALIZATION_EXAMPLE,
-    "Retain the last accepted field value",
-    "scene: i32 at \"game.dll\", 0x1000 normalize if value == 7 {\n    previous\n} else {\n    value\n};",
-    STATE_NORMALIZATION_SOURCE
 );
 focused_example!(
     FUNCTION_EXAMPLE,
@@ -621,15 +613,6 @@ define_language_catalog! {
         "Declares process attachment and transactional watched state.",
         "Every state expression produces a Result. A tick commits a complete new snapshot only when all required fields succeed. Deliberately optional reads can convert their own Result to an Option with `toOption()` without weakening the rest of the transaction.",
         STATE_DECL_EXAMPLE
-    ),
-    language_item!(
-        StateNormalize,
-        "normalize",
-        LanguageItemKind::Syntax,
-        "field source normalize expression",
-        "Normalizes one successfully read state-field candidate before commit.",
-        "Inside the expression, read-only `value` is the raw candidate and `previous` is the last accepted value. On the first successful poll after attachment, both names contain the candidate. Normalization is per field: other fields still advance, and the complete resulting snapshot remains atomic.",
-        STATE_NORMALIZATION_EXAMPLE
     ),
     language_item!(
         StateLayout,

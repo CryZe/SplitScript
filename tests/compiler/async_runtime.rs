@@ -6,6 +6,8 @@ use super::*;
 struct AsyncTestHost {
     process_open: bool,
     messages: Vec<String>,
+    raw_scene: i32,
+    raw_entities: i32,
 }
 
 fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasmtime::Instance) {
@@ -48,6 +50,24 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
                         }
                         "process_get_module_address" => results[0] = Val::I64(0x1000),
                         "process_get_module_size" => results[0] = Val::I64(0x200),
+                        "process_read" => {
+                            let address = parameters[1].unwrap_i64();
+                            let pointer = parameters[2].unwrap_i32() as usize;
+                            let length = parameters[3].unwrap_i32() as usize;
+                            let value = match address {
+                                0x7fff_0000 => caller.data().raw_scene,
+                                0x7fff_0004 => caller.data().raw_entities,
+                                _ => return Ok(()),
+                            };
+                            let memory = caller
+                                .get_export("memory")
+                                .and_then(wasmtime::Extern::into_memory)
+                                .expect("generated modules export memory");
+                            memory
+                                .write(&mut caller, pointer, &value.to_le_bytes()[..length])
+                                .expect("process-read output should belong to guest memory");
+                            results[0] = Val::I32(1);
+                        }
                         "runtime_print_message" => {
                             let pointer = parameters[0].unwrap_i32() as usize;
                             let length = parameters[1].unwrap_i32() as usize;
@@ -76,6 +96,8 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
         AsyncTestHost {
             process_open: true,
             messages: Vec::new(),
+            raw_scene: 1,
+            raw_entities: 7,
         },
     );
     let instance = linker
@@ -1547,34 +1569,36 @@ fn expression_backed_state_fields_use_discovered_addresses_and_rotate_snapshots(
 }
 
 #[test]
-fn state_normalizers_retain_one_field_without_rejecting_the_snapshot() {
-    let source = r#"
-        let rawScene: i32 = 1
-        let rawEntities: i32 = 7
-        let phase = 0
+fn state_field_filters_retain_one_field_without_rejecting_the_snapshot() {
+    splitscript::compile(
+        r#"
+            state "game.exe" {
+                scene = if true { 1 } else { 2 };
+            }
+        "#,
+    )
+    .expect("expression-backed fields use an ordinary right-hand-side if");
+    splitscript::compile(
+        r#"
+            state "game.exe" {
+                scene = 1 if value == 1 { old } else { value };
+            }
+        "#,
+    )
+    .expect_err("a trailing field if is specific to at pointer paths");
 
+    let source = r#"
         state "game.exe" {
-            scene: i32 = rawScene normalize if value == 7 || value == 8 {
-                previous
+            scene: i32 at 0x7fff0000 if value == 7 || value == 8 {
+                old
             } else {
                 value
             };
-            entities: i32 = rawEntities;
+            entities: i32 at 0x7fff0004;
         }
 
         whileAttached {
             print(`{current.scene}:{current.entities}`)
-            if phase == 0 {
-                rawScene = 7
-                rawEntities = 6
-            } else if phase == 1 {
-                rawScene = 5
-                rawEntities = 5
-            } else if phase == 2 {
-                rawScene = 7
-                rawEntities = 4
-            }
-            phase += 1
         }
     "#;
     let (mut store, instance) = execute_with_mock_host(source);
@@ -1583,7 +1607,11 @@ fn state_normalizers_retain_one_field_without_rejecting_the_snapshot() {
         .unwrap();
 
     update.call(&mut store, ()).unwrap();
+    store.data_mut().raw_scene = 7;
+    store.data_mut().raw_entities = 6;
     update.call(&mut store, ()).unwrap();
+    store.data_mut().raw_scene = 5;
+    store.data_mut().raw_entities = 5;
     update.call(&mut store, ()).unwrap();
 
     assert_eq!(store.data().messages, ["1:7", "1:6", "5:5"]);
@@ -1591,6 +1619,8 @@ fn state_normalizers_retain_one_field_without_rejecting_the_snapshot() {
     store.data_mut().process_open = false;
     update.call(&mut store, ()).unwrap();
     store.data_mut().process_open = true;
+    store.data_mut().raw_scene = 7;
+    store.data_mut().raw_entities = 4;
     update.call(&mut store, ()).unwrap();
 
     assert_eq!(store.data().messages, ["1:7", "1:6", "5:5", "7:4"]);

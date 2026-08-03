@@ -497,8 +497,8 @@ impl HighlightCollector<'_> {
                     let readonly = self.syntax.state.as_ref().is_some_and(|state| {
                         state.layout_value == Some(id)
                             || state.all_fields().any(|field| {
-                                field.normalizer.as_ref().is_some_and(|normalizer| {
-                                    normalizer.value == id || normalizer.previous == id
+                                field.transform.as_ref().is_some_and(|transform| {
+                                    transform.value == id || transform.old == id
                                 })
                             })
                     });
@@ -945,7 +945,6 @@ fn is_keyword(name: &str) -> bool {
             | "match"
             | "as"
             | "at"
-            | "normalize"
             | "key"
             | "default"
             | "choice"
@@ -1307,16 +1306,16 @@ whileAttached {
     }
 
     #[test]
-    fn highlights_state_normalizer_context() {
+    fn highlights_state_filter_context() {
         let source = r#"state "game.exe" {
-    scene: i32 at 0x100 normalize if value == 7 { previous } else { value };
+    scene: i32 at 0x100 if value == 7 { old } else { value };
 }"#;
         let mut database = CompilerDatabase::new(source);
         let index = database.semantic_highlights().unwrap();
         assert!(contains(
             source,
             &index,
-            "normalize",
+            "if",
             SemanticTokenKind::Keyword,
             0
         ));
@@ -1330,7 +1329,7 @@ whileAttached {
         assert!(contains(
             source,
             &index,
-            "previous",
+            "old",
             SemanticTokenKind::Variable,
             MODIFIER_READONLY
         ));

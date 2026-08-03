@@ -483,10 +483,10 @@ pub struct StateExpression {
 }
 
 #[derive(Debug, Clone)]
-pub struct StateNormalizer {
+pub struct StateTransform {
     pub field: ValueId,
     pub value: ValueId,
-    pub previous: ValueId,
+    pub old: ValueId,
     pub expression: ExprId,
     pub locals: Vec<Local>,
 }
@@ -498,7 +498,7 @@ pub struct Program {
     bodies: Vec<Body>,
     global_initializers: Vec<(ValueId, ExprId)>,
     state_expressions: Vec<StateExpression>,
-    state_normalizers: Vec<StateNormalizer>,
+    state_transforms: Vec<StateTransform>,
     expressions: Vec<Expression>,
     next_generated_expression: u32,
     next_temporary: u32,
@@ -531,7 +531,7 @@ impl Program {
             bodies: Vec::new(),
             global_initializers,
             state_expressions: Vec::new(),
-            state_normalizers: Vec::new(),
+            state_transforms: Vec::new(),
             expressions,
             next_generated_expression,
             next_temporary: 0,
@@ -571,14 +571,14 @@ impl Program {
                 locals: plan_expression(expression, &program, semantics),
             })
             .collect();
-        program.state_normalizers = typed_hir
-            .state_normalizers()
-            .map(|normalizer| StateNormalizer {
-                field: normalizer.field,
-                value: normalizer.value,
-                previous: normalizer.previous,
-                expression: normalizer.expression,
-                locals: plan_expression(normalizer.expression, &program, semantics),
+        program.state_transforms = typed_hir
+            .state_transforms()
+            .map(|transform| StateTransform {
+                field: transform.field,
+                value: transform.value,
+                old: transform.old,
+                expression: transform.expression,
+                locals: plan_expression(transform.expression, &program, semantics),
             })
             .collect();
         program
@@ -633,14 +633,14 @@ impl Program {
             .find(|expression| expression.field == field)
     }
 
-    pub fn state_normalizers(&self) -> impl Iterator<Item = &StateNormalizer> {
-        self.state_normalizers.iter()
+    pub fn state_transforms(&self) -> impl Iterator<Item = &StateTransform> {
+        self.state_transforms.iter()
     }
 
-    pub fn state_normalizer(&self, field: ValueId) -> Option<&StateNormalizer> {
-        self.state_normalizers
+    pub fn state_transform(&self, field: ValueId) -> Option<&StateTransform> {
+        self.state_transforms
             .iter()
-            .find(|normalizer| normalizer.field == field)
+            .find(|transform| transform.field == field)
     }
 
     pub fn expression(&self, id: ExprId) -> Option<&Expression> {

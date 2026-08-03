@@ -29,7 +29,7 @@ pub(super) struct UpdateContext<'a> {
 
 pub(super) struct StatePollFunctions<'a> {
     pub reads: &'a [u32],
-    pub normalizers: &'a [Option<u32>],
+    pub transforms: &'a [Option<u32>],
 }
 
 pub(super) fn compile_update(
@@ -227,7 +227,7 @@ pub(super) fn compile_update(
                 &mut function,
                 field.id,
                 state_functions.reads[read_index],
-                state_functions.normalizers[read_index],
+                state_functions.transforms[read_index],
                 first_poll_result + read_index as u32,
                 candidate_state,
                 lowering,
@@ -261,7 +261,7 @@ pub(super) fn compile_update(
                     &mut function,
                     field.id,
                     state_functions.reads[read_index],
-                    state_functions.normalizers[read_index],
+                    state_functions.transforms[read_index],
                     first_poll_result + read_index as u32,
                     candidate_state,
                     lowering,
@@ -389,7 +389,7 @@ fn emit_state_field_poll(
     function: &mut Function,
     field: crate::ast::ValueId,
     read_function: u32,
-    normalizer_function: Option<u32>,
+    transform_function: Option<u32>,
     poll_result_local: u32,
     candidate_state: u32,
     lowering: &UpdateContext<'_>,
@@ -427,7 +427,7 @@ fn emit_state_field_poll(
         field_type,
         lowering,
     );
-    if let Some(normalizer) = normalizer_function {
+    if let Some(transform) = transform_function {
         function
             .instruction(&Instruction::GlobalGet(
                 lowering.runtime_globals.state_ready,
@@ -448,7 +448,7 @@ fn emit_state_field_poll(
         );
         function
             .instruction(&Instruction::End)
-            .instruction(&Instruction::Call(normalizer));
+            .instruction(&Instruction::Call(transform));
     }
     function.instruction(&Instruction::StructSet {
         struct_type_index: STATE_TYPE,

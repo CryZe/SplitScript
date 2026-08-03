@@ -11,6 +11,83 @@ Priority meanings:
 - **P2** — tooling, migration, build profiles, and ecosystem scaling.
 - **Ongoing** — work that should continuously validate every other priority.
 
+## Active-roadmap consolidation (2026-08-03)
+
+The active roadmap was rebuilt after commit `8e2edc9` so it contains only
+unfinished, deliberately deferred, and ongoing work. The large checked
+checklists removed at that point represented these completed milestones:
+
+- one canonical source-defined standard library in `stdlib/standard.split`,
+  with validated privileged declarations, a small intrinsic trust boundary,
+  source-defined synchronous and suspending bodies, inferred generic function
+  schemes, demand-driven specialization, and catalog-driven documentation and
+  tooling;
+- first-class storable `async T` futures with expression-level `await`, typed
+  Wasm-GC frames, nested suspension, process-close cancellation, and shared
+  source/intrinsic polling semantics;
+- typed state providers for ordinary processes and GBA, including the faithful
+  Minish Cap port, fixed-length memory-readable arrays, generic process reads,
+  expression-backed state fields, and transactional snapshots;
+- named uniform state layouts selected by `onAttach`, safe unsupported-build
+  waiting, typed module/process identity, PE file-version discovery, version
+  literals, source-defined `MemoryPath`, and maintained ABZU, Martha Is Dead,
+  Borderlands, and Alan Wake pressure cases;
+- source-defined capability inheritance and `Display`, array iteration, UTF-8
+  string operations, numeric helpers, `Duration`, monotonic `Instant`, operator
+  roles, warnings and unused-code analysis, migration diagnostics, formatter
+  improvements, and identity-aware editor features;
+- a self-contained VS Code desktop/web extension using separate bundled core-
+  Wasm compiler and language-service workers, with release builds, revision-
+  safe debug watch, virtual-workspace support, and a real
+  `@vscode/test-web` acceptance test; and
+- `None` as the sole unit type and value, with `void` removed and plain unit
+  erased from function ABI, locals, globals, discarded expressions, and async
+  completion storage. Aggregate physical-layout specialization remains a
+  deliberately deferred optimization.
+
+Detailed earlier architectural history remains below. New completed milestones
+should be summarized here rather than accumulating checked boxes in
+`TODO.md`.
+
+### Faithful A Plague Tale: Innocence port (2026-08-03)
+
+The first goal after the roadmap consolidation re-audited the original ASL and
+ported its complete maintained behavior rather than the scalar subset produced
+by the old batch converter:
+
+- Steam, Epic, Xbox, and unsupported executable layouts are selected in
+  `onAttach` and exercised by host-run fixtures;
+- its `string50` map field uses bounded UTF-8 decoding after the complete
+  pointer path, settings preserve the original parent gating, a typed chapter
+  enum plus `u32` bit set prevents duplicate checkpoint splits, and timer-start
+  detection resets run progress without a C# event handler;
+- explicit `timer.pauseGameTime()` / `resumeGameTime()` intrinsics expose the
+  existing least-privilege host operations, and guarded `onDetached` cleanup
+  preserves the ASL `exit` behavior without running at initial detached entry;
+- the original runtime behavior of `stringN` is recorded in
+  `docs/ASL_PORTING.md`. A Plague Tale's ASCII identifiers fit the existing
+  strict UTF-8 decoder; native UTF-16/autodetect replacement behavior remains
+  evidence-driven rather than becoming another pseudo-type family;
+- the port uncovered and fixed a typed-HIR panic when an enum value was
+  implicitly lifted into `T?`, and corrected decoded state fields that had
+  consumed the base address before resolving their remaining pointer offsets;
+  and
+- `cargo xtask check` compiles and validates the example, runs all four new
+  fixtures, and retains the complete native/compiler/extension/browser/runtime
+  matrix.
+
+### Structured migration catalog and capability index (2026-08-03)
+
+Migration knowledge now has a dependency-light compiler-owned catalog with
+stable string IDs, ASL/C#/JavaScript/Rust provenance, direct/pattern/planned/
+non-goal status, canonical language and standard-library targets, cookbook
+anchors, and applicable foreign spellings. The compiler validates every target
+against the active catalogs and every recipe anchor against the maintained
+porting guide; `docs/MIGRATION_CAPABILITIES.md` is generated from the same data
+and protected by a drift test. Existing `const`/`var`, `null`, `func`/
+`function`, `string`, `TimeSpan`, and C# numeric-type diagnostics now consume
+these entries without changing their machine-applicable edits.
+
 ## P0 — Maintainability audit and architectural convergence (2026-07-30)
 
 This audit covers the current compiler, standard library, backend, language

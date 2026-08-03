@@ -36,7 +36,7 @@ fn bounded_utf8_reads_are_fallible_strings_and_state_sugar_infers_string() {
     );
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
-        .expect("bounded UTF-8 state and expression reads should validate");
+        .expect("bounded UTF-8 reads after a pointer path should validate");
 
     for (source, expected) in [
         (
@@ -67,8 +67,17 @@ fn option_and_result_values_use_explicit_typed_hir_conversions() {
     let source = r#"
         state "game.exe" {}
 
+        enum Chapter {
+            Village
+        }
+
         fn maybe(flag: bool) -> i32? {
             if flag { return 7 }
+            return None
+        }
+
+        fn maybeChapter(flag: bool) -> Chapter? {
+            if flag { return Chapter.Village }
             return None
         }
 
@@ -79,6 +88,7 @@ fn option_and_result_values_use_explicit_typed_hir_conversions() {
 
         whileAttached {
             let optional: i32? = 5
+            let chapter: Chapter? = Chapter.Village
             let empty: i32? = None
             let successful: i32! = 11
             let failed: i32! = Err("failed")

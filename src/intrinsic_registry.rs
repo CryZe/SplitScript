@@ -289,6 +289,8 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::RuntimeSetTickRate => &[HostImport(Host::RuntimeSetTickRate)],
         IntrinsicId::InstantNow => &[HostImport(Host::WasiClockTimeGet)],
         IntrinsicId::TimerState => &[HostImport(Host::TimerGetState)],
+        IntrinsicId::TimerPauseGameTime => &[HostImport(Host::TimerPauseGameTime)],
+        IntrinsicId::TimerResumeGameTime => &[HostImport(Host::TimerResumeGameTime)],
         IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => &[
             HostImport(Host::ProcessGetModuleAddress),
             HostImport(Host::ProcessGetModuleSize),
@@ -736,6 +738,22 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Function,
             signature(NO_TYPE_PARAMETERS, None, params![], TIMER_STATE),
             TIMER_READ,
+            Everywhere,
+            HostBoundary
+        ),
+        IntrinsicId::TimerPauseGameTime => contract!(
+            TimerPauseGameTime,
+            Function,
+            signature(NO_TYPE_PARAMETERS, None, params![], NONE),
+            TIMER_WRITE,
+            Everywhere,
+            HostBoundary
+        ),
+        IntrinsicId::TimerResumeGameTime => contract!(
+            TimerResumeGameTime,
+            Function,
+            signature(NO_TYPE_PARAMETERS, None, params![], NONE),
+            TIMER_WRITE,
             Everywhere,
             HostBoundary
         ),

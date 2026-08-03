@@ -998,7 +998,7 @@ fn lower_expression_kind(
     syntax: &SyntaxProgram,
     standard_library: &StandardLibrary,
 ) -> TypedExpressionKind {
-    if semantics.enum_variant(expression.id).is_some() {
+    if let Some(resolved_variant) = semantics.enum_variant(expression.id) {
         let (variant, payload) = match &expression.kind {
             ExprKind::Path(path) => {
                 let [_, variant] = path.as_slice() else {
@@ -1021,7 +1021,11 @@ fn lower_expression_kind(
             _ => unreachable!("only enum-shaped syntax resolves an enum variant"),
         };
         return TypedExpressionKind::Enum {
-            enumeration: enum_type_for_expression(expression.id, semantics),
+            // The expression's published type may be the target of an implicit
+            // wrapper conversion (for example, returning `Chapter.Village`
+            // from a `Chapter?` function). The resolved variant remains the
+            // canonical identity of the enum value being constructed.
+            enumeration: enum_type_for_variant(resolved_variant, syntax, standard_library),
             variant,
             payload,
         };
@@ -1187,17 +1191,6 @@ fn lower_expression_kind(
             receiver: receiver.as_ref().map(|receiver| receiver.id),
             arguments: args.iter().map(|argument| argument.id).collect(),
         },
-    }
-}
-
-fn enum_type_for_expression(expression: ExprId, semantics: &SemanticModel) -> EnumTypeId {
-    let ty = semantics
-        .expression_type(expression)
-        .expect("typed enum constructors have expression types");
-    match semantics.types().kind(ty) {
-        TypeKind::Enum(enumeration) => EnumTypeId::Source(*enumeration),
-        TypeKind::Standard(enumeration) => EnumTypeId::Standard(*enumeration),
-        kind => unreachable!("enum constructor has non-enum type `{kind:?}`"),
     }
 }
 

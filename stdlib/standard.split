@@ -344,6 +344,42 @@ namespace timer {
     @intrinsic(TimerState)
     fn state() -> TimerState;
 
+    /// Pauses LiveSplit's game-time clock.
+    ///
+    /// `isLoading` should remain the normal way to remove loads. This explicit
+    /// operation is intended for lifecycle transitions such as ensuring game
+    /// time does not advance after the attached process closes.
+    ///
+    /// # Example
+    ///
+    /// Pause game time after detaching
+    ///
+    /// ```splitscript
+    /// onDetached {
+    ///     timer.pauseGameTime()
+    /// }
+    /// ```
+    @intrinsic(TimerPauseGameTime)
+    fn pauseGameTime() -> None;
+
+    /// Resumes LiveSplit's game-time clock.
+    ///
+    /// Prefer returning `false` from `isLoading` for ordinary load removal.
+    /// Use this operation only when lifecycle logic explicitly paused game
+    /// time outside that action.
+    ///
+    /// # Example
+    ///
+    /// Resume game time after attaching
+    ///
+    /// ```splitscript
+    /// onAttach {
+    ///     timer.resumeGameTime()
+    /// }
+    /// ```
+    @intrinsic(TimerResumeGameTime)
+    fn resumeGameTime() -> None;
+
     /// Reports whether the LiveSplit timer is currently running.
     ///
     /// This is a convenience check over the exhaustive timer state.

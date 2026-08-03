@@ -2114,6 +2114,16 @@ fn compile_expr_unconverted(
                     context.gc.index(Type::Standard(StdlibTypeId::TimerState)),
                 ));
             }
+            IntrinsicId::TimerPauseGameTime => {
+                function.instruction(&Instruction::Call(
+                    context.abi.function(AbiImportId::TimerPauseGameTime),
+                ));
+            }
+            IntrinsicId::TimerResumeGameTime => {
+                function.instruction(&Instruction::Call(
+                    context.abi.function(AbiImportId::TimerResumeGameTime),
+                ));
+            }
             IntrinsicId::RuntimeSetTickRate => {
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::Call(

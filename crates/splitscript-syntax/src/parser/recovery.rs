@@ -6,6 +6,7 @@ use super::{
     ActionKind, Diagnostic, Parser, RecoveryNode, RecoveryNodeKind, Span, Token, TokenKind,
     parse_integer,
 };
+use crate::migration::{ForeignSpellingContext, foreign_spelling};
 
 impl Parser<'_> {
     pub(super) fn terminator(&mut self) -> Result<(), Diagnostic> {
@@ -157,28 +158,10 @@ impl Parser<'_> {
             unreachable!("the familiar declaration keyword is an identifier")
         };
         let keyword = keyword.clone();
-        self.diagnostics.push(
-            Diagnostic::new(
-                format!("SplitScript uses `let` instead of `{keyword}` for variable declarations"),
-                span,
-            )
-            .with_primary_label("replace this familiar declaration keyword")
-            .with_machine_applicable_fix(
-                format!("replace `{keyword}` with `let`"),
-                span,
-                "let",
-            ),
-        );
-    }
-
-    pub(super) fn record_none_keyword_diagnostic(&mut self, span: Span) {
-        self.diagnostics.push(
-            Diagnostic::new(
-                "SplitScript uses `None` instead of `null` for absent optional values",
-                span,
-            )
-            .with_primary_label("replace this JavaScript-style value")
-            .with_machine_applicable_fix("replace `null` with `None`", span, "None"),
+        self.record_foreign_spelling_diagnostic(
+            span,
+            &keyword,
+            ForeignSpellingContext::VariableDeclaration,
         );
     }
 
@@ -188,70 +171,26 @@ impl Parser<'_> {
             unreachable!("the familiar function keyword is an identifier")
         };
         let keyword = keyword.clone();
-        self.diagnostics.push(
-            Diagnostic::new(
-                format!("SplitScript uses `fn` instead of `{keyword}` for functions"),
-                span,
-            )
-            .with_primary_label("replace this familiar function keyword")
-            .with_machine_applicable_fix(
-                format!("replace `{keyword}` with `fn`"),
-                span,
-                "fn",
-            ),
+        self.record_foreign_spelling_diagnostic(
+            span,
+            &keyword,
+            ForeignSpellingContext::FunctionDeclaration,
         );
     }
 
-    pub(super) fn record_string_type_diagnostic(&mut self, span: Span) {
-        self.diagnostics.push(
-            Diagnostic::new(
-                "SplitScript uses `String` instead of `string` for the string type",
-                span,
-            )
-            .with_primary_label("type names are case-sensitive")
-            .with_machine_applicable_fix(
-                "replace `string` with `String`",
-                span,
-                "String",
-            ),
-        );
-    }
-
-    pub(super) fn record_duration_type_diagnostic(&mut self, span: Span) {
-        self.diagnostics.push(
-            Diagnostic::new(
-                "SplitScript uses `Duration` instead of `TimeSpan` for timer durations",
-                span,
-            )
-            .with_primary_label("replace this C# type name")
-            .with_machine_applicable_fix(
-                "replace `TimeSpan` with `Duration`",
-                span,
-                "Duration",
-            ),
-        );
-    }
-
-    pub(super) fn record_numeric_type_diagnostic(
+    pub(super) fn record_foreign_spelling_diagnostic(
         &mut self,
         span: Span,
-        csharp_name: &str,
-        splitscript_name: &str,
-    ) {
+        spelling: &str,
+        context: ForeignSpellingContext,
+    ) -> Option<&'static str> {
+        let rule = foreign_spelling(spelling, context)?;
         self.diagnostics.push(
-            Diagnostic::new(
-                format!(
-                    "SplitScript uses `{splitscript_name}` instead of `{csharp_name}` for this numeric type"
-                ),
-                span,
-            )
-            .with_primary_label("replace this C# numeric type name")
-            .with_machine_applicable_fix(
-                format!("replace `{csharp_name}` with `{splitscript_name}`"),
-                span,
-                splitscript_name,
-            ),
+            Diagnostic::new(rule.message, span)
+                .with_primary_label(rule.primary_label)
+                .with_machine_applicable_fix(rule.fix_title, span, rule.replacement),
         );
+        Some(rule.replacement)
     }
 
     pub(super) fn current_action_kind(&self) -> Option<ActionKind> {

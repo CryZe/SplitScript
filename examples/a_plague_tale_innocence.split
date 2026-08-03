@@ -1,0 +1,283 @@
+// Faithful port of the A Plague Tale: Innocence ASL autosplitter. It supports
+// the Steam, Epic, and Xbox executable layouts, removes loads, starts a new
+// run, and splits each configured chapter at most once per run.
+
+/// A chapter recognized from the game's current map identifier.
+enum Chapter {
+    /// Chapter 2 — The Strangers.
+    Village
+    /// Chapter 3 — Retribution.
+    Village2
+    /// Chapter 4 — The Apprentice.
+    Farm
+    /// Chapter 5 — The Ravens' Spoils.
+    Battlefield
+    /// Chapter 6 — Damaged Goods.
+    Battlefield2
+    /// Chapter 7 — The Path Before Us.
+    ShelterForest
+    /// Chapter 8 — Our Home.
+    ShelterMorning
+    /// Chapter 9 — In the Shadow of Ramparts.
+    University
+    /// Chapter 10 — The Way of Roses.
+    University2
+    /// Chapter 11 — Alive.
+    ShelterSafe
+    /// Chapter 12 — All That Remains.
+    CorruptedDomain
+    /// Chapter 13 — Penance.
+    Illusion
+    /// Chapter 14 — Blood Ties.
+    Inquisition
+    /// Chapter 15 — Remembrance.
+    ShelterSiege
+    /// Chapter 16 — Coronation.
+    Cathedral
+    /// Chapter 17 — For Each Other.
+    Epilogue
+}
+
+settings {
+    /// Enables every chapter split as one group.
+    "All Chapters" => allChapters: true
+
+    "Chapters" {
+        /// Splits on the first visit to the Chapter 2 map.
+        "Chapter 2 - The Strangers" => splitVillage: true
+        /// Splits on the first visit to the Chapter 3 map.
+        "Chapter 3 - Retribution" => splitVillage2: true
+        /// Splits on the first visit to the Chapter 4 map.
+        "Chapter 4 - The Apprentice" => splitFarm: true
+        /// Splits on the first visit to the Chapter 5 map.
+        "Chapter 5 - The Ravens' Spoils" => splitBattlefield: true
+        /// Splits on the first visit to the Chapter 6 map.
+        "Chapter 6 - Damaged Goods" => splitBattlefield2: true
+        /// Splits on the first visit to the Chapter 7 map.
+        "Chapter 7 - The Path Before Us" => splitShelterForest: true
+        /// Splits on the first visit to the Chapter 8 map.
+        "Chapter 8 - Our Home" => splitShelterMorning: true
+        /// Splits on the first visit to the Chapter 9 map.
+        "Chapter 9 - In the Shadow of Ramparts" => splitUniversity: true
+        /// Splits on the first visit to the Chapter 10 map.
+        "Chapter 10 - The Way of Roses" => splitUniversity2: true
+        /// Splits on the first visit to the Chapter 11 map.
+        "Chapter 11 - Alive" => splitShelterSafe: true
+        /// Splits on the first visit to the Chapter 12 map.
+        "Chapter 12 - All That Remains" => splitCorruptedDomain: true
+        /// Splits on the first visit to the Chapter 13 map.
+        "Chapter 13 - Penance" => splitIllusion: true
+        /// Splits on the first visit to the Chapter 14 map.
+        "Chapter 14 - Blood Ties" => splitInquisition: true
+        /// Splits on the first visit to the Chapter 15 map.
+        "Chapter 15 - Remembrance" => splitShelterSiege: true
+        /// Splits on the first visit to the Chapter 16 map.
+        "Chapter 16 - Coronation" => splitCathedral: true
+        /// Splits on the first visit to the Chapter 17 map.
+        "Chapter 17 - For Each Other" => splitEpilogue: true
+    }
+}
+
+state "APlagueTaleInnocence_x64" {
+    /// Steam executable layout.
+    layout Steam {
+        /// Whether the audio runtime reports a loading screen.
+        loading: bool at "WwiseLibPCx64R.dll", 0x262521
+        /// Player-control state used to detect a new run.
+        playerControl: i32 at "APlagueTaleInnocence_x64", 0x152E91C
+        /// Bounded NUL-terminated map identifier.
+        map at "APlagueTaleInnocence_x64", 0x015206E0, 0x88, 0x0, 0xD0, 0x990, 0x260 as utf8(50)
+        /// Cutscene state used by the final ending split.
+        cutsceneState: i32 at "APlagueTaleInnocence_x64", 0x164BC34
+    }
+
+    /// Epic Games Store executable layout.
+    layout Epic {
+        /// Whether the audio runtime reports a loading screen.
+        loading: bool at "WwiseLibPCx64R.dll", 0x262521
+        /// Player-control state used to detect a new run.
+        playerControl: i32 at "APlagueTaleInnocence_x64", 0x152E6DC
+        /// Bounded NUL-terminated map identifier.
+        map at "APlagueTaleInnocence_x64", 0x016AADC0, 0x10, 0x110, 0xD8, 0x10, 0x30, 0x170, 0x260 as utf8(50)
+        /// Cutscene state used by the final ending split.
+        cutsceneState: i32 at "APlagueTaleInnocence_x64", 0x164B9F4
+    }
+
+    /// Xbox executable layout.
+    layout Xbox {
+        /// Whether the audio runtime reports a loading screen.
+        loading: bool at "WwiseLibPCx64R.dll", 0x262521
+        /// Player-control state used to detect a new run.
+        playerControl: i32 at "APlagueTaleInnocence_x64", 0x1744EBC
+        /// Bounded NUL-terminated map identifier.
+        map at "MessageBus.dll", 0x005C0DE0, 0x340, 0x668 as utf8(50)
+        /// Xbox has no known cutscene-state address, so its ending trigger is unavailable.
+        cutsceneState: i32 = 0
+    }
+}
+
+/// Bit set of chapter-entry splits already emitted during the current run.
+let completedChapters: u32 = 0
+/// Timer state observed on the preceding attached tick.
+let previousTimerState = TimerState.NotRunning
+/// Whether a process attachment has entered `onAttach` since the last detach.
+let attachedOnce = false
+
+/// Classifies a raw map identifier from the game.
+fn chapterForMap(map: String) -> Chapter? {
+    if map.endsWith(">VILLAGE") {
+        return Chapter.Village
+    } else if map.endsWith(">VILLAGE2") {
+        return Chapter.Village2
+    } else if map.endsWith(">FARM") {
+        return Chapter.Farm
+    } else if map.endsWith(">BATTLEFIELD") {
+        return Chapter.Battlefield
+    } else if map.endsWith(">BATTLEFIELD2") {
+        return Chapter.Battlefield2
+    } else if map.endsWith(">SHELTER_FOREST") {
+        return Chapter.ShelterForest
+    } else if map.endsWith(">SHELTER_MORNING") {
+        return Chapter.ShelterMorning
+    } else if map.endsWith(">UNIVERSITY") {
+        return Chapter.University
+    } else if map.endsWith(">UNIVERSITY2") {
+        return Chapter.University2
+    } else if map.endsWith(">SHELTER_SAFE") {
+        return Chapter.ShelterSafe
+    } else if map.endsWith(">CORRUPTED_DOMAIN") {
+        return Chapter.CorruptedDomain
+    } else if map.endsWith(">ILLUSION") {
+        return Chapter.Illusion
+    } else if map.endsWith(">INQUISITION") {
+        return Chapter.Inquisition
+    } else if map.endsWith(">SHELTER_SIEGE") {
+        return Chapter.ShelterSiege
+    } else if map.endsWith(">CATHEDRAL") {
+        return Chapter.Cathedral
+    } else if map.endsWith(">EPILOGUE") {
+        return Chapter.Epilogue
+    }
+    return None
+}
+
+/// Returns the stable bit assigned to a chapter.
+fn chapterMask(chapter: Chapter) -> u32 {
+    return match chapter {
+        Chapter.Village => 1u32 << 0,
+        Chapter.Village2 => 1u32 << 1,
+        Chapter.Farm => 1u32 << 2,
+        Chapter.Battlefield => 1u32 << 3,
+        Chapter.Battlefield2 => 1u32 << 4,
+        Chapter.ShelterForest => 1u32 << 5,
+        Chapter.ShelterMorning => 1u32 << 6,
+        Chapter.University => 1u32 << 7,
+        Chapter.University2 => 1u32 << 8,
+        Chapter.ShelterSafe => 1u32 << 9,
+        Chapter.CorruptedDomain => 1u32 << 10,
+        Chapter.Illusion => 1u32 << 11,
+        Chapter.Inquisition => 1u32 << 12,
+        Chapter.ShelterSiege => 1u32 << 13,
+        Chapter.Cathedral => 1u32 << 14,
+        Chapter.Epilogue => 1u32 << 15
+    }
+}
+
+/// Returns whether the chapter and its parent setting are enabled.
+fn chapterEnabled(chapter: Chapter) -> bool {
+    if !settings.allChapters {
+        return false
+    }
+    return match chapter {
+        Chapter.Village => settings.splitVillage,
+        Chapter.Village2 => settings.splitVillage2,
+        Chapter.Farm => settings.splitFarm,
+        Chapter.Battlefield => settings.splitBattlefield,
+        Chapter.Battlefield2 => settings.splitBattlefield2,
+        Chapter.ShelterForest => settings.splitShelterForest,
+        Chapter.ShelterMorning => settings.splitShelterMorning,
+        Chapter.University => settings.splitUniversity,
+        Chapter.University2 => settings.splitUniversity2,
+        Chapter.ShelterSafe => settings.splitShelterSafe,
+        Chapter.CorruptedDomain => settings.splitCorruptedDomain,
+        Chapter.Illusion => settings.splitIllusion,
+        Chapter.Inquisition => settings.splitInquisition,
+        Chapter.ShelterSiege => settings.splitShelterSiege,
+        Chapter.Cathedral => settings.splitCathedral,
+        Chapter.Epilogue => settings.splitEpilogue
+    }
+}
+
+/// Clears per-run progress and suppresses a split for the map on which the run starts.
+fn resetRunProgress(map: String) {
+    completedChapters = match chapterForMap(map) {
+        Some(chapter) => chapterMask(chapter),
+        None => 0u32
+    }
+}
+
+/// Marks an enabled chapter as completed and reports whether it should split.
+fn enterChapter(map: String) -> bool {
+    let chapter = chapterForMap(map) else return false
+    let mask = chapterMask(chapter)
+    if !chapterEnabled(chapter) || completedChapters & mask != 0 {
+        return false
+    }
+    completedChapters |= mask
+    return true
+}
+
+onAttach {
+    attachedOnce = true
+    let executable = await process.mainModule()
+    if executable.size == 25_473_024 {
+        return StateLayout.Steam
+    } else if executable.size == 25_284_608 {
+        return StateLayout.Epic
+    } else if executable.size == 27_566_080 {
+        return StateLayout.Xbox
+    }
+
+    print(`unsupported A Plague Tale: Innocence module size {executable.size}`)
+    await process.closed()
+}
+
+whileAttached {
+    let currentTimerState = timer.state()
+    let timerStarted = previousTimerState == TimerState.NotRunning
+        && currentTimerState != TimerState.NotRunning
+    if timerStarted {
+        resetRunProgress(current.map)
+    }
+    previousTimerState = currentTimerState
+
+    debug print(current.cutsceneState)
+}
+
+onDetached {
+    if attachedOnce {
+        timer.pauseGameTime()
+        attachedOnce = false
+    }
+}
+
+start {
+    return current.map.contains("DOMAIN")
+        && current.playerControl == 4024
+        && old.playerControl == 4025
+}
+
+split {
+    if enterChapter(current.map) {
+        return true
+    } else if current.map.contains("EPILOGUE")
+        && current.cutsceneState == 1_079_474_040
+    {
+        completedChapters |= chapterMask(Chapter.Epilogue)
+        return true
+    }
+}
+
+isLoading {
+    return current.loading
+}

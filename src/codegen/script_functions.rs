@@ -156,6 +156,27 @@ pub(super) fn compile_read(
             .instruction(&Instruction::LocalSet(address_local));
     }
 
+    // Resolve the complete pointer chain before either decoding a string or
+    // reading an ordinary MemoryReadable value. A decoder changes how the
+    // final address is consumed, not how that address is discovered.
+    let process_read = ProcessReadEmission {
+        abi,
+        address_local,
+        fallback_ty: field_type,
+        result_type,
+        gc: lowering.gc,
+        abi_read: lowering.abi_read,
+    };
+    for offset in offsets.iter().skip(1) {
+        emit_process_read(&mut function, &process_read, 8);
+        function
+            .instruction(&Instruction::I32Const(lowering.abi_read.start()))
+            .instruction(&Instruction::I64Load(memarg()))
+            .instruction(&Instruction::I64Const(*offset as i64))
+            .instruction(&Instruction::I64Add)
+            .instruction(&Instruction::LocalSet(address_local));
+    }
+
     if let Some(crate::ast::StateMemoryDecoder::Utf8 { max_bytes, .. }) = path.decoder {
         let string_local = 2;
         function
@@ -191,24 +212,6 @@ pub(super) fn compile_read(
         .layout(field_type_id, lowering.semantics)
         .expect("checked undecoded pointer fields are MemoryReadable")
         .size();
-
-    let process_read = ProcessReadEmission {
-        abi,
-        address_local,
-        fallback_ty: field_type,
-        result_type,
-        gc: lowering.gc,
-        abi_read: lowering.abi_read,
-    };
-    for offset in offsets.iter().skip(1) {
-        emit_process_read(&mut function, &process_read, 8);
-        function
-            .instruction(&Instruction::I32Const(lowering.abi_read.start()))
-            .instruction(&Instruction::I64Load(memarg()))
-            .instruction(&Instruction::I64Const(*offset as i64))
-            .instruction(&Instruction::I64Add)
-            .instruction(&Instruction::LocalSet(address_local));
-    }
     emit_process_read(&mut function, &process_read, field_size);
     emit_memory_value(
         &mut function,

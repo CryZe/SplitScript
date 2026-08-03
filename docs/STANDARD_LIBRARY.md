@@ -442,7 +442,10 @@ strings such as `` `{stage}-{act}` ``, `print`, and `setVariable`.
 Standard-library nominal types may fulfill that contract with an `@display`
 source method; primitives retain their compact compiler implementation.
 `String.concat` remains available as the underlying collection helper.
-`timer.state` and `setTickRate` wrap their ASR host calls.
+`timer.state`, `timer.pauseGameTime`, `timer.resumeGameTime`, and `setTickRate`
+wrap their ASR host calls. `isLoading` remains the normal declarative load-
+removal API; explicit pause/resume is for lifecycle transitions such as process
+exit cleanup.
 `timer.state()` returns the exhaustive `TimerState` enum with
 `NotRunning`, `Running`, `Paused`, `Ended`, and `Unknown`; raw host integers are
 normalized only at the ABI boundary. `Duration.fromSeconds` converts Unity's

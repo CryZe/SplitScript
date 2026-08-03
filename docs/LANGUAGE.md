@@ -1139,6 +1139,8 @@ linear-memory pointers in source code.
 compiler-provided enum with `NotRunning`, `Running`, `Paused`, `Ended`, and
 `Unknown`. Match it like any other enum; the raw host integer is not visible to
 source code.
+`timer.pauseGameTime()` and `timer.resumeGameTime()` provide explicit timer
+mutation for lifecycle cleanup. Prefer `isLoading` for ordinary load removal.
 
 The generated loop follows this order:
 

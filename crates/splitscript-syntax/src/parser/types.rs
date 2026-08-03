@@ -2,8 +2,9 @@
 
 use super::{
     ArrayTypeDecl, AsyncTypeDecl, Diagnostic, OptionTypeDecl, Parser, ResultTypeDecl, Span,
-    TokenKind, TypeNameId, TypeRef, csharp_numeric_type,
+    TokenKind, TypeNameId, TypeRef,
 };
+use crate::migration::ForeignSpellingContext;
 
 impl Parser<'_> {
     pub(super) fn resolve_type(&mut self, name: &str, span: Span) -> Result<TypeRef, Diagnostic> {
@@ -74,14 +75,9 @@ impl Parser<'_> {
             (TypeRef::Array(id), start, end)
         } else {
             let (mut name, start) = self.expect_any_ident(message)?;
-            if name == "string" {
-                self.record_string_type_diagnostic(start);
-                name = "String".to_owned();
-            } else if name == "TimeSpan" {
-                self.record_duration_type_diagnostic(start);
-                name = "Duration".to_owned();
-            } else if let Some(replacement) = csharp_numeric_type(&name) {
-                self.record_numeric_type_diagnostic(start, &name, replacement);
+            if let Some(replacement) =
+                self.record_foreign_spelling_diagnostic(start, &name, ForeignSpellingContext::Type)
+            {
                 name = replacement.to_owned();
             }
             (self.resolve_type(&name, start)?, start, start)

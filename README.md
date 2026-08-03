@@ -189,7 +189,11 @@ The full example is in [`examples/lunistice.split`](examples/lunistice.split).
 See [`docs/LANGUAGE.md`](docs/LANGUAGE.md) for the language,
 [`docs/STANDARD_LIBRARY.md`](docs/STANDARD_LIBRARY.md) for the growing reusable
 ASR surface, [`docs/LUNISTICE_PORT.md`](docs/LUNISTICE_PORT.md) for the parity
-audit, [`docs/COMPILER.md`](docs/COMPILER.md) for compiler architecture, and
+audit, [`docs/ASL_PORTING.md`](docs/ASL_PORTING.md) for compiler-checked
+migration recipes, the generated
+[`docs/MIGRATION_CAPABILITIES.md`](docs/MIGRATION_CAPABILITIES.md) index for
+foreign-language support status, [`docs/COMPILER.md`](docs/COMPILER.md) for
+compiler architecture, and
 [`docs/ABI.md`](docs/ABI.md) for the generated module contract. Reproducible
 compile-time and output-size measurements are recorded in
 [`docs/BASELINES.md`](docs/BASELINES.md).
@@ -245,8 +249,8 @@ compile-time and output-size measurements are recorded in
 - A GC-backed continuation frame that preserves `onAttach` locals and resumes
   ordinary statements exactly once across suspension boundaries.
 - Typed `print` calls in any action block.
-- Runtime variables, timer-state inspection, tick-rate control, and saturating
-  floating-point duration conversion.
+- Runtime variables, timer-state inspection, explicit game-time pause/resume,
+  tick-rate control, and normalized duration conversion.
 - Live typed settings: nested titles and tooltips, booleans, enum-backed
   choices, file selectors with glob/MIME filters, and automatic
   `settings`/`oldSettings` tick snapshots.

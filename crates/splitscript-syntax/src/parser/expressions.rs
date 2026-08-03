@@ -330,7 +330,11 @@ impl Parser<'_> {
                 Ok(self.new_expr(ExprKind::None, token.span))
             }
             TokenKind::Ident(name) if name == "null" => {
-                self.record_none_keyword_diagnostic(token.span);
+                self.record_foreign_spelling_diagnostic(
+                    token.span,
+                    "null",
+                    crate::migration::ForeignSpellingContext::OptionalValue,
+                );
                 self.bump();
                 Ok(self.new_expr(ExprKind::None, token.span))
             }
@@ -344,18 +348,14 @@ impl Parser<'_> {
             }
             TokenKind::Ident(mut first) => {
                 self.bump();
-                if self.at(&TokenKind::Dot) {
-                    match first.as_str() {
-                        "string" => {
-                            self.record_string_type_diagnostic(token.span);
-                            first = "String".to_owned();
-                        }
-                        "TimeSpan" => {
-                            self.record_duration_type_diagnostic(token.span);
-                            first = "Duration".to_owned();
-                        }
-                        _ => {}
-                    }
+                if self.at(&TokenKind::Dot)
+                    && let Some(replacement) = self.record_foreign_spelling_diagnostic(
+                        token.span,
+                        &first,
+                        crate::migration::ForeignSpellingContext::StaticTypeReceiver,
+                    )
+                {
+                    first = replacement.to_owned();
                 }
                 if first == "sig" {
                     let signature_span = self.current().span;
@@ -791,7 +791,11 @@ impl Parser<'_> {
                 MatchPattern::None
             }
             TokenKind::Ident(name) if name == "null" => {
-                self.record_none_keyword_diagnostic(token.span);
+                self.record_foreign_spelling_diagnostic(
+                    token.span,
+                    "null",
+                    crate::migration::ForeignSpellingContext::OptionalValue,
+                );
                 self.bump();
                 MatchPattern::None
             }

@@ -9,6 +9,7 @@ pub mod ast;
 mod cursor;
 pub mod diagnostic;
 mod lexer;
+pub mod migration;
 pub mod parser;
 pub mod source;
 pub mod standard_library;

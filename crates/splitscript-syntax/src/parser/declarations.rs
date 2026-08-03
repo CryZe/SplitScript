@@ -7,7 +7,6 @@ use super::{
     FunctionId, Parameter, Parser, PointerPath, RecordDecl, RecordField, RecordId,
     SettingChoiceOption, SettingDecl, SettingFileFilter, SettingKind, Span, StateDecl, StateField,
     StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource, TokenKind, TypeRef,
-    csharp_numeric_type,
 };
 
 impl Parser<'_> {
@@ -127,24 +126,13 @@ impl Parser<'_> {
         let start = self.bump().span.start;
         let (first_name, first_span) = self.expect_any_ident("expected a function name")?;
         let (method_of, name, name_span) = if self.eat(&TokenKind::Dot).is_some() {
-            let receiver_name = match first_name.as_str() {
-                "string" => {
-                    self.record_string_type_diagnostic(first_span);
-                    "String"
-                }
-                "TimeSpan" => {
-                    self.record_duration_type_diagnostic(first_span);
-                    "Duration"
-                }
-                name => {
-                    if let Some(replacement) = csharp_numeric_type(name) {
-                        self.record_numeric_type_diagnostic(first_span, name, replacement);
-                        replacement
-                    } else {
-                        &first_name
-                    }
-                }
-            };
+            let receiver_name = self
+                .record_foreign_spelling_diagnostic(
+                    first_span,
+                    &first_name,
+                    crate::migration::ForeignSpellingContext::Type,
+                )
+                .unwrap_or(&first_name);
             let receiver = self.resolve_type(receiver_name, first_span)?;
             let (method, method_span) =
                 self.expect_any_ident("expected a method name after `.`")?;

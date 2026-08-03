@@ -26,6 +26,7 @@ mod language;
 mod lexer;
 mod lsp;
 mod memory;
+pub mod migration;
 use splitscript_syntax::parser;
 mod refactor;
 mod resolution;

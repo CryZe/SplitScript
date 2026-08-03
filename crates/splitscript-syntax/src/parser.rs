@@ -368,22 +368,6 @@ fn assignment_operator(token: &TokenKind) -> Option<Option<BinaryOp>> {
     })
 }
 
-fn csharp_numeric_type(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "sbyte" => "i8",
-        "byte" => "u8",
-        "short" => "i16",
-        "ushort" => "u16",
-        "int" => "i32",
-        "uint" => "u32",
-        "long" => "i64",
-        "ulong" => "u64",
-        "float" => "f32",
-        "double" => "f64",
-        _ => return None,
-    })
-}
-
 pub(crate) fn parse_integer(text: &str) -> Result<(u64, Option<TypeRef>), String> {
     const SUFFIXES: [&str; 8] = ["u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8"];
     let (digits, suffix) = SUFFIXES

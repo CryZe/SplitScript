@@ -8,7 +8,102 @@ if (!wasmPath) {
 const decoder = new TextDecoder();
 const bytes = new Map();
 const reads = [];
+const readsPerPoll = [];
+const settingValues = new Map();
+const settingValueHandles = new Map();
+const registeredBooleanKeys = new Set();
+let nextSettingValueHandle = 1n;
 let instance;
+
+const expectedSettingKeys = new Set([
+    "manySplits",
+    "manySplits_1_1_cp1",
+    "manySplits_1_2_cp1",
+    "manySplits_1_3_cp1",
+    "manySplits_1_4_cp0_pause_pos",
+    "manySplits_1_4_cp1",
+    "manySplits_1_4_cp2",
+    "manySplits_1_6_cp59_pause",
+    "manySplits_2_1_cp5",
+    "manySplits_2_4_cp1",
+    "manySplits_2_4_cp4",
+    "manySplits_2_5_cp1",
+    "manySplits_2_5_cp2",
+    "manySplits_2_5_cp3",
+    "manySplits_2_6_cp0_pause_pos",
+    "manySplits_3_2_cp0_pause_pos",
+    "manySplits_3_3_cp1",
+    "manySplits_3_4_cp0_pause_pos",
+    "manySplits_3_6_cp1",
+    "manySplits_4_99_cp0_pause_pos",
+    "manySplits_4_99_entry",
+    "manySplits_5_1_cp1",
+    "manySplits_5_1_cp10",
+    "manySplits_5_1_cp2",
+    "manySplits_5_1_cp3",
+    "manySplits_6_1_cp3",
+    "manySplits_6_2_cp1",
+    "manySplits_6_3_cp1",
+    "manySplits_6_3_cp2",
+    "manySplits_6_3_cp3",
+    "manySplits_pos_40",
+    "manySplits_pos_41",
+    "manySplits_pos_42",
+    "manySplits_pos_43",
+    "manySplits_pos_44",
+    "manySplits_pos_45",
+    "manySplits_pos_5",
+    "manySplits_riftBlue",
+    "manySplits_riftPurple",
+    "settings",
+    "settings_gameTimeMsg",
+    "settings_ILMode",
+    "settings_newFileStart",
+    "splits",
+    "splits_actEntry",
+    "splits_checkpoint",
+    "splits_dwbth",
+    "splits_dwbth_doubleSplitNo",
+    "splits_tp",
+    "splits_tp_any",
+    "splits_tp_new",
+    "splits_tp_std",
+    "splits_yarn",
+]);
+for (let chapter = 1; chapter <= 7; chapter += 1) {
+    expectedSettingKeys.add(`manySplits_${chapter}`);
+}
+for (const [chapter, actCount] of [[1, 7], [2, 6], [3, 6], [6, 3]]) {
+    for (let act = 1; act <= actCount; act += 1) {
+        const base = `manySplits_${chapter}_${act}`;
+        expectedSettingKeys.add(base);
+        expectedSettingKeys.add(`${base}_entry`);
+        expectedSettingKeys.add(`${base}_tp`);
+        expectedSettingKeys.add(`${base}_tpDelayed`);
+    }
+}
+for (const chapter of [5, 7]) {
+    expectedSettingKeys.add(`manySplits_${chapter}_entry`);
+}
+for (const chapter of [4, 5, 7]) {
+    expectedSettingKeys.add(`manySplits_${chapter}_tp`);
+}
+for (const id of [
+    "gallery", "lab", "sewers", "bazaar", "owlExpress", "moon",
+    "village", "pipe", "twilight", "curly", "balcony",
+]) {
+    const base = `manySplits_riftBlue_${id}`;
+    expectedSettingKeys.add(base);
+    expectedSettingKeys.add(`${base}_entry`);
+    expectedSettingKeys.add(`${base}_tp`);
+}
+for (const id of ["moc", "dbs", "sleepy", "alpine", "deepSea", "rumbi", "tour"]) {
+    const base = `manySplits_riftPurple_${id}`;
+    expectedSettingKeys.add(base);
+    expectedSettingKeys.add(`${base}_entry`);
+    expectedSettingKeys.add(`${base}_cp`);
+    expectedSettingKeys.add(`${base}_tp`);
+}
 
 const timerBase = 0x1100n;
 const saveSignature = 0x1200n;
@@ -130,13 +225,66 @@ const env = {
         }
         return 1;
     },
+    user_settings_add_bool(keyPointer, keyLength, _labelPointer, _labelLength, defaultValue) {
+        const key = text(keyPointer, keyLength);
+        registeredBooleanKeys.add(key);
+        if (!settingValues.has(key)) {
+            settingValues.set(key, defaultValue !== 0);
+        }
+        return settingValues.get(key) ? 1 : 0;
+    },
+    user_settings_add_title() {},
+    user_settings_set_tooltip() {},
+    settings_map_load: () => 1n,
+    settings_map_free() {},
+    settings_map_get(_map, keyPointer, keyLength) {
+        const key = text(keyPointer, keyLength);
+        if (!settingValues.has(key)) {
+            return 0n;
+        }
+        const handle = nextSettingValueHandle++;
+        settingValueHandles.set(handle, settingValues.get(key));
+        return handle;
+    },
+    setting_value_free(handle) {
+        settingValueHandles.delete(handle);
+    },
+    setting_value_get_bool(handle, outputPointer) {
+        const value = settingValueHandles.get(handle);
+        if (typeof value !== "boolean") {
+            return 0;
+        }
+        new DataView(instance.exports.memory.buffer).setUint8(outputPointer, value ? 1 : 0);
+        return 1;
+    },
 };
 
 ({ instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), { env }));
 instance.exports._start();
 
+const missingSettingKeys = [...expectedSettingKeys]
+    .filter(key => !registeredBooleanKeys.has(key));
+const unexpectedSettingKeys = [...registeredBooleanKeys]
+    .filter(key => !expectedSettingKeys.has(key));
+if (missingSettingKeys.length !== 0 || unexpectedSettingKeys.length !== 0) {
+    throw new Error(
+        `A Hat settings differ from the original ASL: missing=${JSON.stringify(missingSettingKeys)}, `
+        + `unexpected=${JSON.stringify(unexpectedSettingKeys)}`,
+    );
+}
+
 for (let poll = 0; poll < 20; poll += 1) {
+    const readsBeforePoll = reads.length;
     instance.exports.update();
+    const pollReads = reads.slice(readsBeforePoll);
+    readsPerPoll.push(pollReads);
+    if (pollReads.filter(([, size]) => size > 8).length > 1) {
+        throw new Error(
+            `one update performed several scan windows: ${JSON.stringify(
+                pollReads.map(([address, size]) => `${address.toString(16)}:${size}`),
+            )}`,
+        );
+    }
     if (reads.some(([address]) => address === 0x40e0n)) {
         break;
     }
@@ -169,4 +317,8 @@ if (reads.some(([, size]) => size > 0x10000)) {
     throw new Error("a discovery poll attempted an unbounded memory read");
 }
 
-console.log(JSON.stringify({ pollsCompleted: true, reads: reads.length }));
+console.log(JSON.stringify({
+    pollsCompleted: readsPerPoll.length,
+    reads: reads.length,
+    registeredSettings: registeredBooleanKeys.size,
+}));

@@ -14,6 +14,357 @@ record SaveDataOffsets {
     checkpoint: u64,
 }
 
+settings {
+    "General" {
+        "Enable Settings" => settingsRoot key "settings": true,
+        /// Uses the act timer for individual-level timing instead of the game timer.
+        /// This also changes the start and reset conditions.
+        "IL Mode - Follow the act timer instead of the game timer" => settings_ILMode: false,
+        "Only start the timer when opening an empty file" => settings_newFileStart: true,
+        /// Retained from the original autosplitter. The sandboxed runtime does not
+        /// currently open a modal timing-method prompt.
+        "Ask if Game Time should be used when the game opens" => settings_gameTimeMsg: true,
+    },
+    "Simple Splits" {
+        "Enable Simple Splits" => splits: true,
+        "Time Pieces" {
+            "Enable Time Pieces" => splits_tp: true,
+            "New Time Pieces" => splits_tp_new: true,
+            /// Includes repeated and Death Wish time pieces, but may not trigger
+            /// under every condition. Use it together with New Time Pieces.
+            "Any Time Piece" => splits_tp_any: true,
+            /// End of Death Wish Any%.
+            "Seal The Deal" => splits_tp_std: true,
+        },
+        /// Also applies to time rifts entered from the spaceship.
+        "Act Entries" => splits_actEntry: false,
+        "Checkpoint" => splits_checkpoint: false,
+        "Yarn" => splits_yarn: false,
+        "Death Wish Level Back to Hub" {
+            "Enable Death Wish Level Back to Hub" => splits_dwbth: false,
+            /// Useful for 110%. A recent split suppresses this transition.
+            "Avoid Double Splits" => splits_dwbth_doubleSplitNo: true,
+        },
+    },
+    "Detailed Splits" {
+        /// Enables the complete customizable split table below.
+        "Enable Detailed Splits" => manySplits: false,
+        "Mafia Town" {
+            "Enable Mafia Town" => manySplits_1: true,
+            "Welcome to Mafia Town" {
+                "Enable Welcome to Mafia Town" => manySplits_1_1: true,
+                /// This may also trigger when a telescope enters a time rift.
+                "Entry" => manySplits_1_1_entry: false,
+                "Time Piece" => manySplits_1_1_tp: true,
+                /// Triggers on the loading screen after collecting the time piece.
+                "Delayed Time Piece" => manySplits_1_1_tpDelayed: false,
+                "Umbrella Fight" => manySplits_1_1_cp1: false,
+            },
+            "Barrel Battle" {
+                "Enable Barrel Battle" => manySplits_1_2: true,
+                "Entry" => manySplits_1_2_entry: false,
+                "Time Piece" => manySplits_1_2_tp: true,
+                "Delayed Time Piece" => manySplits_1_2_tpDelayed: false,
+                "Battle Start" => manySplits_1_2_cp1: false,
+            },
+            "She Came From Outer Space" {
+                "Enable She Came From Outer Space" => manySplits_1_3: true,
+                "Entry" => manySplits_1_3_entry: false,
+                "Time Piece" => manySplits_1_3_tp: true,
+                "Delayed Time Piece" => manySplits_1_3_tpDelayed: false,
+                "Scare" => manySplits_1_3_cp1: false,
+            },
+            "Down With The Mafia!" {
+                "Enable Down With The Mafia!" => manySplits_1_4: true,
+                "Entry" => manySplits_1_4_entry: false,
+                "Time Piece" => manySplits_1_4_tp: true,
+                "Delayed Time Piece" => manySplits_1_4_tpDelayed: false,
+                "Enter HQ" => manySplits_1_4_cp0_pause_pos: false,
+                "Vent" => manySplits_1_4_cp1: false,
+                "Boss" => manySplits_1_4_cp2: false,
+            },
+            "Cheating The Race" {
+                "Enable Cheating The Race" => manySplits_1_5: true,
+                "Entry" => manySplits_1_5_entry: false,
+                "Time Piece" => manySplits_1_5_tp: true,
+                "Delayed Time Piece" => manySplits_1_5_tpDelayed: false,
+            },
+            "Heating Up Mafia Town" {
+                "Enable Heating Up Mafia Town" => manySplits_1_6: true,
+                "Entry" => manySplits_1_6_entry: false,
+                "Time Piece" => manySplits_1_6_tp: true,
+                "Delayed Time Piece" => manySplits_1_6_tpDelayed: false,
+                /// For routes that do the beach faucet after the death as the last one.
+                "Death" => manySplits_1_6_cp59_pause: false,
+            },
+            "The Golden Vault" {
+                "Enable The Golden Vault" => manySplits_1_7: true,
+                "Entry" => manySplits_1_7_entry: false,
+                "Time Piece" => manySplits_1_7_tp: true,
+                "Delayed Time Piece" => manySplits_1_7_tpDelayed: false,
+            },
+        },
+        "Battle of the Birds" {
+            "Enable Battle of the Birds" => manySplits_2: true,
+            "Dead Bird Studio" {
+                "Enable Dead Bird Studio" => manySplits_2_1: true,
+                "Entry" => manySplits_2_1_entry: false,
+                "Time Piece" => manySplits_2_1_tp: true,
+                "Delayed Time Piece" => manySplits_2_1_tpDelayed: false,
+                "Warp Exploit" => manySplits_2_1_cp5: false,
+            },
+            "Murder on the Owl Express" {
+                "Enable Murder on the Owl Express" => manySplits_2_2: true,
+                "Entry" => manySplits_2_2_entry: false,
+                "Time Piece" => manySplits_2_2_tp: true,
+                "Delayed Time Piece" => manySplits_2_2_tpDelayed: false,
+            },
+            "Picture Perfect" {
+                "Enable Picture Perfect" => manySplits_2_3: true,
+                "Entry" => manySplits_2_3_entry: false,
+                "Time Piece" => manySplits_2_3_tp: true,
+                "Delayed Time Piece" => manySplits_2_3_tpDelayed: false,
+            },
+            "Train Rush" {
+                "Enable Train Rush" => manySplits_2_4: true,
+                "Entry" => manySplits_2_4_entry: false,
+                "Time Piece" => manySplits_2_4_tp: true,
+                "Delayed Time Piece" => manySplits_2_4_tpDelayed: false,
+                "Intro" => manySplits_2_4_cp1: false,
+                "Exit to Roof" => manySplits_2_4_cp4: false,
+            },
+            "The Big Parade" {
+                "Enable The Big Parade" => manySplits_2_5: true,
+                "Entry" => manySplits_2_5_entry: false,
+                "Time Piece" => manySplits_2_5_tp: true,
+                "Delayed Time Piece" => manySplits_2_5_tpDelayed: false,
+                "Intro" => manySplits_2_5_cp1: false,
+                "Waiting Time #1" => manySplits_2_5_cp2: false,
+                "Waiting Time #2" => manySplits_2_5_cp3: false,
+            },
+            /// Covers both the fake and real finale time pieces and entries.
+            "Award Ceremony" {
+                "Enable Award Ceremony" => manySplits_2_6: true,
+                "Entry" => manySplits_2_6_entry: false,
+                "Time Piece" => manySplits_2_6_tp: true,
+                "Delayed Time Piece" => manySplits_2_6_tpDelayed: false,
+                "Elevator to Boss" => manySplits_2_6_cp0_pause_pos: false,
+            },
+        },
+        "Subcon Forest" {
+            "Enable Subcon Forest" => manySplits_3: true,
+            "Contractual Obligations" {
+                "Enable Contractual Obligations" => manySplits_3_1: true,
+                "Entry" => manySplits_3_1_entry: false,
+                "Time Piece" => manySplits_3_1_tp: true,
+                "Delayed Time Piece" => manySplits_3_1_tpDelayed: false,
+            },
+            "The Subcon Well" {
+                "Enable The Subcon Well" => manySplits_3_2: true,
+                "Entry" => manySplits_3_2_entry: false,
+                "Time Piece" => manySplits_3_2_tp: true,
+                "Delayed Time Piece" => manySplits_3_2_tpDelayed: false,
+                "Inside Well" => manySplits_3_2_cp0_pause_pos: false,
+            },
+            "Toilet of Doom" {
+                "Enable Toilet of Doom" => manySplits_3_3: true,
+                "Entry" => manySplits_3_3_entry: false,
+                "Time Piece" => manySplits_3_3_tp: true,
+                "Delayed Time Piece" => manySplits_3_3_tpDelayed: false,
+                "Fight Start" => manySplits_3_3_cp1: false,
+            },
+            "Queen Vanessa's Manor" {
+                "Enable Queen Vanessa's Manor" => manySplits_3_4: true,
+                "Entry" => manySplits_3_4_entry: false,
+                "Time Piece" => manySplits_3_4_tp: true,
+                "Delayed Time Piece" => manySplits_3_4_tpDelayed: false,
+                "Inside Manor" => manySplits_3_4_cp0_pause_pos: false,
+            },
+            "Mail Delivery Service" {
+                "Enable Mail Delivery Service" => manySplits_3_5: true,
+                "Entry" => manySplits_3_5_entry: false,
+                "Time Piece" => manySplits_3_5_tp: true,
+                "Delayed Time Piece" => manySplits_3_5_tpDelayed: false,
+            },
+            "Your Contract Has Expired" {
+                "Enable Your Contract Has Expired" => manySplits_3_6: true,
+                "Entry" => manySplits_3_6_entry: false,
+                "Time Piece" => manySplits_3_6_tp: true,
+                "Delayed Time Piece" => manySplits_3_6_tpDelayed: false,
+                "Fight Start" => manySplits_3_6_cp1: false,
+            },
+        },
+        "Alpine Skyline" {
+            "Enable Alpine Skyline" => manySplits_4: true,
+            "Time Pieces" => manySplits_4_tp: true,
+            "Intro" {
+                "Intro Entry" => manySplits_4_99_entry: false,
+                /// Triggers after the zipline fades to white and returns to the hub.
+                "Intro End" => manySplits_4_99_cp0_pause_pos: false,
+            },
+            "Position Splits" {
+                /// Triggers close to the end of the zipline.
+                "The Birdhouse Arrival" => manySplits_pos_40: false,
+                /// Triggers close to the end of the zipline.
+                "The Lava Cake Arrival" => manySplits_pos_41: false,
+                /// Triggers close to the end of the zipline.
+                "The Windmill Arrival" => manySplits_pos_42: false,
+                /// Triggers close to the end of the zipline.
+                "The Twilight Bell Arrival" => manySplits_pos_43: false,
+                "The Illness Has Spread - Birdhouse Warp" => manySplits_pos_44: false,
+                "The Illness Has Spread - Windmill Warp" => manySplits_pos_45: false,
+            },
+        },
+        "Time's End - The Finale" {
+            "Enable Time's End - The Finale" => manySplits_5: true,
+            "Entry" => manySplits_5_entry: false,
+            "Time Piece" => manySplits_5_tp: true,
+            /// Only recommended for ILs.
+            "Enter Castle" => manySplits_5_1_cp1: false,
+            /// Only recommended for ILs.
+            "Big Doors 1" => manySplits_5_1_cp2: false,
+            /// Only recommended for ILs.
+            "Big Doors 2" => manySplits_5_1_cp3: false,
+            "Slap" => manySplits_pos_5: false,
+            "Hyper Zone" => manySplits_5_1_cp10: false,
+        },
+        "The Arctic Cruise" {
+            "Enable The Arctic Cruise" => manySplits_6: true,
+            "Bon Voyage!" {
+                "Enable Bon Voyage!" => manySplits_6_1: true,
+                "Entry" => manySplits_6_1_entry: false,
+                "Time Piece" => manySplits_6_1_tp: true,
+                "Delayed Time Piece" => manySplits_6_1_tpDelayed: false,
+                "Check-in" => manySplits_6_1_cp3: false,
+            },
+            "Ship Shape" {
+                "Enable Ship Shape" => manySplits_6_2: true,
+                "Entry" => manySplits_6_2_entry: false,
+                "Time Piece" => manySplits_6_2_tp: true,
+                "Delayed Time Piece" => manySplits_6_2_tpDelayed: false,
+                "Job Start" => manySplits_6_2_cp1: false,
+            },
+            "Rock The Boat" {
+                "Enable Rock The Boat" => manySplits_6_3: true,
+                "Entry" => manySplits_6_3_entry: false,
+                "Time Piece" => manySplits_6_3_tp: true,
+                "Delayed Time Piece" => manySplits_6_3_tpDelayed: false,
+                "Sink the Boat" => manySplits_6_3_cp1: false,
+                "First Group Saved" => manySplits_6_3_cp2: false,
+                "Second Group Saved" => manySplits_6_3_cp3: false,
+            },
+        },
+        "Nyakuza Metro" {
+            "Enable Nyakuza Metro" => manySplits_7: true,
+            "Entry" => manySplits_7_entry: false,
+            "Time Pieces" => manySplits_7_tp: true,
+        },
+        "Blue Time Rifts" {
+            "Enable Blue Time Rifts" => manySplits_riftBlue: true,
+            "The Gallery" {
+                "Enable" => manySplits_riftBlue_gallery: true,
+                "Entry" => manySplits_riftBlue_gallery_entry: false,
+                "Time Piece" => manySplits_riftBlue_gallery_tp: true,
+            },
+            "The Lab" {
+                "Enable" => manySplits_riftBlue_lab: true,
+                "Entry" => manySplits_riftBlue_lab_entry: false,
+                "Time Piece" => manySplits_riftBlue_lab_tp: true,
+            },
+            "Sewers" {
+                "Enable" => manySplits_riftBlue_sewers: true,
+                "Entry" => manySplits_riftBlue_sewers_entry: false,
+                "Time Piece" => manySplits_riftBlue_sewers_tp: true,
+            },
+            "Bazaar" {
+                "Enable" => manySplits_riftBlue_bazaar: true,
+                "Entry" => manySplits_riftBlue_bazaar_entry: false,
+                "Time Piece" => manySplits_riftBlue_bazaar_tp: true,
+            },
+            "The Owl Express" {
+                "Enable" => manySplits_riftBlue_owlExpress: true,
+                "Entry" => manySplits_riftBlue_owlExpress_entry: false,
+                "Time Piece" => manySplits_riftBlue_owlExpress_tp: true,
+            },
+            "The Moon" {
+                "Enable" => manySplits_riftBlue_moon: true,
+                "Entry" => manySplits_riftBlue_moon_entry: false,
+                "Time Piece" => manySplits_riftBlue_moon_tp: true,
+            },
+            "Village" {
+                "Enable" => manySplits_riftBlue_village: true,
+                "Entry" => manySplits_riftBlue_village_entry: false,
+                "Time Piece" => manySplits_riftBlue_village_tp: true,
+            },
+            "Pipe" {
+                "Enable" => manySplits_riftBlue_pipe: true,
+                "Entry" => manySplits_riftBlue_pipe_entry: false,
+                "Time Piece" => manySplits_riftBlue_pipe_tp: true,
+            },
+            "Twilight Bell" {
+                "Enable" => manySplits_riftBlue_twilight: true,
+                "Entry" => manySplits_riftBlue_twilight_entry: false,
+                "Time Piece" => manySplits_riftBlue_twilight_tp: true,
+            },
+            "Curly Tail Trail" {
+                "Enable" => manySplits_riftBlue_curly: true,
+                "Entry" => manySplits_riftBlue_curly_entry: false,
+                "Time Piece" => manySplits_riftBlue_curly_tp: true,
+            },
+            "Balcony" {
+                "Enable" => manySplits_riftBlue_balcony: true,
+                "Entry" => manySplits_riftBlue_balcony_entry: false,
+                "Time Piece" => manySplits_riftBlue_balcony_tp: true,
+            },
+        },
+        "Purple Time Rifts" {
+            "Enable Purple Time Rifts" => manySplits_riftPurple: true,
+            "Mafia of Cooks" {
+                "Enable" => manySplits_riftPurple_moc: true,
+                "Entry" => manySplits_riftPurple_moc_entry: false,
+                "Room Completed" => manySplits_riftPurple_moc_cp: false,
+                "Time Piece" => manySplits_riftPurple_moc_tp: true,
+            },
+            "Dead Bird Studio" {
+                "Enable" => manySplits_riftPurple_dbs: true,
+                "Entry" => manySplits_riftPurple_dbs_entry: false,
+                "Room Completed" => manySplits_riftPurple_dbs_cp: false,
+                "Time Piece" => manySplits_riftPurple_dbs_tp: true,
+            },
+            "Sleepy Subcon" {
+                "Enable" => manySplits_riftPurple_sleepy: true,
+                "Entry" => manySplits_riftPurple_sleepy_entry: false,
+                "Room Completed" => manySplits_riftPurple_sleepy_cp: false,
+                "Time Piece" => manySplits_riftPurple_sleepy_tp: true,
+            },
+            "Alpine Skyline" {
+                "Enable" => manySplits_riftPurple_alpine: true,
+                "Entry" => manySplits_riftPurple_alpine_entry: false,
+                "Room Completed" => manySplits_riftPurple_alpine_cp: false,
+                "Time Piece" => manySplits_riftPurple_alpine_tp: true,
+            },
+            "Deep Sea" {
+                "Enable" => manySplits_riftPurple_deepSea: true,
+                "Entry" => manySplits_riftPurple_deepSea_entry: false,
+                "Room Completed" => manySplits_riftPurple_deepSea_cp: false,
+                "Time Piece" => manySplits_riftPurple_deepSea_tp: true,
+            },
+            "Rumbi Factory" {
+                "Enable" => manySplits_riftPurple_rumbi: true,
+                "Entry" => manySplits_riftPurple_rumbi_entry: false,
+                "Room Completed" => manySplits_riftPurple_rumbi_cp: false,
+                "Time Piece" => manySplits_riftPurple_rumbi_tp: true,
+            },
+            "Tour" {
+                "Enable" => manySplits_riftPurple_tour: true,
+                "Entry" => manySplits_riftPurple_tour_entry: false,
+                "Room Completed" => manySplits_riftPurple_tour_cp: false,
+                "Time Piece" => manySplits_riftPurple_tour_tp: true,
+            },
+        },
+    },
+}
+
 fn saveDataOffsets(layout) {
     return match layout {
         SaveDataLayout.DLC => SaveDataOffsets {

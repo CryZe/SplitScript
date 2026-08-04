@@ -22,7 +22,7 @@ use super::{
     },
     call_target,
     context::AttachContext,
-    data_plan::{SignaturePool, StringPool},
+    data_plan::{SignatureEntry, SignaturePool, StringPool},
     emit_default, emit_memory_value, emit_string_literal, emit_typed_struct_get,
     expression::{
         BareReturn, ExprContext, IntrinsicCapture, LocalStorage, LoopControl, MatchLayout,
@@ -33,6 +33,11 @@ use super::{
     imports::Abi,
     memarg, plan_wasm_locals, resolved_intrinsic, semantic_type, unity_layout,
 };
+
+/// Candidate start positions inspected by one signature-future poll. The
+/// range helper reads in smaller pages within this window, so control returns
+/// to the host after a bounded amount of work even for very large mappings.
+const SIGNATURE_SCAN_CANDIDATES_PER_POLL: i64 = 64 * 1024;
 
 pub(super) fn compile_async_attach(
     action: &Action,
@@ -431,6 +436,304 @@ fn mark_future_complete(function: &mut Function, target: BareReturn) {
     }
 }
 
+fn intrinsic_state(context: &ExprContext<'_>, slot: usize) -> (AsyncFrameRef, u32, Type) {
+    let capture = context
+        .intrinsic_capture
+        .expect("stateful intrinsics are polled through their own future frame");
+    let (field, ty) = capture.layout.state[slot];
+    (capture.frame, field, ty)
+}
+
+fn emit_intrinsic_state_get(function: &mut Function, context: &ExprContext<'_>, slot: usize) {
+    let (frame, field, ty) = intrinsic_state(context, slot);
+    frame.emit(function);
+    emit_typed_struct_get(function, frame.struct_type, field, ty);
+}
+
+fn emit_intrinsic_state_set_local(
+    function: &mut Function,
+    context: &ExprContext<'_>,
+    slot: usize,
+    local: u32,
+) {
+    let (frame, field, _) = intrinsic_state(context, slot);
+    frame.emit(function);
+    function
+        .instruction(&Instruction::LocalGet(local))
+        .instruction(&Instruction::StructSet {
+            struct_type_index: frame.struct_type,
+            field_index: field,
+        });
+}
+
+fn emit_intrinsic_state_set_zero(function: &mut Function, context: &ExprContext<'_>, slot: usize) {
+    let (frame, field, _) = intrinsic_state(context, slot);
+    frame.emit(function);
+    function
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::StructSet {
+            struct_type_index: frame.struct_type,
+            field_index: field,
+        });
+}
+
+/// Polls one bounded window of an explicit memory range. The caller has
+/// already placed the range address and size in scratch slots 1 and 2. A
+/// successful address is left in slot 3; absence returns `pending` directly.
+fn emit_cooperative_range_scan(
+    function: &mut Function,
+    target: &wasm_ir::CallTarget,
+    entry: SignatureEntry,
+    scratch: &[u32],
+    process_from_runtime: bool,
+    context: &ExprContext<'_>,
+) {
+    let cursor = scratch[0];
+    let address = scratch[1];
+    let remaining = scratch[2];
+    let matched = scratch[3];
+    let window_limit = SIGNATURE_SCAN_CANDIDATES_PER_POLL + i64::from(entry.len) - 1;
+
+    emit_intrinsic_state_get(function, context, 0);
+    function
+        .instruction(&Instruction::LocalSet(cursor))
+        // remaining = size - cursor, unless no candidate can start here.
+        .instruction(&Instruction::LocalGet(cursor))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I64GeU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_intrinsic_state_set_zero(function, context, 0);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::LocalGet(cursor))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalTee(remaining))
+        .instruction(&Instruction::I64Const(i64::from(entry.len)))
+        .instruction(&Instruction::I64LtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_intrinsic_state_set_zero(function, context, 0);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+
+    if process_from_runtime {
+        function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+    } else {
+        compile_receiver(function, target, context);
+    }
+    function
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::LocalGet(cursor))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I64Const(window_limit))
+        .instruction(&Instruction::I64LeU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I64Const(window_limit))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(entry.needle as i32))
+        .instruction(&Instruction::I32Const(entry.mask as i32))
+        .instruction(&Instruction::I32Const(entry.len as i32))
+        .instruction(&Instruction::Call(
+            context
+                .runtime_helpers
+                .function(RuntimeHelperId::ScanProcessRange),
+        ))
+        .instruction(&Instruction::LocalTee(matched))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I64Const(window_limit))
+        .instruction(&Instruction::I64LeU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_intrinsic_state_set_zero(function, context, 0);
+    function.instruction(&Instruction::Else);
+    let (frame, field, _) = intrinsic_state(context, 0);
+    frame.emit(function);
+    function
+        .instruction(&Instruction::LocalGet(cursor))
+        .instruction(&Instruction::I64Const(SIGNATURE_SCAN_CANDIDATES_PER_POLL))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: frame.struct_type,
+            field_index: field,
+        })
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+}
+
+fn emit_process_scan_advance_range(
+    function: &mut Function,
+    context: &ExprContext<'_>,
+    next_range: u32,
+) {
+    emit_intrinsic_state_set_local(function, context, 0, next_range);
+    emit_intrinsic_state_set_zero(function, context, 1);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return);
+}
+
+/// Polls at most one bounded window from one readable process memory range.
+/// State slot 0 encodes the current reverse range as `index + 1`; zero starts
+/// a fresh snapshot. State slot 1 is the byte cursor within that range.
+fn emit_cooperative_process_scan(
+    function: &mut Function,
+    target: &wasm_ir::CallTarget,
+    entry: SignatureEntry,
+    scratch: &[u32],
+    abi: &Abi,
+    context: &ExprContext<'_>,
+) {
+    let range_cursor = scratch[0];
+    let offset = scratch[1];
+    let index = scratch[2];
+    let address = scratch[3];
+    let remaining = scratch[4];
+    let matched = scratch[5];
+    let window_limit = SIGNATURE_SCAN_CANDIDATES_PER_POLL + i64::from(entry.len) - 1;
+
+    emit_intrinsic_state_get(function, context, 0);
+    function.instruction(&Instruction::LocalSet(range_cursor));
+    emit_intrinsic_state_get(function, context, 1);
+    function.instruction(&Instruction::LocalSet(offset));
+
+    compile_receiver(function, target, context);
+    function
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeCount),
+        ))
+        .instruction(&Instruction::LocalSet(index))
+        // Start a new reverse traversal, or recover if the host's mapping list
+        // shrank while this future was suspended.
+        .instruction(&Instruction::LocalGet(range_cursor))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::LocalGet(range_cursor))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I64GtU)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalSet(range_cursor))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::LocalSet(offset))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(range_cursor))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_intrinsic_state_set_zero(function, context, 0);
+    emit_intrinsic_state_set_zero(function, context, 1);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(range_cursor))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalSet(index));
+
+    compile_receiver(function, target, context);
+    function
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeFlags),
+        ))
+        .instruction(&Instruction::I64Const(1 << 1))
+        .instruction(&Instruction::I64And)
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_process_scan_advance_range(function, context, index);
+    function.instruction(&Instruction::End);
+
+    compile_receiver(function, target, context);
+    function
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeAddress),
+        ))
+        .instruction(&Instruction::LocalSet(address));
+    compile_receiver(function, target, context);
+    function
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeSize),
+        ))
+        .instruction(&Instruction::LocalSet(remaining))
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I64GeU)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_process_scan_advance_range(function, context, index);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalTee(remaining))
+        .instruction(&Instruction::I64Const(i64::from(entry.len)))
+        .instruction(&Instruction::I64LtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_process_scan_advance_range(function, context, index);
+    function.instruction(&Instruction::End);
+
+    compile_receiver(function, target, context);
+    function
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I64Const(window_limit))
+        .instruction(&Instruction::I64LeU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I64Const(window_limit))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(entry.needle as i32))
+        .instruction(&Instruction::I32Const(entry.mask as i32))
+        .instruction(&Instruction::I32Const(entry.len as i32))
+        .instruction(&Instruction::Call(
+            context
+                .runtime_helpers
+                .function(RuntimeHelperId::ScanProcessRange),
+        ))
+        .instruction(&Instruction::LocalTee(matched))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I64Const(window_limit))
+        .instruction(&Instruction::I64LeU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_process_scan_advance_range(function, context, index);
+    function.instruction(&Instruction::Else);
+    emit_intrinsic_state_set_local(function, context, 0, range_cursor);
+    let (frame, field, _) = intrinsic_state(context, 1);
+    frame.emit(function);
+    function
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Const(SIGNATURE_SCAN_CANDIDATES_PER_POLL))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: frame.struct_type,
+            field_index: field,
+        })
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compile_suspension_poll(
     function: &mut Function,
@@ -451,13 +754,23 @@ fn compile_suspension_poll(
         .wasm_ir
         .expression(value)
         .expect("await value belongs to Wasm IR");
+    let stateful_intrinsic = match &value_expression.kind {
+        wasm_ir::ExpressionKind::Call {
+            target: wasm_ir::CallTarget::Intrinsic { intrinsic, .. },
+            ..
+        } => crate::intrinsic_registry::contract(*intrinsic)
+            .async_state
+            .is_some(),
+        _ => false,
+    };
     if !matches!(
         &value_expression.kind,
         wasm_ir::ExpressionKind::Call {
             target: wasm_ir::CallTarget::Intrinsic { .. },
             ..
         }
-    ) {
+    ) || (stateful_intrinsic && context.intrinsic_capture.is_none())
+    {
         compile_source_future_poll(function, destination, value, layout, context);
         return;
     }
@@ -644,28 +957,36 @@ fn compile_suspension_poll(
                 unreachable!();
             };
             let entry = signatures.get(signature);
-            compile_receiver(function, target, context);
             compile_expr(function, args[0], context);
+            function.instruction(&Instruction::LocalSet(scratch[1]));
             compile_expr(function, args[1], context);
-            function
-                .instruction(&Instruction::I32Const(entry.needle as i32))
-                .instruction(&Instruction::I32Const(entry.mask as i32))
-                .instruction(&Instruction::I32Const(entry.len as i32))
-                .instruction(&Instruction::Call(
-                    context
-                        .runtime_helpers
-                        .function(RuntimeHelperId::ScanProcessRange),
-                ))
-                .instruction(&Instruction::LocalTee(module_address_local))
-                .instruction(&Instruction::I64Eqz)
-                .instruction(&Instruction::If(BlockType::Empty))
-                .instruction(&Instruction::I32Const(0))
-                .instruction(&Instruction::Return)
-                .instruction(&Instruction::End);
+            function.instruction(&Instruction::LocalSet(scratch[2]));
+            emit_cooperative_range_scan(function, target, entry, scratch, false, context);
             if let Some((field, _)) = layout.field(destination) {
                 context.locals.frame().emit(function);
                 function
-                    .instruction(&Instruction::LocalGet(module_address_local))
+                    .instruction(&Instruction::LocalGet(scratch[3]))
+                    .instruction(&Instruction::StructSet {
+                        struct_type_index: context.locals.frame().struct_type,
+                        field_index: field,
+                    });
+            }
+        }
+        Some(IntrinsicId::ProcessScanMemory) => {
+            let wasm_ir::ExpressionKind::Signature(signature) = &context
+                .wasm_ir
+                .expression(args[0])
+                .expect("process-memory scan signature belongs to Wasm IR")
+                .kind
+            else {
+                unreachable!();
+            };
+            let entry = signatures.get(signature);
+            emit_cooperative_process_scan(function, target, entry, scratch, abi, context);
+            if let Some((field, _)) = layout.field(destination) {
+                context.locals.frame().emit(function);
+                function
+                    .instruction(&Instruction::LocalGet(scratch[5]))
                     .instruction(&Instruction::StructSet {
                         struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
@@ -929,7 +1250,6 @@ fn compile_suspension_poll(
                 unreachable!();
             };
             let entry = signatures.get(signature);
-            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
             compile_receiver(function, target, context);
             function
                 .instruction(&Instruction::RefAsNonNull)
@@ -938,7 +1258,8 @@ fn compile_suspension_poll(
                     field_index: context
                         .gc
                         .standard_field_index(StdlibFieldId::ModuleAddress),
-                });
+                })
+                .instruction(&Instruction::LocalSet(scratch[1]));
             compile_receiver(function, target, context);
             function
                 .instruction(&Instruction::RefAsNonNull)
@@ -946,24 +1267,12 @@ fn compile_suspension_poll(
                     struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
                     field_index: context.gc.standard_field_index(StdlibFieldId::ModuleSize),
                 })
-                .instruction(&Instruction::I32Const(entry.needle as i32))
-                .instruction(&Instruction::I32Const(entry.mask as i32))
-                .instruction(&Instruction::I32Const(entry.len as i32))
-                .instruction(&Instruction::Call(
-                    context
-                        .runtime_helpers
-                        .function(RuntimeHelperId::ScanProcessRange),
-                ))
-                .instruction(&Instruction::LocalTee(module_address_local))
-                .instruction(&Instruction::I64Eqz)
-                .instruction(&Instruction::If(BlockType::Empty))
-                .instruction(&Instruction::I32Const(0))
-                .instruction(&Instruction::Return)
-                .instruction(&Instruction::End);
+                .instruction(&Instruction::LocalSet(scratch[2]));
+            emit_cooperative_range_scan(function, target, entry, scratch, true, context);
             if let Some((field, _)) = layout.field(destination) {
                 context.locals.frame().emit(function);
                 function
-                    .instruction(&Instruction::LocalGet(module_address_local))
+                    .instruction(&Instruction::LocalGet(scratch[3]))
                     .instruction(&Instruction::StructSet {
                         struct_type_index: context.locals.frame().struct_type,
                         field_index: field,

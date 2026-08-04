@@ -1911,6 +1911,9 @@ fn compile_expr_unconverted(
                 compile_expr(function, *argument, context);
             }
         }
+        for (_, ty) in &layout.state {
+            emit_default(function, *ty, context.gc);
+        }
         if let Some((_, completion)) = layout.completion {
             emit_default(function, completion, context.gc);
         }
@@ -2223,7 +2226,7 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
-            IntrinsicId::ProcessScan => {
+            IntrinsicId::ProcessScan | IntrinsicId::ProcessScanMemory => {
                 unreachable!("process.scan is lowered as an await")
             }
             IntrinsicId::ProcessReadRelative32 => {

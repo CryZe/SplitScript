@@ -183,18 +183,18 @@ impl AsyncFrameLayout {
                     let expression = program
                         .expression(*value)
                         .expect("suspension operands belong to Wasm IR");
-                    let is_intrinsic = matches!(
+                    let directly_polled_intrinsic = matches!(
                         expression.kind,
                         wasm_ir::ExpressionKind::Call {
-                            target: wasm_ir::CallTarget::Intrinsic { .. },
+                            target: wasm_ir::CallTarget::Intrinsic { intrinsic, .. },
                             ..
-                        }
+                        } if crate::intrinsic_registry::contract(intrinsic).async_state.is_none()
                     );
                     let ty = self.owner.map_or(expression.ty, |owner| {
                         self.semantics.specialize_type(owner, expression.ty)
                     });
                     let ty = semantic_type(ty, self.semantics);
-                    if matches!(ty, Type::Async(_)) && !is_intrinsic {
+                    if matches!(ty, Type::Async(_)) && !directly_polled_intrinsic {
                         self.values.push((*value, ty));
                     }
                 }
@@ -272,6 +272,7 @@ pub(super) struct IntrinsicFutureLayout {
     pub future: Type,
     pub receiver: Option<(u32, Type)>,
     pub arguments: HashMap<ExprId, (u32, Type)>,
+    pub state: Vec<(u32, Type)>,
     pub completion: Option<(u32, Type)>,
     pub types: Vec<Type>,
 }
@@ -320,9 +321,9 @@ impl AsyncFrameLayouts {
                             .expect("suspension operands belong to Wasm IR")
                             .kind,
                         wasm_ir::ExpressionKind::Call {
-                            target: wasm_ir::CallTarget::Intrinsic { .. },
+                            target: wasm_ir::CallTarget::Intrinsic { intrinsic, .. },
                             ..
-                        }
+                        } if crate::intrinsic_registry::contract(intrinsic).async_state.is_none()
                     )
                 {
                     self.values.insert(IntrinsicFutureInstance {
@@ -367,6 +368,7 @@ impl AsyncFrameLayouts {
                 continue;
             };
             let wasm_ir::CallTarget::Intrinsic {
+                intrinsic,
                 receiver,
                 receiver_type,
                 ..
@@ -413,6 +415,23 @@ impl AsyncFrameLayouts {
                 types.push(ty);
                 captured_arguments.insert(*argument, (field, ty));
             }
+            let mut state = Vec::new();
+            if let Some(policy) = crate::intrinsic_registry::contract(*intrinsic).async_state {
+                let ty = match policy.ty {
+                    crate::intrinsic_registry::ScratchType::Core(core) => {
+                        semantic_type(semantics.types().id_for_core(core), semantics)
+                    }
+                    crate::intrinsic_registry::ScratchType::Expression
+                    | crate::intrinsic_registry::ScratchType::ResultValue => {
+                        unreachable!("intrinsic future state currently uses concrete core types")
+                    }
+                };
+                for _ in 0..policy.slots {
+                    let field = 2 + types.len() as u32;
+                    types.push(ty);
+                    state.push((field, ty));
+                }
+            }
             let completion_type = semantic_type(specialize(*value), semantics);
             let completion = (completion_type != Type::None).then(|| {
                 let field = 2 + types.len() as u32;
@@ -436,6 +455,7 @@ impl AsyncFrameLayouts {
                     future: semantic_type(future_id, semantics),
                     receiver,
                     arguments: captured_arguments,
+                    state,
                     completion,
                     types,
                 },

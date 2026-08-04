@@ -274,7 +274,9 @@ intrinsic type Process {
 
     /// Scans a process-memory range.
     ///
-    /// Suspends until the signature is found in the requested range.
+    /// Suspends until the signature is found in the requested range. Large
+    /// ranges are scanned cooperatively across ticks so the autosplitter keeps
+    /// yielding to the host.
     ///
     /// # Example
     ///
@@ -289,6 +291,29 @@ intrinsic type Process {
         address: address,
         /// The number of bytes to scan.
         size: u64,
+        /// The compile-time signature pattern.
+        @literal(signature)
+        signature: Signature,
+    ) -> address;
+
+    /// Scans every readable mapped memory range in the process.
+    ///
+    /// Ranges are visited from the highest address to the lowest address and
+    /// unreadable mappings are skipped. The operation suspends until a match
+    /// exists and is cancelled automatically when the process closes. Prefer
+    /// module or explicit-range scans when the target is known because they
+    /// perform less work. Only a bounded window is inspected per tick, so even
+    /// a large process-wide search keeps yielding to the host.
+    ///
+    /// # Example
+    ///
+    /// Discover a runtime-created marker outside known modules
+    ///
+    /// ```splitscript
+    /// let timerData = await process.scanMemory(sig"54 49 4D 52 ?? ?? ?? ??")
+    /// ```
+    @intrinsic(ProcessScanMemory)
+    fn scanMemory(
         /// The compile-time signature pattern.
         @literal(signature)
         signature: Signature,
@@ -2070,7 +2095,9 @@ struct Module {
 
     /// Scans a module for a signature.
     ///
-    /// The module's address and size define the scanned range.
+    /// The module's address and size define the scanned range. Large modules
+    /// are scanned cooperatively across ticks so the autosplitter keeps
+    /// yielding to the host.
     ///
     /// # Example
     ///

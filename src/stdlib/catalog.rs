@@ -102,12 +102,13 @@ onAttach {
     let module = await process.module("GameAssembly.dll")
     let marker = await module.scan(sig"48 8B ?? 89")
     let rangedMarker = await process.scan(module.address, module.size, sig"48 8B ?? 89")
+    let processMarker = await process.scanMemory(sig"54 49 4D 52 ?? ?? ?? ??")
     let object = retry process.follow(module.address, [0x100, 0x20])
     let health = retry process.read<i32>(object.offset(0x10))
     let target = retry process.readRelative32(marker.offset(3))
     let moduleTarget = retry module.readRelative32(0x400)
     let scene = retry process.readManagedString(target, 64)
-    print(`{rangedMarker}:{health}:{moduleTarget}:{scene}`)
+    print(`{rangedMarker}:{processMarker}:{health}:{moduleTarget}:{scene}`)
 }"#;
 const UNITY_EXAMPLE: &str = r#"state "game.exe" {}
 onAttach {
@@ -165,6 +166,7 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::ProcessRead
         | StdlibItemId::ProcessFollow
         | StdlibItemId::ProcessScan
+        | StdlibItemId::ProcessScanMemory
         | StdlibItemId::ProcessReadRelative32
         | StdlibItemId::ProcessReadUtf8
         | StdlibItemId::ProcessReadManagedString

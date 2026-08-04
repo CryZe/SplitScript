@@ -27,11 +27,32 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — unblock the next representative native port
+## Now — faithfully port A Hat in Time
 
-- [ ] Select the next manually reviewed ASL port whose blocker is shared by
-  multiple scripts, then implement the smallest ordinary language or
-  source-defined standard-library feature that makes the port faithful.
+- [ ] Port the production-scale `AHatInTime.asl` without copying its C#
+  implementation artifacts. Its background scan thread becomes suspending
+  `onAttach` discovery, followed by declarative state polling only after every
+  required root is ready.
+- [x] Add process-wide signature discovery over readable mapped ranges. Keep
+  explicit range/module scanning available, scan ranges in deterministic
+  reverse order for this port, skip unreadable mappings, and preserve
+  process-lifetime cancellation while discovery is pending. Every public scan
+  owns a future-local cursor and inspects only a bounded window per tick.
+- [ ] Move compiler-owned Unity IL2CPP and GBA discovery onto the same
+  cooperative scan machinery. An async-looking provider must never call a
+  helper that traverses an unbounded module or memory-range list in one poll.
+- [ ] Represent the timer, save-data, actor, and coordinate watchers through
+  discovered addresses and patch-dependent pointer paths. Prefer ordinary
+  globals, records, arrays, functions, and state expressions over dynamic
+  `MemoryWatcher` objects or game-specific compiler branches.
+- [ ] Add host-driven `onSplit` behavior for the debounce lock so manual and
+  externally initiated splits are observed as well as splits requested by the
+  script. Define event ordering and detached availability before exposing the
+  action.
+- [ ] Preserve the full settings hierarchy, detailed/rift/position split
+  tables, game-time correction, IL mode, start/reset behavior, and split lock.
+  Introduce a repeated-settings or collection abstraction only where the
+  static source would otherwise become materially unmaintainable.
 
 ## P0 — unblock the next representative native ports
 

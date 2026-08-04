@@ -1,0 +1,6 @@
+state "game.exe" {}
+
+onAttach {
+    let marker = await process.scanMemory(sig"DE AD ?? EF")
+    print(marker)
+}

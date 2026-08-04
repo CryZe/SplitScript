@@ -201,6 +201,8 @@ pub(crate) struct IntrinsicContract {
     pub(crate) lowering: LoweringClass,
     pub(crate) dependency_roots: &'static [DependencyRoot],
     pub(crate) async_scratch: Option<ScratchPolicy>,
+    /// Values retained inside a compiler-generated future between polls.
+    pub(crate) async_state: Option<ScratchPolicy>,
     pub(crate) synchronous_scratch: Option<ScratchPolicy>,
 }
 
@@ -222,6 +224,7 @@ impl IntrinsicContract {
             lowering,
             dependency_roots: dependency_roots(id),
             async_scratch: async_scratch(id),
+            async_state: async_state(id),
             synchronous_scratch: synchronous_scratch(id),
         }
     }
@@ -244,17 +247,28 @@ const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => {
             scratch(ScratchType::Core(CoreTypeId::U64), 2)
         }
+        IntrinsicId::ProcessScan => scratch(ScratchType::Core(CoreTypeId::U64), 4),
+        IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 6),
+        IntrinsicId::ModuleScan => scratch(ScratchType::Core(CoreTypeId::U64), 4),
         IntrinsicId::ProcessFollow
-        | IntrinsicId::ProcessScan
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::UnityClassField
         | IntrinsicId::UnityClassStaticInstance
-        | IntrinsicId::UnityClassStaticTable
-        | IntrinsicId::ModuleScan => scratch(ScratchType::Core(CoreTypeId::U64), 1),
+        | IntrinsicId::UnityClassStaticTable => scratch(ScratchType::Core(CoreTypeId::U64), 1),
         IntrinsicId::UnityIl2Cpp
         | IntrinsicId::UnityModuleImage
         | IntrinsicId::UnityImageClass
         | IntrinsicId::UnityClassFieldAny => scratch(ScratchType::Expression, 1),
+        _ => None,
+    }
+}
+
+const fn async_state(id: IntrinsicId) -> Option<ScratchPolicy> {
+    match id {
+        IntrinsicId::ProcessScan | IntrinsicId::ModuleScan => {
+            scratch(ScratchType::Core(CoreTypeId::U64), 1)
+        }
+        IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 2),
         _ => None,
     }
 }
@@ -300,6 +314,13 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::ProcessRead => &[HostImport(Host::ProcessRead)],
         IntrinsicId::ProcessFollow => &[Helper(Runtime::FollowAddress)],
         IntrinsicId::ProcessScan | IntrinsicId::ModuleScan => &[Helper(Runtime::ScanProcessRange)],
+        IntrinsicId::ProcessScanMemory => &[
+            Helper(Runtime::ScanProcessRange),
+            HostImport(Host::ProcessGetMemoryRangeCount),
+            HostImport(Host::ProcessGetMemoryRangeAddress),
+            HostImport(Host::ProcessGetMemoryRangeSize),
+            HostImport(Host::ProcessGetMemoryRangeFlags),
+        ],
         IntrinsicId::ProcessReadRelative32 => &[Helper(Runtime::ReadRelative32)],
         IntrinsicId::ProcessReadUtf8 => &[Helper(Runtime::ReadUtf8String)],
         IntrinsicId::ProcessReadManagedString => &[Helper(Runtime::ReadManagedString)],
@@ -695,6 +716,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                     value(U64),
                     literal(SIGNATURE, ParameterRule::SignatureLiteral),
                 ],
+                ADDRESS,
+            ),
+            PROCESS_SUSPEND,
+            OnAttach,
+            Suspension
+        ),
+        IntrinsicId::ProcessScanMemory => contract!(
+            ProcessScanMemory,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(PROCESS_TYPE),
+                params![literal(SIGNATURE, ParameterRule::SignatureLiteral)],
                 ADDRESS,
             ),
             PROCESS_SUSPEND,

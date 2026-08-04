@@ -29,7 +29,7 @@ General rules:
 
 ## Now — faithfully port A Hat in Time
 
-- [ ] Port the production-scale `AHatInTime.asl` without copying its C#
+- [x] Port the production-scale `AHatInTime.asl` without copying its C#
   implementation artifacts. Its background scan thread becomes suspending
   `onAttach` discovery, followed by declarative state polling only after every
   required root is ready.
@@ -52,13 +52,13 @@ General rules:
   `MemoryWatcher` objects or game-specific compiler branches. The A Hat runtime
   fixture covers alternative-signature layout selection and the discovered
   save-data and actor pointer chains.
-- [ ] Implement the debounce lock with the existing
+- [x] Implement the debounce lock with the existing
   `timer_current_split_index` host import. Observe index advancement from
   `whileAttached`; document that skips also advance the index and that an undo
   followed by a split between polls is not observable through the current ABI.
   Keep an exact host-driven timer event as future runtime work rather than
   inventing an export that LiveSplit does not call.
-- [ ] Preserve the full settings hierarchy, detailed/rift/position split
+- [x] Preserve the full settings hierarchy, detailed/rift/position split
   tables, game-time correction, IL mode, start/reset behavior, and split lock.
   Introduce a repeated-settings or collection abstraction only where the
   static source would otherwise become materially unmaintainable.

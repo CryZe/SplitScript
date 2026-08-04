@@ -5,6 +5,29 @@ enum SaveDataLayout {
     Release,
 }
 
+/// Time rift currently occupied by Hat Kid.
+enum Rift {
+    None,
+    PurpleMafiaOfCooks,
+    PurpleDeadBirdStudio,
+    PurpleSleepySubcon,
+    PurpleAlpineSkyline,
+    PurpleDeepSea,
+    PurpleRumbiFactory,
+    PurpleTour,
+    BlueSewers,
+    BlueBazaar,
+    BlueOwlExpress,
+    BlueMoon,
+    BlueVillage,
+    BluePipe,
+    BlueTwilightBell,
+    BlueCurlyTailTrail,
+    BlueBalcony,
+    BlueLab,
+    BlueGallery,
+}
+
 /// Patch-dependent offsets below the discovered save-data pointer.
 record SaveDataOffsets {
     root: u64,
@@ -12,6 +35,59 @@ record SaveDataOffsets {
     chapter: u64,
     act: u64,
     checkpoint: u64,
+}
+
+/// Axis-aligned world-space trigger volume.
+record Bounds {
+    minX: f32,
+    maxX: f32,
+    minY: f32,
+    maxY: f32,
+    minZ: f32,
+    maxZ: f32,
+}
+
+/// Volume that arms a later position split.
+record PositionKeyLocation {
+    chapter: i32,
+    key: i32,
+    bounds: Bounds,
+}
+
+/// Destination volume associated with an armed position split.
+record PositionTarget {
+    key: i32,
+    bounds: Bounds,
+}
+
+/// Rift identity and one of the world-space volumes that identifies it.
+record RiftLocation {
+    /// Zero means the location is valid in every chapter.
+    chapter: i32,
+    rift: Rift,
+    bounds: Bounds,
+}
+
+/// Chapter-qualified world-space location, with zero meaning every chapter.
+record ChapterLocation {
+    chapter: i32,
+    bounds: Bounds,
+}
+
+/// Pause transition whose position can produce a detailed split.
+enum PausePosition {
+    MafiaHeadquarters,
+    BasementBoss,
+    SubconWell,
+    VanessaManor,
+    AlpineIntro,
+}
+
+/// Chapter-specific pause transition volume.
+record PauseLocation {
+    chapter: i32,
+    kind: PausePosition,
+    bounds: Bounds,
 }
 
 settings {
@@ -422,10 +498,1055 @@ let checkpointPath: MemoryPath? = None
 let xPath: MemoryPath? = None
 let yPath: MemoryPath? = None
 let zPath: MemoryPath? = None
+let lastChapter = 0
+let gameTimeFinal = 0.0
+let savedGameTime = 0.0
+let splitInLoadScreen = false
+let currentRift = Rift.None
+let justEnteredRift = false
+let positionSplitKey = 0
+let observedSplitIndex: i64 = -1
+let lastSplitAt: Instant? = None
+
+let positionKeyLocations = [
+    PositionKeyLocation {
+        chapter: 4,
+        key: 40,
+        bounds: Bounds {
+            minX: -11000.0,
+            maxX: -9000.0,
+            minY: 32000.0,
+            maxY: 34000.0,
+            minZ: -1000.0,
+            maxZ: 500.0,
+        },
+    },
+    PositionKeyLocation {
+        chapter: 4,
+        key: 41,
+        bounds: Bounds {
+            minX: 36500.0,
+            maxX: 38000.0,
+            minY: -13000.0,
+            maxY: -11000.0,
+            minZ: 4500.0,
+            maxZ: 5500.0,
+        },
+    },
+    PositionKeyLocation {
+        chapter: 4,
+        key: 42,
+        bounds: Bounds {
+            minX: 47000.0,
+            maxX: 49000.0,
+            minY: 21000.0,
+            maxY: 22000.0,
+            minZ: 1000.0,
+            maxZ: 2500.0,
+        },
+    },
+    PositionKeyLocation {
+        chapter: 4,
+        key: 43,
+        bounds: Bounds {
+            minX: 7000.0,
+            maxX: 8500.0,
+            minY: 43000.0,
+            maxY: 45000.0,
+            minZ: -1000.0,
+            maxZ: 1000.0,
+        },
+    },
+    PositionKeyLocation {
+        chapter: 4,
+        key: 44,
+        bounds: Bounds {
+            minX: -15300.0,
+            maxX: -14400.0,
+            minY: 47750.0,
+            maxY: 49000.0,
+            minZ: -1650.0,
+            maxZ: -1300.0,
+        },
+    },
+    PositionKeyLocation {
+        chapter: 4,
+        key: 45,
+        bounds: Bounds {
+            minX: 41000.0,
+            maxX: 42500.0,
+            minY: 29000.0,
+            maxY: 30500.0,
+            minZ: 2400.0,
+            maxZ: 2800.0,
+        },
+    },
+    PositionKeyLocation {
+        chapter: 5,
+        key: 5,
+        bounds: Bounds {
+            minX: -30000.0,
+            maxX: -28000.0,
+            minY: -2.0,
+            maxY: -2.0,
+            minZ: -2.0,
+            maxZ: -2.0,
+        },
+    },
+]
+
+let positionTargets = [
+    PositionTarget {
+        key: 40,
+        bounds: Bounds {
+            minX: -24000.0,
+            maxX: -23000.0,
+            minY: 29000.0,
+            maxY: 30500.0,
+            minZ: 4000.0,
+            maxZ: 6000.0,
+        },
+    },
+    PositionTarget {
+        key: 41,
+        bounds: Bounds {
+            minX: 3000.0,
+            maxX: 30400.0,
+            minY: -28500.0,
+            maxY: -27353.0,
+            minZ: 3200.0,
+            maxZ: 4000.0,
+        },
+    },
+    PositionTarget {
+        key: 42,
+        bounds: Bounds {
+            minX: 71600.0,
+            maxX: 72300.0,
+            minY: 21500.0,
+            maxY: 22700.0,
+            minZ: 1500.0,
+            maxZ: 2100.0,
+        },
+    },
+    PositionTarget {
+        key: 43,
+        bounds: Bounds {
+            minX: 4600.0,
+            maxX: 8700.0,
+            minY: 69000.0,
+            maxY: 70000.0,
+            minZ: 4000.0,
+            maxZ: 5400.0,
+        },
+    },
+    PositionTarget {
+        key: 44,
+        bounds: Bounds {
+            minX: -2.0,
+            maxX: -2.0,
+            minY: -2.0,
+            maxY: -2.0,
+            minZ: -2.0,
+            maxZ: -9680.0,
+        },
+    },
+    PositionTarget {
+        key: 45,
+        bounds: Bounds {
+            minX: -2.0,
+            maxX: -2.0,
+            minY: -2.0,
+            maxY: -2.0,
+            minZ: -2.0,
+            maxZ: -4230.0,
+        },
+    },
+    PositionTarget {
+        key: 5,
+        bounds: Bounds {
+            minX: -38300.0,
+            maxX: -38190.0,
+            minY: -85000.0,
+            maxY: -84000.0,
+            minZ: -2.0,
+            maxZ: -2.0,
+        },
+    },
+]
+
+let pauseLocations = [
+    PauseLocation {
+        chapter: 1,
+        kind: PausePosition.MafiaHeadquarters,
+        bounds: Bounds {
+            minX: 3500.0,
+            maxX: 4500.0,
+            minY: -3500.0,
+            maxY: -3000.0,
+            minZ: 8000.0,
+            maxZ: 9000.0,
+        },
+    },
+    PauseLocation {
+        chapter: 2,
+        kind: PausePosition.BasementBoss,
+        bounds: Bounds {
+            minX: 5500.0,
+            maxX: 9500.0,
+            minY: 5000.0,
+            maxY: 12000.0,
+            minZ: -2.0,
+            maxZ: 4000.0,
+        },
+    },
+    PauseLocation {
+        chapter: 3,
+        kind: PausePosition.SubconWell,
+        bounds: Bounds {
+            minX: 15800.0,
+            maxX: 17000.0,
+            minY: 10900.0,
+            maxY: 11900.0,
+            minZ: -2.0,
+            maxZ: 2000.0,
+        },
+    },
+    PauseLocation {
+        chapter: 3,
+        kind: PausePosition.VanessaManor,
+        bounds: Bounds {
+            minX: -28000.0,
+            maxX: -26000.0,
+            minY: 2000.0,
+            maxY: 3400.0,
+            minZ: 200.0,
+            maxZ: 1200.0,
+        },
+    },
+    PauseLocation {
+        chapter: 4,
+        kind: PausePosition.AlpineIntro,
+        bounds: Bounds {
+            minX: 37000.0,
+            maxX: 41000.0,
+            minY: 47000.0,
+            maxY: 51000.0,
+            minZ: -14000.0,
+            maxZ: -5000.0,
+        },
+    },
+]
+
+let riftLocations = [
+    RiftLocation {
+        chapter: 1,
+        rift: Rift.PurpleMafiaOfCooks,
+        bounds: Bounds {
+            minX: 4070.0, maxX: 4250.0, minY: -5550.0, maxY: -5350.0, minZ: -900.0, maxZ: -700.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.PurpleMafiaOfCooks,
+        bounds: Bounds {
+            minX: 13200.0, maxX: 13250.0, minY: -120.0, maxY: -80.0, minZ: -250.0, maxZ: -2.0
+        },
+    },
+    RiftLocation {
+        chapter: 2,
+        rift: Rift.PurpleDeadBirdStudio,
+        bounds: Bounds {
+            minX: 8350.0, maxX: 8500.0, minY: -2250.0, maxY: -2100.0, minZ: 2700.0, maxZ: 2870.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.PurpleDeadBirdStudio,
+        bounds: Bounds {
+            minX: 7750.0, maxX: 7800.0, minY: -10500.0, maxY: -10400.0, minZ: 1000.0, maxZ: -2.0
+        },
+    },
+    RiftLocation {
+        chapter: 3,
+        rift: Rift.PurpleSleepySubcon,
+        bounds: Bounds {
+            minX: 13100.0, maxX: 13300.0, minY: 25150.0, maxY: 25350.0, minZ: 2300.0, maxZ: 2500.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.PurpleSleepySubcon,
+        bounds: Bounds {
+            minX: 6100.0, maxX: 6150.0, minY: 32400.0, maxY: 32500.0, minZ: 550.0, maxZ: -2.0
+        },
+    },
+    RiftLocation {
+        chapter: 4,
+        rift: Rift.PurpleAlpineSkyline,
+        bounds: Bounds {
+            minX: 16700.0, maxX: 16850.0, minY: 28750.0, maxY: 28900.0, minZ: -5100.0, maxZ: -4800.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.PurpleAlpineSkyline,
+        bounds: Bounds {
+            minX: -11700.0, maxX: -11600.0, minY: -11700.0, maxY: -11600.0, minZ: -4000.0, maxZ: -2.0
+        },
+    },
+    RiftLocation {
+        chapter: 6,
+        rift: Rift.PurpleDeepSea,
+        bounds: Bounds {
+            minX: 1860.0, maxX: 3000.0, minY: 6400.0, maxY: 6550.0, minZ: 4000.0, maxZ: 4200.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.PurpleDeepSea,
+        bounds: Bounds {
+            minX: -15700.0, maxX: -15600.0, minY: 870.0, maxY: 910.0, minZ: 3200.0, maxZ: -2.0
+        },
+    },
+    RiftLocation {
+        chapter: 7,
+        rift: Rift.PurpleRumbiFactory,
+        bounds: Bounds {
+            minX: 750.0, maxX: 900.0, minY: 1200.0, maxY: 1350.0, minZ: 1250.0, maxZ: 1450.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.PurpleRumbiFactory,
+        bounds: Bounds {
+            minX: -400.0, maxX: -300.0, minY: -8400.0, maxY: -8300.0, minZ: 1000.0, maxZ: -2.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.PurpleTour,
+        bounds: Bounds {
+            minX: -4220.0, maxX: -4120.0, minY: -800.0, maxY: -710.0, minZ: 1300.0, maxZ: 1500.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.PurpleTour,
+        bounds: Bounds {
+            minX: 13100.0, maxX: 13200.0, minY: -250.0, maxY: -200.0, minZ: 2650.0, maxZ: -2.0
+        },
+    },
+    RiftLocation {
+        chapter: 1,
+        rift: Rift.BlueSewers,
+        bounds: Bounds {
+            minX: -200.0, maxX: -150.0, minY: -410.0, maxY: -360.0, minZ: 60.0, maxZ: 120.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueSewers,
+        bounds: Bounds {
+            minX: 640.0, maxX: 850.0, minY: 4000.0, maxY: 4140.0, minZ: 760.0, maxZ: 960.0
+        },
+    },
+    RiftLocation {
+        chapter: 1,
+        rift: Rift.BlueBazaar,
+        bounds: Bounds {
+            minX: -200.0, maxX: -150.0, minY: -150.0, maxY: -120.0, minZ: 60.0, maxZ: 120.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueBazaar,
+        bounds: Bounds {
+            minX: -3150.0, maxX: -3030.0, minY: -2480.0, maxY: -2360.0, minZ: 400.0, maxZ: 600.0
+        },
+    },
+    RiftLocation {
+        chapter: 2,
+        rift: Rift.BlueOwlExpress,
+        bounds: Bounds {
+            minX: -2710.0, maxX: -2500.0, minY: 1020.0, maxY: 1230.0, minZ: 10.0, maxZ: 100.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueOwlExpress,
+        bounds: Bounds {
+            minX: -53920.0, maxX: -53810.0, minY: -9260.0, maxY: -9150.0, minZ: 100.0, maxZ: 290.0
+        },
+    },
+    RiftLocation {
+        chapter: 2,
+        rift: Rift.BlueMoon,
+        bounds: Bounds {
+            minX: 2600.0, maxX: 2850.0, minY: 850.0, maxY: 1100.0, minZ: 0.0, maxZ: 100.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueMoon,
+        bounds: Bounds {
+            minX: -3950.0, maxX: -3830.0, minY: -100.0, maxY: 0.0, minZ: 390.0, maxZ: 570.0
+        },
+    },
+    RiftLocation {
+        chapter: 3,
+        rift: Rift.BlueVillage,
+        bounds: Bounds {
+            minX: -2800.0, maxX: -2400.0, minY: -1800.0, maxY: -1450.0, minZ: 60.0, maxZ: 120.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueVillage,
+        bounds: Bounds {
+            minX: 1190.0, maxX: 1290.0, minY: 26250.0, maxY: 26350.0, minZ: 3450.0, maxZ: 3630.0
+        },
+    },
+    RiftLocation {
+        chapter: 3,
+        rift: Rift.BluePipe,
+        bounds: Bounds {
+            minX: 1780.0, maxX: 2000.0, minY: -11384.0, maxY: -9350.0, minZ: 60.0, maxZ: 120.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BluePipe,
+        bounds: Bounds {
+            minX: -130.0, maxX: -20.0, minY: 7250.0, maxY: 7360.0, minZ: 500.0, maxZ: 640.0
+        },
+    },
+    RiftLocation {
+        chapter: 4,
+        rift: Rift.BlueTwilightBell,
+        bounds: Bounds {
+            minX: 7600.0, maxX: 7900.0, minY: 1100.0, maxY: 1400.0, minZ: -500.0, maxZ: -100.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueTwilightBell,
+        bounds: Bounds {
+            minX: 6330.0, maxX: 6450.0, minY: 72060.0, maxY: 72180.0, minZ: 5150.0, maxZ: 5300.0
+        },
+    },
+    RiftLocation {
+        chapter: 4,
+        rift: Rift.BlueCurlyTailTrail,
+        bounds: Bounds {
+            minX: 5700.0, maxX: 6000.0, minY: 3100.0, maxY: 3400.0, minZ: -500.0, maxZ: -100.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueCurlyTailTrail,
+        bounds: Bounds {
+            minX: 56380.0, maxX: 56500.0, minY: 6740.0, maxY: 6840.0, minZ: -1690.0, maxZ: -1500.0
+        },
+    },
+    RiftLocation {
+        chapter: 6,
+        rift: Rift.BlueBalcony,
+        bounds: Bounds {
+            minX: 3700.0, maxX: 3950.0, minY: 4300.0, maxY: 4550.0, minZ: 1200.0, maxZ: 1400.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueBalcony,
+        bounds: Bounds {
+            minX: -950.0, maxX: -840.0, minY: -1410.0, maxY: -1310.0, minZ: 7690.0, maxZ: 7850.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueLab,
+        bounds: Bounds {
+            minX: -1180.0, maxX: -920.0, minY: 4050.0, maxY: 4350.0, minZ: 200.0, maxZ: 300.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueLab,
+        bounds: Bounds {
+            minX: -3940.0, maxX: -3840.0, minY: -80.0, maxY: 20.0, minZ: -520.0, maxZ: -350.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueGallery,
+        bounds: Bounds {
+            minX: 7250.0, maxX: 7550.0, minY: 100.0, maxY: 400.0, minZ: -500.0, maxZ: -400.0
+        },
+    },
+    RiftLocation {
+        chapter: 0,
+        rift: Rift.BlueGallery,
+        bounds: Bounds {
+            minX: 3100.0, maxX: 3220.0, minY: -2400.0, maxY: -2270.0, minZ: 130.0, maxZ: 310.0
+        },
+    },
+]
+
+let hubLocations = [
+    ChapterLocation {
+        chapter: 0,
+        bounds: Bounds {
+            minX: -690.0, maxX: -660.0, minY: 1525.0, maxY: 1555.0, minZ: 225.0, maxZ: 260.0
+        },
+    },
+    ChapterLocation {
+        chapter: 1,
+        bounds: Bounds {
+            minX: 195.0, maxX: 425.0, minY: 0.0, maxY: 200.0, minZ: -2.0, maxZ: -2.0
+        },
+    },
+    ChapterLocation {
+        chapter: 2,
+        bounds: Bounds {
+            minX: 2345.0, maxX: 2555.0, minY: 110.0, maxY: 320.0, minZ: 0.0, maxZ: 200.0
+        },
+    },
+    ChapterLocation {
+        chapter: 2,
+        bounds: Bounds {
+            minX: 2300.0, maxX: 2550.0, minY: -160.0, maxY: 60.0, minZ: 0.0, maxZ: 200.0
+        },
+    },
+    ChapterLocation {
+        chapter: 3,
+        bounds: Bounds {
+            minX: -2120.0, maxX: -1910.0, minY: -2010.0, maxY: -1800.0, minZ: 0.0, maxZ: 150.0
+        },
+    },
+    ChapterLocation {
+        chapter: 4,
+        bounds: Bounds {
+            minX: -690.0, maxX: -480.0, minY: -4065.0, maxY: -3855.0, minZ: -325.0, maxZ: -240.0
+        },
+    },
+    ChapterLocation {
+        chapter: 5,
+        bounds: Bounds {
+            minX: -1365.0, maxX: -1155.0, minY: -125.0, maxY: 85.0, minZ: 280.0, maxZ: 350.0
+        },
+    },
+    ChapterLocation {
+        chapter: 6,
+        bounds: Bounds {
+            minX: 19365.0, maxX: 21375.0, minY: -24840.0, maxY: -22830.0, minZ: 1200.0, maxZ: 1400.0
+        },
+    },
+    ChapterLocation {
+        chapter: 7,
+        bounds: Bounds {
+            minX: 25260.0, maxX: 27270.0, minY: -24015.0, maxY: -22005.0, minZ: 1190.0, maxZ: 1500.0
+        },
+    },
+    ChapterLocation {
+        chapter: 97,
+        bounds: Bounds {
+            minX: -2410.0, maxX: -2200.0, minY: -2185.0, maxY: -1975.0, minZ: -65.0, maxZ: 200.0
+        },
+    },
+    ChapterLocation {
+        chapter: 99,
+        bounds: Bounds {
+            minX: 1500.0, maxX: 1710.0, minY: 1525.0, maxY: 1735.0, minZ: 400.0, maxZ: 500.0
+        },
+    },
+]
 
 fn resolvePath(path: MemoryPath?) -> address! {
     let initialized = path else return Err("path not initialized")
     return initialized.resolve()
+}
+
+fn Bounds.containsWithIgnoredAxes(x: f32, y: f32, z: f32) -> bool {
+    return(self.minX == -2.0 || x > self.minX)
+        && (self.maxX == -2.0 || x < self.maxX)
+        && (self.minY == -2.0 || y > self.minY)
+        && (self.maxY == -2.0 || y < self.maxY)
+        && (self.minZ == -2.0 || z > self.minZ)
+        && (self.maxZ == -2.0 || z < self.maxZ)
+}
+
+fn positionTarget(key: i32) -> Bounds? {
+    for target in positionTargets {
+        if target.key == key {
+            return target.bounds
+        }
+    }
+    return None
+}
+
+fn positionSettingEnabled(key: i32) -> bool {
+    if !detailedChapterEnabled(if key == 5 {
+            5
+    } else {
+            4
+    })
+    {
+        return false
+    }
+    return match key {
+        5 => settings.manySplits_pos_5,
+        40 => settings.manySplits_pos_40,
+        41 => settings.manySplits_pos_41,
+        42 => settings.manySplits_pos_42,
+        43 => settings.manySplits_pos_43,
+        44 => settings.manySplits_pos_44,
+        45 => settings.manySplits_pos_45,
+        _ => false,
+    }
+}
+
+fn shouldSplitAtPosition(key: i32, x: f32, y: f32, z: f32) -> bool {
+    if key == 0 || !positionSettingEnabled(key) {
+        return false
+    }
+    let target = positionTarget(key) else return false
+    return target.containsWithIgnoredAxes(x, y, z)
+}
+
+fn pausePositionEnabled(kind: PausePosition) -> bool {
+    return match kind {
+        PausePosition.MafiaHeadquarters => settings.manySplits_1
+        && settings.manySplits_1_4
+        && settings.manySplits_1_4_cp0_pause_pos,
+        PausePosition.BasementBoss => settings.manySplits_2
+        && settings.manySplits_2_6
+        && settings.manySplits_2_6_cp0_pause_pos,
+        PausePosition.SubconWell => settings.manySplits_3
+        && settings.manySplits_3_2
+        && settings.manySplits_3_2_cp0_pause_pos,
+        PausePosition.VanessaManor => settings.manySplits_3
+        && settings.manySplits_3_4
+        && settings.manySplits_3_4_cp0_pause_pos,
+        PausePosition.AlpineIntro => settings.manySplits_4
+        && settings.manySplits_4_99_cp0_pause_pos,
+    }
+}
+
+fn shouldSplitAtPausePosition(chapter: i32, x: f32, y: f32, z: f32) -> bool {
+    for location in pauseLocations {
+        if location.chapter == chapter
+            && pausePositionEnabled(location.kind)
+            && location.bounds.containsWithIgnoredAxes(x, y, z)
+        {
+            return true
+        }
+    }
+    return false
+}
+
+fn detectRift(chapter: i32, x: f32, y: f32, z: f32) -> Rift {
+    for location in riftLocations {
+        if (location.chapter == 0 || location.chapter == chapter)
+            && location.bounds.containsWithIgnoredAxes(x, y, z)
+        {
+            return location.rift
+        }
+    }
+    return Rift.None
+}
+
+fn isBackAtHub(chapter: i32, x: f32, y: f32, z: f32) -> bool {
+    for location in hubLocations {
+        if (location.chapter == 0 || location.chapter == chapter)
+            && location.bounds.containsWithIgnoredAxes(x, y, z)
+        {
+            return true
+        }
+    }
+    return false
+}
+
+fn riftEnabled(rift: Rift) -> bool {
+    if !settings.manySplits {
+        return false
+    }
+    return match rift {
+        Rift.None => false,
+        Rift.PurpleMafiaOfCooks => settings.manySplits_riftPurple
+        && settings.manySplits_riftPurple_moc,
+        Rift.PurpleDeadBirdStudio => settings.manySplits_riftPurple
+        && settings.manySplits_riftPurple_dbs,
+        Rift.PurpleSleepySubcon => settings.manySplits_riftPurple
+        && settings.manySplits_riftPurple_sleepy,
+        Rift.PurpleAlpineSkyline => settings.manySplits_riftPurple
+        && settings.manySplits_riftPurple_alpine,
+        Rift.PurpleDeepSea => settings.manySplits_riftPurple
+        && settings.manySplits_riftPurple_deepSea,
+        Rift.PurpleRumbiFactory => settings.manySplits_riftPurple
+        && settings.manySplits_riftPurple_rumbi,
+        Rift.PurpleTour => settings.manySplits_riftPurple
+        && settings.manySplits_riftPurple_tour,
+        Rift.BlueSewers => settings.manySplits_riftBlue
+        && settings.manySplits_riftBlue_sewers,
+        Rift.BlueBazaar => settings.manySplits_riftBlue
+        && settings.manySplits_riftBlue_bazaar,
+        Rift.BlueOwlExpress => settings.manySplits_riftBlue
+        && settings.manySplits_riftBlue_owlExpress,
+        Rift.BlueMoon => settings.manySplits_riftBlue
+        && settings.manySplits_riftBlue_moon,
+        Rift.BlueVillage => settings.manySplits_riftBlue
+        && settings.manySplits_riftBlue_village,
+        Rift.BluePipe => settings.manySplits_riftBlue
+        && settings.manySplits_riftBlue_pipe,
+        Rift.BlueTwilightBell => settings.manySplits_riftBlue
+        && settings.manySplits_riftBlue_twilight,
+        Rift.BlueCurlyTailTrail => settings.manySplits_riftBlue
+        && settings.manySplits_riftBlue_curly,
+        Rift.BlueBalcony => settings.manySplits_riftBlue
+        && settings.manySplits_riftBlue_balcony,
+        Rift.BlueLab => settings.manySplits_riftBlue
+        && settings.manySplits_riftBlue_lab,
+        Rift.BlueGallery => settings.manySplits_riftBlue
+        && settings.manySplits_riftBlue_gallery,
+    }
+}
+
+fn riftTimePieceEnabled(rift: Rift) -> bool {
+    if !riftEnabled(rift) {
+        return false
+    }
+    return match rift {
+        Rift.None => false,
+        Rift.PurpleMafiaOfCooks => settings.manySplits_riftPurple_moc_tp,
+        Rift.PurpleDeadBirdStudio => settings.manySplits_riftPurple_dbs_tp,
+        Rift.PurpleSleepySubcon => settings.manySplits_riftPurple_sleepy_tp,
+        Rift.PurpleAlpineSkyline => settings.manySplits_riftPurple_alpine_tp,
+        Rift.PurpleDeepSea => settings.manySplits_riftPurple_deepSea_tp,
+        Rift.PurpleRumbiFactory => settings.manySplits_riftPurple_rumbi_tp,
+        Rift.PurpleTour => settings.manySplits_riftPurple_tour_tp,
+        Rift.BlueSewers => settings.manySplits_riftBlue_sewers_tp,
+        Rift.BlueBazaar => settings.manySplits_riftBlue_bazaar_tp,
+        Rift.BlueOwlExpress => settings.manySplits_riftBlue_owlExpress_tp,
+        Rift.BlueMoon => settings.manySplits_riftBlue_moon_tp,
+        Rift.BlueVillage => settings.manySplits_riftBlue_village_tp,
+        Rift.BluePipe => settings.manySplits_riftBlue_pipe_tp,
+        Rift.BlueTwilightBell => settings.manySplits_riftBlue_twilight_tp,
+        Rift.BlueCurlyTailTrail => settings.manySplits_riftBlue_curly_tp,
+        Rift.BlueBalcony => settings.manySplits_riftBlue_balcony_tp,
+        Rift.BlueLab => settings.manySplits_riftBlue_lab_tp,
+        Rift.BlueGallery => settings.manySplits_riftBlue_gallery_tp,
+    }
+}
+
+fn riftEntryEnabled(rift: Rift) -> bool {
+    if !riftEnabled(rift) {
+        return false
+    }
+    return match rift {
+        Rift.None => false,
+        Rift.PurpleMafiaOfCooks => settings.manySplits_riftPurple_moc_entry,
+        Rift.PurpleDeadBirdStudio => settings.manySplits_riftPurple_dbs_entry,
+        Rift.PurpleSleepySubcon => settings.manySplits_riftPurple_sleepy_entry,
+        Rift.PurpleAlpineSkyline => settings.manySplits_riftPurple_alpine_entry,
+        Rift.PurpleDeepSea => settings.manySplits_riftPurple_deepSea_entry,
+        Rift.PurpleRumbiFactory => settings.manySplits_riftPurple_rumbi_entry,
+        Rift.PurpleTour => settings.manySplits_riftPurple_tour_entry,
+        Rift.BlueSewers => settings.manySplits_riftBlue_sewers_entry,
+        Rift.BlueBazaar => settings.manySplits_riftBlue_bazaar_entry,
+        Rift.BlueOwlExpress => settings.manySplits_riftBlue_owlExpress_entry,
+        Rift.BlueMoon => settings.manySplits_riftBlue_moon_entry,
+        Rift.BlueVillage => settings.manySplits_riftBlue_village_entry,
+        Rift.BluePipe => settings.manySplits_riftBlue_pipe_entry,
+        Rift.BlueTwilightBell => settings.manySplits_riftBlue_twilight_entry,
+        Rift.BlueCurlyTailTrail => settings.manySplits_riftBlue_curly_entry,
+        Rift.BlueBalcony => settings.manySplits_riftBlue_balcony_entry,
+        Rift.BlueLab => settings.manySplits_riftBlue_lab_entry,
+        Rift.BlueGallery => settings.manySplits_riftBlue_gallery_entry,
+    }
+}
+
+fn riftCheckpointEnabled(rift: Rift) -> bool {
+    if !riftEnabled(rift) {
+        return false
+    }
+    return match rift {
+        Rift.PurpleMafiaOfCooks => settings.manySplits_riftPurple_moc_cp,
+        Rift.PurpleDeadBirdStudio => settings.manySplits_riftPurple_dbs_cp,
+        Rift.PurpleSleepySubcon => settings.manySplits_riftPurple_sleepy_cp,
+        Rift.PurpleAlpineSkyline => settings.manySplits_riftPurple_alpine_cp,
+        Rift.PurpleDeepSea => settings.manySplits_riftPurple_deepSea_cp,
+        Rift.PurpleRumbiFactory => settings.manySplits_riftPurple_rumbi_cp,
+        Rift.PurpleTour => settings.manySplits_riftPurple_tour_cp,
+        _ => false,
+    }
+}
+
+fn ilModeEnabled() -> bool {
+    return settings.settingsRoot && settings.settings_ILMode
+}
+
+fn newFileStartEnabled() -> bool {
+    return settings.settingsRoot && settings.settings_newFileStart
+}
+
+fn acquiredNewTimePiece(currentCount: i32, oldCount: i32) -> bool {
+    return currentCount == oldCount + 1
+}
+
+fn acquiredAnyTimePiece(currentFlag: i32, oldFlag: i32) -> bool {
+    return currentFlag == 1 && oldFlag == 0
+}
+
+fn splitLockElapsed(milliseconds: i64) -> bool {
+    let splitAt = lastSplitAt else return true
+    return splitAt.hasElapsed(Duration.fromWholeMilliseconds(milliseconds))
+}
+
+fn detailedChapterEnabled(chapter: i32) -> bool {
+    if !settings.manySplits {
+        return false
+    }
+    return match chapter {
+        1 => settings.manySplits_1,
+        2 => settings.manySplits_2,
+        3 => settings.manySplits_3,
+        4 => settings.manySplits_4,
+        5 => settings.manySplits_5,
+        6 => settings.manySplits_6,
+        7 => settings.manySplits_7,
+        _ => false,
+    }
+}
+
+fn detailedActEnabled(chapter: i32, act: i32) -> bool {
+    if !detailedChapterEnabled(chapter) {
+        return false
+    }
+    return match chapter * 100 + act {
+        101 => settings.manySplits_1_1,
+        102 => settings.manySplits_1_2,
+        103 => settings.manySplits_1_3,
+        104 => settings.manySplits_1_4,
+        105 => settings.manySplits_1_5,
+        106 => settings.manySplits_1_6,
+        107 => settings.manySplits_1_7,
+        201 => settings.manySplits_2_1,
+        202 => settings.manySplits_2_2,
+        203 => settings.manySplits_2_3,
+        204 => settings.manySplits_2_4,
+        205 => settings.manySplits_2_5,
+        206 => settings.manySplits_2_6,
+        301 => settings.manySplits_3_1,
+        302 => settings.manySplits_3_2,
+        303 => settings.manySplits_3_3,
+        304 => settings.manySplits_3_4,
+        305 => settings.manySplits_3_5,
+        306 => settings.manySplits_3_6,
+        601 => settings.manySplits_6_1,
+        602 => settings.manySplits_6_2,
+        603 => settings.manySplits_6_3,
+        _ => chapter == 4 || chapter == 5 || chapter == 7,
+    }
+}
+
+fn detailedTimePieceEnabled(chapter: i32, act: i32) -> bool {
+    if !detailedActEnabled(chapter, act) {
+        return false
+    }
+    return match chapter * 100 + act {
+        101 => settings.manySplits_1_1_tp,
+        102 => settings.manySplits_1_2_tp,
+        103 => settings.manySplits_1_3_tp,
+        104 => settings.manySplits_1_4_tp,
+        105 => settings.manySplits_1_5_tp,
+        106 => settings.manySplits_1_6_tp,
+        107 => settings.manySplits_1_7_tp,
+        201 => settings.manySplits_2_1_tp,
+        202 => settings.manySplits_2_2_tp,
+        203 => settings.manySplits_2_3_tp,
+        204 => settings.manySplits_2_4_tp,
+        205 => settings.manySplits_2_5_tp,
+        206 => settings.manySplits_2_6_tp,
+        301 => settings.manySplits_3_1_tp,
+        302 => settings.manySplits_3_2_tp,
+        303 => settings.manySplits_3_3_tp,
+        304 => settings.manySplits_3_4_tp,
+        305 => settings.manySplits_3_5_tp,
+        306 => settings.manySplits_3_6_tp,
+        601 => settings.manySplits_6_1_tp,
+        602 => settings.manySplits_6_2_tp,
+        603 => settings.manySplits_6_3_tp,
+        _ => match chapter {
+            4 => settings.manySplits_4_tp,
+            5 => settings.manySplits_5_tp,
+            7 => settings.manySplits_7_tp,
+            _ => false,
+        },
+    }
+}
+
+fn detailedDelayedTimePieceEnabled(chapter: i32, act: i32) -> bool {
+    if !detailedActEnabled(chapter, act) {
+        return false
+    }
+    return match chapter * 100 + act {
+        101 => settings.manySplits_1_1_tpDelayed,
+        102 => settings.manySplits_1_2_tpDelayed,
+        103 => settings.manySplits_1_3_tpDelayed,
+        104 => settings.manySplits_1_4_tpDelayed,
+        105 => settings.manySplits_1_5_tpDelayed,
+        106 => settings.manySplits_1_6_tpDelayed,
+        107 => settings.manySplits_1_7_tpDelayed,
+        201 => settings.manySplits_2_1_tpDelayed,
+        202 => settings.manySplits_2_2_tpDelayed,
+        203 => settings.manySplits_2_3_tpDelayed,
+        204 => settings.manySplits_2_4_tpDelayed,
+        205 => settings.manySplits_2_5_tpDelayed,
+        206 => settings.manySplits_2_6_tpDelayed,
+        301 => settings.manySplits_3_1_tpDelayed,
+        302 => settings.manySplits_3_2_tpDelayed,
+        303 => settings.manySplits_3_3_tpDelayed,
+        304 => settings.manySplits_3_4_tpDelayed,
+        305 => settings.manySplits_3_5_tpDelayed,
+        306 => settings.manySplits_3_6_tpDelayed,
+        601 => settings.manySplits_6_1_tpDelayed,
+        602 => settings.manySplits_6_2_tpDelayed,
+        603 => settings.manySplits_6_3_tpDelayed,
+        _ => false,
+    }
+}
+
+fn detailedEntryEnabled(chapter: i32, act: i32) -> bool {
+    if !detailedActEnabled(chapter, act) {
+        return false
+    }
+    return match chapter * 100 + act {
+        101 => settings.manySplits_1_1_entry,
+        102 => settings.manySplits_1_2_entry,
+        103 => settings.manySplits_1_3_entry,
+        104 => settings.manySplits_1_4_entry,
+        105 => settings.manySplits_1_5_entry,
+        106 => settings.manySplits_1_6_entry,
+        107 => settings.manySplits_1_7_entry,
+        201 => settings.manySplits_2_1_entry,
+        202 => settings.manySplits_2_2_entry,
+        203 => settings.manySplits_2_3_entry,
+        204 => settings.manySplits_2_4_entry,
+        205 => settings.manySplits_2_5_entry,
+        206 => settings.manySplits_2_6_entry,
+        301 => settings.manySplits_3_1_entry,
+        302 => settings.manySplits_3_2_entry,
+        303 => settings.manySplits_3_3_entry,
+        304 => settings.manySplits_3_4_entry,
+        305 => settings.manySplits_3_5_entry,
+        306 => settings.manySplits_3_6_entry,
+        499 => settings.manySplits_4_99_entry,
+        601 => settings.manySplits_6_1_entry,
+        602 => settings.manySplits_6_2_entry,
+        603 => settings.manySplits_6_3_entry,
+        _ => match chapter {
+            5 => settings.manySplits_5_entry,
+            7 => settings.manySplits_7_entry,
+            _ => false,
+        },
+    }
+}
+
+fn detailedCheckpointEnabled(chapter: i32, act: i32, checkpoint: i32) -> bool {
+    if !detailedActEnabled(chapter, act) {
+        return false
+    }
+    return match chapter * 10000 + act * 100 + checkpoint {
+        10101 => settings.manySplits_1_1_cp1,
+        10201 => settings.manySplits_1_2_cp1,
+        10301 => settings.manySplits_1_3_cp1,
+        10401 => settings.manySplits_1_4_cp1,
+        10402 => settings.manySplits_1_4_cp2,
+        20105 => settings.manySplits_2_1_cp5,
+        20401 => settings.manySplits_2_4_cp1,
+        20404 => settings.manySplits_2_4_cp4,
+        20501 => settings.manySplits_2_5_cp1,
+        20502 => settings.manySplits_2_5_cp2,
+        20503 => settings.manySplits_2_5_cp3,
+        30301 => settings.manySplits_3_3_cp1,
+        30601 => settings.manySplits_3_6_cp1,
+        50101 => settings.manySplits_5_1_cp1,
+        50102 => settings.manySplits_5_1_cp2,
+        50103 => settings.manySplits_5_1_cp3,
+        50110 => settings.manySplits_5_1_cp10,
+        60103 => settings.manySplits_6_1_cp3,
+        60201 => settings.manySplits_6_2_cp1,
+        60301 => settings.manySplits_6_3_cp1,
+        60302 => settings.manySplits_6_3_cp2,
+        60303 => settings.manySplits_6_3_cp3,
+        _ => false,
+    }
+}
+
+fn detailedPauseCheckpointEnabled(chapter: i32, act: i32, checkpoint: i32) -> bool {
+    return detailedActEnabled(chapter, act)
+        && chapter == 1
+        && act == 6
+        && checkpoint == 59
+        && settings.manySplits_1_6_cp59_pause
+}
+
+fn shouldDetailedSplit(currentState, oldState) -> bool {
+    if !settings.manySplits {
+        return false
+    }
+
+    let gotTimePiece = acquiredNewTimePiece(
+        currentState.timePieceCount,
+        oldState.timePieceCount,
+    ) || acquiredAnyTimePiece(currentState.justGotTimePiece, oldState.justGotTimePiece)
+
+    if currentRift == Rift.None {
+        return gotTimePiece
+            && detailedTimePieceEnabled(currentState.chapter, currentState.act)
+            || currentState.checkpoint != oldState.checkpoint
+            && detailedCheckpointEnabled(
+            currentState.chapter,
+            currentState.act,
+            currentState.checkpoint,
+        )
+            || shouldSplitAtPosition(
+            positionSplitKey,
+            currentState.x,
+            currentState.y,
+            currentState.z,
+        )
+            || splitInLoadScreen
+            && currentState.gameTimerIsPaused == 1
+            && oldState.gameTimerIsPaused == 0
+            || currentState.actTimerIsVisible == 1
+            && oldState.actTimerIsVisible == 0
+            && !ilModeEnabled()
+            && detailedEntryEnabled(currentState.chapter, currentState.act)
+            || currentState.gameTimerIsPaused == 1
+            && oldState.gameTimerIsPaused == 0
+            && detailedPauseCheckpointEnabled(
+            currentState.chapter,
+            currentState.act,
+            currentState.checkpoint,
+        )
+            || currentState.gameTimerIsPaused != oldState.gameTimerIsPaused
+            && shouldSplitAtPausePosition(
+            currentState.chapter,
+            currentState.x,
+            currentState.y,
+            currentState.z,
+        )
+    }
+
+    return gotTimePiece && riftTimePieceEnabled(currentRift)
+        || currentState.checkpoint > oldState.checkpoint
+        && riftCheckpointEnabled(currentRift)
+        || justEnteredRift
+        && riftEntryEnabled(currentRift)
+        && !ilModeEnabled()
+        && splitLockElapsed(3000)
 }
 
 onAttach {
@@ -477,20 +1598,166 @@ onAttach {
     xPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x80, PointerSize.Bit64)
     yPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x84, PointerSize.Bit64)
     zPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x88, PointerSize.Bit64)
+
+    observedSplitIndex = timer.currentSplitIndex()
+    lastSplitAt = Instant.now()
+}
+
+whileAttached {
+    let splitIndex = timer.currentSplitIndex()
+    if observedSplitIndex >= 0 && splitIndex > observedSplitIndex {
+        lastSplitAt = Instant.now()
+        positionSplitKey = 0
+    }
+    observedSplitIndex = splitIndex
+
+    if current.chapter != old.chapter {
+        lastChapter = old.chapter
+    }
+
+    gameTimeFinal = current.realGameTime
+
+    if current.actTimerIsVisible == 1 && old.actTimerIsVisible == 0 {
+        savedGameTime = current.gameTime
+    }
+
+    if acquiredNewTimePiece(current.timePieceCount, old.timePieceCount)
+        || acquiredAnyTimePiece(current.justGotTimePiece, old.justGotTimePiece)
+    {
+        if detailedDelayedTimePieceEnabled(current.chapter, current.act) {
+            splitInLoadScreen = true
+        }
+
+        let preciseGameTime = savedGameTime + current.realActTime
+        if preciseGameTime > current.realGameTime - 0.1
+            && preciseGameTime < current.realGameTime + 0.1
+        {
+            gameTimeFinal = preciseGameTime
+        }
+    }
+
+    if current.gameTimerIsPaused == 0 && old.gameTimerIsPaused == 1 {
+        splitInLoadScreen = false
+        positionSplitKey = 0
+        if isBackAtHub(current.chapter, current.x, current.y, current.z) {
+            currentRift = Rift.None
+        }
+    }
+
+    if current.timerState == 0 && currentRift != Rift.None {
+        currentRift = Rift.None
+    }
+
+    if justEnteredRift {
+        justEnteredRift = false
+    }
+
+    if current.gameTimerIsPaused != old.gameTimerIsPaused
+        && currentRift == Rift.None
+        && settings.manySplits
+    {
+        currentRift = detectRift(current.chapter, current.x, current.y, current.z)
+        if currentRift != Rift.None {
+            justEnteredRift = true
+        }
+    }
+
+    if current.chapter == 4 || current.chapter == 5 {
+        for location in positionKeyLocations {
+            if location.chapter == current.chapter
+                && location.bounds.containsWithIgnoredAxes(current.x, current.y, current.z)
+            {
+                positionSplitKey = location.key
+            }
+        }
+    }
 }
 
 start {
-    return false
+    return newFileStartEnabled()
+        && current.timerState == 1
+        && old.timerState == 0
+        && (current.timePieceCount == 0 || current.timePieceCount == -1)
+        || !newFileStartEnabled()
+        && current.timerState == 1
+        && old.timerState == 0
+        || ilModeEnabled()
+        && current.actTimerIsVisible == 1
+        && current.realActTime == 0.0
 }
 
 split {
-    return false
+    if !splitLockElapsed(1000) || current.timerState == 0 {
+        return false
+    }
+
+    if settings.splits {
+        if acquiredNewTimePiece(current.timePieceCount, old.timePieceCount)
+            && settings.splits_tp
+            && settings.splits_tp_new
+        {
+            return true
+        }
+        if acquiredAnyTimePiece(current.justGotTimePiece, old.justGotTimePiece)
+            && settings.splits_tp
+            && settings.splits_tp_any
+        {
+            return true
+        }
+        if current.actTimerIsVisible == 1
+            && old.actTimerIsVisible == 0
+            && currentRift == Rift.None
+            && settings.splits_actEntry
+            && !ilModeEnabled()
+        {
+            return true
+        }
+        if acquiredAnyTimePiece(current.justGotTimePiece, old.justGotTimePiece)
+            && current.chapter == 3
+            && lastChapter == 5
+            && settings.splits_tp
+            && settings.splits_tp_std
+        {
+            return true
+        }
+        if current.chapter == 97
+            && old.chapter != 97
+            && settings.splits_dwbth
+            && (!settings.splits_dwbth_doubleSplitNo || splitLockElapsed(9000))
+        {
+            return true
+        }
+        if current.yarn == old.yarn + 1 && settings.splits_yarn {
+            return true
+        }
+        if current.checkpoint != old.checkpoint
+            && current.checkpoint != 0
+            && settings.splits_checkpoint
+        {
+            return true
+        }
+    }
+
+    return shouldDetailedSplit(current, old)
 }
 
 reset {
-    return false
+    return current.timerState == 0 && old.timerState == 1
+        || ilModeEnabled()
+        && (current.actTimerIsVisible == 0 && old.actTimerIsVisible == 1
+        || current.realActTime < old.realActTime && current.realActTime == 0.0)
 }
 
 isLoading {
-    return false
+    return true
+}
+
+gameTime {
+    return Duration.fromSeconds(
+        if ilModeEnabled() {
+            current.realActTime
+        } else {
+            gameTimeFinal
+        }
+    )
 }

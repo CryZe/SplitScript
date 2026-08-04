@@ -14,6 +14,13 @@ const settingValueHandles = new Map();
 const registeredBooleanKeys = new Set();
 let nextSettingValueHandle = 1n;
 let instance;
+let liveSplitTimerState = 0;
+let currentSplitIndex = -1n;
+let monotonicNanoseconds = 1_000_000_000n;
+const gameTimes = [];
+let starts = 0;
+let splits = 0;
+let resets = 0;
 
 const expectedSettingKeys = new Set([
     "manySplits",
@@ -202,10 +209,25 @@ const text = (pointer, length) => decoder.decode(
 );
 
 const env = {
-    timer_get_state: () => 0,
-    timer_start() {},
-    timer_split() {},
-    timer_reset() {},
+    timer_get_state: () => liveSplitTimerState,
+    timer_current_split_index: () => currentSplitIndex,
+    timer_start() {
+        starts += 1;
+        liveSplitTimerState = 1;
+        currentSplitIndex = 0n;
+    },
+    timer_split() {
+        splits += 1;
+        currentSplitIndex += 1n;
+    },
+    timer_reset() {
+        resets += 1;
+        liveSplitTimerState = 0;
+        currentSplitIndex = -1n;
+    },
+    timer_set_game_time(seconds, nanoseconds) {
+        gameTimes.push([seconds, nanoseconds]);
+    },
     timer_pause_game_time() {},
     timer_resume_game_time() {},
     process_attach(pointer, length) {
@@ -259,7 +281,24 @@ const env = {
     },
 };
 
-({ instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), { env }));
+const wasi = {
+    clock_time_get(clockId, precision, destination) {
+        if (clockId !== 1 || precision !== 1n) {
+            return 28;
+        }
+        new DataView(instance.exports.memory.buffer).setBigUint64(
+            destination,
+            monotonicNanoseconds,
+            true,
+        );
+        return 0;
+    },
+};
+
+({ instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), {
+    env,
+    wasi_snapshot_preview1: wasi,
+}));
 instance.exports._start();
 
 const missingSettingKeys = [...expectedSettingKeys]
@@ -317,8 +356,138 @@ if (reads.some(([, size]) => size > 0x10000)) {
     throw new Error("a discovery poll attempted an unbounded memory read");
 }
 
+const update = () => instance.exports.update();
+update(); // Complete snapshot initialization after attachment discovery.
+
+// Prepare a stopped, empty file and then observe the ordinary start transition.
+writeI32(timerBase + 0x04n, 0);
+writeI32(timerBase + 0x44n, 0);
+update();
+resets = 0;
+writeI32(timerBase + 0x04n, 1);
+update();
+if (starts !== 1 || liveSplitTimerState !== 1 || currentSplitIndex !== 0n) {
+    throw new Error(`new-file start differed: ${JSON.stringify({ starts, liveSplitTimerState, currentSplitIndex: Number(currentSplitIndex) })}`);
+}
+
+// A normal time-piece transition splits after the one-second lock expires.
+monotonicNanoseconds = 3_000_000_000n;
+writeI32(timerBase + 0x44n, 1);
+update();
+if (splits !== 1 || currentSplitIndex !== 1n) {
+    throw new Error(`new time piece did not split: ${JSON.stringify({ splits, currentSplitIndex: Number(currentSplitIndex) })}`);
+}
+
+// Manual/external segment advancement is observed through the documented
+// timer index on the next update and restarts the debounce lock before split
+// conditions are evaluated.
+monotonicNanoseconds = 5_000_000_000n;
+currentSplitIndex += 1n;
+writeI32(timerBase + 0x44n, 2);
+update();
+if (splits !== 1) {
+    throw new Error("an immediate memory transition split after external timer advancement");
+}
+
+monotonicNanoseconds = 6_100_000_000n;
+writeI32(timerBase + 0x44n, 3);
+update();
+if (splits !== 2) {
+    throw new Error("the split lock did not reopen after one second");
+}
+
+// Detailed chapter-wide time-piece settings work without allocating dynamic
+// setting keys on each tick and still honor their parent gates.
+update(); // Observe the scripted split index and restart the lock.
+settingValues.set("splits", false);
+settingValues.set("manySplits", true);
+monotonicNanoseconds = 7_200_000_000n;
+writeI32(timerBase + 0x44n, 4);
+update();
+if (splits !== 3) {
+    throw new Error("the detailed Alpine time-piece setting did not split");
+}
+
+// Reset remains driven by the game's timer-state transition.
+writeI32(timerBase + 0x04n, 0);
+update();
+if (resets !== 1 || liveSplitTimerState !== 0 || currentSplitIndex !== -1n) {
+    throw new Error(`timer reset differed: ${JSON.stringify({ resets, liveSplitTimerState, currentSplitIndex: Number(currentSplitIndex) })}`);
+}
+
+// Re-enter a run and exercise the paired key/target volumes used by Alpine's
+// detailed position splits.
+settingValues.set("settings_newFileStart", false);
+settingValues.set("manySplits_pos_40", true);
+monotonicNanoseconds = 8_000_000_000n;
+writeI32(timerBase + 0x04n, 1);
+update();
+writeF32(0x5300n + 0x80n, -10_000);
+writeF32(0x5300n + 0x84n, 33_000);
+writeF32(0x5300n + 0x88n, 0);
+update();
+monotonicNanoseconds = 10_000_000_000n;
+writeF32(0x5300n + 0x80n, -23_500);
+writeF32(0x5300n + 0x84n, 29_750);
+writeF32(0x5300n + 0x88n, 5_000);
+update();
+if (splits !== 4) {
+    throw new Error("the armed Alpine position volume did not split at its target");
+}
+
+// A pause transition at a known rift entrance identifies the typed rift and
+// applies its independently configurable entry setting.
+update(); // Observe the position split and restart the lock.
+settingValues.set("manySplits_riftBlue_gallery_entry", true);
+monotonicNanoseconds = 14_000_000_000n;
+writeF32(0x5300n + 0x80n, 7_300);
+writeF32(0x5300n + 0x84n, 200);
+writeF32(0x5300n + 0x88n, -450);
+writeI32(timerBase + 0x10n, 1);
+update();
+if (splits !== 5) {
+    throw new Error("the configured Gallery rift entry did not split");
+}
+
+// Reproduce the original sub-tick correction: save game time when the act
+// timer appears, then prefer saved game time plus the precise act timer when a
+// time piece arrives within the original 100 ms sanity window.
+update(); // Observe the rift-entry split.
+writeI32(timerBase + 0x18n, 0);
+update();
+writeF64(timerBase + 0x24n, 100.0);
+writeF64(timerBase + 0x34n, 104.95);
+writeF64(timerBase + 0x3cn, 5.0);
+writeI32(timerBase + 0x18n, 1);
+update();
+monotonicNanoseconds = 16_000_000_000n;
+writeF64(timerBase + 0x34n, 105.05);
+writeI32(timerBase + 0x44n, 5);
+update();
+if (!gameTimes.some(([seconds, nanoseconds]) => seconds === 105n && nanoseconds === 0)) {
+    throw new Error("the precise time-piece game-time correction was not applied");
+}
+
+// IL mode switches the published game time to the act timer.
+settingValues.set("settings_ILMode", true);
+writeF64(timerBase + 0x3cn, 7.25);
+update();
+const [ilSeconds, ilNanoseconds] = gameTimes.at(-1);
+if (ilSeconds !== 7n || ilNanoseconds !== 250_000_000) {
+    throw new Error(`IL game time differed: ${Number(ilSeconds)}:${ilNanoseconds}`);
+}
+
+if (!gameTimes.some(([seconds, nanoseconds]) => seconds === 13n && nanoseconds === 250_000_000)) {
+    throw new Error(`game time was not forwarded from the watcher: ${JSON.stringify(
+        gameTimes.map(([seconds, nanoseconds]) => [Number(seconds), nanoseconds]),
+    )}`);
+}
+
 console.log(JSON.stringify({
     pollsCompleted: readsPerPoll.length,
     reads: reads.length,
     registeredSettings: registeredBooleanKeys.size,
+    starts,
+    splits,
+    resets,
 }));

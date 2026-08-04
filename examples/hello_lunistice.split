@@ -46,7 +46,7 @@ onAttach {
         sig"48 8B ?? 89",
     )
     let object = retry process.follow(gameAssembly.address, [0x100, 0x20])
-    let answer = retry process.read(object + 0x10)
+    let answer: i32 = retry process.read(object + 0x10)
     let relative = retry process.readRelative32(gameAssembly.address + 0x400)
     let unity = await Unity.il2cpp(2020)
     let image = await unity.image("Assembly-CSharp")

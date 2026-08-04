@@ -13,7 +13,7 @@ record LevelTimeParts {
 }
 
 state ["Lunistice.exe", "Lunistice-Demo.exe"] {
-    gameState = process.read(gameManagerInstance.offset(gameStateOffset));
+    gameState: i32 = process.read(gameManagerInstance.offset(gameStateOffset));
     points: u32 = process.read(gameManagerInstance.offset(pointsOffset));
     deaths: u32 = process.read(gameManagerInstance.offset(deathsOffset));
     levelOrScene = if isDlcDemo {

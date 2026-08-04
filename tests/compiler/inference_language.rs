@@ -501,52 +501,31 @@ fn integer_looking_literals_flow_into_float_contexts_exactly() {
 }
 
 #[test]
-fn floating_literals_default_their_inference_component_to_f64() {
+fn numeric_defaults_do_not_select_process_memory_representations() {
     let source = r#"
         state "game.exe" {
-            elapsed = process.read(0x100)
-        }
-
-        gameTime {
-            return Duration.fromSeconds(current.elapsed + 0.0)
-        }
-    "#;
-    let wasm = splitscript::compile(source)
-        .expect("the floating literal should default the shared memory-read type to f64");
-    Validator::new_with_features(WasmFeatures::all())
-        .validate_all(&wasm)
-        .expect("the f64-defaulted process read should produce valid Wasm");
-}
-
-#[test]
-fn integer_and_float_capabilities_default_without_literals() {
-    let source = r#"
-        state "game.exe" {
+            literal = process.read(0x80);
             integer = process.read(0x100);
             floating = process.read(0x200);
         }
 
         whileAttached {
+            let withLiteral = current.literal + 1
             let masked = current.integer & current.integer
             let rounded = current.floating.round()
         }
     "#;
-    let checked = splitscript::check(splitscript::parse(source).unwrap())
-        .expect("integer- and float-specific operations should select their language defaults");
-    let state = checked.syntax().state.as_ref().unwrap();
-    let integer = checked.semantics().value_type(state.fields[0].id).unwrap();
-    let floating = checked.semantics().value_type(state.fields[1].id).unwrap();
+    let diagnostics = splitscript::compile(source)
+        .expect_err("numeric defaults must not decide a process-memory layout");
     assert_eq!(
-        checked.semantics().types().kind(integer),
-        &splitscript::compiler::types::TypeKind::Builtin(
-            splitscript::compiler::types::BuiltinType::I32,
-        )
-    );
-    assert_eq!(
-        checked.semantics().types().kind(floating),
-        &splitscript::compiler::types::TypeKind::Builtin(
-            splitscript::compiler::types::BuiltinType::F64,
-        )
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic
+                .message
+                .contains("cannot infer the memory type read"))
+            .count(),
+        3,
+        "{diagnostics:#?}"
     );
 }
 
@@ -601,9 +580,13 @@ fn state_field_types_are_inferred_from_expressions_and_uses() {
         state "game.exe" {
             mystery at 0x1234
         }
+
+        whileAttached {
+            let rounded = current.mystery.round()
+        }
     "#;
-    let diagnostics =
-        splitscript::compile(ambiguous).expect_err("an unconstrained pointer field is ambiguous");
+    let diagnostics = splitscript::compile(ambiguous)
+        .expect_err("even a float-constrained pointer field needs an explicit memory type");
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message

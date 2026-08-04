@@ -7,7 +7,7 @@ enum AbzuBuild {
 }
 
 state "AbzuGame-Win64-Shipping.exe" {
-    loading = process.read(loadingAddress);
+    loading: i32 = process.read(loadingAddress);
 }
 
 // State polling cannot begin until onAttach completes. Every completing branch

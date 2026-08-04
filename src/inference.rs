@@ -570,6 +570,16 @@ impl InferenceContext {
 
     fn default_builtin(&self, variable: u32) -> Option<BuiltinType> {
         let variable = &self.variables[variable as usize];
+        // A numeric default is an ergonomic source-language choice. It must
+        // never silently become a process-memory layout choice: memory reads
+        // need an explicit concrete representation from an annotation or an
+        // otherwise fixed type.
+        if variable
+            .requirements
+            .contains(StdlibCapabilityId::MemoryReadable)
+        {
+            return None;
+        }
         if variable.requirements.contains(StdlibCapabilityId::Float) {
             return Some(BuiltinType::F64);
         }
@@ -1282,6 +1292,37 @@ mod tests {
             inference.resolve(float),
             inference.known_builtin(BuiltinType::F64)
         );
+    }
+
+    #[test]
+    fn memory_readable_suppresses_literal_and_capability_defaults() {
+        let mut inference = InferenceContext::new(
+            StandardLibrary::new(),
+            TypeStore::default(),
+            0,
+            [],
+            [],
+            [],
+            [],
+        );
+        let integer = inference.fresh(
+            Requirements::capabilities([
+                StdlibCapabilityId::MemoryReadable,
+                StdlibCapabilityId::Integer,
+            ]),
+            Some(1),
+        );
+        let float = inference.fresh(
+            Requirements::capabilities([
+                StdlibCapabilityId::MemoryReadable,
+                StdlibCapabilityId::Float,
+            ]),
+            None,
+        );
+        let errors = inference.default_unbound();
+        assert_eq!(errors.len(), 2);
+        assert!(inference.is_unbound_without_default(integer));
+        assert!(inference.is_unbound_without_default(float));
     }
 
     #[test]

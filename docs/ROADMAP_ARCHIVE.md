@@ -13,6 +13,10 @@
   parameters, arrays, wrappers, and generic bodies require an annotation, with
   a focused diagnostic for pointer-backed state fields whose memory type cannot
   be inferred.
+- `MemoryReadable` is a hard defaulting boundary: a process read or `at` field
+  never obtains its representation from a numeric literal or an `Integer` or
+  `Float` default. Memory width and interpretation must be explicit or inferred
+  from another exact type.
 - Recovering editor analysis now uses an explicit semantic error type instead
   of publishing `i32`. It has no source spelling, layout, capabilities, or
   code-generation path, and inlay hints suppress it while other editor queries

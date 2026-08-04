@@ -204,9 +204,13 @@ values default to `i32`, while floating-point literals and `Float` values
 default to `f64`. An integer-looking literal required to satisfy `Float` also
 defaults to `f64`. Broader capabilities such as `Numeric`, `Signed`,
 `MemoryReadable`, or `Display` do not choose a representation on their own; an
-otherwise ambiguous value needs an annotation. Mutable `let` bindings are
-monomorphic. User functions are also currently monomorphic per declaration;
-generalized polymorphic functions will require Wasm signature specialization.
+otherwise ambiguous value needs an annotation. Memory reads are stricter: a
+component constrained by `MemoryReadable` never uses a numeric default, even if
+it also contains a literal or an `Integer`/`Float` constraint. The concrete
+memory representation must come from an annotation, explicit generic argument,
+or another exact type. Mutable `let` bindings are monomorphic. User functions
+are also currently monomorphic per declaration; generalized polymorphic
+functions will require Wasm signature specialization.
 
 Assignments support `=`, the arithmetic compound forms `+=`, `-=`, `*=`, `/=`,
 and `%=`, plus `|=`, `&=`, `^=`, `<<=`, and `>>=` for integers. A compound

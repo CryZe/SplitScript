@@ -283,6 +283,7 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
     match id {
         IntrinsicId::NumericMin | IntrinsicId::NumericMax => scratch(ScratchType::Expression, 2),
         IntrinsicId::TimerState => scratch(ScratchType::Core(CoreTypeId::U32), 1),
+        IntrinsicId::TimerCurrentSplitIndex => scratch(ScratchType::Core(CoreTypeId::I64), 1),
         IntrinsicId::ProcessFollow
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::ProcessReadUtf8
@@ -387,7 +388,6 @@ const NEXT_TICK: EffectSet = EffectSet::one(Effect::RequiresAttachedProcess)
 
 const NONE: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::None);
 const BOOL: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Bool);
-const I64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::I64);
 const U32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U32);
 const U64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U64);
 const F64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::F64);
@@ -416,6 +416,10 @@ const STRING_ARRAY: ContractTypeRef = ContractTypeRef::Application {
 };
 const U64_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
+    arguments: &[U64],
+};
+const U64_OPTION: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Option,
     arguments: &[U64],
 };
 const SIGNATURE_ARRAY: ContractTypeRef = ContractTypeRef::Application {
@@ -807,8 +811,8 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::TimerCurrentSplitIndex => contract!(
             TimerCurrentSplitIndex,
             Function,
-            signature(NO_TYPE_PARAMETERS, None, params![], I64),
-            TIMER_READ,
+            signature(NO_TYPE_PARAMETERS, None, params![], U64_OPTION),
+            TIMER_READ.with(Effect::Allocates),
             Everywhere,
             HostBoundary
         ),

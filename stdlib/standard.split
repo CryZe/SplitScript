@@ -430,21 +430,23 @@ namespace timer {
 
     /// Returns the index of the split the current attempt is on.
     ///
-    /// The host returns `-1` when no attempt is in progress and returns the
-    /// segment count after the final split. An increased index means that the
-    /// timer advanced, including through a skip. If an undo and another split
-    /// both happen between updates, the unchanged index cannot reveal that
-    /// sequence; an exact timer-event API would require additional host support.
+    /// `None` means that no attempt is in progress. The signed host ABI uses a
+    /// negative value for that state; all nonnegative values are exposed as
+    /// `u64`. The index equals the segment count after the final split. An
+    /// increased index means that the timer advanced, including through a skip.
+    /// If an undo and another split both happen between updates, the unchanged
+    /// index cannot reveal that sequence; an exact timer-event API would require
+    /// additional host support.
     ///
     /// # Example
     ///
     /// Observe timer advancement
     ///
     /// ```splitscript
-    /// let splitIndex = timer.currentSplitIndex()
+    /// let splitIndex = timer.currentSplitIndex() else return
     /// ```
     @intrinsic(TimerCurrentSplitIndex)
-    fn currentSplitIndex() -> i64;
+    fn currentSplitIndex() -> u64?;
 
     /// Pauses LiveSplit's game-time clock.
     ///

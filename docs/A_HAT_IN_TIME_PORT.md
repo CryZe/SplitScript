@@ -19,7 +19,9 @@ triggers, rift identification, and hub-return detection. Its settings tree
 registers the same 214 runtime keys as the original script, and helper
 functions preserve the recursive parent-setting behavior of legacy ASL.
 
-The split lock observes `timer.currentSplitIndex()` from `whileAttached`.
+The split lock observes the optional `u64` returned by
+`timer.currentSplitIndex()` from `whileAttached`. The standard library maps the
+host ABI's negative sentinel to `None` rather than exposing the signed encoding.
 LiveSplit's current Wasm autosplitting contract calls only the `update` export;
 it does not provide an `on_split` callback. An index advancement therefore
 restarts the lock on the next update. This faithfully handles ordinary and

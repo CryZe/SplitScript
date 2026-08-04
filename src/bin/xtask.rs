@@ -283,6 +283,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/timer_split_index.split",
+        output: "timer_split_index.wasm",
+        profile: "release",
+        harness: "tests/timer_split_index_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/async_loop.split",
         output: "async_loop.wasm",
         profile: "release",

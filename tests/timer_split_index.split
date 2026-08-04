@@ -1,0 +1,9 @@
+state "game.exe" {}
+
+whileAttached {
+    let label = match timer.currentSplitIndex() {
+        Some(index) => index as String,
+        None => "None",
+    }
+    setVariable("Split Index", label)
+}

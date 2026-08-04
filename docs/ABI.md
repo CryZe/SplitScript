@@ -62,6 +62,10 @@ suite verifies the table below against the catalog renderer.
 | `setting_value_get_bool` | `(i64, i32) -> i32` |
 | `setting_value_get_string` | `(i64, i32, i32) -> i32` |
 
+The signed type of `timer_current_split_index` is a host encoding, not its
+source-language type. `timer.currentSplitIndex()` maps every negative import
+result to `None` and exposes every nonnegative result as `Some(u64)`.
+
 The compiler plans imports from reachable operations. Every autosplitter gets
 the small lifecycle baseline; optional facilities such as process reads,
 settings, logging, and the monotonic clock are imported only when reachable

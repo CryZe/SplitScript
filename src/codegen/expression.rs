@@ -2125,9 +2125,28 @@ fn compile_expr_unconverted(
                 ));
             }
             IntrinsicId::TimerCurrentSplitIndex => {
-                function.instruction(&Instruction::Call(
-                    context.abi.function(AbiImportId::TimerCurrentSplitIndex),
-                ));
+                let host_index = context.matches.intrinsic_temps[&expression][0];
+                let Type::Option(option) = ty else {
+                    unreachable!("timer.currentSplitIndex returns the declared optional u64")
+                };
+                let option_type = context.gc.val_type(Type::Option(option));
+                function
+                    .instruction(&Instruction::Call(
+                        context.abi.function(AbiImportId::TimerCurrentSplitIndex),
+                    ))
+                    .instruction(&Instruction::LocalTee(host_index))
+                    .instruction(&Instruction::I64Const(0))
+                    .instruction(&Instruction::I64LtS)
+                    .instruction(&Instruction::If(BlockType::Result(option_type)))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(
+                        context.gc.index(Type::Option(option)),
+                    )))
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::LocalGet(host_index))
+                    .instruction(&Instruction::StructNew(
+                        context.gc.index(Type::Option(option)),
+                    ))
+                    .instruction(&Instruction::End);
             }
             IntrinsicId::TimerPauseGameTime => {
                 function.instruction(&Instruction::Call(

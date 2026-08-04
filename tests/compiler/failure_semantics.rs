@@ -962,7 +962,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
     );
     assert_eq!(
         library.render_signature(StdlibItemId::TimerCurrentSplitIndex),
-        "timer.currentSplitIndex() -> i64"
+        "timer.currentSplitIndex() -> u64?"
     );
     let next_tick = library
         .item_by_name("nextTick")

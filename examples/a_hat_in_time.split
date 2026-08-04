@@ -505,7 +505,7 @@ let splitInLoadScreen = false
 let currentRift = Rift.None
 let justEnteredRift = false
 let positionSplitKey = 0
-let observedSplitIndex: i64 = -1
+let observedSplitIndex: u64? = None
 let lastSplitAt: Instant? = None
 
 let positionKeyLocations = [
@@ -1605,7 +1605,14 @@ onAttach {
 
 whileAttached {
     let splitIndex = timer.currentSplitIndex()
-    if observedSplitIndex >= 0 && splitIndex > observedSplitIndex {
+    let timerAdvanced = match observedSplitIndex {
+        Some(previousIndex) => match splitIndex {
+            Some(currentIndex) => currentIndex > previousIndex,
+            None => false,
+        },
+        None => false,
+    }
+    if timerAdvanced {
         lastSplitAt = Instant.now()
         positionSplitKey = 0
     }

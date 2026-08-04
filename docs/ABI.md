@@ -12,6 +12,10 @@ truth for import IDs, Wasm signatures, ownership, lifetime rules, effects, and
 summaries. The compiler emits its import section from that catalog, and the test
 suite verifies the table below against the catalog renderer.
 
+Proposed host capabilities and limitations discovered during real ports are
+tracked separately in [`RUNTIME_EVOLUTION.md`](RUNTIME_EVOLUTION.md). This file
+describes only the contract that generated modules implement today.
+
 ## Exports
 
 | Export | Type | Purpose |
@@ -84,6 +88,11 @@ settings map before running `onDetached` or attached user code, decodes it into 
 and frees all temporary host handles. Choice strings become payloadless enum
 variants and selected paths become GC strings. The preceding tick remains
 available as `oldSettings`.
+
+These explicit frees are an implementation detail of the current C-shaped
+`env` ABI, not a desired SplitScript ownership model. New host-owned collection
+and value APIs should follow the GC-managed `externref` direction recorded in
+`RUNTIME_EVOLUTION.md` instead of expanding the manual-handle surface.
 
 ## GC types
 

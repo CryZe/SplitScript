@@ -24,6 +24,10 @@ General rules:
   representations, validated intrinsics, runtime helpers, and ABI boundaries.
 - Add compiler, runtime, formatter, and editor coverage in the same change when
   a feature crosses those surfaces.
+- Record host-runtime gaps found during ports in
+  [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md), with evidence and
+  semantic requirements before proposing import spellings. Keep compiler-only
+  work in this roadmap and implemented contracts in `docs/ABI.md`.
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
@@ -89,7 +93,9 @@ General rules:
   and a typed value enum. Preserve atomic `storeIfUnchanged` behavior when
   mutable settings data is eventually exposed. The settings declaration DSL
   remains the normal registration API, and `start`/`split`/`reset` blocks remain
-  preferable to duplicate direct timer commands.
+  preferable to duplicate direct timer commands. Coordinate the host-owned
+  portions through R1 and R3 in
+  [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
 - [ ] Extend signatures only for corpus-proven gaps: reusable scan targets,
   fallback signatures, range/page selection, capture transforms, relative
   address decoding, and concise pointer-follow composition. Existing `sig`,
@@ -280,7 +286,9 @@ remaining work is product hardening and distribution.
   Add host ABI, runtime, type-checking, hover/completion, and detached-event
   fixtures together; do not weaken availability in ordinary attached blocks.
   The current LiveSplit Wasm runtime only calls `update`; this requires a real
-  upstream host contract before any event export may be implemented.
+  upstream host contract before any event export may be implemented. R2 in
+  [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md) is the canonical
+  runtime-side requirement.
 - [ ] Design a typed least-privilege timer/run API for timing method, category,
   attempt metadata, current segment/history, and run offset. Separate read-only
   metadata from mutations and add ABI support only where LiveSplit can expose

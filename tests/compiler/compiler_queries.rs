@@ -835,6 +835,74 @@ fn rename_queries_validate_identifiers_reservations_and_binding_identity() {
 }
 
 #[test]
+fn semantic_queries_use_exact_tokens_before_end_of_word_fallbacks() {
+    use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget};
+
+    let source = concat!(
+        "state \"game.exe\" {}\n",
+        "fn inspect(value: i32) { print(value) }\n",
+        "whileAttached {\n",
+        "    inspect(1)\n",
+        "    inspect (2)\n",
+        "}\n",
+    );
+    let mut database = CompilerDatabase::new(source);
+    database.check().expect("navigation fixture should check");
+
+    let declaration = source.find("inspect").unwrap();
+    let adjacent = source.find("inspect(1)").unwrap();
+    let adjacent_boundary = adjacent + "inspect".len();
+
+    assert!(database.hover(adjacent_boundary).unwrap().is_none());
+    assert!(database.definition_at(adjacent_boundary).unwrap().is_none());
+    assert!(
+        database
+            .references_at(adjacent_boundary, true)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        database
+            .rename_target_at(adjacent_boundary)
+            .unwrap()
+            .is_none()
+    );
+
+    let inside = adjacent_boundary - 1;
+    assert!(database.hover(inside).unwrap().is_some());
+    assert!(matches!(
+        database.definition_at(inside).unwrap(),
+        Some(DefinitionTarget::Source(definition)) if definition.span.start == declaration
+    ));
+    assert_eq!(database.references_at(inside, true).unwrap().len(), 3);
+    assert!(database.rename_target_at(inside).unwrap().is_some());
+
+    let gap_boundary = source.rfind("inspect").unwrap() + "inspect".len();
+    assert!(database.hover(gap_boundary).unwrap().is_some());
+    assert!(matches!(
+        database.definition_at(gap_boundary).unwrap(),
+        Some(DefinitionTarget::Source(definition)) if definition.span.start == declaration
+    ));
+    assert_eq!(database.references_at(gap_boundary, true).unwrap().len(), 3);
+    assert!(database.rename_target_at(gap_boundary).unwrap().is_some());
+
+    let opening_parenthesis = gap_boundary + 1;
+    assert!(database.hover(opening_parenthesis).unwrap().is_none());
+    assert!(
+        database
+            .definition_at(opening_parenthesis)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        database
+            .rename_target_at(opening_parenthesis)
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
 fn underscore_suppression_reuses_validated_identity_renames() {
     use splitscript::tooling::database::CompilerDatabase;
 

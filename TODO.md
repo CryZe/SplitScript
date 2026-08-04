@@ -29,13 +29,6 @@ General rules:
 
 ## Now — restore editor semantic precision
 
-- [ ] Correct editor cursor-boundary selection across hover, definition,
-  references, and rename. The exact token under the cursor wins, including
-  punctuation such as the `(` in `foo(bar)`; only fall back to the immediately
-  preceding word when no token starts at that offset and the word ends there.
-  Cover adjacent punctuation, one space, end of line/file, UTF-16 positions,
-  and postfix `?`/`!` so the earlier exclusive-end fix remains useful without
-  making two neighboring tokens appear selected.
 - [ ] Give contextual state/settings syntax its own catalog-backed hover
   identity. Add focused documentation for `at` pointer-path fields and `key`
   stable settings-map keys, preserve their exact keyword spans in the syntax

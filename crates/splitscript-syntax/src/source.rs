@@ -63,23 +63,21 @@ impl SourceDocument {
         })
     }
 
-    /// Returns the word-like token selected by an editor cursor.
+    /// Returns the token selected by an editor cursor.
     ///
-    /// Editor cursors commonly sit at a symbol's half-open end, which may also
-    /// be the start of following punctuation. Prefer a word-like token directly
-    /// under the cursor, then accept the immediately preceding word-like token
-    /// when it ends exactly at the cursor. Whitespace farther away from a token
-    /// remains unselected.
+    /// Editor cursors commonly sit at a symbol's half-open end. An exact token
+    /// at that offset always wins, including punctuation that begins where the
+    /// preceding word ends. Only a genuine token gap or end of file falls back
+    /// to the immediately preceding word-like token when it ends exactly at the
+    /// cursor. Whitespace farther away from a token remains unselected.
     pub fn symbol_token_at(&self, offset: usize) -> Option<&Token> {
-        let current = self.token_at(offset);
-        if current.is_some_and(|token| is_word_like(&token.kind)) {
-            return current;
+        if let Some(current) = self.token_at(offset) {
+            return Some(current);
         }
-        let previous = offset
+        offset
             .checked_sub(1)
             .and_then(|previous| self.token_at(previous))
-            .filter(|token| token.span.end == offset && is_word_like(&token.kind));
-        previous.or(current)
+            .filter(|token| token.span.end == offset && is_word_like(&token.kind))
     }
 
     pub fn trivia(&self) -> impl Iterator<Item = &Trivia> {
@@ -169,14 +167,14 @@ mod tests {
 
     #[test]
     fn selects_symbols_at_editor_cursor_boundaries() {
-        let source = "alpha.beta  gamma";
+        let source = "alpha.beta  gamma(delta) value? result! omega";
         let document =
             SourceDocument::from_lexed(source, lex_lossless(source, SyntaxMode::Program).unwrap());
 
         let alpha_end = "alpha".len();
         assert_eq!(
             document.text(document.symbol_token_at(alpha_end).unwrap().span),
-            "alpha"
+            "."
         );
         let beta_end = source.find("beta").unwrap() + "beta".len();
         assert_eq!(
@@ -189,5 +187,45 @@ mod tests {
             document.text(document.symbol_token_at(gamma).unwrap().span),
             "gamma"
         );
+
+        let gamma_end = gamma + "gamma".len();
+        assert_eq!(
+            document.text(document.symbol_token_at(gamma_end).unwrap().span),
+            "("
+        );
+        let delta_end = source.find("delta").unwrap() + "delta".len();
+        assert_eq!(
+            document.text(document.symbol_token_at(delta_end).unwrap().span),
+            ")"
+        );
+
+        for punctuation in ['?', '!'] {
+            let offset = source.find(punctuation).unwrap();
+            assert_eq!(
+                document.text(document.symbol_token_at(offset).unwrap().span),
+                punctuation.to_string()
+            );
+        }
+
+        let omega_end = source.len();
+        assert_eq!(
+            document.text(document.symbol_token_at(omega_end).unwrap().span),
+            "omega"
+        );
+
+        let source = "lineEnd\noneSpace \nnext";
+        let document =
+            SourceDocument::from_lexed(source, lex_lossless(source, SyntaxMode::Program).unwrap());
+        let line_end = "lineEnd".len();
+        assert_eq!(
+            document.text(document.symbol_token_at(line_end).unwrap().span),
+            "lineEnd"
+        );
+        let one_space_end = source.find("oneSpace").unwrap() + "oneSpace".len();
+        assert_eq!(
+            document.text(document.symbol_token_at(one_space_end).unwrap().span),
+            "oneSpace"
+        );
+        assert!(document.symbol_token_at(one_space_end + 1).is_none());
     }
 }

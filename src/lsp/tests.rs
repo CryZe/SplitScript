@@ -505,9 +505,7 @@ fn hover_and_signature_help_preserve_resolved_catalog_information() {
     assert!(markdown.contains("Runtime behavior"));
     assert!(markdown.contains("Examples"));
 
-    // A cursor immediately after the receiver is also positioned on the dot
-    // under half-open source coordinates.
-    let value_offset = source.rfind("number").unwrap() + "number".len();
+    let value_offset = source.rfind("number").unwrap() + "number".len() - 1;
     let (value_line, value_character) = position_parts(source, value_offset);
     let value_hover = server.handle(json!({
         "jsonrpc": "2.0",
@@ -528,6 +526,21 @@ fn hover_and_signature_help_preserve_resolved_catalog_information() {
         value_hover[0]["result"]["range"]["start"],
         position(source, source.rfind("number").unwrap())
     );
+
+    // The exact token at a boundary wins: the cursor after `number` is on the
+    // dot, so it must not also select the receiver.
+    let dot_offset = source.rfind("number").unwrap() + "number".len();
+    let (dot_line, dot_character) = position_parts(source, dot_offset);
+    let dot_hover = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 91,
+        "method": "textDocument/hover",
+        "params": {
+            "textDocument": { "uri": "file:///insight.split" },
+            "position": { "line": dot_line, "character": dot_character }
+        }
+    }));
+    assert!(dot_hover[0]["result"].is_null());
 
     let parameter_offset = source.find(", 7").unwrap() + 2;
     let (parameter_line, parameter_character) = position_parts(source, parameter_offset);
@@ -633,7 +646,10 @@ fn definition_and_references_use_source_identities_and_utf16_ranges() {
         "// 🦊\n",
         "state \"game.exe\" {}\n",
         "fn inspect(value: i32) { print(value as String) }\n",
-        "whileAttached { inspect(1) }\n"
+        "whileAttached {\n",
+        "    inspect(1)\n",
+        "    inspect (2)\n",
+        "}\n"
     );
     let uri = "file:///navigation.split";
     let mut server = LanguageServer::default();
@@ -649,8 +665,7 @@ fn definition_and_references_use_source_identities_and_utf16_ranges() {
         }),
     ));
 
-    // The cursor immediately after the function name shares its position with
-    // the opening parenthesis.
+    // A token gap permits the editor-friendly end-of-word fallback.
     let call = source.rfind("inspect").unwrap() + "inspect".len();
     let (line, character) = position_parts(source, call);
     let definition = server.handle(json!({
@@ -683,10 +698,10 @@ fn definition_and_references_use_source_identities_and_utf16_ranges() {
             "context": { "includeDeclaration": false }
         }
     }));
-    assert_eq!(references[0]["result"].as_array().unwrap().len(), 1);
+    assert_eq!(references[0]["result"].as_array().unwrap().len(), 2);
     assert_eq!(
         references[0]["result"][0]["range"]["start"],
-        position(source, source.rfind("inspect").unwrap())
+        position(source, source.find("inspect(1)").unwrap())
     );
 
     let with_declaration = server.handle(json!({
@@ -699,7 +714,34 @@ fn definition_and_references_use_source_identities_and_utf16_ranges() {
             "context": { "includeDeclaration": true }
         }
     }));
-    assert_eq!(with_declaration[0]["result"].as_array().unwrap().len(), 2);
+    assert_eq!(with_declaration[0]["result"].as_array().unwrap().len(), 3);
+
+    // With no gap, the opening parenthesis begins exactly at the cursor and
+    // wins over the identifier that ends there.
+    let adjacent = source.find("inspect(1)").unwrap() + "inspect".len();
+    let (adjacent_line, adjacent_character) = position_parts(source, adjacent);
+    let definition = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 16,
+        "method": "textDocument/definition",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": adjacent_line, "character": adjacent_character }
+        }
+    }));
+    assert!(definition[0]["result"].is_null());
+
+    let references = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 17,
+        "method": "textDocument/references",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": adjacent_line, "character": adjacent_character },
+            "context": { "includeDeclaration": true }
+        }
+    }));
+    assert!(references[0]["result"].as_array().unwrap().is_empty());
 }
 
 #[test]
@@ -782,7 +824,7 @@ fn prepare_rename_and_rename_emit_validated_workspace_edits() {
     );
     let uri = "file:///rename.split";
     let call = source.rfind("inspect").unwrap();
-    let (line, character) = position_parts(source, call + "inspect".len());
+    let (line, character) = position_parts(source, call + "inspect".len() - 1);
     let mut server = LanguageServer::default();
     initialize(&mut server);
     server.handle(notification(

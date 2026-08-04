@@ -27,7 +27,48 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — unblock the next representative native port
+## Now — make inference defaults provenance-safe
+
+- [ ] Default an unresolved numeric inference component only when it contains
+  an unsuffixed literal: integer literals default to `i32` and floating-point
+  literals default to `f64`, matching Rust's user-facing rule. A variable that
+  is constrained only by capabilities such as `MemoryReadable`, `Numeric`,
+  `Integer`, `Float`, `Signed`, or `Display` must remain ambiguous and produce
+  a focused annotation diagnostic instead of acquiring a representation.
+  Track literal provenance through variable unification rather than inferring
+  it from the final capability set, and retain literal range checking.
+- [ ] Stop publishing `i32` as the recovery type for unrelated failed
+  inference. Introduce an explicit semantic error/unknown type (or an
+  equivalent non-codegen recovery representation) so hover and inlay hints do
+  not claim that an untyped `state` pointer field is `i32`. Strict compilation
+  must reject the program; recovering editor queries must remain available
+  without allowing the placeholder into lowering. Cover state fields, process
+  reads, locals, globals, parameters, generic bodies, arrays, and wrappers.
+
+## P0 — restore editor semantic precision
+
+- [ ] Make root completion consume the same attachment-availability facts as
+  effect checking. Do not offer the selected provider value (`process` or
+  `gba`) in `onDetached` or any future context where it cannot be used; keep it
+  available in attaching and attached contexts. Test both providers and user
+  functions whose attached-process requirements are inferred transitively so
+  completion cannot drift into a second availability model.
+- [ ] Correct editor cursor-boundary selection across hover, definition,
+  references, and rename. The exact token under the cursor wins, including
+  punctuation such as the `(` in `foo(bar)`; only fall back to the immediately
+  preceding word when no token starts at that offset and the word ends there.
+  Cover adjacent punctuation, one space, end of line/file, UTF-16 positions,
+  and postfix `?`/`!` so the earlier exclusive-end fix remains useful without
+  making two neighboring tokens appear selected.
+- [ ] Give contextual state/settings syntax its own catalog-backed hover
+  identity. Add focused documentation for `at` pointer-path fields and `key`
+  stable settings-map keys, preserve their exact keyword spans in the syntax
+  tree, and resolve hover only in those grammatical positions—not merely for
+  identifiers with the same spelling. Keep semantic highlighting, hover,
+  completion documentation, and future generated language docs driven by the
+  same entries.
+
+## P0 — unblock the next representative native ports
 
 - [ ] Select the next manually reviewed ASL port whose blocker is shared by
   multiple scripts, then implement the smallest ordinary language or
@@ -36,8 +77,6 @@ General rules:
   but do not introduce a dedicated lifecycle keyword or block until a
   maintained port proves that state-field expressions and `whileAttached`
   cannot represent the behavior clearly.
-
-## P0 — unblock the next representative native ports
 
 ### State layouts, discovery, and process identity
 

@@ -519,6 +519,38 @@ fn floating_literals_default_their_inference_component_to_f64() {
 }
 
 #[test]
+fn integer_and_float_capabilities_default_without_literals() {
+    let source = r#"
+        state "game.exe" {
+            integer = process.read(0x100);
+            floating = process.read(0x200);
+        }
+
+        whileAttached {
+            let masked = current.integer & current.integer
+            let rounded = current.floating.round()
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("integer- and float-specific operations should select their language defaults");
+    let state = checked.syntax().state.as_ref().unwrap();
+    let integer = checked.semantics().value_type(state.fields[0].id).unwrap();
+    let floating = checked.semantics().value_type(state.fields[1].id).unwrap();
+    assert_eq!(
+        checked.semantics().types().kind(integer),
+        &splitscript::compiler::types::TypeKind::Builtin(
+            splitscript::compiler::types::BuiltinType::I32,
+        )
+    );
+    assert_eq!(
+        checked.semantics().types().kind(floating),
+        &splitscript::compiler::types::TypeKind::Builtin(
+            splitscript::compiler::types::BuiltinType::F64,
+        )
+    );
+}
+
+#[test]
 fn global_types_are_inferred_from_uses_and_assignments() {
     let source = r#"
         let base = 0

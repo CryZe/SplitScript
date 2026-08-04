@@ -5,11 +5,14 @@
 - Numeric defaulting now follows literal provenance through unification and
   generic instantiation. Components containing an unsuffixed integer or
   floating-point literal default to `i32` or `f64`; an integer-looking literal
-  in a required floating-point context defaults to `f64`.
-- Capability-only constraints no longer manufacture a concrete representation.
-  Ambiguous process reads, state fields, locals, globals, parameters, arrays,
-  wrappers, and generic bodies require an annotation, with a focused diagnostic
-  for pointer-backed state fields whose memory type cannot be inferred.
+  in a required floating-point context defaults to `f64`. A specific `Integer`
+  or `Float` constraint likewise selects the corresponding language default.
+- Broad capability-only constraints no longer manufacture a concrete
+  representation. `Numeric`, `Signed`, `MemoryReadable`, and `Display` values
+  remain ambiguous; affected process reads, state fields, locals, globals,
+  parameters, arrays, wrappers, and generic bodies require an annotation, with
+  a focused diagnostic for pointer-backed state fields whose memory type cannot
+  be inferred.
 - Recovering editor analysis now uses an explicit semantic error type instead
   of publishing `i32`. It has no source spelling, layout, capabilities, or
   code-generation path, and inlay hints suppress it while other editor queries

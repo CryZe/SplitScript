@@ -914,7 +914,7 @@ define_language_catalog! {
         I32,
         "i32",
         "Stores a 32-bit signed integer.",
-        "Unconstrained integer literals default to i32; process reads and surrounding uses can infer a different width.",
+        "Unconstrained integer literals and values specifically constrained as Integer default to i32; process reads and surrounding uses can infer a different width.",
         "let health: i32 = process.read(healthAddress) else 0"
     ),
     builtin_type_item!(
@@ -956,7 +956,7 @@ define_language_catalog! {
         F64,
         "f64",
         "Stores a 64-bit floating-point number.",
-        "Floating-point values are useful for game coordinates, timers, and duration conversion. Unconstrained floating-point literals default to f64; capability constraints alone never choose a memory representation.",
+        "Floating-point values are useful for game coordinates, timers, and duration conversion. Unconstrained floating-point literals and values specifically constrained as Float default to f64; broader capabilities alone never choose a memory representation.",
         "let tickRate: f64 = 60.0"
     ),
     }

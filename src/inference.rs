@@ -463,7 +463,7 @@ impl InferenceContext {
         let Type::Variable(variable) = self.shallow(ty) else {
             return false;
         };
-        self.variables[variable as usize].literal_default.is_none()
+        self.default_builtin(variable).is_none()
     }
 
     pub(crate) fn unify(&mut self, left: Type, right: Type) -> Result<Type, InferenceError> {
@@ -553,30 +553,34 @@ impl InferenceContext {
             if root != id || self.variables[root as usize].binding.is_some() {
                 continue;
             }
-            let default = match self.variables[root as usize].literal_default {
-                Some(LiteralDefault::Integer)
-                    if self.variables[root as usize]
-                        .requirements
-                        .contains(StdlibCapabilityId::Float) =>
-                {
-                    Some(self.known_builtin(BuiltinType::F64))
-                }
-                Some(LiteralDefault::Integer) => Some(self.known_builtin(BuiltinType::I32)),
-                Some(LiteralDefault::Float) => Some(self.known_builtin(BuiltinType::F64)),
-                None => None,
-            };
-            let Some(default) = default else {
+            let Some(default) = self.default_builtin(root) else {
                 errors.push(error(format!(
                     "cannot infer type variable `?{root}` without more context"
                 )));
                 continue;
             };
+            let default = self.known_builtin(default);
             match self.validate_binding(root, default) {
                 Ok(()) => self.variables[root as usize].binding = Some(default),
                 Err(error) => errors.push(error),
             }
         }
         errors
+    }
+
+    fn default_builtin(&self, variable: u32) -> Option<BuiltinType> {
+        let variable = &self.variables[variable as usize];
+        if variable.requirements.contains(StdlibCapabilityId::Float) {
+            return Some(BuiltinType::F64);
+        }
+        if variable.requirements.contains(StdlibCapabilityId::Integer) {
+            return Some(BuiltinType::I32);
+        }
+        match variable.literal_default {
+            Some(LiteralDefault::Integer) => Some(BuiltinType::I32),
+            Some(LiteralDefault::Float) => Some(BuiltinType::F64),
+            None => None,
+        }
     }
 
     /// Gives every still-unbound variable a recovery-only representation so
@@ -1234,7 +1238,7 @@ mod tests {
     }
 
     #[test]
-    fn capability_constraints_do_not_choose_a_numeric_representation() {
+    fn broad_capability_constraints_do_not_choose_a_numeric_representation() {
         let mut inference = InferenceContext::new(
             StandardLibrary::new(),
             TypeStore::default(),
@@ -1257,7 +1261,31 @@ mod tests {
     }
 
     #[test]
-    fn unsuffixed_literals_are_the_only_numeric_defaults() {
+    fn integer_and_float_capabilities_choose_the_language_defaults() {
+        let mut inference = InferenceContext::new(
+            StandardLibrary::new(),
+            TypeStore::default(),
+            0,
+            [],
+            [],
+            [],
+            [],
+        );
+        let integer = inference.fresh(Requirements::capability(StdlibCapabilityId::Integer), None);
+        let float = inference.fresh(Requirements::capability(StdlibCapabilityId::Float), None);
+        assert!(inference.default_unbound().is_empty());
+        assert_eq!(
+            inference.resolve(integer),
+            inference.known_builtin(BuiltinType::I32)
+        );
+        assert_eq!(
+            inference.resolve(float),
+            inference.known_builtin(BuiltinType::F64)
+        );
+    }
+
+    #[test]
+    fn unsuffixed_literals_use_the_language_numeric_defaults() {
         let mut inference = InferenceContext::new(
             StandardLibrary::new(),
             TypeStore::default(),

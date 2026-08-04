@@ -198,14 +198,15 @@ records, the compiler reports those candidates instead of guessing.
 Annotations and integer suffixes are constraints, not a routine requirement.
 Suffixes such as `1u8`, `10i64`, and `0xffu32` remain available when a literal is
 genuinely unconstrained or when an exact type should be documented. An
-unresolved inference component defaults only when it contains an unsuffixed
-literal: integer literals default to `i32`, floating-point literals default to
-`f64`, and an integer-looking literal required to satisfy `Float` defaults to
-`f64`. Capabilities such as `Numeric`, `Integer`, `Float`, `MemoryReadable`, or
-`Display` do not choose a representation on their own; an otherwise ambiguous
-value needs an annotation. Mutable `let` bindings are monomorphic. User
-functions are also currently monomorphic per declaration; generalized
-polymorphic functions will require Wasm signature specialization.
+unresolved inference component defaults when it contains an unsuffixed literal
+or has a specific numeric-kind constraint: integer literals and `Integer`
+values default to `i32`, while floating-point literals and `Float` values
+default to `f64`. An integer-looking literal required to satisfy `Float` also
+defaults to `f64`. Broader capabilities such as `Numeric`, `Signed`,
+`MemoryReadable`, or `Display` do not choose a representation on their own; an
+otherwise ambiguous value needs an annotation. Mutable `let` bindings are
+monomorphic. User functions are also currently monomorphic per declaration;
+generalized polymorphic functions will require Wasm signature specialization.
 
 Assignments support `=`, the arithmetic compound forms `+=`, `-=`, `*=`, `/=`,
 and `%=`, plus `|=`, `&=`, `^=`, `<<=`, and `>>=` for integers. A compound

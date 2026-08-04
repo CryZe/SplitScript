@@ -195,6 +195,15 @@ abi_catalog! {
         "Reads the index of the split the current attempt is on."
     ),
     import!(
+        TimerSegmentWasSplit,
+        "timer_segment_splitted",
+        &[value("index", AbiType::I64)],
+        &[value("was_split", AbiType::I32)],
+        TIMER_READ,
+        "Returns -1 when the segment has not been reached, 0 when skipped, and 1 when split.",
+        "Reads how an earlier segment was advanced during the current attempt."
+    ),
+    import!(
         TimerStart,
         "timer_start",
         &[],
@@ -211,6 +220,24 @@ abi_catalog! {
         TIMER_WRITE,
         "Retains no guest values.",
         "Advances the timer to the next split."
+    ),
+    import!(
+        TimerSkipSplit,
+        "timer_skip_split",
+        &[],
+        &[],
+        TIMER_WRITE,
+        "Retains no guest values.",
+        "Skips the current split."
+    ),
+    import!(
+        TimerUndoSplit,
+        "timer_undo_split",
+        &[],
+        &[],
+        TIMER_WRITE,
+        "Retains no guest values.",
+        "Undoes the previous split."
     ),
     import!(
         TimerReset,
@@ -371,6 +398,19 @@ abi_catalog! {
         "Returns a host-provided portable filesystem path for a module."
     ),
     import!(
+        ProcessGetPath,
+        "process_get_path",
+        &[
+            borrowed("process", AbiType::I64),
+            output("path_pointer"),
+            output("path_length_pointer")
+        ],
+        &[value("success", AbiType::I32)],
+        PROCESS_READ,
+        "The process handle is borrowed; the path and length buffers are written only for this call.",
+        "Returns a host-provided portable filesystem path for the executable."
+    ),
+    import!(
         ProcessGetMemoryRangeCount,
         "process_get_memory_range_count",
         &[borrowed("process", AbiType::I64)],
@@ -426,6 +466,24 @@ abi_catalog! {
         RUNTIME_WRITE,
         "Message bytes are borrowed for this call only.",
         "Writes a diagnostic message."
+    ),
+    import!(
+        RuntimeGetOs,
+        "runtime_get_os",
+        &[output("name_pointer"), output("name_length_pointer")],
+        &[value("success", AbiType::I32)],
+        RUNTIME_READ,
+        "The name and length buffers are written only for this call.",
+        "Returns the host operating-system name."
+    ),
+    import!(
+        RuntimeGetArch,
+        "runtime_get_arch",
+        &[output("name_pointer"), output("name_length_pointer")],
+        &[value("success", AbiType::I32)],
+        RUNTIME_READ,
+        "The name and length buffers are written only for this call.",
+        "Returns the host architecture name."
     ),
     import!(
         UserSettingsAddBool,

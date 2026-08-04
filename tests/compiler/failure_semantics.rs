@@ -964,6 +964,30 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
         library.render_signature(StdlibItemId::TimerCurrentSplitIndex),
         "timer.currentSplitIndex() -> u64?"
     );
+    assert_eq!(
+        library.render_signature(StdlibItemId::TimerSegmentWasSplit),
+        "timer.segmentWasSplit(index: u64) -> bool?"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::TimerSkipSplit),
+        "timer.skipSplit() -> None"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::TimerUndoSplit),
+        "timer.undoSplit() -> None"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::ProcessPath),
+        "Process.path() -> String!"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::RuntimeOperatingSystem),
+        "runtime.operatingSystem() -> String!"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::RuntimeArchitecture),
+        "runtime.architecture() -> String!"
+    );
     let next_tick = library
         .item_by_name("nextTick")
         .expect("nextTick should be catalog-backed");

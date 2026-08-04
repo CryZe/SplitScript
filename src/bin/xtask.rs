@@ -290,6 +290,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/host_metadata.split",
+        output: "host_metadata.wasm",
+        profile: "release",
+        harness: "tests/host_metadata_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/async_loop.split",
         output: "async_loop.wasm",
         profile: "release",

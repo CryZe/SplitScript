@@ -216,6 +216,7 @@ pub struct StdlibVariant {
 
 const BOOL_CAPABILITIES: &[StdlibCapabilityId] = &[
     StdlibCapabilityId::Equatable,
+    StdlibCapabilityId::Display,
     StdlibCapabilityId::MemoryReadable,
 ];
 const SIGNED_INTEGER_CAPABILITIES: &[StdlibCapabilityId] = &[

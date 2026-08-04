@@ -1,0 +1,8 @@
+state "game.exe" {}
+
+whileAttached {
+    let executablePath = process.path() else "Unavailable"
+    let operatingSystem = runtime.operatingSystem() else "Unavailable"
+    let architecture = runtime.architecture() else "Unavailable"
+    setVariable("Host Metadata", `{executablePath}|{operatingSystem}|{architecture}`)
+}

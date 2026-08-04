@@ -2148,6 +2148,43 @@ fn compile_expr_unconverted(
                     ))
                     .instruction(&Instruction::End);
             }
+            IntrinsicId::TimerSegmentWasSplit => {
+                let host_value = context.matches.intrinsic_temps[&expression][0];
+                let Type::Option(option) = ty else {
+                    unreachable!("timer.segmentWasSplit returns the declared optional bool")
+                };
+                let option_type = context.gc.val_type(Type::Option(option));
+                compile_expr(function, args[0], context);
+                function
+                    .instruction(&Instruction::Call(
+                        context.abi.function(AbiImportId::TimerSegmentWasSplit),
+                    ))
+                    .instruction(&Instruction::LocalTee(host_value))
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::I32LtS)
+                    .instruction(&Instruction::If(BlockType::Result(option_type)))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(
+                        context.gc.index(Type::Option(option)),
+                    )))
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::LocalGet(host_value))
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::I32Ne)
+                    .instruction(&Instruction::StructNew(
+                        context.gc.index(Type::Option(option)),
+                    ))
+                    .instruction(&Instruction::End);
+            }
+            IntrinsicId::TimerSkipSplit => {
+                function.instruction(&Instruction::Call(
+                    context.abi.function(AbiImportId::TimerSkipSplit),
+                ));
+            }
+            IntrinsicId::TimerUndoSplit => {
+                function.instruction(&Instruction::Call(
+                    context.abi.function(AbiImportId::TimerUndoSplit),
+                ));
+            }
             IntrinsicId::TimerPauseGameTime => {
                 function.instruction(&Instruction::Call(
                     context.abi.function(AbiImportId::TimerPauseGameTime),
@@ -2311,6 +2348,22 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
+            IntrinsicId::ProcessPath => {
+                compile_receiver(function, target, context);
+                function.instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::ProcessPath),
+                ));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Standard(StdlibTypeId::String),
+                    Instruction::RefIsNull,
+                    "process path is unavailable",
+                    context,
+                );
+            }
             IntrinsicId::ModulePath => {
                 function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
                 compile_receiver(function, target, context);
@@ -2331,6 +2384,22 @@ fn compile_expr_unconverted(
                     Type::Standard(StdlibTypeId::String),
                     Instruction::RefIsNull,
                     "module path is unavailable",
+                    context,
+                );
+            }
+            IntrinsicId::RuntimeOperatingSystem | IntrinsicId::RuntimeArchitecture => {
+                let helper = if intrinsic == Some(IntrinsicId::RuntimeOperatingSystem) {
+                    RuntimeHelperId::RuntimeOperatingSystem
+                } else {
+                    RuntimeHelperId::RuntimeArchitecture
+                };
+                function.instruction(&Instruction::Call(context.runtime_helpers.function(helper)));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Standard(StdlibTypeId::String),
+                    Instruction::RefIsNull,
+                    "runtime metadata is unavailable",
                     context,
                 );
             }
@@ -2663,6 +2732,16 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
 
     if target == Type::Standard(StdlibTypeId::String) {
         if source == target {
+            return;
+        }
+        if source == Type::Bool {
+            function.instruction(&Instruction::If(BlockType::Result(
+                context.gc.val_type(Type::Standard(StdlibTypeId::String)),
+            )));
+            emit_string_literal(function, "true", context.gc);
+            function.instruction(&Instruction::Else);
+            emit_string_literal(function, "false", context.gc);
+            function.instruction(&Instruction::End);
             return;
         }
         if let Type::Standard(standard) = source

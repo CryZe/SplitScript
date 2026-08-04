@@ -115,6 +115,52 @@ root {
     fn nextTick() -> None;
 }
 
+/// Reads metadata about the autosplitting runtime host.
+///
+/// These values describe the system running LiveSplit, not necessarily the
+/// architecture of the attached game process.
+///
+/// # Example
+///
+/// Inspect the host platform
+///
+/// ```splitscript
+/// let hostOs = runtime.operatingSystem() else "unknown"
+/// let hostArchitecture = runtime.architecture() else "unknown"
+/// print(`Running on {hostOs} ({hostArchitecture})`)
+/// ```
+namespace runtime {
+    /// Returns the runtime host's operating-system name.
+    ///
+    /// Common values are `windows`, `linux`, and `macos`. The result remains a
+    /// string so new host operating systems do not require a language update.
+    ///
+    /// # Example
+    ///
+    /// Select platform-specific metadata handling
+    ///
+    /// ```splitscript
+    /// let hostOs = runtime.operatingSystem() else "unknown"
+    /// ```
+    @intrinsic(RuntimeOperatingSystem)
+    fn operatingSystem() -> String!;
+
+    /// Returns the runtime host's architecture name.
+    ///
+    /// Common values include `x86`, `x86_64`, `arm`, and `aarch64`. This is the
+    /// runtime architecture rather than a guarantee about the attached process.
+    ///
+    /// # Example
+    ///
+    /// Report the host architecture
+    ///
+    /// ```splitscript
+    /// let hostArchitecture = runtime.architecture() else "unknown"
+    /// ```
+    @intrinsic(RuntimeArchitecture)
+    fn architecture() -> String!;
+}
+
 /// Selects either the current or previous values of the script's declared settings.
 ///
 /// The compiler supplies `settings` and `oldSettings`; copying either value is
@@ -183,6 +229,22 @@ intrinsic type Process {
     /// ```
     @intrinsic(ProcessName)
     fn name() -> String;
+
+    /// Returns the executable's host-provided filesystem path.
+    ///
+    /// The runtime uses a portable WASI spelling, such as `/mnt/c/game.exe`
+    /// for a Windows path. The path is metadata only; obtaining it does not
+    /// grant unrestricted host filesystem access.
+    ///
+    /// # Example
+    ///
+    /// Inspect the attached executable path
+    ///
+    /// ```splitscript
+    /// let executablePath = process.path() else "Unavailable"
+    /// ```
+    @intrinsic(ProcessPath)
+    fn path() -> String!;
 
     /// Waits for the main executable module.
     ///
@@ -447,6 +509,62 @@ namespace timer {
     /// ```
     @intrinsic(TimerCurrentSplitIndex)
     fn currentSplitIndex() -> u64?;
+
+    /// Reports how an earlier segment was advanced during this attempt.
+    ///
+    /// Returns `Some(true)` when the segment was split, `Some(false)` when it
+    /// was skipped, and `None` when the index has not been reached in the
+    /// current attempt. This is historical attempt data; the current and later
+    /// segment indices therefore return `None`.
+    ///
+    /// # Example
+    ///
+    /// Check whether the first segment was split
+    ///
+    /// ```splitscript
+    /// let firstSegmentWasSplit = timer.segmentWasSplit(0)
+    /// ```
+    @intrinsic(TimerSegmentWasSplit)
+    fn segmentWasSplit(
+        /// Zero-based segment index.
+        index: u64,
+    ) -> bool?;
+
+    /// Skips the current split.
+    ///
+    /// This directly advances the timer without recording the current segment
+    /// as split. Use it only when the autosplitter intentionally controls timer
+    /// history rather than merely deciding whether its `split` block fires.
+    ///
+    /// # Example
+    ///
+    /// Skip a segment that does not exist in this route
+    ///
+    /// ```splitscript
+    /// if routeOmitsCurrentSegment {
+    ///     timer.skipSplit()
+    /// }
+    /// ```
+    @intrinsic(TimerSkipSplit)
+    fn skipSplit() -> None;
+
+    /// Undoes the previous split.
+    ///
+    /// The timer moves back one segment when its current state permits it.
+    /// This is an explicit timer mutation and is separate from autosplitter
+    /// snapshot history.
+    ///
+    /// # Example
+    ///
+    /// Correct an automatically detected false positive
+    ///
+    /// ```splitscript
+    /// if falsePositiveDetected {
+    ///     timer.undoSplit()
+    /// }
+    /// ```
+    @intrinsic(TimerUndoSplit)
+    fn undoSplit() -> None;
 
     /// Pauses LiveSplit's game-time clock.
     ///

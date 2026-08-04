@@ -863,7 +863,13 @@ fn runtime_text_outputs_accept_display_values() {
             print("tick")
             print(42)
             print(-7i64)
+            print(true)
             setVariable("Score", 9u16)
+            setVariable("Flag", false)
+            let explicit = true as String
+            let interpolated = `flag={false}`
+            print(explicit)
+            print(interpolated)
         }
     "#;
     let wasm = splitscript::compile(source)
@@ -872,8 +878,10 @@ fn runtime_text_outputs_accept_display_values() {
         .validate_all(&wasm)
         .expect("generic runtime text output should produce valid Wasm");
 
-    for call in ["print(true)", "setVariable(\"Flag\", true)"] {
-        let source = format!("state \"game.exe\" {{}} whileAttached {{ {call} }}");
+    for call in ["print(value)", "setVariable(\"Value\", value)"] {
+        let source = format!(
+            "record Value {{ number: i32 }} state \"game.exe\" {{}} whileAttached {{ let value = Value {{ number: 1 }}; {call} }}"
+        );
         let diagnostics = splitscript::compile(&source)
             .expect_err("values that cannot be displayed should be rejected");
         assert!(
@@ -951,12 +959,13 @@ fn template_strings_interpolate_strings_castable_values_and_nested_templates() {
 #[test]
 fn template_strings_reject_values_without_string_casts() {
     let source = r#"
+        record Value { number: i32 }
         state "game.exe" {}
-        fn format(value: bool) -> String {
+        fn format(value: Value) -> String {
             return `value={value}`
         }
     "#;
-    let diagnostics = splitscript::compile(source).expect_err("bool does not implement Display");
+    let diagnostics = splitscript::compile(source).expect_err("Value does not implement Display");
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message

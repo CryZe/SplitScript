@@ -48,6 +48,9 @@ pub(crate) enum RuntimeHelperId {
     ReadUtf8String,
     ReadManagedString,
     ModulePath,
+    ProcessPath,
+    RuntimeOperatingSystem,
+    RuntimeArchitecture,
     UnityAttach,
     CStringEquality,
     BackingFieldEquality,
@@ -284,11 +287,15 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         IntrinsicId::NumericMin | IntrinsicId::NumericMax => scratch(ScratchType::Expression, 2),
         IntrinsicId::TimerState => scratch(ScratchType::Core(CoreTypeId::U32), 1),
         IntrinsicId::TimerCurrentSplitIndex => scratch(ScratchType::Core(CoreTypeId::I64), 1),
+        IntrinsicId::TimerSegmentWasSplit => scratch(ScratchType::Core(CoreTypeId::I32), 1),
         IntrinsicId::ProcessFollow
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::ProcessReadUtf8
         | IntrinsicId::ProcessReadManagedString
         | IntrinsicId::ModulePath
+        | IntrinsicId::ProcessPath
+        | IntrinsicId::RuntimeOperatingSystem
+        | IntrinsicId::RuntimeArchitecture
         | IntrinsicId::StringReplaceAll
         | IntrinsicId::StringSlice
         | IntrinsicId::GbaAttach => scratch(ScratchType::ResultValue, 1),
@@ -313,6 +320,9 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::InstantNow => &[HostImport(Host::WasiClockTimeGet)],
         IntrinsicId::TimerState => &[HostImport(Host::TimerGetState)],
         IntrinsicId::TimerCurrentSplitIndex => &[HostImport(Host::TimerCurrentSplitIndex)],
+        IntrinsicId::TimerSegmentWasSplit => &[HostImport(Host::TimerSegmentWasSplit)],
+        IntrinsicId::TimerSkipSplit => &[HostImport(Host::TimerSkipSplit)],
+        IntrinsicId::TimerUndoSplit => &[HostImport(Host::TimerUndoSplit)],
         IntrinsicId::TimerPauseGameTime => &[HostImport(Host::TimerPauseGameTime)],
         IntrinsicId::TimerResumeGameTime => &[HostImport(Host::TimerResumeGameTime)],
         IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => &[
@@ -333,6 +343,9 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::ProcessReadUtf8 => &[Helper(Runtime::ReadUtf8String)],
         IntrinsicId::ProcessReadManagedString => &[Helper(Runtime::ReadManagedString)],
         IntrinsicId::ModulePath => &[Helper(Runtime::ModulePath)],
+        IntrinsicId::ProcessPath => &[Helper(Runtime::ProcessPath)],
+        IntrinsicId::RuntimeOperatingSystem => &[Helper(Runtime::RuntimeOperatingSystem)],
+        IntrinsicId::RuntimeArchitecture => &[Helper(Runtime::RuntimeArchitecture)],
         IntrinsicId::UnityIl2Cpp => &[Helper(Runtime::UnityAttach)],
         IntrinsicId::UnityModuleImage => &[Helper(Runtime::UnityGetImage)],
         IntrinsicId::UnityImageClass => &[Helper(Runtime::UnityGetClass)],
@@ -421,6 +434,10 @@ const U64_ARRAY: ContractTypeRef = ContractTypeRef::Application {
 const U64_OPTION: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Option,
     arguments: &[U64],
+};
+const BOOL_OPTION: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Option,
+    arguments: &[BOOL],
 };
 const SIGNATURE_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
@@ -667,6 +684,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             RepresentationPrimitive
         ),
+        IntrinsicId::ProcessPath => contract!(
+            ProcessPath,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(PROCESS_TYPE),
+                params![],
+                STRING_RESULT,
+            ),
+            PROCESS.with(Effect::Allocates),
+            Everywhere,
+            Retryable
+        ),
         IntrinsicId::ProcessMainModule => contract!(
             ProcessMainModule,
             Method,
@@ -816,6 +846,30 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             HostBoundary
         ),
+        IntrinsicId::TimerSegmentWasSplit => contract!(
+            TimerSegmentWasSplit,
+            Function,
+            signature(NO_TYPE_PARAMETERS, None, params![value(U64)], BOOL_OPTION),
+            TIMER_READ.with(Effect::Allocates),
+            Everywhere,
+            HostBoundary
+        ),
+        IntrinsicId::TimerSkipSplit => contract!(
+            TimerSkipSplit,
+            Function,
+            signature(NO_TYPE_PARAMETERS, None, params![], NONE),
+            TIMER_WRITE,
+            Everywhere,
+            HostBoundary
+        ),
+        IntrinsicId::TimerUndoSplit => contract!(
+            TimerUndoSplit,
+            Function,
+            signature(NO_TYPE_PARAMETERS, None, params![], NONE),
+            TIMER_WRITE,
+            Everywhere,
+            HostBoundary
+        ),
         IntrinsicId::TimerPauseGameTime => contract!(
             TimerPauseGameTime,
             Function,
@@ -957,6 +1011,22 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(NO_TYPE_PARAMETERS, Some(MODULE), params![], STRING_RESULT,),
             PROCESS,
+            Everywhere,
+            Retryable
+        ),
+        IntrinsicId::RuntimeOperatingSystem => contract!(
+            RuntimeOperatingSystem,
+            Function,
+            signature(NO_TYPE_PARAMETERS, None, params![], STRING_RESULT,),
+            RUNTIME_READ_ALLOCATES,
+            Everywhere,
+            Retryable
+        ),
+        IntrinsicId::RuntimeArchitecture => contract!(
+            RuntimeArchitecture,
+            Function,
+            signature(NO_TYPE_PARAMETERS, None, params![], STRING_RESULT,),
+            RUNTIME_READ_ALLOCATES,
             Everywhere,
             Retryable
         ),

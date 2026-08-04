@@ -768,6 +768,141 @@ pub(super) fn compile_module_path(
     function
 }
 
+pub(super) fn compile_process_path(
+    abi: &Abi,
+    string_from_memory: u32,
+    gc: &GcLayout,
+    scratch: super::super::memory_plan::RuntimeScratch,
+) -> Function {
+    const MAX_PROCESS_PATH_BYTES: i32 = 65_536;
+
+    let host_strings = scratch.host_strings_start;
+    let path_length_pointer = scratch.abi_read.destination(4);
+    let mut function = Function::new([(2, ValType::I32)]);
+    let process = 0;
+    let path_length = 1;
+    let required_pages = 2;
+
+    emit_ensure_linear_capacity(
+        &mut function,
+        host_strings + MAX_PROCESS_PATH_BYTES,
+        required_pages,
+    );
+    function
+        .instruction(&Instruction::I32Const(path_length_pointer))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Store(memarg()))
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(path_length_pointer))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetPath),
+        ))
+        .instruction(&Instruction::Drop)
+        .instruction(&Instruction::I32Const(path_length_pointer))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::LocalTee(path_length))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::LocalGet(path_length))
+        .instruction(&Instruction::I32Const(MAX_PROCESS_PATH_BYTES))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::I32Const(path_length_pointer))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetPath),
+        ))
+        .instruction(&Instruction::I32Eqz);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(path_length))
+        .instruction(&Instruction::Call(string_from_memory))
+        .instruction(&Instruction::End);
+    function
+}
+
+pub(super) fn compile_runtime_metadata(
+    abi: &Abi,
+    import: AbiImportId,
+    string_from_memory: u32,
+    gc: &GcLayout,
+    scratch: super::super::memory_plan::RuntimeScratch,
+) -> Function {
+    const MAX_RUNTIME_METADATA_BYTES: i32 = 256;
+
+    debug_assert!(matches!(
+        import,
+        AbiImportId::RuntimeGetOs | AbiImportId::RuntimeGetArch
+    ));
+    let host_strings = scratch.host_strings_start;
+    let length_pointer = scratch.abi_read.destination(4);
+    let mut function = Function::new([(2, ValType::I32)]);
+    let length = 0;
+    let required_pages = 1;
+
+    emit_ensure_linear_capacity(
+        &mut function,
+        host_strings + MAX_RUNTIME_METADATA_BYTES,
+        required_pages,
+    );
+    function
+        .instruction(&Instruction::I32Const(length_pointer))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Store(memarg()))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(length_pointer))
+        .instruction(&Instruction::Call(abi.function(import)))
+        .instruction(&Instruction::Drop)
+        .instruction(&Instruction::I32Const(length_pointer))
+        .instruction(&Instruction::I32Load(memarg()))
+        .instruction(&Instruction::LocalTee(length))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::I32Const(MAX_RUNTIME_METADATA_BYTES))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::I32Const(length_pointer))
+        .instruction(&Instruction::Call(abi.function(import)))
+        .instruction(&Instruction::I32Eqz);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::Call(string_from_memory))
+        .instruction(&Instruction::End);
+    function
+}
+
+fn emit_ensure_linear_capacity(function: &mut Function, end: i32, required_pages: u32) {
+    function
+        .instruction(&Instruction::I32Const(end))
+        .instruction(&Instruction::I32Const(65_535))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Const(16))
+        .instruction(&Instruction::I32ShrU)
+        .instruction(&Instruction::LocalTee(required_pages))
+        .instruction(&Instruction::MemorySize(0))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(required_pages))
+        .instruction(&Instruction::MemorySize(0))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::MemoryGrow(0))
+        .instruction(&Instruction::Drop)
+        .instruction(&Instruction::End);
+}
+
 fn emit_empty_string_return(function: &mut Function, gc: &GcLayout) {
     function
         .instruction(&Instruction::ArrayNewFixed {

@@ -1,9 +1,31 @@
 state "game.exe" {}
 
+let changedHistory = false
+
 whileAttached {
     let label = match timer.currentSplitIndex() {
         Some(index) => index as String,
         None => "None",
     }
     setVariable("Split Index", label)
+
+    let first = match timer.segmentWasSplit(0) {
+        Some(wasSplit) => wasSplit as String,
+        None => "None",
+    }
+    let second = match timer.segmentWasSplit(1) {
+        Some(wasSplit) => wasSplit as String,
+        None => "None",
+    }
+    let future = match timer.segmentWasSplit(2) {
+        Some(wasSplit) => wasSplit as String,
+        None => "None",
+    }
+    setVariable("Split History", `{first},{second},{future}`)
+
+    if !changedHistory {
+        timer.skipSplit()
+        timer.undoSplit()
+        changedHistory = true
+    }
 }

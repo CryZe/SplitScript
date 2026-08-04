@@ -131,6 +131,35 @@ pub(super) fn build_module_path(inputs: &RuntimeHelperInputs<'_>) -> Function {
     )
 }
 
+pub(super) fn build_process_path(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_process_path(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::StringFromMemory),
+        inputs.gc,
+        inputs.memory.scratch(),
+    )
+}
+
+pub(super) fn build_runtime_operating_system(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_runtime_metadata(
+        inputs.abi,
+        crate::abi::AbiImportId::RuntimeGetOs,
+        inputs.plan.function(RuntimeHelperId::StringFromMemory),
+        inputs.gc,
+        inputs.memory.scratch(),
+    )
+}
+
+pub(super) fn build_runtime_architecture(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_runtime_metadata(
+        inputs.abi,
+        crate::abi::AbiImportId::RuntimeGetArch,
+        inputs.plan.function(RuntimeHelperId::StringFromMemory),
+        inputs.gc,
+        inputs.memory.scratch(),
+    )
+}
+
 pub(super) fn build_unity_attach(inputs: &RuntimeHelperInputs<'_>) -> Function {
     unity::compile_unity_attach(
         inputs.abi,

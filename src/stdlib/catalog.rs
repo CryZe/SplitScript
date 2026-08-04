@@ -471,6 +471,7 @@ mod tests {
         assert!(library.core_type_has_capability(CoreTypeId::U32, StdlibCapabilityId::Numeric));
         assert!(library.core_type_has_capability(CoreTypeId::U32, StdlibCapabilityId::Display));
         assert!(library.core_type_has_capability(CoreTypeId::U32, StdlibCapabilityId::Equatable));
+        assert!(library.core_type_has_capability(CoreTypeId::Bool, StdlibCapabilityId::Display));
 
         let schema = include_str!("schema.rs");
         let retired_constraint = ["enum Type", "Constraint"].concat();

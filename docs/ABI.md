@@ -26,8 +26,11 @@ suite verifies the table below against the catalog renderer.
 | --- | --- |
 | `timer_get_state` | `() -> i32` |
 | `timer_current_split_index` | `() -> i64` |
+| `timer_segment_splitted` | `(i64) -> i32` |
 | `timer_start` | `() -> ()` |
 | `timer_split` | `() -> ()` |
+| `timer_skip_split` | `() -> ()` |
+| `timer_undo_split` | `() -> ()` |
 | `timer_reset` | `() -> ()` |
 | `timer_set_game_time` | `(i64, i32) -> ()` |
 | `timer_pause_game_time` | `() -> ()` |
@@ -42,11 +45,14 @@ suite verifies the table below against the catalog renderer.
 | `process_get_module_address` | `(i64, i32, i32) -> i64` |
 | `process_get_module_size` | `(i64, i32, i32) -> i64` |
 | `process_get_module_path` | `(i64, i32, i32, i32, i32) -> i32` |
+| `process_get_path` | `(i64, i32, i32) -> i32` |
 | `process_get_memory_range_count` | `(i64) -> i64` |
 | `process_get_memory_range_address` | `(i64, i64) -> i64` |
 | `process_get_memory_range_size` | `(i64, i64) -> i64` |
 | `process_get_memory_range_flags` | `(i64, i64) -> i64` |
 | `runtime_print_message` | `(i32, i32) -> ()` |
+| `runtime_get_os` | `(i32, i32) -> i32` |
+| `runtime_get_arch` | `(i32, i32) -> i32` |
 | `user_settings_add_bool` | `(i32, i32, i32, i32, i32) -> i32` |
 | `user_settings_add_title` | `(i32, i32, i32, i32, i32) -> ()` |
 | `user_settings_add_choice` | `(i32, i32, i32, i32, i32, i32) -> ()` |

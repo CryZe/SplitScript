@@ -79,6 +79,17 @@ General rules:
   module enumeration/search, product-version identity, and a deterministic
   executable fingerprint. Prefer host metadata over unrestricted filesystem
   access or hashing an entire module inside Wasm.
+- [ ] Finish the remaining official host ABI as typed language facilities,
+  preserving semantics without exposing owned numeric handles or manual
+  `free` calls. Timer segment history, skip/undo, executable path, host OS, and
+  host architecture are available now. Design PID discovery/attachment around
+  the language's single process-lifetime boundary; expose mapped ranges through
+  bounded cooperative iteration and a `MemoryRange` record with typed flags;
+  and represent recursive settings maps/lists/values as GC-owned collections
+  and a typed value enum. Preserve atomic `storeIfUnchanged` behavior when
+  mutable settings data is eventually exposed. The settings declaration DSL
+  remains the normal registration API, and `start`/`split`/`reset` blocks remain
+  preferable to duplicate direct timer commands.
 - [ ] Extend signatures only for corpus-proven gaps: reusable scan targets,
   fallback signatures, range/page selection, capture transforms, relative
   address decoding, and concise pointer-follow composition. Existing `sig`,

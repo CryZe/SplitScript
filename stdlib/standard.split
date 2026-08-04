@@ -1761,7 +1761,7 @@ enum PointerSize {
 /// let healthPath = 0x1000.memoryPath([0x20, 0x18], 0x8, PointerSize.Bit64)
 /// ```
 @representation(gcStruct, nullable)
-@valueUsage(recordField, enumPayload, stateField, localVariable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
 struct MemoryPath {
     /// Returns the address at which traversal starts.
     ///

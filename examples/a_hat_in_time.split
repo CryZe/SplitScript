@@ -1,0 +1,145 @@
+/// Save-data layouts selected by runtime signature discovery.
+enum SaveDataLayout {
+    DLC,
+    Modding,
+    Release,
+}
+
+/// Patch-dependent offsets below the discovered save-data pointer.
+record SaveDataOffsets {
+    root: u64,
+    yarn: u64,
+    chapter: u64,
+    act: u64,
+    checkpoint: u64,
+}
+
+fn saveDataOffsets(layout) {
+    return match layout {
+        SaveDataLayout.DLC => SaveDataOffsets {
+            root: 0x68,
+            yarn: 0xf0,
+            chapter: 0x108,
+            act: 0x10c,
+            checkpoint: 0x110,
+        },
+        SaveDataLayout.Modding => SaveDataOffsets {
+            root: 0x64,
+            yarn: 0xe0,
+            chapter: 0xf8,
+            act: 0xfc,
+            checkpoint: 0x100,
+        },
+        SaveDataLayout.Release => SaveDataOffsets {
+            root: 0x64,
+            yarn: 0xe0,
+            chapter: 0xf4,
+            act: 0xf8,
+            checkpoint: 0xfc,
+        },
+    }
+}
+
+state "HatinTimeGame" {
+    timerState: i32 = process.read(timerBase + 0x04)?;
+    unpauseTime: f64 = process.read(timerBase + 0x08)?;
+    gameTimerIsPaused: i32 = process.read(timerBase + 0x10)?;
+    actTimerIsPaused: i32 = process.read(timerBase + 0x14)?;
+    actTimerIsVisible: i32 = process.read(timerBase + 0x18)?;
+    unpauseTimeIsDirty: i32 = process.read(timerBase + 0x1c)?;
+    justGotTimePiece: i32 = process.read(timerBase + 0x20)?;
+    gameTime: f64 = process.read(timerBase + 0x24)?;
+    actTime: f64 = process.read(timerBase + 0x2c)?;
+    realGameTime: f64 = process.read(timerBase + 0x34)?;
+    realActTime: f64 = process.read(timerBase + 0x3c)?;
+    timePieceCount: i32 = process.read(timerBase + 0x44)?;
+    yarn: i32 = process.read(resolvePath(yarnPath)?)?;
+    chapter: i32 = process.read(resolvePath(chapterPath)?)?;
+    act: i32 = process.read(resolvePath(actPath)?)?;
+    checkpoint: i32 = process.read(resolvePath(checkpointPath)?)?;
+    x: f32 = process.read(resolvePath(xPath)?)?;
+    y: f32 = process.read(resolvePath(yPath)?)?;
+    z: f32 = process.read(resolvePath(zPath)?)?;
+}
+
+let timerBase: address = 0x0
+let saveDataLayout = SaveDataLayout.Release
+let yarnPath: MemoryPath? = None
+let chapterPath: MemoryPath? = None
+let actPath: MemoryPath? = None
+let checkpointPath: MemoryPath? = None
+let xPath: MemoryPath? = None
+let yPath: MemoryPath? = None
+let zPath: MemoryPath? = None
+
+fn resolvePath(path: MemoryPath?) -> address! {
+    let initialized = path else return Err("path not initialized")
+    return initialized.resolve()
+}
+
+onAttach {
+    timerBase = await process.scanMemory(
+        sig"54 49 4D 52 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 45 4E 44 20"
+    )
+
+    let saveData = await process.scanMemoryAny([
+        sig"48 8B 1D ?? ?? ?? ?? 48 85 DB 74 ?? 48 8B 5B ?? 48 85 DB 74 ??",
+        sig"48 8B 05 ?? ?? ?? ?? 48 8B 74 24 ?? 48 83 C4 50",
+        sig"48 8B 05 ?? ?? ?? ?? 48 8B D9 48 85 C0 75 ?? 48 89 7C 24 ??",
+        sig"48 8B 05 ?? ?? ?? ?? 48 8B 7C 24 ?? 48 83 C4 40",
+    ])
+    saveDataLayout = match saveData.index {
+        0 => SaveDataLayout.DLC,
+        1 => SaveDataLayout.DLC,
+        2 => SaveDataLayout.Modding,
+        _ => SaveDataLayout.Release,
+    }
+    let saveDataRoot = retry process.readRelative32(saveData.address + 3)
+
+    let actorsSignature = await process.scanMemory(
+        sig"48 8B 05 ?? ?? ?? ?? 81 88 ?? ?? ?? ?? 00 00 80 00"
+    )
+    let actorsRoot = retry process.readRelative32(actorsSignature + 3)
+    let coordinatesSignature = await process.scanMemory(
+        sig"48 8B 81 ?? ?? ?? ?? 4C 8D 80 ?? ?? ?? ??"
+    )
+    let hatKidOffset = retry process.read<u32>(coordinatesSignature + 3) as u64
+
+    while true {
+        let saveDataPointer = retry process.read<address>(saveDataRoot)
+        let actorsPointer = retry process.read<address>(actorsRoot)
+        if saveDataPointer != 0 && actorsPointer != 0 {
+            break
+        }
+        await nextTick()
+    }
+
+    let offsets = saveDataOffsets(saveDataLayout)
+    yarnPath = saveDataRoot.memoryPath([offsets.root], offsets.yarn, PointerSize.Bit64)
+    chapterPath = saveDataRoot.memoryPath([offsets.root], offsets.chapter, PointerSize.Bit64)
+    actPath = saveDataRoot.memoryPath([offsets.root], offsets.act, PointerSize.Bit64)
+    checkpointPath = saveDataRoot.memoryPath(
+        [offsets.root],
+        offsets.checkpoint,
+        PointerSize.Bit64,
+    )
+    xPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x80, PointerSize.Bit64)
+    yPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x84, PointerSize.Bit64)
+    zPath = actorsRoot.memoryPath([0x6dc, 0, 0x68, hatKidOffset], 0x88, PointerSize.Bit64)
+}
+
+start {
+    return false
+}
+
+split {
+    return false
+}
+
+reset {
+    return false
+}
+
+isLoading {
+    return false
+}

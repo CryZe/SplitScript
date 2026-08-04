@@ -24,6 +24,13 @@ const COMPILE_FIXTURES: &[CompileFixture] = &[];
 
 const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
     RuntimeFixture {
+        source: "examples/a_hat_in_time.split",
+        output: "a_hat_in_time.wasm",
+        profile: "release",
+        harness: "tests/a_hat_in_time_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "examples/akibas_trip.split",
         output: "akibas_trip.wasm",
         profile: "release",

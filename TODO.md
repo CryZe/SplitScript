@@ -37,14 +37,18 @@ General rules:
   explicit range/module scanning available, scan ranges in deterministic
   reverse order for this port, skip unreadable mappings, and preserve
   process-lifetime cancellation while discovery is pending. Every public scan
-  owns a future-local cursor and inspects only a bounded window per tick.
+  owns a future-local cursor, inspects only a bounded window per poll, and then
+  yields back to the host. This is a responsiveness contract: discovery must
+  not make a tick exceed the runtime's hanging-autosplitter threshold.
 - [ ] Move compiler-owned Unity IL2CPP and GBA discovery onto the same
   cooperative scan machinery. An async-looking provider must never call a
   helper that traverses an unbounded module or memory-range list in one poll.
-- [ ] Represent the timer, save-data, actor, and coordinate watchers through
+- [x] Represent the timer, save-data, actor, and coordinate watchers through
   discovered addresses and patch-dependent pointer paths. Prefer ordinary
   globals, records, arrays, functions, and state expressions over dynamic
-  `MemoryWatcher` objects or game-specific compiler branches.
+  `MemoryWatcher` objects or game-specific compiler branches. The A Hat runtime
+  fixture covers alternative-signature layout selection and the discovered
+  save-data and actor pointer chains.
 - [ ] Add host-driven `onSplit` behavior for the debounce lock so manual and
   externally initiated splits are observed as well as splits requested by the
   script. Define event ordering and detached availability before exposing the

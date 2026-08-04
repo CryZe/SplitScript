@@ -949,10 +949,16 @@ replacements. Root candidates combine the `LanguageCatalog`, `StandardLibrary`,
 source declarations, and bindings visible at the cursor. The lexical walk
 includes function parameters, preceding ordinary and suspension bindings,
 enclosing-block locals, and active match-pattern bindings while preserving
-shadowing and excluding later or sibling declarations. Member completion
-handles snapshots and nominal enum names directly, then uses a temporary source
-probe with the unfinished member suffix removed to recover the receiver's
-semantic `TypeKind`. That supports
+shadowing and excluding later or sibling declarations. Root completion also
+uses the same exhaustive lifecycle attachment predicate as validation. In a
+detached context it omits the selected `process`/`gba` provider, catalog
+operations that require an attachment, and user functions whose transitive
+`OperationAnalysis` carries that requirement. A temporary `None` probe replaces
+an unfinished root identifier when necessary, retaining those function facts
+while the user is typing instead of introducing a second effect analysis.
+Member completion handles snapshots and nominal enum names directly, then uses
+a temporary source probe with the unfinished member suffix removed to recover
+the receiver's semantic `TypeKind`. That supports
 record fields, compiler-provided fields, user methods, and catalog methods even
 for the normal mid-edit spelling `receiver.`. The LSP adapter converts the
 replacement span to UTF-16 and emits standard snippet text edits; it does not

@@ -43,10 +43,27 @@ pub struct OperationAnalysis {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DetachedCallViolation {
+pub struct AttachedProcessViolation {
+    pub action: ActionKind,
     pub expression_span: Span,
     pub function: Option<FunctionId>,
     pub standard_library_name: Option<&'static str>,
+}
+
+/// Whether code in this lifecycle action executes with a selected process
+/// provider. Keep this as the shared source of truth for semantic validation
+/// and editor candidate filtering as new lifecycle contexts are introduced.
+pub const fn action_has_attached_process(action: ActionKind) -> bool {
+    match action {
+        ActionKind::OnDetached => false,
+        ActionKind::OnAttach
+        | ActionKind::WhileAttached
+        | ActionKind::Start
+        | ActionKind::Split
+        | ActionKind::Reset
+        | ActionKind::IsLoading
+        | ActionKind::GameTime => true,
+    }
 }
 
 struct CallFacts {
@@ -209,13 +226,14 @@ impl OperationAnalysis {
             .unwrap_or_default()
     }
 
-    pub fn detached_call_violations(&self, program: &TypedProgram) -> Vec<DetachedCallViolation> {
-        let Some(body) = program.action_body(ActionKind::OnDetached) else {
-            return Vec::new();
-        };
+    pub fn attached_process_violations(
+        &self,
+        program: &TypedProgram,
+    ) -> Vec<AttachedProcessViolation> {
         struct Validator<'a> {
             analysis: &'a OperationAnalysis,
-            violations: Vec<DetachedCallViolation>,
+            action: ActionKind,
+            violations: Vec<AttachedProcessViolation>,
         }
         impl Validator<'_> {
             fn violation(
@@ -223,7 +241,7 @@ impl OperationAnalysis {
                 call: &ResolvedCall,
                 span: Span,
                 program: &TypedProgram,
-            ) -> Option<DetachedCallViolation> {
+            ) -> Option<AttachedProcessViolation> {
                 match call {
                     ResolvedCall::StandardLibrary { item, .. } => {
                         let item = program.standard_library().item(*item);
@@ -238,7 +256,8 @@ impl OperationAnalysis {
                                     .operation_semantics(item.id)
                                     .requires_attached_process
                             });
-                        requires_attached_process.then_some(DetachedCallViolation {
+                        requires_attached_process.then_some(AttachedProcessViolation {
+                            action: self.action,
                             expression_span: span,
                             function: None,
                             standard_library_name: Some(item.qualified_name),
@@ -249,7 +268,8 @@ impl OperationAnalysis {
                         .analysis
                         .function(*function)
                         .requires_attached_process
-                        .then_some(DetachedCallViolation {
+                        .then_some(AttachedProcessViolation {
+                            action: self.action,
                             expression_span: span,
                             function: Some(*function),
                             standard_library_name: None,
@@ -282,12 +302,20 @@ impl OperationAnalysis {
             }
         }
 
-        let mut validator = Validator {
-            analysis: self,
-            violations: Vec::new(),
-        };
-        validator.visit_block(body, program);
-        validator.violations
+        let mut violations = Vec::new();
+        for action in program
+            .action_bodies()
+            .filter(|action| !action_has_attached_process(action.action))
+        {
+            let mut validator = Validator {
+                analysis: self,
+                action: action.action,
+                violations: Vec::new(),
+            };
+            validator.visit_block(&action.body, program);
+            violations.extend(validator.violations);
+        }
+        violations
     }
 }
 

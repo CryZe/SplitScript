@@ -1,5 +1,19 @@
 # SplitScript roadmap
 
+## 2026-08-04: attachment-aware root completion
+
+- Root completion now shares the exhaustive lifecycle attachment predicate
+  used by semantic validation. `process` and `gba` are omitted from
+  `onDetached`, while attaching and attached lifecycle actions retain their
+  selected typed provider.
+- Detached completion filters global catalog operations and source functions
+  that require an attached process. User-function requirements come from the
+  same fixed-point `OperationAnalysis` as diagnostics, including transitive
+  helper calls rather than a second completion-only effect model.
+- Incomplete root identifiers are replaced by a temporary inert `None` probe
+  when necessary, so transitive filtering remains available during ordinary
+  typing. Added native/GBA and direct/transitive/safe function regressions.
+
 ## 2026-08-04: provenance-safe numeric inference defaults
 
 - Numeric defaulting now follows literal provenance through unification and

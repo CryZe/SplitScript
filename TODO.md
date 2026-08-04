@@ -29,12 +29,6 @@ General rules:
 
 ## Now — restore editor semantic precision
 
-- [ ] Make root completion consume the same attachment-availability facts as
-  effect checking. Do not offer the selected provider value (`process` or
-  `gba`) in `onDetached` or any future context where it cannot be used; keep it
-  available in attaching and attached contexts. Test both providers and user
-  functions whose attached-process requirements are inferred transitively so
-  completion cannot drift into a second availability model.
 - [ ] Correct editor cursor-boundary selection across hover, definition,
   references, and rename. The exact token under the cursor wins, including
   punctuation such as the `(` in `foo(bar)`; only fall back to the immediately

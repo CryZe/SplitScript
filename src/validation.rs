@@ -104,7 +104,7 @@ pub(crate) fn validate(
         }
     }
 
-    for violation in effects.detached_call_violations(hir) {
+    for violation in effects.attached_process_violations(hir) {
         let name = violation
             .standard_library_name
             .map(str::to_owned)
@@ -118,8 +118,9 @@ pub(crate) fn validate(
             });
         diagnostics.push(Diagnostic::semantic(
             format!(
-                "`{}` requires an attached process and is unavailable in `onDetached`",
-                name.unwrap_or_else(|| "function".to_owned())
+                "`{}` requires an attached process and is unavailable in `{}`",
+                name.unwrap_or_else(|| "function".to_owned()),
+                violation.action.name(),
             ),
             violation.expression_span,
         ));

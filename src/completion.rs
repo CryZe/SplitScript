@@ -10,6 +10,7 @@ use crate::{
     catalog::Documentation,
     database::{CompilerDatabase, SemanticQueryResult},
     documentation::StandardLibraryDocumentation,
+    effects::{OperationAnalysis, action_has_attached_process},
     hir::ExpressionResolution,
     language::{LanguageCatalog, LanguageItem, LanguageItemId, LanguageItemKind},
     lexer::{self, TokenKind},
@@ -71,8 +72,58 @@ pub(crate) fn complete(
     } else if let Some(context) = member_context(&source, offset) {
         Ok(complete_member(&source, &syntax, context, compiler_context))
     } else {
-        Ok(complete_root(&source, &syntax, offset, standard_library))
+        let action = syntax
+            .actions
+            .iter()
+            .find(|action| contains_offset(action.body.span, offset))
+            .map(|action| action.kind);
+        let has_attached_process = action.is_none_or(action_has_attached_process);
+        let effects = (!has_attached_process)
+            .then(|| {
+                completion_operation_analysis(
+                    database,
+                    &source,
+                    identifier_span(&source, offset),
+                    compiler_context,
+                )
+            })
+            .flatten();
+        Ok(complete_root(
+            &source,
+            &syntax,
+            offset,
+            standard_library,
+            has_attached_process,
+            effects.as_ref(),
+        ))
     }
+}
+
+fn completion_operation_analysis(
+    database: &mut CompilerDatabase,
+    source: &str,
+    replacement: Span,
+    compiler_context: crate::CompilerContext,
+) -> Option<OperationAnalysis> {
+    if let Some(effects) = database
+        .semantic_snapshot()
+        .ok()
+        .and_then(|snapshot| snapshot.effects().cloned())
+    {
+        return Some(effects);
+    }
+
+    // A partially typed root identifier is normally an unknown expression and
+    // prevents typed-HIR effect analysis. Replace only that identifier with a
+    // valid inert value; declaration and function IDs remain stable, allowing
+    // completion to retain the same transitive operation facts while typing.
+    let mut probe_source = source.to_owned();
+    probe_source.replace_range(replacement.start..replacement.end, "None");
+    let mut probe = CompilerDatabase::with_context(compiler_context, probe_source);
+    probe
+        .semantic_snapshot()
+        .ok()
+        .and_then(|snapshot| snapshot.effects().cloned())
 }
 
 fn complete_type_argument(
@@ -224,6 +275,8 @@ fn complete_root(
     syntax: &Program,
     offset: usize,
     standard_library: StandardLibrary,
+    has_attached_process: bool,
+    effects: Option<&OperationAnalysis>,
 ) -> CompletionList {
     let replacement = identifier_span(source, offset);
     let prefix = source[replacement.start..offset].to_owned();
@@ -235,8 +288,8 @@ fn complete_root(
         }
     }
     let provider = selected_provider(syntax, &standard_library);
-    add_root_standard_library(&mut builder, &standard_library);
-    if let Some(provider) = provider {
+    add_root_standard_library(&mut builder, &standard_library, has_attached_process);
+    if has_attached_process && let Some(provider) = provider {
         let ty = standard_library.type_decl(provider.process_type);
         builder.add(CompletionItem {
             label: provider.value_name.to_owned(),
@@ -247,7 +300,7 @@ fn complete_root(
             is_snippet: false,
         });
     }
-    add_source_declarations(&mut builder, syntax);
+    add_source_declarations(&mut builder, syntax, has_attached_process, effects);
     add_visible_bindings(&mut builder, syntax, offset);
     builder.finish()
 }
@@ -434,7 +487,11 @@ fn catalog_language_completion(
     }
 }
 
-fn add_root_standard_library(builder: &mut CompletionBuilder, library: &StandardLibrary) {
+fn add_root_standard_library(
+    builder: &mut CompletionBuilder,
+    library: &StandardLibrary,
+    has_attached_process: bool,
+) {
     for namespace in library
         .namespaces()
         .iter()
@@ -461,6 +518,13 @@ fn add_root_standard_library(builder: &mut CompletionBuilder, library: &Standard
             continue;
         };
         if path.len() == 1 {
+            if !has_attached_process
+                && library
+                    .operation_semantics(item.id)
+                    .requires_attached_process
+            {
+                continue;
+            }
             builder.add(stdlib_completion(
                 item.name,
                 item,
@@ -556,7 +620,12 @@ fn function_snippet(label: &str, item: &StdlibItem) -> String {
     format!("{label}({parameters})")
 }
 
-fn add_source_declarations(builder: &mut CompletionBuilder, syntax: &Program) {
+fn add_source_declarations(
+    builder: &mut CompletionBuilder,
+    syntax: &Program,
+    has_attached_process: bool,
+    effects: Option<&OperationAnalysis>,
+) {
     if syntax
         .state
         .as_ref()
@@ -577,6 +646,11 @@ fn add_source_declarations(builder: &mut CompletionBuilder, syntax: &Program) {
     }
     for function in &syntax.functions {
         if function.method_of.is_some() {
+            continue;
+        }
+        if !has_attached_process
+            && effects.is_none_or(|effects| effects.function(function.id).requires_attached_process)
+        {
             continue;
         }
         let parameters = function
@@ -1671,6 +1745,65 @@ fn masked(value) {
         let native_source = "state \"game.exe\" {}\nwhileAttached { pro }";
         let mut database = CompilerDatabase::new(native_source);
         assert!(labels(&mut database, " pro").contains(&"process".to_owned()));
+    }
+
+    #[test]
+    fn provider_values_complete_only_with_an_attached_process() {
+        for (state, prefix, provider) in [
+            ("state \"game.exe\" {}", "pro", "process"),
+            ("state GBA {}", "gb", "gba"),
+        ] {
+            let detached = format!("{state}\nonDetached {{ {prefix} }}");
+            let mut database = CompilerDatabase::new(detached);
+            assert!(
+                !labels(&mut database, &format!("{{ {prefix}")).contains(&provider.to_owned()),
+                "{provider} must not complete without an attachment"
+            );
+
+            for action in ["onAttach", "whileAttached", "split"] {
+                let attached = format!("{state}\n{action} {{ {prefix} }}");
+                let mut database = CompilerDatabase::new(attached);
+                assert!(
+                    labels(&mut database, &format!("{{ {prefix}")).contains(&provider.to_owned()),
+                    "{provider} should complete in {action}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn detached_completion_filters_transitive_attached_process_functions() {
+        let declarations = r#"
+state "game.exe" {}
+
+fn readsProcess() {
+    let value: i32 = process.read<i32>(0x100) else return
+}
+
+fn relay() {
+    readsProcess()
+}
+
+fn safe() {
+    print("safe")
+}
+"#;
+
+        let detached_relay = format!("{declarations}\nonDetached {{ rel }}");
+        let mut database = CompilerDatabase::new(detached_relay);
+        assert!(!labels(&mut database, "{ rel").contains(&"relay".to_owned()));
+
+        let detached_direct = format!("{declarations}\nonDetached {{ rea }}");
+        let mut database = CompilerDatabase::new(detached_direct);
+        assert!(!labels(&mut database, "{ rea").contains(&"readsProcess".to_owned()));
+
+        let detached_safe = format!("{declarations}\nonDetached {{ sa }}");
+        let mut database = CompilerDatabase::new(detached_safe);
+        assert!(labels(&mut database, "{ sa").contains(&"safe".to_owned()));
+
+        let attached = format!("{declarations}\nonAttach {{ rel }}");
+        let mut database = CompilerDatabase::new(attached);
+        assert!(labels(&mut database, "{ rel").contains(&"relay".to_owned()));
     }
 
     #[test]

@@ -102,7 +102,6 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(ProcessPath, (I64) -> (StringValue), deps [StringFromMemory], imports [ProcessGetPath], build_process_path),
     helper!(RuntimeOperatingSystem, () -> (StringValue), deps [StringFromMemory], imports [RuntimeGetOs], build_runtime_operating_system),
     helper!(RuntimeArchitecture, () -> (StringValue), deps [StringFromMemory], imports [RuntimeGetArch], build_runtime_architecture),
-    helper!(UnityAttach, (I64, I32) -> (Standard(StdlibTypeId::UnityModule)), deps [ScanProcessRange, ReadRelative32], imports [ProcessGetModuleAddress, ProcessGetModuleSize], build_unity_attach),
     helper!(CStringEquality, (I64, I64, StringValue, I32, I32) -> (I32), deps [], imports [ProcessRead], build_c_string_equality),
     helper!(BackingFieldEquality, (I64, I64, StringValue) -> (I32), deps [], imports [ProcessRead], build_backing_field_equality),
     helper!(UnityGetImage, (I64, Standard(StdlibTypeId::UnityModule), StringValue) -> (Standard(StdlibTypeId::UnityImage)), deps [CStringEquality], imports [ProcessRead], build_unity_get_image),

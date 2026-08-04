@@ -160,17 +160,6 @@ pub(super) fn build_runtime_architecture(inputs: &RuntimeHelperInputs<'_>) -> Fu
     )
 }
 
-pub(super) fn build_unity_attach(inputs: &RuntimeHelperInputs<'_>) -> Function {
-    unity::compile_unity_attach(
-        inputs.abi,
-        inputs.strings,
-        inputs.signatures,
-        inputs.plan.function(RuntimeHelperId::ScanProcessRange),
-        inputs.plan.function(RuntimeHelperId::ReadRelative32),
-        inputs.gc,
-    )
-}
-
 pub(super) fn build_c_string_equality(inputs: &RuntimeHelperInputs<'_>) -> Function {
     unity::compile_c_string_eq(inputs.abi, inputs.gc, inputs.memory.scratch().c_string)
 }

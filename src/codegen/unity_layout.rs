@@ -1,71 +1,12 @@
-//! Validated IL2CPP discovery and target-memory layout facts.
+//! Validated IL2CPP target-memory layout facts.
 //!
 //! Wasm emitters consume this module instead of embedding Unity-version
-//! checks, metadata offsets, pointer widths, or discovery signatures in their
-//! instruction streams. Supporting another layout is therefore one table-row
-//! change unless the discovery algorithm itself changes.
+//! offsets or object-layout facts in their instruction streams. High-level
+//! discovery is source-defined in the standard library.
 
 use std::collections::HashSet;
 
 use wasm_encoder::{BlockType, Function, Instruction, ValType};
-
-use crate::signature::parse_signature;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum DiscoverySignatureId {
-    Assemblies,
-    MetadataFileName,
-    MetadataReference,
-    TypeInfoShift,
-    TypeInfoStore,
-}
-
-impl DiscoverySignatureId {
-    pub const ALL: [Self; 5] = [
-        Self::Assemblies,
-        Self::MetadataFileName,
-        Self::MetadataReference,
-        Self::TypeInfoShift,
-        Self::TypeInfoStore,
-    ];
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct DiscoverySignature {
-    pub id: DiscoverySignatureId,
-    pub pattern: &'static str,
-}
-
-pub(super) const DISCOVERY_SIGNATURES: [DiscoverySignature; 5] = [
-    DiscoverySignature {
-        id: DiscoverySignatureId::Assemblies,
-        pattern: "75 ?? 48 8B 1D ?? ?? ?? ?? 48 3B 1D",
-    },
-    DiscoverySignature {
-        id: DiscoverySignatureId::MetadataFileName,
-        pattern: "67 6C 6F 62 61 6C 2D 6D 65 74 61 64 61 74 61 2E 64 61 74 00",
-    },
-    DiscoverySignature {
-        id: DiscoverySignatureId::MetadataReference,
-        pattern: "48 8D 0D",
-    },
-    DiscoverySignature {
-        id: DiscoverySignatureId::TypeInfoShift,
-        pattern: "48 C1 E9",
-    },
-    DiscoverySignature {
-        id: DiscoverySignatureId::TypeInfoStore,
-        pattern: "48 89 05",
-    },
-];
-
-pub(super) fn discovery_signature(id: DiscoverySignatureId) -> &'static str {
-    DISCOVERY_SIGNATURES
-        .iter()
-        .find(|signature| signature.id == id)
-        .expect("every discovery signature identity is declared")
-        .pattern
-}
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct UnityVersionLayout {
@@ -144,25 +85,6 @@ pub(super) const OBJECT_LAYOUT: Il2CppObjectLayout = Il2CppObjectLayout {
 };
 
 #[derive(Debug, Clone, Copy)]
-pub(super) struct Il2CppDiscoveryLayout {
-    pub module_name: &'static str,
-    pub assemblies_displacement_offset: u64,
-    pub metadata_reference_displacement_offset: u64,
-    pub type_info_shift_scan_size: u64,
-    pub type_info_store_scan_size: u64,
-    pub instruction_displacement_offset: u64,
-}
-
-pub(super) const DISCOVERY_LAYOUT: Il2CppDiscoveryLayout = Il2CppDiscoveryLayout {
-    module_name: "GameAssembly.dll",
-    assemblies_displacement_offset: 5,
-    metadata_reference_displacement_offset: 3,
-    type_info_shift_scan_size: 0x200,
-    type_info_store_scan_size: 0x100,
-    instruction_displacement_offset: 3,
-};
-
-#[derive(Debug, Clone, Copy)]
 pub(super) enum VersionedOffset {
     ClassFieldCount,
     ClassStaticTable,
@@ -174,24 +96,6 @@ impl VersionedOffset {
             Self::ClassFieldCount => layout.class_field_count_offset,
             Self::ClassStaticTable => layout.class_static_table_offset,
         }
-    }
-}
-
-/// Emits an `i32` predicate for whether `version_local` names a supported
-/// layout. The version table is the only source of accepted values.
-pub(super) fn emit_supported_version(function: &mut Function, version_local: u32) {
-    let mut layouts = VERSION_LAYOUTS.iter();
-    let first = layouts.next().expect("Unity has a base layout");
-    function
-        .instruction(&Instruction::LocalGet(version_local))
-        .instruction(&Instruction::I32Const(first.version as i32))
-        .instruction(&Instruction::I32Eq);
-    for layout in layouts {
-        function
-            .instruction(&Instruction::LocalGet(version_local))
-            .instruction(&Instruction::I32Const(layout.version as i32))
-            .instruction(&Instruction::I32Eq)
-            .instruction(&Instruction::I32Or);
     }
 }
 
@@ -296,25 +200,6 @@ pub(super) fn validate() -> Vec<String> {
         errors.push("Unity field layout does not fit its declared stride".to_owned());
     }
 
-    let mut signature_ids = HashSet::new();
-    for signature in DISCOVERY_SIGNATURES {
-        if !signature_ids.insert(signature.id) {
-            errors.push(format!(
-                "duplicate Unity discovery signature {:?}",
-                signature.id
-            ));
-        }
-        if let Err(error) = parse_signature(signature.pattern) {
-            errors.push(format!(
-                "invalid Unity discovery signature {:?}: {error}",
-                signature.id
-            ));
-        }
-    }
-    if signature_ids.len() != DiscoverySignatureId::ALL.len() {
-        errors.push("Unity discovery signature identities are incomplete".to_owned());
-    }
-
     errors
 }
 
@@ -328,18 +213,11 @@ const fn i64_from_u64(value: u64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{DISCOVERY_SIGNATURES, discovery_signature, validate};
+    use super::validate;
 
     #[test]
     fn unity_domain_descriptors_are_valid() {
         assert_eq!(validate(), Vec::<String>::new());
-    }
-
-    #[test]
-    fn every_discovery_signature_is_addressable_by_identity() {
-        for signature in DISCOVERY_SIGNATURES {
-            assert_eq!(discovery_signature(signature.id), signature.pattern);
-        }
     }
 
     #[test]
@@ -348,17 +226,8 @@ mod tests {
             include_str!("async_state.rs"),
             include_str!("data_plan.rs"),
             include_str!("runtime_helpers/unity.rs"),
-            include_str!("runtime_helpers/unity/attach.rs"),
         ];
-        for forbidden in [
-            "0x114",
-            "0x11c",
-            "0x120",
-            "0x124",
-            "0xb8",
-            "GameAssembly.dll",
-            "75 ?? 48 8B 1D",
-        ] {
+        for forbidden in ["0x114", "0x11c", "0x120", "0x124", "0xb8"] {
             assert!(
                 emitters.iter().all(|source| !source.contains(forbidden)),
                 "Unity layout fact {forbidden:?} escaped its domain descriptor"

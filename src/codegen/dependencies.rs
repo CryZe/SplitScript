@@ -190,10 +190,6 @@ impl BackendDependencies {
         self.helpers.contains(&helper)
     }
 
-    pub fn uses_unity_metadata(&self) -> bool {
-        self.uses_helper(RuntimeHelperId::UnityAttach)
-    }
-
     pub fn uses_gba_emulator_discovery(&self) -> bool {
         self.uses_helper(RuntimeHelperId::GbaAttach)
     }
@@ -245,7 +241,7 @@ impl BackendDependencies {
 
 #[cfg(test)]
 mod tests {
-    use crate::{intrinsic_registry::RuntimeHelperId, stdlib::IntrinsicId};
+    use crate::intrinsic_registry::RuntimeHelperId;
 
     use super::BackendDependencies;
 
@@ -259,15 +255,5 @@ mod tests {
         assert!(dependencies.uses_helper(RuntimeHelperId::UnityGetFieldOffset));
         assert!(dependencies.uses_helper(RuntimeHelperId::CStringEquality));
         assert!(dependencies.uses_helper(RuntimeHelperId::BackingFieldEquality));
-    }
-
-    #[test]
-    fn unity_attach_requires_its_scanning_helpers() {
-        let mut dependencies = BackendDependencies::default();
-        dependencies.require_intrinsic(IntrinsicId::UnityIl2Cpp);
-
-        assert!(dependencies.uses_unity_metadata());
-        assert!(dependencies.uses_helper(RuntimeHelperId::ScanProcessRange));
-        assert!(dependencies.uses_helper(RuntimeHelperId::ReadRelative32));
     }
 }

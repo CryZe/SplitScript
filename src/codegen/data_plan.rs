@@ -13,7 +13,6 @@ use super::dependencies::BackendDependencies;
 use super::gba_layout;
 use super::memory_plan::{LinearMemoryLayout, ScratchRequirements};
 use super::reachability::Reachability;
-use super::unity_layout::{DISCOVERY_LAYOUT, DISCOVERY_SIGNATURES};
 
 pub(super) struct StaticData {
     pub strings: StringPool,
@@ -114,9 +113,6 @@ impl StaticData {
                 _ => {}
             }
         }
-        if dependencies.uses_unity_metadata() {
-            strings.intern(DISCOVERY_LAYOUT.module_name);
-        }
         if dependencies.uses_gba_emulator_discovery() {
             for name in gba_layout::PROCESS_NAMES
                 .iter()
@@ -134,11 +130,6 @@ impl StaticData {
             }
             if let wasm_ir::ExpressionKind::Signature(signature) = &expression.kind {
                 signatures.intern(signature);
-            }
-        }
-        if dependencies.uses_unity_metadata() {
-            for signature in DISCOVERY_SIGNATURES {
-                signatures.intern(signature.pattern);
             }
         }
         if dependencies.uses_gba_emulator_discovery() {

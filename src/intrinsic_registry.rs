@@ -51,7 +51,6 @@ pub(crate) enum RuntimeHelperId {
     ProcessPath,
     RuntimeOperatingSystem,
     RuntimeArchitecture,
-    UnityAttach,
     CStringEquality,
     BackingFieldEquality,
     UnityGetImage,
@@ -259,8 +258,7 @@ const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::UnityClassField
         | IntrinsicId::UnityClassStaticInstance
         | IntrinsicId::UnityClassStaticTable => scratch(ScratchType::Core(CoreTypeId::U64), 1),
-        IntrinsicId::UnityIl2Cpp
-        | IntrinsicId::UnityModuleImage
+        IntrinsicId::UnityModuleImage
         | IntrinsicId::UnityImageClass
         | IntrinsicId::UnityClassFieldAny => scratch(ScratchType::Expression, 1),
         _ => None,
@@ -346,7 +344,6 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::ProcessPath => &[Helper(Runtime::ProcessPath)],
         IntrinsicId::RuntimeOperatingSystem => &[Helper(Runtime::RuntimeOperatingSystem)],
         IntrinsicId::RuntimeArchitecture => &[Helper(Runtime::RuntimeArchitecture)],
-        IntrinsicId::UnityIl2Cpp => &[Helper(Runtime::UnityAttach)],
         IntrinsicId::UnityModuleImage => &[Helper(Runtime::UnityGetImage)],
         IntrinsicId::UnityImageClass => &[Helper(Runtime::UnityGetClass)],
         IntrinsicId::UnityClassField => &[Helper(Runtime::UnityGetFieldOffset)],
@@ -886,14 +883,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             HostBoundary
         ),
-        IntrinsicId::UnityIl2Cpp => contract!(
-            UnityIl2Cpp,
-            Function,
-            signature(NO_TYPE_PARAMETERS, None, params![value(U32)], UNITY_MODULE,),
-            PROCESS_SUSPEND,
-            OnAttach,
-            Suspension
-        ),
         IntrinsicId::StringLength => contract!(
             StringLength,
             Method,
@@ -1142,7 +1131,7 @@ mod tests {
         assert!(!planner.contains(&retired_dispatch));
         assert!(planner.contains("dependency_roots"));
         assert!(
-            !contract(IntrinsicId::UnityIl2Cpp)
+            !contract(IntrinsicId::ProcessScan)
                 .dependency_roots
                 .is_empty()
         );

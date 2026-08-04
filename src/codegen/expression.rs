@@ -2403,9 +2403,6 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
-            IntrinsicId::UnityIl2Cpp => {
-                unreachable!("Unity.il2cpp is lowered as an await")
-            }
             IntrinsicId::GbaAttach => {
                 function
                     .instruction(&Instruction::GlobalGet(context.runtime_globals.process))

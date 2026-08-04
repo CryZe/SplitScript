@@ -13,10 +13,7 @@ use super::super::unity_layout::{
     OBJECT_LAYOUT, POINTER_SIZE, VersionedOffset, emit_versioned_offset,
 };
 
-mod attach;
-
 use super::super::{GcLayout, Type, emit_array_get, memarg};
-pub(super) use attach::compile_unity_attach;
 pub(super) fn compile_c_string_eq(abi: &Abi, gc: &GcLayout, c_string: ScratchRegion) -> Function {
     let c_string_start = c_string.start();
     let mut function = Function::new([(1, ValType::I32)]);

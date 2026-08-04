@@ -379,9 +379,13 @@ expressed as normal source code.
 ## Unity IL2CPP
 
 The implemented IL2CPP surface supports 64-bit Unity base, 2019, 2020, and
-2022 layouts. These supported versions, their metadata offsets, and the
-discovery signatures are represented by one validated compiler descriptor;
-sync and suspending operations do not maintain separate layout tables.
+2022 layouts. `Unity.il2cpp` is implemented in standard-library SplitScript:
+its supported-version policy, signatures, scan windows, and instruction
+displacements are visible together in one source body. It composes the same
+bounded module and range scans available to scripts, so discovery yields
+between scan windows rather than hiding an unbounded compiler helper. Only the
+target-memory metadata offsets and object-layout facts needed by low-level
+operations remain compiler-owned.
 
 ```text
 let unity = await Unity.il2cpp(2020)

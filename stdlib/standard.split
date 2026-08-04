@@ -643,11 +643,59 @@ namespace Unity {
     /// ```splitscript
     /// let unity = await Unity.il2cpp(2020)
     /// ```
-    @intrinsic(UnityIl2Cpp)
     fn il2cpp(
         /// The Unity metadata layout version.
         version: u32,
-    ) -> UnityModule;
+    ) -> UnityModule {
+        if version != 0 && version != 2019 && version != 2020 && version != 2022 {
+            await process.closed()
+        }
+
+        let gameAssembly = await process.module("GameAssembly.dll")
+        let assembliesInstruction = await gameAssembly.scan(sig"75 ?? 48 8B 1D ?? ?? ?? ?? 48 3B 1D")
+        let assemblies = retry process.readRelative32(assembliesInstruction.offset(5))
+        let metadata = await gameAssembly.scan(sig"67 6C 6F 62 61 6C 2D 6D 65 74 61 64 61 74 61 2E 64 61 74 00")
+
+        let metadataReference: address = 0
+        let cursor = gameAssembly.address
+        let end = gameAssembly.address.add(gameAssembly.size)
+        while metadataReference == 0 {
+            let instruction = await process.scan(
+                cursor,
+                (end as u64) - (cursor as u64),
+                sig"48 8D 0D",
+            )
+            let displacement = instruction.offset(3)
+            let target = match process.readRelative32(displacement) {
+                Ok(address) => address,
+                Err(_) => 0 as address,
+            }
+            if target == metadata {
+                metadataReference = displacement
+            } else {
+                cursor = instruction.add(1)
+            }
+        }
+
+        let shiftInstruction = await process.scan(
+            metadataReference,
+            0x200,
+            sig"48 C1 E9",
+        )
+        let storeInstruction = await process.scan(
+            shiftInstruction.offset(3),
+            0x100,
+            sig"48 89 05",
+        )
+        let typeInformation = retry process.readRelative32(storeInstruction.offset(3))
+
+        return UnityModule {
+            assemblies: assemblies,
+            typeInfoTable: typeInformation,
+            version: version,
+            pointerSize: 8,
+        }
+    }
 }
 
 /// Supports ordered numeric operations.

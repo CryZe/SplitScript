@@ -16,7 +16,9 @@ let moduleSizePolls = 0;
 const moduleAddressNames = [];
 const moduleSizeNames = [];
 let scanReads = 0;
+let scanBytes = 0;
 let scalarReads = 0;
+const scanBytesPerTick = [];
 const attachNames = [];
 let instance;
 const gameAssembly = new Uint8Array(0x2000);
@@ -105,6 +107,7 @@ const env = {
         );
         if (length > 8) {
             scanReads += 1;
+            scanBytes += length;
         } else {
             scalarReads += 1;
         }
@@ -146,8 +149,10 @@ const env = {
 ({ instance } = await WebAssembly.instantiate(bytes, { env }));
 instance.exports._start();
 
-for (let tick = 0; tick < 5; tick += 1) {
+for (let tick = 0; tick < 40 && !messages.includes("Hello, world from SplitScript!"); tick += 1) {
+    const before = scanBytes;
     instance.exports.update();
+    scanBytesPerTick.push(scanBytes - before);
 }
 
 const expected = "Hello, world from SplitScript!";
@@ -181,6 +186,19 @@ if (scalarReads !== 28) {
     throw new Error(`expected twenty-eight scalar reads, got ${scalarReads}`);
 }
 
+const activeScanTicks = scanBytesPerTick.filter((bytes) => bytes > 0);
+if (activeScanTicks.length < 6) {
+    throw new Error(
+        `expected Unity discovery to yield across at least six scan ticks, got ${JSON.stringify(scanBytesPerTick)}`,
+    );
+}
+
+if (Math.max(...scanBytesPerTick) > 8192) {
+    throw new Error(
+        `expected bounded Unity discovery work per tick, got ${JSON.stringify(scanBytesPerTick)}`,
+    );
+}
+
 if (attachNames.join(",") !== "Lunistice.exe,Lunistice-Demo.exe") {
     throw new Error(`unexpected attachment order: ${JSON.stringify(attachNames)}`);
 }
@@ -208,6 +226,7 @@ console.log(
         modulePolls,
         moduleSizePolls,
         scanReads,
+        scanBytesPerTick,
         scalarReads,
         messages,
         variables,

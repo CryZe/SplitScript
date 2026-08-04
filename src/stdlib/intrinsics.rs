@@ -48,7 +48,6 @@ macro_rules! trusted_intrinsics {
             TimerResumeGameTime,
             RuntimeOperatingSystem,
             RuntimeArchitecture,
-            UnityIl2Cpp,
             StringLength,
             StringContains,
             StringStartsWith,

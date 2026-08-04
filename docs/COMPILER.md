@@ -535,7 +535,7 @@ than mirroring it in an intrinsic-only enum.
 small descriptor-callback orchestrator. Implementations are split by domain in
 [`src/codegen/runtime_helpers/`](../src/codegen/runtime_helpers/): String
 conversion/formatting, structural equality, process memory/signature scanning/
-managed UTF-16, Unity type and field discovery, and Unity attachment. Each
+managed UTF-16, and Unity type and field discovery. Each
 domain has explicit imports and a narrow builder surface. Runtime bodies are
 built by iterating the ordered `RuntimeHelperPlan`; settings adapters use the
 same path, while type-directed structural equality remains a separate
@@ -589,19 +589,20 @@ anonymous destinations and raw address-zero loads.
 
 [`src/codegen/unity_layout.rs`](../src/codegen/unity_layout.rs) is the sole
 target-layout authority for the implemented 64-bit IL2CPP family. It declares
-the accepted Unity versions and their versioned class offsets alongside the
-invariant assembly/image/class/field schema, pointer width, module name,
-discovery signatures, scan windows, and instruction displacements. The table
-generates supported-version and offset-selection instruction sequences used by
-both ordinary runtime helpers and async polling. Compiler-start validation and
-architecture tests reject malformed, duplicated, misaligned, incomplete, or
-redeclared layout facts before an emitter can silently drift.
+the versioned class offsets alongside the invariant assembly/image/class/field
+schema and object-layout facts needed by low-level metadata helpers. The
+high-level `Unity.il2cpp` discovery algorithm, supported-version policy,
+signatures, scan windows, and instruction displacements live together in its
+standard-library source body. Compiler-start validation and architecture tests
+reject malformed, duplicated, misaligned, incomplete, or redeclared backend
+layout facts before an emitter can silently drift.
 
 [`src/codegen/dependencies.rs`](../src/codegen/dependencies.rs) scans resolved
 standard-library calls in Wasm IR and closes descriptor-declared helper and ABI
 dependencies transitively. The first consumer is static-data planning: Unity's
-module name and built-in IL2CPP signatures are absent unless `Unity.il2cpp` is
-used. Function planning and body generation traverse the same filtered
+module name and IL2CPP signatures are discovered from the reachable
+standard-library body and remain absent unless `Unity.il2cpp` is used. Function
+planning and body generation traverse the same filtered
 descriptor order and the latter consumes the former's concrete plan; checked
 helper-index lookups catch missing transitive edges, and no placeholder
 signatures or bodies remain. Settings-free programs also omit their two
@@ -771,8 +772,10 @@ pointer following, relative-address decoding, and managed-string decoding all
 return `T!`. Their low-level helpers may still use zero or null sentinels at the
 ABI boundary, but expression lowering converts those sentinels exactly once
 into the standard Result GC representation. Discovery APIs such as module,
-signature, and Unity metadata lookup instead remain intrinsic suspensions:
+signature, and low-level Unity metadata lookup remain intrinsic suspensions:
 temporary absence means pending, while process closure cancels their region.
+Higher-level discovery such as `Unity.il2cpp` is an ordinary source-defined
+async function composed from those bounded suspension points.
 
 The Wasm IR now owns a stable-ID expression plan alongside its control-flow and
 storage plans. Scalar literals, resolved value/member paths, unary and binary

@@ -1104,7 +1104,6 @@ fn compile_suspension_poll(
     let primary_scratch = scratch.first().copied().unwrap_or(u32::MAX);
     let module_address_local = primary_scratch;
     let module_size_local = scratch.get(1).copied().unwrap_or(u32::MAX);
-    let unity_module_local = primary_scratch;
     let unity_image_local = primary_scratch;
     let unity_class_local = primary_scratch;
     let unity_field_local = primary_scratch;
@@ -1341,31 +1340,6 @@ fn compile_suspension_poll(
                 context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(module_address_local))
-                    .instruction(&Instruction::StructSet {
-                        struct_type_index: context.locals.frame().struct_type,
-                        field_index: field,
-                    });
-            }
-        }
-        Some(IntrinsicId::UnityIl2Cpp) => {
-            function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
-            compile_expr(function, args[0], context);
-            function
-                .instruction(&Instruction::Call(
-                    context
-                        .runtime_helpers
-                        .function(RuntimeHelperId::UnityAttach),
-                ))
-                .instruction(&Instruction::LocalTee(unity_module_local))
-                .instruction(&Instruction::RefIsNull)
-                .instruction(&Instruction::If(BlockType::Empty))
-                .instruction(&Instruction::I32Const(0))
-                .instruction(&Instruction::Return)
-                .instruction(&Instruction::End);
-            if let Some((field, _)) = layout.field(destination) {
-                context.locals.frame().emit(function);
-                function
-                    .instruction(&Instruction::LocalGet(unity_module_local))
                     .instruction(&Instruction::StructSet {
                         struct_type_index: context.locals.frame().struct_type,
                         field_index: field,

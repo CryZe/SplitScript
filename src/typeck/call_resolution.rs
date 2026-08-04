@@ -1191,6 +1191,13 @@ impl Checker {
             );
             return None;
         }
+        if matches!(self.callable, CallableContext::Action(ActionKind::OnSplit)) {
+            self.error(
+                "state snapshots are unavailable in `onSplit` because timer events can occur while detached",
+                span,
+            );
+            return None;
+        }
         Some(())
     }
 

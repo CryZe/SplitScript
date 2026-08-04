@@ -1,0 +1,8 @@
+state "game.exe" {}
+
+let completedSplits = 0
+
+onSplit {
+    completedSplits += 1
+    print(completedSplits)
+}

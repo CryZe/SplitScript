@@ -671,6 +671,7 @@ pub struct VariableDecl {
 pub enum ActionKind {
     OnDetached,
     OnAttach,
+    OnSplit,
     WhileAttached,
     Start,
     Split,
@@ -684,6 +685,7 @@ impl ActionKind {
         Some(match name {
             "onDetached" => Self::OnDetached,
             "onAttach" => Self::OnAttach,
+            "onSplit" => Self::OnSplit,
             "whileAttached" => Self::WhileAttached,
             "start" => Self::Start,
             "split" => Self::Split,
@@ -698,6 +700,7 @@ impl ActionKind {
         match self {
             Self::OnDetached => "onDetached",
             Self::OnAttach => "onAttach",
+            Self::OnSplit => "onSplit",
             Self::WhileAttached => "whileAttached",
             Self::Start => "start",
             Self::Split => "split",

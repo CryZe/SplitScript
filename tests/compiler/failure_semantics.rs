@@ -1071,6 +1071,46 @@ fn process_operations_reject_detached_lifecycle_use() {
 }
 
 #[test]
+fn host_split_events_do_not_assume_an_attachment_or_state_snapshot() {
+    let process_errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            onSplit {
+                let memory = process.read<i32>(0x100) else 0
+                print(memory)
+            }
+        "#,
+    )
+    .expect_err("host split events must remain valid while detached");
+    assert!(
+        process_errors.iter().any(|error| {
+            error.message
+                == "`Process.read` requires an attached process and is unavailable in `onSplit`"
+        }),
+        "{process_errors:#?}"
+    );
+
+    let snapshot_errors = splitscript::compile(
+        r#"
+            state "game.exe" {
+                value: i32 at 0x100;
+            }
+            onSplit {
+                print(current.value)
+            }
+        "#,
+    )
+    .expect_err("host split events cannot assume that state snapshots exist");
+    assert!(
+        snapshot_errors.iter().any(|error| {
+            error.message
+                == "state snapshots are unavailable in `onSplit` because timer events can occur while detached"
+        }),
+        "{snapshot_errors:#?}"
+    );
+}
+
+#[test]
 fn call_result_fields_parse_before_detached_effects_are_checked() {
     let source = r#"
         state "game.exe" {}

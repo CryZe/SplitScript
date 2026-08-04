@@ -257,12 +257,17 @@ pub(super) fn encode<'a>(
     for action in &program.actions {
         let (params, results) = if action.kind == ActionKind::OnAttach {
             (vec![ValType::I64], vec![ValType::I32])
+        } else if action.kind == ActionKind::OnSplit {
+            (Vec::new(), Vec::new())
         } else {
             (
                 vec![state_ref, state_ref],
                 (!matches!(
                     action.kind,
-                    ActionKind::OnDetached | ActionKind::OnAttach | ActionKind::WhileAttached
+                    ActionKind::OnDetached
+                        | ActionKind::OnAttach
+                        | ActionKind::OnSplit
+                        | ActionKind::WhileAttached
                 ))
                 .then(|| action_result_val_type(action.kind, gc))
                 .into_iter()

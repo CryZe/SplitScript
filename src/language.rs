@@ -1086,6 +1086,14 @@ define_language_catalog! {
         "onAttach {\n    let module = await process.module(\"GameAssembly.dll\")\n}"
     ),
     action_item!(
+        OnSplit,
+        OnSplit,
+        "onSplit",
+        "Observes every completed timer split.",
+        "The host invokes this synchronous event after the segment advances, including for manual and externally requested splits. It remains available while detached, so process providers and state snapshots are unavailable.",
+        "let completedSplits = 0\n\nonSplit {\n    completedSplits += 1\n}"
+    ),
+    action_item!(
         WhileAttached,
         WhileAttached,
         "whileAttached",

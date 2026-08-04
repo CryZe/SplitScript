@@ -49,10 +49,12 @@ General rules:
   `MemoryWatcher` objects or game-specific compiler branches. The A Hat runtime
   fixture covers alternative-signature layout selection and the discovered
   save-data and actor pointer chains.
-- [ ] Add host-driven `onSplit` behavior for the debounce lock so manual and
+- [x] Add host-driven `onSplit` behavior for the debounce lock so manual and
   externally initiated splits are observed as well as splits requested by the
-  script. Define event ordering and detached availability before exposing the
-  action.
+  script. The optional parameterless export runs synchronously after segment
+  advancement and outside `update`; it permits globals and settings while
+  rejecting attachment providers and state snapshots because it can run while
+  detached.
 - [ ] Preserve the full settings hierarchy, detailed/rift/position split
   tables, game-time correction, IL mode, start/reset behavior, and split lock.
   Introduce a repeated-settings or collection abstraction only where the

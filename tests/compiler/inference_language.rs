@@ -602,6 +602,7 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
         state "game.exe" {}
         onDetached { setTickRate(1.0) }
         onAttach { setTickRate(120.0) }
+        onSplit { print("split observed") }
         whileAttached { print("tick") }
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
@@ -615,6 +616,7 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
         [
             ActionKind::OnDetached,
             ActionKind::OnAttach,
+            ActionKind::OnSplit,
             ActionKind::WhileAttached,
         ]
     );
@@ -623,6 +625,46 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
         .expect("canonical lifecycle blocks should produce valid Wasm");
+}
+
+#[test]
+fn on_split_is_an_optional_parameterless_host_export() {
+    let with_event = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            let count = 0
+            onSplit { count += 1 }
+        "#,
+    )
+    .expect("a host split event should compile");
+    let without_event = splitscript::compile(r#"state "game.exe" {}"#)
+        .expect("an autosplitter does not need a host split event");
+
+    let exports = |wasm: &[u8]| {
+        Parser::new(0)
+            .parse_all(wasm)
+            .filter_map(|payload| match payload.unwrap() {
+                Payload::ExportSection(section) => Some(
+                    section
+                        .into_iter()
+                        .map(|export| export.unwrap().name.to_owned())
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .flatten()
+            .collect::<Vec<_>>()
+    };
+    assert!(exports(&with_event).iter().any(|name| name == "on_split"));
+    assert!(
+        !exports(&without_event)
+            .iter()
+            .any(|name| name == "on_split")
+    );
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&with_event)
+        .expect("the host event should preserve valid Wasm GC");
 }
 
 #[test]

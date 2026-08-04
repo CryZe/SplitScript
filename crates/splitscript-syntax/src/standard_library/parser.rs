@@ -857,7 +857,7 @@ typeConstructor Array<T> {}
 extend address {}
 /// GBA emulators.
 @processType(GbaEmulator)
-@attachment(GbaAttach)
+@attachment(identity)
 @directRead(GbaEmulatorRead)
 stateProvider GBA as gba { "mGBA.exe", "mGBA" }
 "#;

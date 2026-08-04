@@ -34,9 +34,9 @@ whileAttached {
 
 The native provider uses an identity attachment: the host's attached-process
 handle already is the `Process` representation. Transformed providers such as
-GBA instead run a declared attachment intrinsic and expose a different nominal
-value. This distinction is catalog metadata, not a provider-name switch in the
-parser, checker, or runtime lifecycle.
+GBA instead name an ordinary standard-library function that asynchronously
+constructs a different nominal value. This distinction is catalog metadata,
+not a provider-name switch in the parser, checker, or runtime lifecycle.
 
 ## GBA emulator support
 
@@ -70,6 +70,13 @@ Discovery covers VisualBoyAdvance/VBA-M, mGBA's contiguous mapping, NO$GBA,
 standalone Mednafen, the supported RetroArch cores, and mGBA-based BizHawk.
 Pointer-backed layouts refresh the current RAM base during reads so starting
 or reloading a ROM does not leave the script with a stale mapping.
+
+The emulator policy, signatures, and mapping selection live together in
+`GbaEmulator.discover`, an ordinary source-defined standard-library function.
+Memory-range lookup and module signature selection are bounded suspension
+primitives: each poll inspects at most one range or one signature window before
+returning control to the host. Only hardware-address translation and the final
+host memory read remain compiler-provided representation primitives.
 
 The provider owns the emulator executable list and attachment lifecycle.
 Autosplitters do not call an attachment function or retain an optional handle.

@@ -74,7 +74,7 @@ impl<'a> CatalogGenerator<'a> {
                 let attachment = if attachment == "identity" {
                     "StateProviderAttachment::Identity".to_owned()
                 } else {
-                    format!("StateProviderAttachment::Intrinsic(IntrinsicId::{attachment})")
+                    format!("StateProviderAttachment::Callable(StdlibItemId::{attachment})")
                 };
                 output.push_str(&format!(
                     "StdlibStateProvider {{ id: StdlibStateProviderId::{}, name: {}, value_name: {}, processes: {}, process_type: StdlibTypeId::{}, attachment: {}, direct_read: StdlibItemId::{}, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, {})], related: &[] }} }},\n",
@@ -884,7 +884,7 @@ struct Duration {
 @valueUsage(localVariable)
 enum TimerState { NotRunning }
 @processType(GbaEmulator)
-@attachment(GbaAttach)
+@attachment(identity)
 @directRead(GbaEmulatorRead)
 stateProvider GBA as gba { "mGBA" }
 "#;

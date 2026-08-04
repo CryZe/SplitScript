@@ -24,7 +24,16 @@ pub(super) struct UpdateContext<'a> {
     pub runtime_globals: RuntimeGlobals,
     pub semantics: &'a crate::semantic::SemanticModel,
     pub process_names: &'a [&'a str],
-    pub provider_attach: Option<u32>,
+    pub provider_attach: Option<ProviderAttach>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ProviderAttach {
+    pub init: u32,
+    pub poll: u32,
+    pub frame_global: u32,
+    pub frame_type: u32,
+    pub completion_field: u32,
 }
 
 pub(super) struct StatePollFunctions<'a> {
@@ -152,6 +161,13 @@ pub(super) fn compile_update(
         emit_provider_default(&mut function, provider_type, lowering);
         function.instruction(&Instruction::GlobalSet(provider_global));
     }
+    if let (Some(frame_global), Some(ProviderAttach { frame_type, .. })) =
+        (globals.provider_attachment_frame, lowering.provider_attach)
+    {
+        function
+            .instruction(&Instruction::RefNull(HeapType::Concrete(frame_type)))
+            .instruction(&Instruction::GlobalSet(frame_global));
+    }
     if let (Some(selected), Some(enumeration)) =
         (globals.selected_layout, state.layout_enum.as_ref())
     {
@@ -188,13 +204,38 @@ pub(super) fn compile_update(
             })
             .expect("provider storage requires a resolved provider");
         emit_provider_unavailable(&mut function, provider_global, provider_type, lowering);
+        function.instruction(&Instruction::If(BlockType::Empty));
+        let ProviderAttach {
+            init,
+            poll,
+            frame_global,
+            frame_type,
+            completion_field,
+        } = provider_attach;
         function
+            .instruction(&Instruction::GlobalGet(frame_global))
+            .instruction(&Instruction::RefIsNull)
             .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::GlobalGet(globals.process));
-        function.instruction(&Instruction::Call(provider_attach));
-        function
+            .instruction(&Instruction::Call(init))
+            .instruction(&Instruction::GlobalSet(frame_global))
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::GlobalGet(frame_global))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::Call(poll))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::GlobalGet(frame_global))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::StructGet {
+                struct_type_index: frame_type,
+                field_index: completion_field,
+            })
             .instruction(&Instruction::GlobalSet(provider_global))
-            .instruction(&Instruction::End);
+            .instruction(&Instruction::RefNull(HeapType::Concrete(frame_type)))
+            .instruction(&Instruction::GlobalSet(frame_global));
+        function.instruction(&Instruction::End);
         emit_provider_unavailable(&mut function, provider_global, provider_type, lowering);
         function
             .instruction(&Instruction::If(BlockType::Empty))

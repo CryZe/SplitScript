@@ -4,7 +4,7 @@ use wasm_encoder::{ConstExpr, GlobalSection, GlobalType, HeapType, RefType, ValT
 
 use crate::{
     ast::{Program, ValueId},
-    semantic::SemanticModel,
+    semantic::{FunctionInstance, SemanticModel},
     stdlib::{
         CoreTypeId, RuntimeRepresentation, StandardLibrary, StateProviderAttachment, StdlibTypeId,
     },
@@ -35,6 +35,8 @@ pub(super) struct RuntimeGlobals {
     /// `-1` means no process is attached.
     pub process_name: u32,
     pub provider_value: Option<u32>,
+    /// Pending source-defined state-provider attachment future.
+    pub provider_attachment_frame: Option<u32>,
     /// The typed enum value returned by `onAttach` for versioned state.
     pub selected_layout: Option<u32>,
     pub current: u32,
@@ -51,6 +53,7 @@ pub(super) fn encode(
     semantics: &SemanticModel,
     gc: &GcLayout,
     wasm_ir: &wasm_ir::Program,
+    provider_attachment: Option<&FunctionInstance>,
 ) -> GlobalPlan {
     let mut section = GlobalSection::new();
     let process = section.len();
@@ -107,6 +110,22 @@ pub(super) fn encode(
             &initial,
         );
         Some(index)
+    });
+    let provider_attachment_frame = provider_attachment.map(|attachment| {
+        let index = section.len();
+        let frame_type = gc.function_frame_index(attachment);
+        section.global(
+            GlobalType {
+                val_type: ValType::Ref(RefType {
+                    nullable: true,
+                    heap_type: HeapType::Concrete(frame_type),
+                }),
+                mutable: true,
+                shared: false,
+            },
+            &ConstExpr::ref_null(HeapType::Concrete(frame_type)),
+        );
+        index
     });
     let selected_layout = program
         .state
@@ -256,6 +275,7 @@ pub(super) fn encode(
             process,
             process_name,
             provider_value,
+            provider_attachment_frame,
             selected_layout,
             current,
             old,

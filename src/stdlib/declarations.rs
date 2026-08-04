@@ -10,8 +10,8 @@ use crate::catalog::Documentation;
 pub use splitscript_syntax::PrimitiveType as CoreTypeId;
 
 use super::ids::{
-    IntrinsicId, StdlibCapabilityId, StdlibFieldId, StdlibItemId, StdlibNamespaceId,
-    StdlibStateProviderId, StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
+    StdlibCapabilityId, StdlibFieldId, StdlibItemId, StdlibNamespaceId, StdlibStateProviderId,
+    StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
 };
 use super::schema::TypeRef;
 
@@ -61,8 +61,10 @@ pub enum StateProviderProcesses {
 pub enum StateProviderAttachment {
     /// The provider value is the raw attached-process handle.
     Identity,
-    /// A compiler intrinsic derives the provider value from the raw handle.
-    Intrinsic(IntrinsicId),
+    /// A standard-library callable derives the provider value from the raw
+    /// attached-process handle. Its implementation may be intrinsic or an
+    /// ordinary source-defined async function.
+    Callable(StdlibItemId),
 }
 
 macro_rules! with_core_types {

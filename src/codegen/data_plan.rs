@@ -9,8 +9,6 @@ use crate::{
     wasm_ir,
 };
 
-use super::dependencies::BackendDependencies;
-use super::gba_layout;
 use super::memory_plan::{LinearMemoryLayout, ScratchRequirements};
 use super::reachability::Reachability;
 
@@ -46,7 +44,6 @@ impl StaticData {
         process_names: &[&str],
         wasm_ir: &wasm_ir::Program,
         reachability: &Reachability,
-        dependencies: &BackendDependencies,
         memory: &MemoryLayouts,
     ) -> Self {
         let state = program.state.as_ref().expect("checked programs have state");
@@ -113,16 +110,6 @@ impl StaticData {
                 _ => {}
             }
         }
-        if dependencies.uses_gba_emulator_discovery() {
-            for name in gba_layout::PROCESS_NAMES
-                .iter()
-                .chain(gba_layout::RETROARCH_CORES)
-                .chain(std::iter::once(&gba_layout::EMUHAWK_CORE))
-            {
-                strings.intern(name);
-            }
-        }
-
         let mut signatures = SignaturePool::new();
         for expression in wasm_ir.expressions() {
             if !reachability.contains_expression(expression.id) {
@@ -132,12 +119,6 @@ impl StaticData {
                 signatures.intern(signature);
             }
         }
-        if dependencies.uses_gba_emulator_discovery() {
-            for signature in gba_layout::SIGNATURES {
-                signatures.intern(signature);
-            }
-        }
-
         let static_data_len = strings
             .bytes
             .len()

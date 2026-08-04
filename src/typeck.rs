@@ -163,6 +163,10 @@ struct Checker {
 }
 
 impl Checker {
+    fn is_library_function(&self) -> bool {
+        matches!(self.callable, CallableContext::LibraryFunction(_))
+    }
+
     fn is_provider_value_name(&self, name: &str) -> bool {
         self.provider_value.is_some_and(|(provider, _)| {
             self.standard_library.state_provider(provider).value_name == name

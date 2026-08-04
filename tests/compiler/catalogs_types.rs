@@ -35,6 +35,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::ResultToOption,
         StdlibItemId::AddressOffset,
         StdlibItemId::UnityIl2Cpp,
+        StdlibItemId::GbaEmulatorDiscover,
     ] {
         assert!(matches!(
             library.item(item).implementation,
@@ -530,6 +531,18 @@ fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
     assert_eq!(gba.value_name, "gba");
     assert_eq!(gba.process_type, StdlibTypeId::GbaEmulator);
     assert_eq!(gba.direct_read, StdlibItemId::GbaEmulatorRead);
+    assert_eq!(
+        gba.attachment,
+        splitscript::compiler::stdlib::StateProviderAttachment::Callable(
+            StdlibItemId::GbaEmulatorDiscover,
+        )
+    );
+    assert!(matches!(
+        library
+            .item(StdlibItemId::GbaEmulatorDiscover)
+            .implementation,
+        Implementation::LibraryBody { .. }
+    ));
     assert!(matches!(
         gba.processes,
         splitscript::compiler::stdlib::StateProviderProcesses::Declared(processes)

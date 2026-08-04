@@ -197,7 +197,8 @@ impl Checker {
                     .iter()
                     .rev()
                     .any(|scope| scope.contains_key(&binding.name))
-                    || self.declarations.globals.contains_key(&binding.name)
+                    || (!self.is_library_function()
+                        && self.declarations.globals.contains_key(&binding.name))
                     || self.is_provider_value_name(&binding.name);
                 if duplicate {
                     self.error(
@@ -304,7 +305,8 @@ impl Checker {
                         .iter()
                         .rev()
                         .any(|scope| scope.contains_key(&binding.name))
-                        || self.declarations.globals.contains_key(&binding.name)
+                        || (!self.is_library_function()
+                            && self.declarations.globals.contains_key(&binding.name))
                         || self.is_provider_value_name(&binding.name);
                     if duplicate {
                         self.error(
@@ -381,7 +383,8 @@ impl Checker {
             .rev()
             .any(|scope| scope.contains_key(&variable.name));
         if duplicate
-            || self.declarations.globals.contains_key(&variable.name)
+            || (!self.is_library_function()
+                && self.declarations.globals.contains_key(&variable.name))
             || self.is_provider_value_name(&variable.name)
         {
             self.error(

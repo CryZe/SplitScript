@@ -2227,7 +2227,19 @@ fn compile_expr_unconverted(
                 // of the scalar process handle.
                 compile_receiver(function, target, context);
                 function.instruction(&Instruction::Drop);
-                let names = &context.state.processes;
+                let provider = context
+                    .semantics
+                    .state_provider()
+                    .map(|provider| context.standard_library.state_provider(provider))
+                    .expect("checked states resolve a process provider");
+                let names = match provider.processes {
+                    crate::stdlib::StateProviderProcesses::Declared(processes) => {
+                        processes.to_vec()
+                    }
+                    crate::stdlib::StateProviderProcesses::SourceState => {
+                        context.state.processes.iter().map(String::as_str).collect()
+                    }
+                };
                 debug_assert!(!names.is_empty());
                 let string_type = context.gc.val_type(Type::Standard(StdlibTypeId::String));
                 for (index, name) in names.iter().enumerate() {
@@ -2249,7 +2261,8 @@ fn compile_expr_unconverted(
             IntrinsicId::NextTick
             | IntrinsicId::ProcessClosed
             | IntrinsicId::ProcessMainModule
-            | IntrinsicId::ProcessModule => {
+            | IntrinsicId::ProcessModule
+            | IntrinsicId::ProcessFindMemoryRange => {
                 unreachable!("suspending functions are lowered as awaits")
             }
             IntrinsicId::ProcessRead => {
@@ -2403,21 +2416,6 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
-            IntrinsicId::GbaAttach => {
-                function
-                    .instruction(&Instruction::GlobalGet(context.runtime_globals.process))
-                    .instruction(&Instruction::Call(
-                        context.runtime_helpers.function(RuntimeHelperId::GbaAttach),
-                    ));
-                emit_sentinel_result(
-                    function,
-                    expression,
-                    Type::Standard(StdlibTypeId::GbaEmulator),
-                    Instruction::RefIsNull,
-                    "GBA emulator memory is not available",
-                    context,
-                );
-            }
             IntrinsicId::GbaEmulatorRead => {
                 let read_type = match target {
                     wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => {
@@ -2529,6 +2527,7 @@ fn compile_expr_unconverted(
                 }
             }
             IntrinsicId::ModuleScan
+            | IntrinsicId::ModuleScanAny
             | IntrinsicId::UnityModuleImage
             | IntrinsicId::UnityImageClass
             | IntrinsicId::UnityClassField

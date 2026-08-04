@@ -8,7 +8,6 @@ use crate::ast::{
     ResultTypeId, UnaryOp, ValueId,
 };
 use crate::equality::EqualityCapabilities;
-use crate::intrinsic_registry;
 use crate::memory::{MemoryLayouts, MemoryTypeLayout};
 use crate::semantic::{FunctionInstance, SemanticModel};
 use crate::stdlib::{
@@ -27,7 +26,6 @@ mod dependencies;
 mod equality_plan;
 mod expression;
 mod function_plan;
-mod gba_layout;
 mod gc_layout;
 mod gc_types;
 mod global_plan;
@@ -61,7 +59,7 @@ use self::script_functions::{
     LocalPlanOptions, compile_action, compile_async_function_init, compile_read,
     compile_state_transform, compile_user_function, plan_wasm_locals,
 };
-use self::update::{StatePollFunctions, compile_update};
+use self::update::{ProviderAttach, StatePollFunctions, compile_update};
 use crate::intrinsic_registry::RuntimeHelperId;
 
 const STATE_TYPE: u32 = 0;
@@ -89,6 +87,34 @@ fn standard_display_function(
         *standard,
         semantics.function_instance(function.id, vec![source, string]),
     ))
+}
+
+fn provider_attachment_function(
+    provider: &crate::stdlib::StdlibStateProvider,
+    program: &Program,
+    semantics: &SemanticModel,
+    standard_library: &StandardLibrary,
+) -> Option<FunctionInstance> {
+    let StateProviderAttachment::Callable(item) = provider.attachment else {
+        return None;
+    };
+    let Implementation::LibraryBody { function_name, .. } =
+        standard_library.item(item).implementation
+    else {
+        return None;
+    };
+    let function = program
+        .functions
+        .iter()
+        .find(|function| function.name == function_name)
+        .expect("source-defined provider attachments are injected into the program");
+    let signature = semantics
+        .function_parameter_types(function.id)
+        .iter()
+        .copied()
+        .chain(semantics.function_result(function.id))
+        .collect();
+    Some(semantics.function_instance(function.id, signature))
 }
 
 struct ConstructedTypes {
@@ -210,8 +236,16 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             .body(BodyOwner::Action(action))
             .and_then(|body| body.cancellation_region)
     });
-    let mut reachability =
-        reachability::Reachability::analyze(program, semantics, enums, wasm_ir, &standard_library);
+    let provider_attachment =
+        provider_attachment_function(provider, program, semantics, &standard_library);
+    let mut reachability = reachability::Reachability::analyze(
+        program,
+        semantics,
+        enums,
+        wasm_ir,
+        &standard_library,
+        provider_attachment.clone(),
+    );
     let async_frames =
         AsyncFrameLayouts::plan(on_attach, program, wasm_ir, semantics, &reachability);
     let async_layout = async_frames.attach.as_ref();
@@ -222,7 +256,6 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &process_names,
         wasm_ir,
         &reachability,
-        &dependencies,
         memory_layouts,
     );
     let strings = &static_data.strings;
@@ -258,7 +291,13 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         variables: global_indices,
         variable_types: global_types,
         settings: setting_indices,
-    } = global_plan::encode(program, semantics, &gc, wasm_ir);
+    } = global_plan::encode(
+        program,
+        semantics,
+        &gc,
+        wasm_ir,
+        provider_attachment.as_ref(),
+    );
 
     let mut codes = CodeSection::new();
     let function_plan::FunctionPlan {
@@ -333,18 +372,25 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         semantics,
         wasm_ir,
     };
-    let provider_attach = match provider.attachment {
-        StateProviderAttachment::Identity => None,
-        StateProviderAttachment::Intrinsic(intrinsic) => intrinsic_registry::contract(intrinsic)
-            .dependency_roots
-            .iter()
-            .find_map(|root| match root {
-                crate::intrinsic_registry::DependencyRoot::Helper(helper) => {
-                    runtime_helpers.optional_function(*helper)
-                }
-                crate::intrinsic_registry::DependencyRoot::HostImport(_) => None,
-            }),
-    };
+    let provider_attach = provider_attachment.as_ref().map(|instance| {
+        let plan = user_functions[instance];
+        let layout = async_frames
+            .function(instance)
+            .expect("source provider attachments must suspend");
+        let (completion_field, completion_type) = layout
+            .completion
+            .expect("source provider attachments return their provider value");
+        debug_assert_eq!(completion_type, Type::Standard(provider.process_type));
+        ProviderAttach {
+            init: plan.call,
+            poll: plan.poll.expect("source provider attachments are async"),
+            frame_global: runtime_globals
+                .provider_attachment_frame
+                .expect("source provider attachments have frame storage"),
+            frame_type: gc.function_frame_index(instance),
+            completion_field,
+        }
+    });
     let update_context = update::UpdateContext {
         standard_library: &standard_library,
         abi: &abi,
@@ -358,7 +404,6 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let helper_inputs = runtime_helpers::RuntimeHelperInputs {
         abi: &abi,
         strings,
-        signatures,
         plan: &runtime_helpers,
         arrays: helper_arrays,
         program,

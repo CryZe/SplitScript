@@ -26,6 +26,8 @@ let invalidReads = 0;
 let pauseCalls = 0;
 let inventoryBlockReads = 0;
 let inventoryByteReads = 0;
+let rangeAddressCalls = 0;
+const rangeAddressCallsPerTick = [];
 
 function gbaOffset(address) {
     if (address >= 0x02000000 && address < 0x02040000) return address - 0x02000000;
@@ -135,7 +137,10 @@ const env = {
         return backend === "vba" && name === "visualboyadvance-m.exe" ? 0x1000n : 0n;
     },
     process_get_memory_range_count: () => backend === "mgba" ? 1n : 0n,
-    process_get_memory_range_address: () => hostBase,
+    process_get_memory_range_address() {
+        rangeAddressCalls += 1;
+        return hostBase;
+    },
     process_get_memory_range_size: () => 0x48000n,
     process_get_memory_range_flags: () => 0x6n,
     user_settings_add_bool: () => 1,
@@ -157,13 +162,22 @@ const env = {
 ({ instance } = await WebAssembly.instantiate(bytes, { env }));
 instance.exports._start();
 
+function update() {
+    const before = rangeAddressCalls;
+    instance.exports.update();
+    rangeAddressCallsPerTick.push(rangeAddressCalls - before);
+}
+
 // Attach and establish the initial watcher snapshot.
-instance.exports.update();
-instance.exports.update();
-instance.exports.update();
+for (let tick = 0; tick < 64 && !variables.has("Hearts"); tick += 1) {
+    update();
+}
+if (!variables.has("Hearts")) {
+    throw new Error("GBA discovery did not complete within 64 cooperative updates");
+}
 setI32(0x0300187a, 145);
 setU16(0x0300100c, 101);
-instance.exports.update();
+update();
 // Acquire Smith's Sword on the following frame.
 if (backend === "vba") {
     const relocatedBase = 0x300000;
@@ -174,7 +188,7 @@ if (backend === "vba") {
 }
 setU8(0x02002b32, 1 << 2);
 setU16(0x0300100c, 102);
-instance.exports.update();
+update();
 
 const expectedAttachNames = backend === "vba"
     ? "visualboyadvance-m.exe"
@@ -189,6 +203,11 @@ if (timerStarts !== 1 || timerSplits !== 1) {
     );
 }
 if (invalidReads !== 0) throw new Error(`GBA translation produced ${invalidReads} invalid reads`);
+if (Math.max(...rangeAddressCallsPerTick) > 1) {
+    throw new Error(
+        `GBA discovery inspected more than one mapped range in an update: ${JSON.stringify(rangeAddressCallsPerTick)}`,
+    );
+}
 if (inventoryBlockReads === 0 || inventoryByteReads !== 0) {
     throw new Error(
         `expected transactional inventory reads, got blocks=${inventoryBlockReads} ` +
@@ -208,5 +227,6 @@ console.log(JSON.stringify({
     timerSplits,
     inventoryBlockReads,
     inventoryByteReads,
+    rangeAddressCallsPerTick,
     variables: Object.fromEntries(variables),
 }));

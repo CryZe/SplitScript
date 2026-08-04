@@ -11,7 +11,7 @@ use crate::{
     types::ResolvedArrayType,
 };
 
-use super::data_plan::{SignaturePool, StringPool};
+use super::data_plan::StringPool;
 use super::imports::Abi;
 use super::memory_plan::LinearMemoryLayout;
 use super::runtime_helper_registry;
@@ -28,7 +28,6 @@ pub(super) use equality::{compile_equality, emit_value_equality};
 pub(super) struct RuntimeHelperInputs<'a> {
     pub abi: &'a Abi,
     pub strings: &'a StringPool,
-    pub signatures: &'a SignaturePool,
     pub plan: &'a RuntimeHelperPlan,
     pub arrays: &'a [ResolvedArrayType],
     pub program: &'a Program,
@@ -224,17 +223,6 @@ pub(super) fn build_follow_address(inputs: &RuntimeHelperInputs<'_>) -> Function
     process::compile_follow_address(
         inputs.abi,
         array_layout(inputs, Type::U64),
-        inputs.memory.scratch().abi_read,
-    )
-}
-
-pub(super) fn build_gba_attach(inputs: &RuntimeHelperInputs<'_>) -> Function {
-    gba::compile_attach(
-        inputs.abi,
-        inputs.strings,
-        inputs.signatures,
-        inputs.plan.function(RuntimeHelperId::ScanProcessRange),
-        inputs.gc,
         inputs.memory.scratch().abi_read,
     )
 }

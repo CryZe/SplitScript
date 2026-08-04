@@ -785,7 +785,7 @@ impl StandardLibrary {
                     ));
                 }
             }
-            let StateProviderAttachment::Intrinsic(attachment_id) = provider.attachment else {
+            let StateProviderAttachment::Callable(attachment_id) = provider.attachment else {
                 if !matches!(
                     self.type_decl(provider.process_type).representation,
                     RuntimeRepresentation::Scalar {
@@ -799,41 +799,33 @@ impl StandardLibrary {
                 }
                 continue;
             };
-            if !intrinsics.insert(attachment_id) {
-                errors.push(format!(
-                    "intrinsic `{:?}` is bound by more than one standard-library declaration",
-                    attachment_id
-                ));
-            }
-            let attachment = intrinsic_registry::contract(attachment_id);
-            let attachment_result_matches = matches!(
-                attachment.signature.result,
-                intrinsic_registry::ContractTypeRef::Application {
-                    constructor: StdlibTypeConstructorId::Result,
-                    arguments: [intrinsic_registry::ContractTypeRef::Standard(process_type)]
-                } if *process_type == provider.process_type
-            );
-            if attachment.shape != intrinsic_registry::CallableShape::Function
-                || attachment.signature.type_parameter_constraints.is_some()
-                || attachment.signature.receiver.is_some()
-                || attachment
-                    .signature
-                    .parameters
-                    .iter()
-                    .flatten()
-                    .next()
-                    .is_some()
-                || !attachment_result_matches
-                || attachment.lowering != intrinsic_registry::LoweringClass::Retryable
-                || !attachment.effects.contains(&Effect::ReadsProcess)
-                || !attachment
-                    .effects
-                    .contains(&Effect::RequiresAttachedProcess)
+            let attachment = self.item(attachment_id);
+            let direct_result =
+                attachment.signature.result == TypeRef::Standard(provider.process_type);
+            if attachment.kind != ItemKind::Function
+                || !attachment.signature.type_parameters.is_empty()
+                || !attachment.signature.parameters.is_empty()
+                || !direct_result
+                || !matches!(
+                    attachment.implementation,
+                    Implementation::LibraryBody { .. }
+                )
             {
                 errors.push(format!(
-                    "state provider `{}` has incompatible attachment intrinsic `{:?}`",
+                    "state provider `{}` has incompatible attachment callable `{:?}`",
                     provider.name, attachment_id
                 ));
+            }
+            if self.source_body_operations_are_initialized() {
+                let operation = self.operation_metadata(attachment_id);
+                if !operation.effects.contains(&Effect::Suspends)
+                    || !operation.effects.contains(&Effect::RequiresAttachedProcess)
+                {
+                    errors.push(format!(
+                        "state provider `{}` attachment `{}` must suspend and require an attached process",
+                        provider.name, attachment.qualified_name
+                    ));
+                }
             }
         }
         if source_state_provider.is_none() {

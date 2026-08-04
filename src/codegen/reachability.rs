@@ -40,9 +40,13 @@ impl Reachability {
         enums: &[EnumDecl],
         wasm_ir: &wasm_ir::Program,
         standard_library: &StandardLibrary,
+        provider_attachment: Option<FunctionInstance>,
     ) -> Self {
         let mut pending = Vec::new();
-        let mut pending_functions = Vec::new();
+        let mut pending_functions = provider_attachment
+            .into_iter()
+            .map(|function| (None, function))
+            .collect::<Vec<_>>();
         for body in wasm_ir.bodies() {
             if matches!(body.owner, BodyOwner::Action(_)) {
                 collect_block_expression_roots(&body.entry, wasm_ir, None, &mut pending);

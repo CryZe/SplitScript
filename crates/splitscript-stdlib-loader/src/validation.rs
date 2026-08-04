@@ -463,7 +463,10 @@ impl<'a> Validator<'a> {
         } else {
             self.error(format!("`{}` is missing `@processType(...)`", value.name));
         }
-        self.require_name_attribute(&value.name, &value.attributes, "attachment", |_| true);
+        let generated_items = self.generated_items.clone();
+        self.require_name_attribute(&value.name, &value.attributes, "attachment", |attachment| {
+            attachment == "identity" || generated_items.contains(attachment)
+        });
         let process_mode =
             self.optional_name_attribute(&value.name, &value.attributes, "processes");
         let source_processes = process_mode == Some("source");

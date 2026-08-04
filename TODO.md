@@ -47,9 +47,6 @@ General rules:
   responsiveness contract: discovery must not make a tick exceed the runtime's
   hanging-autosplitter threshold; runtime tests must assert both the byte budget
   and the number of scan attempts made by each poll.
-- [ ] Move compiler-owned Unity IL2CPP and GBA discovery onto the same
-  cooperative scan machinery. An async-looking provider must never call a
-  helper that traverses an unbounded module or memory-range list in one poll.
 - [x] Represent the timer, save-data, actor, and coordinate watchers through
   discovered addresses and patch-dependent pointer paths. Prefer ordinary
   globals, records, arrays, functions, and state expressions over dynamic

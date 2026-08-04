@@ -1,5 +1,23 @@
 # SplitScript roadmap
 
+## 2026-08-04: source-defined cooperative engine discovery
+
+- Moved Unity IL2CPP and GBA emulator discovery out of compiler-owned helpers
+  and into ordinary privileged SplitScript bodies in `stdlib/standard.split`.
+  Provider metadata can now name any compatible source-defined or intrinsic
+  catalog callable; the generic attachment lifecycle polls its typed async
+  frame and cancels it when the process closes.
+- Added bounded memory-range selection and multi-signature module scanning.
+  Each poll inspects at most one host range or one signature window, so neither
+  engine discovery path can hide an unbounded scan behind an async-looking API.
+- Removed the hard-coded GBA process/signature tables and attachment helper.
+  Emulator policy, signatures, layout selection, and supported process names
+  are now co-located with `GbaEmulator.discover`; only target-address
+  translation and host reads remain representation intrinsics.
+- Extended the Minish Cap runtime fixture to cover both stable mGBA and
+  pointer-backed VBA mappings and to assert the per-update memory-range query
+  bound.
+
 ## 2026-08-04: optional pointer fields and faithful Aquanox port
 
 - Added explicit optional pointer fields: `field: T? at ...` reads the

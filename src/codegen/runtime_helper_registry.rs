@@ -111,7 +111,6 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(UnityGetStaticInstance, (I64, Standard(StdlibTypeId::UnityClass), StringArray) -> (I64), deps [UnityGetFieldAny], imports [ProcessRead], build_unity_get_static_instance),
     helper!(ConcatStrings, (StringArray) -> (StringValue), deps [], imports [], build_concat_strings),
     helper!(FollowAddress, (I64, I64, U64Array) -> (I64), deps [], imports [ProcessRead], build_follow_address),
-    helper!(GbaAttach, (I64) -> (Standard(StdlibTypeId::GbaEmulator)), deps [ScanProcessRange], imports [ProcessRead, ProcessGetModuleAddress, ProcessGetModuleSize, ProcessGetMemoryRangeCount, ProcessGetMemoryRangeAddress, ProcessGetMemoryRangeSize, ProcessGetMemoryRangeFlags], build_gba_attach),
     helper!(GbaTranslateAddress, (I64, Standard(StdlibTypeId::GbaEmulator), I32, I32) -> (I64), deps [], imports [ProcessRead], build_gba_translate_address),
     helper!(RefreshSettings, () -> (), deps [], imports [], build_refresh_settings),
     helper!(SettingsEnabled, (I32, StringValue) -> (I32), deps [], imports [], build_settings_enabled),

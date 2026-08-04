@@ -60,7 +60,6 @@ pub(crate) enum RuntimeHelperId {
     UnityGetStaticInstance,
     ConcatStrings,
     FollowAddress,
-    GbaAttach,
     GbaTranslateAddress,
     RefreshSettings,
     SettingsEnabled,
@@ -249,10 +248,12 @@ const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => {
             scratch(ScratchType::Core(CoreTypeId::U64), 2)
         }
+        IntrinsicId::ProcessFindMemoryRange => scratch(ScratchType::Core(CoreTypeId::U64), 5),
         IntrinsicId::ProcessScan => scratch(ScratchType::Core(CoreTypeId::U64), 5),
         IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 7),
         IntrinsicId::ProcessScanMemoryAny => scratch(ScratchType::Core(CoreTypeId::U64), 8),
         IntrinsicId::ModuleScan => scratch(ScratchType::Core(CoreTypeId::U64), 5),
+        IntrinsicId::ModuleScanAny => scratch(ScratchType::Core(CoreTypeId::U64), 5),
         IntrinsicId::ProcessFollow
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::UnityClassField
@@ -276,6 +277,8 @@ const fn async_state(id: IntrinsicId) -> Option<ScratchPolicy> {
         }
         IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 3),
         IntrinsicId::ProcessScanMemoryAny => scratch(ScratchType::Core(CoreTypeId::U64), 5),
+        IntrinsicId::ModuleScanAny => scratch(ScratchType::Core(CoreTypeId::U64), 4),
+        IntrinsicId::ProcessFindMemoryRange => scratch(ScratchType::Core(CoreTypeId::U64), 5),
         _ => None,
     }
 }
@@ -295,8 +298,7 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::RuntimeOperatingSystem
         | IntrinsicId::RuntimeArchitecture
         | IntrinsicId::StringReplaceAll
-        | IntrinsicId::StringSlice
-        | IntrinsicId::GbaAttach => scratch(ScratchType::ResultValue, 1),
+        | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
         IntrinsicId::GbaEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
         _ => None,
     }
@@ -327,9 +329,17 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
             HostImport(Host::ProcessGetModuleAddress),
             HostImport(Host::ProcessGetModuleSize),
         ],
+        IntrinsicId::ProcessFindMemoryRange => &[
+            HostImport(Host::ProcessGetMemoryRangeCount),
+            HostImport(Host::ProcessGetMemoryRangeAddress),
+            HostImport(Host::ProcessGetMemoryRangeSize),
+            HostImport(Host::ProcessGetMemoryRangeFlags),
+        ],
         IntrinsicId::ProcessRead => &[HostImport(Host::ProcessRead)],
         IntrinsicId::ProcessFollow => &[Helper(Runtime::FollowAddress)],
-        IntrinsicId::ProcessScan | IntrinsicId::ModuleScan => &[Helper(Runtime::ScanProcessRange)],
+        IntrinsicId::ProcessScan | IntrinsicId::ModuleScan | IntrinsicId::ModuleScanAny => {
+            &[Helper(Runtime::ScanProcessRange)]
+        }
         IntrinsicId::ProcessScanMemory | IntrinsicId::ProcessScanMemoryAny => &[
             Helper(Runtime::ScanProcessRange),
             HostImport(Host::ProcessGetMemoryRangeCount),
@@ -349,7 +359,6 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::UnityClassField => &[Helper(Runtime::UnityGetFieldOffset)],
         IntrinsicId::UnityClassFieldAny => &[Helper(Runtime::UnityGetFieldAny)],
         IntrinsicId::UnityClassStaticInstance => &[Helper(Runtime::UnityGetStaticInstance)],
-        IntrinsicId::GbaAttach => &[Helper(Runtime::GbaAttach)],
         IntrinsicId::GbaEmulatorRead => &[Helper(Runtime::GbaTranslateAddress)],
         IntrinsicId::StringContains
         | IntrinsicId::StringStartsWith
@@ -408,6 +417,9 @@ const PROCESS_TYPE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Pr
 const SIGNATURE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Signature);
 const SIGNATURE_MATCH: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SignatureMatch);
 const MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Module);
+const MEMORY_RANGE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::MemoryRange);
+const MEMORY_RANGE_ACCESS: ContractTypeRef =
+    ContractTypeRef::Standard(StdlibTypeId::MemoryRangeAccess);
 const TIMER_STATE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::TimerState);
 const INSTANT: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Instant);
 const UNITY_MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityModule);
@@ -436,6 +448,10 @@ const BOOL_OPTION: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Option,
     arguments: &[BOOL],
 };
+const MEMORY_RANGE_OPTION: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Option,
+    arguments: &[MEMORY_RANGE],
+};
 const SIGNATURE_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
     arguments: &[SIGNATURE],
@@ -451,10 +467,6 @@ const ADDRESS_RESULT: ContractTypeRef = ContractTypeRef::Application {
 const STRING_RESULT: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Result,
     arguments: &[STRING],
-};
-const GBA_EMULATOR_RESULT: ContractTypeRef = ContractTypeRef::Application {
-    constructor: StdlibTypeConstructorId::Result,
-    arguments: &[GBA_EMULATOR],
 };
 
 const NO_TYPE_PARAMETERS: Option<&[StdlibCapabilityId]> = None;
@@ -723,6 +735,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             OnAttach,
             Suspension
         ),
+        IntrinsicId::ProcessFindMemoryRange => contract!(
+            ProcessFindMemoryRange,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(PROCESS_TYPE),
+                params![value(U64), value(MEMORY_RANGE_ACCESS)],
+                MEMORY_RANGE_OPTION,
+            ),
+            PROCESS_SUSPEND.with(Effect::Allocates),
+            OnAttach,
+            Suspension
+        ),
         IntrinsicId::ProcessRead => contract!(
             ProcessRead,
             Method,
@@ -781,6 +806,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             signature(
                 NO_TYPE_PARAMETERS,
                 Some(PROCESS_TYPE),
+                params![value(SIGNATURE_ARRAY)],
+                SIGNATURE_MATCH,
+            ),
+            PROCESS_SUSPEND.with(Effect::Allocates),
+            OnAttach,
+            Suspension
+        ),
+        IntrinsicId::ModuleScanAny => contract!(
+            ModuleScanAny,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(MODULE),
                 params![value(SIGNATURE_ARRAY)],
                 SIGNATURE_MATCH,
             ),
@@ -1091,14 +1129,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             PROCESS_SUSPEND,
             OnAttach,
             Suspension
-        ),
-        IntrinsicId::GbaAttach => contract!(
-            GbaAttach,
-            Function,
-            signature(NO_TYPE_PARAMETERS, None, params![], GBA_EMULATOR_RESULT,),
-            PROCESS,
-            Everywhere,
-            Retryable
         ),
         IntrinsicId::GbaEmulatorRead => contract!(
             GbaEmulatorRead,

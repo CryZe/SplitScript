@@ -32,7 +32,7 @@ stateProvider Native as process {}
 /// }
 /// ```
 @processType(GbaEmulator)
-@attachment(GbaAttach)
+@attachment(GbaEmulatorDiscover)
 @directRead(GbaEmulatorRead)
 stateProvider GBA as gba {
     "visualboyadvance-m.exe",
@@ -297,6 +297,27 @@ intrinsic type Process {
         @literal(string)
         name: String,
     ) -> Module;
+
+    /// Searches mapped memory ranges cooperatively.
+    ///
+    /// At most one host memory-range entry is inspected per update. The
+    /// operation completes with `None` after one full traversal when no range
+    /// has the requested size and permissions.
+    ///
+    /// # Example
+    ///
+    /// Find a readable and writable emulator mapping
+    ///
+    /// ```splitscript
+    /// let mapping = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite)
+    /// ```
+    @intrinsic(ProcessFindMemoryRange)
+    fn findMemoryRange(
+        /// The exact mapped byte length.
+        size: u64,
+        /// Permissions that the range must provide.
+        access: MemoryRangeAccess,
+    ) -> MemoryRange?;
 
     /// Reads a fixed-layout value from process memory.
     ///
@@ -1336,7 +1357,7 @@ intrinsic type String {
     /// Extract a level-number component
     ///
     /// ```splitscript
-    /// let prefix = "Straße".slice(0, 6) else "Unknown"
+    /// let prefix = "StraÃŸe".slice(0, 6) else "Unknown"
     /// ```
     @intrinsic(StringSlice)
     fn slice(
@@ -1934,6 +1955,130 @@ enum PointerSize {
     Bit64,
 }
 
+/// Selects the permissions required by a mapped-memory query.
+///
+/// The query may return ranges with additional permissions.
+///
+/// # Example
+///
+/// Require readable and writable memory
+///
+/// ```splitscript
+/// let requiredAccess = MemoryRangeAccess.ReadWrite
+/// ```
+@representation(enum, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@capabilities(Equatable)
+enum MemoryRangeAccess {
+    /// Requires readable memory.
+    ///
+    /// # Example
+    ///
+    /// Request readable memory
+    ///
+    /// ```splitscript
+    /// let access = MemoryRangeAccess.Read
+    /// ```
+    Read,
+
+    /// Requires readable and writable memory.
+    ///
+    /// # Example
+    ///
+    /// Request mutable emulated memory
+    ///
+    /// ```splitscript
+    /// let access = MemoryRangeAccess.ReadWrite
+    /// ```
+    ReadWrite,
+
+    /// Requires readable and executable memory.
+    ///
+    /// # Example
+    ///
+    /// Request executable code memory
+    ///
+    /// ```splitscript
+    /// let access = MemoryRangeAccess.ReadExecute
+    /// ```
+    ReadExecute,
+}
+
+/// Describes one mapped process-memory range.
+///
+/// Values are snapshots of host mapping metadata discovered cooperatively.
+///
+/// # Example
+///
+/// Inspect a discovered mapping
+///
+/// ```splitscript
+/// let emulatorRange = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite)
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+struct MemoryRange {
+    /// Returns the first mapped address.
+    ///
+    /// # Example
+    ///
+    /// Read the mapping base
+    ///
+    /// ```splitscript
+    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite) else return;
+    /// let base = range.address
+    /// ```
+    address: address,
+
+    /// Returns the mapped byte length.
+    ///
+    /// # Example
+    ///
+    /// Read the mapping size
+    ///
+    /// ```splitscript
+    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite) else return;
+    /// let bytes = range.size
+    /// ```
+    size: u64,
+
+    /// Reports whether the range is readable.
+    ///
+    /// # Example
+    ///
+    /// Inspect read access
+    ///
+    /// ```splitscript
+    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite) else return;
+    /// let canRead = range.readable
+    /// ```
+    readable: bool,
+
+    /// Reports whether the range is writable.
+    ///
+    /// # Example
+    ///
+    /// Inspect write access
+    ///
+    /// ```splitscript
+    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite) else return;
+    /// let canWrite = range.writable
+    /// ```
+    writable: bool,
+
+    /// Reports whether the range is executable.
+    ///
+    /// # Example
+    ///
+    /// Inspect execute access
+    ///
+    /// ```splitscript
+    /// let range = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite) else return;
+    /// let canExecute = range.executable
+    /// ```
+    executable: bool,
+}
+
 /// Describes a native pointer chain rooted at an address.
 ///
 /// A path keeps version-specific pointer data separate from state polling and
@@ -2355,6 +2500,24 @@ struct Module {
         signature: Signature,
     ) -> address;
 
+    /// Scans the module for the first of several signatures.
+    ///
+    /// One signature is checked in one bounded window per update. The result
+    /// identifies both the matching address and candidate index.
+    ///
+    /// # Example
+    ///
+    /// Select a module-specific layout
+    ///
+    /// ```splitscript
+    /// let layout = await module.scanAny([sig"48 8B ??", sig"A1 ?? ??"])
+    /// ```
+    @intrinsic(ModuleScanAny)
+    fn scanAny(
+        /// Candidate patterns in priority order.
+        signatures: [Signature],
+    ) -> SignatureMatch;
+
     /// Reads a 32-bit relative address at an offset from this module.
     ///
     /// The encoded displacement is resolved relative to the instruction that
@@ -2759,6 +2922,262 @@ struct GbaEmulator {
 
     /// Stores backend-specific discovery state.
     private aux3: address,
+
+    /// Discovers the emulator's GBA memory mapping.
+    ///
+    /// `state GBA` invokes this automatically after attaching to one of the
+    /// provider's supported processes.
+    ///
+    /// # Example
+    ///
+    /// Discover a GBA emulator mapping explicitly
+    ///
+    /// ```splitscript state GBA
+    /// let emulator = await GbaEmulator.discover()
+    /// ```
+    static fn discover() -> GbaEmulator {
+        let processName = process.name()
+
+        if processName == "mGBA.exe" || processName == "mGBA" || processName == "EmuHawk.exe" {
+            while true {
+                let range = await process.findMemoryRange(
+                    0x48000,
+                    MemoryRangeAccess.ReadWrite,
+                )
+                while true {
+                    let mapping = range else break
+                    return GbaEmulator {
+                        backend: 1,
+                        ewram: mapping.address,
+                        iwram: mapping.address.offset(0x40000),
+                        aux1: 0,
+                        aux2: 0,
+                        aux3: 0,
+                    }
+                }
+                await nextTick()
+            }
+        }
+
+        if processName == "NO$GBA.EXE" {
+            let matched = await process.scanMemory(sig"FF 35 ?? ?? ?? ?? 55")
+            let basePointer = retry process.read<u32>(matched.offset(2))
+            return GbaEmulator {
+                backend: 4,
+                ewram: 0,
+                iwram: 0,
+                aux1: basePointer as address,
+                aux2: 0,
+                aux3: 0,
+            }
+        }
+
+        if processName == "visualboyadvance-m.exe" || processName == "VisualBoyAdvance.exe" {
+            let emulatorModule = await process.mainModule()
+            let found = await emulatorModule.scanAny([
+                sig"48 8B 05 ?? ?? ?? ?? 81 E3 FF FF 03 00",
+                sig"A1 ?? ?? ?? ?? 81 ?? FF FF 03 00",
+                sig"81 E6 FF FF 03 00 8B 15 ?? ?? ?? ??",
+            ])
+            if found.index == 0 {
+                let ewramInstruction = found.address.offset(3)
+                let ewramPointer = retry process.readRelative32(ewramInstruction)
+                let ewramOpcode = retry process.read<u8>(ewramInstruction.offset(10))
+                if ewramOpcode == 0x48 {
+                    ewramPointer = retry process.read<address>(ewramPointer)
+                }
+
+                let iwramMatch = await emulatorModule.scan(
+                    sig"48 8B 05 ?? ?? ?? ?? 81 E3 FF 7F 00 00",
+                )
+                let iwramInstruction = iwramMatch.offset(3)
+                let iwramPointer = retry process.readRelative32(iwramInstruction)
+                let iwramOpcode = retry process.read<u8>(iwramInstruction.offset(10))
+                if iwramOpcode == 0x48 {
+                    iwramPointer = retry process.read<address>(iwramPointer)
+                }
+                return GbaEmulator {
+                    backend: 3,
+                    ewram: 0,
+                    iwram: 0,
+                    aux1: ewramPointer,
+                    aux2: iwramPointer,
+                    aux3: 0,
+                }
+            } else if found.index == 1 {
+                let ewramPointer = retry process.read<u32>(found.address.offset(1))
+                let iwramMatch = await emulatorModule.scan(
+                    sig"A1 ?? ?? ?? ?? 81 ?? FF 7F 00 00",
+                )
+                let iwramPointer = retry process.read<u32>(iwramMatch.offset(1))
+                return GbaEmulator {
+                    backend: 2,
+                    ewram: 0,
+                    iwram: 0,
+                    aux1: ewramPointer as address,
+                    aux2: iwramPointer as address,
+                    aux3: 0,
+                }
+            } else {
+                let ewramPointer = retry process.read<u32>(found.address.offset(8))
+                return GbaEmulator {
+                    backend: 2,
+                    ewram: 0,
+                    iwram: 0,
+                    aux1: ewramPointer as address,
+                    aux2: (ewramPointer as address).offset(4),
+                    aux3: 0,
+                }
+            }
+        }
+
+        if processName == "retroarch.exe" {
+            let range = await process.findMemoryRange(
+                0x48000,
+                MemoryRangeAccess.ReadWrite,
+            )
+            while true {
+                let mapping = range else break
+                return GbaEmulator {
+                    backend: 1,
+                    ewram: mapping.address,
+                    iwram: mapping.address.offset(0x40000),
+                    aux1: 0,
+                    aux2: 0,
+                    aux3: 0,
+                }
+            }
+
+            let found = await process.scanMemoryAny([
+                sig"48 8B 05 ?? ?? ?? ?? 81 E1 FF FF 03 00",
+                sig"A1 ?? ?? ?? ?? 81 ?? FF FF 03 00",
+                sig"48 8B 15 ?? ?? ?? ?? 8B 42 40",
+                sig"A3 ?? ?? ?? ?? F7 C5 02 00 00 00",
+            ])
+            if found.index >= 2 {
+                let basePointer = if found.index == 2 {
+                    retry process.readRelative32(found.address.offset(3))
+                } else {
+                    retry process.read<u32>(found.address.offset(1)) as address
+                }
+                let base: address = 0
+                if found.index == 2 {
+                    base = retry process.read<address>(basePointer)
+                } else {
+                    base = basePointer
+                }
+                let ewramMatch = await process.scanMemory(sig"25 FF FF 03 00 88 94 03")
+                let ewramOffset = retry process.read<i32>(ewramMatch.offset(8))
+                let iwramMatch = await process.scanMemory(sig"25 FE 7F 00 00 66 89 94 03")
+                let iwramOffset = retry process.read<i32>(iwramMatch.offset(9))
+                return GbaEmulator {
+                    backend: 1,
+                    ewram: base.add((ewramOffset as i64) as u64),
+                    iwram: base.add((iwramOffset as i64) as u64),
+                    aux1: 0,
+                    aux2: 0,
+                    aux3: 0,
+                }
+            }
+
+            let ewramPointer: address = 0
+            if found.index == 0 {
+                let instruction = found.address.offset(3)
+                let pointer = retry process.readRelative32(instruction)
+                let opcode = retry process.read<u8>(instruction.offset(10))
+                if opcode == 0x48 {
+                    pointer = retry process.read<address>(pointer)
+                }
+                ewramPointer = pointer
+            } else {
+                ewramPointer = retry process.read<u32>(found.address.offset(1)) as address
+            }
+            let iwramMatch = if found.index == 0 {
+                await process.scanMemory(
+                    sig"48 8B 05 ?? ?? ?? ?? 81 E1 FF 7F 00 00",
+                )
+            } else {
+                await process.scanMemory(sig"A1 ?? ?? ?? ?? 81 ?? FF 7F 00 00")
+            }
+            let iwramPointer: address = 0
+            if found.index == 0 {
+                let instruction = iwramMatch.offset(3)
+                let pointer = retry process.readRelative32(instruction)
+                let opcode = retry process.read<u8>(instruction.offset(10))
+                if opcode == 0x48 {
+                    pointer = retry process.read<address>(pointer)
+                }
+                iwramPointer = pointer
+            } else {
+                iwramPointer = retry process.read<u32>(iwramMatch.offset(1)) as address
+            }
+            return GbaEmulator {
+                backend: if found.index == 0 { 3 } else { 2 },
+                ewram: 0,
+                iwram: 0,
+                aux1: ewramPointer,
+                aux2: iwramPointer,
+                aux3: 0,
+            }
+        }
+
+        if processName == "mednafen.exe" {
+            let emulatorModule = await process.mainModule()
+            let found = await emulatorModule.scanAny([
+                sig"48 8B 05 ?? ?? ?? ?? 81 E1 FF FF 03 00",
+                sig"A1 ?? ?? ?? ?? 81 ?? FF FF 03 00",
+            ])
+            let ewramPointer: address = 0
+            if found.index == 0 {
+                let instruction = found.address.offset(3)
+                let pointer = retry process.readRelative32(instruction)
+                let opcode = retry process.read<u8>(instruction.offset(10))
+                if opcode == 0x48 {
+                    pointer = retry process.read<address>(pointer)
+                }
+                ewramPointer = pointer
+            } else {
+                ewramPointer = retry process.read<u32>(found.address.offset(1)) as address
+            }
+            let iwramMatch = if found.index == 0 {
+                await emulatorModule.scan(
+                    sig"48 8B 05 ?? ?? ?? ?? 81 E1 FF 7F 00 00",
+                )
+            } else {
+                await emulatorModule.scan(sig"A1 ?? ?? ?? ?? 81 ?? FF 7F 00 00")
+            }
+            let iwramPointer: address = 0
+            if found.index == 0 {
+                let instruction = iwramMatch.offset(3)
+                let pointer = retry process.readRelative32(instruction)
+                let opcode = retry process.read<u8>(instruction.offset(10))
+                if opcode == 0x48 {
+                    pointer = retry process.read<address>(pointer)
+                }
+                iwramPointer = pointer
+            } else {
+                iwramPointer = retry process.read<u32>(iwramMatch.offset(1)) as address
+            }
+            return GbaEmulator {
+                backend: if found.index == 0 { 3 } else { 2 },
+                ewram: 0,
+                iwram: 0,
+                aux1: ewramPointer,
+                aux2: iwramPointer,
+                aux3: 0,
+            }
+        }
+
+        await process.closed()
+        return GbaEmulator {
+            backend: 0,
+            ewram: 0,
+            iwram: 0,
+            aux1: 0,
+            aux2: 0,
+            aux3: 0,
+        }
+    }
 
     /// Reads a typed value from emulated GBA memory.
     ///

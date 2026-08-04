@@ -5,7 +5,7 @@ use crate::{
     ast::{ActionKind, Program, SettingFileFilter, SettingKind, StateSource},
     intrinsic_registry::{self, DependencyRoot, RuntimeHelperId},
     semantic::SemanticModel,
-    stdlib::{Implementation, IntrinsicId, StateProviderAttachment, StdlibItemId, StdlibTypeId},
+    stdlib::{Implementation, IntrinsicId, StdlibItemId, StdlibTypeId},
     types::TypeKind,
     wasm_ir,
 };
@@ -35,9 +35,6 @@ impl BackendDependencies {
         if let Some(state) = &program.state {
             if let Some(provider) = semantics.state_provider() {
                 let provider = wasm_ir.standard_library().state_provider(provider);
-                if let StateProviderAttachment::Intrinsic(attachment) = provider.attachment {
-                    dependencies.require_intrinsic(attachment);
-                }
                 if state
                     .fields
                     .iter()
@@ -188,10 +185,6 @@ impl BackendDependencies {
 
     pub fn uses_helper(&self, helper: RuntimeHelperId) -> bool {
         self.helpers.contains(&helper)
-    }
-
-    pub fn uses_gba_emulator_discovery(&self) -> bool {
-        self.uses_helper(RuntimeHelperId::GbaAttach)
     }
 
     pub fn helpers(&self) -> impl Iterator<Item = RuntimeHelperId> + '_ {

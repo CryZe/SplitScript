@@ -1008,13 +1008,15 @@ fn language_catalog_is_valid_documented_and_compilable() {
         ))
     );
     assert_eq!(
-        language.item_for_source_token("choice").map(|item| item.id),
-        Some(LanguageItemId::ChoiceSetting)
-    );
-    assert_eq!(
         language.item_for_source_token("[").map(|item| item.id),
         Some(LanguageItemId::ArrayType)
     );
+    for contextual in ["at", "key", "choice", "default", "file", "mime", "in"] {
+        assert!(
+            language.item_for_source_token(contextual).is_none(),
+            "`{contextual}` needs its grammatical context"
+        );
+    }
     assert!(language.item_for_source_token("Array").is_none());
     assert_eq!(
         StandardLibrary::new()
@@ -1073,7 +1075,7 @@ fn compiler_database_resolves_language_catalog_syntax() {
 
         settings {
             /// Select the active mode.
-            "Mode" => selected: choice {
+            "Mode" => selected key "selected-mode": choice {
                 "First" => Mode.A default,
                 "Second" => Mode.B
             },
@@ -1111,6 +1113,9 @@ fn compiler_database_resolves_language_catalog_syntax() {
 
         whileAttached {
             let firstByte = preserveBytes([1u8])[0]
+            for byte in [firstByte] {
+                print(byte)
+            }
             let timerState = TimerState.Running
             let levelChanged = current.level != old.level
             let settingChanged = settings.selected != oldSettings.selected
@@ -1250,6 +1255,9 @@ fn compiler_database_resolves_language_catalog_syntax() {
         ("default", LanguageItemId::ChoiceSetting),
         ("file {", LanguageItemId::FileSetting),
         ("mime =>", LanguageItemId::FileSetting),
+        ("at 0x1000", LanguageItemId::StatePointerField),
+        ("key \"selected-mode\"", LanguageItemId::StableSettingKey),
+        ("in [firstByte]", LanguageItemId::For),
         ("whileAttached", LanguageItemId::WhileAttached),
     ] {
         let offset = source.find(spelling).unwrap();
@@ -1258,6 +1266,12 @@ fn compiler_database_resolves_language_catalog_syntax() {
             Some(DefinitionTarget::Language(expected)),
             "wrong catalog target for `{spelling}`"
         );
+        let hover = database
+            .hover(offset)
+            .unwrap()
+            .unwrap_or_else(|| panic!("missing catalog hover for `{spelling}`"));
+        assert!(hover.markdown.contains("```splitscript"));
+        assert!(hover.markdown.contains("**Examples**"));
     }
 
     let doc_comment = source.find("/// Select").unwrap();

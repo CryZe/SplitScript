@@ -125,7 +125,7 @@ impl Parser<'_> {
         if self.eat_ident("for").is_some() {
             let start = self.previous().span.start;
             let (name, name_span) = self.expect_any_ident("expected a binding after `for`")?;
-            self.expect_ident("in")?;
+            let in_span = self.expect_ident("in")?;
             let iterable = self.root_expression();
             let body = self.block()?;
             let end = body.span.end;
@@ -135,6 +135,7 @@ impl Parser<'_> {
                     name,
                     span: name_span,
                 },
+                in_span,
                 iterable_value: self.new_value_id(),
                 index_value: self.new_value_id(),
                 iterable,

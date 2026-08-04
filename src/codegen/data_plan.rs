@@ -75,7 +75,7 @@ impl StaticData {
                         strings.intern(&option.description);
                     }
                 }
-                SettingKind::File { filters } => {
+                SettingKind::File { filters, .. } => {
                     for filter in filters {
                         match filter {
                             SettingFileFilter::Name {
@@ -87,7 +87,7 @@ impl StaticData {
                                 }
                                 strings.intern(pattern);
                             }
-                            SettingFileFilter::Mime(mime) => {
+                            SettingFileFilter::Mime { value: mime, .. } => {
                                 strings.intern(mime);
                             }
                         }

@@ -400,9 +400,11 @@ impl Parser<'_> {
             } else {
                 None
             };
-            if legacy_colon.is_none() {
-                self.expect_ident("at")?;
-            }
+            let at_span = if legacy_colon.is_none() {
+                Some(self.expect_ident("at")?)
+            } else {
+                None
+            };
             let module = if matches!(self.current().kind, TokenKind::String(_)) {
                 let module = self.expect_string("expected a module name")?;
                 self.expect(TokenKind::Comma, "expected an offset after the module")?;
@@ -489,6 +491,7 @@ impl Parser<'_> {
                 );
             }
             StateSource::Pointer(PointerPath {
+                at_span,
                 module,
                 offsets,
                 decoder,
@@ -667,13 +670,14 @@ impl Parser<'_> {
         self.expect(TokenKind::FatArrow, "expected `=>` after the setting label")?;
         let (name, name_span) = self.expect_any_ident("expected a setting name")?;
         let external_key = if self.at_ident("key") {
-            self.bump();
+            let keyword_span = self.bump().span;
             let token = self.current().clone();
             let key = match token.kind {
                 TokenKind::String(value) => {
                     self.bump();
                     SettingExternalKey {
                         value,
+                        keyword_span,
                         span: token.span,
                     }
                 }
@@ -691,8 +695,8 @@ impl Parser<'_> {
         let kind = match kind_name.as_str() {
             "true" => SettingKind::Bool { default: true },
             "false" => SettingKind::Bool { default: false },
-            "choice" => self.choice_setting()?,
-            "file" => self.file_setting()?,
+            "choice" => self.choice_setting(kind_span)?,
+            "file" => self.file_setting(kind_span)?,
             _ => {
                 return Err(Diagnostic::new(
                     "expected `true`, `false`, `choice`, or `file`",
@@ -748,7 +752,7 @@ impl Parser<'_> {
         (!tooltip.is_empty()).then_some(tooltip)
     }
 
-    pub(super) fn choice_setting(&mut self) -> Result<SettingKind, Diagnostic> {
+    pub(super) fn choice_setting(&mut self, keyword_span: Span) -> Result<SettingKind, Diagnostic> {
         self.expect(TokenKind::LBrace, "expected `{` after `choice`")?;
         let body_depth = self.brace_depth_before(self.cursor.position());
         let mut enumeration: Option<(String, Span)> = None;
@@ -779,7 +783,8 @@ impl Parser<'_> {
                 }
                 self.expect(TokenKind::Dot, "expected `.` before the enum variant")?;
                 let (variant, variant_span) = self.expect_any_ident("expected an enum variant")?;
-                let is_default = self.eat_ident("default").is_some();
+                let default_span = self.eat_ident("default");
+                let is_default = default_span.is_some();
                 if is_default && default_variant.is_some() {
                     return Err(Diagnostic::new(
                         "a choice can only have one default option",
@@ -788,19 +793,27 @@ impl Parser<'_> {
                 }
                 let span = option_start.join(self.previous().span);
                 self.require_comma_between("choice options");
-                Ok((enum_name, enum_span, description, variant, is_default, span))
+                Ok((
+                    enum_name,
+                    enum_span,
+                    description,
+                    variant,
+                    default_span,
+                    span,
+                ))
             })();
-            if let Some((enum_name, enum_span, description, variant, is_default, span)) =
+            if let Some((enum_name, enum_span, description, variant, default_span, span)) =
                 self.recover_delimited_item(parsed, item_start, body_depth)
             {
                 enumeration.get_or_insert((enum_name, enum_span));
-                if is_default {
+                if default_span.is_some() {
                     default_variant = Some(variant.clone());
                 }
                 options.push(SettingChoiceOption {
                     id: self.new_setting_choice_option_id(),
                     variant,
                     description,
+                    default_span,
                     span,
                 });
             }
@@ -811,6 +824,7 @@ impl Parser<'_> {
         };
         let default_variant = default_variant.unwrap_or_else(|| options[0].variant.clone());
         Ok(SettingKind::Choice {
+            keyword_span,
             enumeration: EnumReference {
                 name: enum_name,
                 span: enum_span,
@@ -820,7 +834,7 @@ impl Parser<'_> {
         })
     }
 
-    pub(super) fn file_setting(&mut self) -> Result<SettingKind, Diagnostic> {
+    pub(super) fn file_setting(&mut self, keyword_span: Span) -> Result<SettingKind, Diagnostic> {
         self.expect(TokenKind::LBrace, "expected `{` after `file`")?;
         let body_depth = self.brace_depth_before(self.cursor.position());
         let mut filters = Vec::new();
@@ -851,9 +865,12 @@ impl Parser<'_> {
                         }
                     }
                     TokenKind::Ident(name) if name == "mime" => {
-                        self.bump();
+                        let keyword_span = self.bump().span;
                         self.expect(TokenKind::FatArrow, "expected `=>` after `mime`")?;
-                        SettingFileFilter::Mime(self.expect_string("expected a MIME type")?)
+                        SettingFileFilter::Mime {
+                            value: self.expect_string("expected a MIME type")?,
+                            keyword_span,
+                        }
                     }
                     _ => {
                         return Err(
@@ -869,7 +886,10 @@ impl Parser<'_> {
             }
         }
         self.eat(&TokenKind::RBrace);
-        Ok(SettingKind::File { filters })
+        Ok(SettingKind::File {
+            keyword_span,
+            filters,
+        })
     }
 
     pub(super) fn action_block(&mut self) -> Result<Action, Diagnostic> {
@@ -994,6 +1014,7 @@ impl Parser<'_> {
                     documentation,
                     annotation: Some(ty),
                     source: StateSource::Pointer(PointerPath {
+                        at_span: None,
                         module,
                         offsets,
                         decoder: None,

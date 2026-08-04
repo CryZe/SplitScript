@@ -971,7 +971,7 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
             SettingKind::Choice { options, .. } if !options.is_empty() => {
                 self.mark_comma(setting.span);
             }
-            SettingKind::File { filters } if !filters.is_empty() => {
+            SettingKind::File { filters, .. } if !filters.is_empty() => {
                 self.mark_comma(setting.span);
             }
             SettingKind::Bool { .. } | SettingKind::Choice { .. } | SettingKind::File { .. } => {}

@@ -426,7 +426,7 @@ fn recovering_parse_keeps_valid_choice_options_and_file_filters() {
             .collect::<Vec<_>>(),
         ["A", "C"]
     );
-    let SettingKind::File { filters } = &recovered.syntax().settings[1].kind else {
+    let SettingKind::File { filters, .. } = &recovered.syntax().settings[1].kind else {
         panic!("file should remain a file setting");
     };
     assert_eq!(filters.len(), 2);
@@ -439,7 +439,7 @@ fn recovering_parse_keeps_valid_choice_options_and_file_filters() {
     ));
     assert!(matches!(
         &filters[1],
-        SettingFileFilter::Mime(mime) if mime == "application/octet-stream"
+        SettingFileFilter::Mime { value: mime, .. } if mime == "application/octet-stream"
     ));
     assert_eq!(recovered.syntax().actions.len(), 1);
     assert_eq!(

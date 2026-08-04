@@ -559,6 +559,9 @@ pub enum StateSource {
 
 #[derive(Debug, Clone)]
 pub struct PointerPath {
+    /// Exact `at` keyword for the ordinary state-field DSL. Legacy recovered
+    /// forms that did not write the keyword retain `None`.
+    pub at_span: Option<Span>,
     pub module: Option<String>,
     pub offsets: Vec<u64>,
     pub decoder: Option<StateMemoryDecoder>,
@@ -600,6 +603,7 @@ impl SettingDecl {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingExternalKey {
     pub value: String,
+    pub keyword_span: Span,
     pub span: Span,
 }
 
@@ -618,11 +622,13 @@ pub enum SettingKind {
         heading_level: u32,
     },
     Choice {
+        keyword_span: Span,
         enumeration: EnumReference,
         default_variant: String,
         options: Vec<SettingChoiceOption>,
     },
     File {
+        keyword_span: Span,
         filters: Vec<SettingFileFilter>,
     },
 }
@@ -632,6 +638,7 @@ pub struct SettingChoiceOption {
     pub id: SettingChoiceOptionId,
     pub variant: String,
     pub description: String,
+    pub default_span: Option<Span>,
     pub span: Span,
 }
 
@@ -641,7 +648,10 @@ pub enum SettingFileFilter {
         description: Option<String>,
         pattern: String,
     },
-    Mime(String),
+    Mime {
+        value: String,
+        keyword_span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -738,6 +748,7 @@ pub enum Stmt {
     },
     For {
         binding: ForBinding,
+        in_span: Span,
         /// Compiler-owned storage for the iterable, which guarantees that the
         /// source expression is evaluated exactly once.
         iterable_value: ValueId,

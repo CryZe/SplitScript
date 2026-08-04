@@ -439,7 +439,7 @@ pub(super) fn emit_setting_registration(
                     .instruction(&Instruction::Drop);
             }
         }
-        SettingKind::File { filters } => {
+        SettingKind::File { filters, .. } => {
             let storage = storage.unwrap();
             emit_string_literal(function, "", gc);
             function
@@ -474,7 +474,7 @@ pub(super) fn emit_setting_registration(
                                 abi.function(AbiImportId::UserSettingsAddFileSelectNameFilter),
                             ));
                     }
-                    SettingFileFilter::Mime(mime) => {
+                    SettingFileFilter::Mime { value: mime, .. } => {
                         let (mime_ptr, mime_len) = strings.get(mime);
                         function
                             .instruction(&Instruction::I32Const(key_ptr as i32))

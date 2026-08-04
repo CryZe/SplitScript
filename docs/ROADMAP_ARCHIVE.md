@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-04: contextual syntax has precise editor identities
+
+- Audited every identifier spelling interpreted contextually by the canonical
+  grammar. State pointer-path `at`, stable settings-map `key`, settings
+  `choice` / `default` / `file` / `mime`, and loop `in` now retain exact spans
+  and resolve to their documented language-catalog concepts.
+- Semantic highlighting consumes those same syntax spans instead of treating
+  the spellings as global keywords. An ordinary parameter, local, field, or
+  function named `at`, `key`, `choice`, `default`, `file`, `mime`, or `in`
+  therefore keeps its source-symbol identity.
+- Added focused state-pointer and stable-key catalog documentation plus
+  compiler-query and highlighting regressions. Existing `utf8`, provider, and
+  globally reserved keyword paths remain shared with their established
+  standard-library or language-catalog identities.
+
 ## 2026-08-04: precise editor cursor boundaries
 
 - Centralized editor symbol selection in the lossless source document while

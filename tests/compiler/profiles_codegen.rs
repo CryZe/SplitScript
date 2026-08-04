@@ -517,6 +517,7 @@ fn compiles_the_complete_settings_showcase() {
         enumeration,
         default_variant,
         options,
+        ..
     } = &choice.kind
     else {
         unreachable!();

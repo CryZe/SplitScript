@@ -13,6 +13,7 @@ use crate::{
     semantic::ResolvedCall,
     stdlib::StdlibSymbolId,
     types::{TypeId, TypeKind},
+    visit::{self, Visitor},
 };
 
 use super::{
@@ -522,6 +523,9 @@ impl CompilerDatabase {
         };
         if let TokenKind::Ident(name) = &token.kind {
             let recovered = self.recovering_parse()?;
+            if let Some(item) = contextual_language_item_at(recovered.syntax(), token.span) {
+                return Ok(Some(DefinitionTarget::Language(item)));
+            }
             if let Some(provider) = recovered
                 .syntax()
                 .state
@@ -666,6 +670,83 @@ impl CompilerDatabase {
         }
         Arc::clone(self.cache.diagnostics.as_ref().unwrap())
     }
+}
+
+struct ContextualLanguageItemAt {
+    target: Span,
+    item: Option<LanguageItemId>,
+}
+
+impl<'ast> Visitor<'ast> for ContextualLanguageItemAt {
+    fn visit_state_field(&mut self, field: &'ast crate::ast::StateField) {
+        if let crate::ast::StateSource::Pointer(path) = &field.source
+            && path.at_span == Some(self.target)
+        {
+            self.item = Some(LanguageItemId::StatePointerField);
+        }
+        visit::walk_state_field(self, field);
+    }
+
+    fn visit_setting(&mut self, setting: &'ast crate::ast::SettingDecl) {
+        if setting
+            .external_key
+            .as_ref()
+            .is_some_and(|key| key.keyword_span == self.target)
+        {
+            self.item = Some(LanguageItemId::StableSettingKey);
+            return;
+        }
+        match &setting.kind {
+            crate::ast::SettingKind::Choice {
+                keyword_span,
+                options,
+                ..
+            } => {
+                if *keyword_span == self.target
+                    || options
+                        .iter()
+                        .any(|option| option.default_span == Some(self.target))
+                {
+                    self.item = Some(LanguageItemId::ChoiceSetting);
+                }
+            }
+            crate::ast::SettingKind::File {
+                keyword_span,
+                filters,
+            } => {
+                if *keyword_span == self.target
+                    || filters.iter().any(|filter| {
+                        matches!(
+                            filter,
+                            crate::ast::SettingFileFilter::Mime { keyword_span, .. }
+                                if *keyword_span == self.target
+                        )
+                    })
+                {
+                    self.item = Some(LanguageItemId::FileSetting);
+                }
+            }
+            crate::ast::SettingKind::Bool { .. } | crate::ast::SettingKind::Title { .. } => {}
+        }
+    }
+
+    fn visit_stmt(&mut self, statement: &'ast crate::ast::Stmt) {
+        if let crate::ast::Stmt::For { in_span, .. } = statement
+            && *in_span == self.target
+        {
+            self.item = Some(LanguageItemId::For);
+        }
+        visit::walk_stmt(self, statement);
+    }
+}
+
+fn contextual_language_item_at(
+    program: &crate::ast::Program,
+    target: Span,
+) -> Option<LanguageItemId> {
+    let mut finder = ContextualLanguageItemAt { target, item: None };
+    finder.visit_program(program);
+    finder.item
 }
 
 impl Default for CompilerDatabase {

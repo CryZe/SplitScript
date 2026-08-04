@@ -27,21 +27,14 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — restore editor semantic precision
-
-- [ ] Give contextual state/settings syntax its own catalog-backed hover
-  identity. Add focused documentation for `at` pointer-path fields and `key`
-  stable settings-map keys, preserve their exact keyword spans in the syntax
-  tree, and resolve hover only in those grammatical positions—not merely for
-  identifiers with the same spelling. Keep semantic highlighting, hover,
-  completion documentation, and future generated language docs driven by the
-  same entries.
-
-## P0 — unblock the next representative native ports
+## Now — unblock the next representative native port
 
 - [ ] Select the next manually reviewed ASL port whose blocker is shared by
   multiple scripts, then implement the smallest ordinary language or
   source-defined standard-library feature that makes the port faithful.
+
+## P0 — unblock the next representative native ports
+
 - [ ] Keep boolean ASL `update { return false; }` behavior as corpus evidence,
   but do not introduce a dedicated lifecycle keyword or block until a
   maintained port proves that state-field expressions and `whileAttached`

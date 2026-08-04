@@ -685,20 +685,26 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 annotation,
             );
         }
-        if let crate::ast::StateSource::Pointer(path) = &field.source
-            && let Some(crate::ast::StateMemoryDecoder::Utf8 { span, .. }) = path.decoder
-        {
-            self.mark_ident(
-                span,
-                "utf8",
-                SemanticTokenKind::Function,
-                MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
-            );
+        if let crate::ast::StateSource::Pointer(path) = &field.source {
+            if let Some(span) = path.at_span {
+                self.insert(span, SemanticTokenKind::Keyword, 0);
+            }
+            if let Some(crate::ast::StateMemoryDecoder::Utf8 { span, .. }) = path.decoder {
+                self.mark_ident(
+                    span,
+                    "utf8",
+                    SemanticTokenKind::Function,
+                    MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
+                );
+            }
         }
         visit::walk_state_field(self, field);
     }
 
     fn visit_setting(&mut self, setting: &'ast crate::ast::SettingDecl) {
+        if let Some(key) = &setting.external_key {
+            self.insert(key.keyword_span, SemanticTokenKind::Keyword, 0);
+        }
         if matches!(setting.kind, SettingKind::Title { .. }) {
             self.mark_first_string(setting.span, SemanticTokenKind::SettingTitle);
         } else {
@@ -708,30 +714,54 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 SemanticTokenKind::Setting,
                 MODIFIER_DECLARATION,
             );
-            if let SettingKind::Choice { options, .. } = &setting.kind {
-                for option in options {
-                    let Some(variant) = self
-                        .semantics
-                        .and_then(|semantics| semantics.setting_choice_option(option.id))
-                    else {
-                        continue;
-                    };
-                    let Some(enumeration) = self.syntax.enum_declarations().find(|enumeration| {
-                        enumeration
-                            .variants
-                            .iter()
-                            .any(|candidate| candidate.id == variant)
-                    }) else {
-                        continue;
-                    };
-                    self.mark_ident(option.span, &enumeration.name, SemanticTokenKind::Enum, 0);
-                    self.mark_ident(
-                        option.span,
-                        &option.variant,
-                        SemanticTokenKind::EnumMember,
-                        0,
-                    );
+            match &setting.kind {
+                SettingKind::Choice {
+                    keyword_span,
+                    options,
+                    ..
+                } => {
+                    self.insert(*keyword_span, SemanticTokenKind::Keyword, 0);
+                    for option in options {
+                        if let Some(default_span) = option.default_span {
+                            self.insert(default_span, SemanticTokenKind::Keyword, 0);
+                        }
+                        let Some(variant) = self
+                            .semantics
+                            .and_then(|semantics| semantics.setting_choice_option(option.id))
+                        else {
+                            continue;
+                        };
+                        let Some(enumeration) =
+                            self.syntax.enum_declarations().find(|enumeration| {
+                                enumeration
+                                    .variants
+                                    .iter()
+                                    .any(|candidate| candidate.id == variant)
+                            })
+                        else {
+                            continue;
+                        };
+                        self.mark_ident(option.span, &enumeration.name, SemanticTokenKind::Enum, 0);
+                        self.mark_ident(
+                            option.span,
+                            &option.variant,
+                            SemanticTokenKind::EnumMember,
+                            0,
+                        );
+                    }
                 }
+                SettingKind::File {
+                    keyword_span,
+                    filters,
+                } => {
+                    self.insert(*keyword_span, SemanticTokenKind::Keyword, 0);
+                    for filter in filters {
+                        if let crate::ast::SettingFileFilter::Mime { keyword_span, .. } = filter {
+                            self.insert(*keyword_span, SemanticTokenKind::Keyword, 0);
+                        }
+                    }
+                }
+                SettingKind::Bool { .. } | SettingKind::Title { .. } => {}
             }
         }
     }
@@ -861,6 +891,13 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
         );
     }
 
+    fn visit_stmt(&mut self, statement: &'ast Stmt) {
+        if let Stmt::For { in_span, .. } = statement {
+            self.insert(*in_span, SemanticTokenKind::Keyword, 0);
+        }
+        visit::walk_stmt(self, statement);
+    }
+
     fn visit_match_arm(&mut self, arm: &'ast crate::ast::MatchArm) {
         match &arm.pattern {
             MatchPattern::Enum {
@@ -935,7 +972,6 @@ fn is_keyword(name: &str) -> bool {
             | "else"
             | "while"
             | "for"
-            | "in"
             | "break"
             | "continue"
             | "return"
@@ -945,12 +981,6 @@ fn is_keyword(name: &str) -> bool {
             | "retry"
             | "match"
             | "as"
-            | "at"
-            | "key"
-            | "default"
-            | "choice"
-            | "file"
-            | "mime"
             | "Some"
             | "Ok"
             | "Err"
@@ -1023,6 +1053,77 @@ mod tests {
                 && highlight.kind == kind
                 && highlight.modifiers & modifiers == modifiers
         })
+    }
+
+    fn kind_at(index: &SemanticHighlightIndex, offset: usize) -> Option<SemanticTokenKind> {
+        index
+            .highlights()
+            .iter()
+            .find(|highlight| highlight.span.start <= offset && offset < highlight.span.end)
+            .map(|highlight| highlight.kind)
+    }
+
+    #[test]
+    fn highlights_contextual_keywords_only_in_their_grammar_positions() {
+        let source = r#"
+enum Mode {
+    A,
+}
+
+state "game.exe" {
+    value: i32 at 0x100;
+}
+
+settings {
+    "Flag" => flag key "stable-flag": true,
+    "Mode" => mode: choice {
+        "A" => Mode.A default,
+    },
+    "Path" => path: file {
+        mime => "text/plain",
+    },
+}
+
+fn names(at: i32, key: i32, choice: i32, default: i32, file: i32, mime: i32, in: i32) -> i32 {
+    return at + key + choice + default + file + mime + in
+}
+
+whileAttached {
+    for item in [1] {
+        print(item)
+    }
+    print(names(1, 2, 3, 4, 5, 6, 7))
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        database.check().expect("contextual keyword fixture");
+        let highlights = database.semantic_highlights().unwrap();
+
+        for spelling in [
+            "at 0x100",
+            "key \"stable-flag\"",
+            "choice {",
+            "default,",
+            "file {",
+            "mime =>",
+            "in [1]",
+        ] {
+            let offset = source.find(spelling).unwrap();
+            assert_eq!(
+                kind_at(&highlights, offset),
+                Some(SemanticTokenKind::Keyword),
+                "wrong contextual highlighting for `{spelling}`"
+            );
+        }
+
+        for name in ["at", "key", "choice", "default", "file", "mime", "in"] {
+            let offset = source.find(&format!("{name}: i32")).unwrap();
+            assert_eq!(
+                kind_at(&highlights, offset),
+                Some(SemanticTokenKind::Parameter),
+                "ordinary `{name}` parameter was treated as contextual syntax"
+            );
+        }
     }
 
     #[test]

@@ -71,6 +71,14 @@ split {
     return current.score > old.score
 }"#;
 
+const POINTER_STATE_SOURCE: &str = r#"state "game.exe" {
+    score: i32 at 0x1000;
+}
+
+split {
+    return current.score > old.score
+}"#;
+
 const NATIVE_STRING_STATE_SOURCE: &str = r#"state "game.exe" {
     mapName at "game.dll", 0x1234, 0x20 as utf8(64);
 }
@@ -269,6 +277,12 @@ focused_example!(
     STATE_LAYOUT_SOURCE
 );
 focused_example!(
+    STATE_POINTER_EXAMPLE,
+    "Read a pointer-backed field",
+    "score: i32 at 0x1000",
+    POINTER_STATE_SOURCE
+);
+focused_example!(
     NATIVE_STRING_DECODER_EXAMPLE,
     "Decode a native string field",
     "mapName at 0x1234 as utf8(64)",
@@ -278,6 +292,12 @@ focused_example!(
     SETTINGS_DECL_EXAMPLE,
     "Declare a toggle",
     "settings {\n    \"Split bosses\" => splitBosses: true,\n}",
+    SETTINGS_SOURCE
+);
+focused_example!(
+    SETTING_KEY_EXAMPLE,
+    "Keep a stable host key",
+    "\"Enable Auto Splitting\" => enableAutoSplitting key \"auto-splitting\": true",
     SETTINGS_SOURCE
 );
 focused_example!(
@@ -624,6 +644,15 @@ define_language_catalog! {
         STATE_LAYOUT_EXAMPLE
     ),
     language_item!(
+        StatePointerField,
+        "state pointer field",
+        LanguageItemKind::Syntax,
+        "field: Type at module?, offset, ...",
+        "Reads a persistent state field through a pointer path.",
+        "The optional module name selects the pointer base and each following integer is an address offset. The field assignment is a Result boundary: initialization waits for every required field, while a later failed read retains this field's last accepted value. The exact memory representation must be explicit or inferred from an exact use.",
+        STATE_POINTER_EXAMPLE
+    ),
+    language_item!(
         NativeStringDecoder,
         "utf8",
         LanguageItemKind::Syntax,
@@ -640,6 +669,15 @@ define_language_catalog! {
         "Declares live user settings.",
         "Settings support nested headings, documentation-comment tooltips, booleans, choices, and file selectors. An optional quoted key is the exact stable string stored in the host settings map; otherwise the source identifier is used. Current and previous values refresh every update.",
         SETTINGS_DECL_EXAMPLE
+    ),
+    language_item!(
+        StableSettingKey,
+        "stable setting key",
+        LanguageItemKind::Syntax,
+        "\"Label\" => name key \"host-key\": value",
+        "Assigns an explicit stable key in the host settings map.",
+        "The quoted key is used for persistent host storage and dynamic settings.enabled(key) lookups. The source identifier remains the statically typed member exposed through settings and oldSettings. Without key, the source identifier is also the host key.",
+        SETTING_KEY_EXAMPLE
     ),
     language_item!(
         If,
@@ -1130,9 +1168,6 @@ impl LanguageCatalog {
                 "[" => LanguageItemId::ArrayType,
                 "?" => LanguageItemId::OptionType,
                 "!" => LanguageItemId::ResultType,
-                "choice" | "default" => LanguageItemId::ChoiceSetting,
-                "in" => LanguageItemId::For,
-                "file" | "mime" => LanguageItemId::FileSetting,
                 "///" => LanguageItemId::DocumentationComment,
                 "`" => LanguageItemId::TemplateString,
                 _ => return None,

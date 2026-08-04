@@ -165,7 +165,7 @@ impl BackendDependencies {
                         dependencies.require_import(AbiImportId::UserSettingsAddChoiceOption);
                         dependencies.require_import(AbiImportId::SettingValueGetString);
                     }
-                    SettingKind::File { filters } => {
+                    SettingKind::File { filters, .. } => {
                         dependencies.require_import(AbiImportId::UserSettingsAddFileSelect);
                         dependencies.require_import(AbiImportId::SettingValueGetString);
                         for filter in filters {
@@ -173,7 +173,7 @@ impl BackendDependencies {
                                 SettingFileFilter::Name { .. } => {
                                     AbiImportId::UserSettingsAddFileSelectNameFilter
                                 }
-                                SettingFileFilter::Mime(_) => {
+                                SettingFileFilter::Mime { .. } => {
                                     AbiImportId::UserSettingsAddFileSelectMimeFilter
                                 }
                             });

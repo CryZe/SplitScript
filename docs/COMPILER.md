@@ -306,6 +306,16 @@ IDs remain distinct, but both use the shared `catalog::Documentation` and
 integrity, and the compiler test suite parses, checks, and lowers every embedded
 example before editor or generated-documentation clients can expose it.
 
+Contextual syntax keeps its exact keyword spans in the shared syntax tree.
+Compiler queries resolve `at` and `key`, settings `choice` / `default` /
+`file` / `mime`, and the `in` in a `for` loop to catalog entries only at those
+grammar positions. Semantic highlighting consumes the same spans. These
+spellings are therefore documented in their DSL roles without globally
+reserving them or misclassifying an ordinary parameter, local, field, or
+function with the same name. Globally meaningful keywords continue to resolve
+directly from their source token; standard-library syntax such as `utf8` and
+state-provider names continues through the standard symbol graph.
+
 The bundled standard library is authored hierarchically once in privileged
 SplitScript source at
 [`stdlib/standard.split`](../stdlib/standard.split). Each namespace, nominal

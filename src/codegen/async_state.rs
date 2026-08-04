@@ -22,7 +22,7 @@ use super::{
     },
     call_target,
     context::AttachContext,
-    data_plan::{SignatureEntry, SignaturePool, StringPool},
+    data_plan::StringPool,
     emit_default, emit_memory_value, emit_string_literal, emit_typed_struct_get,
     expression::{
         BareReturn, ExprContext, IntrinsicCapture, LocalStorage, LoopControl, MatchLayout,
@@ -160,6 +160,7 @@ pub(super) fn compile_intrinsic_future_poll(
         arrays: runtime.lowering.arrays,
         memory: runtime.lowering.memory,
         abi_read: runtime.lowering.abi_read,
+        signatures: runtime.lowering.signatures,
         matches: &matches,
         semantics: runtime.lowering.semantics,
         wasm_ir: runtime.lowering.wasm_ir,
@@ -219,7 +220,6 @@ pub(super) fn compile_intrinsic_future_poll(
         instance.expression,
         runtime.abi,
         runtime.strings,
-        runtime.signatures,
         &destination_layout,
         &context,
     );
@@ -288,6 +288,7 @@ fn compile_async_body(
         arrays: runtime.lowering.arrays,
         memory: runtime.lowering.memory,
         abi_read: runtime.lowering.abi_read,
+        signatures: runtime.lowering.signatures,
         matches: &matches,
         semantics: runtime.lowering.semantics,
         wasm_ir: runtime.lowering.wasm_ir,
@@ -401,7 +402,6 @@ fn compile_async_body(
                     value,
                     runtime.abi,
                     runtime.strings,
-                    runtime.signatures,
                     layout,
                     &context,
                 );
@@ -477,13 +477,47 @@ fn emit_intrinsic_state_set_zero(function: &mut Function, context: &ExprContext<
         });
 }
 
+fn emit_signature_length_i64(function: &mut Function, signature: u32) {
+    function
+        .instruction(&Instruction::LocalGet(signature))
+        .instruction(&Instruction::I64Const(32))
+        .instruction(&Instruction::I64ShrU);
+}
+
+fn emit_signature_length_i32(function: &mut Function, signature: u32) {
+    emit_signature_length_i64(function, signature);
+    function.instruction(&Instruction::I32WrapI64);
+}
+
+fn emit_signature_window_limit(function: &mut Function, signature: u32) {
+    emit_signature_length_i64(function, signature);
+    function
+        .instruction(&Instruction::I64Const(
+            SIGNATURE_SCAN_CANDIDATES_PER_POLL - 1,
+        ))
+        .instruction(&Instruction::I64Add);
+}
+
+fn emit_signature_arguments(function: &mut Function, signature: u32) {
+    // A first-class Signature packs its static needle pointer into the low 32
+    // bits and its length into the high 32 bits. The mask immediately follows
+    // the needle in the compiler-owned static-data pool.
+    function
+        .instruction(&Instruction::LocalGet(signature))
+        .instruction(&Instruction::I32WrapI64)
+        .instruction(&Instruction::LocalGet(signature))
+        .instruction(&Instruction::I32WrapI64);
+    emit_signature_length_i32(function, signature);
+    function.instruction(&Instruction::I32Add);
+    emit_signature_length_i32(function, signature);
+}
+
 /// Polls one bounded window of an explicit memory range. The caller has
 /// already placed the range address and size in scratch slots 1 and 2. A
 /// successful address is left in slot 3; absence returns `pending` directly.
 fn emit_cooperative_range_scan(
     function: &mut Function,
     target: &wasm_ir::CallTarget,
-    entry: SignatureEntry,
     scratch: &[u32],
     process_from_runtime: bool,
     context: &ExprContext<'_>,
@@ -492,7 +526,7 @@ fn emit_cooperative_range_scan(
     let address = scratch[1];
     let remaining = scratch[2];
     let matched = scratch[3];
-    let window_limit = SIGNATURE_SCAN_CANDIDATES_PER_POLL + i64::from(entry.len) - 1;
+    let signature = scratch[4];
 
     emit_intrinsic_state_get(function, context, 0);
     function
@@ -510,8 +544,9 @@ fn emit_cooperative_range_scan(
         .instruction(&Instruction::LocalGet(remaining))
         .instruction(&Instruction::LocalGet(cursor))
         .instruction(&Instruction::I64Sub)
-        .instruction(&Instruction::LocalTee(remaining))
-        .instruction(&Instruction::I64Const(i64::from(entry.len)))
+        .instruction(&Instruction::LocalTee(remaining));
+    emit_signature_length_i64(function, signature);
+    function
         .instruction(&Instruction::I64LtU)
         .instruction(&Instruction::If(BlockType::Empty));
     emit_intrinsic_state_set_zero(function, context, 0);
@@ -529,17 +564,17 @@ fn emit_cooperative_range_scan(
         .instruction(&Instruction::LocalGet(address))
         .instruction(&Instruction::LocalGet(cursor))
         .instruction(&Instruction::I64Add)
-        .instruction(&Instruction::LocalGet(remaining))
-        .instruction(&Instruction::I64Const(window_limit))
+        .instruction(&Instruction::LocalGet(remaining));
+    emit_signature_window_limit(function, signature);
+    function
         .instruction(&Instruction::I64LeU)
         .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
         .instruction(&Instruction::LocalGet(remaining))
-        .instruction(&Instruction::Else)
-        .instruction(&Instruction::I64Const(window_limit))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::I32Const(entry.needle as i32))
-        .instruction(&Instruction::I32Const(entry.mask as i32))
-        .instruction(&Instruction::I32Const(entry.len as i32))
+        .instruction(&Instruction::Else);
+    emit_signature_window_limit(function, signature);
+    function.instruction(&Instruction::End);
+    emit_signature_arguments(function, signature);
+    function
         .instruction(&Instruction::Call(
             context
                 .runtime_helpers
@@ -548,8 +583,9 @@ fn emit_cooperative_range_scan(
         .instruction(&Instruction::LocalTee(matched))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::LocalGet(remaining))
-        .instruction(&Instruction::I64Const(window_limit))
+        .instruction(&Instruction::LocalGet(remaining));
+    emit_signature_window_limit(function, signature);
+    function
         .instruction(&Instruction::I64LeU)
         .instruction(&Instruction::If(BlockType::Empty));
     emit_intrinsic_state_set_zero(function, context, 0);
@@ -588,7 +624,6 @@ fn emit_process_scan_advance_range(
 fn emit_cooperative_process_scan(
     function: &mut Function,
     target: &wasm_ir::CallTarget,
-    entry: SignatureEntry,
     scratch: &[u32],
     abi: &Abi,
     context: &ExprContext<'_>,
@@ -599,7 +634,7 @@ fn emit_cooperative_process_scan(
     let address = scratch[3];
     let remaining = scratch[4];
     let matched = scratch[5];
-    let window_limit = SIGNATURE_SCAN_CANDIDATES_PER_POLL + i64::from(entry.len) - 1;
+    let signature = scratch[6];
 
     emit_intrinsic_state_get(function, context, 0);
     function.instruction(&Instruction::LocalSet(range_cursor));
@@ -680,8 +715,9 @@ fn emit_cooperative_process_scan(
         .instruction(&Instruction::LocalGet(remaining))
         .instruction(&Instruction::LocalGet(offset))
         .instruction(&Instruction::I64Sub)
-        .instruction(&Instruction::LocalTee(remaining))
-        .instruction(&Instruction::I64Const(i64::from(entry.len)))
+        .instruction(&Instruction::LocalTee(remaining));
+    emit_signature_length_i64(function, signature);
+    function
         .instruction(&Instruction::I64LtU)
         .instruction(&Instruction::If(BlockType::Empty));
     emit_process_scan_advance_range(function, context, index);
@@ -692,17 +728,17 @@ fn emit_cooperative_process_scan(
         .instruction(&Instruction::LocalGet(address))
         .instruction(&Instruction::LocalGet(offset))
         .instruction(&Instruction::I64Add)
-        .instruction(&Instruction::LocalGet(remaining))
-        .instruction(&Instruction::I64Const(window_limit))
+        .instruction(&Instruction::LocalGet(remaining));
+    emit_signature_window_limit(function, signature);
+    function
         .instruction(&Instruction::I64LeU)
         .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
         .instruction(&Instruction::LocalGet(remaining))
-        .instruction(&Instruction::Else)
-        .instruction(&Instruction::I64Const(window_limit))
-        .instruction(&Instruction::End)
-        .instruction(&Instruction::I32Const(entry.needle as i32))
-        .instruction(&Instruction::I32Const(entry.mask as i32))
-        .instruction(&Instruction::I32Const(entry.len as i32))
+        .instruction(&Instruction::Else);
+    emit_signature_window_limit(function, signature);
+    function.instruction(&Instruction::End);
+    emit_signature_arguments(function, signature);
+    function
         .instruction(&Instruction::Call(
             context
                 .runtime_helpers
@@ -711,8 +747,9 @@ fn emit_cooperative_process_scan(
         .instruction(&Instruction::LocalTee(matched))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
-        .instruction(&Instruction::LocalGet(remaining))
-        .instruction(&Instruction::I64Const(window_limit))
+        .instruction(&Instruction::LocalGet(remaining));
+    emit_signature_window_limit(function, signature);
+    function
         .instruction(&Instruction::I64LeU)
         .instruction(&Instruction::If(BlockType::Empty));
     emit_process_scan_advance_range(function, context, index);
@@ -734,6 +771,226 @@ fn emit_cooperative_process_scan(
         .instruction(&Instruction::End);
 }
 
+fn emit_process_scan_any_advance_range(
+    function: &mut Function,
+    context: &ExprContext<'_>,
+    next_range: u32,
+) {
+    emit_intrinsic_state_set_local(function, context, 0, next_range);
+    emit_intrinsic_state_set_zero(function, context, 1);
+    emit_intrinsic_state_set_zero(function, context, 2);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return);
+}
+
+fn emit_signature_array_length(
+    function: &mut Function,
+    signatures_expression: ExprId,
+    context: &ExprContext<'_>,
+) {
+    compile_expr(function, signatures_expression, context);
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::I64ExtendI32U);
+}
+
+/// Multi-pattern counterpart of `emit_cooperative_process_scan`. One poll
+/// checks one signature in one bounded window. This keeps latency independent
+/// of both mapped-range size and the number of fallback signatures.
+fn emit_cooperative_process_scan_any(
+    function: &mut Function,
+    target: &wasm_ir::CallTarget,
+    signatures_expression: ExprId,
+    signature_array: u32,
+    scratch: &[u32],
+    abi: &Abi,
+    context: &ExprContext<'_>,
+) {
+    let range_cursor = scratch[0];
+    let offset = scratch[1];
+    let index = scratch[2];
+    let address = scratch[3];
+    let remaining = scratch[4];
+    let matched = scratch[5];
+    let signature = scratch[6];
+    let signature_index = scratch[7];
+
+    emit_intrinsic_state_get(function, context, 0);
+    function.instruction(&Instruction::LocalSet(range_cursor));
+    emit_intrinsic_state_get(function, context, 1);
+    function.instruction(&Instruction::LocalSet(offset));
+    emit_intrinsic_state_get(function, context, 2);
+    function.instruction(&Instruction::LocalSet(signature_index));
+
+    emit_signature_array_length(function, signatures_expression, context);
+    function
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+    compile_expr(function, signatures_expression, context);
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(signature_index))
+        .instruction(&Instruction::I32WrapI64)
+        .instruction(&Instruction::ArrayGet(signature_array))
+        .instruction(&Instruction::LocalSet(signature));
+
+    compile_receiver(function, target, context);
+    function
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeCount),
+        ))
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::LocalGet(range_cursor))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::LocalGet(range_cursor))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I64GtU)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalSet(range_cursor))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::LocalSet(offset))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::LocalSet(signature_index))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(range_cursor))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_intrinsic_state_set_zero(function, context, 0);
+    emit_intrinsic_state_set_zero(function, context, 1);
+    emit_intrinsic_state_set_zero(function, context, 2);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(range_cursor))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalSet(index));
+
+    compile_receiver(function, target, context);
+    function
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeFlags),
+        ))
+        .instruction(&Instruction::I64Const(1 << 1))
+        .instruction(&Instruction::I64And)
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_process_scan_any_advance_range(function, context, index);
+    function.instruction(&Instruction::End);
+
+    compile_receiver(function, target, context);
+    function
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeAddress),
+        ))
+        .instruction(&Instruction::LocalSet(address));
+    compile_receiver(function, target, context);
+    function
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetMemoryRangeSize),
+        ))
+        .instruction(&Instruction::LocalSet(remaining))
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I64GeU)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_process_scan_any_advance_range(function, context, index);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalTee(remaining));
+    emit_signature_length_i64(function, signature);
+    function
+        .instruction(&Instruction::I64LtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_process_scan_any_advance_range(function, context, index);
+    function.instruction(&Instruction::End);
+
+    compile_receiver(function, target, context);
+    function
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalGet(remaining));
+    emit_signature_window_limit(function, signature);
+    function
+        .instruction(&Instruction::I64LeU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::Else);
+    emit_signature_window_limit(function, signature);
+    function.instruction(&Instruction::End);
+    emit_signature_arguments(function, signature);
+    function
+        .instruction(&Instruction::Call(
+            context
+                .runtime_helpers
+                .function(RuntimeHelperId::ScanProcessRange),
+        ))
+        .instruction(&Instruction::LocalTee(matched))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        // Try the next signature against this same range window.
+        .instruction(&Instruction::LocalGet(signature_index))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalTee(signature_index));
+    emit_signature_array_length(function, signatures_expression, context);
+    function
+        .instruction(&Instruction::I64LtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_intrinsic_state_set_local(function, context, 0, range_cursor);
+    emit_intrinsic_state_set_local(function, context, 1, offset);
+    emit_intrinsic_state_set_local(function, context, 2, signature_index);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        // Every signature missed this window; move to the next window/range.
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::LocalSet(signature_index))
+        .instruction(&Instruction::LocalGet(remaining));
+    emit_signature_window_limit(function, signature);
+    function
+        .instruction(&Instruction::I64LeU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_process_scan_any_advance_range(function, context, index);
+    function.instruction(&Instruction::Else);
+    emit_intrinsic_state_set_local(function, context, 0, range_cursor);
+    let (frame, offset_field, _) = intrinsic_state(context, 1);
+    frame.emit(function);
+    function
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Const(SIGNATURE_SCAN_CANDIDATES_PER_POLL))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: frame.struct_type,
+            field_index: offset_field,
+        });
+    emit_intrinsic_state_set_zero(function, context, 2);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compile_suspension_poll(
     function: &mut Function,
@@ -742,7 +999,6 @@ fn compile_suspension_poll(
     value: ExprId,
     abi: &Abi,
     strings: &StringPool,
-    signatures: &SignaturePool,
     layout: &AsyncFrameLayout,
     context: &ExprContext<'_>,
 ) {
@@ -948,20 +1204,13 @@ fn compile_suspension_poll(
             }
         }
         Some(IntrinsicId::ProcessScan) => {
-            let wasm_ir::ExpressionKind::Signature(signature) = &context
-                .wasm_ir
-                .expression(args[2])
-                .expect("scan signature belongs to Wasm IR")
-                .kind
-            else {
-                unreachable!();
-            };
-            let entry = signatures.get(signature);
             compile_expr(function, args[0], context);
             function.instruction(&Instruction::LocalSet(scratch[1]));
             compile_expr(function, args[1], context);
             function.instruction(&Instruction::LocalSet(scratch[2]));
-            emit_cooperative_range_scan(function, target, entry, scratch, false, context);
+            compile_expr(function, args[2], context);
+            function.instruction(&Instruction::LocalSet(scratch[4]));
+            emit_cooperative_range_scan(function, target, scratch, false, context);
             if let Some((field, _)) = layout.field(destination) {
                 context.locals.frame().emit(function);
                 function
@@ -973,20 +1222,42 @@ fn compile_suspension_poll(
             }
         }
         Some(IntrinsicId::ProcessScanMemory) => {
-            let wasm_ir::ExpressionKind::Signature(signature) = &context
-                .wasm_ir
-                .expression(args[0])
-                .expect("process-memory scan signature belongs to Wasm IR")
-                .kind
-            else {
-                unreachable!();
-            };
-            let entry = signatures.get(signature);
-            emit_cooperative_process_scan(function, target, entry, scratch, abi, context);
+            compile_expr(function, args[0], context);
+            function.instruction(&Instruction::LocalSet(scratch[6]));
+            emit_cooperative_process_scan(function, target, scratch, abi, context);
             if let Some((field, _)) = layout.field(destination) {
                 context.locals.frame().emit(function);
                 function
                     .instruction(&Instruction::LocalGet(scratch[5]))
+                    .instruction(&Instruction::StructSet {
+                        struct_type_index: context.locals.frame().struct_type,
+                        field_index: field,
+                    });
+            }
+        }
+        Some(IntrinsicId::ProcessScanMemoryAny) => {
+            let Type::Array(signature_array) = context.expression_type(args[0]) else {
+                unreachable!("scanMemoryAny accepts a signature array")
+            };
+            let signature_array = context.gc.index(Type::Array(signature_array));
+            emit_cooperative_process_scan_any(
+                function,
+                target,
+                args[0],
+                signature_array,
+                scratch,
+                abi,
+                context,
+            );
+            if let Some((field, _)) = layout.field(destination) {
+                context.locals.frame().emit(function);
+                function
+                    .instruction(&Instruction::LocalGet(scratch[5]))
+                    .instruction(&Instruction::LocalGet(scratch[7]))
+                    .instruction(&Instruction::I32WrapI64)
+                    .instruction(&Instruction::StructNew(
+                        context.gc.standard_index(StdlibTypeId::SignatureMatch),
+                    ))
                     .instruction(&Instruction::StructSet {
                         struct_type_index: context.locals.frame().struct_type,
                         field_index: field,
@@ -1241,15 +1512,6 @@ fn compile_suspension_poll(
             }
         }
         Some(IntrinsicId::ModuleScan) => {
-            let wasm_ir::ExpressionKind::Signature(signature) = &context
-                .wasm_ir
-                .expression(args[0])
-                .expect("scan signature belongs to Wasm IR")
-                .kind
-            else {
-                unreachable!();
-            };
-            let entry = signatures.get(signature);
             compile_receiver(function, target, context);
             function
                 .instruction(&Instruction::RefAsNonNull)
@@ -1268,7 +1530,9 @@ fn compile_suspension_poll(
                     field_index: context.gc.standard_field_index(StdlibFieldId::ModuleSize),
                 })
                 .instruction(&Instruction::LocalSet(scratch[2]));
-            emit_cooperative_range_scan(function, target, entry, scratch, true, context);
+            compile_expr(function, args[0], context);
+            function.instruction(&Instruction::LocalSet(scratch[4]));
+            emit_cooperative_range_scan(function, target, scratch, true, context);
             if let Some((field, _)) = layout.field(destination) {
                 context.locals.frame().emit(function);
                 function
@@ -2127,7 +2391,6 @@ fn compile_async_flow(
                     *value,
                     runtime.abi,
                     runtime.strings,
-                    runtime.signatures,
                     layout,
                     context,
                 );

@@ -1,0 +1,7 @@
+state "game.exe" {}
+
+onAttach {
+    let layouts = [sig"AA BB CC DD", sig"DE AD ?? EF"]
+    let found = await process.scanMemoryAny(layouts)
+    print(`{found.index}:{found.address}`)
+}

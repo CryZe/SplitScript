@@ -34,6 +34,7 @@ macro_rules! trusted_intrinsics {
             ProcessFollow,
             ProcessScan,
             ProcessScanMemory,
+            ProcessScanMemoryAny,
             ProcessReadRelative32,
             ProcessReadUtf8,
             ProcessReadManagedString,

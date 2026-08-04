@@ -247,9 +247,10 @@ const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => {
             scratch(ScratchType::Core(CoreTypeId::U64), 2)
         }
-        IntrinsicId::ProcessScan => scratch(ScratchType::Core(CoreTypeId::U64), 4),
-        IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 6),
-        IntrinsicId::ModuleScan => scratch(ScratchType::Core(CoreTypeId::U64), 4),
+        IntrinsicId::ProcessScan => scratch(ScratchType::Core(CoreTypeId::U64), 5),
+        IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 7),
+        IntrinsicId::ProcessScanMemoryAny => scratch(ScratchType::Core(CoreTypeId::U64), 8),
+        IntrinsicId::ModuleScan => scratch(ScratchType::Core(CoreTypeId::U64), 5),
         IntrinsicId::ProcessFollow
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::UnityClassField
@@ -269,6 +270,7 @@ const fn async_state(id: IntrinsicId) -> Option<ScratchPolicy> {
             scratch(ScratchType::Core(CoreTypeId::U64), 1)
         }
         IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 2),
+        IntrinsicId::ProcessScanMemoryAny => scratch(ScratchType::Core(CoreTypeId::U64), 3),
         _ => None,
     }
 }
@@ -314,7 +316,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::ProcessRead => &[HostImport(Host::ProcessRead)],
         IntrinsicId::ProcessFollow => &[Helper(Runtime::FollowAddress)],
         IntrinsicId::ProcessScan | IntrinsicId::ModuleScan => &[Helper(Runtime::ScanProcessRange)],
-        IntrinsicId::ProcessScanMemory => &[
+        IntrinsicId::ProcessScanMemory | IntrinsicId::ProcessScanMemoryAny => &[
             Helper(Runtime::ScanProcessRange),
             HostImport(Host::ProcessGetMemoryRangeCount),
             HostImport(Host::ProcessGetMemoryRangeAddress),
@@ -388,6 +390,7 @@ const STRING: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::String);
 const SETTINGS_VIEW: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SettingsView);
 const PROCESS_TYPE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Process);
 const SIGNATURE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Signature);
+const SIGNATURE_MATCH: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SignatureMatch);
 const MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Module);
 const TIMER_STATE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::TimerState);
 const INSTANT: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Instant);
@@ -408,6 +411,10 @@ const STRING_ARRAY: ContractTypeRef = ContractTypeRef::Application {
 const U64_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
     arguments: &[U64],
+};
+const SIGNATURE_ARRAY: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Array,
+    arguments: &[SIGNATURE],
 };
 const T_RESULT: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Result,
@@ -711,11 +718,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             signature(
                 NO_TYPE_PARAMETERS,
                 Some(PROCESS_TYPE),
-                params![
-                    value(ADDRESS),
-                    value(U64),
-                    literal(SIGNATURE, ParameterRule::SignatureLiteral),
-                ],
+                params![value(ADDRESS), value(U64), value(SIGNATURE),],
                 ADDRESS,
             ),
             PROCESS_SUSPEND,
@@ -728,10 +731,23 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             signature(
                 NO_TYPE_PARAMETERS,
                 Some(PROCESS_TYPE),
-                params![literal(SIGNATURE, ParameterRule::SignatureLiteral)],
+                params![value(SIGNATURE)],
                 ADDRESS,
             ),
             PROCESS_SUSPEND,
+            OnAttach,
+            Suspension
+        ),
+        IntrinsicId::ProcessScanMemoryAny => contract!(
+            ProcessScanMemoryAny,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(PROCESS_TYPE),
+                params![value(SIGNATURE_ARRAY)],
+                SIGNATURE_MATCH,
+            ),
+            PROCESS_SUSPEND.with(Effect::Allocates),
             OnAttach,
             Suspension
         ),
@@ -911,7 +927,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             signature(
                 NO_TYPE_PARAMETERS,
                 Some(MODULE),
-                params![literal(SIGNATURE, ParameterRule::SignatureLiteral)],
+                params![value(SIGNATURE)],
                 ADDRESS,
             ),
             PROCESS_SUSPEND,

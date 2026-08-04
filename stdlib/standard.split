@@ -291,8 +291,7 @@ intrinsic type Process {
         address: address,
         /// The number of bytes to scan.
         size: u64,
-        /// The compile-time signature pattern.
-        @literal(signature)
+        /// The compiled signature pattern.
         signature: Signature,
     ) -> address;
 
@@ -314,10 +313,31 @@ intrinsic type Process {
     /// ```
     @intrinsic(ProcessScanMemory)
     fn scanMemory(
-        /// The compile-time signature pattern.
-        @literal(signature)
+        /// The compiled signature pattern.
         signature: Signature,
     ) -> address;
+
+    /// Scans for the first of several signatures across process memory.
+    ///
+    /// Signatures are tried in array order within each bounded memory window.
+    /// The returned index identifies the matching array element. The operation
+    /// remains cooperative and is cancelled when the process closes.
+    ///
+    /// # Example
+    ///
+    /// Discover one of several supported layouts
+    ///
+    /// ```splitscript
+    /// let found = await process.scanMemoryAny([
+    ///     sig"48 8B 05 ?? ?? ?? ??",
+    ///     sig"48 8B 1D ?? ?? ?? ??",
+    /// ])
+    /// ```
+    @intrinsic(ProcessScanMemoryAny)
+    fn scanMemoryAny(
+        /// Candidate patterns in priority order. The array must not be empty.
+        signatures: [Signature],
+    ) -> SignatureMatch;
 
     /// Resolves a 32-bit relative address.
     ///
@@ -1171,8 +1191,45 @@ intrinsic type String {
 /// let markerAddress = await executable.scan(sig"48 8B ?? 89")
 /// ```
 @representation(scalar, i64)
-@valueUsage()
+@valueUsage(recordField, enumPayload, localVariable, globalVariable)
 intrinsic type Signature {}
+
+/// Identifies a signature selected by a multi-pattern memory scan.
+///
+/// # Example
+///
+/// Select a discovered memory layout
+///
+/// ```splitscript
+/// let found = await process.scanMemoryAny([sig"48 8B ??", sig"48 89 ??"])
+/// print(found.index)
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, localVariable, globalVariable)
+struct SignatureMatch {
+    /// Address where the signature matched.
+    ///
+    /// # Example
+    ///
+    /// Read the matching address
+    ///
+    /// ```splitscript
+    /// let found = await process.scanMemoryAny([sig"48 8B ??"])
+    /// let marker = found.address
+    /// ```
+    address: address,
+    /// Zero-based index in the supplied signature array.
+    ///
+    /// # Example
+    ///
+    /// Select the associated layout
+    ///
+    /// ```splitscript
+    /// let found = await process.scanMemoryAny([sig"48 8B ??"])
+    /// let layoutIndex = found.index
+    /// ```
+    index: u32,
+}
 
 /// Represents a precise span of time.
 ///
@@ -2108,8 +2165,7 @@ struct Module {
     /// ```
     @intrinsic(ModuleScan)
     fn scan(
-        /// The compile-time signature pattern.
-        @literal(signature)
+        /// The compiled signature pattern.
         signature: Signature,
     ) -> address;
 

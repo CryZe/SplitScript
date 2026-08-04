@@ -104,6 +104,7 @@ pub(super) struct ExprContext<'a> {
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,
     pub abi_read: AbiReadScratch,
+    pub signatures: &'a super::data_plan::SignaturePool,
     pub matches: &'a MatchLayout,
     pub semantics: &'a SemanticModel,
     pub wasm_ir: &'a wasm_ir::Program,
@@ -1437,8 +1438,10 @@ fn compile_expr_unconverted(
                     .function(RuntimeHelperId::ConcatStrings),
             ));
         }
-        wasm_ir::ExpressionKind::Signature(_) => {
-            unreachable!("signature literals are lowered by signature-consuming builtins")
+        wasm_ir::ExpressionKind::Signature(signature) => {
+            let entry = context.signatures.get(signature);
+            let packed = u64::from(entry.needle) | (u64::from(entry.len) << 32);
+            function.instruction(&Instruction::I64Const(packed as i64));
         }
         wasm_ir::ExpressionKind::Array(elements) => {
             let Type::Array(array_id) = ty else {
@@ -2226,7 +2229,9 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
-            IntrinsicId::ProcessScan | IntrinsicId::ProcessScanMemory => {
+            IntrinsicId::ProcessScan
+            | IntrinsicId::ProcessScanMemory
+            | IntrinsicId::ProcessScanMemoryAny => {
                 unreachable!("process.scan is lowered as an await")
             }
             IntrinsicId::ProcessReadRelative32 => {

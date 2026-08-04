@@ -42,6 +42,7 @@ pub(super) struct EmissionContext<'a> {
     pub arrays: &'a [ResolvedArrayType],
     pub memory: &'a MemoryLayouts,
     pub abi_read: AbiReadScratch,
+    pub signatures: &'a SignaturePool,
     pub semantics: &'a SemanticModel,
     pub wasm_ir: &'a wasm_ir::Program,
     pub gc: &'a GcLayout,
@@ -52,6 +53,5 @@ pub(super) struct EmissionContext<'a> {
 pub(super) struct AttachContext<'a> {
     pub abi: &'a Abi,
     pub strings: &'a StringPool,
-    pub signatures: &'a SignaturePool,
     pub lowering: &'a EmissionContext<'a>,
 }

@@ -312,6 +312,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         arrays: array_types,
         memory: memory_layouts,
         abi_read: static_data.layout().scratch().abi_read,
+        signatures,
         semantics,
         wasm_ir,
         gc: &gc,
@@ -320,7 +321,6 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let runtime = AttachContext {
         abi: &abi,
         strings,
-        signatures,
         lowering: &lowering,
     };
     let settings_context = settings::SettingsContext {

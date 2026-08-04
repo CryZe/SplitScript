@@ -152,6 +152,7 @@ fn emit_aggregate_global_initializers(
         arrays: lowering.arrays,
         memory: lowering.memory,
         abi_read: lowering.abi_read,
+        signatures: lowering.signatures,
         matches: &matches,
         semantics: lowering.semantics,
         wasm_ir: lowering.wasm_ir,

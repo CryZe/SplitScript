@@ -186,12 +186,28 @@ fn collect_state_field_type(
         }
     }
     if let StateSource::Pointer(path) = &field.source {
+        // An explicitly optional pointer field observes read failure as
+        // `None`. The pointer still reads the contained representation; the
+        // outer Option belongs to snapshot semantics rather than process
+        // memory layout.
+        let memory_ty = if matches!(field.annotation, Some(crate::ast::TypeRef::Option(_))) {
+            match ty {
+                Type::Option(option) => checker.inference.option_value(option),
+                Type::Known(ty) => match checker.inference.type_store().kind(ty) {
+                    crate::types::TypeKind::Option { value, .. } => Type::Known(*value),
+                    _ => Type::Known(ty),
+                },
+                _ => ty,
+            }
+        } else {
+            ty
+        };
         if path.offsets.is_empty() {
             checker.error("a pointer path needs at least one offset", field.span);
         }
         if let Some(StateMemoryDecoder::Utf8 { max_bytes, span }) = path.decoder {
             let string = checker.standard_type(StdlibTypeId::String);
-            checker.unify(ty, string, field.span);
+            checker.unify(memory_ty, string, field.span);
             if max_bytes == 0 {
                 checker.error("a UTF-8 state read must allow at least one byte", span);
             } else if max_bytes > MAX_NATIVE_STRING_BYTES {
@@ -202,7 +218,7 @@ fn collect_state_field_type(
             }
         } else {
             checker.require(
-                ty,
+                memory_ty,
                 Requirements::capability(StdlibCapabilityId::MemoryReadable),
                 field.span,
             );

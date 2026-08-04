@@ -10,7 +10,8 @@ The complete reference for the recipes below is
 Epic, Xbox, and unsupported-build fixtures. The smaller
 [`examples/arietta_of_spirits.split`](../examples/arietta_of_spirits.split)
 example isolates bounded native strings, lifecycle transitions, and pause-menu
-load removal.
+load removal. [`examples/aquanox.split`](../examples/aquanox.split) demonstrates
+a nullable native-string watcher whose failed read is observable as `None`.
 
 ## Bounded native `stringN` state
 
@@ -130,14 +131,22 @@ state field. For a field that is semantically absent on some ticks, declare
 
 ```splitscript
 state "game.exe" {
-    requiredLevel: u32 = process.read(levelAddress);
-    optionalBonus: u32? = process.read<u32>(bonusAddress).toOption();
+    requiredLevel: u32 at "game.exe", 0x1000;
+    optionalBonus: u32? at "game.exe", 0x2000;
 }
 ```
 
-`toOption()` discards the read error and maps it to a successfully accepted
-`None`. This differs from leaving the result failed, which retains the last
-accepted field value after initialization.
+For a static pointer path, the explicit `T?` annotation maps a failed module
+lookup, pointer traversal, final read, or decoder to a successfully accepted
+`None`; success produces `Some(T)`. This differs from a required `T` field,
+whose failed result retains the last accepted value after initialization. The
+maintained Aquanox port uses `String? at ... as utf8(32)` because the original
+ASL watcher becoming `null` is itself the manual level-end signal.
+
+The same policy remains available to a discovered-address expression with
+`process.read<T>(address).toOption()`. Prefer direct `T? at` syntax when the
+path is static so the declaration shows both the memory layout and its absence
+semantics in one place.
 
 Pointer width is a property of traversal. Static `at` fields use the attached
 process's native width. When a 64-bit host reads a PE32 or other 32-bit target,

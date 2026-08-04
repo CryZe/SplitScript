@@ -1,0 +1,66 @@
+state "Aqua" {
+    /// Whether a prerendered cutscene is active.
+    cutscene: i32 at "binkw32.dll", 0x5e064;
+    /// The game's loading-screen marker.
+    loading: u8 at "Aqua", 0x10dbc0, 0x1d8;
+    /// The station that is currently active.
+    activeStation: u8 at "Aqua", 0x292f5c, 0x8, 0x28;
+    /// The station selected before and during a load.
+    nextStation: u8 at "Aqua", 0x263258, 0x1c, 0x28;
+    /// Resource path of the current map.
+    mapPath: String at "Aqua", 0x2676c0, 0x7c, 0x40, 0x60 as utf8(64);
+    /// Primary menu selection used by automatic level-end splits.
+    menu1: String at "Aqua", 0x26323c, 0xa0, 0x2f4, 0x0 as utf8(32);
+    /// Secondary menu selection, which becomes absent when loading starts.
+    menu2: String? at "Aqua", 0x26323c, 0xa0, 0x340, 0x0 as utf8(32);
+}
+
+let attachedOnce = false
+
+onAttach {
+    attachedOnce = true
+}
+
+/// Whether an optional menu selection contains the manual split command.
+fn isActivateDipol(selection: String?) -> bool {
+    return match selection {
+        Some(selection) => selection == "Activate Dipol",
+        None => false,
+    }
+}
+
+start {
+    return old.cutscene > 0
+        && current.cutscene == 0
+        && current.nextStation == 2
+}
+
+split {
+    let automaticLevelEnd = old.menu1 == "Dipol Auto Activate: 0"
+        && current.menu1 != old.menu1
+        && current.mapPath != "map\\6h4\\script\\6h4"
+    let manualLevelEnd = isActivateDipol(old.menu2)
+        && current.menu2 == None
+    let finalLevelEnd = current.menu1 == "Dipol Auto Activate: 20"
+        && current.menu1 != old.menu1
+        && current.mapPath == "map\\6h4\\script\\6h4"
+    return automaticLevelEnd || manualLevelEnd || finalLevelEnd
+}
+
+reset {
+    return old.cutscene == 0
+        && current.cutscene > 0
+        && current.nextStation == 2
+        && current.activeStation != 2
+}
+
+isLoading {
+    return current.loading == 43
+}
+
+onDetached {
+    if attachedOnce {
+        timer.pauseGameTime()
+        attachedOnce = false
+    }
+}

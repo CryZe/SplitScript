@@ -61,6 +61,70 @@ fn bounded_utf8_reads_are_fallible_strings_and_state_sugar_infers_string() {
 }
 
 #[test]
+fn explicitly_optional_pointer_fields_observe_read_failure_as_none() {
+    use splitscript::compiler::{
+        stdlib::StdlibTypeId,
+        types::{BuiltinType, TypeKind},
+    };
+
+    let source = r#"
+        state "game.exe" {
+            scalar: i32? at 0x1000;
+            mapName: String? at 0x2000 as utf8(32)
+        }
+
+        whileAttached {
+            print(match current.scalar {
+                Some(value) => value as String,
+                None => "missing"
+            })
+            print(match current.mapName {
+                Some(value) => value,
+                None => "missing"
+            })
+        }
+    "#;
+    let parsed = splitscript::parse(source).unwrap();
+    assert!(matches!(
+        parsed.syntax().state.as_ref().unwrap().fields[0].annotation,
+        Some(splitscript::compiler::ast::TypeRef::Option(_))
+    ));
+    let checked = splitscript::check(parsed).expect("optional pointer fields should type-check");
+    let fields = &checked.syntax().state.as_ref().unwrap().fields;
+    for (field, expected) in [
+        (&fields[0], TypeKind::Builtin(BuiltinType::I32)),
+        (&fields[1], TypeKind::Standard(StdlibTypeId::String)),
+    ] {
+        let field_type = checked.semantics().value_type(field.id).unwrap();
+        let TypeKind::Option { value, .. } = checked.semantics().types().kind(field_type) else {
+            panic!("optional pointer fields must retain their Option type")
+        };
+        assert_eq!(checked.semantics().types().kind(*value), &expected);
+    }
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("optional scalar and decoded-string pointer reads should validate");
+
+    let gba = r#"
+        state GBA {
+            marker: u8? at 0x02000000
+        }
+
+        whileAttached {
+            print(match current.marker {
+                Some(value) => value as String,
+                None => "missing"
+            })
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(gba).unwrap())
+        .expect("provider-backed optional pointer fields should type-check");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("provider-backed optional pointer reads should validate");
+}
+
+#[test]
 fn option_and_result_values_use_explicit_typed_hir_conversions() {
     use splitscript::compiler::semantic::{ResolvedCall, ValueConversionKind};
 

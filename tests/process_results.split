@@ -9,7 +9,8 @@ state "game.exe" {
     second: i32 = process.read(0x2000);
     combined: i32 = process.read(0x4000)? + process.read(0x5000)?;
     parts: LevelTimeParts = process.read(0x6000);
-    optional: i32? = process.read<i32>(0x7000).toOption();
+    optional: i32? at "optional.dll", 0x7000;
+    label: String? at 0x8000, 0x10 as utf8(16);
 }
 
 fn optionalText(value: i32?) -> String {
@@ -19,10 +20,17 @@ fn optionalText(value: i32?) -> String {
     }
 }
 
+fn optionalString(value: String?) -> String {
+    return match value {
+        Some(value) => value,
+        None => "None",
+    }
+}
+
 whileAttached {
     let probe: i32 = process.read(0x3000) else - 1
     setVariable(
         "Snapshot",
-        `{old.first},{old.second},{old.combined},{old.parts.minutes as u32},{old.parts.seconds as u32},{old.parts.hundredths as u32},{optionalText(old.optional)}->{current.first},{current.second},{current.combined},{current.parts.minutes as u32},{current.parts.seconds as u32},{current.parts.hundredths as u32},{optionalText(current.optional)}:{probe}`,
+        `{old.first},{old.second},{old.combined},{old.parts.minutes as u32},{old.parts.seconds as u32},{old.parts.hundredths as u32},{optionalText(old.optional)},{optionalString(old.label)}->{current.first},{current.second},{current.combined},{current.parts.minutes as u32},{current.parts.seconds as u32},{current.parts.hundredths as u32},{optionalText(current.optional)},{optionalString(current.label)}:{probe}`,
     )
 }

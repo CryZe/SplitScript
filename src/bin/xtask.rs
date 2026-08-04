@@ -248,6 +248,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &["vba"],
     },
     RuntimeFixture {
+        source: "examples/aquanox.split",
+        output: "aquanox.wasm",
+        profile: "release",
+        harness: "tests/aquanox_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "examples/cancellation.split",
         output: "cancellation.wasm",
         profile: "release",

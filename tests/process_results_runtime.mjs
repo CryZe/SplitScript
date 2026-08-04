@@ -7,6 +7,7 @@ if (!wasmPath) {
 
 const bytes = fs.readFileSync(wasmPath);
 const decoder = new TextDecoder();
+const encoder = new TextEncoder();
 let instance;
 let phase = 0;
 const snapshots = [];
@@ -35,9 +36,24 @@ const env = {
     process_read(_process, address, destination, size) {
         const numericAddress = Number(address);
         if (numericAddress === 0x3000
-            || (phase === 2 && numericAddress === 0x7000)
+            || (phase === 2 && numericAddress === 0x10007000)
+            || (phase === 0 && numericAddress === 0x8000)
             || (phase === 1 && (numericAddress === 0x2000 || numericAddress === 0x5000))) {
             return 0;
+        }
+
+        if (numericAddress === 0x8000) {
+            if (size !== 8) throw new Error(`unexpected pointer read size: ${size}`);
+            new DataView(instance.exports.memory.buffer).setBigUint64(destination, 0x9000n, true);
+            return 1;
+        }
+        if (numericAddress === 0x9010) {
+            if (size !== 16) throw new Error(`unexpected string read size: ${size}`);
+            if (phase === 2) return 0;
+            const output = new Uint8Array(instance.exports.memory.buffer, destination, size);
+            output.fill(0);
+            output.set(encoder.encode(["zero", "one", "two", "three"][phase]));
+            return 1;
         }
 
         const value = numericAddress === 0x1000
@@ -46,7 +62,7 @@ const env = {
                 ? 20 + phase
                 : numericAddress === 0x4000
                     ? 40 + phase
-                    : numericAddress === 0x7000
+                    : numericAddress === 0x10007000
                         ? 70 + phase
                     : 50 + phase;
         const view = new DataView(instance.exports.memory.buffer);
@@ -61,7 +77,12 @@ const env = {
         view.setInt32(destination, value, true);
         return 1;
     },
-    process_get_module_address: () => 0n,
+    process_get_module_address(_process, namePointer, nameLength) {
+        if (text(namePointer, nameLength) !== "optional.dll") {
+            throw new Error("queried an unexpected module");
+        }
+        return phase === 0 ? 0n : 0x10000000n;
+    },
     process_get_module_size: () => 0n,
     runtime_print_message() {},
     user_settings_add_bool: () => 1,
@@ -95,9 +116,9 @@ const expected = [
     // Phase zero initializes both snapshots and remains silent. In phase one,
     // failed required fields retain their accepted values while successful
     // siblings advance. The optional read deliberately accepts None instead.
-    "10,20,90,1,2,3,70->11,20,90,2,3,4,71:-1",
-    "11,20,90,2,3,4,71->12,22,94,3,4,5,None:-1",
-    "12,22,94,3,4,5,None->13,23,96,4,5,6,73:-1",
+    "10,20,90,1,2,3,None,None->11,20,90,2,3,4,71,one:-1",
+    "11,20,90,2,3,4,71,one->12,22,94,3,4,5,None,None:-1",
+    "12,22,94,3,4,5,None,None->13,23,96,4,5,6,73,three:-1",
 ];
 if (JSON.stringify(snapshots) !== JSON.stringify(expected)) {
     throw new Error(`unexpected transactional snapshots: ${JSON.stringify({ expected, snapshots })}`);

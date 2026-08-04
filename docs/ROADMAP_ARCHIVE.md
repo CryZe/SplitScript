@@ -1,5 +1,24 @@
 # SplitScript roadmap
 
+## 2026-08-04: optional pointer fields and faithful Aquanox port
+
+- Added explicit optional pointer fields: `field: T? at ...` reads the
+  contained `MemoryReadable` representation but accepts module, traversal,
+  final-read, or decoder failure as `None`. Required `T at ...` fields retain
+  their existing initialization and last-accepted-value semantics.
+- Lowering constructs `Result<Option<T>>` directly for native and provider
+  reads. An absent optional field can initialize a snapshot and advance
+  independently between `None` and `Some(T)` without fabricating a default or
+  weakening transactional required fields.
+- Added a maintained Aquanox port. Its optional secondary menu string becomes
+  `None` when loading invalidates the pointer, preserving the original manual
+  split condition alongside automatic/final splits, start/reset behavior,
+  load removal, and detach cleanup.
+- Expanded compiler, Wasm-validation, host-runtime, language-reference,
+  catalog-hover, and ASL-porting coverage. The transactional runtime fixture
+  proves optional scalar and UTF-8 fields can initialize absent, become
+  present, become absent again, and recover.
+
 ## 2026-08-04: contextual syntax has precise editor identities
 
 - Audited every identifier spelling interpreted contextually by the canonical

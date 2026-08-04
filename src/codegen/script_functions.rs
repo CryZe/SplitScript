@@ -77,6 +77,10 @@ pub(super) fn compile_read(
         .value_type(field.id)
         .expect("checked state fields have semantic types");
     let field_type = value_type(field.id, lowering.semantics);
+    let (memory_type_id, optional) = match lowering.semantics.types().kind(field_type_id) {
+        crate::types::TypeKind::Option { layout, value } => (*value, Some(*layout)),
+        _ => (field_type_id, None),
+    };
     let poll_result = semantic_type(
         lowering
             .semantics
@@ -99,13 +103,14 @@ pub(super) fn compile_read(
         if direct_read == IntrinsicId::GbaEmulatorRead {
             let field_size = lowering
                 .memory
-                .layout(field_type_id, lowering.semantics)
+                .layout(memory_type_id, lowering.semantics)
                 .expect("provider pointer fields are MemoryReadable")
                 .size();
             return compile_gba_direct_read(
                 path.offsets[0] as u32,
-                field_type_id,
+                memory_type_id,
                 field_type,
+                optional,
                 field_size,
                 result_type,
                 lowering,
@@ -136,10 +141,11 @@ pub(super) fn compile_read(
             .instruction(&Instruction::LocalTee(address_local))
             .instruction(&Instruction::I64Eqz)
             .instruction(&Instruction::If(BlockType::Empty));
-        emit_result_error(
+        emit_pointer_read_failure(
             &mut function,
             result_type,
             field_type,
+            optional,
             "process module was not found",
             lowering.gc,
         );
@@ -163,6 +169,7 @@ pub(super) fn compile_read(
         abi,
         address_local,
         fallback_ty: field_type,
+        optional,
         result_type,
         gc: lowering.gc,
         abi_read: lowering.abi_read,
@@ -191,10 +198,11 @@ pub(super) fn compile_read(
             .instruction(&Instruction::LocalTee(string_local))
             .instruction(&Instruction::RefIsNull)
             .instruction(&Instruction::If(BlockType::Empty));
-        emit_result_error(
+        emit_pointer_read_failure(
             &mut function,
             result_type,
             field_type,
+            optional,
             "UTF-8 string could not be read",
             lowering.gc,
         );
@@ -202,27 +210,27 @@ pub(super) fn compile_read(
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End)
             .instruction(&Instruction::LocalGet(string_local));
-        emit_result_success(&mut function, result_type, lowering.gc);
+        emit_pointer_read_success(&mut function, result_type, optional, lowering.gc);
         function.instruction(&Instruction::End);
         return function;
     }
 
     let field_size = lowering
         .memory
-        .layout(field_type_id, lowering.semantics)
+        .layout(memory_type_id, lowering.semantics)
         .expect("checked undecoded pointer fields are MemoryReadable")
         .size();
     emit_process_read(&mut function, &process_read, field_size);
     emit_memory_value(
         &mut function,
-        field_type_id,
+        memory_type_id,
         lowering.abi_read,
         0,
         lowering.memory,
         lowering.semantics,
         lowering.gc,
     );
-    emit_result_success(&mut function, result_type, lowering.gc);
+    emit_pointer_read_success(&mut function, result_type, optional, lowering.gc);
     function.instruction(&Instruction::End);
     function
 }
@@ -304,8 +312,9 @@ pub(super) fn compile_state_transform(
 
 fn compile_gba_direct_read(
     address: u32,
-    field_type_id: crate::types::TypeId,
+    memory_type_id: crate::types::TypeId,
     field_type: Type,
+    optional: Option<crate::ast::OptionTypeId>,
     field_size: u32,
     result_type: ResultTypeId,
     lowering: &EmissionContext<'_>,
@@ -330,10 +339,11 @@ fn compile_gba_direct_read(
         .instruction(&Instruction::LocalTee(address_local))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty));
-    emit_result_error(
+    emit_pointer_read_failure(
         &mut function,
         result_type,
         field_type,
+        optional,
         "invalid or unavailable GBA memory address",
         lowering.gc,
     );
@@ -347,6 +357,7 @@ fn compile_gba_direct_read(
             abi: lowering.abi,
             address_local,
             fallback_ty: field_type,
+            optional,
             result_type,
             gc: lowering.gc,
             abi_read: lowering.abi_read,
@@ -355,14 +366,14 @@ fn compile_gba_direct_read(
     );
     emit_memory_value(
         &mut function,
-        field_type_id,
+        memory_type_id,
         lowering.abi_read,
         0,
         lowering.memory,
         lowering.semantics,
         lowering.gc,
     );
-    emit_result_success(&mut function, result_type, lowering.gc);
+    emit_pointer_read_success(&mut function, result_type, optional, lowering.gc);
     function.instruction(&Instruction::End);
     function
 }
@@ -371,6 +382,7 @@ struct ProcessReadEmission<'a> {
     abi: &'a Abi,
     address_local: u32,
     fallback_ty: Type,
+    optional: Option<crate::ast::OptionTypeId>,
     result_type: ResultTypeId,
     gc: &'a GcLayout,
     abi_read: memory_plan::AbiReadScratch,
@@ -387,16 +399,47 @@ fn emit_process_read(function: &mut Function, emission: &ProcessReadEmission<'_>
         ))
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::If(BlockType::Empty));
-    emit_result_error(
+    emit_pointer_read_failure(
         function,
         emission.result_type,
         emission.fallback_ty,
+        emission.optional,
         "process read failed",
         emission.gc,
     );
     function
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
+}
+
+fn emit_pointer_read_failure(
+    function: &mut Function,
+    result_type: ResultTypeId,
+    field_type: Type,
+    optional: Option<crate::ast::OptionTypeId>,
+    message: &str,
+    gc: &GcLayout,
+) {
+    if let Some(option) = optional {
+        function.instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.index(Type::Option(option)),
+        )));
+        emit_result_success(function, result_type, gc);
+    } else {
+        emit_result_error(function, result_type, field_type, message, gc);
+    }
+}
+
+fn emit_pointer_read_success(
+    function: &mut Function,
+    result_type: ResultTypeId,
+    optional: Option<crate::ast::OptionTypeId>,
+    gc: &GcLayout,
+) {
+    if let Some(option) = optional {
+        function.instruction(&Instruction::StructNew(gc.index(Type::Option(option))));
+    }
+    emit_result_success(function, result_type, gc);
 }
 
 pub(super) fn compile_user_function(

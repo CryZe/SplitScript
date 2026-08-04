@@ -177,8 +177,12 @@ pub(crate) fn validate(
                 let ty = semantics
                     .value_type(field.id)
                     .expect("checked state fields have semantic types");
+                let memory_ty = match semantics.types().kind(ty) {
+                    crate::types::TypeKind::Option { value, .. } => *value,
+                    _ => ty,
+                };
                 if let Err(error) =
-                    capabilities.require(ty, StdlibCapabilityId::MemoryReadable, semantics)
+                    capabilities.require(memory_ty, StdlibCapabilityId::MemoryReadable, semantics)
                 {
                     diagnostics.push(Diagnostic::semantic(error, field.span));
                 }

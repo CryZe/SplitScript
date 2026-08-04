@@ -647,9 +647,9 @@ define_language_catalog! {
         StatePointerField,
         "state pointer field",
         LanguageItemKind::Syntax,
-        "field: Type at module?, offset, ...",
+        "field: T at module?, offset, ... | field: T? at module?, offset, ...",
         "Reads a persistent state field through a pointer path.",
-        "The optional module name selects the pointer base and each following integer is an address offset. The field assignment is a Result boundary: initialization waits for every required field, while a later failed read retains this field's last accepted value. The exact memory representation must be explicit or inferred from an exact use.",
+        "The optional module name selects the pointer base and each following integer is an address offset. A required T field is a Result boundary: initialization waits for it, while a later failed read retains its last accepted value. An explicitly optional T? field instead accepts read failure as None and a successful read as Some(T), so absence is observable in current and old. The exact memory representation must be explicit or inferred from an exact use; optional read semantics require the T? annotation.",
         STATE_POINTER_EXAMPLE
     ),
     language_item!(
@@ -658,7 +658,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "field at address as utf8(maxBytes)",
         "Decodes a bounded native UTF-8 string state field.",
-        "This is state-layout sugar for a bounded read-and-decode operation, not a string-size type. It follows the complete pointer path, reads at most 4096 bytes once, stops at the first NUL byte, and rejects this field's candidate when memory cannot be read or the bytes are not valid UTF-8. The field type is inferred as String.",
+        "This is state-layout sugar for a bounded read-and-decode operation, not a string-size type. It follows the complete pointer path, reads at most 4096 bytes once, and stops at the first NUL byte. A required field rejects its candidate when memory cannot be read or the bytes are not valid UTF-8; an explicitly annotated String? field observes that failure as None. Without the optional annotation, the field type is inferred as String.",
         NATIVE_STRING_DECODER_EXAMPLE
     ),
     language_item!(

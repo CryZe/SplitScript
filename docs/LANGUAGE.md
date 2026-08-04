@@ -62,6 +62,23 @@ a failed field retains its last accepted value while successful sibling fields
 still advance. The resulting snapshots are WebAssembly GC structs, so action
 code uses typed references rather than a linear-memory state layout.
 
+Some watchers use failed memory access as meaningful absence rather than a
+transient error. Write that choice explicitly with an optional pointer field:
+
+```text
+state "game.exe" {
+    requiredMenu: String at 0x1000 as utf8(32);
+    optionalMenu: String? at 0x2000 as utf8(32);
+}
+```
+
+The required field keeps the initialization/retention behavior above. The
+optional field accepts a failed module lookup, pointer traversal, final memory
+read, or decoder as `None`; a successful read is `Some(T)`. It therefore never
+blocks initialization and can visibly transition between a value and `None`
+in `old` and `current`. The `T?` annotation is mandatory because it selects
+failure semantics in addition to constraining the inferred value type.
+
 A pointer-path field can use an ordinary trailing `if` expression to accept the
 raw value or produce an error. Expression-backed fields
 already have an ordinary right-hand side and should put the `if` there instead:

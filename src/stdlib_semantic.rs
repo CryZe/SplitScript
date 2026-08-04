@@ -124,6 +124,7 @@ fn semantic_type_may_have_capability(
 ) -> bool {
     let behavior = library.capability(capability).behavior;
     match ty {
+        TypeKind::Error => false,
         TypeKind::Builtin(builtin) => library.core_type_has_capability(*builtin, capability),
         TypeKind::Standard(standard) => library.type_has_capability(*standard, capability),
         TypeKind::StateSnapshot | TypeKind::SettingsView => false,

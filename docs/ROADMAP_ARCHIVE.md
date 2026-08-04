@@ -1,5 +1,23 @@
 # SplitScript roadmap
 
+## 2026-08-04: provenance-safe numeric inference defaults
+
+- Numeric defaulting now follows literal provenance through unification and
+  generic instantiation. Components containing an unsuffixed integer or
+  floating-point literal default to `i32` or `f64`; an integer-looking literal
+  in a required floating-point context defaults to `f64`.
+- Capability-only constraints no longer manufacture a concrete representation.
+  Ambiguous process reads, state fields, locals, globals, parameters, arrays,
+  wrappers, and generic bodies require an annotation, with a focused diagnostic
+  for pointer-backed state fields whose memory type cannot be inferred.
+- Recovering editor analysis now uses an explicit semantic error type instead
+  of publishing `i32`. It has no source spelling, layout, capabilities, or
+  code-generation path, and inlay hints suppress it while other editor queries
+  remain available.
+- Added inference and editor regression coverage and made the Lunistice points
+  and deaths memory widths explicit after the stricter rule exposed their
+  former `Display`-only inference.
+
 ## 2026-08-03: faithful Arietta of Spirits port
 
 - Added a maintained port of the Arietta of Spirits 1.2.9.0 autosplitter. It

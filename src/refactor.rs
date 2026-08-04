@@ -844,6 +844,7 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
 
 fn contains_generic_parameter(ty: TypeId, snapshot: &SemanticSnapshot) -> bool {
     match snapshot.semantics().types().kind(ty) {
+        TypeKind::Error => false,
         TypeKind::GenericParameter { .. } => true,
         TypeKind::Array { element, .. }
         | TypeKind::Option { value: element, .. }

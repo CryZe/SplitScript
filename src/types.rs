@@ -47,6 +47,9 @@ impl fmt::Display for EnumTypeId {
 /// contains compiler or standard-library identities.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ResolvedTypeRef {
+    /// Recovery-only marker for a type that could not be inferred. Checked
+    /// programs never contain this reference.
+    Error,
     Core(CoreTypeId),
     Standard(StdlibTypeId),
     StateSnapshot,
@@ -104,6 +107,9 @@ pub type BuiltinType = CoreTypeId;
 /// The fully resolved shape of an interned semantic type.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeKind {
+    /// Recovery-only marker for failed inference. It has no source spelling,
+    /// capabilities, memory layout, or code-generation representation.
+    Error,
     Builtin(BuiltinType),
     Standard(StdlibTypeId),
     /// The generated structural value described by the program's `state`
@@ -208,6 +214,31 @@ impl TypeStore {
 
     pub fn id_for_builtin(&self, builtin: BuiltinType) -> TypeId {
         self.interned[&TypeKind::Builtin(builtin)]
+    }
+
+    pub(crate) fn id_for_error(&mut self) -> TypeId {
+        self.intern(TypeKind::Error)
+    }
+
+    pub(crate) fn existing_error(&self) -> Option<TypeId> {
+        self.interned.get(&TypeKind::Error).copied()
+    }
+
+    pub fn contains_error(&self, id: TypeId) -> bool {
+        match self.kind(id) {
+            TypeKind::Error => true,
+            TypeKind::Array { element, .. } => self.contains_error(*element),
+            TypeKind::Option { value, .. }
+            | TypeKind::Result { value, .. }
+            | TypeKind::Async { value, .. } => self.contains_error(*value),
+            TypeKind::Builtin(_)
+            | TypeKind::Standard(_)
+            | TypeKind::StateSnapshot
+            | TypeKind::SettingsView
+            | TypeKind::Record(_)
+            | TypeKind::Enum(_)
+            | TypeKind::GenericParameter { .. } => false,
+        }
     }
 
     pub fn id_for_core(&self, core: CoreTypeId) -> TypeId {
@@ -320,6 +351,7 @@ impl TypeStore {
         asyncs: &[ResolvedAsyncType],
     ) -> TypeId {
         match ty {
+            ResolvedTypeRef::Error => self.id_for_error(),
             ResolvedTypeRef::Core(core) => self.id_for_core(core),
             ResolvedTypeRef::Standard(standard) => self.id_for_standard(standard),
             ResolvedTypeRef::StateSnapshot => self.id_for_state_snapshot(),

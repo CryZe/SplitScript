@@ -878,6 +878,7 @@ fn add_inferred_fields(
     standard_library: &StandardLibrary,
 ) {
     match receiver {
+        TypeKind::Error => {}
         TypeKind::StateSnapshot => {
             if let Some(state) = &syntax.state {
                 for field in state.common_fields() {

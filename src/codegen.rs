@@ -481,6 +481,7 @@ fn call_target(wasm_ir: &wasm_ir::Program, expression: ExprId) -> Option<&wasm_i
 
 fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
     match semantics.types().kind(id) {
+        TypeKind::Error => unreachable!("failed inference reached code generation"),
         TypeKind::Builtin(builtin) => Type::from_core(*builtin),
         TypeKind::Standard(standard) => Type::Standard(*standard),
         TypeKind::StateSnapshot => Type::StateSnapshot,

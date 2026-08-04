@@ -78,8 +78,7 @@ impl Checker {
                 self.expect_expression(expr.id, ty, expected, expr.span)?
             }
             ExprKind::Float(_) => {
-                let ty =
-                    self.fresh_inference(Requirements::capability(StdlibCapabilityId::Float), None);
+                let ty = self.inference.fresh_float_literal();
                 self.expect_expression(expr.id, ty, expected, expr.span)?
             }
             ExprKind::String(_) => self.expect_expression(

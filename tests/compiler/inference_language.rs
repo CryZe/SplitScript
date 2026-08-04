@@ -501,7 +501,7 @@ fn integer_looking_literals_flow_into_float_contexts_exactly() {
 }
 
 #[test]
-fn floating_process_reads_require_an_unambiguous_memory_width() {
+fn floating_literals_default_their_inference_component_to_f64() {
     let source = r#"
         state "game.exe" {
             elapsed = process.read(0x100)
@@ -511,14 +511,11 @@ fn floating_process_reads_require_an_unambiguous_memory_width() {
             return Duration.fromSeconds(current.elapsed + 0.0)
         }
     "#;
-    let diagnostics = splitscript::compile(source)
-        .expect_err("an f32/f64 process-memory ambiguity must not silently choose a width");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == splitscript::DiagnosticCode::Type
-            && diagnostic
-                .message
-                .contains("cannot infer whether process memory uses `f32` or `f64`")
-    }));
+    let wasm = splitscript::compile(source)
+        .expect("the floating literal should default the shared memory-read type to f64");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("the f64-defaulted process read should produce valid Wasm");
 }
 
 #[test]
@@ -575,11 +572,11 @@ fn state_field_types_are_inferred_from_expressions_and_uses() {
     "#;
     let diagnostics =
         splitscript::compile(ambiguous).expect_err("an unconstrained pointer field is ambiguous");
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("cannot infer type variable"))
-    );
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("cannot infer the memory type of state field `mystery`")
+    }));
 }
 
 #[test]

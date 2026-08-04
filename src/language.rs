@@ -956,7 +956,7 @@ define_language_catalog! {
         F64,
         "f64",
         "Stores a 64-bit floating-point number.",
-        "Floating-point values are useful for game coordinates, timers, and duration conversion.",
+        "Floating-point values are useful for game coordinates, timers, and duration conversion. Unconstrained floating-point literals default to f64; capability constraints alone never choose a memory representation.",
         "let tickRate: f64 = 60.0"
     ),
     }

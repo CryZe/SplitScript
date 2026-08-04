@@ -423,6 +423,9 @@ impl Reachability {
                 continue;
             }
             match semantics.types().kind(ty) {
+                TypeKind::Error => {
+                    unreachable!("failed inference reached code-generation reachability")
+                }
                 TypeKind::Builtin(_) | TypeKind::GenericParameter { .. } => {}
                 TypeKind::StateSnapshot => {
                     pending.extend(
@@ -521,6 +524,9 @@ impl Reachability {
                 continue;
             }
             match semantics.types().kind(ty) {
+                TypeKind::Error => {
+                    unreachable!("failed inference reached equality reachability")
+                }
                 TypeKind::Standard(StdlibTypeId::String) => self.string_equality = true,
                 TypeKind::Standard(standard) => {
                     let library = standard_library;

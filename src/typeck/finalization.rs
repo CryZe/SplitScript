@@ -19,7 +19,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
         (HashMap::new(), HashMap::new())
     };
     if checker.errors.is_empty() {
-        checker.default_inference_variables();
+        checker.default_inference_variables(program);
     }
     if !checker.errors.is_empty() {
         checker.inference.recover_unbound();
@@ -180,7 +180,36 @@ fn bind_function_generics(
 }
 
 impl Checker {
-    pub(super) fn default_inference_variables(&mut self) {
+    pub(super) fn default_inference_variables(&mut self, program: &Program) {
+        for field in program
+            .state
+            .as_ref()
+            .into_iter()
+            .flat_map(|state| state.all_fields())
+            .filter(|field| {
+                field.annotation.is_none()
+                    && matches!(field.source, StateSource::Pointer(_))
+                    && !matches!(
+                        field.source,
+                        StateSource::Pointer(crate::ast::PointerPath {
+                            decoder: Some(_),
+                            ..
+                        })
+                    )
+            })
+        {
+            let ty = self.declarations.state_fields_by_id[&field.id];
+            if self.inference.is_unbound_without_default(ty) {
+                self.error(
+                    format!(
+                        "cannot infer the memory type of state field `{}`; add an explicit type such as `{}: i32 at ...`",
+                        field.name, field.name
+                    ),
+                    field.span,
+                );
+                self.inference.recover_unbound_type(ty);
+            }
+        }
         for error in self.inference.default_unbound() {
             let message = self.inference_error_message(error);
             self.error(message, Span::default());

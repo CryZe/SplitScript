@@ -484,6 +484,7 @@ fn snapshot_type_name(
     ty: splitscript::compiler::types::TypeId,
 ) -> String {
     match checked.semantics().types().kind(ty) {
+        TypeKind::Error => "<unknown>".to_owned(),
         TypeKind::Builtin(builtin) => builtin.to_string(),
         TypeKind::Standard(standard) => StandardLibrary::new().type_decl(*standard).name.to_owned(),
         TypeKind::StateSnapshot => "StateSnapshot".to_owned(),

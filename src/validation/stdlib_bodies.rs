@@ -353,6 +353,7 @@ fn render_actual_type(
     parameter_bindings: &HashMap<TypeId, TypeRef>,
 ) -> String {
     match semantics.types().kind(ty) {
+        TypeKind::Error => "<unknown>".to_owned(),
         TypeKind::Builtin(core) => core.to_string(),
         TypeKind::Standard(standard) => library.type_decl(*standard).name.to_owned(),
         TypeKind::StateSnapshot => "StateSnapshot".to_owned(),

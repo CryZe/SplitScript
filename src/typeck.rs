@@ -524,6 +524,11 @@ fn syntax_type(ty: TypeRef, types: &TypeStore, resolutions: &ProgramResolutions)
 
 fn resolved_type_ref(ty: ResolvedTypeRef, types: &TypeStore) -> Type {
     match ty {
+        ResolvedTypeRef::Error => Type::Known(
+            types
+                .existing_error()
+                .expect("recovery interned its semantic error type"),
+        ),
         ResolvedTypeRef::Core(core) => Type::Known(types.id_for_core(core)),
         ResolvedTypeRef::Standard(standard) => Type::Known(types.id_for_standard(standard)),
         ResolvedTypeRef::StateSnapshot => Type::Known(types.id_for_state_snapshot()),

@@ -435,6 +435,7 @@ impl SemanticModel {
             return specialized;
         }
         let specialized_child = match self.types.kind(ty) {
+            TypeKind::Error => None,
             TypeKind::Array { element, .. } => Some((0, self.specialize_type(instance, *element))),
             TypeKind::Option { value, .. } => Some((1, self.specialize_type(instance, *value))),
             TypeKind::Result { value, .. } => Some((2, self.specialize_type(instance, *value))),
@@ -525,6 +526,7 @@ impl SemanticModel {
         }
         let kind = self.types.kind(ty).clone();
         let specialized = match kind {
+            TypeKind::Error => ty,
             TypeKind::Array {
                 element, length, ..
             } => {
@@ -628,6 +630,7 @@ impl SemanticModel {
 
     fn resolved_type_ref(&self, ty: TypeId) -> crate::types::ResolvedTypeRef {
         match self.types.kind(ty) {
+            TypeKind::Error => crate::types::ResolvedTypeRef::Error,
             TypeKind::Builtin(core) => crate::types::ResolvedTypeRef::Core(*core),
             TypeKind::Standard(standard) => crate::types::ResolvedTypeRef::Standard(*standard),
             TypeKind::StateSnapshot => crate::types::ResolvedTypeRef::StateSnapshot,

@@ -51,6 +51,9 @@ impl InlayHintCollector<'_> {
         let Some(ty) = self.snapshot.semantics().value_type(id) else {
             return;
         };
+        if self.snapshot.semantics().types().contains_error(ty) {
+            return;
+        }
         let first_candidate = self
             .tokens
             .partition_point(|token| token.span.start < span.start);
@@ -71,6 +74,9 @@ impl InlayHintCollector<'_> {
         let Some(ty) = self.snapshot.semantics().function_result(function.id) else {
             return;
         };
+        if self.snapshot.semantics().types().contains_error(ty) {
+            return;
+        }
         let first_candidate = self
             .tokens
             .partition_point(|token| token.span.start < function.span.start);
@@ -198,5 +204,60 @@ onAttach {
         assert!(hints.iter().any(|hint| hint.label == " -> async Module"));
         assert!(hints.iter().any(|hint| hint.label == ": async Module"));
         assert!(hints.iter().any(|hint| hint.label == ": Module"));
+    }
+
+    #[test]
+    fn failed_inference_does_not_publish_fabricated_type_hints() {
+        let source = r#"state GBA {
+    ok at 0x100;
+}
+split {
+    let copy = current.ok
+    return false
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let snapshot = database
+            .semantic_snapshot()
+            .expect("recovering semantics should remain available");
+        let field = &snapshot.syntax().state.as_ref().unwrap().fields[0];
+        let field_type = snapshot.semantics().value_type(field.id).unwrap();
+        assert_eq!(
+            snapshot.semantics().types().kind(field_type),
+            &crate::types::TypeKind::Error
+        );
+
+        let hints = inferred_type_hints(
+            &snapshot,
+            Span {
+                start: 0,
+                end: source.len(),
+            },
+        );
+        assert!(hints.is_empty(), "{hints:#?}");
+        assert!(database.diagnostics().iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("cannot infer the memory type of state field `ok`")
+        }));
+    }
+
+    #[test]
+    fn unsuffixed_numeric_literals_publish_rust_style_default_hints() {
+        let source = r#"state "game.exe" {}
+whileAttached {
+    let integer = 7
+    let float = 1.5
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let snapshot = database.semantic_snapshot().unwrap();
+        let hints = inferred_type_hints(
+            &snapshot,
+            Span {
+                start: 0,
+                end: source.len(),
+            },
+        );
+        assert!(hints.iter().any(|hint| hint.label == ": i32"), "{hints:#?}");
+        assert!(hints.iter().any(|hint| hint.label == ": f64"), "{hints:#?}");
     }
 }

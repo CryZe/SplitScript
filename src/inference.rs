@@ -25,6 +25,7 @@ impl Type {
     pub(crate) fn to_ref(self, types: &TypeStore) -> ResolvedTypeRef {
         match self {
             Self::Known(id) => match types.kind(id) {
+                TypeKind::Error => ResolvedTypeRef::Error,
                 TypeKind::Builtin(builtin) => ResolvedTypeRef::Core(*builtin),
                 TypeKind::Standard(standard) => ResolvedTypeRef::Standard(*standard),
                 TypeKind::StateSnapshot => ResolvedTypeRef::StateSnapshot,
@@ -94,12 +95,6 @@ impl Requirements {
     fn contains(&self, capability: StdlibCapabilityId) -> bool {
         self.0.contains(&capability)
     }
-
-    fn intersects(&self, capabilities: &[StdlibCapabilityId]) -> bool {
-        capabilities
-            .iter()
-            .any(|capability| self.contains(*capability))
-    }
 }
 
 impl BitOr for Requirements {
@@ -130,6 +125,23 @@ struct Variable {
     binding: Option<Type>,
     requirements: Requirements,
     largest_literal: Option<u64>,
+    literal_default: Option<LiteralDefault>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiteralDefault {
+    Integer,
+    Float,
+}
+
+impl LiteralDefault {
+    fn merge(left: Option<Self>, right: Option<Self>) -> Option<Self> {
+        match (left, right) {
+            (Some(Self::Float), _) | (_, Some(Self::Float)) => Some(Self::Float),
+            (Some(Self::Integer), _) | (_, Some(Self::Integer)) => Some(Self::Integer),
+            (None, None) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -260,6 +272,7 @@ impl InferenceContext {
 
     pub(crate) fn known_type_name(&self, id: TypeId) -> String {
         match self.types.kind(id) {
+            TypeKind::Error => "<unknown>".into(),
             TypeKind::Builtin(builtin) => builtin.to_string(),
             TypeKind::Standard(standard) => self.standard_library.type_decl(*standard).name.into(),
             TypeKind::StateSnapshot => "StateSnapshot".into(),
@@ -281,6 +294,24 @@ impl InferenceContext {
         requirements: Requirements,
         largest_literal: Option<u64>,
     ) -> Type {
+        let literal_default = largest_literal.map(|_| LiteralDefault::Integer);
+        self.fresh_with_literal_default(requirements, largest_literal, literal_default)
+    }
+
+    pub(crate) fn fresh_float_literal(&mut self) -> Type {
+        self.fresh_with_literal_default(
+            Requirements::capability(StdlibCapabilityId::Float),
+            None,
+            Some(LiteralDefault::Float),
+        )
+    }
+
+    fn fresh_with_literal_default(
+        &mut self,
+        requirements: Requirements,
+        largest_literal: Option<u64>,
+        literal_default: Option<LiteralDefault>,
+    ) -> Type {
         let requirements = Requirements(
             self.standard_library
                 .minimal_capabilities(requirements.as_slice()),
@@ -291,6 +322,7 @@ impl InferenceContext {
             binding: None,
             requirements,
             largest_literal,
+            literal_default,
         });
         Type::Variable(id)
     }
@@ -325,7 +357,11 @@ impl InferenceContext {
                     return *substitution;
                 }
                 let template = self.variables[variable as usize].clone();
-                let substitution = self.fresh(template.requirements, template.largest_literal);
+                let substitution = self.fresh_with_literal_default(
+                    template.requirements,
+                    template.largest_literal,
+                    template.literal_default,
+                );
                 substitutions.insert(variable, substitution);
                 substitution
             }
@@ -427,14 +463,7 @@ impl InferenceContext {
         let Type::Variable(variable) = self.shallow(ty) else {
             return false;
         };
-        let requirements = &self.variables[variable as usize].requirements;
-        !requirements.intersects(&[
-            StdlibCapabilityId::Float,
-            StdlibCapabilityId::Integer,
-            StdlibCapabilityId::Numeric,
-            StdlibCapabilityId::Signed,
-            StdlibCapabilityId::Display,
-        ])
+        self.variables[variable as usize].literal_default.is_none()
     }
 
     pub(crate) fn unify(&mut self, left: Type, right: Type) -> Result<Type, InferenceError> {
@@ -524,26 +553,17 @@ impl InferenceContext {
             if root != id || self.variables[root as usize].binding.is_some() {
                 continue;
             }
-            let requirements = &self.variables[root as usize].requirements;
-            if requirements.contains(StdlibCapabilityId::Float)
-                && requirements.contains(StdlibCapabilityId::MemoryReadable)
-            {
-                errors.push(error(format!(
-                    "cannot infer whether process memory uses `f32` or `f64` for type variable `?{root}`; add a type annotation to the state field or memory read"
-                )));
-                continue;
-            }
-            let default = if requirements.intersects(&[StdlibCapabilityId::Float]) {
-                Some(self.known_builtin(BuiltinType::F64))
-            } else if requirements.intersects(&[
-                StdlibCapabilityId::Integer,
-                StdlibCapabilityId::Numeric,
-                StdlibCapabilityId::Signed,
-                StdlibCapabilityId::Display,
-            ]) {
-                Some(self.known_builtin(BuiltinType::I32))
-            } else {
-                None
+            let default = match self.variables[root as usize].literal_default {
+                Some(LiteralDefault::Integer)
+                    if self.variables[root as usize]
+                        .requirements
+                        .contains(StdlibCapabilityId::Float) =>
+                {
+                    Some(self.known_builtin(BuiltinType::F64))
+                }
+                Some(LiteralDefault::Integer) => Some(self.known_builtin(BuiltinType::I32)),
+                Some(LiteralDefault::Float) => Some(self.known_builtin(BuiltinType::F64)),
+                None => None,
             };
             let Some(default) = default else {
                 errors.push(error(format!(
@@ -563,11 +583,25 @@ impl InferenceContext {
     /// editor queries can retain independent semantic facts after diagnostics.
     /// Strict checking never observes these fallback bindings.
     pub(crate) fn recover_unbound(&mut self) {
+        let error = self.types.id_for_error();
         for id in 0..self.variables.len() as u32 {
             let root = self.root(id);
             if root == id && self.variables[root as usize].binding.is_none() {
-                self.variables[root as usize].binding =
-                    Some(Type::Known(self.types.id_for_builtin(BuiltinType::I32)));
+                self.variables[root as usize].binding = Some(Type::Known(error));
+            }
+        }
+    }
+
+    pub(crate) fn recover_unbound_type(&mut self, ty: Type) {
+        let variables = self.unbound_variables_in([ty]);
+        if variables.is_empty() {
+            return;
+        }
+        let error = Type::Known(self.types.id_for_error());
+        for variable in variables {
+            let root = self.root(variable);
+            if self.variables[root as usize].binding.is_none() {
+                self.variables[root as usize].binding = Some(error);
             }
         }
     }
@@ -973,6 +1007,10 @@ impl InferenceContext {
         self.variables[left as usize].largest_literal = left_variable
             .largest_literal
             .max(right_variable.largest_literal);
+        self.variables[left as usize].literal_default = LiteralDefault::merge(
+            left_variable.literal_default,
+            right_variable.literal_default,
+        );
         self.variables[left as usize].binding = None;
 
         let binding = match (left_variable.binding, right_variable.binding) {
@@ -1056,6 +1094,7 @@ fn fits_unsigned_literal(types: &TypeStore, value: u64, ty: Type) -> bool {
         return false;
     };
     match types.kind(id) {
+        TypeKind::Error => false,
         TypeKind::Builtin(BuiltinType::Bool) => value <= 1,
         TypeKind::Builtin(BuiltinType::U8) => u8::try_from(value).is_ok(),
         TypeKind::Builtin(BuiltinType::I8) => value <= i8::MAX as u64,
@@ -1103,6 +1142,7 @@ pub(crate) fn type_may_have_capability(
     let behavior = library.capability(capability).behavior;
     match ty {
         Type::Known(id) => match types.kind(id) {
+            TypeKind::Error => false,
             TypeKind::Builtin(builtin) => library.core_type_has_capability(*builtin, capability),
             TypeKind::Standard(standard) => library.type_has_capability(*standard, capability),
             TypeKind::StateSnapshot | TypeKind::SettingsView => false,
@@ -1194,7 +1234,7 @@ mod tests {
     }
 
     #[test]
-    fn combines_constraints_and_defaults_numeric_variables() {
+    fn capability_constraints_do_not_choose_a_numeric_representation() {
         let mut inference = InferenceContext::new(
             StandardLibrary::new(),
             TypeStore::default(),
@@ -1208,9 +1248,35 @@ mod tests {
         inference
             .require(value, Requirements::capability(StdlibCapabilityId::Numeric))
             .unwrap();
+        assert_eq!(inference.default_unbound().len(), 1);
+        inference.recover_unbound();
+        let Type::Known(recovered) = inference.resolve(value) else {
+            panic!("recovery must publish a semantic type")
+        };
+        assert_eq!(inference.type_store().kind(recovered), &TypeKind::Error);
+    }
+
+    #[test]
+    fn unsuffixed_literals_are_the_only_numeric_defaults() {
+        let mut inference = InferenceContext::new(
+            StandardLibrary::new(),
+            TypeStore::default(),
+            0,
+            [],
+            [],
+            [],
+            [],
+        );
+        let integer = inference.fresh(
+            Requirements::capability(StdlibCapabilityId::Numeric),
+            Some(7),
+        );
+        let float = inference.fresh_float_literal();
         assert!(inference.default_unbound().is_empty());
         let i32_type = inference.known_builtin(BuiltinType::I32);
-        assert_eq!(inference.resolve(value), i32_type);
+        let f64_type = inference.known_builtin(BuiltinType::F64);
+        assert_eq!(inference.resolve(integer), i32_type);
+        assert_eq!(inference.resolve(float), f64_type);
     }
 
     #[test]

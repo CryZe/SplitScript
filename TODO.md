@@ -27,25 +27,7 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — make inference defaults provenance-safe
-
-- [ ] Default an unresolved numeric inference component only when it contains
-  an unsuffixed literal: integer literals default to `i32` and floating-point
-  literals default to `f64`, matching Rust's user-facing rule. A variable that
-  is constrained only by capabilities such as `MemoryReadable`, `Numeric`,
-  `Integer`, `Float`, `Signed`, or `Display` must remain ambiguous and produce
-  a focused annotation diagnostic instead of acquiring a representation.
-  Track literal provenance through variable unification rather than inferring
-  it from the final capability set, and retain literal range checking.
-- [ ] Stop publishing `i32` as the recovery type for unrelated failed
-  inference. Introduce an explicit semantic error/unknown type (or an
-  equivalent non-codegen recovery representation) so hover and inlay hints do
-  not claim that an untyped `state` pointer field is `i32`. Strict compilation
-  must reject the program; recovering editor queries must remain available
-  without allowing the placeholder into lowering. Cover state fields, process
-  reads, locals, globals, parameters, generic bodies, arrays, and wrappers.
-
-## P0 — restore editor semantic precision
+## Now — restore editor semantic precision
 
 - [ ] Make root completion consume the same attachment-availability facts as
   effect checking. Do not offer the selected provider value (`process` or

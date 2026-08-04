@@ -284,6 +284,7 @@ fn validate_future_storage(
             return false;
         }
         match semantics.types().kind(ty) {
+            TypeKind::Error => false,
             TypeKind::Async { .. } => true,
             TypeKind::Record(record) => syntax
                 .records
@@ -1147,6 +1148,7 @@ fn expand_fully_observed_types(
             continue;
         }
         match semantics.types().kind(ty) {
+            TypeKind::Error => {}
             TypeKind::StateSnapshot => {
                 if let Some(state) = &syntax.state {
                     pending.extend(
@@ -1216,6 +1218,7 @@ fn expand_reachable_nominal_types(
             continue;
         }
         match semantics.types().kind(ty) {
+            TypeKind::Error => {}
             TypeKind::StateSnapshot => {
                 if let Some(state) = &syntax.state {
                     pending.extend(

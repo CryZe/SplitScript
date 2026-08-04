@@ -8,6 +8,7 @@ use crate::{
 pub(crate) fn display_type(ty: TypeId, snapshot: &SemanticSnapshot) -> String {
     let types = snapshot.semantics().types();
     match types.kind(ty) {
+        TypeKind::Error => "<unknown>".to_owned(),
         TypeKind::Builtin(builtin) => builtin.to_string(),
         TypeKind::Standard(standard) => snapshot
             .context()

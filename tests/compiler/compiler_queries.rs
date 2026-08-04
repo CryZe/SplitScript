@@ -854,18 +854,22 @@ fn semantic_queries_use_exact_tokens_before_end_of_word_fallbacks() {
     let adjacent_boundary = adjacent + "inspect".len();
 
     assert!(database.hover(adjacent_boundary).unwrap().is_none());
-    assert!(database.definition_at(adjacent_boundary).unwrap().is_none());
-    assert!(
+    assert!(matches!(
+        database.definition_at(adjacent_boundary).unwrap(),
+        Some(DefinitionTarget::Source(definition)) if definition.span.start == declaration
+    ));
+    assert_eq!(
         database
             .references_at(adjacent_boundary, true)
             .unwrap()
-            .is_empty()
+            .len(),
+        3
     );
     assert!(
         database
             .rename_target_at(adjacent_boundary)
             .unwrap()
-            .is_none()
+            .is_some()
     );
 
     let inside = adjacent_boundary - 1;

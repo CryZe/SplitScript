@@ -973,11 +973,13 @@ semantic models. `CompilerDatabase::definition_at` resolves the token under the
 cursor, while `CompilerDatabase::references_at` filters the same index by
 identity and optionally excludes its declaration. The LSP adapter emits
 single-document `Location` values and performs only byte-to-UTF-16 conversion.
-Editor cursor selection is centralized in the lossless `SourceDocument`: an
-exact token beginning at the cursor always wins, including punctuation next to
-an identifier. Only a token-free position may fall back to a word-like token
-whose half-open span ends exactly there. Hover, definition, references, and
-rename therefore agree at punctuation, whitespace, line endings, and EOF.
+Editor selection is centralized in the lossless `SourceDocument` but reflects
+the two LSP position conventions. Hover is character-based, so an exact token
+beginning at the pointer wins over an identifier ending there. Definition,
+references, and rename are caret-based and keep selecting a word whose
+half-open span ends at the caret, including before adjacent punctuation;
+semantic postfix `?`/`!` tokens retain exact precedence. Neither policy skips
+whitespace, and all remain well-defined at line endings and EOF.
 Standard-library and language-catalog definitions deliberately return no source
 location; future generated or virtual documentation can provide a separate
 navigation target without weakening source identity.

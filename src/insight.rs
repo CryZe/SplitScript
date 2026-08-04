@@ -54,12 +54,12 @@ pub(crate) fn hover(
     database: &mut CompilerDatabase,
     offset: usize,
 ) -> SemanticQueryResult<Option<HoverInfo>> {
-    let offset = database.symbol_query_offset(offset)?;
+    let offset = database.hover_query_offset(offset)?;
     let standard_library = database.context().standard_library();
     let Some(token) = database.token_at(offset)? else {
         return Ok(None);
     };
-    let target = database.definition_at(offset)?;
+    let target = database.definition_at_query_offset(offset)?;
     if target.is_none()
         && let Some(analysis) = database.analysis_at(offset)?
         && let Some(ExpressionResolution::ValuePath {

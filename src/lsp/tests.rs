@@ -716,8 +716,9 @@ fn definition_and_references_use_source_identities_and_utf16_ranges() {
     }));
     assert_eq!(with_declaration[0]["result"].as_array().unwrap().len(), 3);
 
-    // With no gap, the opening parenthesis begins exactly at the cursor and
-    // wins over the identifier that ends there.
+    // Navigation receives a caret position rather than a hovered character,
+    // so the identifier ending at an adjacent opening parenthesis remains the
+    // target.
     let adjacent = source.find("inspect(1)").unwrap() + "inspect".len();
     let (adjacent_line, adjacent_character) = position_parts(source, adjacent);
     let definition = server.handle(json!({
@@ -729,7 +730,11 @@ fn definition_and_references_use_source_identities_and_utf16_ranges() {
             "position": { "line": adjacent_line, "character": adjacent_character }
         }
     }));
-    assert!(definition[0]["result"].is_null());
+    assert_eq!(definition[0]["result"]["uri"], uri);
+    assert_eq!(
+        definition[0]["result"]["range"]["start"],
+        position(source, declaration)
+    );
 
     let references = server.handle(json!({
         "jsonrpc": "2.0",
@@ -741,7 +746,7 @@ fn definition_and_references_use_source_identities_and_utf16_ranges() {
             "context": { "includeDeclaration": true }
         }
     }));
-    assert!(references[0]["result"].as_array().unwrap().is_empty());
+    assert_eq!(references[0]["result"].as_array().unwrap().len(), 3);
 }
 
 #[test]
@@ -824,7 +829,7 @@ fn prepare_rename_and_rename_emit_validated_workspace_edits() {
     );
     let uri = "file:///rename.split";
     let call = source.rfind("inspect").unwrap();
-    let (line, character) = position_parts(source, call + "inspect".len() - 1);
+    let (line, character) = position_parts(source, call + "inspect".len());
     let mut server = LanguageServer::default();
     initialize(&mut server);
     server.handle(notification(

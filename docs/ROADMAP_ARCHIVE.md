@@ -2,16 +2,17 @@
 
 ## 2026-08-04: precise editor cursor boundaries
 
-- Centralized editor symbol selection in the lossless source document. A token
-  beginning at the cursor now wins over the identifier ending there, so
-  punctuation such as the `(` in `foo(bar)` no longer selects `foo` as well.
-- A cursor may still select a word at its half-open end when the position is a
-  genuine trivia gap, line/file end, or other token-free boundary. Whitespace
-  is never skipped, and exact postfix `?`/`!` tokens retain their own language
-  identities.
-- Hover, definition, references, and rename share this rule. Added lossless,
-  compiler-query, and UTF-16 LSP regressions for adjacent punctuation, a
-  one-space gap, line/file endings, and postfix punctuation.
+- Centralized editor symbol selection in the lossless source document while
+  distinguishing character-based hover from zero-width caret operations.
+  Hover gives precedence to an exact token beginning at the pointer, so the
+  `(` in `foo(bar)` no longer selects `foo` as well.
+- Definition, references, and rename conventionally keep selecting a word at
+  its half-open end, including before adjacent punctuation. Meaningful postfix
+  `?`/`!` tokens retain their own language identities, and whitespace is never
+  skipped.
+- Added lossless, compiler-query, and UTF-16 LSP regressions for adjacent
+  punctuation, a one-space gap, line/file endings, hover, navigation,
+  references, rename, and postfix punctuation.
 
 ## 2026-08-04: attachment-aware root completion
 

@@ -392,18 +392,20 @@ impl CompilerDatabase {
         Ok(recovered.source_document().token_at(offset).cloned())
     }
 
-    pub(crate) fn symbol_query_offset(&mut self, offset: usize) -> SemanticQueryResult<usize> {
+    pub(crate) fn hover_query_offset(&mut self, offset: usize) -> SemanticQueryResult<usize> {
         let recovered = self.recovering_parse()?;
-        if recovered
-            .source_document()
-            .token_at(offset)
-            .is_some_and(|token| matches!(token.kind, TokenKind::Question | TokenKind::Bang))
-        {
-            return Ok(offset);
-        }
         Ok(recovered
             .source_document()
             .symbol_token_at(offset)
+            .filter(|token| token.span.end == offset)
+            .map_or(offset, |token| token.span.end - 1))
+    }
+
+    pub(crate) fn caret_query_offset(&mut self, offset: usize) -> SemanticQueryResult<usize> {
+        let recovered = self.recovering_parse()?;
+        Ok(recovered
+            .source_document()
+            .caret_symbol_token_at(offset)
             .filter(|token| token.span.end == offset)
             .map_or(offset, |token| token.span.end - 1))
     }
@@ -461,7 +463,14 @@ impl CompilerDatabase {
         &mut self,
         offset: usize,
     ) -> SemanticQueryResult<Option<DefinitionTarget>> {
-        let offset = self.symbol_query_offset(offset)?;
+        let offset = self.caret_query_offset(offset)?;
+        self.definition_at_query_offset(offset)
+    }
+
+    pub(crate) fn definition_at_query_offset(
+        &mut self,
+        offset: usize,
+    ) -> SemanticQueryResult<Option<DefinitionTarget>> {
         let definitions = self.definition_index()?;
         if let Some(reference) = definitions.reference_at(offset) {
             return Ok(definitions

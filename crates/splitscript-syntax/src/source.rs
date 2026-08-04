@@ -74,6 +74,29 @@ impl SourceDocument {
         if let Some(current) = self.token_at(offset) {
             return Some(current);
         }
+        self.word_ending_at(offset)
+    }
+
+    /// Returns the semantic token selected by a zero-width editor caret.
+    ///
+    /// Unlike hover, caret-driven operations conventionally keep selecting an
+    /// identifier when the caret sits at its half-open end. Meaningful postfix
+    /// operators retain their own identity; other adjacent punctuation yields
+    /// to the word immediately before the caret.
+    pub fn caret_symbol_token_at(&self, offset: usize) -> Option<&Token> {
+        let current = self.token_at(offset);
+        if current.is_some_and(|token| {
+            matches!(
+                token.kind,
+                crate::TokenKind::Question | crate::TokenKind::Bang
+            )
+        }) {
+            return current;
+        }
+        self.word_ending_at(offset).or(current)
+    }
+
+    fn word_ending_at(&self, offset: usize) -> Option<&Token> {
         offset
             .checked_sub(1)
             .and_then(|previous| self.token_at(previous))
@@ -176,6 +199,10 @@ mod tests {
             document.text(document.symbol_token_at(alpha_end).unwrap().span),
             "."
         );
+        assert_eq!(
+            document.text(document.caret_symbol_token_at(alpha_end).unwrap().span),
+            "alpha"
+        );
         let beta_end = source.find("beta").unwrap() + "beta".len();
         assert_eq!(
             document.text(document.symbol_token_at(beta_end).unwrap().span),
@@ -203,6 +230,10 @@ mod tests {
             let offset = source.find(punctuation).unwrap();
             assert_eq!(
                 document.text(document.symbol_token_at(offset).unwrap().span),
+                punctuation.to_string()
+            );
+            assert_eq!(
+                document.text(document.caret_symbol_token_at(offset).unwrap().span),
                 punctuation.to_string()
             );
         }

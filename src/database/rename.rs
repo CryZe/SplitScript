@@ -55,7 +55,7 @@ impl CompilerDatabase {
     /// Language and standard-library catalog symbols are intentionally not
     /// renameable source declarations.
     pub fn rename_target_at(&mut self, offset: usize) -> SemanticQueryResult<Option<RenameTarget>> {
-        let offset = self.symbol_query_offset(offset)?;
+        let offset = self.caret_query_offset(offset)?;
         let definitions = self.definition_index()?;
         if let Some(reference) = definitions.reference_at(offset) {
             let target = definitions.get(reference.target).and_then(|definition| {
@@ -77,7 +77,7 @@ impl CompilerDatabase {
             }
             return Ok(target);
         }
-        let target = match self.definition_at(offset)? {
+        let target = match self.definition_at_query_offset(offset)? {
             Some(DefinitionTarget::Source(definition)) => {
                 if matches!(
                     definition.id,

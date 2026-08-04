@@ -1034,7 +1034,6 @@ fn language_catalog_is_valid_documented_and_compilable() {
     for action in [
         splitscript::compiler::ast::ActionKind::OnDetached,
         splitscript::compiler::ast::ActionKind::OnAttach,
-        splitscript::compiler::ast::ActionKind::OnSplit,
         splitscript::compiler::ast::ActionKind::WhileAttached,
         splitscript::compiler::ast::ActionKind::Start,
         splitscript::compiler::ast::ActionKind::Split,

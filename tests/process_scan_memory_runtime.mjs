@@ -58,7 +58,7 @@ const env = {
 ({ instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), { env }));
 instance.exports._start();
 const polls = [];
-for (let poll = 0; poll < 4; poll += 1) {
+for (let poll = 0; poll < 5; poll += 1) {
     reads = [];
     bytesRead = 0;
     instance.exports.update();
@@ -68,7 +68,7 @@ for (let poll = 0; poll < 4; poll += 1) {
     }
 }
 
-if (polls.slice(0, 3).some((poll) => poll.messages.length !== 0)) {
+if (polls.slice(0, 4).some((poll) => poll.messages.length !== 0)) {
     throw new Error(`scan completed before visiting the lower range: ${JSON.stringify(polls)}`);
 }
 if (polls[0].reads[0] !== 0x100000 || polls[1].reads[0] !== 0x110000) {
@@ -77,7 +77,8 @@ if (polls[0].reads[0] !== 0x100000 || polls[1].reads[0] !== 0x110000) {
 if (polls[2].reads.length !== 0) {
     throw new Error(`unreadable range was not skipped cooperatively: ${JSON.stringify(polls)}`);
 }
-if (JSON.stringify(messages) !== JSON.stringify(["4103"]) || polls[3].reads[0] !== 0x1000) {
+if (polls[3].reads[0] !== 0x1000 || polls[4].reads.length !== 0
+    || JSON.stringify(messages) !== JSON.stringify(["4103"])) {
     throw new Error(`completed scan differed: ${JSON.stringify(polls)}`);
 }
 

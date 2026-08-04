@@ -528,6 +528,15 @@ fn emit_cooperative_range_scan(
     let matched = scratch[3];
     let signature = scratch[4];
 
+    // Deliver a match saved by the previous poll without doing more scanning
+    // work. A scan that inspects memory always yields once, so several awaited
+    // scans chained by the caller cannot all run during a single host update.
+    emit_intrinsic_state_get(function, context, 1);
+    function
+        .instruction(&Instruction::LocalTee(matched))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+
     emit_intrinsic_state_get(function, context, 0);
     function
         .instruction(&Instruction::LocalSet(cursor))
@@ -604,6 +613,14 @@ fn emit_cooperative_range_scan(
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
+
+    emit_intrinsic_state_set_local(function, context, 1, matched);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+    emit_intrinsic_state_set_zero(function, context, 0);
+    emit_intrinsic_state_set_zero(function, context, 1);
 }
 
 fn emit_process_scan_advance_range(
@@ -635,6 +652,15 @@ fn emit_cooperative_process_scan(
     let remaining = scratch[4];
     let matched = scratch[5];
     let signature = scratch[6];
+
+    // A non-zero result was found in the preceding poll. Deliver it now and
+    // clear the future-local traversal state for a later execution of the same
+    // await expression.
+    emit_intrinsic_state_get(function, context, 2);
+    function
+        .instruction(&Instruction::LocalTee(matched))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
 
     emit_intrinsic_state_get(function, context, 0);
     function.instruction(&Instruction::LocalSet(range_cursor));
@@ -769,6 +795,15 @@ fn emit_cooperative_process_scan(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::End);
+
+    emit_intrinsic_state_set_local(function, context, 2, matched);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+    emit_intrinsic_state_set_zero(function, context, 0);
+    emit_intrinsic_state_set_zero(function, context, 1);
+    emit_intrinsic_state_set_zero(function, context, 2);
 }
 
 fn emit_process_scan_any_advance_range(
@@ -816,6 +851,15 @@ fn emit_cooperative_process_scan_any(
     let matched = scratch[5];
     let signature = scratch[6];
     let signature_index = scratch[7];
+
+    // Preserve both parts of the match across one mandatory cooperative
+    // boundary. This keeps a fallback scan to one signature/window attempt per
+    // host poll even when its caller immediately awaits another scan.
+    emit_intrinsic_state_get(function, context, 3);
+    function
+        .instruction(&Instruction::LocalTee(matched))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
 
     emit_intrinsic_state_get(function, context, 0);
     function.instruction(&Instruction::LocalSet(range_cursor));
@@ -989,6 +1033,20 @@ fn emit_cooperative_process_scan_any(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::End);
+
+    emit_intrinsic_state_set_local(function, context, 3, matched);
+    emit_intrinsic_state_set_local(function, context, 4, signature_index);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+    emit_intrinsic_state_get(function, context, 4);
+    function.instruction(&Instruction::LocalSet(signature_index));
+    emit_intrinsic_state_set_zero(function, context, 0);
+    emit_intrinsic_state_set_zero(function, context, 1);
+    emit_intrinsic_state_set_zero(function, context, 2);
+    emit_intrinsic_state_set_zero(function, context, 3);
+    emit_intrinsic_state_set_zero(function, context, 4);
 }
 
 #[allow(clippy::too_many_arguments)]

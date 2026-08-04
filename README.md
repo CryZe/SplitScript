@@ -42,8 +42,8 @@ isLoading {
 Expressions intentionally feel familiar to JavaScript and C# authors: `let`,
 property access, `==`/`!=`, `&&`/`||`, and ordinary control flow. Repetitive
 autosplitter concepts use their own syntax: `state`, `settings`, `onAttach`,
-`onSplit`, `start`, `split`, `reset`, `isLoading`, and `gameTime` are top-level
-constructs, not disguised function exports.
+`start`, `split`, `reset`, `isLoading`, and `gameTime` are top-level constructs,
+not disguised function exports.
 
 The examples include a full port of the currently implemented behavior in the
 unfinished Rust Minish Cap autosplitter. It exercises GBA emulator discovery,
@@ -255,9 +255,7 @@ compile-time and output-size measurements are recorded in
   host-map keys, enum-backed choices, file selectors with glob/MIME filters, and automatic
   `settings`/`oldSettings` tick snapshots.
 - `whileAttached`, `start`, `split`, `reset`, `isLoading`, and `gameTime`
-  actions, one-shot `onAttach` and `onDetached` lifecycle blocks, and a
-  host-driven `onSplit` event that observes scripted, manual, and external
-  timer splits.
+  actions, plus one-shot `onAttach` and `onDetached` lifecycle blocks.
 - LiveSplit timer-state ordering matching the ASL v2 prototype.
 - Source spans and concise diagnostics.
 - Tooling-facing standard-library and language catalogs with stable IDs,

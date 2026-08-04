@@ -2124,6 +2124,11 @@ fn compile_expr_unconverted(
                     context.gc.index(Type::Standard(StdlibTypeId::TimerState)),
                 ));
             }
+            IntrinsicId::TimerCurrentSplitIndex => {
+                function.instruction(&Instruction::Call(
+                    context.abi.function(AbiImportId::TimerCurrentSplitIndex),
+                ));
+            }
             IntrinsicId::TimerPauseGameTime => {
                 function.instruction(&Instruction::Call(
                     context.abi.function(AbiImportId::TimerPauseGameTime),

@@ -901,24 +901,6 @@ onDetached {
 }
 ```
 
-`onSplit` is a host-driven event, not another split condition. It runs after
-the timer has advanced a segment for every kind of split, including manual and
-external splits:
-
-```text
-let completedSplits = 0
-
-onSplit {
-    completedSplits += 1
-}
-```
-
-The event is synchronous and can occur while detached. Globals and the most
-recent settings remain available, but `process`/provider values and the
-`current`/`old` state snapshots do not. The host invokes it after the active
-`update` call returns, so it never re-enters script execution through the
-`timer_split` import.
-
 ```text
 start {
     return current.level == 1;
@@ -958,7 +940,7 @@ and `reset`; those blocks are simply boolean and default to `false`.
 `Duration.fromFrames(i64, i64)`, and `Duration.fromParts(i64, i32)`.
 `Duration.fromSeconds(f32)` performs the safe game-time conversion used by
 Unity timers. `whileAttached` returns nothing and runs before timer actions on
-every attached tick. `onDetached` and `onSplit` also return nothing.
+every attached tick. `onDetached` also returns nothing.
 
 ## Discovered state and watchers
 

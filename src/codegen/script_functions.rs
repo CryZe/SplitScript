@@ -554,18 +554,13 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
     let mut locals = HashMap::new();
     let mut local_types = Vec::new();
     let mut matches = MatchLayout::default();
-    let parameter_count = if action.kind == ActionKind::OnSplit {
-        0
-    } else {
-        2
-    };
     plan_wasm_locals(
         &wasm_body.locals,
         &mut locals,
         &mut matches,
         &mut local_types,
         LocalPlanOptions {
-            parameter_count,
+            parameter_count: 2,
             semantics: lowering.semantics,
             instance: None,
             include_values: true,
@@ -629,10 +624,7 @@ pub(super) fn emit_action_default(function: &mut Function, action: ActionKind, g
                 gc.standard_index(StdlibTypeId::Duration),
             )));
         }
-        ActionKind::OnDetached
-        | ActionKind::OnAttach
-        | ActionKind::OnSplit
-        | ActionKind::WhileAttached => {}
+        ActionKind::OnDetached | ActionKind::OnAttach | ActionKind::WhileAttached => {}
     }
 }
 

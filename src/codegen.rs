@@ -454,7 +454,6 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &static_data,
         start_function,
         update_function,
-        action_functions.get(&ActionKind::OnSplit).copied(),
     )
 }
 

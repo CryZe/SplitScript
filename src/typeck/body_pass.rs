@@ -383,9 +383,7 @@ fn layout_selection_is_terminal(checker: &Checker, block: &crate::ast::Block) ->
 
 fn action_return_type(checker: &Checker, program: &Program, action: ActionKind) -> Type {
     match action {
-        ActionKind::OnDetached | ActionKind::OnSplit | ActionKind::WhileAttached => {
-            checker.core_type(CoreTypeId::None)
-        }
+        ActionKind::OnDetached | ActionKind::WhileAttached => checker.core_type(CoreTypeId::None),
         ActionKind::OnAttach => program
             .state
             .as_ref()

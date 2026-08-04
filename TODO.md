@@ -38,8 +38,11 @@ General rules:
   reverse order for this port, skip unreadable mappings, and preserve
   process-lifetime cancellation while discovery is pending. Every public scan
   owns a future-local cursor, inspects only a bounded window per poll, and then
-  yields back to the host. This is a responsiveness contract: discovery must
-  not make a tick exceed the runtime's hanging-autosplitter threshold.
+  yields back to the host before delivering a match. Chaining several awaited
+  scans therefore cannot traverse several windows in one update. This is a
+  responsiveness contract: discovery must not make a tick exceed the runtime's
+  hanging-autosplitter threshold; runtime tests must assert both the byte budget
+  and the number of scan attempts made by each poll.
 - [ ] Move compiler-owned Unity IL2CPP and GBA discovery onto the same
   cooperative scan machinery. An async-looking provider must never call a
   helper that traverses an unbounded module or memory-range list in one poll.
@@ -49,12 +52,12 @@ General rules:
   `MemoryWatcher` objects or game-specific compiler branches. The A Hat runtime
   fixture covers alternative-signature layout selection and the discovered
   save-data and actor pointer chains.
-- [x] Add host-driven `onSplit` behavior for the debounce lock so manual and
-  externally initiated splits are observed as well as splits requested by the
-  script. The optional parameterless export runs synchronously after segment
-  advancement and outside `update`; it permits globals and settings while
-  rejecting attachment providers and state snapshots because it can run while
-  detached.
+- [ ] Implement the debounce lock with the existing
+  `timer_current_split_index` host import. Observe index advancement from
+  `whileAttached`; document that skips also advance the index and that an undo
+  followed by a split between polls is not observable through the current ABI.
+  Keep an exact host-driven timer event as future runtime work rather than
+  inventing an export that LiveSplit does not call.
 - [ ] Preserve the full settings hierarchy, detailed/rift/position split
   tables, game-time correction, IL mode, start/reset behavior, and split lock.
   Introduce a repeated-settings or collection abstraction only where the
@@ -265,6 +268,8 @@ remaining work is product hardening and distribution.
   relative to polling and detach, reentrancy, and whether suspension is safe.
   Add host ABI, runtime, type-checking, hover/completion, and detached-event
   fixtures together; do not weaken availability in ordinary attached blocks.
+  The current LiveSplit Wasm runtime only calls `update`; this requires a real
+  upstream host contract before any event export may be implemented.
 - [ ] Design a typed least-privilege timer/run API for timing method, category,
   attempt metadata, current segment/history, and run offset. Separate read-only
   metadata from mutations and add ABI support only where LiveSplit can expose

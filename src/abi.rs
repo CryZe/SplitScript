@@ -186,6 +186,15 @@ abi_catalog! {
         "Reads the current timer state."
     ),
     import!(
+        TimerCurrentSplitIndex,
+        "timer_current_split_index",
+        &[],
+        &[value("index", AbiType::I64)],
+        TIMER_READ,
+        "Returns -1 outside an attempt and the segment count after the final split.",
+        "Reads the index of the split the current attempt is on."
+    ),
+    import!(
         TimerStart,
         "timer_start",
         &[],

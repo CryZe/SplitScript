@@ -42,14 +42,16 @@ const env = {
 
 ({ instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), { env }));
 instance.exports._start();
-for (let poll = 0; poll < 2; poll += 1) {
+for (let poll = 0; poll < 3; poll += 1) {
     reads = 0;
     instance.exports.update();
     readsPerPoll.push(reads);
 }
 
-if (JSON.stringify(readsPerPoll) !== JSON.stringify([1, 1])) {
-    throw new Error(`expected one candidate signature per poll, got ${JSON.stringify(readsPerPoll)}`);
+if (JSON.stringify(readsPerPoll) !== JSON.stringify([1, 1, 0])) {
+    throw new Error(
+        `expected one candidate signature per work poll and a delivery poll, got ${JSON.stringify(readsPerPoll)}`,
+    );
 }
 if (JSON.stringify(messages) !== JSON.stringify(["1:4105"])) {
     throw new Error(`unexpected signature match: ${JSON.stringify(messages)}`);

@@ -266,11 +266,15 @@ const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
 
 const fn async_state(id: IntrinsicId) -> Option<ScratchPolicy> {
     match id {
+        // A completed scan is delivered on the poll after the bounded window
+        // that found it. Besides making the operation observably async, the
+        // extra result slots prevent chained scans from consuming several
+        // windows during one host update.
         IntrinsicId::ProcessScan | IntrinsicId::ModuleScan => {
-            scratch(ScratchType::Core(CoreTypeId::U64), 1)
+            scratch(ScratchType::Core(CoreTypeId::U64), 2)
         }
-        IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 2),
-        IntrinsicId::ProcessScanMemoryAny => scratch(ScratchType::Core(CoreTypeId::U64), 3),
+        IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 3),
+        IntrinsicId::ProcessScanMemoryAny => scratch(ScratchType::Core(CoreTypeId::U64), 5),
         _ => None,
     }
 }
@@ -307,6 +311,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::SettingsEnabled => &[Helper(Runtime::SettingsEnabled)],
         IntrinsicId::InstantNow => &[HostImport(Host::WasiClockTimeGet)],
         IntrinsicId::TimerState => &[HostImport(Host::TimerGetState)],
+        IntrinsicId::TimerCurrentSplitIndex => &[HostImport(Host::TimerCurrentSplitIndex)],
         IntrinsicId::TimerPauseGameTime => &[HostImport(Host::TimerPauseGameTime)],
         IntrinsicId::TimerResumeGameTime => &[HostImport(Host::TimerResumeGameTime)],
         IntrinsicId::ProcessMainModule | IntrinsicId::ProcessModule => &[
@@ -382,6 +387,7 @@ const NEXT_TICK: EffectSet = EffectSet::one(Effect::RequiresAttachedProcess)
 
 const NONE: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::None);
 const BOOL: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Bool);
+const I64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::I64);
 const U32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U32);
 const U64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U64);
 const F64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::F64);
@@ -794,6 +800,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             TimerState,
             Function,
             signature(NO_TYPE_PARAMETERS, None, params![], TIMER_STATE),
+            TIMER_READ,
+            Everywhere,
+            HostBoundary
+        ),
+        IntrinsicId::TimerCurrentSplitIndex => contract!(
+            TimerCurrentSplitIndex,
+            Function,
+            signature(NO_TYPE_PARAMETERS, None, params![], I64),
             TIMER_READ,
             Everywhere,
             HostBoundary

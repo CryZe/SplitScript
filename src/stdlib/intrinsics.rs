@@ -39,6 +39,7 @@ macro_rules! trusted_intrinsics {
             ProcessReadUtf8,
             ProcessReadManagedString,
             TimerState,
+            TimerCurrentSplitIndex,
             TimerPauseGameTime,
             TimerResumeGameTime,
             UnityIl2Cpp,

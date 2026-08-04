@@ -18,7 +18,6 @@ suite verifies the table below against the catalog renderer.
 | --- | --- | --- |
 | `_start` | `() -> ()` | Allocate GC state snapshots and register settings |
 | `update` | `() -> ()` | Host ABI polling entry point; drives SplitScript lifecycle blocks and timer actions |
-| `on_split` (optional) | `() -> ()` | Notify a declared `onSplit` block after any timer split has advanced the segment |
 | `memory` | dynamically sized linear memory | Named runtime scratch regions followed by immutable UTF-8/signature data and growable host-string staging |
 
 ## Imports
@@ -26,6 +25,7 @@ suite verifies the table below against the catalog renderer.
 | Import | WebAssembly type |
 | --- | --- |
 | `timer_get_state` | `() -> i32` |
+| `timer_current_split_index` | `() -> i64` |
 | `timer_start` | `() -> ()` |
 | `timer_split` | `() -> ()` |
 | `timer_reset` | `() -> ()` |
@@ -67,13 +67,6 @@ the small lifecycle baseline; optional facilities such as process reads,
 settings, logging, and the monotonic clock are imported only when reachable
 source needs them. Import identities and ordering remain deterministic through
 the ABI catalog.
-
-The host calls the optional `on_split` export after the timer has advanced to
-the next segment and after any active `update` call returns. It does this for
-script-requested, manual, and externally requested splits alike. The callback
-is synchronous and may also run while no process is attached; hosts must not
-re-enter it from the `timer_split` import. Modules without an `onSplit` block do
-not export it.
 
 `_start` registers the complete settings GUI, including nested titles,
 tooltips, choices, and file filters. Every exported `update` call loads a

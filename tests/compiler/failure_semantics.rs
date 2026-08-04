@@ -960,6 +960,10 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
         library.render_signature(StdlibItemId::TimerState),
         "timer.state() -> TimerState"
     );
+    assert_eq!(
+        library.render_signature(StdlibItemId::TimerCurrentSplitIndex),
+        "timer.currentSplitIndex() -> i64"
+    );
     let next_tick = library
         .item_by_name("nextTick")
         .expect("nextTick should be catalog-backed");
@@ -1068,46 +1072,6 @@ fn process_operations_reject_detached_lifecycle_use() {
         error.message
             == "`Process.read` requires an attached process and is unavailable in `onDetached`"
     }));
-}
-
-#[test]
-fn host_split_events_do_not_assume_an_attachment_or_state_snapshot() {
-    let process_errors = splitscript::compile(
-        r#"
-            state "game.exe" {}
-            onSplit {
-                let memory = process.read<i32>(0x100) else 0
-                print(memory)
-            }
-        "#,
-    )
-    .expect_err("host split events must remain valid while detached");
-    assert!(
-        process_errors.iter().any(|error| {
-            error.message
-                == "`Process.read` requires an attached process and is unavailable in `onSplit`"
-        }),
-        "{process_errors:#?}"
-    );
-
-    let snapshot_errors = splitscript::compile(
-        r#"
-            state "game.exe" {
-                value: i32 at 0x100;
-            }
-            onSplit {
-                print(current.value)
-            }
-        "#,
-    )
-    .expect_err("host split events cannot assume that state snapshots exist");
-    assert!(
-        snapshot_errors.iter().any(|error| {
-            error.message
-                == "state snapshots are unavailable in `onSplit` because timer events can occur while detached"
-        }),
-        "{snapshot_errors:#?}"
-    );
 }
 
 #[test]

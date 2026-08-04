@@ -20,7 +20,6 @@ pub(super) fn finish(
     data: &StaticData,
     start_function: u32,
     update_function: u32,
-    on_split_function: Option<u32>,
 ) -> Vec<u8> {
     let Sections {
         types,
@@ -41,9 +40,6 @@ pub(super) fn finish(
     exports.export("memory", ExportKind::Memory, 0);
     exports.export("_start", ExportKind::Func, start_function);
     exports.export("update", ExportKind::Func, update_function);
-    if let Some(on_split) = on_split_function {
-        exports.export("on_split", ExportKind::Func, on_split);
-    }
     let data = data.encode();
 
     let mut module = Module::new();

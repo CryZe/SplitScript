@@ -161,6 +161,14 @@ cases. Candidate host-owned facilities are:
 - typed, bounded iteration over mapped memory ranges, including readable,
   writable, executable, and path-backed flags.
 
+Before expanding discovery, document the existing attachment-name contract:
+whether matching uses the full executable filename, how case is handled, and
+what name is reported after a match on each host OS. Legacy ASL commonly omits
+Windows' `.exe`, while SplitScript currently supplies literal names. The
+compiler owns migration diagnostics for that difference; the host must provide
+stable, testable matching semantics rather than relying on accidental platform
+normalization.
+
 Any collection-shaped result should use the GC-managed resource direction from
 R1 or a bounded visitor/polling contract. It should not introduce another
 integer handle plus manual `free` family. Long-running discovery must cooperate
@@ -178,10 +186,61 @@ filters, tooltips, and a global settings map. Future ports may require
 conditional visibility or enablement and repeated/table-shaped settings. Those
 features need a frontend/runtime contract, not merely new SplitScript syntax.
 
+The bulk ASL campaign found finite loops that register 35, 50, or 110 boolean
+settings and then look them up by string key. A compile-time repeated/table
+declaration can solve those finite cases without runtime mutation and belongs
+in `TODO.md`. Runtime-created settings are justified only when keys or labels
+are genuinely discovered from game data or otherwise unbounded. For that case,
+the host must define when additions become visible, how ordering and hierarchy
+are preserved, what happens to persisted values for temporarily absent keys,
+and whether registration is permitted after startup.
+
 Dynamic settings mutation must compose with concurrent changes from the
 LiveSplit UI. R1's GC-native map API therefore needs to retain the current
 compare-and-store behavior rather than replacing it with an unconditional
 overwrite.
+
+## R5: typed timer/run observation and controlled mutation
+
+**Priority:** P1, promoted by repeated port evidence
+
+**Status:** Existing narrow operations are supported; broader semantics and
+transport are undecided.
+
+The current contract exposes timer state, current split index, whether a
+segment was split, timer actions, game-time publication/pause/resume, and
+variables. This already covers ordinary `start`/`split`/`reset`, load removal,
+and many one-shot guards. It does not expose the nested LiveSplit objects that
+legacy scripts use through `timer.CurrentTime`, `timer.CurrentSplit.Name`,
+`timer.Run.Offset`, timing-method selection, or attempt/category metadata.
+
+The porting campaign found three different needs that must not be collapsed
+into one untyped `timer` escape hatch:
+
+- process-independent debounce and delay logic, which should use SplitScript's
+  existing monotonic `Instant.now()` and requires no new timer ABI;
+- read-only snapshots of timer real time, game time, current segment identity,
+  run metadata, and timing method;
+- controlled mutations such as changing run offset or timing method, whose
+  ordering and user-visible effects need an explicit host contract.
+
+A future versioned ABI should expose typed optional values when LiveSplit has
+no current attempt, split, or game time. Reads taken during one update must form
+a coherent snapshot. Mutations must specify whether they apply before or after
+timer-decision exports, how they interact with reset/start/split events, and
+whether user UI changes win. Run-offset units, sign, precision, persistence,
+and undo/reset behavior must be explicit. Source APIs should be
+least-privilege: reading metadata must not grant arbitrary run mutation.
+
+Timing-method prompts and message boxes are frontend interactions, not timer
+state. They require a separate consent-aware UI design and may remain outside
+the sandbox; a port must not silently claim parity merely because it omitted
+the prompt.
+
+Acceptance tests should cover absence before a run, active and paused timers,
+segment changes, reset, positive and negative offsets, timing-method changes,
+and ordering relative to `whileAttached`, timer-decision actions, game-time
+publication, and the eventual exact-event contract in R2.
 
 ## Recording requirements from ports
 

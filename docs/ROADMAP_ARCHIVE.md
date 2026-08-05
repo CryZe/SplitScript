@@ -1,5 +1,22 @@
 # SplitScript roadmap
 
+## 2026-08-04: faithful A Hat in Time production port
+
+- Ported the production-scale autosplitter with its full settings hierarchy,
+  IL mode, detailed/rift/position split tables, game-time correction,
+  start/reset behavior, and split lock.
+- Replaced the legacy background thread with process-lifetime-cancelled,
+  suspending discovery. Process-wide scans traverse readable mapped ranges in
+  deterministic bounded windows and yield between windows so one update cannot
+  monopolize the autosplitting thread.
+- Represented discovered timer, save-data, actor, and coordinate roots through
+  ordinary source globals, records, arrays, functions, and declarative state
+  expressions rather than game-specific compiler paths.
+- Used the official current-split-index observation for the polling-based
+  debounce lock and documented its skip/undo limitation instead of inventing a
+  host callback. Runtime fixtures cover signature fallback, discovered pointer
+  chains, settings behavior, scan budgets, and unsupported builds.
+
 ## 2026-08-04: source-defined cooperative engine discovery
 
 - Moved Unity IL2CPP and GBA emulator discovery out of compiler-owned helpers

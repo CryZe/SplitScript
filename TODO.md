@@ -31,38 +31,55 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — faithfully port A Hat in Time
+## Now — turn the bulk ASL ports into faithful migration evidence
 
-- [x] Port the production-scale `AHatInTime.asl` without copying its C#
-  implementation artifacts. Its background scan thread becomes suspending
-  `onAttach` discovery, followed by declarative state polling only after every
-  required root is ready.
-- [x] Add process-wide signature discovery over readable mapped ranges. Keep
-  explicit range/module scanning available, scan ranges in deterministic
-  reverse order for this port, skip unreadable mappings, and preserve
-  process-lifetime cancellation while discovery is pending. Every public scan
-  owns a future-local cursor, inspects only a bounded window per poll, and then
-  yields back to the host before delivering a match. Chaining several awaited
-  scans therefore cannot traverse several windows in one update. This is a
-  responsiveness contract: discovery must not make a tick exceed the runtime's
-  hanging-autosplitter threshold; runtime tests must assert both the byte budget
-  and the number of scan attempts made by each poll.
-- [x] Represent the timer, save-data, actor, and coordinate watchers through
-  discovered addresses and patch-dependent pointer paths. Prefer ordinary
-  globals, records, arrays, functions, and state expressions over dynamic
-  `MemoryWatcher` objects or game-specific compiler branches. The A Hat runtime
-  fixture covers alternative-signature layout selection and the discovered
-  save-data and actor pointer chains.
-- [x] Implement the debounce lock with the existing
-  `timer_current_split_index` host import. Observe index advancement from
-  `whileAttached`; document that skips also advance the index and that an undo
-  followed by a split between polls is not observable through the current ABI.
-  Keep an exact host-driven timer event as future runtime work rather than
-  inventing an export that LiveSplit does not call.
-- [x] Preserve the full settings hierarchy, detailed/rift/position split
-  tables, game-time correction, IL mode, start/reset behavior, and split lock.
-  Introduce a repeated-settings or collection abstraction only where the
-  static source would otherwise become materially unmaintainable.
+The external porting campaign is valuable pressure-test input, not yet a
+maintained corpus. Its 392 sources used the current compiler but were not run
+against games or the repository's deterministic host fixtures. Several reports
+miss facilities that were already available, which is evidence that our
+documentation, examples, completion, or diagnostics did not make the intended
+solution discoverable. Every native `state` declaration in the campaign also
+copies ASL's extensionless process name. Compilation success must not be
+mistaken for attachment or behavioral parity.
+
+- [ ] Triage every reported limitation against the current language and the
+  source ASL before planning a replacement feature. For facilities that already
+  exist—such as `process.name()`, `timer.currentSplitIndex()`, `Instant.now()`,
+  rejected state candidates, cooperative scans, and the host-fixture
+  harness—identify why the author missed them and improve the relevant search
+  path: cookbook, standard-library docs, completion, hover, or a contextual
+  diagnostic. Recompile only focused probes needed to reproduce a concrete
+  report; do not rerun the campaign as though it used a stale compiler.
+- [ ] Classify each external port as compile-only, runtime-verified,
+  behavior-limited, or intentionally failing; compare the source ASL for
+  semantic omissions instead of trusting generated port notes. Record the
+  compiler revision for future campaigns as provenance, not because this
+  campaign used a different compiler.
+- [ ] Close the process-name migration footgun first. SplitScript process names
+  are literal executable identities, whereas ASL state declarations commonly
+  omit Windows' `.exe`. Put this difference beside the first `state` example,
+  recognize suspicious extensionless native process names, and provide a
+  prominent diagnostic plus an `.exe` code action only when it is safe or
+  clearly marked as requiring confirmation. Keep intentional Linux/macOS names
+  expressible without normalizing every name behind the author's back. Cover
+  one name, name lists, case behavior, and actual host attachment in tests.
+- [ ] Refresh the ASL migration catalog and cookbook against the current
+  compiler. Give `startup`, `init`, `update`, `exit`, `shutdown`, and
+  `timer.OnStart` focused semantic guidance rather than a generic top-level
+  parse error; explain one-time versus per-tick placement and the initial
+  `onDetached` invocation. Suppress predictable follow-on errors after a
+  missing member or failed declaration. Do not add compatibility aliases.
+- [ ] Promote a small pressure set from the campaign into repository-owned,
+  host-executed ports: one extensionless-name/multi-layout port, one native
+  UTF-16 or parsed-string port, one run-scoped visited-set port, and one
+  timer/run-metadata port. Each must record the preserved behavior and prove
+  pointer width, failed reads, attach/detach, unsupported builds, settings,
+  timer-action order, and tick cadence as applicable.
+- [ ] Use those maintained ports to decide the first implementation slice:
+  prefer the recurring `Set<String>`/membership and native UTF-16 blockers over
+  callbacks, reflection, UI prompts, or unrestricted filesystem access. Move a
+  gap back down the roadmap when the current language can already express it
+  clearly and only documentation or diagnostics were missing.
 
 ## P0 — unblock the next representative native ports
 
@@ -73,6 +90,12 @@ General rules:
 
 ### State layouts, discovery, and process identity
 
+- [ ] Make unsupported-build handling explicit in named-layout diagnostics and
+  completion. The generated `onAttach` skeleton should select only proven
+  layouts and end unknown or unavailable metadata paths with
+  `await process.closed()`; it must not encourage a typed fallback that can
+  silently poll the wrong addresses. Document when process name, executable
+  path, module size, `FileVersion`, or a signature is a reliable discriminator.
 - [ ] Add layout sharing or overrides only if a maintained port proves that
   repeated pointer paths across many versions are materially unmaintainable.
   Keep the selected physical layout auditable.
@@ -98,6 +121,12 @@ General rules:
   address decoding, and concise pointer-follow composition. Existing `sig`,
   scan, follow, and `readRelative32` APIs should be documented before new APIs
   are introduced.
+- [ ] Support signed pointer offsets without turning base addresses into signed
+  values. Specify wrapping/overflow behavior for static `at` paths,
+  `MemoryPath`, and discovered-address arithmetic; preserve ordinary positive
+  address literals and diagnose offsets that cannot fit the chosen signed
+  representation. Drive the first fixture from a real negative-offset ASL
+  path.
 - [ ] Add exact record layout controls only when a target requires them:
   offsets, padding/alignment, packing, and per-field endianness. Keep
   field-order native-endian layout as the default and diagnose overlaps and
@@ -105,15 +134,60 @@ General rules:
 
 ### Polling, mutable watcher patterns, and settings
 
-- [ ] Extend settings for data-heavy ports beyond the now-supported stable
-  external string keys and boolean lookup: conditional visibility or
-  enablement, and repeated tables. Preserve the label-first DSL, nested
-  headings, choices, files, and `///` tooltips; do not restore `settings.Add`
-  or compact aliases.
-- [ ] Add growable collections when the first faithful port requires them.
-  Prioritize the smallest coherent slice of `List<T>`/`Set<T>`/`Map<K, V>` with
-  lookup, insertion/removal, containment, clearing, and `for` iteration. Derive
-  key constraints from source-declared equality/hash capabilities.
+- [ ] Add a compile-time repeated/table form for large but finite settings
+  families before exposing runtime mutation. It must generate stable string
+  keys, labels, defaults, parent gating, and tooltips through the same settings
+  declaration model, and make 35–110-entry level/mission tables auditable
+  without hand expansion. `settings.enabled(key)` remains lookup over declared
+  boolean keys and should diagnose or clearly document unknown-key behavior.
+  Truly game-discovered or unbounded settings remain separate host/runtime work
+  under R1/R4 in [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
+- [ ] Add conditional settings visibility or enablement only with explicit host
+  semantics for persisted hidden values and parent changes. Until then,
+  document that headings are visual and parent boolean settings must gate child
+  behavior in source; do not let a compiling hierarchy imply behavior the host
+  does not provide.
+- [ ] Add source-defined `contains` and `indexOf` operations for fixed arrays,
+  with equality constraints and focused examples, so closed route tables do not
+  require manual search loops.
+- [ ] Add a run-scoped `Set<T>` as the first growable collection. The repeated
+  visited-map/checkpoint pattern now has evidence from several ports and cannot
+  be faithfully replaced by comparing only the previous value. Start with
+  construction, insertion, removal, containment, clearing, length, and `for`
+  iteration; make allocation and mutation behavior explicit and avoid creating
+  a fresh collection every tick. Derive key constraints from source-declared
+  equality/hash capabilities. Add `List<T>` or `Map<K, V>` only when the next
+  maintained port requires ordering, duplicates, or stored values.
+- [ ] Design indexed mutation together with collection mutability rather than
+  adding an isolated array-assignment special case. Specify aliasing, fixed
+  array versus growable collection behavior, bounds failure, and interaction
+  with globals and Wasm GC before enabling `values[index] = value`.
+
+### Runtime validation and ordinary library gaps
+
+- [ ] Turn the existing JavaScript host fixtures into a documented reusable
+  port-conformance harness rather than inventing a second test system. Make it
+  straightforward to model process names, 32/64-bit memory, modules, failed
+  reads, settings snapshots, timer state, attach/detach/restart, and bounded
+  async polling. A compile-only port is never labelled faithful.
+- [ ] Add explicit bounded native UTF-16LE decoding, including NUL termination,
+  surrogate handling, malformed-input policy, and required versus optional
+  state-field behavior. Keep it distinct from Unity managed-string object
+  decoding and from ASL `stringN` auto-detection; only add an auto-decoder if a
+  maintained port proves that explicit encoding cannot preserve the source.
+- [ ] Fill corpus-proven `String` gaps through source-defined APIs where
+  possible: case conversion with stated Unicode/ASCII semantics, splitting,
+  byte/scalar inspection consistent with the language's byte-index policy, and
+  fallible numeric parsing. Improve missing-member recovery so one unknown
+  method does not create unrelated unknown-local cascades.
+- [ ] Accept and round-trip finite IEEE-754 subnormal literals when their value
+  is representable. If decimal parsing would underflow or round, report the
+  exact result and offer an explicit bit-pattern form rather than rejecting a
+  valid memory comparison without guidance.
+- [ ] Prove `setTickRate` units, transition timing, and reset-to-default behavior
+  in the host harness at representative 60, 100, 120, and default rates. Show
+  `Instant.now()` as the process-independent tool for debounce/delay logic, and
+  distinguish it from reading the LiveSplit timer's real-time value.
 
 ### Standard-library and type-system boundaries
 
@@ -150,13 +224,20 @@ General rules:
   maintained ports. The first bounded-string, versioned-layout, one-shot, and
   detach-cleanup recipes are complete; add module fields, signatures and
   relative pointers, discovered addresses, records/fixed arrays, settings,
-  game time, state filtering, and cancellation. Compile the owning maintained
+  game time, state filtering, cancellation, mixed-width pointers, numeric/index
+  casts, monotonic delays, exact process-name matching, and helpers that take
+  `old`/`current` snapshots explicitly. Add a concise source-to-target
+  capability table that links to complete standard-library symbols instead of
+  making authors search the language reference. Compile the owning maintained
   examples in `cargo xtask check`.
 - [ ] Expand capability-driven diagnostics and code actions beyond the initial
   structured entries. Emit one focused explanation and suppress predictable
-  cascades for recognizable ASL constructs. Use machine-applicable rewrites
-  only after resolution proves equivalence and that user-defined names are not
-  being rewritten.
+  cascades for recognizable ASL constructs, including legacy lifecycle blocks,
+  timer member chains, `List<T>` operations, `settings.Add`, member casing, and
+  string decoders. Distinguish “supported under a different spelling,”
+  “requires a semantic rewrite,” “requires host support,” and “intentionally
+  sandboxed out.” Use machine-applicable rewrites only after resolution proves
+  equivalence and that user-defined names are not being rewritten.
 - [ ] Expand the structured foreign-spelling entries beyond the existing
   declarations, option value, strings, durations, and numeric types. Complete
   unambiguous fixes for JavaScript `===`/`!==` and `${...}`, Rust `let mut`,
@@ -166,6 +247,9 @@ General rules:
   TypeScript/JavaScript, and Rust. Explain semantic differences—lifecycle,
   fixed-width numbers, `Duration`, async cancellation, `Option`/`Result`,
   settings, and process reads—not only token substitutions.
+- [ ] Add conventional `splitc --help` and `splitc --version` behavior. Include
+  the compiler version/Git revision in machine-readable port reports so future
+  evidence remains reproducible.
 
 ## P1 — source-level debugging in debug builds
 
@@ -287,9 +371,13 @@ remaining work is product hardening and distribution.
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md) is the canonical
   runtime-side requirement.
 - [ ] Design a typed least-privilege timer/run API for timing method, category,
-  attempt metadata, current segment/history, and run offset. Separate read-only
-  metadata from mutations and add ABI support only where LiveSplit can expose
-  stable semantics.
+  attempt metadata, current segment/history, real time, game time, and run
+  offset. Separate read-only snapshots from mutations, distinguish the
+  monotonic `Instant` clock from timer real time, and add ABI support only where
+  LiveSplit can expose stable semantics. Use the repeated `timer.CurrentTime`,
+  `timer.CurrentSplit.Name`, `timer.Run.Offset`, and timing-method ports as the
+  evidence ledger; coordinate the host side through R5 in
+  [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
 - [ ] Document and test existing lifecycle mappings before adding host APIs:
   `isLoading`, `onDetached`, `timer.state()`, and `setTickRate` already replace
   common ASL patterns.
@@ -298,9 +386,15 @@ remaining work is product hardening and distribution.
   not expose threads or unconstrained background tasks.
 - [ ] Broaden suspending control flow incrementally from real ports and add a
   host-executed conformance fixture for each new shape.
+- [ ] Port one callback-heavy splitter such as Axiom Verge before designing
+  first-class function values or closures. Determine whether a named-function
+  table plus `match` is clearer, or whether stored callbacks materially reduce
+  complexity; do not import C# delegates, reflection, or event subscription as
+  compatibility concepts by default.
 - [ ] Complete remaining ordinary library gaps when a port needs them:
-  multiplication/division/remainder operator roles, additional immutable String
-  operations, and `Instant + Duration` with an explicit overflow contract.
+  multiplication/division/remainder operator roles, immutable String operations
+  beyond the corpus-proven P0 slice, and `Instant + Duration` with an explicit
+  overflow contract.
 - [ ] Generalize first-class indexing beyond arrays only when another real type
   needs it. Design an operator protocol with inferred index and output types
   (the current single-receiver capability graph has no associated types), then
@@ -341,8 +435,11 @@ remaining work is product hardening and distribution.
   defines checking, reachability, and release erasure.
 - [ ] Write an explicit sandbox policy before adding process writes/injection,
   arbitrary file access, network/process launching, modal UI, audio, or broad
-  host control. Dangerous capabilities require visible consent and cleanup
-  semantics; some may remain intentional non-goals.
+  host control. Use stats-file game time, install-file discovery, injected load
+  removers, and timing-method prompts from the ASL corpus as concrete policy
+  cases. Prefer file settings and typed host metadata where they suffice.
+  Dangerous capabilities require visible consent and cleanup semantics; some
+  may remain intentional non-goals.
 
 ## Ongoing — evidence, correctness, and maintainability
 
@@ -352,8 +449,9 @@ remaining work is product hardening and distribution.
   behavior, omissions, blockers, workaround quality, compiler revision, and
   runtime status. Distinguish complete, variant-limited, and behavior-limited
   ports.
-- [ ] Re-audit old notes after major compiler milestones. Missing documentation
-  or a stale copied compiler must not become duplicate feature work.
+- [ ] Re-audit old notes after major compiler milestones. Missing or
+  hard-to-find documentation, weak diagnostics, and unrecorded compiler
+  provenance must not become duplicate feature work.
 - [ ] Maintain a representative warning-free corpus spanning native games,
   Unity Mono/IL2CPP, emulators, pointer paths, signatures, settings trees,
   loading, game time, cancellation, and unusual numeric layouts.
@@ -371,17 +469,21 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Re-audit the manual notes with the generated index and select the next unrelated
-   production-scale port.
-2. Implement only gaps demonstrated by that port, with runtime and editor
-   coverage; promote only recurring
-   game-independent patterns.
-3. In parallel with stable language semantics, establish the Wasmtime/DWARF
+1. Audit the campaign's misunderstandings against the current compiler, fix the
+   exact process-name/`.exe` migration footgun, and improve the documentation,
+   completion, and diagnostics that failed to reveal existing features.
+2. Promote the pressure set into repository-owned runtime fixtures, starting
+   with native UTF-16 and a run-scoped visited set; implement only gaps that
+   remain after semantic review.
+3. Add the smallest recurring game-independent pieces—fixed-array search,
+   `Set<T>`, repeated static settings, signed pointer offsets, and focused
+   string operations—with runtime and editor coverage.
+4. In parallel with stable language semantics, establish the Wasmtime/DWARF
    compatibility fixture and land debug names plus source-line stepping.
-4. Harden and publish the bundled VSIX and native releases, then evaluate the
+5. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench.
-5. Add Unity Mono and the next emulator/engine provider from representative
+6. Add Unity Mono and the next emulator/engine provider from representative
    ports.
-6. Keep physical `None` aggregate specialization and sandbox-sensitive host
+7. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

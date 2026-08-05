@@ -472,7 +472,10 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &lowering,
         strings,
         &setting_indices,
-        refresh_settings,
+        module_start::StartFunctions {
+            refresh_settings,
+            setup: action_functions.get(&ActionKind::Setup).copied(),
+        },
         async_layout.is_some(),
     ));
     codes.function(&compile_update(

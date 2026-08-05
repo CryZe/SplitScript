@@ -255,19 +255,16 @@ pub(super) fn encode<'a>(
     });
     let mut actions = HashMap::new();
     for action in &program.actions {
-        let (params, results) = if action.kind == ActionKind::OnAttach {
-            (vec![ValType::I64], vec![ValType::I32])
-        } else {
-            (
+        let (params, results) = match action.kind {
+            ActionKind::Setup => (vec![], vec![]),
+            ActionKind::OnAttach => (vec![ValType::I64], vec![ValType::I32]),
+            action => (
                 vec![state_ref, state_ref],
-                (!matches!(
-                    action.kind,
-                    ActionKind::OnDetached | ActionKind::OnAttach | ActionKind::WhileAttached
-                ))
-                .then(|| action_result_val_type(action.kind, gc))
-                .into_iter()
-                .collect(),
-            )
+                (!matches!(action, ActionKind::OnDetached | ActionKind::WhileAttached))
+                    .then(|| action_result_val_type(action, gc))
+                    .into_iter()
+                    .collect(),
+            ),
         };
         actions.insert(action.kind, declare(params, results));
     }

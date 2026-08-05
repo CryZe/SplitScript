@@ -74,7 +74,10 @@ impl BackendDependencies {
                 ActionKind::GameTime => {
                     dependencies.require_import(AbiImportId::TimerSetGameTime);
                 }
-                ActionKind::OnAttach | ActionKind::OnDetached | ActionKind::WhileAttached => {}
+                ActionKind::Setup
+                | ActionKind::OnAttach
+                | ActionKind::OnDetached
+                | ActionKind::WhileAttached => {}
             }
         }
 

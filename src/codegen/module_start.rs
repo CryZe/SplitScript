@@ -23,13 +23,18 @@ use super::{
     value_type,
 };
 
+pub(super) struct StartFunctions {
+    pub(super) refresh_settings: Option<u32>,
+    pub(super) setup: Option<u32>,
+}
+
 pub(super) fn compile_start(
     program: &Program,
     settings_context: &SettingsContext<'_>,
     emission: &EmissionContext<'_>,
     strings: &StringPool,
     settings: &HashMap<ValueId, SettingStorage>,
-    refresh_settings: Option<u32>,
+    start_functions: StartFunctions,
     has_async_frame: bool,
 ) -> Function {
     let semantics = settings_context.semantics;
@@ -62,8 +67,11 @@ pub(super) fn compile_start(
             settings_context,
         );
     }
-    if let Some(refresh_settings) = refresh_settings {
+    if let Some(refresh_settings) = start_functions.refresh_settings {
         function.instruction(&Instruction::Call(refresh_settings));
+    }
+    if let Some(setup) = start_functions.setup {
+        function.instruction(&Instruction::Call(setup));
     }
     function.instruction(&Instruction::End);
     function

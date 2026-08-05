@@ -20,7 +20,7 @@ describes only the contract that generated modules implement today.
 
 | Export | Type | Purpose |
 | --- | --- | --- |
-| `_start` | `() -> ()` | Allocate GC state snapshots and register settings |
+| `_start` | `() -> ()` | Initialize module state and run the source `setup` block |
 | `update` | `() -> ()` | Host ABI polling entry point; drives SplitScript lifecycle blocks and timer actions |
 | `memory` | dynamically sized linear memory | Named runtime scratch regions followed by immutable UTF-8/signature data and growable host-string staging |
 
@@ -82,8 +82,11 @@ settings, logging, and the monotonic clock are imported only when reachable
 source needs them. Import identities and ordering remain deterministic through
 the ABI catalog.
 
-`_start` registers the complete settings GUI, including nested titles,
-tooltips, choices, and file filters. Every exported `update` call loads a
+`_start` initializes globals and GC state, registers the complete settings GUI
+including nested titles, tooltips, choices, and file filters, loads the initial
+settings snapshot, and then invokes the source `setup` block exactly once.
+`setup` is compiled as a synchronous `() -> ()` internal function and cannot
+observe a process provider or state snapshot. Every exported `update` call loads a
 settings map before running `onDetached` or attached user code, decodes it into typed GC/global values,
 and frees all temporary host handles. Choice strings become payloadless enum
 variants and selected paths become GC strings. The preceding tick remains

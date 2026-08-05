@@ -62,6 +62,59 @@ fn recovering_parse_reports_multiple_errors_and_keeps_later_declarations() {
 }
 
 #[test]
+fn legacy_lifecycle_blocks_get_semantic_migration_guidance() {
+    let source = r#"
+        state "game.exe" {}
+        startup {}
+        init {}
+        update {}
+        exit {}
+        shutdown {}
+        onStart {}
+        onSplit {}
+        onReset {}
+        whileAttached { print("retained") }
+    "#;
+    let recovered = splitscript::parse_recovering(source).unwrap();
+    assert_eq!(recovered.diagnostics().len(), 8);
+    for expected in [
+        "ASL `startup` is not a SplitScript lifecycle block",
+        "ASL `init` has no blind one-to-one lifecycle rename",
+        "ASL `update` is named `whileAttached` for ordinary per-tick work",
+        "ASL `exit` is not exactly the same as `onDetached`",
+        "ASL `shutdown` has no SplitScript equivalent yet",
+    ] {
+        assert!(
+            recovered
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.message == expected),
+            "missing diagnostic `{expected}`: {:#?}",
+            recovered.diagnostics()
+        );
+    }
+    assert_eq!(
+        recovered
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.message == "ASL timer event handlers are not SplitScript decision blocks"
+            })
+            .count(),
+        3
+    );
+    assert!(
+        recovered
+            .diagnostics()
+            .iter()
+            .all(|diagnostic| diagnostic.fixes.is_empty()),
+        "lifecycle migration cannot be a blind machine-applicable rename"
+    );
+    assert_eq!(recovered.syntax().actions.len(), 1);
+    assert_eq!(recovered.syntax().actions[0].kind.name(), "whileAttached");
+}
+
+#[test]
 fn recovering_parse_keeps_later_statements_in_the_same_block() {
     use splitscript::{compiler::ast::Stmt, compiler::syntax::RecoveryNodeKind};
 

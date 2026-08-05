@@ -1753,12 +1753,14 @@ fn masked(value) {
             ("state \"game.exe\" {}", "pro", "process"),
             ("state GBA {}", "gb", "gba"),
         ] {
-            let detached = format!("{state}\nonDetached {{ {prefix} }}");
-            let mut database = CompilerDatabase::new(detached);
-            assert!(
-                !labels(&mut database, &format!("{{ {prefix}")).contains(&provider.to_owned()),
-                "{provider} must not complete without an attachment"
-            );
+            for action in ["setup", "onDetached"] {
+                let detached = format!("{state}\n{action} {{ {prefix} }}");
+                let mut database = CompilerDatabase::new(detached);
+                assert!(
+                    !labels(&mut database, &format!("{{ {prefix}")).contains(&provider.to_owned()),
+                    "{provider} must not complete in {action}"
+                );
+            }
 
             for action in ["onAttach", "whileAttached", "split"] {
                 let attached = format!("{state}\n{action} {{ {prefix} }}");
@@ -1800,6 +1802,10 @@ fn safe() {
         let detached_safe = format!("{declarations}\nonDetached {{ sa }}");
         let mut database = CompilerDatabase::new(detached_safe);
         assert!(labels(&mut database, "{ sa").contains(&"safe".to_owned()));
+
+        let setup_relay = format!("{declarations}\nsetup {{ rel }}");
+        let mut database = CompilerDatabase::new(setup_relay);
+        assert!(!labels(&mut database, "{ rel").contains(&"relay".to_owned()));
 
         let attached = format!("{declarations}\nonAttach {{ rel }}");
         let mut database = CompilerDatabase::new(attached);

@@ -161,13 +161,14 @@ cases. Candidate host-owned facilities are:
 - typed, bounded iteration over mapped memory ranges, including readable,
   writable, executable, and path-backed flags.
 
-Before expanding discovery, document the existing attachment-name contract:
+Before expanding discovery, settle and document the attachment-name contract:
 whether matching uses the full executable filename, how case is handled, and
 what name is reported after a match on each host OS. Legacy ASL commonly omits
-Windows' `.exe`, while SplitScript currently supplies literal names. The
-compiler owns migration diagnostics for that difference; the host must provide
-stable, testable matching semantics rather than relying on accidental platform
-normalization.
+Windows' `.exe`, while extensionless names are normal on Linux and macOS. Do
+not add a compiler warning until deciding whether the host should normalize
+executable identity portably, accept target-specific aliases, or retain exact
+literal names. Whichever policy is chosen needs stable attachment fixtures on
+all three hosts rather than accidental platform behavior.
 
 Any collection-shaped result should use the GC-managed resource direction from
 R1 or a bounded visitor/polling contract. It should not introduce another
@@ -241,6 +242,30 @@ Acceptance tests should cover absence before a run, active and paused timers,
 segment changes, reset, positive and negative offsets, timing-method changes,
 and ordering relative to `whileAttached`, timer-decision actions, game-time
 publication, and the eventual exact-event contract in R2.
+
+## R6: script shutdown notification
+
+**Priority:** P1, promoted by lifecycle-port evidence
+
+**Status:** Required semantic boundary known; no host export exists.
+
+ASL `shutdown` runs when the autosplitter is disabled, LiveSplit exits, the
+script path changes, or the script is reloaded. It is script-instance teardown,
+not process detachment. SplitScript can detect an attached process closing
+inside `update`, but generated Wasm cannot run code after the host simply drops
+the store or module instance.
+
+If maintained ports prove teardown side effects necessary, the host should
+invoke a dedicated export before discarding a SplitScript instance. The
+contract must define ordering relative to process-exit handling, settings and
+timer events, debug-watch replacement, traps, cancellation of suspended work,
+and host shutdown. It must also state whether teardown has a bounded execution
+budget and whether it may suspend; prompt resource cleanup should normally be
+compiler/runtime-owned rather than left to user code.
+
+Do not map ASL `shutdown` to `onDetached`: the latter also runs initially and
+after each process closes, while shutdown may run once with no current process
+and may observe only partially available historical process state.
 
 ## Recording requirements from ports
 

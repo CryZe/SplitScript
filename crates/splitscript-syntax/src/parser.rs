@@ -280,7 +280,9 @@ impl Parser<'_> {
                     enumeration.documentation = documentation.take();
                     program.enums.push(enumeration);
                 })
-            } else if self.current_action_kind().is_some() {
+            } else if self.current_action_kind().is_some()
+                || self.current_legacy_lifecycle_diagnostic().is_some()
+            {
                 self.action_block()
                     .map(|action| program.actions.push(action))
             } else {
@@ -413,6 +415,16 @@ mod tests {
             Some(TypeRef::core(PrimitiveType::U32))
         );
         assert_eq!(program.actions[0].kind, ActionKind::Split);
+    }
+
+    #[test]
+    fn parses_setup_as_a_lifecycle_block() {
+        let source = r#"
+            state "game.exe" {}
+            setup { setTickRate(60.0) }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        assert_eq!(program.actions[0].kind, ActionKind::Setup);
     }
 
     #[test]

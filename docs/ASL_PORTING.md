@@ -232,6 +232,34 @@ Use a growable `Set<T>` only when the keys are genuinely discovered or
 unbounded. A fixed 16-chapter route does not justify per-tick collection
 allocation or a new compiler special case.
 
+## Legacy ASL lifecycle blocks
+
+The similarly shaped block names are not interchangeable. The original
+LiveSplit component invokes them at different boundaries:
+
+| ASL construct | Exact legacy timing | SplitScript direction |
+| --- | --- | --- |
+| `startup` | Once when the script is loaded, before process attachment | Put settings in `settings`, constant data in global initializers, and remaining process-independent statements in `setup`. |
+| `init` | Once for each found process, after one legacy state refresh; a failure retries attachment initialization | Put suspending discovery and layout selection in `onAttach`. Code that truly requires the first `current`/`old` snapshot has no exact direct block yet. |
+| `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put ordinary per-tick work in `whileAttached`. There is not yet an exact equivalent for the `false` control result. |
+| `exit` | When the attached process exits | Use guarded `onDetached` cleanup as shown below. `onDetached` also runs once before the first attachment. |
+| `shutdown` | When the script is disabled, reloaded, dropped, or LiveSplit exits | No exact host callback exists yet; do not approximate it with `onDetached`. |
+| `timer.OnStart`, `timer.OnSplit`, `timer.OnReset` | LiveSplit timer events, which may be raised independently of this script's decision blocks | Reconstruct only simple observable transitions in `whileAttached`. Exact lossless events require the planned host contract. |
+
+For example, process-independent ASL startup statements belong in `setup`, not
+`onAttach`:
+
+```splitscript
+setup {
+    setTickRate(30.0)
+    print("Autosplitter loaded")
+}
+```
+
+`setup` runs after settings are available but cannot use `process`, `gba`,
+`current`, `old`, `await`, or `retry`. A debug-watch replacement loads a new
+module and therefore runs it again.
+
 ## Process-exit game-time cleanup
 
 ASL commonly pauses game time in `exit`. SplitScript's `onDetached` also runs

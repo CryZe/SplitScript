@@ -600,6 +600,7 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
 
     let source = r#"
         state "game.exe" {}
+        setup { setTickRate(30.0) }
         onDetached { setTickRate(1.0) }
         onAttach { setTickRate(120.0) }
         whileAttached { print("tick") }
@@ -613,6 +614,7 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
             .map(|action| action.kind)
             .collect::<Vec<_>>(),
         [
+            ActionKind::Setup,
             ActionKind::OnDetached,
             ActionKind::OnAttach,
             ActionKind::WhileAttached,

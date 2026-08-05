@@ -224,6 +224,7 @@ onAttach {
 
 const LIFECYCLE_SOURCE: &str = r#"state "game.exe" {}
 
+setup {}
 onDetached {}
 onAttach {}
 whileAttached {}
@@ -1070,6 +1071,14 @@ define_language_catalog! {
     }
     actions {
     action_item!(
+        Setup,
+        Setup,
+        "setup",
+        "Initializes one loaded script instance.",
+        "Runs once from the module start entry point, after globals and settings are initialized and refreshed. Settings and process-independent operations are available, but process providers, state snapshots, and suspension are not.",
+        "setup {\n    setTickRate(60.0)\n}"
+    ),
+    action_item!(
         OnDetached,
         OnDetached,
         "onDetached",
@@ -1246,6 +1255,7 @@ impl LanguageCatalog {
             }
         }
         for action in [
+            ActionKind::Setup,
             ActionKind::OnDetached,
             ActionKind::OnAttach,
             ActionKind::WhileAttached,

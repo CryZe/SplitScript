@@ -1184,11 +1184,17 @@ impl Checker {
             );
             return None;
         }
-        if matches!(self.callable, CallableContext::Action(ActionKind::OnAttach)) {
-            self.error(
-                "state snapshots are not available until `onAttach` completes",
-                span,
-            );
+        if let CallableContext::Action(action @ (ActionKind::Setup | ActionKind::OnAttach)) =
+            self.callable
+        {
+            let message = match action {
+                ActionKind::Setup => "state snapshots are not available during `setup`",
+                ActionKind::OnAttach => {
+                    "state snapshots are not available until `onAttach` completes"
+                }
+                _ => unreachable!(),
+            };
+            self.error(message, span);
             return None;
         }
         Some(())

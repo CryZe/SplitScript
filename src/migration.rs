@@ -39,7 +39,12 @@ impl MigrationCatalog {
         let mut errors = Vec::new();
 
         for concept in self.concepts() {
-            if concept.targets.is_empty() && concept.support != MigrationSupport::SandboxNonGoal {
+            if concept.targets.is_empty()
+                && matches!(
+                    concept.support,
+                    MigrationSupport::Direct | MigrationSupport::TypedPattern
+                )
+            {
                 errors.push(format!(
                     "migration concept `{}` has no canonical target",
                     concept.id.as_str()
@@ -102,13 +107,16 @@ This index maps common source-language concepts to canonical SplitScript APIs an
                 .map(|target| format!("`{}`", target.display()))
                 .collect::<Vec<_>>()
                 .join(", ");
-            let direction = if let Some(anchor) = concept.cookbook_anchor {
+            let direction = if concept.targets.is_empty() {
+                concept.cookbook_anchor.map_or_else(
+                    || concept.summary.to_owned(),
+                    |anchor| format!("{} [Recipe](ASL_PORTING.md#{anchor}).", concept.summary),
+                )
+            } else if let Some(anchor) = concept.cookbook_anchor {
                 format!(
                     "{} Canonical targets: {}. [Recipe](ASL_PORTING.md#{anchor}).",
                     concept.summary, targets
                 )
-            } else if targets.is_empty() {
-                concept.summary.to_owned()
             } else {
                 format!("{} Canonical targets: {}.", concept.summary, targets)
             };

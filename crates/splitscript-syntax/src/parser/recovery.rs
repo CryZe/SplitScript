@@ -8,7 +8,7 @@ use super::{
 };
 use crate::migration::{
     ForeignSpellingContext, MigrationDiagnosticId, diagnostic as migration_diagnostic,
-    foreign_spelling,
+    foreign_spelling, legacy_lifecycle_diagnostic,
 };
 
 impl Parser<'_> {
@@ -214,12 +214,20 @@ impl Parser<'_> {
         ActionKind::parse(name)
     }
 
+    pub(super) fn current_legacy_lifecycle_diagnostic(&self) -> Option<MigrationDiagnosticId> {
+        let TokenKind::Ident(name) = &self.current().kind else {
+            return None;
+        };
+        legacy_lifecycle_diagnostic(name)
+    }
+
     pub(super) fn is_top_level_start(&self) -> bool {
         matches!(
             &self.current().kind,
             TokenKind::Ident(name)
                 if matches!(name.as_str(), "state" | "settings" | "let" | "const" | "var" | "debug" | "fn" | "func" | "function" | "record" | "enum")
                     || ActionKind::parse(name).is_some()
+                    || legacy_lifecycle_diagnostic(name).is_some()
         )
     }
 

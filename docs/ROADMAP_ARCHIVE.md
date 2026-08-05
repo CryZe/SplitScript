@@ -1,5 +1,24 @@
 # SplitScript roadmap
 
+## 2026-08-05: explicit script-instance setup and lifecycle migration guidance
+
+- Added `setup`, a synchronous process-independent lifecycle block that runs
+  once per loaded Wasm instance after globals and settings are initialized.
+  It has a true zero-parameter Wasm signature and is invoked by `_start`, not
+  by the per-tick update state machine.
+- Kept lifecycle boundaries explicit: `setup` cannot access a process provider,
+  state snapshots, `await`, or `retry`; `onAttach` remains the per-process
+  suspending discovery phase. Debug-watch replacement naturally runs setup for
+  the newly loaded instance.
+- Added targeted, non-machine-applicable diagnostics for legacy ASL `startup`,
+  `init`, `update`, `exit`, `shutdown`, and timer-event-shaped blocks. The
+  migration catalog and cookbook now explain exact timing differences and
+  identify cases that still require a host contract instead of suggesting
+  unsafe aliases.
+- Added parser, type/effect, catalog-hover, Wasm-validation, and host-runtime
+  coverage, including proof that setup runs once during `_start` and never on
+  later updates.
+
 ## 2026-08-04: faithful A Hat in Time production port
 
 - Ported the production-scale autosplitter with its full settings hierarchy,

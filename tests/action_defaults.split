@@ -1,6 +1,15 @@
 state "game.exe" {}
 
+settings {
+    "Enabled" => enabled: true
+}
+
 let explicitNull = false
+
+setup {
+    print(settings.enabled)
+    setTickRate(42.0)
+}
 
 whileAttached {
     explicitNull = !explicitNull

@@ -560,7 +560,11 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
         &mut matches,
         &mut local_types,
         LocalPlanOptions {
-            parameter_count: 2,
+            parameter_count: if action.kind == ActionKind::Setup {
+                0
+            } else {
+                2
+            },
             semantics: lowering.semantics,
             instance: None,
             include_values: true,
@@ -624,7 +628,10 @@ pub(super) fn emit_action_default(function: &mut Function, action: ActionKind, g
                 gc.standard_index(StdlibTypeId::Duration),
             )));
         }
-        ActionKind::OnDetached | ActionKind::OnAttach | ActionKind::WhileAttached => {}
+        ActionKind::Setup
+        | ActionKind::OnDetached
+        | ActionKind::OnAttach
+        | ActionKind::WhileAttached => {}
     }
 }
 

@@ -38,9 +38,8 @@ maintained corpus. Its 392 sources used the current compiler but were not run
 against games or the repository's deterministic host fixtures. Several reports
 miss facilities that were already available, which is evidence that our
 documentation, examples, completion, or diagnostics did not make the intended
-solution discoverable. Every native `state` declaration in the campaign also
-copies ASL's extensionless process name. Compilation success must not be
-mistaken for attachment or behavioral parity.
+solution discoverable. Compilation success must not be mistaken for attachment
+or behavioral parity.
 
 - [ ] Triage every reported limitation against the current language and the
   source ASL before planning a replacement feature. For facilities that already
@@ -55,20 +54,10 @@ mistaken for attachment or behavioral parity.
   semantic omissions instead of trusting generated port notes. Record the
   compiler revision for future campaigns as provenance, not because this
   campaign used a different compiler.
-- [ ] Close the process-name migration footgun first. SplitScript process names
-  are literal executable identities, whereas ASL state declarations commonly
-  omit Windows' `.exe`. Put this difference beside the first `state` example,
-  recognize suspicious extensionless native process names, and provide a
-  prominent diagnostic plus an `.exe` code action only when it is safe or
-  clearly marked as requiring confirmation. Keep intentional Linux/macOS names
-  expressible without normalizing every name behind the author's back. Cover
-  one name, name lists, case behavior, and actual host attachment in tests.
-- [ ] Refresh the ASL migration catalog and cookbook against the current
-  compiler. Give `startup`, `init`, `update`, `exit`, `shutdown`, and
-  `timer.OnStart` focused semantic guidance rather than a generic top-level
-  parse error; explain one-time versus per-tick placement and the initial
-  `onDetached` invocation. Suppress predictable follow-on errors after a
-  missing member or failed declaration. Do not add compatibility aliases.
+- [ ] Continue refreshing the ASL migration catalog and cookbook for
+  non-lifecycle misunderstandings found by the campaign. Suppress predictable
+  follow-on errors after a missing member or failed declaration. Do not add
+  compatibility aliases.
 - [ ] Promote a small pressure set from the campaign into repository-owned,
   host-executed ports: one extensionless-name/multi-layout port, one native
   UTF-16 or parsed-string port, one run-scoped visited-set port, and one
@@ -83,10 +72,28 @@ mistaken for attachment or behavioral parity.
 
 ## P0 — unblock the next representative native ports
 
-- [ ] Keep boolean ASL `update { return false; }` behavior as corpus evidence,
-  but do not introduce a dedicated lifecycle keyword or block until a
-  maintained port proves that state-field expressions and `whileAttached`
-  cannot represent the behavior clearly.
+### Lifecycle semantics exposed by legacy ASL
+
+- [ ] Determine whether a post-initial-snapshot attachment hook is needed for
+  ASL `init` bodies that genuinely consume `current`/`old`. `onAttach` remains
+  the suspending pre-snapshot discovery and layout-selection phase. Add a new
+  block only if passing explicit reads or a guarded first `whileAttached` tick
+  makes a maintained port materially less clear.
+- [ ] Design a clear way for `whileAttached` to suppress the remaining timer
+  actions for the current update when a maintained port requires ASL
+  `update { return false; }` exactly. State-field rejection is not equivalent:
+  it retains one candidate, whereas ASL refreshes the whole snapshot and then
+  skips `isLoading`, `gameTime`, `reset`, `split`, and `start`. Avoid a
+  `shouldEvaluate`-style concept or unexplained boolean return.
+- [ ] Consider an exact process-exit-only action implemented by the generated
+  update lifecycle. It would differ from `onDetached`, which intentionally also
+  runs on initial entry into the detached state, and would remove the common
+  `attachedOnce` guard. Settle its name and ordering before adding it.
+- [ ] Keep ASL `shutdown` and exact `onStart`/`onSplit`/`onReset` events as host
+  requirements rather than approximating them. Shutdown requires the host to
+  invoke a teardown export before disabling, reloading, or dropping a module;
+  timer events require the ordered lossless contract in R2. Track teardown in
+  R6 of [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
 
 ### State layouts, discovery, and process identity
 
@@ -421,6 +428,13 @@ remaining work is product hardening and distribution.
 
 ## P2 / deliberately deferred
 
+- [ ] Settle cross-platform process-name semantics with the host runtime before
+  warning about extensionless native `state` names. ASL commonly omits
+  Windows' `.exe`, but extensionless names are valid on Linux and macOS, so a
+  compiler warning would create false positives without a target-aware
+  contract. Decide whether the runtime should match executable identity
+  portably, expose target-specific aliases, or retain exact names; only then
+  add documentation, diagnostics, and attachment fixtures for all three hosts.
 - [ ] Specialize physical aggregate layouts around zero-sized `None` only when
   measured size or allocation pressure justifies it. Records may omit unit
   fields; `Option<None>` still needs distinct empty/present states;
@@ -469,9 +483,10 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Audit the campaign's misunderstandings against the current compiler, fix the
-   exact process-name/`.exe` migration footgun, and improve the documentation,
-   completion, and diagnostics that failed to reveal existing features.
+1. Audit the campaign's misunderstandings against the current compiler and
+   improve the documentation, completion, and diagnostics that failed to reveal
+   existing features. Defer process-name warnings until the host's
+   cross-platform matching contract is settled.
 2. Promote the pressure set into repository-owned runtime fixtures, starting
    with native UTF-16 and a run-scoped visited set; implement only gaps that
    remain after semantic review.

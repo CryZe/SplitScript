@@ -1099,6 +1099,46 @@ fn process_operations_reject_detached_lifecycle_use() {
 }
 
 #[test]
+fn setup_is_process_independent_and_cannot_suspend_or_read_snapshots() {
+    let process_errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            setup { process.read<i32>(0x1000) }
+        "#,
+    )
+    .expect_err("setup must not access the process provider");
+    assert!(process_errors.iter().any(|error| {
+        error.message == "`Process.read` requires an attached process and is unavailable in `setup`"
+    }));
+
+    let snapshot_errors = splitscript::compile(
+        r#"
+            state "game.exe" { level: i32 at 0x1000 }
+            setup { print(current.level) }
+        "#,
+    )
+    .expect_err("setup runs before state snapshots exist");
+    assert!(snapshot_errors.iter().any(|error| {
+        error
+            .message
+            .contains("state snapshots are not available during `setup`")
+    }));
+
+    let suspension_errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            setup { await nextTick() }
+        "#,
+    )
+    .expect_err("setup must finish synchronously during module start");
+    assert!(
+        suspension_errors
+            .iter()
+            .any(|error| error.message == "`await` is not available in this synchronous body")
+    );
+}
+
+#[test]
 fn call_result_fields_parse_before_detached_effects_are_checked() {
     let source = r#"
         state "game.exe" {}

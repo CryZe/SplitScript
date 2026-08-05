@@ -891,6 +891,23 @@ label; `///` documentation comments are the only way to define its tooltip.
 
 ## Actions
 
+`setup` runs once for each loaded WebAssembly instance, after global values and
+the settings UI have been initialized and the current settings have been
+loaded. It is intended for process-independent startup work such as choosing an
+initial tick rate or printing a startup message:
+
+```text
+setup {
+    setTickRate(30.0)
+    print("Autosplitter loaded")
+}
+```
+
+`setup` cannot access `process`, `gba`, `current`, `old`, or suspend. A debug
+watch reload creates a new module instance, so its `setup` block runs again.
+This is deliberately distinct from `onAttach`, which runs once for every
+selected process and may suspend while performing discovery.
+
 `onDetached` runs once when the runtime enters the detached state: once initially,
 then once immediately each time an attached process closes. Attachment retries
 do not rerun it. This makes detached-state policy explicit in the script:
@@ -939,8 +956,8 @@ and `reset`; those blocks are simply boolean and default to `false`.
 `Duration.zero()`, `Duration.fromMilliseconds(i64)`,
 `Duration.fromFrames(i64, i64)`, and `Duration.fromParts(i64, i32)`.
 `Duration.fromSeconds(f32)` performs the safe game-time conversion used by
-Unity timers. `whileAttached` returns nothing and runs before timer actions on
-every attached tick. `onDetached` also returns nothing.
+Unity timers. `setup`, `whileAttached`, and `onDetached` return nothing.
+`whileAttached` runs before timer actions on every attached tick.
 
 ## Discovered state and watchers
 

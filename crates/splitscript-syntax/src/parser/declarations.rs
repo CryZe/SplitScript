@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{
     diagnostic::{DiagnosticFix, FixApplicability, TextEdit},
-    migration::ASL_STRING_N_FIELD_DIAGNOSTIC,
+    migration::{ASL_STRING_N_FIELD_DIAGNOSTIC, legacy_lifecycle_diagnostic},
 };
 
 impl Parser<'_> {
@@ -895,6 +895,9 @@ impl Parser<'_> {
     pub(super) fn action_block(&mut self) -> Result<Action, Diagnostic> {
         let (name, name_span) = self.expect_any_ident("expected an action name")?;
         let Some(kind) = ActionKind::parse(&name) else {
+            if let Some(diagnostic) = legacy_lifecycle_diagnostic(&name) {
+                return Err(self.migration_diagnostic(diagnostic, name_span));
+            }
             return Err(Diagnostic::new(
                 format!("unknown action `{name}`"),
                 name_span,

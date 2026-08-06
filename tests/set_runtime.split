@@ -1,0 +1,32 @@
+state "game.exe" {}
+
+let visited = Set.new<String>()
+let tick = 0
+
+whileAttached {
+    tick += 1
+    if tick == 1 {
+        let first = visited.insert("A")
+        visited.insert("B")
+        visited.insert("C")
+        visited.insert("D")
+        visited.insert("E")
+        let duplicate = visited.insert("A")
+        setVariable(
+            "Set First Tick",
+            `{first},{duplicate},{visited.length()},{visited.contains("E")}`,
+        )
+    } else if tick == 2 {
+        let retained = visited.length()
+        let removed = visited.remove("C")
+        let missing = visited.remove("missing")
+        for room in visited {
+            print(room)
+        }
+        visited.clear()
+        setVariable(
+            "Set Second Tick",
+            `{retained},{removed},{missing},{visited.length()},{visited.isEmpty()}`,
+        )
+    }
+}

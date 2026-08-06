@@ -398,6 +398,17 @@ impl HighlightCollector<'_> {
                 .iter()
                 .find(|future| future.id == id)
                 .is_some_and(|future| self.type_contains_none(future.value)),
+            TypeRef::Application(id) => self
+                .syntax
+                .type_applications
+                .iter()
+                .find(|application| application.id == id)
+                .is_some_and(|application| {
+                    application
+                        .arguments
+                        .iter()
+                        .any(|argument| self.type_contains_none(*argument))
+                }),
         }
     }
 
@@ -990,7 +1001,7 @@ fn is_keyword(name: &str) -> bool {
 fn is_builtin_type(standard_library: &StandardLibrary, name: &str) -> bool {
     TypeRef::parse(name).is_some()
         || standard_library.type_by_name(name).is_some()
-        || name == "Array"
+        || standard_library.type_constructor_by_name(name).is_some()
 }
 
 fn is_namespace(standard_library: &StandardLibrary, name: &str) -> bool {

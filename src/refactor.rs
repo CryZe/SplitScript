@@ -847,6 +847,7 @@ fn contains_generic_parameter(ty: TypeId, snapshot: &SemanticSnapshot) -> bool {
         TypeKind::Error => false,
         TypeKind::GenericParameter { .. } => true,
         TypeKind::Array { element, .. }
+        | TypeKind::Set { element, .. }
         | TypeKind::Option { value: element, .. }
         | TypeKind::Result { value: element, .. }
         | TypeKind::Async { value: element, .. } => contains_generic_parameter(*element, snapshot),

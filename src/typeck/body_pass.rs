@@ -38,12 +38,7 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
             );
             continue;
         }
-        if !is_constant(&global.value, &checker.resolutions) {
-            checker.error(
-                "global initializers must be literal values composed from None, numbers, booleans, strings, payload-free enums, records, or arrays",
-                global.value.span,
-            );
-        }
+        let constant_initializer = is_constant(&global.value, &checker.resolutions);
         let inferred = checker.with_debug_context(
             DebugContext::from_declaration(global.debug_only),
             |checker| {
@@ -51,6 +46,14 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
                 checker.expr(&global.value, expected)
             },
         );
+        let run_scoped_initializer = checker.semantics.standard_library_item(global.value.id)
+            == Some(crate::stdlib::StdlibItemId::SetNew);
+        if !constant_initializer && !run_scoped_initializer {
+            checker.error(
+                "global initializers must be literal values composed from None, numbers, booleans, strings, payload-free enums, records, or arrays, or a run-scoped Set.new value",
+                global.value.span,
+            );
+        }
         if let Some(ty) = inferred {
             let unsupported_standard = checker.standard_type_id(ty).is_some_and(|standard| {
                 standard != StdlibTypeId::String

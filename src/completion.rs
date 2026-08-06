@@ -567,6 +567,13 @@ fn add_standard_library_path_members(
     }
 
     for item in library.items() {
+        if let [type_name] = prefix
+            && let Some(constructor) = library.type_constructor_by_name(type_name)
+            && item.owner == crate::stdlib::StdlibOwner::TypeConstructor(constructor.id)
+            && matches!(item.kind, crate::stdlib::ItemKind::Method { .. })
+        {
+            continue;
+        }
         let Some(path) = library.item_path(item) else {
             continue;
         };
@@ -1010,7 +1017,8 @@ fn add_inferred_fields(
         | TypeKind::Array { .. }
         | TypeKind::Option { .. }
         | TypeKind::Result { .. }
-        | TypeKind::Async { .. } => {}
+        | TypeKind::Async { .. }
+        | TypeKind::Set { .. } => {}
     }
 }
 

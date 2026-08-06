@@ -509,6 +509,9 @@ fn snapshot_type_name(
         TypeKind::Array { element, .. } => {
             format!("[{}]", snapshot_type_name(checked, *element))
         }
+        TypeKind::Set { element, .. } => {
+            format!("Set<{}>", snapshot_type_name(checked, *element))
+        }
         TypeKind::Option { value, .. } => format!("{}?", snapshot_type_name(checked, *value)),
         TypeKind::Result { value, .. } => format!("{}!", snapshot_type_name(checked, *value)),
         TypeKind::Async { value, .. } => {

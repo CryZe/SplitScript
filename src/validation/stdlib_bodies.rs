@@ -266,6 +266,7 @@ fn constructed_argument(
         ) => Some((*element, *length)),
         (StdlibTypeConstructorId::Option, TypeKind::Option { value, .. })
         | (StdlibTypeConstructorId::Result, TypeKind::Result { value, .. }) => Some((*value, None)),
+        (StdlibTypeConstructorId::Set, TypeKind::Set { element, .. }) => Some((*element, None)),
         _ => None,
     }
 }
@@ -385,6 +386,10 @@ fn render_actual_type(
             "async {}",
             render_actual_type(library, semantics, *value, parameter_bindings)
         ),
+        TypeKind::Set { element, .. } => format!(
+            "Set<{}>",
+            render_actual_type(library, semantics, *element, parameter_bindings)
+        ),
     }
 }
 
@@ -473,7 +478,9 @@ mod tests {
             rule: ParameterRule::Value,
             documentation: "",
         }];
-        let checked = checked("state \"game.exe\" {}\nfn count(values) { return values.length() }");
+        let checked = checked(
+            "state \"game.exe\" {}\nfn count(values) { let first = values[0]; return values.length() }",
+        );
         let function = checked
             .syntax()
             .functions

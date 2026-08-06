@@ -1,5 +1,27 @@
 # SplitScript roadmap
 
+## 2026-08-06: run-scoped sets and source generic type applications
+
+- Added `Set<T>` as the first growable run-scoped collection, with
+  `Set.new<T>()`, `length`, source-defined `isEmpty`, linear `contains`,
+  `insert`, `remove`, `clear`, and direct `for` traversal. Global construction
+  runs once per script instance, so visited checkpoints persist across ticks
+  without allocating a new set on every update.
+- Kept the public declaration in `stdlib/standard.split`. The generated type-
+  constructor catalog now retains parameter constraints, so the type checker
+  enforces `T: Equatable` from that declaration rather than a duplicate Set-
+  specific rule. Completion, hover documentation, semantic highlighting, and
+  static `Set.new` completion consume the same catalog identity.
+- Lowered each reachable concrete set to one mutable Wasm GC object holding a
+  growable GC-array backing store and logical length. The runtime fixture covers
+  growth, duplicate insertion, persistence, removal, iteration, clearing, and
+  string equality; the representation allocates only for construction, growth,
+  and clearing.
+- Added first-class source syntax identities for named generic applications,
+  while retaining every written occurrence for lossless tooling. The formatter
+  consequently understands generic angle delimiters, compact and multiline
+  trailing commas, and repeated `Set<T>` annotations.
+
 ## 2026-08-06: source-defined array search
 
 - Added `contains` and `indexOf` to both `[T]` and `[T; N]` as ordinary

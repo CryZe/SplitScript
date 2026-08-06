@@ -32,7 +32,7 @@ use crate::{
     },
     types::{
         EnumTypeId, ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType,
-        ResolvedTypeRef, TypeKind, TypeStore,
+        ResolvedSetType, ResolvedTypeRef, TypeKind, TypeStore,
     },
 };
 
@@ -70,6 +70,7 @@ pub struct CheckOutput {
     pub option_types: Vec<ResolvedOptionType>,
     pub result_types: Vec<ResolvedResultType>,
     pub async_types: Vec<ResolvedAsyncType>,
+    pub set_types: Vec<ResolvedSetType>,
 }
 
 pub struct RecoveringCheckOutput {
@@ -544,6 +545,7 @@ fn resolved_type_ref(ty: ResolvedTypeRef, types: &TypeStore) -> Type {
         ResolvedTypeRef::Option(id) => Type::Option(id),
         ResolvedTypeRef::Result(id) => Type::Result(id),
         ResolvedTypeRef::Async(id) => Type::Async(id),
+        ResolvedTypeRef::Set(id) => Type::Set(id),
     }
 }
 

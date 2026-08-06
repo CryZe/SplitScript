@@ -1156,6 +1156,131 @@ typeConstructor Array<T> {
     ) -> None;
 }
 
+/// Stores a growable collection of unique values for one script instance.
+///
+/// A set keeps its allocation and contents across ticks. Mutating operations
+/// update the same set value, so a global set can track visited checkpoints
+/// without rebuilding a collection on every update.
+///
+/// # Example
+///
+/// Track visited rooms
+///
+/// ```splitscript
+/// let visited = Set.new<String>()
+/// visited.insert("Atrium")
+/// ```
+typeConstructor Set<T: Equatable> {
+    /// Creates an empty set.
+    ///
+    /// The returned value retains its contents until explicitly mutated or the
+    /// script instance is unloaded.
+    ///
+    /// # Example
+    ///
+    /// Create a room set
+    ///
+    /// ```splitscript
+    /// let visited = Set.new<String>()
+    /// ```
+    @intrinsic(SetNew)
+    static fn new<U: Equatable>() -> Set<U>;
+
+    /// Returns the number of stored values.
+    ///
+    /// Duplicate insertions do not increase the count.
+    ///
+    /// # Example
+    ///
+    /// Count visited rooms
+    ///
+    /// ```splitscript
+    /// let roomCount = visited.length()
+    /// ```
+    @intrinsic(SetLength)
+    fn length() -> u32;
+
+    /// Reports whether the set contains no values.
+    ///
+    /// This composes the source-defined result from `length`.
+    ///
+    /// # Example
+    ///
+    /// Check a new route
+    ///
+    /// ```splitscript
+    /// let routeIsNew = visited.isEmpty()
+    /// ```
+    fn isEmpty() -> bool {
+        return self.length() == 0
+    }
+
+    /// Reports whether an equal value is present.
+    ///
+    /// Values are compared using the element type's equality implementation.
+    ///
+    /// # Example
+    ///
+    /// Check a visited room
+    ///
+    /// ```splitscript
+    /// let seenAtrium = visited.contains("Atrium")
+    /// ```
+    @intrinsic(SetContains)
+    fn contains(
+        /// The value to find.
+        value: T,
+    ) -> bool;
+
+    /// Inserts a value if it is not already present.
+    ///
+    /// Returns whether the value was newly inserted.
+    ///
+    /// # Example
+    ///
+    /// Record a visited room
+    ///
+    /// ```splitscript
+    /// let firstVisit = visited.insert("Atrium")
+    /// ```
+    @intrinsic(SetInsert)
+    fn insert(
+        /// The value to insert.
+        value: T,
+    ) -> bool;
+
+    /// Removes an equal value if it is present.
+    ///
+    /// Returns whether a value was removed.
+    ///
+    /// # Example
+    ///
+    /// Forget a visited room
+    ///
+    /// ```splitscript
+    /// let wasVisited = visited.remove("Atrium")
+    /// ```
+    @intrinsic(SetRemove)
+    fn remove(
+        /// The value to remove.
+        value: T,
+    ) -> bool;
+
+    /// Removes every stored value while retaining the set itself.
+    ///
+    /// Later insertions reuse the same logical set value.
+    ///
+    /// # Example
+    ///
+    /// Reset a route
+    ///
+    /// ```splitscript
+    /// visited.clear()
+    /// ```
+    @intrinsic(SetClear)
+    fn clear() -> None;
+}
+
 /// Represents a value that may be absent.
 ///
 /// The postfix `?` type syntax constructs an Option value.

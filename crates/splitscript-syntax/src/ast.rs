@@ -155,6 +155,20 @@ impl AsyncTypeId {
     }
 }
 
+/// Stable identity for a named generic type application such as `Set<String>`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TypeApplicationId(u32);
+
+impl TypeApplicationId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    pub(crate) fn from_index(index: u32) -> Self {
+        Self(index)
+    }
+}
+
 /// Stable identity for a field declared by a record in one parsed program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RecordFieldId(u32);
@@ -202,6 +216,7 @@ display_stable_id!(
     OptionTypeId,
     ResultTypeId,
     AsyncTypeId,
+    TypeApplicationId,
     RecordFieldId,
     EnumVariantId
 );
@@ -256,6 +271,7 @@ display_stable_id!(TypeNameId);
 pub struct Program {
     pub type_names: Vec<String>,
     pub type_name_spans: Vec<Span>,
+    pub type_name_occurrences: Vec<Vec<Span>>,
     pub state: Option<StateDecl>,
     /// The complete `settings` declaration, including its keyword and body.
     pub settings_span: Option<Span>,
@@ -270,6 +286,7 @@ pub struct Program {
     pub option_types: Vec<OptionTypeDecl>,
     pub result_types: Vec<ResultTypeDecl>,
     pub async_types: Vec<AsyncTypeDecl>,
+    pub type_applications: Vec<TypeApplicationDecl>,
     pub functions: Vec<FunctionDecl>,
     pub actions: Vec<Action>,
 }
@@ -309,6 +326,10 @@ impl Program {
     pub fn type_name_span(&self, id: TypeNameId) -> Span {
         self.type_name_spans[id.index()]
     }
+
+    pub fn type_name_occurrences(&self, id: TypeNameId) -> &[Span] {
+        &self.type_name_occurrences[id.index()]
+    }
 }
 
 /// Allocates constructed-type identities in the shared per-program ID space.
@@ -341,6 +362,10 @@ impl ConstructedTypeIdAllocator {
 
     pub fn async_value(&mut self) -> AsyncTypeId {
         AsyncTypeId::from_index(self.take())
+    }
+
+    pub fn application(&mut self) -> TypeApplicationId {
+        TypeApplicationId::from_index(self.take())
     }
 
     pub fn next_index(&self) -> u32 {
@@ -376,6 +401,24 @@ pub struct OptionTypeDecl {
 pub struct ResultTypeDecl {
     pub id: ResultTypeId,
     pub value: TypeRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeApplicationDecl {
+    pub id: TypeApplicationId,
+    pub constructor: TypeNameId,
+    pub arguments: Vec<TypeRef>,
+    /// Every written occurrence retained even when structurally identical type
+    /// applications share one semantic identity.
+    pub occurrences: Vec<TypeApplicationOccurrence>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeApplicationOccurrence {
+    pub span: Span,
+    pub constructor: Span,
+    pub opening: Span,
+    pub closing: Span,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1006,6 +1049,7 @@ pub enum TypeRef {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Application(TypeApplicationId),
 }
 
 impl TypeRef {
@@ -1038,6 +1082,7 @@ impl fmt::Display for TypeRef {
             Self::Option(id) => write!(f, "Option#{id}"),
             Self::Result(id) => write!(f, "Result#{id}"),
             Self::Async(id) => write!(f, "Async#{id}"),
+            Self::Application(id) => write!(f, "Application#{id}"),
         }
     }
 }

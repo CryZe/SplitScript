@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     ast::{
         ArrayTypeId, AsyncTypeId, BinaryOp, EnumDecl, EnumId, ExprId, OptionTypeId, Program,
-        RecordId, ResultTypeId,
+        RecordId, ResultTypeId, TypeApplicationId,
     },
     semantic::{FunctionInstance, SemanticModel},
     stdlib::{
@@ -30,6 +30,7 @@ pub(super) struct Reachability {
     gc_options: BTreeSet<OptionTypeId>,
     gc_results: BTreeSet<ResultTypeId>,
     gc_asyncs: BTreeSet<AsyncTypeId>,
+    gc_sets: BTreeSet<TypeApplicationId>,
     display_functions: BTreeMap<StdlibTypeId, FunctionInstance>,
 }
 
@@ -122,6 +123,27 @@ impl Reachability {
                 reachable.require_equality(ty, program, enums, semantics, standard_library);
             }
             if let wasm_ir::ExpressionKind::Call { target, .. } = &expression.kind {
+                if let wasm_ir::CallTarget::Intrinsic {
+                    intrinsic:
+                        IntrinsicId::SetContains | IntrinsicId::SetInsert | IntrinsicId::SetRemove,
+                    receiver_type: Some(receiver),
+                    ..
+                } = target
+                {
+                    let receiver = owner.as_ref().map_or(*receiver, |owner| {
+                        semantics.specialize_type(owner, *receiver)
+                    });
+                    let TypeKind::Set { element, .. } = semantics.types().kind(receiver) else {
+                        unreachable!("checked set methods have Set receivers")
+                    };
+                    reachable.require_equality(
+                        *element,
+                        program,
+                        enums,
+                        semantics,
+                        standard_library,
+                    );
+                }
                 let function = match target {
                     wasm_ir::CallTarget::UserFunction { function }
                     | wasm_ir::CallTarget::UserMethod { function, .. } => Some(function.clone()),
@@ -412,6 +434,10 @@ impl Reachability {
         self.gc_asyncs.contains(&future)
     }
 
+    pub fn contains_set_type(&self, set: TypeApplicationId) -> bool {
+        self.gc_sets.contains(&set)
+    }
+
     fn require_types(
         &mut self,
         roots: impl IntoIterator<Item = TypeId>,
@@ -509,6 +535,15 @@ impl Reachability {
                     self.gc_asyncs.insert(*layout);
                     pending.push(*value);
                 }
+                TypeKind::Set {
+                    layout,
+                    element,
+                    backing,
+                } => {
+                    self.gc_sets.insert(*layout);
+                    self.gc_arrays.insert(*backing);
+                    pending.push(*element);
+                }
             }
         }
     }
@@ -589,7 +624,8 @@ impl Reachability {
                 | TypeKind::Array { .. }
                 | TypeKind::Option { .. }
                 | TypeKind::Result { .. }
-                | TypeKind::Async { .. } => {}
+                | TypeKind::Async { .. }
+                | TypeKind::Set { .. } => {}
             }
         }
     }

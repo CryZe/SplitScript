@@ -2,7 +2,7 @@
 
 use super::{
     ArrayTypeDecl, AsyncTypeDecl, Diagnostic, OptionTypeDecl, Parser, ResultTypeDecl, Span,
-    TokenKind, TypeNameId, TypeRef,
+    TokenKind, TypeApplicationDecl, TypeApplicationOccurrence, TypeNameId, TypeRef,
 };
 use crate::migration::ForeignSpellingContext;
 
@@ -12,11 +12,13 @@ impl Parser<'_> {
             return Ok(core);
         }
         let id = if let Some(id) = self.type_name_ids.get(name).copied() {
+            self.type_name_occurrences[id.index()].push(span);
             id
         } else {
             let id = TypeNameId::from_index(self.type_names.len() as u32);
             self.type_names.push(name.to_owned());
             self.type_name_spans.push(span);
+            self.type_name_occurrences.push(vec![span]);
             self.type_name_ids.insert(name.to_owned(), id);
             id
         };
@@ -80,7 +82,57 @@ impl Parser<'_> {
             {
                 name = replacement.to_owned();
             }
-            (self.resolve_type(&name, start)?, start, start)
+            let named = self.resolve_type(&name, start)?;
+            if let Some(opening) = self.eat(&TokenKind::Lt) {
+                let TypeRef::Named(constructor) = named else {
+                    return Err(Diagnostic::new(
+                        "core types cannot be used as generic type constructors",
+                        start,
+                    ));
+                };
+                let mut arguments = Vec::new();
+                loop {
+                    let (argument, _) = self.parse_type("expected a generic type argument")?;
+                    arguments.push(argument);
+                    if self.eat(&TokenKind::Comma).is_none() {
+                        break;
+                    }
+                    if self.at(&TokenKind::Gt) {
+                        break;
+                    }
+                }
+                let end =
+                    self.expect(TokenKind::Gt, "expected `>` after generic type arguments")?;
+                let occurrence = TypeApplicationOccurrence {
+                    span: start.join(end),
+                    constructor: start,
+                    opening,
+                    closing: end,
+                };
+                let key = (constructor, arguments.clone());
+                let id = if let Some(&id) = self.type_application_ids.get(&key) {
+                    self.type_applications
+                        .iter_mut()
+                        .find(|application| application.id == id)
+                        .expect("interned type applications retain their declaration")
+                        .occurrences
+                        .push(occurrence);
+                    id
+                } else {
+                    let id = self.constructed_type_ids.application();
+                    self.type_applications.push(TypeApplicationDecl {
+                        id,
+                        constructor,
+                        arguments,
+                        occurrences: vec![occurrence],
+                    });
+                    self.type_application_ids.insert(key, id);
+                    id
+                };
+                (TypeRef::Application(id), start, end)
+            } else {
+                (named, start, start)
+            }
         };
 
         if let Some(suffix) = self.eat(&TokenKind::Question) {

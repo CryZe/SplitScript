@@ -5,7 +5,10 @@ use std::collections::HashMap;
 use crate::{
     ast::{FunctionId, Program, Span, StateSource},
     inference::Type,
-    types::{ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType},
+    types::{
+        ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType,
+        ResolvedSetType,
+    },
 };
 
 use super::{CheckOutput, Checker, RecoveringCheckOutput};
@@ -43,6 +46,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     checker.finalize_array_types();
     checker.inference.finalize_wrappers();
     checker.finalize_array_types();
+    checker.inference.finalize_sets();
     checker.inference.intern_resolved_constructed_types();
     let array_types = checker
         .inference
@@ -81,6 +85,18 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             value: future.value.to_ref(checker.inference.type_store()),
         })
         .collect::<Vec<_>>();
+    let set_types = checker
+        .inference
+        .sets()
+        .iter()
+        .map(|set| ResolvedSetType {
+            id: set.id,
+            element: set.element.to_ref(checker.inference.type_store()),
+            backing: set
+                .backing
+                .expect("set backing arrays are assigned during inference initialization"),
+        })
+        .collect::<Vec<_>>();
     for array in &array_types {
         let element = checker.resolved_type_ref(array.element);
         checker
@@ -93,10 +109,13 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     let diagnostics = std::mem::take(&mut checker.errors);
     let mut semantics = semantics.finish(
         semantic_types,
-        &array_types,
-        &option_types,
-        &result_types,
-        &async_types,
+        crate::semantic::ResolvedConstructedTypes {
+            arrays: &array_types,
+            options: &option_types,
+            results: &result_types,
+            asyncs: &async_types,
+            sets: &set_types,
+        },
         |ty| checker.resolved_type(ty),
     );
     semantics.set_function_parameter_types(
@@ -128,6 +147,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             option_types,
             result_types,
             async_types,
+            set_types,
         },
         diagnostics,
     }

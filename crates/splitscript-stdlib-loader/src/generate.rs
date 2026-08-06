@@ -127,9 +127,9 @@ impl<'a> CatalogGenerator<'a> {
                     .map(|reason| format!("Some({})", quote(reason)))
                     .unwrap_or_else(|| "None".to_owned());
                 output.push_str(&format!(
-                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, name: {}, parameters: &[{}], must_use: {must_use}, documentation: {} }},\n",
+                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, name: {}, parameters: {}, must_use: {must_use}, documentation: {} }},\n",
                     quote(&owner.name),
-                    owner.type_parameters.iter().map(|parameter| quote(&parameter.name)).collect::<Vec<_>>().join(","),
+                    self.type_parameters(&owner.type_parameters, owner),
                     self.documentation(&owner.documentation)
                 ));
             }

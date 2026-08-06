@@ -197,10 +197,12 @@ await bindings, state fields, settings, and match payload bindings, while
 annotations remain optional in checked syntax instead of being overwritten by
 inference. Record fields, enum payloads, and array elements likewise publish
 their resolved `TypeId` layouts through `RecordFieldId`, `EnumVariantId`, and
-the dedicated `ArrayTypeId`; WebAssembly GC layout construction reads those
+dedicated constructed-type identities; WebAssembly GC layout construction reads those
 semantic queries rather than the AST annotations. `TypeKind::Array` retains
 its `ArrayTypeId` layout identity, element `TypeId`, and optional exact length,
 so code generation never needs to reconstruct this information from syntax.
+`TypeKind::Set` similarly retains the source generic-application identity,
+element type, and compiler-selected backing-array identity.
 `TypeStore` has no
 parallel legacy type representation: Wasm storage/value selection lowers
 `TypeId` / `TypeKind` directly into backend-local physical categories.

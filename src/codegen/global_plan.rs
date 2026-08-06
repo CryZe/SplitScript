@@ -242,7 +242,10 @@ pub(super) fn encode(
         } else if ty.is_enum(wasm_ir.standard_library())
             || matches!(
                 ty,
-                Type::Record(_) | Type::Array(_) | Type::Standard(StdlibTypeId::String)
+                Type::Record(_)
+                    | Type::Array(_)
+                    | Type::Set(_)
+                    | Type::Standard(StdlibTypeId::String)
             )
         {
             section.global(

@@ -9,7 +9,10 @@ use crate::{
     ast::{EnumDecl, Program},
     semantic::SemanticModel,
     stdlib::{DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibTypeId},
-    types::{ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType},
+    types::{
+        ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType,
+        ResolvedSetType,
+    },
 };
 
 use super::{
@@ -36,6 +39,7 @@ pub(super) struct Inputs<'a> {
     pub option_types: &'a [ResolvedOptionType],
     pub result_types: &'a [ResolvedResultType],
     pub async_types: &'a [ResolvedAsyncType],
+    pub set_types: &'a [ResolvedSetType],
     pub reachability: &'a reachability::Reachability,
 }
 
@@ -51,6 +55,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         option_types,
         result_types,
         async_types,
+        set_types,
         reachability,
     } = inputs;
     let layout = GcLayout::plan(super::gc_layout::Inputs {
@@ -61,6 +66,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         options: option_types,
         results: result_types,
         asyncs: async_types,
+        sets: set_types,
         async_frames,
         reachability,
     });
@@ -262,6 +268,29 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                 true,
                 None,
             ),
+            Type::Set(id) => {
+                let set = set_types
+                    .iter()
+                    .find(|set| set.id == id)
+                    .expect("reachable sets have resolved declarations");
+                (
+                    CompositeInnerType::Struct(StructType {
+                        fields: vec![
+                            FieldType {
+                                element_type: layout.storage_type(Type::Array(set.backing)),
+                                mutable: true,
+                            },
+                            FieldType {
+                                element_type: StorageType::Val(ValType::I32),
+                                mutable: true,
+                            },
+                        ]
+                        .into(),
+                    }),
+                    true,
+                    None,
+                )
+            }
             _ => unreachable!("only dynamic GC types are ordered by GcLayout"),
         };
         recursive_types.push(SubType {

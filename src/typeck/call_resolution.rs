@@ -894,6 +894,8 @@ impl Checker {
                         && matches!(receiver, Type::Option(_)))
                     || (constructor == StdlibTypeConstructorId::Result
                         && matches!(receiver, Type::Result(_)))
+                    || (constructor == StdlibTypeConstructorId::Set
+                        && matches!(receiver, Type::Set(_)))
             }
             CatalogTypeRef::FixedArray { length, .. } => {
                 matches!(receiver, Type::Variable(_))
@@ -928,6 +930,15 @@ impl Checker {
             return;
         }
         let receiver_is_inferred = matches!(self.shallow_type(receiver), Type::Variable(_));
+        if receiver_is_inferred && let CallableContext::LibraryFunction(item) = self.callable {
+            let owner = self.standard_library.item(item).owner;
+            if candidates
+                .iter()
+                .any(|candidate| candidate.item.owner == owner)
+            {
+                candidates.retain(|candidate| candidate.item.owner == owner);
+            }
+        }
         let specificity = |candidate: &CallCandidate| match candidate.receiver() {
             Some(CatalogTypeRef::Parameter(_)) => 1,
             Some(_) if receiver_is_inferred => 0,
@@ -985,6 +996,8 @@ impl Checker {
                     Type::Option(self.inference.option_type(value))
                 } else if constructor == StdlibTypeConstructorId::Result {
                     Type::Result(self.inference.result_type(value))
+                } else if constructor == StdlibTypeConstructorId::Set {
+                    Type::Set(self.inference.set_type(value))
                 } else {
                     unreachable!("validated catalog type constructor has semantic support")
                 }
@@ -1550,6 +1563,10 @@ impl Checker {
             Type::Async(future) => {
                 let value = self.inference.async_value(future);
                 format!("async {}", self.type_name(value))
+            }
+            Type::Set(set) => {
+                let element = self.inference.set_element(set);
+                format!("Set<{}>", self.type_name(element))
             }
             Type::Variable(_) => "an inferred type".to_owned(),
             Type::Known(id) => match self.inference.type_store().kind(id) {

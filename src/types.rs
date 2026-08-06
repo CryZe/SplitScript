@@ -10,7 +10,7 @@ use std::fmt;
 use crate::{
     ast::{
         ArrayTypeId, AsyncTypeId, EnumDecl, EnumId, FunctionId, OptionTypeId, RecordDecl, RecordId,
-        ResultTypeId,
+        ResultTypeId, TypeApplicationId,
     },
     inference::Type,
     stdlib::{CoreTypeId, StandardLibrary, StdlibTypeId},
@@ -61,6 +61,7 @@ pub enum ResolvedTypeRef {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Set(TypeApplicationId),
 }
 
 pub(crate) fn generic_parameter_name(index: u32) -> String {
@@ -95,6 +96,14 @@ pub struct ResolvedResultType {
 pub struct ResolvedAsyncType {
     pub id: AsyncTypeId,
     pub value: ResolvedTypeRef,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedSetType {
+    pub id: TypeApplicationId,
+    pub element: ResolvedTypeRef,
+    /// General GC array used as the growable backing storage.
+    pub backing: ArrayTypeId,
 }
 
 /// Semantic name for a core, non-constructed SplitScript type.
@@ -141,6 +150,11 @@ pub enum TypeKind {
     Async {
         layout: AsyncTypeId,
         value: TypeId,
+    },
+    Set {
+        layout: TypeApplicationId,
+        element: TypeId,
+        backing: ArrayTypeId,
     },
 }
 
@@ -228,6 +242,7 @@ impl TypeStore {
         match self.kind(id) {
             TypeKind::Error => true,
             TypeKind::Array { element, .. } => self.contains_error(*element),
+            TypeKind::Set { element, .. } => self.contains_error(*element),
             TypeKind::Option { value, .. }
             | TypeKind::Result { value, .. }
             | TypeKind::Async { value, .. } => self.contains_error(*value),
@@ -286,6 +301,7 @@ impl TypeStore {
         options: &[ResolvedOptionType],
         results: &[ResolvedResultType],
         asyncs: &[ResolvedAsyncType],
+        sets: &[ResolvedSetType],
     ) -> TypeId {
         if let Type::Known(id) = ty {
             debug_assert!(
@@ -301,7 +317,8 @@ impl TypeStore {
                     .iter()
                     .find(|array| array.id == id)
                     .unwrap_or_else(|| panic!("missing checked array type {id}"));
-                let element = self.intern_type_ref(array.element, arrays, options, results, asyncs);
+                let element =
+                    self.intern_type_ref(array.element, arrays, options, results, asyncs, sets);
                 TypeKind::Array {
                     layout: id,
                     element,
@@ -314,7 +331,7 @@ impl TypeStore {
                     .find(|option| option.id == id)
                     .unwrap_or_else(|| panic!("missing checked option type {id}"))
                     .value;
-                let value = self.intern_type_ref(value, arrays, options, results, asyncs);
+                let value = self.intern_type_ref(value, arrays, options, results, asyncs, sets);
                 TypeKind::Option { layout: id, value }
             }
             Type::Result(id) => {
@@ -323,7 +340,7 @@ impl TypeStore {
                     .find(|result| result.id == id)
                     .unwrap_or_else(|| panic!("missing checked result type {id}"))
                     .value;
-                let value = self.intern_type_ref(value, arrays, options, results, asyncs);
+                let value = self.intern_type_ref(value, arrays, options, results, asyncs, sets);
                 TypeKind::Result { layout: id, value }
             }
             Type::Async(id) => {
@@ -332,8 +349,21 @@ impl TypeStore {
                     .find(|future| future.id == id)
                     .unwrap_or_else(|| panic!("missing checked async type {id}"))
                     .value;
-                let value = self.intern_type_ref(value, arrays, options, results, asyncs);
+                let value = self.intern_type_ref(value, arrays, options, results, asyncs, sets);
                 TypeKind::Async { layout: id, value }
+            }
+            Type::Set(id) => {
+                let set = sets
+                    .iter()
+                    .find(|set| set.id == id)
+                    .unwrap_or_else(|| panic!("missing checked set type {id}"));
+                let element =
+                    self.intern_type_ref(set.element, arrays, options, results, asyncs, sets);
+                TypeKind::Set {
+                    layout: id,
+                    element,
+                    backing: set.backing,
+                }
             }
             Type::Variable(_) => {
                 unreachable!("unresolved `{ty}` reached the semantic type store")
@@ -349,6 +379,7 @@ impl TypeStore {
         options: &[ResolvedOptionType],
         results: &[ResolvedResultType],
         asyncs: &[ResolvedAsyncType],
+        sets: &[ResolvedSetType],
     ) -> TypeId {
         match ty {
             ResolvedTypeRef::Error => self.id_for_error(),
@@ -360,16 +391,19 @@ impl TypeStore {
             ResolvedTypeRef::Enum(enumeration) => self.id_for_enum(enumeration),
             ResolvedTypeRef::GenericParameter(parameter) => parameter,
             ResolvedTypeRef::Array(id) => {
-                self.intern_inferred(Type::Array(id), arrays, options, results, asyncs)
+                self.intern_inferred(Type::Array(id), arrays, options, results, asyncs, sets)
             }
             ResolvedTypeRef::Option(id) => {
-                self.intern_inferred(Type::Option(id), arrays, options, results, asyncs)
+                self.intern_inferred(Type::Option(id), arrays, options, results, asyncs, sets)
             }
             ResolvedTypeRef::Result(id) => {
-                self.intern_inferred(Type::Result(id), arrays, options, results, asyncs)
+                self.intern_inferred(Type::Result(id), arrays, options, results, asyncs, sets)
             }
             ResolvedTypeRef::Async(id) => {
-                self.intern_inferred(Type::Async(id), arrays, options, results, asyncs)
+                self.intern_inferred(Type::Async(id), arrays, options, results, asyncs, sets)
+            }
+            ResolvedTypeRef::Set(id) => {
+                self.intern_inferred(Type::Set(id), arrays, options, results, asyncs, sets)
             }
         }
     }

@@ -368,20 +368,36 @@ mod tests {
         assert_eq!(
             library
                 .type_constructor(StdlibTypeConstructorId::Array)
-                .parameters,
+                .parameters
+                .iter()
+                .map(|parameter| parameter.name)
+                .collect::<Vec<_>>(),
             ["T"]
         );
         assert_eq!(
             library
                 .type_constructor(StdlibTypeConstructorId::Option)
-                .parameters,
+                .parameters
+                .iter()
+                .map(|parameter| parameter.name)
+                .collect::<Vec<_>>(),
             ["T"]
         );
         assert_eq!(
             library
                 .type_constructor(StdlibTypeConstructorId::Result)
-                .parameters,
+                .parameters
+                .iter()
+                .map(|parameter| parameter.name)
+                .collect::<Vec<_>>(),
             ["T"]
+        );
+        assert_eq!(
+            library
+                .type_constructor(StdlibTypeConstructorId::Set)
+                .parameters[0]
+                .constraints,
+            [StdlibCapabilityId::Equatable]
         );
         assert_eq!(
             library.render_signature(StdlibItemId::ProcessRead),

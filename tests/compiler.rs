@@ -41,6 +41,8 @@ mod inference_language;
 mod parser_recovery;
 #[path = "compiler/profiles_codegen.rs"]
 mod profiles_codegen;
+#[path = "compiler/sets.rs"]
+mod sets;
 #[path = "compiler/snapshots.rs"]
 mod snapshots;
 #[path = "compiler/state_layouts.rs"]

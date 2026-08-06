@@ -17,8 +17,8 @@ use crate::{
         RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
         SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFileFilter, SettingKind,
         Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
-        StateSource, StateTransform, Stmt, SuspensionMode, TypeNameId, TypeRef, UnaryOp, ValueId,
-        VariableDecl,
+        StateSource, StateTransform, Stmt, SuspensionMode, TypeApplicationDecl, TypeApplicationId,
+        TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::Diagnostic,
     migration::DUPLICATE_STATE_DIAGNOSTIC,
@@ -52,8 +52,11 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         result_type_ids: HashMap::new(),
         async_types: Vec::new(),
         async_type_ids: HashMap::new(),
+        type_applications: Vec::new(),
+        type_application_ids: HashMap::new(),
         type_names: Vec::new(),
         type_name_spans: Vec::new(),
+        type_name_occurrences: Vec::new(),
         type_name_ids: HashMap::new(),
         constructed_type_ids: ConstructedTypeIdAllocator::starting_at(0),
         next_expression_id: 0,
@@ -83,8 +86,11 @@ struct Parser<'a> {
     result_type_ids: HashMap<TypeRef, ResultTypeId>,
     async_types: Vec<AsyncTypeDecl>,
     async_type_ids: HashMap<TypeRef, AsyncTypeId>,
+    type_applications: Vec<TypeApplicationDecl>,
+    type_application_ids: HashMap<(TypeNameId, Vec<TypeRef>), TypeApplicationId>,
     type_names: Vec<String>,
     type_name_spans: Vec<Span>,
+    type_name_occurrences: Vec<Vec<Span>>,
     type_name_ids: HashMap<String, TypeNameId>,
     constructed_type_ids: ConstructedTypeIdAllocator,
     next_expression_id: u32,
@@ -330,8 +336,10 @@ impl Parser<'_> {
         program.option_types = self.option_types;
         program.result_types = self.result_types;
         program.async_types = self.async_types;
+        program.type_applications = self.type_applications;
         program.type_names = self.type_names;
         program.type_name_spans = self.type_name_spans;
+        program.type_name_occurrences = self.type_name_occurrences;
         ParseOutput {
             program,
             diagnostics: self.diagnostics,
@@ -540,12 +548,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_array_constructor_syntax_is_not_accepted() {
-        let source = "state \"game.exe\" {} record Legacy { values: Array<i32> }";
-        assert!(parse(source, lex(source, SyntaxMode::Program).unwrap()).is_err());
-    }
-
-    #[test]
     fn parses_for_in_with_a_scoped_binding() {
         let source = r#"
             state "game.exe" {}
@@ -711,6 +713,30 @@ mod tests {
             assert!(
                 error.message.starts_with("expected `,` between ")
                     || error.message == "expected `;` between state fields"
+            );
+        }
+    }
+
+    #[test]
+    fn interns_generic_type_applications_but_retains_every_source_occurrence() {
+        let source = r#"
+            state "game.exe" {}
+            fn visit(first: Set<String>, second: Set<String,>) {}
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        assert_eq!(program.type_applications.len(), 1);
+        let application = &program.type_applications[0];
+        assert_eq!(program.type_name(application.constructor), "Set");
+        assert_eq!(application.arguments.len(), 1);
+        assert_eq!(application.occurrences.len(), 2);
+        for occurrence in &application.occurrences {
+            assert_eq!(
+                &source[occurrence.opening.start..occurrence.opening.end],
+                "<"
+            );
+            assert_eq!(
+                &source[occurrence.closing.start..occurrence.closing.end],
+                ">"
             );
         }
     }

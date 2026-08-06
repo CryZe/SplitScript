@@ -19,7 +19,7 @@ use crate::{
 };
 
 use super::{
-    EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, SettingStorage, Type,
+    EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, SetFunctions, SettingStorage, Type,
     array_element_type,
     async_frame::{AsyncFrameRef, IntrinsicFutureInstance, IntrinsicFutureLayout},
     emit_array_get, emit_default, emit_failure_transfer, emit_int, emit_memory_value,
@@ -99,6 +99,7 @@ pub(super) struct ExprContext<'a> {
     pub intrinsic_futures: &'a HashMap<IntrinsicFutureInstance, u32>,
     pub display_functions: &'a HashMap<StdlibTypeId, FunctionInstance>,
     pub equality_functions: &'a EqualityFunctions,
+    pub set_functions: &'a SetFunctions,
     pub records: &'a [RecordDecl],
     pub enums: &'a [EnumDecl],
     pub arrays: &'a [ResolvedArrayType],
@@ -1126,18 +1127,46 @@ fn compile_value_set(
     }
 }
 
-fn for_array_type(
+#[derive(Clone, Copy)]
+enum ForCollection {
+    Array(crate::ast::ArrayTypeId),
+    Set {
+        set: crate::ast::TypeApplicationId,
+        backing: crate::ast::ArrayTypeId,
+    },
+}
+
+fn for_collection_type(
     iterable_value: ValueId,
     context: &ExprContext<'_>,
-) -> (crate::ast::ArrayTypeId, Type) {
+) -> (ForCollection, Type) {
     let ty = context
         .semantics
         .value_type(iterable_value)
         .expect("checked for-loop iterable storage has a type");
-    let Type::Array(array) = context.ty(ty) else {
-        unreachable!("checked for-loop iterables are arrays")
-    };
-    (array, array_element_type(array, context.semantics))
+    match context.ty(ty) {
+        Type::Array(array) => (
+            ForCollection::Array(array),
+            array_element_type(array, context.semantics),
+        ),
+        Type::Set(set) => {
+            let (element, backing) = context
+                .semantics
+                .types()
+                .iter()
+                .find_map(|(_, kind)| match kind {
+                    crate::types::TypeKind::Set {
+                        layout,
+                        element,
+                        backing,
+                    } if *layout == set => Some((context.ty(*element), *backing)),
+                    _ => None,
+                })
+                .expect("checked set layouts have iterable storage");
+            (ForCollection::Set { set, backing }, element)
+        }
+        _ => unreachable!("checked for-loop iterables are arrays or sets"),
+    }
 }
 
 pub(super) fn compile_for_init(
@@ -1164,10 +1193,19 @@ pub(super) fn compile_for_has_next(
 ) {
     compile_value_get(function, index_value, context);
     compile_value_get(function, iterable_value, context);
-    function
-        .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::ArrayLen)
-        .instruction(&Instruction::I32LtU);
+    function.instruction(&Instruction::RefAsNonNull);
+    match for_collection_type(iterable_value, context).0 {
+        ForCollection::Array(_) => {
+            function.instruction(&Instruction::ArrayLen);
+        }
+        ForCollection::Set { set, .. } => {
+            function.instruction(&Instruction::StructGet {
+                struct_type_index: context.gc.index(Type::Set(set)),
+                field_index: 1,
+            });
+        }
+    }
+    function.instruction(&Instruction::I32LtU);
 }
 
 /// Stores the current element in the source binding and advances before the
@@ -1179,10 +1217,21 @@ pub(super) fn compile_for_bind_and_advance(
     index_value: ValueId,
     context: &ExprContext<'_>,
 ) {
-    let (array, element) = for_array_type(iterable_value, context);
+    let (collection, element) = for_collection_type(iterable_value, context);
     compile_value_set(function, binding, context, |function| {
         compile_value_get(function, iterable_value, context);
         function.instruction(&Instruction::RefAsNonNull);
+        let array = match collection {
+            ForCollection::Array(array) => array,
+            ForCollection::Set { set, backing } => {
+                function.instruction(&Instruction::StructGet {
+                    struct_type_index: context.gc.index(Type::Set(set)),
+                    field_index: 0,
+                });
+                function.instruction(&Instruction::RefAsNonNull);
+                backing
+            }
+        };
         compile_value_get(function, index_value, context);
         emit_array_get(function, context.gc.index(Type::Array(array)), element);
     });
@@ -2002,6 +2051,30 @@ fn compile_expr_unconverted(
             }
         },
         Some(builtin) => match builtin {
+            IntrinsicId::SetNew => {
+                let Type::Set(set) = ty else {
+                    unreachable!("Set.new produces a Set value")
+                };
+                function.instruction(&Instruction::Call(
+                    context.set_functions.function(set, builtin),
+                ));
+            }
+            IntrinsicId::SetLength
+            | IntrinsicId::SetContains
+            | IntrinsicId::SetInsert
+            | IntrinsicId::SetRemove
+            | IntrinsicId::SetClear => {
+                let receiver = compile_receiver(function, target, context);
+                let Type::Set(set) = receiver else {
+                    unreachable!("set methods have Set receivers")
+                };
+                for argument in args {
+                    compile_expr(function, *argument, context);
+                }
+                function.instruction(&Instruction::Call(
+                    context.set_functions.function(set, builtin),
+                ));
+            }
             IntrinsicId::Print => {
                 compile_as_string(function, args[0], context);
                 function.instruction(&Instruction::Call(

@@ -339,6 +339,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/set_runtime.split",
+        output: "set_runtime.wasm",
+        profile: "release",
+        harness: "tests/set_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/process_results.split",
         output: "process_results.wasm",
         profile: "release",

@@ -824,6 +824,50 @@ Nested arrays can combine both forms, for example `[[u8; 4]; 2]`. Wrapper
 postfixes apply to the complete array type, so `[T; N]?` is an optional sized
 array and `[T!; N]` is a sized array of fallible values.
 
+## Sets
+
+`Set<T>` is a growable collection of unique values. `T` must implement
+`Equatable`; this constraint is declared by the standard library and applies
+both to inferred construction and explicit `Set<T>` annotations. Construct a
+set with an explicit element type because an empty set has no values from which
+to infer it:
+
+```text
+let visited = Set.new<String>()
+
+whileAttached {
+    if visited.insert(current.roomName) {
+        print(`First visit to {current.roomName}`)
+    }
+}
+```
+
+A global set is constructed once for the loaded script instance and retains its
+contents across ticks and attachments until it is explicitly changed or the
+instance is unloaded. Constructing one inside a polling block instead creates a
+fresh empty set each time that expression runs.
+
+`insert(value)` returns whether the value was new. `remove(value)` returns
+whether a value was present, `contains(value)` performs a linear equality
+search, `length()` returns `u32`, `isEmpty()` reports whether the length is zero,
+and `clear()` removes all values. The set object remains stable across mutation;
+its backing storage allocates at construction, when insertion grows capacity,
+and when clearing releases stored references.
+
+Sets can be traversed directly:
+
+```text
+for room in visited {
+    print(room)
+}
+```
+
+Set iteration order is not a language guarantee. Traversal currently observes
+the live collection, so mutating that same set from its loop body can change
+which values remain to be visited. Avoid doing so; the language will adopt a
+stricter diagnostic or snapshot rule before more mutable collection types are
+introduced.
+
 ## Settings
 
 ```text

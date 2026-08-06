@@ -91,6 +91,8 @@ fn catalog_method_accepts(
                     && matches!(receiver, TypeKind::Option { .. }))
                 || (constructor == StdlibTypeConstructorId::Result
                     && matches!(receiver, TypeKind::Result { .. }))
+                || (constructor == StdlibTypeConstructorId::Set
+                    && matches!(receiver, TypeKind::Set { .. }))
         }
         TypeRef::FixedArray { length, .. } => {
             matches!(receiver, TypeKind::Array { length: Some(actual), .. } if *actual == length)
@@ -140,6 +142,7 @@ fn semantic_type_may_have_capability(
         }
         TypeKind::GenericParameter { .. } => false,
         TypeKind::Async { .. } => false,
+        TypeKind::Set { .. } => false,
     }
 }
 

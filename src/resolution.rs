@@ -10,7 +10,7 @@ use crate::{
     Diagnostic,
     ast::{
         EnumReference, ExprId, ExprKind, MatchPattern, PatternId, Program, SettingKind, Span,
-        TypeNameId, TypeRef, ValueId,
+        TypeApplicationId, TypeNameId, TypeRef, ValueId,
     },
     stdlib::{StandardLibrary, StdlibStateProviderId, StdlibTypeKind},
     types::{EnumTypeId, ResolvedTypeRef},
@@ -26,6 +26,7 @@ use crate::{
 pub(crate) struct ProgramResolutions {
     state_provider: Option<StdlibStateProviderId>,
     type_names: HashMap<TypeNameId, ResolvedTypeRef>,
+    type_applications: HashMap<TypeApplicationId, ResolvedTypeRef>,
     expression_enums: HashMap<ExprId, EnumTypeId>,
     pattern_enums: HashMap<PatternId, EnumTypeId>,
     setting_enums: HashMap<ValueId, EnumTypeId>,
@@ -44,6 +45,7 @@ impl ProgramResolutions {
             TypeRef::Option(id) => Some(ResolvedTypeRef::Option(id)),
             TypeRef::Result(id) => Some(ResolvedTypeRef::Result(id)),
             TypeRef::Async(id) => Some(ResolvedTypeRef::Async(id)),
+            TypeRef::Application(id) => self.type_applications.get(&id).copied(),
         }
     }
 
@@ -128,6 +130,7 @@ pub(crate) fn validate_declarations(
 
     for (name, span) in program.type_names.iter().zip(&program.type_name_spans) {
         if standard_library.type_by_name(name).is_none()
+            && standard_library.type_constructor_by_name(name).is_none()
             && !program.records.iter().any(|record| record.name == *name)
             && !program
                 .enums
@@ -138,6 +141,30 @@ pub(crate) fn validate_declarations(
                 format!("unknown type `{name}`"),
                 *span,
             ));
+        }
+    }
+
+    let applied_constructor_occurrences = program
+        .type_applications
+        .iter()
+        .flat_map(|application| {
+            application
+                .occurrences
+                .iter()
+                .map(|occurrence| occurrence.constructor)
+        })
+        .collect::<std::collections::HashSet<_>>();
+    for (id, name, _) in program.type_names() {
+        if standard_library.type_constructor_by_name(name).is_none() {
+            continue;
+        }
+        for span in program.type_name_occurrences(id) {
+            if !applied_constructor_occurrences.contains(span) {
+                diagnostics.push(Diagnostic::type_error(
+                    format!("`{name}` is a generic type constructor; provide its type arguments as `{name}<...>`"),
+                    *span,
+                ));
+            }
         }
     }
 
@@ -198,6 +225,45 @@ pub(crate) fn resolve_program(
         })
         .collect::<HashMap<_, _>>();
     resolutions.type_names = type_names;
+
+    for application in &program.type_applications {
+        let name = program.type_name(application.constructor);
+        let Some(constructor) = standard_library.type_constructor_by_name(name) else {
+            provider_diagnostics.push(Diagnostic::type_error(
+                format!("unknown generic type constructor `{name}`"),
+                program.type_name_span(application.constructor),
+            ));
+            continue;
+        };
+        if application.arguments.len() != constructor.parameters.len() {
+            provider_diagnostics.push(Diagnostic::type_error(
+                format!(
+                    "`{name}` expects {} type argument{}, found {}",
+                    constructor.parameters.len(),
+                    if constructor.parameters.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    },
+                    application.arguments.len(),
+                ),
+                program.type_name_span(application.constructor),
+            ));
+            continue;
+        }
+        let resolved = if constructor.id == crate::stdlib::StdlibTypeConstructorId::Set {
+            ResolvedTypeRef::Set(application.id)
+        } else {
+            provider_diagnostics.push(Diagnostic::type_error(
+                format!("`{name}<...>` does not have source type syntax"),
+                program.type_name_span(application.constructor),
+            ));
+            continue;
+        };
+        resolutions
+            .type_applications
+            .insert(application.id, resolved);
+    }
 
     let mut resolver = EnumResolver {
         enums: &enums,

@@ -315,6 +315,7 @@ fn validate_future_storage(
                     })
                 }),
             TypeKind::Array { element, .. }
+            | TypeKind::Set { element, .. }
             | TypeKind::Option { value: element, .. }
             | TypeKind::Result { value: element, .. } => {
                 contains_future(*element, syntax, semantics, enum_types, visited)
@@ -1190,6 +1191,7 @@ fn expand_fully_observed_types(
                 }
             }
             TypeKind::Array { element, .. }
+            | TypeKind::Set { element, .. }
             | TypeKind::Option { value: element, .. }
             | TypeKind::Result { value: element, .. }
             | TypeKind::Async { value: element, .. } => pending.push_back(*element),
@@ -1262,6 +1264,7 @@ fn expand_reachable_nominal_types(
                 }
             }
             TypeKind::Array { element, .. }
+            | TypeKind::Set { element, .. }
             | TypeKind::Option { value: element, .. }
             | TypeKind::Result { value: element, .. }
             | TypeKind::Async { value: element, .. } => pending.push_back(*element),

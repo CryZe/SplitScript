@@ -154,13 +154,12 @@ or behavioral parity.
   document that headings are visual and parent boolean settings must gate child
   behavior in source; do not let a compiling hierarchy imply behavior the host
   does not provide.
-- [ ] Add a run-scoped `Set<T>` as the first growable collection. The repeated
-  visited-map/checkpoint pattern now has evidence from several ports and cannot
-  be faithfully replaced by comparing only the previous value. Start with
-  construction, insertion, removal, containment, clearing, length, and `for`
-  iteration; make allocation and mutation behavior explicit and avoid creating
-  a fresh collection every tick. Derive key constraints from source-declared
-  equality/hash capabilities. Add `List<T>` or `Map<K, V>` only when the next
+- [ ] Settle mutation during collection iteration before adding more mutable
+  collections. `Set<T>` traversal currently observes the live set, which is
+  deterministic but easy to misuse when insertion, removal, or clearing occurs
+  in the loop body. Choose and document one approachable rule: diagnose
+  mutation of the iterated collection, or define snapshot traversal with an
+  explicit allocation policy. Add `List<T>` or `Map<K, V>` only when the next
   maintained port requires ordering, duplicates, or stored values.
 - [ ] Design indexed mutation together with collection mutability rather than
   adding an isolated array-assignment special case. Specify aliasing, fixed

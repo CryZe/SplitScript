@@ -2,7 +2,10 @@
 
 use crate::{
     ast::Program,
-    inference::{ArrayLayout, AsyncLayout, InferenceContext, OptionLayout, ResultLayout, Type},
+    inference::{
+        ArrayLayout, AsyncLayout, ConstructedLayouts, InferenceContext, OptionLayout, Requirements,
+        ResultLayout, SetLayout, Type,
+    },
     resolution::ProgramResolutions,
     semantic::SemanticBuilder,
     stdlib::StandardLibrary,
@@ -71,15 +74,33 @@ fn initialize_checker(
             value: syntax_type(future.value, &semantic_types, resolutions),
         })
         .collect::<Vec<_>>();
+    let set_types = program
+        .type_applications
+        .iter()
+        .filter(|application| {
+            matches!(
+                resolutions.type_ref(crate::ast::TypeRef::Application(application.id)),
+                Some(crate::types::ResolvedTypeRef::Set(_))
+            )
+        })
+        .map(|application| SetLayout {
+            id: application.id,
+            element: syntax_type(application.arguments[0], &semantic_types, resolutions),
+            backing: None,
+        })
+        .collect::<Vec<_>>();
     let none_type = Type::Known(semantic_types.id_for_core(crate::stdlib::CoreTypeId::None));
     let inference = InferenceContext::new(
         standard_library.clone(),
         semantic_types,
         records.len() as u32 + enums.len() as u32,
-        array_types,
-        option_types,
-        result_types,
-        async_types,
+        ConstructedLayouts {
+            arrays: array_types,
+            options: option_types,
+            results: result_types,
+            asyncs: async_types,
+            sets: set_types,
+        },
     );
     let provider_value = resolutions.state_provider().map(|provider| {
         let declaration = standard_library.state_provider(provider);
@@ -131,6 +152,28 @@ fn initialize_checker(
         let ty = checker.catalog_type(field.ty, &variables);
         checker.standard_field_types.insert(field.id, ty);
         checker.semantics.resolve_standard_field_type(field.id, ty);
+    }
+    for application in &program.type_applications {
+        let name = program.type_name(application.constructor);
+        let Some(constructor) = checker.standard_library.type_constructor_by_name(name) else {
+            continue;
+        };
+        if !matches!(
+            checker
+                .resolutions
+                .type_ref(crate::ast::TypeRef::Application(application.id)),
+            Some(crate::types::ResolvedTypeRef::Set(_))
+        ) {
+            continue;
+        }
+        for (argument, parameter) in application.arguments.iter().zip(constructor.parameters) {
+            let argument = checker.syntax_type(*argument);
+            checker.require(
+                argument,
+                Requirements::capabilities(parameter.constraints.iter().copied()),
+                program.type_name_span(application.constructor),
+            );
+        }
     }
     checker
 }

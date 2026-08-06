@@ -7,13 +7,15 @@ use crate::{
     equality::EqualityCapabilities,
     semantic::{FunctionInstance, SemanticModel},
     stdlib::{RuntimeRepresentation, StandardLibrary, StdlibTypeId},
-    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType},
+    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, ResolvedSetType},
 };
 
 use super::{
     EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, Type, action_result_val_type,
-    async_frame::IntrinsicFutureInstance, dependencies::BackendDependencies, reachability,
-    runtime_helper_registry, semantic_type,
+    async_frame::IntrinsicFutureInstance,
+    dependencies::BackendDependencies,
+    reachability, runtime_helper_registry, semantic_type, set_element_type,
+    set_functions::{SetFunctionPlan, SetFunctions},
 };
 
 /// The complete, deterministic assignment of generated function signatures
@@ -23,6 +25,7 @@ pub(super) struct FunctionPlan<'a> {
     pub section: FunctionSection,
     pub runtime_helpers: RuntimeHelperPlan,
     pub equality: EqualityFunctions,
+    pub sets: SetFunctions,
     pub users: HashMap<FunctionInstance, UserFunctionPlan>,
     pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
     pub displays: HashMap<StdlibTypeId, FunctionInstance>,
@@ -48,6 +51,7 @@ pub(super) struct Inputs<'a> {
     pub arrays: &'a [ResolvedArrayType],
     pub options: &'a [ResolvedOptionType],
     pub results: &'a [ResolvedResultType],
+    pub sets: &'a [ResolvedSetType],
     pub equality: &'a EqualityCapabilities,
     pub dependencies: &'a BackendDependencies,
     pub reachability: &'a reachability::Reachability,
@@ -70,6 +74,7 @@ pub(super) fn encode<'a>(
         arrays,
         options,
         results,
+        sets,
         equality: equality_capabilities,
         dependencies,
         reachability,
@@ -151,6 +156,26 @@ pub(super) fn encode<'a>(
         ordered: ordered_helpers,
         functions: helper_functions,
     };
+
+    let mut set_functions = SetFunctions::default();
+    for set in sets
+        .iter()
+        .filter(|set| reachability.contains_set_type(set.id))
+    {
+        let set_type = gc.val_type(Type::Set(set.id));
+        let element_type = gc.val_type(set_element_type(set.id, semantics));
+        set_functions.insert(
+            set.id,
+            SetFunctionPlan {
+                new: declare(vec![], vec![set_type]),
+                length: declare(vec![set_type], vec![ValType::I32]),
+                contains: declare(vec![set_type, element_type], vec![ValType::I32]),
+                insert: declare(vec![set_type, element_type], vec![ValType::I32]),
+                remove: declare(vec![set_type, element_type], vec![ValType::I32]),
+                clear: declare(vec![set_type], vec![]),
+            },
+        );
+    }
 
     let mut users = HashMap::new();
     for instance in reachability.functions() {
@@ -276,6 +301,7 @@ pub(super) fn encode<'a>(
         section,
         runtime_helpers,
         equality,
+        sets: set_functions,
         users,
         intrinsic_futures,
         displays: reachability

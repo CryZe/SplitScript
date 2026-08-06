@@ -44,6 +44,12 @@ pub trait Visitor<'ast>: Sized {
         self.visit_type_ref(&result.value);
     }
 
+    fn visit_type_application(&mut self, application: &'ast TypeApplicationDecl) {
+        for argument in &application.arguments {
+            self.visit_type_ref(argument);
+        }
+    }
+
     fn visit_function(&mut self, function: &'ast FunctionDecl) {
         walk_function(self, function);
     }
@@ -111,6 +117,9 @@ pub fn walk_program<'ast, V: Visitor<'ast>>(visitor: &mut V, program: &'ast Prog
     }
     for result in &program.result_types {
         visitor.visit_result_type(result);
+    }
+    for application in &program.type_applications {
+        visitor.visit_type_application(application);
     }
     for function in &program.functions {
         visitor.visit_function(function);

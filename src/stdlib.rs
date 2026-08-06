@@ -267,6 +267,12 @@ impl StandardLibrary {
             .expect("every standard-library type-constructor ID must have a declaration")
     }
 
+    pub fn type_constructor_by_name(&self, name: &str) -> Option<&'static StdlibTypeConstructor> {
+        self.type_constructors()
+            .iter()
+            .find(|constructor| constructor.name == name)
+    }
+
     pub fn namespaces(&self) -> &'static [StdlibNamespace] {
         NAMESPACES
     }
@@ -462,9 +468,10 @@ impl StandardLibrary {
             StdlibOwner::Root => Vec::new(),
             StdlibOwner::Namespace(namespace) => self.namespace(namespace).path.to_vec(),
             StdlibOwner::Type(ty) => vec![self.type_decl(ty).name],
-            StdlibOwner::Core(_) | StdlibOwner::Capability(_) | StdlibOwner::TypeConstructor(_) => {
-                return None;
+            StdlibOwner::TypeConstructor(constructor) => {
+                vec![self.type_constructor(constructor).name]
             }
+            StdlibOwner::Core(_) | StdlibOwner::Capability(_) => return None,
         };
         path.push(item.name);
         Some(path)
@@ -598,15 +605,15 @@ impl StandardLibrary {
         for constructor in TYPE_CONSTRUCTORS {
             let mut parameters = HashSet::new();
             for parameter in constructor.parameters {
-                if parameter.trim().is_empty() {
+                if parameter.name.trim().is_empty() {
                     errors.push(format!(
                         "type constructor `{}` has an empty parameter name",
                         constructor.name
                     ));
-                } else if !parameters.insert(*parameter) {
+                } else if !parameters.insert(parameter.name) {
                     errors.push(format!(
-                        "type constructor `{}` repeats parameter `{parameter}`",
-                        constructor.name
+                        "type constructor `{}` repeats parameter `{}`",
+                        constructor.name, parameter.name
                     ));
                 }
             }

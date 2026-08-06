@@ -37,6 +37,7 @@ mod reachability;
 mod runtime_helper_registry;
 mod runtime_helpers;
 mod script_functions;
+mod set_functions;
 mod settings;
 mod specialization;
 mod unity_layout;
@@ -59,6 +60,7 @@ use self::script_functions::{
     LocalPlanOptions, compile_action, compile_async_function_init, compile_read,
     compile_state_transform, compile_user_function, plan_wasm_locals,
 };
+use self::set_functions::SetFunctions;
 use self::update::{ProviderAttach, StatePollFunctions, compile_update};
 use crate::intrinsic_registry::RuntimeHelperId;
 
@@ -123,6 +125,7 @@ struct ConstructedTypes {
     options: Vec<ResolvedOptionType>,
     results: Vec<ResolvedResultType>,
     asyncs: Vec<crate::types::ResolvedAsyncType>,
+    sets: Vec<crate::types::ResolvedSetType>,
 }
 
 /// Complete, immutable input to backend planning and Wasm encoding.
@@ -149,6 +152,7 @@ impl<'a> BackendProgram<'a> {
             options: checked.option_types.clone(),
             results: checked.result_types.clone(),
             asyncs: checked.async_types.clone(),
+            sets: checked.set_types.clone(),
         };
         specialization::materialize(
             &wasm_ir,
@@ -157,6 +161,7 @@ impl<'a> BackendProgram<'a> {
             &mut constructed_types.options,
             &mut constructed_types.results,
             &mut constructed_types.asyncs,
+            &mut constructed_types.sets,
         );
         Self {
             standard_library: checked.context.standard_library(),
@@ -210,12 +215,14 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         options: option_types,
         results: result_types,
         asyncs: async_types,
+        sets: set_types,
     } = constructed_types;
     let semantics = &semantics;
     let enums = &enums;
     let array_types = &array_types;
     let option_types = &option_types;
     let result_types = &result_types;
+    let set_types = &set_types;
     let wasm_ir = &wasm_ir;
     let state = program.state.as_ref().unwrap();
     let provider = semantics
@@ -276,6 +283,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         option_types,
         result_types,
         async_types: &async_types,
+        set_types,
         reachability: &reachability,
     });
     let imports::EncodedImports {
@@ -304,6 +312,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         section: functions,
         runtime_helpers,
         equality: equality_functions,
+        sets: set_functions,
         users: user_functions,
         intrinsic_futures,
         displays: display_functions,
@@ -325,6 +334,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             arrays: array_types,
             options: option_types,
             results: result_types,
+            sets: set_types,
             equality,
             dependencies: &dependencies,
             reachability: &reachability,
@@ -346,6 +356,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         intrinsic_futures: &intrinsic_futures,
         display_functions: &display_functions,
         equality_functions: &equality_functions,
+        set_functions: &set_functions,
         records: &program.records,
         enums,
         arrays: array_types,
@@ -424,11 +435,24 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &equality_functions,
         &gc,
     );
+    let set_bodies = set_functions::compile(
+        set_types,
+        &set_functions,
+        semantics,
+        &equality_functions,
+        runtime_helpers
+            .optional_function(RuntimeHelperId::StringEquality)
+            .unwrap_or(0),
+        &gc,
+    );
     for body in helper_bodies {
         codes.function(&body);
     }
     let refresh_settings = runtime_helpers.optional_function(RuntimeHelperId::RefreshSettings);
     for body in equality_bodies {
+        codes.function(&body);
+    }
+    for body in set_bodies {
         codes.function(&body);
     }
     for instance in reachability.functions() {
@@ -543,6 +567,7 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
         TypeKind::Option { layout, .. } => Type::Option(*layout),
         TypeKind::Result { layout, .. } => Type::Result(*layout),
         TypeKind::Async { layout, .. } => Type::Async(*layout),
+        TypeKind::Set { layout, .. } => Type::Set(*layout),
     }
 }
 
@@ -594,6 +619,19 @@ fn enum_variant_payload(variant: EnumVariantId, semantics: &SemanticModel) -> Op
 fn array_element_type(array: ArrayTypeId, semantics: &SemanticModel) -> Type {
     try_array_element_type(array, semantics)
         .expect("concrete array layouts have backend-representable element types")
+}
+
+fn set_element_type(set: crate::ast::TypeApplicationId, semantics: &SemanticModel) -> Type {
+    semantics
+        .types()
+        .iter()
+        .find_map(|(_, kind)| match kind {
+            TypeKind::Set {
+                layout, element, ..
+            } if *layout == set => Some(semantic_type(*element, semantics)),
+            _ => None,
+        })
+        .expect("checked set layouts have semantic element types")
 }
 
 fn try_array_element_type(array: ArrayTypeId, semantics: &SemanticModel) -> Option<Type> {

@@ -379,6 +379,12 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::FloatRound
         | IntrinsicId::ArrayLength
         | IntrinsicId::ArraySet
+        | IntrinsicId::SetNew
+        | IntrinsicId::SetLength
+        | IntrinsicId::SetContains
+        | IntrinsicId::SetInsert
+        | IntrinsicId::SetRemove
+        | IntrinsicId::SetClear
         | IntrinsicId::AddressAdd
         | IntrinsicId::ProcessName
         | IntrinsicId::ProcessClosed
@@ -432,6 +438,10 @@ const T_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
     arguments: &[T],
 };
+const T_SET: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Set,
+    arguments: &[T],
+};
 const STRING_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
     arguments: &[STRING],
@@ -473,6 +483,7 @@ const NO_TYPE_PARAMETERS: Option<&[StdlibCapabilityId]> = None;
 const UNCONSTRAINED_T: Option<&[StdlibCapabilityId]> = Some(&[]);
 const NUMERIC_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Numeric]);
 const FLOAT_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Float]);
+const EQUATABLE_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Equatable]);
 const MEMORY_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::MemoryReadable]);
 const DISPLAY_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Display]);
 
@@ -669,6 +680,54 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 NONE,
             ),
             MUTATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::SetNew => contract!(
+            SetNew,
+            Function,
+            signature(EQUATABLE_T, None, params![], T_SET),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::SetLength => contract!(
+            SetLength,
+            Method,
+            signature(EQUATABLE_T, Some(T_SET), params![], U32),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::SetContains => contract!(
+            SetContains,
+            Method,
+            signature(EQUATABLE_T, Some(T_SET), params![value(T)], BOOL),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::SetInsert => contract!(
+            SetInsert,
+            Method,
+            signature(EQUATABLE_T, Some(T_SET), params![value(T)], BOOL),
+            ALLOCATES.with(Effect::MutatesValue),
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::SetRemove => contract!(
+            SetRemove,
+            Method,
+            signature(EQUATABLE_T, Some(T_SET), params![value(T)], BOOL),
+            MUTATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::SetClear => contract!(
+            SetClear,
+            Method,
+            signature(EQUATABLE_T, Some(T_SET), params![], NONE),
+            ALLOCATES.with(Effect::MutatesValue),
             Everywhere,
             RepresentationPrimitive
         ),

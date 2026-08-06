@@ -7,7 +7,7 @@ use crate::{
     Diagnostic,
     ast::{
         Action, EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, Program, RecordDecl, SettingDecl,
-        SettingKind, StateDecl, StateField, Stmt, VariableDecl,
+        SettingKind, StateDecl, StateField, Stmt, TypeApplicationDecl, VariableDecl,
     },
     lexer::{Lexeme, TokenKind, TriviaKind},
     syntax::SourceDocument,
@@ -239,6 +239,16 @@ impl SyntaxLayoutCollector<'_> {
 }
 
 impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
+    fn visit_type_application(&mut self, application: &'ast TypeApplicationDecl) {
+        for occurrence in &application.occurrences {
+            self.generic_opens.insert(occurrence.opening.start);
+            self.generic_closes.insert(occurrence.closing.start);
+        }
+        for argument in &application.arguments {
+            self.visit_type_ref(argument);
+        }
+    }
+
     fn visit_record(&mut self, record: &'ast RecordDecl) {
         self.mark_declaration_items_vertical(
             record.span,
@@ -424,7 +434,14 @@ impl<'a> Formatter<'a> {
             index_opens: HashSet::new(),
         };
         layout.visit_program(syntax);
-        let trailing_punctuation = trailing_list_punctuation(document, syntax, &layout.break_after);
+        let trailing_punctuation = trailing_list_punctuation(
+            document,
+            syntax,
+            &layout.break_after,
+            &layout.generic_opens,
+            &layout.generic_closes,
+        );
+        let delimiters = delimiter_ranges(document, &layout.generic_opens, &layout.generic_closes);
         Self {
             document,
             output: String::with_capacity(document.source().len()),
@@ -441,7 +458,7 @@ impl<'a> Formatter<'a> {
             bracket_depth: 0,
             multiline_headers,
             continuations: layout.continuations,
-            delimiters: delimiter_ranges(document),
+            delimiters,
             join_before: layout.join_before,
             break_after: layout.break_after,
             trailing_comma_before: trailing_punctuation.commas,
@@ -744,6 +761,7 @@ enum DelimiterKind {
     Parenthesis,
     Bracket,
     Brace,
+    Angle,
 }
 
 struct PendingDelimiter {
@@ -752,7 +770,11 @@ struct PendingDelimiter {
     direct_breaks: Vec<usize>,
 }
 
-fn delimiter_ranges(document: &SourceDocument) -> Vec<DelimiterRange> {
+fn delimiter_ranges(
+    document: &SourceDocument,
+    generic_opens: &HashSet<usize>,
+    generic_closes: &HashSet<usize>,
+) -> Vec<DelimiterRange> {
     let mut stack = Vec::<PendingDelimiter>::new();
     let mut ranges = Vec::new();
     for lexeme in document.lexemes() {
@@ -770,6 +792,21 @@ fn delimiter_ranges(document: &SourceDocument) -> Vec<DelimiterRange> {
                 {
                     delimiter.direct_breaks.push(trivia.span.end);
                 }
+            }
+            Lexeme::Token(token) if generic_opens.contains(&token.span.start) => {
+                stack.push(PendingDelimiter {
+                    kind: DelimiterKind::Angle,
+                    opening: token.span.start,
+                    direct_breaks: Vec::new(),
+                });
+            }
+            Lexeme::Token(token) if generic_closes.contains(&token.span.start) => {
+                close_delimiter(
+                    &mut stack,
+                    &mut ranges,
+                    DelimiterKind::Angle,
+                    token.span.start,
+                );
             }
             Lexeme::Token(token) => match token.kind {
                 TokenKind::LParen => stack.push(PendingDelimiter {
@@ -813,6 +850,8 @@ fn trailing_list_punctuation(
     document: &SourceDocument,
     syntax: &Program,
     break_after: &HashSet<usize>,
+    generic_opens: &HashSet<usize>,
+    generic_closes: &HashSet<usize>,
 ) -> TrailingPunctuation {
     #[derive(Debug)]
     struct ListDelimiter {
@@ -841,11 +880,15 @@ fn trailing_list_punctuation(
                 }
             }
             Lexeme::Token(token) => {
-                let opening = match token.kind {
-                    TokenKind::LParen => Some(DelimiterKind::Parenthesis),
-                    TokenKind::LBracket => Some(DelimiterKind::Bracket),
-                    TokenKind::LBrace => Some(DelimiterKind::Brace),
-                    _ => None,
+                let opening = if generic_opens.contains(&token.span.start) {
+                    Some(DelimiterKind::Angle)
+                } else {
+                    match token.kind {
+                        TokenKind::LParen => Some(DelimiterKind::Parenthesis),
+                        TokenKind::LBracket => Some(DelimiterKind::Bracket),
+                        TokenKind::LBrace => Some(DelimiterKind::Brace),
+                        _ => None,
+                    }
                 };
                 if let Some(kind) = opening {
                     if let Some(parent) = stack.last_mut() {
@@ -871,11 +914,15 @@ fn trailing_list_punctuation(
                     }
                     continue;
                 }
-                let closing = match token.kind {
-                    TokenKind::RParen => Some(DelimiterKind::Parenthesis),
-                    TokenKind::RBracket => Some(DelimiterKind::Bracket),
-                    TokenKind::RBrace => Some(DelimiterKind::Brace),
-                    _ => None,
+                let closing = if generic_closes.contains(&token.span.start) {
+                    Some(DelimiterKind::Angle)
+                } else {
+                    match token.kind {
+                        TokenKind::RParen => Some(DelimiterKind::Parenthesis),
+                        TokenKind::RBracket => Some(DelimiterKind::Bracket),
+                        TokenKind::RBrace => Some(DelimiterKind::Brace),
+                        _ => None,
+                    }
                 };
                 if let Some(kind) = closing
                     && let Some(delimiter) = stack.pop()
@@ -960,6 +1007,24 @@ impl TrailingPunctuationCollector<'_> {
 }
 
 impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
+    fn visit_type_application(&mut self, application: &'ast TypeApplicationDecl) {
+        for occurrence in &application.occurrences {
+            if line_breaks(
+                &self.document.source()[occurrence.opening.end..occurrence.closing.start],
+            ) > 0
+            {
+                self.punctuation.commas.insert(occurrence.closing.start);
+            } else if let Some(comma) =
+                trailing_comma_before(self.document, occurrence.span, occurrence.closing.start)
+            {
+                self.punctuation.omitted_commas.insert(comma);
+            }
+        }
+        for argument in &application.arguments {
+            self.visit_type_ref(argument);
+        }
+    }
+
     fn visit_program(&mut self, program: &'ast Program) {
         if !program.settings.is_empty()
             && let Some(span) = program.settings_span
@@ -1884,6 +1949,34 @@ whileAttached {
 
         let formatted = format_source(source).unwrap();
         assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn keeps_generic_type_arguments_attached() {
+        let source = r#"state "game.exe"{}
+fn contains(visited:Set < String >,other:Set < String, >)->bool{return visited.contains("Atrium")||other.contains("Library")}"#;
+        let expected = r#"state "game.exe" {}
+fn contains(visited: Set<String>, other: Set<String>) -> bool {
+    return visited.contains("Atrium") || other.contains("Library")
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn adds_trailing_commas_to_multiline_generic_types() {
+        let source = r#"state "game.exe" {}
+fn visit(values: Set<
+String
+>) {}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert!(formatted.contains("Set<\n"), "{formatted}");
+        assert!(formatted.contains("String,\n"), "{formatted}");
         assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
 

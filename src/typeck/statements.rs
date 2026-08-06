@@ -139,15 +139,19 @@ impl Checker {
                     }),
                     Some(ty) => match self.shallow_type(ty) {
                         Type::Array(array) => (ty, self.inference.array_element(array)),
+                        Type::Set(set) => (ty, self.inference.set_element(set)),
                         Type::Known(id) => match self.inference.type_store().kind(id) {
                             crate::types::TypeKind::Array { element, .. } => {
+                                (ty, Type::Known(*element))
+                            }
+                            crate::types::TypeKind::Set { element, .. } => {
                                 (ty, Type::Known(*element))
                             }
                             _ => {
                                 let actual = self.type_name(ty);
                                 self.error(
                                     format!(
-                                        "`for ... in` expects an array, but this expression has type `{actual}`"
+                                        "`for ... in` expects an array or set, but this expression has type `{actual}`"
                                     ),
                                     iterable.span,
                                 );
@@ -164,7 +168,7 @@ impl Checker {
                                 let actual = self.type_name(ty);
                                 self.error(
                                     format!(
-                                        "`for ... in` expects an array, but this expression has type `{actual}`"
+                                        "`for ... in` expects an array or set, but this expression has type `{actual}`"
                                     ),
                                     iterable.span,
                                 );
@@ -175,7 +179,7 @@ impl Checker {
                             let actual = self.type_name(ty);
                             self.error(
                                 format!(
-                                    "`for ... in` expects an array, but this expression has type `{actual}`"
+                                    "`for ... in` expects an array or set, but this expression has type `{actual}`"
                                 ),
                                 iterable.span,
                             );

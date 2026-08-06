@@ -142,13 +142,18 @@ impl Parser<'_> {
             }
             let documentation = self.documentation()?;
             let attributes = self.attributes()?;
+            let explicitly_static = self.eat_ident("static");
             if !self.eat_ident("fn") {
-                return Err(self.error("expected a function declaration"));
+                return Err(self.error(if explicitly_static {
+                    "expected `fn` after `static`"
+                } else {
+                    "expected a function declaration"
+                }));
             }
             functions.push(self.function_declaration(
                 documentation,
                 attributes,
-                functions_are_static,
+                functions_are_static || explicitly_static,
             )?);
         }
         self.bump();

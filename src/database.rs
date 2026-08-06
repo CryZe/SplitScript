@@ -1050,6 +1050,16 @@ fn named_type(
             .iter()
             .find(|future| future.id == id)
             .and_then(|future| named_type(syntax, future.value)),
+        SyntaxTypeRef::Application(id) => syntax
+            .type_applications
+            .iter()
+            .find(|application| application.id == id)
+            .and_then(|application| {
+                application
+                    .arguments
+                    .iter()
+                    .find_map(|argument| named_type(syntax, *argument))
+            }),
         SyntaxTypeRef::Named(id) => {
             let name = syntax.type_name(id);
             syntax

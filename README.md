@@ -219,7 +219,9 @@ compile-time and output-size measurements are recorded in
   general `[T]` and exact-length `[T; N]` forms, inferred literals, and typed
   `array[index]` access plus `length`/`set` methods. Fixed arrays of readable
   elements support one transactional typed process-memory read.
-- Inferred `for value in array` loops over `[T]` and `[T; N]`, with read-only
+- Run-scoped `Set<T>` values with source-declared `Equatable` constraints,
+  persistent mutation, containment, insertion/removal, clearing, and length.
+- Inferred `for value in collection` loops over `[T]`, `[T; N]`, and `Set<T>`, with read-only
   scoped bindings, `break`/`continue`, single evaluation of the iterable, and
   suspension-safe `await`/`retry` bodies in `onAttach`.
 - Strict width checking: a `u16` is never silently treated as a `u32`.

@@ -12,6 +12,7 @@ use crate::{
     },
     types::{
         EnumTypeId, ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType,
+        ResolvedSetType,
     },
 };
 
@@ -44,6 +45,7 @@ pub(super) struct Inputs<'a> {
     pub options: &'a [ResolvedOptionType],
     pub results: &'a [ResolvedResultType],
     pub asyncs: &'a [ResolvedAsyncType],
+    pub sets: &'a [ResolvedSetType],
     pub async_frames: &'a AsyncFrameLayouts,
     pub reachability: &'a reachability::Reachability,
 }
@@ -58,6 +60,7 @@ impl GcLayout {
             options,
             results,
             asyncs,
+            sets,
             async_frames,
             reachability,
         } = inputs;
@@ -138,6 +141,16 @@ impl GcLayout {
         reachable_arrays.sort_by_key(|array| (array.length.is_some(), array.id.index()));
         for array in reachable_arrays {
             let ty = Type::Array(array.id);
+            dynamic.insert(ty, next);
+            ordered.push(ty);
+            next += 1;
+        }
+
+        for set in sets
+            .iter()
+            .filter(|set| reachability.contains_set_type(set.id))
+        {
+            let ty = Type::Set(set.id);
             dynamic.insert(ty, next);
             ordered.push(ty);
             next += 1;
@@ -289,7 +302,8 @@ impl GcLayout {
             | Type::Enum(_)
             | Type::Array(_)
             | Type::Option(_)
-            | Type::Result(_) => *self
+            | Type::Result(_)
+            | Type::Set(_) => *self
                 .dynamic
                 .get(&ty)
                 .unwrap_or_else(|| panic!("dynamic GC type `{ty:?}` was not marked reachable")),
@@ -339,7 +353,8 @@ impl GcLayout {
             | Type::Array(_)
             | Type::Option(_)
             | Type::Result(_)
-            | Type::Async(_) => ValType::Ref(RefType {
+            | Type::Async(_)
+            | Type::Set(_) => ValType::Ref(RefType {
                 nullable: true,
                 heap_type: HeapType::Concrete(self.index(ty)),
             }),

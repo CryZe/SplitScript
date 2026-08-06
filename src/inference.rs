@@ -6,7 +6,10 @@
 use std::{collections::HashMap, fmt, ops::BitOr};
 
 use crate::{
-    ast::{ArrayTypeId, AsyncTypeId, ConstructedTypeIdAllocator, OptionTypeId, ResultTypeId},
+    ast::{
+        ArrayTypeId, AsyncTypeId, ConstructedTypeIdAllocator, OptionTypeId, ResultTypeId,
+        TypeApplicationId,
+    },
     stdlib::{CapabilityBehavior, CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
     types::{BuiltinType, ResolvedTypeRef, TypeId, TypeKind, TypeStore},
 };
@@ -18,6 +21,7 @@ pub(crate) enum Type {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Set(TypeApplicationId),
     Variable(u32),
 }
 
@@ -37,11 +41,13 @@ impl Type {
                 TypeKind::Option { layout, .. } => ResolvedTypeRef::Option(*layout),
                 TypeKind::Result { layout, .. } => ResolvedTypeRef::Result(*layout),
                 TypeKind::Async { layout, .. } => ResolvedTypeRef::Async(*layout),
+                TypeKind::Set { layout, .. } => ResolvedTypeRef::Set(*layout),
             },
             Self::Array(id) => ResolvedTypeRef::Array(id),
             Self::Option(id) => ResolvedTypeRef::Option(id),
             Self::Result(id) => ResolvedTypeRef::Result(id),
             Self::Async(id) => ResolvedTypeRef::Async(id),
+            Self::Set(id) => ResolvedTypeRef::Set(id),
             Self::Variable(variable) => {
                 unreachable!("inference variable ?{variable} cannot become a source type reference")
             }
@@ -57,6 +63,7 @@ impl fmt::Display for Type {
             Self::Option(id) => write!(formatter, "Option#{id}"),
             Self::Result(id) => write!(formatter, "Result#{id}"),
             Self::Async(id) => write!(formatter, "Async#{id}"),
+            Self::Set(id) => write!(formatter, "Set#{id}"),
             Self::Variable(id) => write!(formatter, "?{id}"),
         }
     }
@@ -169,6 +176,22 @@ pub(crate) struct AsyncLayout {
     pub(crate) value: Type,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SetLayout {
+    pub(crate) id: TypeApplicationId,
+    pub(crate) element: Type,
+    pub(crate) backing: Option<ArrayTypeId>,
+}
+
+#[derive(Default)]
+pub(crate) struct ConstructedLayouts {
+    pub(crate) arrays: Vec<ArrayLayout>,
+    pub(crate) options: Vec<OptionLayout>,
+    pub(crate) results: Vec<ResultLayout>,
+    pub(crate) asyncs: Vec<AsyncLayout>,
+    pub(crate) sets: Vec<SetLayout>,
+}
+
 pub(crate) struct InferenceContext {
     standard_library: StandardLibrary,
     types: TypeStore,
@@ -177,10 +200,12 @@ pub(crate) struct InferenceContext {
     options: Vec<OptionLayout>,
     results: Vec<ResultLayout>,
     asyncs: Vec<AsyncLayout>,
+    sets: Vec<SetLayout>,
     canonical_arrays: HashMap<ArrayTypeId, ArrayTypeId>,
     canonical_options: HashMap<OptionTypeId, OptionTypeId>,
     canonical_results: HashMap<ResultTypeId, ResultTypeId>,
     canonical_asyncs: HashMap<AsyncTypeId, AsyncTypeId>,
+    canonical_sets: HashMap<TypeApplicationId, TypeApplicationId>,
     constructed_types: HashMap<Type, TypeId>,
     constructed_type_ids: ConstructedTypeIdAllocator,
 }
@@ -190,22 +215,41 @@ impl InferenceContext {
         standard_library: StandardLibrary,
         types: TypeStore,
         first_constructed_type_index: u32,
-        arrays: impl IntoIterator<Item = ArrayLayout>,
-        options: impl IntoIterator<Item = OptionLayout>,
-        results: impl IntoIterator<Item = ResultLayout>,
-        asyncs: impl IntoIterator<Item = AsyncLayout>,
+        layouts: ConstructedLayouts,
     ) -> Self {
-        let arrays = arrays.into_iter().collect::<Vec<_>>();
-        let options = options.into_iter().collect::<Vec<_>>();
-        let results = results.into_iter().collect::<Vec<_>>();
-        let asyncs = asyncs.into_iter().collect::<Vec<_>>();
+        let ConstructedLayouts {
+            mut arrays,
+            options,
+            results,
+            asyncs,
+            mut sets,
+        } = layouts;
         let next_constructed_type_index = arrays
             .iter()
             .map(|layout| layout.id.index() as u32 + 1)
             .chain(options.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(results.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(asyncs.iter().map(|layout| layout.id.index() as u32 + 1))
+            .chain(sets.iter().map(|layout| layout.id.index() as u32 + 1))
             .fold(first_constructed_type_index, u32::max);
+        let mut constructed_type_ids =
+            ConstructedTypeIdAllocator::starting_at(next_constructed_type_index);
+        for set in &mut sets {
+            let backing = arrays
+                .iter()
+                .find(|array| array.element == set.element && array.length.is_none())
+                .map(|array| array.id)
+                .unwrap_or_else(|| {
+                    let id = constructed_type_ids.array();
+                    arrays.push(ArrayLayout {
+                        id,
+                        element: set.element,
+                        length: None,
+                    });
+                    id
+                });
+            set.backing = Some(backing);
+        }
         Self {
             standard_library,
             types,
@@ -214,14 +258,14 @@ impl InferenceContext {
             options,
             results,
             asyncs,
+            sets,
             canonical_arrays: HashMap::new(),
             canonical_options: HashMap::new(),
             canonical_results: HashMap::new(),
             canonical_asyncs: HashMap::new(),
+            canonical_sets: HashMap::new(),
             constructed_types: HashMap::new(),
-            constructed_type_ids: ConstructedTypeIdAllocator::starting_at(
-                next_constructed_type_index,
-            ),
+            constructed_type_ids,
         }
     }
 
@@ -285,6 +329,7 @@ impl InferenceContext {
                 crate::types::generic_parameter_name(*index)
             }
             TypeKind::Array { .. } => "Array".into(),
+            TypeKind::Set { .. } => "Set".into(),
             TypeKind::Option { .. } => "Option".into(),
             TypeKind::Result { .. } => "Result".into(),
             TypeKind::Async { .. } => "async".into(),
@@ -377,6 +422,15 @@ impl InferenceContext {
                     Type::Array(self.array_type_with_length(instantiated, self.array_length(array)))
                 }
             }
+            Type::Set(set) => {
+                let element = self.set_element(set);
+                let instantiated = self.instantiate_type(element, generalized, substitutions);
+                if instantiated == element {
+                    Type::Set(set)
+                } else {
+                    Type::Set(self.set_type(instantiated))
+                }
+            }
             Type::Option(option) => {
                 let value = self.option_value(option);
                 let instantiated = self.instantiate_type(value, generalized, substitutions);
@@ -427,6 +481,7 @@ impl InferenceContext {
                 }
             }
             Type::Array(array) => self.collect_unbound_variables(self.array_element(array), output),
+            Type::Set(set) => self.collect_unbound_variables(self.set_element(set), output),
             Type::Option(option) => {
                 self.collect_unbound_variables(self.option_value(option), output)
             }
@@ -490,6 +545,12 @@ impl InferenceContext {
                 let right_element = self.array_element(right);
                 self.unify(left_element, right_element)?;
                 Ok(Type::Array(left))
+            }
+            (Type::Set(left), Type::Set(right)) => {
+                let left_element = self.set_element(left);
+                let right_element = self.set_element(right);
+                self.unify(left_element, right_element)?;
+                Ok(Type::Set(left))
             }
             (Type::Option(left), Type::Option(right)) => {
                 let left_value = self.option_value(left);
@@ -648,6 +709,7 @@ impl InferenceContext {
                     .copied()
                     .unwrap_or(future),
             ),
+            Type::Set(set) => Type::Set(self.canonical_sets.get(&set).copied().unwrap_or(set)),
             ty => ty,
         };
         self.constructed_types
@@ -677,11 +739,17 @@ impl InferenceContext {
             .iter()
             .map(|layout| Type::Async(layout.id))
             .collect::<Vec<_>>();
+        let sets = self
+            .sets
+            .iter()
+            .map(|layout| Type::Set(layout.id))
+            .collect::<Vec<_>>();
         for ty in arrays
             .into_iter()
             .chain(options)
             .chain(results)
             .chain(asyncs)
+            .chain(sets)
         {
             self.intern_resolved_type(ty);
         }
@@ -779,6 +847,37 @@ impl InferenceContext {
         id
     }
 
+    pub(crate) fn set_type(&mut self, element: Type) -> TypeApplicationId {
+        if let Some(set) = self.sets.iter().find(|set| set.element == element) {
+            return set.id;
+        }
+        let backing = self.array_type(element);
+        let id = self.constructed_type_ids.application();
+        self.sets.push(SetLayout {
+            id,
+            element,
+            backing: Some(backing),
+        });
+        id
+    }
+
+    pub(crate) fn set_element(&self, id: TypeApplicationId) -> Type {
+        self.sets
+            .iter()
+            .find(|set| set.id == id)
+            .expect("checked set type has a layout")
+            .element
+    }
+
+    pub(crate) fn set_backing(&self, id: TypeApplicationId) -> ArrayTypeId {
+        self.sets
+            .iter()
+            .find(|set| set.id == id)
+            .expect("checked set type has a layout")
+            .backing
+            .expect("set backing arrays are assigned during inference initialization")
+    }
+
     pub(crate) fn finalize_arrays(&mut self) {
         let unresolved = self
             .arrays
@@ -809,6 +908,7 @@ impl InferenceContext {
                     &self.canonical_options,
                     &self.canonical_results,
                     &self.canonical_asyncs,
+                    &self.canonical_sets,
                 );
                 let canonical = representatives
                     .iter()
@@ -834,6 +934,7 @@ impl InferenceContext {
                 &self.canonical_options,
                 &self.canonical_results,
                 &self.canonical_asyncs,
+                &self.canonical_sets,
             );
         }
     }
@@ -899,6 +1000,7 @@ impl InferenceContext {
                     &previous_options,
                     &previous_results,
                     &previous_asyncs,
+                    &self.canonical_sets,
                 );
                 let canonical = option_representatives
                     .iter()
@@ -918,6 +1020,7 @@ impl InferenceContext {
                     &previous_options,
                     &previous_results,
                     &previous_asyncs,
+                    &self.canonical_sets,
                 );
                 let canonical = result_representatives
                     .iter()
@@ -937,6 +1040,7 @@ impl InferenceContext {
                     &previous_options,
                     &previous_results,
                     &previous_asyncs,
+                    &self.canonical_sets,
                 );
                 let canonical = async_representatives
                     .iter()
@@ -966,6 +1070,7 @@ impl InferenceContext {
                 &canonical_options,
                 &canonical_results,
                 &canonical_asyncs,
+                &self.canonical_sets,
             );
         }
         for result in &mut self.results {
@@ -975,6 +1080,7 @@ impl InferenceContext {
                 &canonical_options,
                 &canonical_results,
                 &canonical_asyncs,
+                &self.canonical_sets,
             );
         }
         for future in &mut self.asyncs {
@@ -984,7 +1090,41 @@ impl InferenceContext {
                 &canonical_options,
                 &canonical_results,
                 &canonical_asyncs,
+                &self.canonical_sets,
             );
+        }
+    }
+
+    pub(crate) fn finalize_sets(&mut self) {
+        let unresolved = self.sets.iter().map(|set| set.element).collect::<Vec<_>>();
+        let resolved = unresolved
+            .into_iter()
+            .map(|element| self.resolve(element))
+            .collect::<Vec<_>>();
+        for (set, element) in self.sets.iter_mut().zip(resolved) {
+            set.element = element;
+            let backing = set
+                .backing
+                .expect("set backing arrays are assigned during inference initialization");
+            set.backing = Some(
+                self.canonical_arrays
+                    .get(&backing)
+                    .copied()
+                    .unwrap_or(backing),
+            );
+        }
+
+        let mut representatives = Vec::<(Type, TypeApplicationId)>::new();
+        self.canonical_sets.clear();
+        for set in &self.sets {
+            let canonical = representatives
+                .iter()
+                .find_map(|(candidate, id)| (*candidate == set.element).then_some(*id))
+                .unwrap_or_else(|| {
+                    representatives.push((set.element, set.id));
+                    set.id
+                });
+            self.canonical_sets.insert(set.id, canonical);
         }
     }
 
@@ -1002,6 +1142,10 @@ impl InferenceContext {
 
     pub(crate) fn asyncs(&self) -> &[AsyncLayout] {
         &self.asyncs
+    }
+
+    pub(crate) fn sets(&self) -> &[SetLayout] {
+        &self.sets
     }
 
     fn intern_resolved_type(&mut self, ty: Type) -> TypeId {
@@ -1036,6 +1180,15 @@ impl InferenceContext {
                 let value = self.async_value(layout);
                 let value = self.intern_resolved_type(value);
                 TypeKind::Async { layout, value }
+            }
+            Type::Set(layout) => {
+                let element = self.set_element(layout);
+                let element = self.intern_resolved_type(element);
+                TypeKind::Set {
+                    layout,
+                    element,
+                    backing: self.set_backing(layout),
+                }
             }
             Type::Variable(variable) => {
                 unreachable!("unresolved type variable ?{variable} reached semantic interning")
@@ -1132,6 +1285,7 @@ impl InferenceContext {
         match ty {
             Type::Variable(candidate) => self.root(candidate) == variable,
             Type::Array(array) => self.occurs_in(variable, self.array_element(array), visited),
+            Type::Set(set) => self.occurs_in(variable, self.set_element(set), visited),
             Type::Option(option) => self.occurs_in(variable, self.option_value(option), visited),
             Type::Result(result) => self.occurs_in(variable, self.result_value(result), visited),
             Type::Async(future) => self.occurs_in(variable, self.async_value(future), visited),
@@ -1226,11 +1380,13 @@ pub(crate) fn type_may_have_capability(
             TypeKind::Array { length, .. } => {
                 behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
             }
+            TypeKind::Set { .. } => false,
             TypeKind::GenericParameter { .. } => false,
         },
         Type::Option(_) | Type::Result(_) => behavior == CapabilityBehavior::StructuralEquality,
         Type::Async(_) => false,
         Type::Array(_) => behavior == CapabilityBehavior::StructuralMemoryLayout,
+        Type::Set(_) => false,
         Type::Variable(_) => false,
     }
 }
@@ -1241,12 +1397,14 @@ fn canonical_constructed_type(
     options: &HashMap<OptionTypeId, OptionTypeId>,
     results: &HashMap<ResultTypeId, ResultTypeId>,
     asyncs: &HashMap<AsyncTypeId, AsyncTypeId>,
+    sets: &HashMap<TypeApplicationId, TypeApplicationId>,
 ) -> Type {
     match ty {
         Type::Array(array) => Type::Array(arrays.get(&array).copied().unwrap_or(array)),
         Type::Option(option) => Type::Option(options.get(&option).copied().unwrap_or(option)),
         Type::Result(result) => Type::Result(results.get(&result).copied().unwrap_or(result)),
         Type::Async(future) => Type::Async(asyncs.get(&future).copied().unwrap_or(future)),
+        Type::Set(set) => Type::Set(sets.get(&set).copied().unwrap_or(set)),
         ty => ty,
     }
 }
@@ -1283,10 +1441,7 @@ mod tests {
             StandardLibrary::new(),
             TypeStore::default(),
             0,
-            [],
-            [],
-            [],
-            [],
+            ConstructedLayouts::default(),
         );
         let value = inference.fresh(
             Requirements::capability(StdlibCapabilityId::Integer),
@@ -1310,10 +1465,7 @@ mod tests {
             StandardLibrary::new(),
             TypeStore::default(),
             0,
-            [],
-            [],
-            [],
-            [],
+            ConstructedLayouts::default(),
         );
         let value = inference.fresh(Requirements::capability(StdlibCapabilityId::Signed), None);
         inference
@@ -1333,10 +1485,7 @@ mod tests {
             StandardLibrary::new(),
             TypeStore::default(),
             0,
-            [],
-            [],
-            [],
-            [],
+            ConstructedLayouts::default(),
         );
         let integer = inference.fresh(Requirements::capability(StdlibCapabilityId::Integer), None);
         let float = inference.fresh(Requirements::capability(StdlibCapabilityId::Float), None);
@@ -1357,10 +1506,7 @@ mod tests {
             StandardLibrary::new(),
             TypeStore::default(),
             0,
-            [],
-            [],
-            [],
-            [],
+            ConstructedLayouts::default(),
         );
         let integer = inference.fresh(
             Requirements::capabilities([
@@ -1388,10 +1534,7 @@ mod tests {
             StandardLibrary::new(),
             TypeStore::default(),
             0,
-            [],
-            [],
-            [],
-            [],
+            ConstructedLayouts::default(),
         );
         let integer = inference.fresh(
             Requirements::capability(StdlibCapabilityId::Numeric),
@@ -1425,10 +1568,7 @@ mod tests {
             StandardLibrary::new(),
             TypeStore::default(),
             0,
-            [],
-            [],
-            [],
-            [],
+            ConstructedLayouts::default(),
         );
         let template = inference.fresh(Requirements::capability(StdlibCapabilityId::Numeric), None);
         let Type::Variable(root) = template else {
@@ -1475,20 +1615,22 @@ mod tests {
             StandardLibrary::new(),
             types,
             3,
-            [ArrayLayout {
-                id: array,
-                element: u32_type,
-                length: None,
-            }],
-            [OptionLayout {
-                id: option,
-                value: Type::Array(array),
-            }],
-            [ResultLayout {
-                id: result,
-                value: Type::Option(option),
-            }],
-            [],
+            ConstructedLayouts {
+                arrays: vec![ArrayLayout {
+                    id: array,
+                    element: u32_type,
+                    length: None,
+                }],
+                options: vec![OptionLayout {
+                    id: option,
+                    value: Type::Array(array),
+                }],
+                results: vec![ResultLayout {
+                    id: result,
+                    value: Type::Option(option),
+                }],
+                ..ConstructedLayouts::default()
+            },
         );
 
         inference.finalize_arrays();

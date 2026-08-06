@@ -41,5 +41,6 @@ pub(crate) fn display_type(ty: TypeId, snapshot: &SemanticSnapshot) -> String {
         TypeKind::Option { value, .. } => format!("{}?", display_type(*value, snapshot)),
         TypeKind::Result { value, .. } => format!("{}!", display_type(*value, snapshot)),
         TypeKind::Async { value, .. } => format!("async {}", display_type(*value, snapshot)),
+        TypeKind::Set { element, .. } => format!("Set<{}>", display_type(*element, snapshot)),
     }
 }

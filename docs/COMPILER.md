@@ -356,11 +356,14 @@ source-to-catalog comparison implementation inside the compiler.
 Callable signatures use a backend-neutral declaration type expression. Core
 types, nominal library types, and type parameters are atomic references; every
 generic shape is the same recursive application node keyed by an open catalog
-constructor ID. Array, Option, and Result are unary constructor declarations,
+constructor ID. Array, Option, Result, and Set are unary constructor declarations,
 so adding a future generic constructor does not add a parallel type-expression
 variant. Catalog validation resolves constructor IDs, checks arity and nested
-arguments, and rejects references to undeclared type parameters before the
-semantic adapter instantiates the supported constructors.
+arguments, preserves constructor-parameter capability constraints, and rejects
+references to undeclared type parameters before the semantic adapter
+instantiates the supported constructors. Source-written `Set<T>` applications
+retain every delimiter occurrence for formatting and editor tooling while
+sharing one structural syntax identity for inference and lowering.
 
 The magical scalar spellings and identities are defined once as
 `splitscript_syntax::PrimitiveType`. `CoreTypeId` and semantic `BuiltinType`

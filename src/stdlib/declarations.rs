@@ -13,7 +13,7 @@ use super::ids::{
     StdlibCapabilityId, StdlibFieldId, StdlibItemId, StdlibNamespaceId, StdlibStateProviderId,
     StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
 };
-use super::schema::TypeRef;
+use super::schema::{TypeParameter, TypeRef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StdlibOwner {
@@ -179,7 +179,7 @@ pub struct StdlibCapability {
 pub struct StdlibTypeConstructor {
     pub id: StdlibTypeConstructorId,
     pub name: &'static str,
-    pub parameters: &'static [&'static str],
+    pub parameters: &'static [TypeParameter],
     pub must_use: Option<&'static str>,
     pub documentation: Documentation<StdlibSymbolId>,
 }

@@ -4,8 +4,9 @@
 
 - Added `setup`, a synchronous process-independent lifecycle block that runs
   once per loaded Wasm instance after globals and settings are initialized.
-  It has a true zero-parameter Wasm signature and is invoked by `_start`, not
-  by the per-tick update state machine.
+  It has a true zero-parameter Wasm signature and is invoked by `_start`; the
+  host defers that initializer to the beginning of the first interruptible
+  update rather than executing arbitrary user code during instantiation.
 - Kept lifecycle boundaries explicit: `setup` cannot access a process provider,
   state snapshots, `await`, or `retry`; `onAttach` remains the per-process
   suspending discovery phase. Debug-watch replacement naturally runs setup for

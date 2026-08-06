@@ -256,9 +256,10 @@ setup {
 }
 ```
 
-`setup` runs after settings are available but cannot use `process`, `gba`,
-`current`, `old`, `await`, or `retry`. A debug-watch replacement loads a new
-module and therefore runs it again.
+`setup` runs at the beginning of the module's first interruptible host update,
+after settings are available, but cannot use `process`, `gba`, `current`,
+`old`, `await`, or `retry`. A debug-watch replacement loads a new module and
+therefore runs it again on that module's first update.
 
 ## Process-exit game-time cleanup
 

@@ -1075,7 +1075,7 @@ define_language_catalog! {
         Setup,
         "setup",
         "Initializes one loaded script instance.",
-        "Runs once from the module start entry point, after globals and settings are initialized and refreshed. Settings and process-independent operations are available, but process providers, state snapshots, and suspension are not.",
+        "Runs once from the module start entry point, after globals and settings are initialized and refreshed. The LiveSplit runtime defers that entry point until the beginning of the first interruptible update. Settings and process-independent operations are available, but process providers, state snapshots, and suspension are not.",
         "setup {\n    setTickRate(60.0)\n}"
     ),
     action_item!(

@@ -891,10 +891,11 @@ label; `///` documentation comments are the only way to define its tooltip.
 
 ## Actions
 
-`setup` runs once for each loaded WebAssembly instance, after global values and
-the settings UI have been initialized and the current settings have been
-loaded. It is intended for process-independent startup work such as choosing an
-initial tick rate or printing a startup message:
+`setup` runs once for each loaded WebAssembly instance at the beginning of its
+first host update, after global values and the settings UI have been initialized
+and the current settings have been loaded. It is intended for
+process-independent startup work such as choosing an initial tick rate or
+printing a startup message:
 
 ```text
 setup {
@@ -903,8 +904,11 @@ setup {
 }
 ```
 
-`setup` cannot access `process`, `gba`, `current`, `old`, or suspend. A debug
-watch reload creates a new module instance, so its `setup` block runs again.
+`setup` cannot access `process`, `gba`, `current`, `old`, or suspend. The body
+is emitted in `_start`; the LiveSplit runtime deliberately defers that export
+until the first controlled update so arbitrary startup code can be interrupted.
+A debug watch reload creates a new module instance, so its `setup` block runs
+again on that instance's first update.
 This is deliberately distinct from `onAttach`, which runs once for every
 selected process and may suspend while performing discovery.
 

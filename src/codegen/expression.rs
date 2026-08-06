@@ -2416,6 +2416,24 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
+            IntrinsicId::ProcessReadUtf16Le => {
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
+                function.instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::ReadUtf16LeString),
+                ));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Standard(StdlibTypeId::String),
+                    Instruction::RefIsNull,
+                    "UTF-16LE string could not be read",
+                    context,
+                );
+            }
             IntrinsicId::ProcessReadManagedString => {
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);

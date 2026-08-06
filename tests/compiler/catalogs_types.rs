@@ -1160,7 +1160,8 @@ fn compiler_database_resolves_language_catalog_syntax() {
 
         state "game.exe" {
             level: i32 at 0x1000;
-            mapName at 0x2000 as utf8(32)
+            mapName at 0x2000 as utf8(32);
+            chapterName at 0x3000 as utf16le(64)
         }
 
         fn maybe(value: i32) -> i32? {
@@ -1251,6 +1252,19 @@ fn compiler_database_resolves_language_catalog_syntax() {
         .expect("the state decoder should have language documentation");
     assert!(decoder_hover.markdown.contains("bounded native UTF-8"));
     assert!(decoder_hover.markdown.contains("not a string-size type"));
+    let utf16_decoder = source.find("utf16le(64)").unwrap();
+    assert_eq!(
+        database.definition_at(utf16_decoder).unwrap(),
+        Some(DefinitionTarget::Language(
+            LanguageItemId::NativeUtf16LeDecoder
+        ))
+    );
+    let decoder_hover = database
+        .hover(utf16_decoder)
+        .unwrap()
+        .expect("the UTF-16LE state decoder should have language documentation");
+    assert!(decoder_hover.markdown.contains("bounded native UTF-16LE"));
+    assert!(decoder_hover.markdown.contains("replacement character"));
 
     let module_field = source.find("module.address").unwrap() + "module.".len();
     assert_eq!(

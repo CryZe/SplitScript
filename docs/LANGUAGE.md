@@ -1241,7 +1241,10 @@ Native strings are read as bounded decoding operations rather than synthetic
 types such as `string32`. `process.readUtf8(address, maxBytes)` reads at most
 4096 bytes in one host call, stops at the first NUL byte (or at the bound), and
 returns `String!`. An inaccessible range, a zero or excessive bound, or invalid
-UTF-8 is an ordinary error. This is intentionally different from
+UTF-8 is an ordinary error. `process.readUtf16Le(address, maxUtf16Units)` reads
+at most 2048 little-endian UTF-16 code units, also stops at NUL or the bound,
+and replaces malformed surrogate sequences with the Unicode replacement
+character. This is intentionally different from
 `process.readManagedString`, which understands the in-memory layout of a Unity
 managed string.
 
@@ -1252,13 +1255,15 @@ resolved, and it infers the field as `String`:
 ```text
 state "game.exe" {
     mapName at "game.dll", 0x1234, 0x20 as utf8(64);
+    chapterName at "game.dll", 0x2345, 0x18 as utf16le(64);
 }
 ```
 
 The bound describes a read operation, not the resulting value's type. All
 decoded values are ordinary `String` values; there are no `string64`-style
-pseudo-types. This leaves room for explicit `utf16(...)` or fixed-length
-decoders when real ports require their distinct semantics.
+pseudo-types. `utf8` is strict because invalid bytes cannot form a language
+string. `utf16le` deliberately uses replacement decoding, matching the native
+ASL UTF-16 behavior while naming the byte order explicitly.
 
 When no context determines the representation, add an annotation or use an
 explicit type argument such as `process.read<u8>(address)`. Any

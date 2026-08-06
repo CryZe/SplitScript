@@ -10,8 +10,10 @@ use crate::intrinsic_registry::MAX_NATIVE_STRING_BYTES;
 
 const SETTINGS_STRING_CAPACITY: u32 = 16_384;
 const C_STRING_CAPACITY: u32 = 8_192;
-const MANAGED_UTF16_CAPACITY: u32 = 4_096;
-const MANAGED_UTF8_CAPACITY: u32 = 4_096;
+const UTF16_INPUT_CAPACITY: u32 = 4_096;
+// One malformed UTF-16 code unit may expand to the three-byte replacement
+// character, so this is the exact worst case for the bounded input bank.
+const UTF16_OUTPUT_CAPACITY: u32 = UTF16_INPUT_CAPACITY / 2 * 3;
 const SIGNATURE_SCAN_WINDOW: u32 = 4_096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,8 +127,8 @@ pub(super) struct RuntimeScratch {
     pub scan: ScratchRegion,
     pub c_string: ScratchRegion,
     pub native_utf8: ScratchRegion,
-    pub managed_utf16: ScratchRegion,
-    pub managed_utf8: ScratchRegion,
+    pub utf16_input: ScratchRegion,
+    pub utf16_output: ScratchRegion,
     /// Unbounded host-call staging starts after all immutable data. Helpers
     /// grow memory before writing, so long log messages cannot overwrite data.
     pub host_strings_start: i32,
@@ -159,9 +161,9 @@ impl LinearMemoryLayout {
             .max(scan_capacity)
             .max(C_STRING_CAPACITY)
             .max(MAX_NATIVE_STRING_BYTES)
-            .max(MANAGED_UTF16_CAPACITY);
+            .max(UTF16_INPUT_CAPACITY);
         let bank_1_start = align_up(u64::from(bank_0_capacity), 8);
-        let bank_1_capacity = MANAGED_UTF8_CAPACITY.max(4);
+        let bank_1_capacity = UTF16_OUTPUT_CAPACITY.max(4);
         let scratch_end = bank_1_start
             .checked_add(u64::from(bank_1_capacity))
             .expect("runtime scratch must fit wasm32");
@@ -216,15 +218,15 @@ impl LinearMemoryLayout {
                 0,
                 MAX_NATIVE_STRING_BYTES as i32,
             ),
-            managed_utf16: ScratchRegion::new(
+            utf16_input: ScratchRegion::new(
                 ScratchAliasClass::Primary,
                 0,
-                MANAGED_UTF16_CAPACITY as i32,
+                UTF16_INPUT_CAPACITY as i32,
             ),
-            managed_utf8: ScratchRegion::new(
+            utf16_output: ScratchRegion::new(
                 ScratchAliasClass::Companion,
                 bank_1_start,
-                MANAGED_UTF8_CAPACITY as i32,
+                UTF16_OUTPUT_CAPACITY as i32,
             ),
             host_strings_start,
         };
@@ -235,12 +237,12 @@ impl LinearMemoryLayout {
             scratch.scan,
             scratch.c_string,
             scratch.native_utf8,
-            scratch.managed_utf16,
+            scratch.utf16_input,
         ] {
             assert_eq!(region.alias_class(), ScratchAliasClass::Primary);
             assert_eq!(region.start(), 0);
         }
-        for region in [scratch.settings_length, scratch.managed_utf8] {
+        for region in [scratch.settings_length, scratch.utf16_output] {
             assert_eq!(region.alias_class(), ScratchAliasClass::Companion);
             assert_eq!(region.start(), bank_1_start);
         }
@@ -249,12 +251,12 @@ impl LinearMemoryLayout {
         assert!(scratch.scan.end() <= bank_0_capacity);
         assert!(scratch.c_string.end() <= bank_0_capacity);
         assert!(scratch.native_utf8.end() <= bank_0_capacity);
-        assert!(scratch.managed_utf16.end() <= bank_0_capacity);
+        assert!(scratch.utf16_input.end() <= bank_0_capacity);
         assert_eq!(
             scratch.settings_length.start(),
-            scratch.managed_utf8.start()
+            scratch.utf16_output.start()
         );
-        assert!(scratch.managed_utf8.end() as u64 <= u64::from(static_data_start));
+        assert!(scratch.utf16_output.end() as u64 <= u64::from(static_data_start));
         assert!(host_strings_address >= static_data_end);
         Self {
             scratch,
@@ -308,7 +310,7 @@ mod tests {
         assert_eq!(empty.scratch().settings_string.start(), 0);
         assert_eq!(
             empty.scratch().settings_length.start(),
-            empty.scratch().managed_utf8.start()
+            empty.scratch().utf16_output.start()
         );
         assert_eq!(empty.scratch().host_strings_start, WASM_PAGE_SIZE as i32);
 

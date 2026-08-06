@@ -87,6 +87,14 @@ whileAttached {
     print(current.mapName)
 }"#;
 
+const NATIVE_UTF16LE_STATE_SOURCE: &str = r#"state "game.exe" {
+    chapterName at "game.dll", 0x2345, 0x18 as utf16le(64);
+}
+
+whileAttached {
+    print(current.chapterName)
+}"#;
+
 const STATE_LAYOUT_SOURCE: &str = include_str!("../examples/state_layouts.split");
 
 const SETTINGS_SOURCE: &str = include_str!("../examples/lso_desktop_settings.split");
@@ -288,6 +296,12 @@ focused_example!(
     "Decode a native string field",
     "mapName at 0x1234 as utf8(64)",
     NATIVE_STRING_STATE_SOURCE
+);
+focused_example!(
+    NATIVE_UTF16LE_DECODER_EXAMPLE,
+    "Decode a native UTF-16LE field",
+    "chapterName at 0x2345 as utf16le(64)",
+    NATIVE_UTF16LE_STATE_SOURCE
 );
 focused_example!(
     SETTINGS_DECL_EXAMPLE,
@@ -661,6 +675,15 @@ define_language_catalog! {
         "Decodes a bounded native UTF-8 string state field.",
         "This is state-layout sugar for a bounded read-and-decode operation, not a string-size type. It follows the complete pointer path, reads at most 4096 bytes once, and stops at the first NUL byte. A required field rejects its candidate when memory cannot be read or the bytes are not valid UTF-8; an explicitly annotated String? field observes that failure as None. Without the optional annotation, the field type is inferred as String.",
         NATIVE_STRING_DECODER_EXAMPLE
+    ),
+    language_item!(
+        NativeUtf16LeDecoder,
+        "utf16le",
+        LanguageItemKind::Syntax,
+        "field at address as utf16le(maxUtf16Units)",
+        "Decodes a bounded native UTF-16LE string state field.",
+        "This state-layout sugar follows the complete pointer path, reads at most 2048 little-endian UTF-16 code units once, and stops at the first NUL code unit. Unpaired surrogate code units become the Unicode replacement character. A required field rejects its candidate when memory cannot be read; an explicitly annotated String? field observes that failure as None. Without the optional annotation, the field type is inferred as String.",
+        NATIVE_UTF16LE_DECODER_EXAMPLE
     ),
     language_item!(
         Settings,

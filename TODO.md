@@ -64,11 +64,13 @@ or behavioral parity.
   timer/run-metadata port. Each must record the preserved behavior and prove
   pointer width, failed reads, attach/detach, unsupported builds, settings,
   timer-action order, and tick cadence as applicable.
-- [ ] Use those maintained ports to decide the first implementation slice:
-  prefer the recurring `Set<String>`/membership and native UTF-16 blockers over
-  callbacks, reflection, UI prompts, or unrestricted filesystem access. Move a
-  gap back down the roadmap when the current language can already express it
-  clearly and only documentation or diagnostics were missing.
+- [ ] Use those maintained ports to decide each next implementation slice.
+  Exercise the existing fixed-array search, `Set<String>`, and explicit native
+  UTF-16LE decoder before adding adjacent abstractions. Prefer recurring static
+  settings, signed offsets, or focused string gaps over callbacks, reflection,
+  UI prompts, or unrestricted filesystem access. Move a gap back down the
+  roadmap when the current language can already express it clearly and only
+  documentation or diagnostics were missing.
 
 ## P0 — unblock the next representative native ports
 
@@ -173,11 +175,6 @@ or behavioral parity.
   straightforward to model process names, 32/64-bit memory, modules, failed
   reads, settings snapshots, timer state, attach/detach/restart, and bounded
   async polling. A compile-only port is never labelled faithful.
-- [ ] Add explicit bounded native UTF-16LE decoding, including NUL termination,
-  surrogate handling, malformed-input policy, and required versus optional
-  state-field behavior. Keep it distinct from Unity managed-string object
-  decoding and from ASL `stringN` auto-detection; only add an auto-decoder if a
-  maintained port proves that explicit encoding cannot preserve the source.
 - [ ] Fill corpus-proven `String` gaps through source-defined APIs where
   possible: case conversion with stated Unicode/ASCII semantics, splitting,
   byte/scalar inspection consistent with the language's byte-index policy, and
@@ -486,9 +483,9 @@ remaining work is product hardening and distribution.
 2. Promote the pressure set into repository-owned runtime fixtures, starting
    with native UTF-16 and a run-scoped visited set; implement only gaps that
    remain after semantic review.
-3. Add the smallest recurring game-independent pieces—fixed-array search,
-   `Set<T>`, repeated static settings, signed pointer offsets, and focused
-   string operations—with runtime and editor coverage.
+3. Add the remaining smallest recurring game-independent pieces—repeated
+   static settings, signed pointer offsets, and focused string operations—with
+   runtime and editor coverage.
 4. In parallel with stable language semantics, establish the Wasmtime/DWARF
    compatibility fixture and land debug names plus source-line stepping.
 5. Harden and publish the bundled VSIX and native releases, then evaluate the

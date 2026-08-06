@@ -452,6 +452,215 @@ pub(super) fn compile_read_utf8_string(
     function
 }
 
+pub(super) fn compile_read_utf16_le_string(
+    abi: &Abi,
+    utf16_from_memory: u32,
+    gc: &GcLayout,
+    utf16: ScratchRegion,
+) -> Function {
+    let utf16_start = utf16.destination(
+        crate::intrinsic_registry::MAX_NATIVE_UTF16_UNITS
+            .checked_mul(2)
+            .expect("bounded UTF-16 input must fit wasm32"),
+    );
+    let mut function = Function::new([(2, ValType::I32)]);
+    let process = 0;
+    let address = 1;
+    let max_units = 2;
+    let units = 3;
+    let index = 4;
+
+    function
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::LocalGet(max_units))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalGet(max_units))
+        .instruction(&Instruction::I32Const(
+            crate::intrinsic_registry::MAX_NATIVE_UTF16_UNITS as i32,
+        ))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or);
+    emit_null_string_if(&mut function, gc);
+
+    function
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::I32Const(utf16_start))
+        .instruction(&Instruction::LocalGet(max_units))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Shl)
+        .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessRead)))
+        .instruction(&Instruction::I32Eqz);
+    emit_null_string_if(&mut function, gc);
+
+    // Native strings terminate at the first complete NUL code unit. If the
+    // bounded region has no terminator, decode the full region.
+    function
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(max_units))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1));
+    emit_utf16_load(&mut function, index, utf16_start);
+    function
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalSet(units))
+        .instruction(&Instruction::LocalGet(units))
+        .instruction(&Instruction::Call(utf16_from_memory))
+        .instruction(&Instruction::End);
+    function
+}
+
+/// Decodes `units` UTF-16LE code units from the shared input scratch region.
+/// Malformed surrogate sequences use Unicode replacement semantics, matching
+/// Rust's `decode_utf16` and .NET's replacement decoder behavior.
+pub(super) fn compile_utf16_string_from_memory(
+    gc: &GcLayout,
+    utf16: ScratchRegion,
+    utf8: ScratchRegion,
+) -> Function {
+    let utf16_start = utf16.start();
+    let utf8_start = utf8.start();
+    let mut function = Function::new([
+        (6, ValType::I32),
+        (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
+    ]);
+    let units = 0;
+    let input_index = 1;
+    let byte_len = 2;
+    let unit = 3;
+    let low = 4;
+    let codepoint = 5;
+    let output_index = 6;
+    let output = 7;
+
+    function
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(input_index))
+        .instruction(&Instruction::LocalGet(units))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1));
+    emit_utf16_load(&mut function, input_index, utf16_start);
+    function
+        .instruction(&Instruction::LocalTee(unit))
+        .instruction(&Instruction::I32Const(0xd800))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(unit))
+        .instruction(&Instruction::I32Const(0xdbff))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::LocalGet(input_index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalGet(units))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::LocalGet(input_index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add);
+    emit_utf16_load_from_stack(&mut function, utf16_start);
+    function
+        .instruction(&Instruction::LocalTee(low))
+        .instruction(&Instruction::I32Const(0xdc00))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(low))
+        .instruction(&Instruction::I32Const(0xdfff))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::LocalGet(input_index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(input_index))
+        .instruction(&Instruction::LocalGet(unit))
+        .instruction(&Instruction::I32Const(0xd800))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::I32Const(10))
+        .instruction(&Instruction::I32Shl)
+        .instruction(&Instruction::LocalGet(low))
+        .instruction(&Instruction::I32Const(0xdc00))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Const(0x10000))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(0xfffd))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(0xfffd))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(unit))
+        .instruction(&Instruction::I32Const(0xdc00))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(unit))
+        .instruction(&Instruction::I32Const(0xdfff))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(0xfffd))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(unit))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalSet(codepoint));
+
+    emit_utf8_encode(&mut function, codepoint, byte_len, utf8_start);
+    function
+        .instruction(&Instruction::LocalGet(input_index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(input_index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(byte_len))
+        .instruction(&Instruction::ArrayNewDefault(
+            gc.standard_index(StdlibTypeId::String),
+        ))
+        .instruction(&Instruction::LocalSet(output))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(output_index))
+        .instruction(&Instruction::LocalGet(byte_len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(output_index))
+        .instruction(&Instruction::I32Const(utf8_start))
+        .instruction(&Instruction::LocalGet(output_index))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Load8U(memarg()))
+        .instruction(&Instruction::ArraySet(
+            gc.standard_index(StdlibTypeId::String),
+        ))
+        .instruction(&Instruction::LocalGet(output_index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(output_index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::End);
+    function
+}
+
 pub(super) fn compile_read_managed_string(
     abi: &Abi,
     gc: &GcLayout,

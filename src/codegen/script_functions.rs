@@ -186,16 +186,26 @@ pub(super) fn compile_read(
             .instruction(&Instruction::LocalSet(address_local));
     }
 
-    if let Some(crate::ast::StateMemoryDecoder::Utf8 { max_bytes, .. }) = path.decoder {
+    if let Some(decoder) = path.decoder {
+        let (maximum, helper, failure) = match decoder {
+            crate::ast::StateMemoryDecoder::Utf8 { max_bytes, .. } => (
+                max_bytes,
+                RuntimeHelperId::ReadUtf8String,
+                "UTF-8 string could not be read",
+            ),
+            crate::ast::StateMemoryDecoder::Utf16Le { max_units, .. } => (
+                max_units,
+                RuntimeHelperId::ReadUtf16LeString,
+                "UTF-16LE string could not be read",
+            ),
+        };
         let string_local = 2;
         function
             .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
             .instruction(&Instruction::LocalGet(address_local))
-            .instruction(&Instruction::I32Const(max_bytes as i32))
+            .instruction(&Instruction::I32Const(maximum as i32))
             .instruction(&Instruction::Call(
-                lowering
-                    .runtime_helpers
-                    .function(RuntimeHelperId::ReadUtf8String),
+                lowering.runtime_helpers.function(helper),
             ))
             .instruction(&Instruction::LocalTee(string_local))
             .instruction(&Instruction::RefIsNull)
@@ -205,7 +215,7 @@ pub(super) fn compile_read(
             result_type,
             field_type,
             optional,
-            "UTF-8 string could not be read",
+            failure,
             lowering.gc,
         );
         function

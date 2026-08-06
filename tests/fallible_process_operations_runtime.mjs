@@ -52,6 +52,17 @@ const env = {
             output.set([0xc0, 0xaf]);
             return 1;
         }
+        if (source === 0x7300 && size === 32) {
+            const output = new Uint16Array(instance.exports.memory.buffer, destination, size / 2);
+            output.fill(0);
+            output.set([0x0048, 0x0069, 0xd83d, 0xde00, 0x0000, 0x0058]);
+            return 1;
+        }
+        if (source === 0x7400 && size === 8) {
+            const output = new Uint16Array(instance.exports.memory.buffer, destination, size / 2);
+            output.set([0xd800, 0x0058, 0x0000, 0x0059]);
+            return 1;
+        }
         return 0;
     },
     timer_set_variable(keyPointer, keyLength, valuePointer, valueLength) {
@@ -67,7 +78,7 @@ for (let tick = 0; tick < 3 && observed === undefined; tick += 1) {
     instance.exports.update();
 }
 
-const expected = "4369,12308,Hi,error,error,error,Café,Café,error,error";
+const expected = "4369,12308,Hi,error,error,error,Café,Café,error,error,Hi😀,Hi😀,�X,error,error";
 if (observed !== expected) {
     throw new Error(`unexpected process operation output: ${JSON.stringify({ expected, observed })}`);
 }

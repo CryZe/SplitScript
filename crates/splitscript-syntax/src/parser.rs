@@ -461,14 +461,15 @@ mod tests {
     }
 
     #[test]
-    fn parses_bounded_utf8_state_decoder_without_a_pseudo_type() {
+    fn parses_bounded_native_string_decoders_without_pseudo_types() {
         let source = r#"
             state "game.exe" {
-                mapName at "game.dll", 0x1234, 0x20 as utf8(64)
+                mapName at "game.dll", 0x1234, 0x20 as utf8(64);
+                chapterName at 0x2345 as utf16le(32)
             }
         "#;
         let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
-        let field = &program.state.unwrap().fields[0];
+        let field = &program.state.as_ref().unwrap().fields[0];
         assert_eq!(field.annotation, None);
         let StateSource::Pointer(path) = &field.source else {
             panic!("expected a pointer-backed state field");
@@ -478,6 +479,16 @@ mod tests {
         assert!(matches!(
             path.decoder,
             Some(StateMemoryDecoder::Utf8 { max_bytes: 64, .. })
+        ));
+        let wide_field = &program.state.as_ref().unwrap().fields[1];
+        assert_eq!(wide_field.annotation, None);
+        let StateSource::Pointer(wide_path) = &wide_field.source else {
+            panic!("expected a pointer-backed UTF-16LE state field");
+        };
+        assert_eq!(wide_path.offsets, [0x2345]);
+        assert!(matches!(
+            wide_path.decoder,
+            Some(StateMemoryDecoder::Utf16Le { max_units: 32, .. })
         ));
     }
 

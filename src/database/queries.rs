@@ -546,7 +546,7 @@ impl CompilerDatabase {
                     StdlibSymbolId::StateProvider(provider.id),
                 )));
             }
-            if name == "utf8"
+            if (name == "utf8" || name == "utf16le")
                 && recovered
                     .syntax()
                     .state
@@ -559,13 +559,18 @@ impl CompilerDatabase {
                     })
                     .any(|decoder| match decoder {
                         crate::ast::StateMemoryDecoder::Utf8 { span, .. } => {
-                            span.start <= offset && offset < span.end
+                            name == "utf8" && span.start <= offset && offset < span.end
+                        }
+                        crate::ast::StateMemoryDecoder::Utf16Le { span, .. } => {
+                            name == "utf16le" && span.start <= offset && offset < span.end
                         }
                     })
             {
-                return Ok(Some(DefinitionTarget::Language(
-                    LanguageItemId::NativeStringDecoder,
-                )));
+                return Ok(Some(DefinitionTarget::Language(if name == "utf8" {
+                    LanguageItemId::NativeStringDecoder
+                } else {
+                    LanguageItemId::NativeUtf16LeDecoder
+                })));
             }
         }
         if let TokenKind::Ident(name) = &token.kind

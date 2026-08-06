@@ -16,6 +16,8 @@ use crate::{
 /// Hard upper bound for one native process-string read. Both direct calls and
 /// state-field decoder sugar fail before asking the host to exceed this size.
 pub(crate) const MAX_NATIVE_STRING_BYTES: u32 = 4_096;
+/// Native UTF-16 reads share the 4096-byte bounded-input policy.
+pub(crate) const MAX_NATIVE_UTF16_UNITS: u32 = MAX_NATIVE_STRING_BYTES / 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CallableShape {
@@ -45,7 +47,9 @@ pub(crate) enum RuntimeHelperId {
     ScanProcessRange,
     ReadRelative32,
     StringFromMemory,
+    Utf16StringFromMemory,
     ReadUtf8String,
+    ReadUtf16LeString,
     ReadManagedString,
     ModulePath,
     ProcessPath,
@@ -292,6 +296,7 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         IntrinsicId::ProcessFollow
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::ProcessReadUtf8
+        | IntrinsicId::ProcessReadUtf16Le
         | IntrinsicId::ProcessReadManagedString
         | IntrinsicId::ModulePath
         | IntrinsicId::ProcessPath
@@ -349,6 +354,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         ],
         IntrinsicId::ProcessReadRelative32 => &[Helper(Runtime::ReadRelative32)],
         IntrinsicId::ProcessReadUtf8 => &[Helper(Runtime::ReadUtf8String)],
+        IntrinsicId::ProcessReadUtf16Le => &[Helper(Runtime::ReadUtf16LeString)],
         IntrinsicId::ProcessReadManagedString => &[Helper(Runtime::ReadManagedString)],
         IntrinsicId::ModulePath => &[Helper(Runtime::ModulePath)],
         IntrinsicId::ProcessPath => &[Helper(Runtime::ProcessPath)],
@@ -900,6 +906,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::ProcessReadUtf8 => contract!(
             ProcessReadUtf8,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(PROCESS_TYPE),
+                params![value(ADDRESS), value(U32)],
+                STRING_RESULT,
+            ),
+            PROCESS,
+            Everywhere,
+            Retryable
+        ),
+        IntrinsicId::ProcessReadUtf16Le => contract!(
+            ProcessReadUtf16Le,
             Method,
             signature(
                 NO_TYPE_PARAMETERS,

@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn bounded_utf8_reads_are_fallible_strings_and_state_sugar_infers_string() {
+fn bounded_native_string_reads_are_fallible_and_state_sugar_infers_string() {
     use splitscript::compiler::{
         ast::{StateMemoryDecoder, StateSource},
         stdlib::StdlibTypeId,
@@ -12,12 +12,15 @@ fn bounded_utf8_reads_are_fallible_strings_and_state_sugar_infers_string() {
 
     let source = r#"
         state "game.exe" {
-            mapName at "game.dll", 0x100, 0x20 as utf8(32)
+            mapName at "game.dll", 0x100, 0x20 as utf8(32);
+            chapterName at 0x200 as utf16le(64)
         }
 
         whileAttached {
             let direct: String! = process.readUtf8(0x2000, 32)
+            let wide: String! = process.readUtf16Le(0x3000, 64)
             print(current.mapName)
+            print(current.chapterName)
         }
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
@@ -28,6 +31,15 @@ fn bounded_utf8_reads_are_fallible_strings_and_state_sugar_infers_string() {
     assert!(matches!(
         path.decoder,
         Some(StateMemoryDecoder::Utf8 { max_bytes: 32, .. })
+    ));
+    let StateSource::Pointer(wide_path) =
+        &checked.syntax().state.as_ref().unwrap().fields[1].source
+    else {
+        panic!("expected a pointer-backed UTF-16LE state field");
+    };
+    assert!(matches!(
+        wide_path.decoder,
+        Some(StateMemoryDecoder::Utf16Le { max_units: 64, .. })
     ));
     let field_type = checked.semantics().value_type(field.id).unwrap();
     assert_eq!(
@@ -46,6 +58,14 @@ fn bounded_utf8_reads_are_fallible_strings_and_state_sugar_infers_string() {
         (
             "state \"game.exe\" { name at 0x100 as utf8(4097) }",
             "limited to 4096 bytes",
+        ),
+        (
+            "state \"game.exe\" { name at 0x100 as utf16le(0) }",
+            "must allow at least one code unit",
+        ),
+        (
+            "state \"game.exe\" { name at 0x100 as utf16le(2049) }",
+            "limited to 2048 code units",
         ),
         (
             "state GBA { name at 0x02000000 as utf8(32) }",
@@ -70,7 +90,8 @@ fn explicitly_optional_pointer_fields_observe_read_failure_as_none() {
     let source = r#"
         state "game.exe" {
             scalar: i32? at 0x1000;
-            mapName: String? at 0x2000 as utf8(32)
+            mapName: String? at 0x2000 as utf8(32);
+            chapterName: String? at 0x3000 as utf16le(32)
         }
 
         whileAttached {
@@ -79,6 +100,10 @@ fn explicitly_optional_pointer_fields_observe_read_failure_as_none() {
                 None => "missing"
             })
             print(match current.mapName {
+                Some(value) => value,
+                None => "missing"
+            })
+            print(match current.chapterName {
                 Some(value) => value,
                 None => "missing"
             })
@@ -94,6 +119,7 @@ fn explicitly_optional_pointer_fields_observe_read_failure_as_none() {
     for (field, expected) in [
         (&fields[0], TypeKind::Builtin(BuiltinType::I32)),
         (&fields[1], TypeKind::Standard(StdlibTypeId::String)),
+        (&fields[2], TypeKind::Standard(StdlibTypeId::String)),
     ] {
         let field_type = checked.semantics().value_type(field.id).unwrap();
         let TypeKind::Option { value, .. } = checked.semantics().types().kind(field_type) else {

@@ -16,7 +16,8 @@ behavior use the same provider model as emulator-backed states.
 The provider exposes a read-only `process: Process` value. `Process` is a
 nominal scalar handle, not a namespace: it can be passed to functions, returned,
 or stored in inferred locals and globals. Its methods include `module`, `read`,
-`follow`, `scan`, `readRelative32`, `readUtf8`, and `readManagedString`. Method
+`follow`, `scan`, `readRelative32`, `readUtf8`, `readUtf16Le`, and
+`readManagedString`. Method
 lowering consumes the written receiver, so this is valid ordinary typed code:
 
 ```splitscript
@@ -455,7 +456,12 @@ attached updates and yields `T`. Native NUL-terminated UTF-8 uses
 all successful values have the ordinary `String` type rather than generated
 `string32`-style types. Pointer state fields can write
 `name at address as utf8(maxBytes)`; this is sugar for the same strict,
-bounded, fallible decode after the pointer path is resolved. Managed IL2CPP
+bounded, fallible decode after the pointer path is resolved. Native
+NUL-terminated UTF-16LE similarly uses
+`process.readUtf16Le(address, maxUtf16Units)` or
+`name at address as utf16le(maxUtf16Units)`. Its bound is measured in code
+units, malformed surrogate sequences become the Unicode replacement character,
+and successful values are still ordinary `String` values. Managed IL2CPP
 strings are decoded with
 `process.readManagedString(pointer, maxUtf16Units)` and propagate failed
 memory access as an error. The unit limit bounds decoding, while malformed

@@ -1,5 +1,6 @@
 state "game.exe" {
     nativeMap at 0x7000 as utf8(16);
+    nativeWide at 0x7300 as utf16le(16);
 }
 
 fn addressState(value: address!) -> String {
@@ -26,8 +27,12 @@ whileAttached {
     let stringFailure = stringState(process.readManagedString(0x6000, 16))
     let utf8Failure = stringState(process.readUtf8(0x7100, 16))
     let excessiveUtf8 = stringState(process.readUtf8(0x7200, 5_000))
+    let nativeWide = process.readUtf16Le(0x7300, 16) else "missing"
+    let replacementWide = process.readUtf16Le(0x7400, 4) else "missing"
+    let utf16Failure = stringState(process.readUtf16Le(0x7500, 16))
+    let excessiveUtf16 = stringState(process.readUtf16Le(0x7600, 2_049))
     setVariable(
         "Fallible Process Operations",
-        `{followed},{relative},{managed},{followFailure},{relativeFailure},{stringFailure},{current.nativeMap},{native},{utf8Failure},{excessiveUtf8}`,
+        `{followed},{relative},{managed},{followFailure},{relativeFailure},{stringFailure},{current.nativeMap},{native},{utf8Failure},{excessiveUtf8},{current.nativeWide},{nativeWide},{replacementWide},{utf16Failure},{excessiveUtf16}`,
     )
 }

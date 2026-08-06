@@ -619,6 +619,9 @@ pub enum StateMemoryDecoder {
     /// Reads at most `max_bytes`, stops at the first NUL byte, and requires
     /// the resulting bytes to be valid UTF-8.
     Utf8 { max_bytes: u32, span: Span },
+    /// Reads at most `max_units` little-endian UTF-16 code units, stops at the
+    /// first NUL unit, and replaces malformed surrogate sequences.
+    Utf16Le { max_units: u32, span: Span },
 }
 
 #[derive(Debug, Clone)]

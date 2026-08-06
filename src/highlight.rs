@@ -700,10 +700,14 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             if let Some(span) = path.at_span {
                 self.insert(span, SemanticTokenKind::Keyword, 0);
             }
-            if let Some(crate::ast::StateMemoryDecoder::Utf8 { span, .. }) = path.decoder {
+            if let Some(decoder) = path.decoder {
+                let (span, name) = match decoder {
+                    crate::ast::StateMemoryDecoder::Utf8 { span, .. } => (span, "utf8"),
+                    crate::ast::StateMemoryDecoder::Utf16Le { span, .. } => (span, "utf16le"),
+                };
                 self.mark_ident(
                     span,
-                    "utf8",
+                    name,
                     SemanticTokenKind::Function,
                     MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY,
                 );
@@ -1147,6 +1151,7 @@ enum Mode {
 state "game.exe" {
     level = process.read<i32>(0);
     mapName at 0x100 as utf8(32);
+    chapterName at 0x200 as utf16le(64);
 }
 
 settings {
@@ -1345,6 +1350,13 @@ whileAttached {
             source,
             &first,
             "utf8",
+            SemanticTokenKind::Function,
+            MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY
+        ));
+        assert!(contains(
+            source,
+            &first,
+            "utf16le",
             SemanticTokenKind::Function,
             MODIFIER_READONLY | MODIFIER_DEFAULT_LIBRARY
         ));

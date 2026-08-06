@@ -45,10 +45,12 @@ preferred or machine-applicable because only the autosplitter author can verify
 the target encoding.
 
 That stricter malformed-input policy is equivalent for A Plague Tale's ASCII
-map identifiers. Do not use `readManagedString` as a replacement for native
-UTF-16: that method reads the object layout of a Unity managed string. A future
-port that genuinely stores native UTF-16 or depends on replacement decoding
-should drive a distinct bounded decoder.
+map identifiers. For a known native UTF-16LE buffer, use
+`field at address as utf16le(maxUtf16Units)` or
+`process.readUtf16Le(address, maxUtf16Units)`. Both stop at the first NUL code
+unit and replace malformed surrogate sequences. Do not use `readManagedString`
+as a replacement: that method reads the object layout of a Unity managed
+string rather than text bytes at the supplied address.
 
 The maintained Arietta of Spirits port uses independent `utf8(128)` and
 `utf8(8)` fields for its stage and pause-menu identifiers. Its host fixture

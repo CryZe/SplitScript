@@ -2314,3 +2314,18 @@ fixtures cover both executable versions and an unsupported build, including
 their different pointer paths, signedness, start/game-time behavior, and bike
 split. The language reference, ASL porting guide, migration diagnostic, and
 language catalog document the refinement rule.
+
+# 2026-08-06: bounded native UTF-16LE strings
+
+- Added `process.readUtf16Le(address, maxUtf16Units) -> String!` and matching
+  `as utf16le(maxUtf16Units)` pointer-state sugar without introducing sized
+  string pseudo-types or reusing Unity managed-string object decoding.
+- Native reads are bounded to 2048 little-endian code units, stop at the first
+  NUL, preserve supplementary characters, and replace malformed surrogate
+  sequences with U+FFFD. Zero/excessive bounds and failed memory are ordinary
+  Result failures; optional state fields retain the existing observable-None
+  semantics.
+- Added completion, hover, semantic highlighting, type inference, diagnostics,
+  code generation, and a host-executed regression covering direct and state
+  reads, NUL termination, surrogate pairs, replacement decoding, failure, and
+  bounds.

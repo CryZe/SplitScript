@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     ast::{Program, SettingDecl, SettingKind, Span, StateMemoryDecoder, StateSource},
     inference::{Requirements, Type},
-    intrinsic_registry::MAX_NATIVE_STRING_BYTES,
+    intrinsic_registry::{MAX_NATIVE_STRING_BYTES, MAX_NATIVE_UTF16_UNITS},
     stdlib::{CoreTypeId, StdlibCapabilityId, StdlibTypeId},
     stdlib_semantic::StandardLibrarySemanticExt,
     types::EnumTypeId,
@@ -205,16 +205,37 @@ fn collect_state_field_type(
         if path.offsets.is_empty() {
             checker.error("a pointer path needs at least one offset", field.span);
         }
-        if let Some(StateMemoryDecoder::Utf8 { max_bytes, span }) = path.decoder {
+        if let Some(decoder) = path.decoder {
             let string = checker.standard_type(StdlibTypeId::String);
             checker.unify(memory_ty, string, field.span);
-            if max_bytes == 0 {
-                checker.error("a UTF-8 state read must allow at least one byte", span);
-            } else if max_bytes > MAX_NATIVE_STRING_BYTES {
-                checker.error(
-                    format!("a UTF-8 state read is limited to {MAX_NATIVE_STRING_BYTES} bytes"),
-                    span,
-                );
+            match decoder {
+                StateMemoryDecoder::Utf8 { max_bytes, span } => {
+                    if max_bytes == 0 {
+                        checker.error("a UTF-8 state read must allow at least one byte", span);
+                    } else if max_bytes > MAX_NATIVE_STRING_BYTES {
+                        checker.error(
+                            format!(
+                                "a UTF-8 state read is limited to {MAX_NATIVE_STRING_BYTES} bytes"
+                            ),
+                            span,
+                        );
+                    }
+                }
+                StateMemoryDecoder::Utf16Le { max_units, span } => {
+                    if max_units == 0 {
+                        checker.error(
+                            "a UTF-16LE state read must allow at least one code unit",
+                            span,
+                        );
+                    } else if max_units > MAX_NATIVE_UTF16_UNITS {
+                        checker.error(
+                            format!(
+                                "a UTF-16LE state read is limited to {MAX_NATIVE_UTF16_UNITS} code units"
+                            ),
+                            span,
+                        );
+                    }
+                }
             }
         } else {
             checker.require(

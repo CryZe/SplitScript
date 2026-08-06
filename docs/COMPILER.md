@@ -538,7 +538,10 @@ than mirroring it in an intrinsic-only enum.
 small descriptor-callback orchestrator. Implementations are split by domain in
 [`src/codegen/runtime_helpers/`](../src/codegen/runtime_helpers/): String
 conversion/formatting, structural equality, process memory/signature scanning/
-managed UTF-16, and Unity type and field discovery. Each
+bounded native UTF-8 and UTF-16LE, managed UTF-16, and Unity type and field
+discovery. Native UTF-16LE has a reusable scratch decoder separated from its
+process-read wrapper; the input and worst-case replacement-encoded UTF-8 output
+occupy distinct, explicitly sized alias banks. Each
 domain has explicit imports and a narrow builder surface. Runtime bodies are
 built by iterating the ordered `RuntimeHelperPlan`; settings adapters use the
 same path, while type-directed structural equality remains a separate

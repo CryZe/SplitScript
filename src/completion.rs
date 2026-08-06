@@ -214,6 +214,14 @@ fn complete_state_decoder(source: &str, offset: usize) -> Option<CompletionList>
         "utf8(${1:maxBytes})".to_owned(),
         true,
     ));
+    let item = language.item(LanguageItemId::NativeUtf16LeDecoder);
+    builder.add(catalog_language_completion(
+        item.name,
+        CompletionKind::Function,
+        item,
+        "utf16le(${1:maxUtf16Units})".to_owned(),
+        true,
+    ));
     Some(builder.finish())
 }
 
@@ -432,7 +440,10 @@ fn selected_provider(
 }
 
 fn language_completion(item: &LanguageItem) -> Option<CompletionItem> {
-    if item.id == LanguageItemId::NativeStringDecoder {
+    if matches!(
+        item.id,
+        LanguageItemId::NativeStringDecoder | LanguageItemId::NativeUtf16LeDecoder
+    ) {
         return None;
     }
     let (kind, insert_text, is_snippet) = match item.kind {
@@ -1870,6 +1881,13 @@ split { lay }
         assert_eq!(decoder.kind, CompletionKind::Function);
         assert_eq!(decoder.insert_text, "utf8(${1:maxBytes})");
         assert!(decoder.is_snippet);
+        let wide = completions
+            .items
+            .iter()
+            .find(|item| item.label == "utf16le")
+            .expect("the UTF-16LE decoder should share the state-decoder completion");
+        assert_eq!(wide.insert_text, "utf16le(${1:maxUtf16Units})");
+        assert!(wide.is_snippet);
 
         let cast_source = "state \"game.exe\" {} whileAttached { let value = 1 as ut }";
         let mut database = CompilerDatabase::new(cast_source);
@@ -1880,7 +1898,7 @@ split { lay }
                 .unwrap()
                 .items
                 .iter()
-                .all(|item| item.label != "utf8")
+                .all(|item| item.label != "utf8" && item.label != "utf16le")
         );
     }
 

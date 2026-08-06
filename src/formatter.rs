@@ -1503,9 +1503,10 @@ fn select(matrix: [[i32]], row: u32, column: u32) -> i32 {
 
     #[test]
     fn formats_bounded_state_string_decoders_as_part_of_the_pointer_path() {
-        let source = r#"state "game.exe"{mapName at "game.dll",0x100,0x20 as utf8(64)}"#;
+        let source = r#"state "game.exe"{mapName at "game.dll",0x100,0x20 as utf8(64);chapterName at 0x200 as utf16le(32)}"#;
         let expected = r#"state "game.exe" {
     mapName at "game.dll", 0x100, 0x20 as utf8(64);
+    chapterName at 0x200 as utf16le(32);
 }
 "#;
 

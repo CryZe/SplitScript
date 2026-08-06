@@ -110,14 +110,28 @@ pub(super) fn build_read_utf8_string(inputs: &RuntimeHelperInputs<'_>) -> Functi
     )
 }
 
+pub(super) fn build_utf16_string_from_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    let scratch = inputs.memory.scratch();
+    process::compile_utf16_string_from_memory(inputs.gc, scratch.utf16_input, scratch.utf16_output)
+}
+
+pub(super) fn build_read_utf16_le_string(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_read_utf16_le_string(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::Utf16StringFromMemory),
+        inputs.gc,
+        inputs.memory.scratch().utf16_input,
+    )
+}
+
 pub(super) fn build_read_managed_string(inputs: &RuntimeHelperInputs<'_>) -> Function {
     let scratch = inputs.memory.scratch();
     process::compile_read_managed_string(
         inputs.abi,
         inputs.gc,
         scratch.abi_read,
-        scratch.managed_utf16,
-        scratch.managed_utf8,
+        scratch.utf16_input,
+        scratch.utf16_output,
     )
 }
 

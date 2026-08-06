@@ -421,35 +421,58 @@ impl Parser<'_> {
             let mut decoder = if let Some(start) = self.eat_ident("as") {
                 let (name, name_span) =
                     self.expect_any_ident("expected a state memory decoder after `as`")?;
-                if name != "utf8" {
+                if name != "utf8" && name != "utf16le" {
                     return Err(Diagnostic::new(
                         format!("unknown state memory decoder `{name}`"),
                         name_span,
                     ));
                 }
-                self.expect(TokenKind::LParen, "expected `(` after `utf8`")?;
-                let max_bytes = self.expect_u64("expected a maximum UTF-8 byte count")?;
+                self.expect(
+                    TokenKind::LParen,
+                    if name == "utf8" {
+                        "expected `(` after `utf8`"
+                    } else {
+                        "expected `(` after `utf16le`"
+                    },
+                )?;
+                let maximum = self.expect_u64(if name == "utf8" {
+                    "expected a maximum UTF-8 byte count"
+                } else {
+                    "expected a maximum UTF-16 code-unit count"
+                })?;
                 let end = self
                     .expect(
                         TokenKind::RParen,
-                        "expected `)` after the maximum UTF-8 byte count",
+                        if name == "utf8" {
+                            "expected `)` after the maximum UTF-8 byte count"
+                        } else {
+                            "expected `)` after the maximum UTF-16 code-unit count"
+                        },
                     )?
                     .end;
-                let Ok(max_bytes) = u32::try_from(max_bytes) else {
+                let Ok(maximum) = u32::try_from(maximum) else {
                     return Err(Diagnostic::new(
-                        "the maximum UTF-8 byte count must fit in `u32`",
+                        format!("the maximum `{name}` count must fit in `u32`"),
                         start.join(Span {
                             start: name_span.start,
                             end,
                         }),
                     ));
                 };
-                Some(StateMemoryDecoder::Utf8 {
-                    max_bytes,
-                    span: Span {
-                        start: start.start,
-                        end,
-                    },
+                let span = Span {
+                    start: start.start,
+                    end,
+                };
+                Some(if name == "utf8" {
+                    StateMemoryDecoder::Utf8 {
+                        max_bytes: maximum,
+                        span,
+                    }
+                } else {
+                    StateMemoryDecoder::Utf16Le {
+                        max_units: maximum,
+                        span,
+                    }
                 })
             } else {
                 None

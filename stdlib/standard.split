@@ -461,6 +461,29 @@ intrinsic type Process {
         maxBytes: u32,
     ) -> String!;
 
+    /// Reads a bounded NUL-terminated UTF-16LE string.
+    ///
+    /// At most `maxUtf16Units` little-endian UTF-16 code units are read in one
+    /// host operation. Decoding stops at the first NUL code unit. Memory-access
+    /// failure, a zero or excessive bound returns an error. Unpaired surrogate
+    /// code units decode as the Unicode replacement character. The result is an
+    /// ordinary immutable SplitScript `String`.
+    ///
+    /// # Example
+    ///
+    /// Read a native Windows string
+    ///
+    /// ```splitscript
+    /// let chapter = process.readUtf16Le(chapterAddress, 64) else "Unknown"
+    /// ```
+    @intrinsic(ProcessReadUtf16Le)
+    fn readUtf16Le(
+        /// The address of the first little-endian UTF-16 code unit.
+        address: address,
+        /// The maximum number of UTF-16 code units to read, up to 2048.
+        maxUtf16Units: u32,
+    ) -> String!;
+
     /// Reads a Unity managed string.
     ///
     /// The address identifies a Unity managed string object rather than its text

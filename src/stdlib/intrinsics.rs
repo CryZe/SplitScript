@@ -44,6 +44,7 @@ macro_rules! trusted_intrinsics {
             ProcessScanMemoryAny,
             ProcessReadRelative32,
             ProcessReadUtf8,
+            ProcessReadUtf16Le,
             ProcessReadManagedString,
             TimerState,
             TimerCurrentSplitIndex,

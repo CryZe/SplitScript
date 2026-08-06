@@ -53,8 +53,15 @@ impl BackendDependencies {
             for field in state.all_fields() {
                 if let StateSource::Pointer(path) = &field.source {
                     dependencies.require_import(AbiImportId::ProcessRead);
-                    if path.decoder.is_some() {
-                        dependencies.require_intrinsic(IntrinsicId::ProcessReadUtf8);
+                    if let Some(decoder) = path.decoder {
+                        dependencies.require_intrinsic(match decoder {
+                            crate::ast::StateMemoryDecoder::Utf8 { .. } => {
+                                IntrinsicId::ProcessReadUtf8
+                            }
+                            crate::ast::StateMemoryDecoder::Utf16Le { .. } => {
+                                IntrinsicId::ProcessReadUtf16Le
+                            }
+                        });
                     }
                     if path.module.is_some() {
                         dependencies.require_import(AbiImportId::ProcessGetModuleAddress);

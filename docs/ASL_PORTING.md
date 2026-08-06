@@ -13,6 +13,24 @@ example isolates bounded native strings, lifecycle transitions, and pause-menu
 load removal. [`examples/aquanox.split`](../examples/aquanox.split) demonstrates
 a nullable native-string watcher whose failed read is observable as `None`.
 
+## Signed pointer offsets
+
+ASL `DeepPointer` paths commonly contain negative offsets. Preserve them
+directly; do not cast them through `u64`:
+
+```splitscript
+state "game.exe" {
+    health: i32 at "game.dll", 0x120, -0x18;
+}
+```
+
+The absolute root in `at 0xffff_ffff_ffff_fff0` remains an unsigned 64-bit
+address. Module-relative roots and every offset after a dereference are signed
+`i64`, and arithmetic wraps modulo the address space. The equivalent dynamic
+APIs are `process.follow(base, offsets: [i64])`,
+`address.offset(displacement)`, which accepts any integer width, and signed
+`MemoryPath` offsets.
+
 ## Bounded native `stringN` state
 
 The original ASL runtime implements `stringN` by:

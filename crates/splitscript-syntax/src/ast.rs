@@ -605,9 +605,19 @@ pub struct PointerPath {
     /// Exact `at` keyword for the ordinary state-field DSL. Legacy recovered
     /// forms that did not write the keyword retain `None`.
     pub at_span: Option<Span>,
-    pub module: Option<String>,
-    pub offsets: Vec<u64>,
+    /// The unsigned absolute address or signed module-relative root.
+    pub base: PointerPathBase,
+    /// Signed offsets applied after each intermediate pointer read.
+    pub offsets: Vec<i64>,
     pub decoder: Option<StateMemoryDecoder>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PointerPathBase {
+    /// An absolute target address. It retains the full unsigned address range.
+    Absolute(u64),
+    /// A module identity and a signed displacement from its load address.
+    Module { name: String, offset: i64 },
 }
 
 /// A bounded interpretation applied after resolving a state pointer path.

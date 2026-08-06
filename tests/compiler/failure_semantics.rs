@@ -1074,7 +1074,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
     );
     assert_eq!(
         library.render_signature(StdlibItemId::ProcessFollow),
-        "Process.follow(base: address, offsets: [u64]) -> address!"
+        "Process.follow(base: address, offsets: [i64]) -> address!"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::ProcessReadRelative32),

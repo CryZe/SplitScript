@@ -202,9 +202,6 @@ fn collect_state_field_type(
         } else {
             ty
         };
-        if path.offsets.is_empty() {
-            checker.error("a pointer path needs at least one offset", field.span);
-        }
         if let Some(decoder) = path.decoder {
             let string = checker.standard_type(StdlibTypeId::String);
             checker.unify(memory_ty, string, field.span);
@@ -262,7 +259,7 @@ fn collect_state_field_type(
                     field.span,
                 );
             }
-            if path.module.is_some() {
+            if matches!(path.base, crate::ast::PointerPathBase::Module { .. }) {
                 checker.error(
                     format!(
                         "`state {}` direct reads use hardware addresses and cannot name a module",
@@ -271,7 +268,7 @@ fn collect_state_field_type(
                     field.span,
                 );
             }
-            if path.offsets.len() != 1 {
+            if !path.offsets.is_empty() {
                 checker.error(
                     format!(
                         "`state {}` direct reads currently require exactly one address",
@@ -280,10 +277,7 @@ fn collect_state_field_type(
                     field.span,
                 );
             }
-            if path
-                .offsets
-                .first()
-                .is_some_and(|address| *address > u32::MAX.into())
+            if !matches!(path.base, crate::ast::PointerPathBase::Absolute(address) if address <= u32::MAX.into())
             {
                 checker.error(
                     format!("`state {}` addresses must fit in `u32`", provider.name),

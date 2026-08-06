@@ -1,0 +1,15 @@
+state "game.exe" {
+    moduleValue: i32 at "game.dll", -0x20;
+    pointerValue: i32 at 0x2000, -0x10;
+    highAddressValue: i32 at 0xffff_ffff_ffff_fff0;
+}
+
+whileAttached {
+    let followed = process.follow(0x3000, [-0x20, 0x10]) else 0 as address
+    let reusable = 0x4000.memoryPath([-0x20], -0x10, PointerSize.Bit64)
+    let resolved = reusable.resolve() else 0 as address
+    setVariable(
+        "Signed Pointer Offsets",
+        `{current.moduleValue},{current.pointerValue},{followed},{resolved},{current.highAddressValue}`,
+    )
+}

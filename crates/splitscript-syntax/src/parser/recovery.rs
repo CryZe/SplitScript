@@ -46,6 +46,34 @@ impl Parser<'_> {
         }
     }
 
+    pub(super) fn expect_i64(&mut self, message: &'static str) -> Result<i64, Diagnostic> {
+        let minus = self.eat(&TokenKind::Minus);
+        let token = self.current().clone();
+        let TokenKind::Int(text) = &token.kind else {
+            return Err(Diagnostic::new(message, minus.unwrap_or(token.span)));
+        };
+        let (magnitude, suffix) =
+            parse_integer(text).map_err(|error| Diagnostic::new(error, token.span))?;
+        if suffix.is_some_and(|ty| !ty.is_integer()) {
+            return Err(Diagnostic::new(message, token.span));
+        }
+        let span = minus.map_or(token.span, |minus| minus.join(token.span));
+        let value = if minus.is_some() {
+            if magnitude == (i64::MAX as u64) + 1 {
+                i64::MIN
+            } else {
+                -i64::try_from(magnitude).map_err(|_| {
+                    Diagnostic::new("a pointer offset must fit in signed 64 bits", span)
+                })?
+            }
+        } else {
+            i64::try_from(magnitude)
+                .map_err(|_| Diagnostic::new("a pointer offset must fit in signed 64 bits", span))?
+        };
+        self.bump();
+        Ok(value)
+    }
+
     pub(super) fn expect_bool(&mut self, message: &'static str) -> Result<bool, Diagnostic> {
         let token = self.current().clone();
         match &token.kind {

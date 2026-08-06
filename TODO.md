@@ -130,12 +130,6 @@ or behavioral parity.
   address decoding, and concise pointer-follow composition. Existing `sig`,
   scan, follow, and `readRelative32` APIs should be documented before new APIs
   are introduced.
-- [ ] Support signed pointer offsets without turning base addresses into signed
-  values. Specify wrapping/overflow behavior for static `at` paths,
-  `MemoryPath`, and discovered-address arithmetic; preserve ordinary positive
-  address literals and diagnose offsets that cannot fit the chosen signed
-  representation. Drive the first fixture from a real negative-offset ASL
-  path.
 - [ ] Add exact record layout controls only when a target requires them:
   offsets, padding/alignment, packing, and per-field endianness. Keep
   field-order native-endian layout as the default and diagnose overlaps and
@@ -484,8 +478,8 @@ remaining work is product hardening and distribution.
    with native UTF-16 and a run-scoped visited set; implement only gaps that
    remain after semantic review.
 3. Add the remaining smallest recurring game-independent pieces—repeated
-   static settings, signed pointer offsets, and focused string operations—with
-   runtime and editor coverage.
+   static settings and focused string operations—with runtime and editor
+   coverage.
 4. In parallel with stable language semantics, establish the Wasmtime/DWARF
    compatibility fixture and land debug names plus source-line stepping.
 5. Harden and publish the bundled VSIX and native releases, then evaluate the

@@ -338,7 +338,9 @@ intrinsic type Process {
 
     /// Follows a pointer path.
     ///
-    /// Each intermediate address is read as a 64-bit target pointer. A failed or null pointer read returns an error; use retry in onAttach to wait for success.
+    /// Each signed offset is applied with wrapping 64-bit address arithmetic
+    /// before reading the next 64-bit target pointer. A failed or null pointer
+    /// read returns an error; use retry in onAttach to wait for success.
     ///
     /// # Example
     ///
@@ -351,8 +353,8 @@ intrinsic type Process {
     fn follow(
         /// The initial address.
         base: address,
-        /// Pointer offsets to follow.
-        offsets: [u64],
+        /// Signed pointer offsets to follow.
+        offsets: [i64],
     ) -> address!;
 
     /// Scans a process-memory range.
@@ -1354,9 +1356,10 @@ typeConstructor Result<T> {
 }
 
 extend address {
-    /// Adds a field offset to an address.
+    /// Applies a signed displacement to an address.
     ///
-    /// The offset is widened to the target address width.
+    /// Arithmetic wraps modulo the 64-bit address space. This preserves the
+    /// full unsigned address domain while allowing negative pointer offsets.
     ///
     /// # Example
     ///
@@ -1365,16 +1368,17 @@ extend address {
     /// ```splitscript
     /// let healthAddress = player.offset(0x20)
     /// ```
-    fn offset(
-        /// The unsigned field offset.
-        offset: u32,
+    fn offset<T: Integer>(
+        /// The integer displacement; signed values retain their sign.
+        offset: T,
     ) -> address {
         return self.add(offset as u64)
     }
 
     /// Adds a full-width offset to an address.
     ///
-    /// This is useful for offsets that are already represented as u64.
+    /// This is useful for unsigned sizes and offsets already represented as
+    /// `u64`. Arithmetic wraps modulo the 64-bit address space.
     ///
     /// # Example
     ///
@@ -1402,10 +1406,10 @@ extend address {
     /// let health = module.address.memoryPath([0x100, 0x20], 0x18, pointerSize)
     /// ```
     fn memoryPath(
-        /// Offsets that each end in a native pointer read.
-        dereferences: [u64],
-        /// Offset applied after the final pointer read.
-        finalOffset: u64,
+        /// Signed offsets that each end in a native pointer read.
+        dereferences: [i64],
+        /// Signed offset applied after the final pointer read.
+        finalOffset: i64,
         /// Native pointer width used by the target executable.
         pointerSize: PointerSize,
     ) -> MemoryPath {
@@ -2307,7 +2311,7 @@ struct MemoryPath {
     /// ```
     base: address,
 
-    /// Returns the offsets that each end in an intermediate pointer read.
+    /// Returns the signed offsets that each end in an intermediate pointer read.
     ///
     /// # Example
     ///
@@ -2317,9 +2321,9 @@ struct MemoryPath {
     /// let path = 0x2000.memoryPath([0x30, 0x10], 0x4, PointerSize.Bit32)
     /// let offsets = path.dereferences
     /// ```
-    dereferences: [u64],
+    dereferences: [i64],
 
-    /// Returns the offset applied after the final pointer read.
+    /// Returns the signed offset applied after the final pointer read.
     ///
     /// # Example
     ///
@@ -2329,7 +2333,7 @@ struct MemoryPath {
     /// let path = 0x3000.memoryPath([], 0x14, PointerSize.Bit64)
     /// let trailingOffset = path.finalOffset
     /// ```
-    finalOffset: u64,
+    finalOffset: i64,
 
     /// Returns the native pointer width used during traversal.
     ///
@@ -2357,13 +2361,13 @@ struct MemoryPath {
     fn resolve() -> address! {
         let current = self.base
         for offset in self.dereferences {
-            let pointerAddress = current.add(offset)
+            let pointerAddress = current.offset(offset)
             current = match self.pointerSize {
                 PointerSize.Bit32 => process.read<u32>(pointerAddress)? as address,
                 PointerSize.Bit64 => process.read<u64>(pointerAddress)? as address
             }
         }
-        return Ok(current.add(self.finalOffset))
+        return Ok(current.offset(self.finalOffset))
     }
 }
 
@@ -3273,8 +3277,8 @@ struct GbaEmulator {
                 let iwramOffset = retry process.read<i32>(iwramMatch.offset(9))
                 return GbaEmulator {
                     backend: 1,
-                    ewram: base.add((ewramOffset as i64) as u64),
-                    iwram: base.add((iwramOffset as i64) as u64),
+                    ewram: base.offset(ewramOffset as i64),
+                    iwram: base.offset(iwramOffset as i64),
                     aux1: 0,
                     aux2: 0,
                     aux3: 0,

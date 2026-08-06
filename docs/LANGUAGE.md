@@ -31,7 +31,7 @@ line.
 
 ```text
 state "game.exe" {
-    level: u16 at "game.exe", 0x1234, 0x20;
+    level: u16 at "game.exe", 0x1234, -0x20;
     score: u32 at 0x7ff612341000;
 }
 ```
@@ -43,10 +43,13 @@ list. Each name is attempted once per tick until one attaches.
 state ["game.exe", "game-demo.exe"] {}
 ```
 
-With a module name, the first offset is added to the module base. Every remaining
-offset follows a 64-bit pointer, adds the offset, and continues. Without a module
-name, the first value is an absolute address. The final read uses the declared
-width and signedness. A failed path rejects that field's candidate value.
+With a module name, the first signed `i64` offset is added to the module base.
+Every remaining signed offset follows a 64-bit pointer, adds the offset, and
+continues. Without a module name, the first value is a full-width unsigned
+absolute address and only subsequent offsets are signed. Address addition wraps
+modulo the 64-bit address space. The final read uses the declared width and
+signedness. A failed path rejects that field's candidate value. An offset whose
+magnitude does not fit `i64` is rejected instead of silently changing its sign.
 
 State field annotations are optional and participate in whole-program
 inference. Expression-backed fields normally obtain their type directly from
@@ -1308,17 +1311,25 @@ name. This keeps `value < limit` an ordinary comparison while making
 `read<u32>(address)` unambiguous; the formatter removes any remaining spaces
 around the generic call delimiters.
 
-`process.follow(base, offsets)` reads a non-null 64-bit pointer at every
-successive `current + offset` location. `process.readRelative32(location)`
+`process.follow(base, offsets)` accepts `[i64]` and reads a non-null 64-bit
+pointer at every successive `current + offset` location. This uses the same
+wrapping signed-displacement arithmetic as static `at` paths and
+`MemoryPath`. `process.readRelative32(location)`
 decodes the common x86-64 RIP-relative form as `location + 4 + i32(location)`.
 Both return `address!`. Use `else` or `?` for a one-shot attempt, or `retry` in
 `onAttach` to poll until they succeed.
 
 ```text
-let object = retry process.follow(module.address, [0x10, 0x28])
+let object = retry process.follow(module.address, [0x10, -0x28])
 let target = retry process.readRelative32(instruction + 0x3)
 let found = await process.scan(target, 0x200, sig"48 8B ?? ??")
 ```
+
+Use `address.offset(displacement)` when the displacement is signed and
+`address.add(delta)` when an unsigned full-width `u64` delta is already
+available. Both preserve the nominal `address` type and wrap modulo 2^64.
+`address.memoryPath(dereferences, finalOffset, pointerSize)` stores signed
+`i64` dereference and final offsets and resolves them with `offset`.
 
 `print` is a regular typed builtin available in every action block and writes
 through the runtime debug-message API. Its argument is any `String` expression,

@@ -311,6 +311,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/signed_pointer_offsets.split",
+        output: "signed_pointer_offsets.wasm",
+        profile: "release",
+        harness: "tests/signed_pointer_offsets_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/float_helpers.split",
         output: "float_helpers.wasm",
         profile: "release",

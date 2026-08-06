@@ -426,9 +426,14 @@ let layout = await gameManager.fieldAny(["currentLevel", "_currentScene"])
 let instance = await gameManager.staticInstance(["Instance", "_instance"])
 ```
 
-An `address` supports `offset(u32)` and `add(u64)`, keeping target pointers
-nominally distinct from numeric sizes while still making field offsets easy to
-apply.
+An `address` supports generic `offset<T: Integer>` for displacements and
+`add(u64)` for unsigned full-width deltas. Signed arguments retain their sign;
+smaller integer widths are extended before addition. Both wrap modulo the 64-bit address space while
+keeping target pointers nominally distinct from numeric sizes. Static `at`
+paths keep their absolute root unsigned, but module-relative and
+post-dereference offsets are signed. `process.follow` accepts `[i64]`, and
+`MemoryPath` stores signed dereference and final offsets, so negative native
+pointer paths do not require lossy casts.
 
 ## Watchers, strings, and timing
 

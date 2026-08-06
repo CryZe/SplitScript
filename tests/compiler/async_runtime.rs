@@ -1191,7 +1191,7 @@ fn explicit_process_reads_and_pointer_following_work_in_sync_and_async_code() {
             let module = await process.module("game.exe")
             let table = await process.scan(module.address, module.size, sig"48 8B ?? 00")
             let target = retry process.readRelative32(table + 0x3)
-            let object = retry process.follow(module.address, [0x10u64, 0x28u64])
+            let object = retry process.follow(module.address, [0x10i64, 0x28i64])
             let kind = retry process.read<u32>(object + 0x8)
             if (target != 0 && kind == 7u32 && (process.read<bool>(object + 0xc) else false)) {
                 print("object ready")

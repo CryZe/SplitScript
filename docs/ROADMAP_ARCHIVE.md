@@ -2329,3 +2329,15 @@ language catalog document the refinement rule.
   code generation, and a host-executed regression covering direct and state
   reads, NUL termination, surrogate pairs, replacement decoding, failure, and
   bounds.
+
+# 2026-08-06: signed native pointer offsets
+
+- Separated full-width unsigned absolute roots from signed module-relative and
+  post-dereference offsets in the syntax AST. Static `at` paths now accept
+  negative `i64` offsets while preserving the entire unsigned address domain.
+- Made `process.follow`, source-defined `MemoryPath`, and generic
+  `address.offset<T: Integer>` use the same signed wrapping-displacement model;
+  `address.add(u64)` remains the explicit unsigned-delta operation.
+- Added range diagnostics and a host-executed fixture covering a negative
+  module root, negative intermediate/final offsets, dynamic pointer following,
+  reusable paths, and a high unsigned absolute address.

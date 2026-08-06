@@ -44,7 +44,7 @@ pub(super) enum HelperValueType {
     String,
     Standard(StdlibTypeId),
     StringArray,
-    U64Array,
+    I64Array,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -80,7 +80,7 @@ macro_rules! helper {
     };
 }
 
-use HelperValueType::{I32, I64, Standard, String as StringValue, StringArray, U64Array};
+use HelperValueType::{I32, I64, I64Array, Standard, String as StringValue, StringArray};
 
 /// Canonical function-index and body order. Dependencies always occur before
 /// the helpers that call them, which is validated by the registry tests.
@@ -112,7 +112,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(UnityGetFieldAny, (I64, Standard(StdlibTypeId::UnityClass), StringArray) -> (Standard(StdlibTypeId::UnityField)), deps [UnityGetFieldOffset], imports [], build_unity_get_field_any),
     helper!(UnityGetStaticInstance, (I64, Standard(StdlibTypeId::UnityClass), StringArray) -> (I64), deps [UnityGetFieldAny], imports [ProcessRead], build_unity_get_static_instance),
     helper!(ConcatStrings, (StringArray) -> (StringValue), deps [], imports [], build_concat_strings),
-    helper!(FollowAddress, (I64, I64, U64Array) -> (I64), deps [], imports [ProcessRead], build_follow_address),
+    helper!(FollowAddress, (I64, I64, I64Array) -> (I64), deps [], imports [ProcessRead], build_follow_address),
     helper!(GbaTranslateAddress, (I64, Standard(StdlibTypeId::GbaEmulator), I32, I32) -> (I64), deps [], imports [ProcessRead], build_gba_translate_address),
     helper!(RefreshSettings, () -> (), deps [], imports [], build_refresh_settings),
     helper!(SettingsEnabled, (I32, StringValue) -> (I32), deps [], imports [], build_settings_enabled),
@@ -216,7 +216,7 @@ pub(super) fn resolve_signature(
         HelperValueType::I64 => ValType::I64,
         HelperValueType::String => gc.val_type(Type::Standard(StdlibTypeId::String)),
         HelperValueType::Standard(standard) => gc.val_type(Type::Standard(standard)),
-        HelperValueType::StringArray | HelperValueType::U64Array => gc.val_type(Type::Array(
+        HelperValueType::StringArray | HelperValueType::I64Array => gc.val_type(Type::Array(
             required_array_layout(ty, arrays, semantics)
                 .expect("runtime array helper has a reachable layout"),
         )),
@@ -250,7 +250,7 @@ fn required_array_layout(
 ) -> Option<ArrayTypeId> {
     let element = match ty {
         HelperValueType::StringArray => Type::Standard(StdlibTypeId::String),
-        HelperValueType::U64Array => Type::U64,
+        HelperValueType::I64Array => Type::I64,
         HelperValueType::I32
         | HelperValueType::I64
         | HelperValueType::String

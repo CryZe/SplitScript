@@ -63,7 +63,7 @@ impl BackendDependencies {
                             }
                         });
                     }
-                    if path.module.is_some() {
+                    if matches!(path.base, crate::ast::PointerPathBase::Module { .. }) {
                         dependencies.require_import(AbiImportId::ProcessGetModuleAddress);
                     }
                 }

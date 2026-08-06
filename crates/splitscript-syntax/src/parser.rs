@@ -13,8 +13,8 @@ use crate::{
         BinaryOp, Block, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference, EnumVariant,
         EnumVariantId, Expr, ExprId, ExprKind, FallbackBranch, ForBinding, FunctionDecl,
         FunctionId, InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId,
-        Parameter, PatternBinding, PatternId, PointerPath, Program, RecordDecl, RecordField,
-        RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
+        Parameter, PatternBinding, PatternId, PointerPath, PointerPathBase, Program, RecordDecl,
+        RecordField, RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
         SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFileFilter, SettingKind,
         Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
         StateSource, StateTransform, Stmt, SuspensionMode, TypeApplicationDecl, TypeApplicationId,
@@ -474,8 +474,14 @@ mod tests {
         let StateSource::Pointer(path) = &field.source else {
             panic!("expected a pointer-backed state field");
         };
-        assert_eq!(path.module.as_deref(), Some("game.dll"));
-        assert_eq!(path.offsets, [0x1234, 0x20]);
+        assert_eq!(
+            path.base,
+            PointerPathBase::Module {
+                name: "game.dll".to_owned(),
+                offset: 0x1234,
+            }
+        );
+        assert_eq!(path.offsets, [0x20]);
         assert!(matches!(
             path.decoder,
             Some(StateMemoryDecoder::Utf8 { max_bytes: 64, .. })
@@ -485,11 +491,51 @@ mod tests {
         let StateSource::Pointer(wide_path) = &wide_field.source else {
             panic!("expected a pointer-backed UTF-16LE state field");
         };
-        assert_eq!(wide_path.offsets, [0x2345]);
+        assert_eq!(wide_path.base, PointerPathBase::Absolute(0x2345));
+        assert!(wide_path.offsets.is_empty());
         assert!(matches!(
             wide_path.decoder,
             Some(StateMemoryDecoder::Utf16Le { max_units: 32, .. })
         ));
+    }
+
+    #[test]
+    fn pointer_paths_keep_unsigned_roots_and_signed_offsets_distinct() {
+        let source = r#"
+            state "game.exe" {
+                high: i32 at 0xffff_ffff_ffff_fff0;
+                module: i32 at "game.dll", -0x20, -0x8000_0000_0000_0000
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let fields = &program.state.as_ref().unwrap().fields;
+        let StateSource::Pointer(high) = &fields[0].source else {
+            panic!("expected an absolute pointer path");
+        };
+        assert_eq!(high.base, PointerPathBase::Absolute(0xffff_ffff_ffff_fff0));
+        assert!(high.offsets.is_empty());
+        let StateSource::Pointer(module) = &fields[1].source else {
+            panic!("expected a module-relative pointer path");
+        };
+        assert_eq!(
+            module.base,
+            PointerPathBase::Module {
+                name: "game.dll".to_owned(),
+                offset: -0x20,
+            }
+        );
+        assert_eq!(module.offsets, [i64::MIN]);
+
+        for source in [
+            "state \"game.exe\" { value: i32 at \"game.dll\", 0x8000_0000_0000_0000 }",
+            "state \"game.exe\" { value: i32 at 0x1000, -0x8000_0000_0000_0001 }",
+        ] {
+            let error = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap_err();
+            assert!(
+                error.message.contains("must fit in signed 64 bits"),
+                "{error:?}"
+            );
+        }
     }
 
     #[test]

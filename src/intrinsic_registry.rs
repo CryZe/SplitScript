@@ -419,6 +419,7 @@ const NEXT_TICK: EffectSet = EffectSet::one(Effect::RequiresAttachedProcess)
 
 const NONE: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::None);
 const BOOL: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Bool);
+const I64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::I64);
 const U32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U32);
 const U64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U64);
 const F64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::F64);
@@ -452,9 +453,9 @@ const STRING_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
     arguments: &[STRING],
 };
-const U64_ARRAY: ContractTypeRef = ContractTypeRef::Application {
+const I64_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
-    arguments: &[U64],
+    arguments: &[I64],
 };
 const U64_OPTION: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Option,
@@ -832,7 +833,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             signature(
                 NO_TYPE_PARAMETERS,
                 Some(PROCESS_TYPE),
-                params![value(ADDRESS), value(U64_ARRAY)],
+                params![value(ADDRESS), value(I64_ARRAY)],
                 ADDRESS_RESULT,
             ),
             PROCESS,

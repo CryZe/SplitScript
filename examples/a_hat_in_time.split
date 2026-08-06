@@ -30,11 +30,11 @@ enum Rift {
 
 /// Patch-dependent offsets below the discovered save-data pointer.
 record SaveDataOffsets {
-    root: u64,
-    yarn: u64,
-    chapter: u64,
-    act: u64,
-    checkpoint: u64,
+    root: i64,
+    yarn: i64,
+    chapter: i64,
+    act: i64,
+    checkpoint: i64,
 }
 
 /// Axis-aligned world-space trigger volume.
@@ -1574,7 +1574,7 @@ onAttach {
     let coordinatesSignature = await process.scanMemory(
         sig"48 8B 81 ?? ?? ?? ?? 4C 8D 80 ?? ?? ?? ??"
     )
-    let hatKidOffset = retry process.read<u32>(coordinatesSignature + 3) as u64
+    let hatKidOffset = retry process.read<u32>(coordinatesSignature + 3) as i64
 
     while true {
         let saveDataPointer = retry process.read<address>(saveDataRoot)

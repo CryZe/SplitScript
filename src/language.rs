@@ -185,7 +185,7 @@ fn readMarker() {
 }
 
 onAttach {
-    let offsets: [u64; 2] = [0x100, 0x20]
+    let offsets: [i64; 2] = [0x100, 0x20]
     let module = await process.module("GameAssembly.dll")
     let marker = retry readMarker()
     print(`ready {module.address}:{marker}`)
@@ -450,7 +450,7 @@ focused_example!(
 focused_example!(
     ARRAY_TYPE_EXAMPLE,
     "Annotate an exact-length array",
-    "let offsets: [u64; 2] = [0x100, 0x20]",
+    "let offsets: [i64; 2] = [0x100, 0x20]",
     TYPES_AND_LITERALS_SOURCE
 );
 focused_example!(

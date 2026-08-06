@@ -109,7 +109,12 @@ pub(super) fn compile_read(
                 .expect("provider pointer fields are MemoryReadable")
                 .size();
             return compile_gba_direct_read(
-                path.offsets[0] as u32,
+                match path.base {
+                    crate::ast::PointerPathBase::Absolute(address) => address as u32,
+                    crate::ast::PointerPathBase::Module { .. } => {
+                        unreachable!("provider direct reads reject module-relative roots")
+                    }
+                },
                 memory_type_id,
                 field_type,
                 optional,
@@ -131,8 +136,8 @@ pub(super) fn compile_read(
     let mut function = Function::new(locals);
     let address_local = 1;
     let offsets = &path.offsets;
-    if let Some(module) = &path.module {
-        let (ptr, len) = strings.get(module);
+    if let crate::ast::PointerPathBase::Module { name, offset } = &path.base {
+        let (ptr, len) = strings.get(name);
         function
             .instruction(&Instruction::LocalGet(0))
             .instruction(&Instruction::I32Const(ptr as i32))
@@ -155,12 +160,12 @@ pub(super) fn compile_read(
             .instruction(&Instruction::Return)
             .instruction(&Instruction::End)
             .instruction(&Instruction::LocalGet(address_local))
-            .instruction(&Instruction::I64Const(offsets[0] as i64))
+            .instruction(&Instruction::I64Const(*offset))
             .instruction(&Instruction::I64Add)
             .instruction(&Instruction::LocalSet(address_local));
-    } else {
+    } else if let crate::ast::PointerPathBase::Absolute(address) = path.base {
         function
-            .instruction(&Instruction::I64Const(offsets[0] as i64))
+            .instruction(&Instruction::I64Const(address as i64))
             .instruction(&Instruction::LocalSet(address_local));
     }
 
@@ -176,12 +181,12 @@ pub(super) fn compile_read(
         gc: lowering.gc,
         abi_read: lowering.abi_read,
     };
-    for offset in offsets.iter().skip(1) {
+    for offset in offsets {
         emit_process_read(&mut function, &process_read, 8);
         function
             .instruction(&Instruction::I32Const(lowering.abi_read.start()))
             .instruction(&Instruction::I64Load(memarg()))
-            .instruction(&Instruction::I64Const(*offset as i64))
+            .instruction(&Instruction::I64Const(*offset))
             .instruction(&Instruction::I64Add)
             .instruction(&Instruction::LocalSet(address_local));
     }

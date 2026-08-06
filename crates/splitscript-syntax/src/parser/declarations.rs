@@ -4,7 +4,7 @@
 
 use super::{
     Action, ActionKind, Diagnostic, EnumDecl, EnumId, EnumReference, EnumVariant, FunctionDecl,
-    FunctionId, Parameter, Parser, PointerPath, RecordDecl, RecordField, RecordId,
+    FunctionId, Parameter, Parser, PointerPath, PointerPathBase, RecordDecl, RecordField, RecordId,
     SettingChoiceOption, SettingDecl, SettingExternalKey, SettingFileFilter, SettingKind, Span,
     StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource,
     StateTransform, TokenKind, TypeRef,
@@ -412,10 +412,22 @@ impl Parser<'_> {
             } else {
                 None
             };
-            let mut offsets = vec![self.expect_u64("expected a pointer offset")?];
-            while self.at(&TokenKind::Comma) && matches!(self.peek(1).kind, TokenKind::Int(_)) {
+            let base = if let Some(name) = module {
+                PointerPathBase::Module {
+                    name,
+                    offset: self.expect_i64("expected a signed module offset")?,
+                }
+            } else {
+                PointerPathBase::Absolute(self.expect_u64("expected an unsigned absolute address")?)
+            };
+            let mut offsets = Vec::new();
+            while self.at(&TokenKind::Comma)
+                && (matches!(self.peek(1).kind, TokenKind::Int(_))
+                    || (matches!(self.peek(1).kind, TokenKind::Minus)
+                        && matches!(self.peek(2).kind, TokenKind::Int(_))))
+            {
                 self.bump();
-                offsets.push(self.expect_u64("expected a pointer offset")?);
+                offsets.push(self.expect_i64("expected a signed pointer offset")?);
             }
             let pointer_end = self.previous().span.end;
             let mut decoder = if let Some(start) = self.eat_ident("as") {
@@ -515,7 +527,7 @@ impl Parser<'_> {
             }
             StateSource::Pointer(PointerPath {
                 at_span,
-                module,
+                base,
                 offsets,
                 decoder,
             })
@@ -1021,15 +1033,25 @@ impl Parser<'_> {
                 } else {
                     None
                 };
+                let base = if let Some(name) = module {
+                    PointerPathBase::Module {
+                        name,
+                        offset: self.expect_i64("expected a signed module offset")?,
+                    }
+                } else {
+                    PointerPathBase::Absolute(
+                        self.expect_u64("expected an unsigned absolute address")?,
+                    )
+                };
                 let mut offsets = Vec::new();
                 loop {
-                    offsets.push(self.expect_u64("expected a pointer offset")?);
                     if self.eat(&TokenKind::Comma).is_none() {
                         break;
                     }
                     if self.at(&TokenKind::RParen) {
                         break;
                     }
+                    offsets.push(self.expect_i64("expected a signed pointer offset")?);
                 }
                 let end = self
                     .expect(TokenKind::RParen, "expected `)` after the pointer path")?
@@ -1041,7 +1063,7 @@ impl Parser<'_> {
                     annotation: Some(ty),
                     source: StateSource::Pointer(PointerPath {
                         at_span: None,
-                        module,
+                        base,
                         offsets,
                         decoder: None,
                     }),

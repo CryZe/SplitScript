@@ -568,6 +568,18 @@ Wasm-local assignment for values, match storage, fallback values, intrinsic
 scratch space, and suspension scratch space; expression and async lowering
 share that assignment routine without owning index policy.
 
+The syntax AST represents a static pointer root separately from its offsets:
+an absolute root is a full unsigned `u64`, while a module root carries a signed
+`i64` initial displacement. All offsets after a pointer dereference are signed
+`i64`. State-reader code generation lowers displacement addition to Wasm
+`i64.add`, whose modulo-2^64 behavior is the language's specified wrapping
+address arithmetic. The generic source-defined `address.offset` casts its
+integer displacement to the address representation and delegates to intrinsic
+`address.add`; it needs no additional compiler special case. Keeping the root
+distinction in the AST prevents a high absolute address from being
+reinterpreted as a negative offset while allowing ordinary negative paths
+without casts.
+
 [`src/codegen/data_plan.rs`](../src/codegen/data_plan.rs) discovers and interns
 all static UTF-8 text and parsed signature needles/masks before body emission.
 It exposes immutable lookup pools to emitters and alone encodes their linear

@@ -53,9 +53,9 @@ impl StaticData {
         }
         for field in state.all_fields() {
             if let StateSource::Pointer(path) = &field.source
-                && let Some(module) = &path.module
+                && let crate::ast::PointerPathBase::Module { name, .. } = &path.base
             {
-                strings.intern(module);
+                strings.intern(name);
             }
         }
         for setting in &program.settings {

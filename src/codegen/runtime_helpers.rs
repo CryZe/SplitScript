@@ -236,7 +236,7 @@ pub(super) fn build_concat_strings(inputs: &RuntimeHelperInputs<'_>) -> Function
 pub(super) fn build_follow_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
     process::compile_follow_address(
         inputs.abi,
-        array_layout(inputs, Type::U64),
+        array_layout(inputs, Type::I64),
         inputs.memory.scratch().abi_read,
     )
 }

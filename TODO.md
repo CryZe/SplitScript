@@ -154,9 +154,6 @@ or behavioral parity.
   document that headings are visual and parent boolean settings must gate child
   behavior in source; do not let a compiling hierarchy imply behavior the host
   does not provide.
-- [ ] Add source-defined `contains` and `indexOf` operations for fixed arrays,
-  with equality constraints and focused examples, so closed route tables do not
-  require manual search loops.
 - [ ] Add a run-scoped `Set<T>` as the first growable collection. The repeated
   visited-map/checkpoint pattern now has evidence from several ports and cannot
   be faithfully replaced by comparing only the previous value. Start with

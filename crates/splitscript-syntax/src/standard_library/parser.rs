@@ -293,6 +293,7 @@ impl Parser<'_> {
         self.expect(TokenKind::Minus, "expected `->` and a return type")?;
         self.expect(TokenKind::Gt, "expected `>` in the return arrow `->`")?;
         let result = self.ty()?;
+        let where_constraints = self.where_constraints()?;
         let body = if self.eat(&TokenKind::Semicolon) {
             None
         } else if self.at(&TokenKind::LBrace) {
@@ -303,6 +304,7 @@ impl Parser<'_> {
         Ok(FunctionDeclaration {
             name,
             type_parameters,
+            where_constraints,
             parameters,
             result,
             is_static,
@@ -362,6 +364,35 @@ impl Parser<'_> {
             self.expect(TokenKind::Gt, "expected `>` after type parameters")?;
         }
         Ok(type_parameters)
+    }
+
+    fn where_constraints(&mut self) -> Result<Vec<TypeParameter>, Error> {
+        let mut parameters = Vec::new();
+        if !self.eat_ident("where") {
+            return Ok(parameters);
+        }
+        loop {
+            let name = self.ident("expected a type-parameter name after `where`")?;
+            self.expect(
+                TokenKind::Colon,
+                "expected `:` after the constrained type parameter",
+            )?;
+            let mut constraints = Vec::new();
+            loop {
+                constraints.push(self.ident("expected a capability constraint")?);
+                if !self.eat(&TokenKind::Plus) {
+                    break;
+                }
+            }
+            parameters.push(TypeParameter { name, constraints });
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+            if self.at(&TokenKind::Semicolon) || self.at(&TokenKind::LBrace) {
+                break;
+            }
+        }
+        Ok(parameters)
     }
 
     fn ty(&mut self) -> Result<Type, Error> {
@@ -837,6 +868,27 @@ typeConstructor Box<T,> {
         assert_eq!(box_type.functions[0].type_parameters[0].name, "U");
         assert_eq!(box_type.functions[0].parameters[0].name, "value");
         assert_eq!(box_type.functions[0].result.to_string(), "Box<U>");
+    }
+
+    #[test]
+    fn parses_constraints_on_inherited_callable_type_parameters() {
+        let source = r#"
+/// Arrays.
+typeConstructor Array<T> {
+    /// Finds a value.
+    fn contains(value: T) -> bool where T: Equatable + Display, {
+        return false
+    }
+}
+"#;
+        let library = parse(source).expect("where constraints should parse");
+        let Declaration::TypeConstructor(array) = &library.declarations[0] else {
+            panic!("expected a type constructor")
+        };
+        let constraints = &array.functions[0].where_constraints;
+        assert_eq!(constraints.len(), 1);
+        assert_eq!(constraints[0].name, "T");
+        assert_eq!(constraints[0].constraints, ["Equatable", "Display"]);
     }
 
     #[test]

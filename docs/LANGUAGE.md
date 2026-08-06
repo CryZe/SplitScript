@@ -792,13 +792,18 @@ let empty: [u16] = []
 bytes.set(1, 0x8b)
 let opcode = bytes[1]
 let count = bytes.length()
+let hasTerminator = bytes.contains(0)
+let marker = bytes.indexOf(0x8b) // u32?
 ```
 
 `length()` returns `u32`, `array[index]` returns `T`, and `set(index, value)`
 mutates the selected element. The index is a `u32`, and Wasm performs bounds
-checks. Arrays can contain
-records, enums, strings, and other arrays, and can themselves be stored in
-records or continuation frames.
+checks. `contains(value)` tests every element from the beginning, while
+`indexOf(value)` returns the first matching `u32` index or `None`. These search
+methods are available when the element type supports `Equatable`; they are
+ordinary source-defined library loops rather than dedicated compiler
+operations. Arrays can contain records, enums, strings, and other arrays, and
+can themselves be stored in records or continuation frames.
 
 Arrays can be traversed directly without manually managing an index:
 

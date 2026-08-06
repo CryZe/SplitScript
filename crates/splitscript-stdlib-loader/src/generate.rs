@@ -387,11 +387,20 @@ impl<'a> CatalogGenerator<'a> {
             };
             let id = format!("{id_prefix}{}", ident(&function.name));
             let intrinsic = optional_attribute_name(&function.attributes, "intrinsic");
-            let type_parameters = if function.type_parameters.is_empty() {
-                inherited.unwrap_or_default()
+            let mut type_parameters = if function.type_parameters.is_empty() {
+                inherited.unwrap_or_default().to_vec()
             } else {
-                &function.type_parameters
+                function.type_parameters.clone()
             };
+            for constrained in &function.where_constraints {
+                let parameter = type_parameters
+                    .iter_mut()
+                    .find(|parameter| parameter.name == constrained.name)
+                    .expect("validated where clauses reference an available type parameter");
+                parameter
+                    .constraints
+                    .extend(constrained.constraints.clone());
+            }
             let kind = if function.is_static {
                 "ItemKind::Function".to_owned()
             } else {
@@ -406,7 +415,7 @@ impl<'a> CatalogGenerator<'a> {
                 owner,
                 &id,
                 intrinsic,
-                type_parameters,
+                &type_parameters,
                 owner_expression,
                 prefix,
                 &kind,

@@ -36,5 +36,11 @@ onAttach {
 }
 
 whileAttached {
-    setVariable("For Loop", `{selectedSum(values())},{evaluations}`)
+    let route = [1, 2, 3, 4, 5]
+    let presentIndex = route.indexOf(4) else 99
+    let missingIndex = route.indexOf(9) else 99
+    setVariable(
+        "For Loop",
+        `{selectedSum(values())},{evaluations},{route.contains(4)},{route.contains(9)},{presentIndex},{missingIndex}`,
+    )
 }

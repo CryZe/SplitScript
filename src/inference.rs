@@ -177,6 +177,7 @@ pub(crate) struct InferenceContext {
     options: Vec<OptionLayout>,
     results: Vec<ResultLayout>,
     asyncs: Vec<AsyncLayout>,
+    canonical_arrays: HashMap<ArrayTypeId, ArrayTypeId>,
     canonical_options: HashMap<OptionTypeId, OptionTypeId>,
     canonical_results: HashMap<ResultTypeId, ResultTypeId>,
     canonical_asyncs: HashMap<AsyncTypeId, AsyncTypeId>,
@@ -213,6 +214,7 @@ impl InferenceContext {
             options,
             results,
             asyncs,
+            canonical_arrays: HashMap::new(),
             canonical_options: HashMap::new(),
             canonical_results: HashMap::new(),
             canonical_asyncs: HashMap::new(),
@@ -625,6 +627,9 @@ impl InferenceContext {
             Type::Variable(variable) => {
                 panic!("unresolved type variable ?{variable} after inference")
             }
+            Type::Array(array) => {
+                Type::Array(self.canonical_arrays.get(&array).copied().unwrap_or(array))
+            }
             Type::Option(option) => Type::Option(
                 self.canonical_options
                     .get(&option)
@@ -787,6 +792,50 @@ impl InferenceContext {
         for (array, element) in self.arrays.iter_mut().zip(resolved) {
             array.element = element;
         }
+
+        // Array layouts can be allocated while their element is still an
+        // inference variable. Distinct provisional layouts may consequently
+        // resolve to the same `[T]` or `[T; N]` type. Collapse those layouts
+        // before semantic publication so Wasm GC never receives two nominal
+        // identities for one source type.
+        loop {
+            let previous = self.canonical_arrays.clone();
+            self.canonical_arrays.clear();
+            let mut representatives = Vec::<(Type, Option<u32>, ArrayTypeId)>::new();
+            for array in &self.arrays {
+                let element = canonical_constructed_type(
+                    array.element,
+                    &previous,
+                    &self.canonical_options,
+                    &self.canonical_results,
+                    &self.canonical_asyncs,
+                );
+                let canonical = representatives
+                    .iter()
+                    .find_map(|(candidate, length, id)| {
+                        (*candidate == element && *length == array.length).then_some(*id)
+                    })
+                    .unwrap_or_else(|| {
+                        representatives.push((element, array.length, array.id));
+                        array.id
+                    });
+                self.canonical_arrays.insert(array.id, canonical);
+            }
+            if self.canonical_arrays == previous {
+                break;
+            }
+        }
+
+        let canonical_arrays = self.canonical_arrays.clone();
+        for array in &mut self.arrays {
+            array.element = canonical_constructed_type(
+                array.element,
+                &canonical_arrays,
+                &self.canonical_options,
+                &self.canonical_results,
+                &self.canonical_asyncs,
+            );
+        }
     }
 
     pub(crate) fn finalize_wrappers(&mut self) {
@@ -844,8 +893,9 @@ impl InferenceContext {
 
             let mut option_representatives = Vec::<(Type, OptionTypeId)>::new();
             for option in &self.options {
-                let value = canonical_wrapper_type(
+                let value = canonical_constructed_type(
                     option.value,
+                    &self.canonical_arrays,
                     &previous_options,
                     &previous_results,
                     &previous_asyncs,
@@ -862,8 +912,9 @@ impl InferenceContext {
 
             let mut result_representatives = Vec::<(Type, ResultTypeId)>::new();
             for result in &self.results {
-                let value = canonical_wrapper_type(
+                let value = canonical_constructed_type(
                     result.value,
+                    &self.canonical_arrays,
                     &previous_options,
                     &previous_results,
                     &previous_asyncs,
@@ -880,8 +931,9 @@ impl InferenceContext {
 
             let mut async_representatives = Vec::<(Type, AsyncTypeId)>::new();
             for future in &self.asyncs {
-                let value = canonical_wrapper_type(
+                let value = canonical_constructed_type(
                     future.value,
+                    &self.canonical_arrays,
                     &previous_options,
                     &previous_results,
                     &previous_asyncs,
@@ -908,24 +960,27 @@ impl InferenceContext {
         let canonical_results = self.canonical_results.clone();
         let canonical_asyncs = self.canonical_asyncs.clone();
         for option in &mut self.options {
-            option.value = canonical_wrapper_type(
+            option.value = canonical_constructed_type(
                 option.value,
+                &self.canonical_arrays,
                 &canonical_options,
                 &canonical_results,
                 &canonical_asyncs,
             );
         }
         for result in &mut self.results {
-            result.value = canonical_wrapper_type(
+            result.value = canonical_constructed_type(
                 result.value,
+                &self.canonical_arrays,
                 &canonical_options,
                 &canonical_results,
                 &canonical_asyncs,
             );
         }
         for future in &mut self.asyncs {
-            future.value = canonical_wrapper_type(
+            future.value = canonical_constructed_type(
                 future.value,
+                &self.canonical_arrays,
                 &canonical_options,
                 &canonical_results,
                 &canonical_asyncs,
@@ -1180,13 +1235,15 @@ pub(crate) fn type_may_have_capability(
     }
 }
 
-fn canonical_wrapper_type(
+fn canonical_constructed_type(
     ty: Type,
+    arrays: &HashMap<ArrayTypeId, ArrayTypeId>,
     options: &HashMap<OptionTypeId, OptionTypeId>,
     results: &HashMap<ResultTypeId, ResultTypeId>,
     asyncs: &HashMap<AsyncTypeId, AsyncTypeId>,
 ) -> Type {
     match ty {
+        Type::Array(array) => Type::Array(arrays.get(&array).copied().unwrap_or(array)),
         Type::Option(option) => Type::Option(options.get(&option).copied().unwrap_or(option)),
         Type::Result(result) => Type::Result(results.get(&result).copied().unwrap_or(result)),
         Type::Async(future) => Type::Async(asyncs.get(&future).copied().unwrap_or(future)),

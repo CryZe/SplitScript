@@ -42,6 +42,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     }
     checker.finalize_array_types();
     checker.inference.finalize_wrappers();
+    checker.finalize_array_types();
     checker.inference.intern_resolved_constructed_types();
     let array_types = checker
         .inference

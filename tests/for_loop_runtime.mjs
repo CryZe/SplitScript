@@ -38,7 +38,7 @@ for (let tick = 0; tick < 20 && !messages.includes("async done"); tick += 1) {
 instance.exports.update();
 
 const expectedMessages = ["first", "last", "async done"];
-if (JSON.stringify(messages) !== JSON.stringify(expectedMessages) || observed !== "8,1") {
+if (JSON.stringify(messages) !== JSON.stringify(expectedMessages) || observed !== "8,1,true,false,3,99") {
     throw new Error(`unexpected for-loop output: ${JSON.stringify({ expectedMessages, messages, observed })}`);
 }
 

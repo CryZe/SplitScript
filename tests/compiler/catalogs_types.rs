@@ -32,6 +32,8 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::FloatIsFinite,
         StdlibItemId::NumericClamp,
         StdlibItemId::ArrayIsEmpty,
+        StdlibItemId::ArrayContains,
+        StdlibItemId::ArrayIndexOf,
         StdlibItemId::ResultToOption,
         StdlibItemId::AddressOffset,
         StdlibItemId::UnityIl2Cpp,
@@ -427,6 +429,62 @@ fn generic_array_library_bodies_share_demand_driven_specialization() {
         defined_functions(&specialized),
         defined_functions(&baseline) + 2,
         "one concrete isEmpty body should be emitted for each reachable array element type"
+    );
+}
+
+#[test]
+fn array_search_methods_are_source_defined_and_preserve_element_constraints() {
+    let library = StandardLibrary::new();
+    assert_eq!(
+        library.render_signature(StdlibItemId::ArrayContains),
+        "[T].contains(value: T) -> bool where T: Equatable"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::ArrayIndexOf),
+        "[T].indexOf(value: T) -> u32? where T: Equatable"
+    );
+    for item in [StdlibItemId::ArrayContains, StdlibItemId::ArrayIndexOf] {
+        assert!(matches!(
+            library.item(item).implementation,
+            Implementation::LibraryBody { .. }
+        ));
+    }
+
+    for expression in [
+        "[2, 4, 6].contains(4)",
+        "[2, 4, 6].indexOf(6) else 99",
+        "[\"Moon\", \"Sun\"].contains(\"Sun\")",
+        "[\"Moon\", \"Sun\"].indexOf(\"missing\") else 99",
+    ] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+                whileAttached {{
+                    print({expression})
+                }}
+            "#
+        );
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&splitscript::compile(&source).unwrap())
+            .unwrap_or_else(|error| panic!("`{expression}` generated invalid Wasm GC: {error}"));
+    }
+
+    let errors = splitscript::compile(
+        r#"
+            record Marker { values: [i32] }
+            state "game.exe" {}
+            whileAttached {
+                let markers: [Marker; 1] = [Marker { values: [1] }]
+                print(markers.contains(Marker { values: [1] }))
+            }
+        "#,
+    )
+    .expect_err("searching arrays whose elements are not equatable should fail");
+    assert!(
+        errors.iter().any(|error| {
+            error.message.contains("Equatable") && error.message.contains("Marker")
+        }),
+        "{errors:#?}"
     );
 }
 

@@ -112,7 +112,11 @@ source-owned types use the same `FunctionInstance` machinery as user-defined
 generic functions. Reachability emits only called concrete instances.
 `Numeric.clamp` composes the primitive `min` and `max` operations, while
 `[T].isEmpty()` composes `length()` across arbitrary array element types.
-Neither helper has dedicated intrinsic dispatch or backend lowering.
+`[T].contains(value)` and `[T].indexOf(value)` are source-defined search loops;
+their declarations add `Equatable` only to the inherited `T` used by those
+methods, leaving operations such as `length()` available for every element
+type. None of these helpers has dedicated intrinsic dispatch or backend
+lowering.
 
 Bodies may perform any operation reachable through their permitted intrinsic
 leaves. All `Duration` constructors are source-defined: their arithmetic and

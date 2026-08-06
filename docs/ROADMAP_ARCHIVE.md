@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-06: source-defined array search
+
+- Added `contains` and `indexOf` to both `[T]` and `[T; N]` as ordinary
+  standard-library source bodies. Their per-method `Equatable` constraint,
+  signatures, documentation, completion, hover data, and focused examples all
+  originate in `stdlib/standard.split`; no backend intrinsic was added.
+- Canonicalized provisional array layouts after inference so independently
+  inferred occurrences of the same `[T]` type share one WebAssembly GC nominal
+  identity. Compile and runtime coverage exercises integer and string search,
+  present and absent indices, and equality-constraint failures.
+
 ## 2026-08-05: explicit script-instance setup and lifecycle migration guidance
 
 - Added `setup`, a synchronous process-independent lifecycle block that runs

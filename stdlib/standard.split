@@ -1083,6 +1083,59 @@ typeConstructor Array<T> {
         return self.length() == 0
     }
 
+    /// Reports whether the array contains an equal element.
+    ///
+    /// Elements are compared from the beginning of the array. The element
+    /// type must support equality.
+    ///
+    /// # Example
+    ///
+    /// Check a closed route table
+    ///
+    /// ```splitscript
+    /// let route = [2, 4, 7]
+    /// let visitsBoss = route.contains(7)
+    /// ```
+    fn contains(
+        /// The element to find.
+        value: T,
+    ) -> bool where T: Equatable {
+        for element in self {
+            if element == value {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Finds the first index containing an equal element.
+    ///
+    /// Returns `None` when the value is absent. The index is a `u32`, matching
+    /// the array indexing and length APIs, and the element type must support
+    /// equality.
+    ///
+    /// # Example
+    ///
+    /// Find a checkpoint in a route table
+    ///
+    /// ```splitscript
+    /// let route = [2, 4, 7]
+    /// let bossIndex = route.indexOf(7)
+    /// ```
+    fn indexOf(
+        /// The element to find.
+        value: T,
+    ) -> u32? where T: Equatable {
+        let index = 0
+        while index < self.length() {
+            if self[index] == value {
+                return index
+            }
+            index += 1
+        }
+        return None
+    }
+
     /// Updates an array element.
     ///
     /// The array is evaluated once and updated in place.

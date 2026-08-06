@@ -1583,7 +1583,7 @@ state "game.exe" {}
         assert!(element.contains(&"min".to_owned()), "{element:#?}");
         assert!(element.contains(&"max".to_owned()), "{element:#?}");
         assert!(element.contains(&"clamp".to_owned()), "{element:#?}");
-        for array_method in ["set", "length", "isEmpty"] {
+        for array_method in ["set", "length", "isEmpty", "contains", "indexOf"] {
             assert!(
                 !element.contains(&array_method.to_owned()),
                 "array method `{array_method}` leaked onto u8 completion: {element:#?}"
@@ -1605,6 +1605,8 @@ split {
         assert!(completions.contains(&"set".to_owned()));
         assert!(completions.contains(&"length".to_owned()));
         assert!(completions.contains(&"isEmpty".to_owned()));
+        assert!(completions.contains(&"contains".to_owned()));
+        assert!(completions.contains(&"indexOf".to_owned()));
     }
 
     #[test]

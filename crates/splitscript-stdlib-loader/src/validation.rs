@@ -374,11 +374,8 @@ impl<'a> Validator<'a> {
                 _ => {}
             }
             self.validate_type_parameters(&qualified, &function.type_parameters);
-            let parameters = if function.type_parameters.is_empty() {
-                inherited
-            } else {
-                &function.type_parameters
-            };
+            let parameters =
+                self.effective_function_type_parameters(&qualified, function, inherited);
             let mut parameter_names = HashSet::new();
             for parameter in &function.parameters {
                 let parameter_owner = format!("{qualified}.{}", parameter.name);
@@ -403,10 +400,61 @@ impl<'a> Validator<'a> {
                         "`{parameter_owner}` has unknown literal rule `{rule}`"
                     ));
                 }
-                self.validate_type(&parameter_owner, &parameter.ty, parameters);
+                self.validate_type(&parameter_owner, &parameter.ty, &parameters);
             }
-            self.validate_type(&format!("{qualified} result"), &function.result, parameters);
+            self.validate_type(
+                &format!("{qualified} result"),
+                &function.result,
+                &parameters,
+            );
         }
+    }
+
+    fn effective_function_type_parameters(
+        &mut self,
+        owner: &str,
+        function: &FunctionDeclaration,
+        inherited: &[TypeParameter],
+    ) -> Vec<TypeParameter> {
+        let mut parameters = if function.type_parameters.is_empty() {
+            inherited.to_vec()
+        } else {
+            function.type_parameters.clone()
+        };
+        let mut constrained_names = HashSet::new();
+        for constrained in &function.where_constraints {
+            if !constrained_names.insert(constrained.name.as_str()) {
+                self.error(format!(
+                    "`{owner}` repeats where clause for `{}`",
+                    constrained.name
+                ));
+            }
+            let Some(parameter) = parameters
+                .iter_mut()
+                .find(|parameter| parameter.name == constrained.name)
+            else {
+                self.error(format!(
+                    "`{owner}` constrains unknown type parameter `{}`",
+                    constrained.name
+                ));
+                continue;
+            };
+            for constraint in &constrained.constraints {
+                if !self.capabilities.contains(constraint.as_str()) {
+                    self.error(format!(
+                        "`{owner}` references unknown capability `{constraint}`"
+                    ));
+                }
+                if parameter.constraints.contains(constraint) {
+                    self.error(format!(
+                        "`{owner}` repeats capability constraint `{constraint}`"
+                    ));
+                } else {
+                    parameter.constraints.push(constraint.clone());
+                }
+            }
+        }
+        parameters
     }
 
     fn validate_operator(&mut self, owner: &str, qualified: &str, function: &FunctionDeclaration) {
@@ -1107,6 +1155,37 @@ capability Values<T> {
         let generated = generate_catalog(&parse(source).unwrap()).unwrap();
         assert!(generated.contains("Implementation::LibraryBody"));
         assert!(generated.contains("TypeRef::Application"));
+    }
+
+    #[test]
+    fn callable_where_clauses_must_reference_known_parameters_and_capabilities() {
+        let source = r#"
+/// Arrays.
+typeConstructor Array<T> {
+    /// Invalid parameter constraint.
+    fn badParameter() -> bool where Missing: Equatable {
+        return false
+    }
+
+    /// Invalid capability constraint.
+    fn badCapability() -> bool where T: MissingCapability {
+        return false
+    }
+}
+"#;
+        let errors = generate_catalog(&parse(source).unwrap()).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error
+                .message
+                .contains("constrains unknown type parameter `Missing`")),
+            "{errors:#?}"
+        );
+        assert!(
+            errors.iter().any(|error| error
+                .message
+                .contains("references unknown capability `MissingCapability`")),
+            "{errors:#?}"
+        );
     }
 
     #[test]

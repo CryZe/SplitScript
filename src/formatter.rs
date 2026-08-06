@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use crate::{
     Diagnostic,
     ast::{
-        Action, EnumDecl, Expr, ExprKind, FunctionDecl, Program, RecordDecl, SettingDecl,
+        Action, EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, Program, RecordDecl, SettingDecl,
         SettingKind, StateDecl, StateField, Stmt, VariableDecl,
     },
     lexer::{Lexeme, TokenKind, TriviaKind},
@@ -369,6 +369,14 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
         }
         visit::walk_expr(self, expression);
     }
+
+    fn visit_match_arm(&mut self, arm: &'ast MatchArm) {
+        if let Some(guard) = &arm.guard {
+            self.continuation_before_block(guard.span.start, guard.span.end);
+        }
+        self.continuation_before_block(arm.value.span.start, arm.value.span.end);
+        visit::walk_match_arm(self, arm);
+    }
 }
 
 struct Formatter<'a> {
@@ -561,7 +569,11 @@ impl<'a> Formatter<'a> {
         }
 
         if self.is_multiline_block_opening(current) {
-            return Separation::Newline;
+            return if self.current_line_indentation > self.indentation {
+                Separation::Newline
+            } else {
+                Separation::Space
+            };
         }
 
         if self.join_before.contains(&current.span().start) {
@@ -668,21 +680,18 @@ impl<'a> Formatter<'a> {
 
     fn continuation_indentation(&self, lexeme: &Lexeme) -> usize {
         let offset = lexeme.span().start;
-        let syntax_continuation = !matches!(
-            token_kind(lexeme),
-            Some(TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace)
-        ) && (self
-            .multiline_headers
-            .iter()
-            .filter(|range| range.start < offset && offset < range.opening_brace)
-            .max_by_key(|range| range.start)
-            .is_some_and(|range| line_breaks(&self.document.source()[range.start..offset]) > 0)
-            || self.continuations.iter().any(|range| {
-                range.start < offset
-                    && offset < range.end
-                    && line_breaks(&self.document.source()[range.start..offset]) > 0
-            }));
-        let delimiter_continuation = self
+        let syntax_offset = match token_kind(lexeme) {
+            Some(TokenKind::RParen | TokenKind::RBracket) => self
+                .delimiters
+                .iter()
+                .find(|range| range.closing == offset)
+                .map(|range| range.opening),
+            Some(TokenKind::RBrace) => None,
+            _ => Some(offset),
+        };
+        let syntax_continuation =
+            syntax_offset.is_some_and(|offset| self.has_syntax_continuation(offset));
+        let active_delimiters = self
             .delimiters
             .iter()
             .filter(|range| {
@@ -695,8 +704,38 @@ impl<'a> Formatter<'a> {
                         .iter()
                         .any(|break_offset| *break_offset <= offset)
             })
-            .count();
+            .collect::<Vec<_>>();
+        let delimiter_continuation = active_delimiters
+            .iter()
+            .map(|range| range.opening)
+            .min()
+            .map_or(0, |outermost_opening| {
+                active_delimiters.len()
+                    + usize::from(self.has_syntax_continuation(outermost_opening))
+            });
         delimiter_continuation.max(usize::from(syntax_continuation))
+    }
+
+    fn has_syntax_continuation(&self, offset: usize) -> bool {
+        self.multiline_headers
+            .iter()
+            .filter(|range| {
+                self.brace_stack
+                    .last()
+                    .is_none_or(|brace| brace.opening < range.start)
+                    && range.start < offset
+                    && offset < range.opening_brace
+            })
+            .max_by_key(|range| range.start)
+            .is_some_and(|range| line_breaks(&self.document.source()[range.start..offset]) > 0)
+            || self.continuations.iter().any(|range| {
+                self.brace_stack
+                    .last()
+                    .is_none_or(|brace| brace.opening < range.start)
+                    && range.start < offset
+                    && offset < range.end
+                    && line_breaks(&self.document.source()[range.start..offset]) > 0
+            })
     }
 }
 
@@ -1161,7 +1200,7 @@ fn needs_space(
     }
 
     if matches!(current, TokenKind::LParen) {
-        return matches!(previous, TokenKind::Ident(name) if matches!(name.as_str(), "if" | "while" | "match"))
+        return matches!(previous, TokenKind::Ident(name) if is_prefix_keyword(name))
             || (!previous_was_generic_close && is_spaced_operator(previous));
     }
     if matches!(current, TokenKind::LBracket) {
@@ -1630,6 +1669,59 @@ split {
     }
 
     #[test]
+    fn indents_match_arm_values_and_calls_nested_in_continued_expressions() {
+        let source = r#"state "game.exe" {}
+fn riftEnabled(rift) {
+return match rift {
+Rift.None => false,
+Rift.Purple => settings.parent
+&& settings.child,
+}
+}
+fn shouldSplit() {
+return gotTimePiece
+&& detailedCheckpointEnabled(
+chapter,
+act,
+checkpoint,
+)
+|| shouldSplitAtPosition(
+key,
+x,
+y,
+z,
+)
+}"#;
+        let expected = r#"state "game.exe" {}
+fn riftEnabled(rift) {
+    return match rift {
+        Rift.None => false,
+        Rift.Purple => settings.parent
+            && settings.child,
+    }
+}
+fn shouldSplit() {
+    return gotTimePiece
+        && detailedCheckpointEnabled(
+            chapter,
+            act,
+            checkpoint,
+        )
+        || shouldSplitAtPosition(
+            key,
+            x,
+            y,
+            z,
+        )
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn block_indentation_supersedes_an_enclosing_multiline_call() {
         let source = r#"state "game.exe" {}
 enum DelayedSplit {
@@ -1656,6 +1748,37 @@ whileAttached {
         DelayedSplit.GetFourSword => "Get Four Sword",
         DelayedSplit.Inactive => "Delayed split",
     })
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn block_indentation_supersedes_an_enclosing_multiline_header() {
+        let source = r#"state "game.exe" {}
+fn positionSettingEnabled(key: i32) -> bool {
+if !detailedChapterEnabled(if key == 5 {
+5
+} else {
+4
+}) {
+return false
+}
+return true
+}"#;
+        let expected = r#"state "game.exe" {}
+fn positionSettingEnabled(key: i32) -> bool {
+    if !detailedChapterEnabled(if key == 5 {
+        5
+    } else {
+        4
+    }) {
+        return false
+    }
+    return true
 }
 "#;
 
@@ -1771,6 +1894,21 @@ fn atMissionPoint(point:MissionPoint,y:f64)->bool{return y==(point.y as f64).rou
         let expected = r#"state "game.exe" {}
 fn atMissionPoint(point: MissionPoint, y: f64) -> bool {
     return y == (point.y as f64).roundTo(3)
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn spaces_grouped_expressions_after_prefix_keywords() {
+        let source = r#"state "game.exe" {}
+fn contains(x: f32) -> bool {return(x > 0.0)}"#;
+        let expected = r#"state "game.exe" {}
+fn contains(x: f32) -> bool {
+    return (x > 0.0)
 }
 "#;
 

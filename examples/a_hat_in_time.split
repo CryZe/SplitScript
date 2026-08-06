@@ -1068,7 +1068,7 @@ fn resolvePath(path: MemoryPath?) -> address! {
 }
 
 fn Bounds.containsWithIgnoredAxes(x: f32, y: f32, z: f32) -> bool {
-    return(self.minX == -2.0 || x > self.minX)
+    return (self.minX == -2.0 || x > self.minX)
         && (self.maxX == -2.0 || x < self.maxX)
         && (self.minY == -2.0 || y > self.minY)
         && (self.maxY == -2.0 || y < self.maxY)
@@ -1087,11 +1087,10 @@ fn positionTarget(key: i32) -> Bounds? {
 
 fn positionSettingEnabled(key: i32) -> bool {
     if !detailedChapterEnabled(if key == 5 {
-            5
+        5
     } else {
-            4
-    })
-    {
+        4
+    }) {
         return false
     }
     return match key {
@@ -1117,19 +1116,19 @@ fn shouldSplitAtPosition(key: i32, x: f32, y: f32, z: f32) -> bool {
 fn pausePositionEnabled(kind: PausePosition) -> bool {
     return match kind {
         PausePosition.MafiaHeadquarters => settings.manySplits_1
-        && settings.manySplits_1_4
-        && settings.manySplits_1_4_cp0_pause_pos,
+            && settings.manySplits_1_4
+            && settings.manySplits_1_4_cp0_pause_pos,
         PausePosition.BasementBoss => settings.manySplits_2
-        && settings.manySplits_2_6
-        && settings.manySplits_2_6_cp0_pause_pos,
+            && settings.manySplits_2_6
+            && settings.manySplits_2_6_cp0_pause_pos,
         PausePosition.SubconWell => settings.manySplits_3
-        && settings.manySplits_3_2
-        && settings.manySplits_3_2_cp0_pause_pos,
+            && settings.manySplits_3_2
+            && settings.manySplits_3_2_cp0_pause_pos,
         PausePosition.VanessaManor => settings.manySplits_3
-        && settings.manySplits_3_4
-        && settings.manySplits_3_4_cp0_pause_pos,
+            && settings.manySplits_3_4
+            && settings.manySplits_3_4_cp0_pause_pos,
         PausePosition.AlpineIntro => settings.manySplits_4
-        && settings.manySplits_4_99_cp0_pause_pos,
+            && settings.manySplits_4_99_cp0_pause_pos,
     }
 }
 
@@ -1174,41 +1173,41 @@ fn riftEnabled(rift: Rift) -> bool {
     return match rift {
         Rift.None => false,
         Rift.PurpleMafiaOfCooks => settings.manySplits_riftPurple
-        && settings.manySplits_riftPurple_moc,
+            && settings.manySplits_riftPurple_moc,
         Rift.PurpleDeadBirdStudio => settings.manySplits_riftPurple
-        && settings.manySplits_riftPurple_dbs,
+            && settings.manySplits_riftPurple_dbs,
         Rift.PurpleSleepySubcon => settings.manySplits_riftPurple
-        && settings.manySplits_riftPurple_sleepy,
+            && settings.manySplits_riftPurple_sleepy,
         Rift.PurpleAlpineSkyline => settings.manySplits_riftPurple
-        && settings.manySplits_riftPurple_alpine,
+            && settings.manySplits_riftPurple_alpine,
         Rift.PurpleDeepSea => settings.manySplits_riftPurple
-        && settings.manySplits_riftPurple_deepSea,
+            && settings.manySplits_riftPurple_deepSea,
         Rift.PurpleRumbiFactory => settings.manySplits_riftPurple
-        && settings.manySplits_riftPurple_rumbi,
+            && settings.manySplits_riftPurple_rumbi,
         Rift.PurpleTour => settings.manySplits_riftPurple
-        && settings.manySplits_riftPurple_tour,
+            && settings.manySplits_riftPurple_tour,
         Rift.BlueSewers => settings.manySplits_riftBlue
-        && settings.manySplits_riftBlue_sewers,
+            && settings.manySplits_riftBlue_sewers,
         Rift.BlueBazaar => settings.manySplits_riftBlue
-        && settings.manySplits_riftBlue_bazaar,
+            && settings.manySplits_riftBlue_bazaar,
         Rift.BlueOwlExpress => settings.manySplits_riftBlue
-        && settings.manySplits_riftBlue_owlExpress,
+            && settings.manySplits_riftBlue_owlExpress,
         Rift.BlueMoon => settings.manySplits_riftBlue
-        && settings.manySplits_riftBlue_moon,
+            && settings.manySplits_riftBlue_moon,
         Rift.BlueVillage => settings.manySplits_riftBlue
-        && settings.manySplits_riftBlue_village,
+            && settings.manySplits_riftBlue_village,
         Rift.BluePipe => settings.manySplits_riftBlue
-        && settings.manySplits_riftBlue_pipe,
+            && settings.manySplits_riftBlue_pipe,
         Rift.BlueTwilightBell => settings.manySplits_riftBlue
-        && settings.manySplits_riftBlue_twilight,
+            && settings.manySplits_riftBlue_twilight,
         Rift.BlueCurlyTailTrail => settings.manySplits_riftBlue
-        && settings.manySplits_riftBlue_curly,
+            && settings.manySplits_riftBlue_curly,
         Rift.BlueBalcony => settings.manySplits_riftBlue
-        && settings.manySplits_riftBlue_balcony,
+            && settings.manySplits_riftBlue_balcony,
         Rift.BlueLab => settings.manySplits_riftBlue
-        && settings.manySplits_riftBlue_lab,
+            && settings.manySplits_riftBlue_lab,
         Rift.BlueGallery => settings.manySplits_riftBlue
-        && settings.manySplits_riftBlue_gallery,
+            && settings.manySplits_riftBlue_gallery,
     }
 }
 
@@ -1507,16 +1506,16 @@ fn shouldDetailedSplit(currentState, oldState) -> bool {
             && detailedTimePieceEnabled(currentState.chapter, currentState.act)
             || currentState.checkpoint != oldState.checkpoint
             && detailedCheckpointEnabled(
-            currentState.chapter,
-            currentState.act,
-            currentState.checkpoint,
-        )
+                currentState.chapter,
+                currentState.act,
+                currentState.checkpoint,
+            )
             || shouldSplitAtPosition(
-            positionSplitKey,
-            currentState.x,
-            currentState.y,
-            currentState.z,
-        )
+                positionSplitKey,
+                currentState.x,
+                currentState.y,
+                currentState.z,
+            )
             || splitInLoadScreen
             && currentState.gameTimerIsPaused == 1
             && oldState.gameTimerIsPaused == 0
@@ -1527,17 +1526,17 @@ fn shouldDetailedSplit(currentState, oldState) -> bool {
             || currentState.gameTimerIsPaused == 1
             && oldState.gameTimerIsPaused == 0
             && detailedPauseCheckpointEnabled(
-            currentState.chapter,
-            currentState.act,
-            currentState.checkpoint,
-        )
+                currentState.chapter,
+                currentState.act,
+                currentState.checkpoint,
+            )
             || currentState.gameTimerIsPaused != oldState.gameTimerIsPaused
             && shouldSplitAtPausePosition(
-            currentState.chapter,
-            currentState.x,
-            currentState.y,
-            currentState.z,
-        )
+                currentState.chapter,
+                currentState.x,
+                currentState.y,
+                currentState.z,
+            )
     }
 
     return gotTimePiece && riftTimePieceEnabled(currentRift)
@@ -1752,7 +1751,7 @@ reset {
     return current.timerState == 0 && old.timerState == 1
         || ilModeEnabled()
         && (current.actTimerIsVisible == 0 && old.actTimerIsVisible == 1
-        || current.realActTime < old.realActTime && current.realActTime == 0.0)
+            || current.realActTime < old.realActTime && current.realActTime == 0.0)
 }
 
 isLoading {

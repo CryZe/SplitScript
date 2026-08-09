@@ -114,6 +114,9 @@ whileAttached {
     {
         matches += 131072
     }
+    if "".isEmpty() && !"Map_A".isEmpty() {
+        matches += 262144
+    }
     let levelParts = "01_02_0.dds".split(".") else []
     let identifiers = levelParts[0].split("_") else []
     let emptyParts = "_a__".split("_") else []

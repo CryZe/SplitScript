@@ -1424,6 +1424,7 @@ is involved:
 | Operation | Behavior |
 | --- | --- |
 | `byteLength()` | UTF-8 byte length |
+| `isEmpty()` | Whether the required string contains zero UTF-8 bytes |
 | `contains(text)` | Case-sensitive substring test |
 | `indexOf(text)` | First matching UTF-8 byte offset as `u32?` |
 | `startsWith(text)` / `endsWith(text)` | Case-sensitive prefix/suffix tests |

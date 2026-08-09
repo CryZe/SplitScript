@@ -1533,6 +1533,23 @@ intrinsic type String {
     @intrinsic(StringLength)
     fn byteLength() -> u32;
 
+    /// Reports whether this string contains no UTF-8 bytes.
+    ///
+    /// `String` itself is never absent. Use ordinary `match` on `String?` when
+    /// absence and emptiness should both satisfy a condition.
+    ///
+    /// # Example
+    ///
+    /// Ignore an empty checkpoint name
+    ///
+    /// ```splitscript
+    /// let hasCheckpoint = !checkpointName.isEmpty()
+    /// ```
+    @mustUse("The string emptiness result must be used.")
+    fn isEmpty() -> bool {
+        return self.byteLength() == 0
+    }
+
     /// Tests whether this string contains an exact substring.
     ///
     /// Matching is case-sensitive over the UTF-8 text. An empty substring is

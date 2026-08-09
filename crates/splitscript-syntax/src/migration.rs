@@ -187,6 +187,8 @@ pub const CSHARP_STRING_REPLACE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.replace-call");
 pub const CSHARP_STRING_TRIM_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.trim-call");
+pub const CSHARP_STRING_IS_NULL_OR_EMPTY_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.string.is-null-or-empty-call");
 pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.numeric.static-parse-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
@@ -407,6 +409,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_STRING_IS_NULL_OR_EMPTY_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.null-or-empty"),
+        message: "C# `String.IsNullOrEmpty` crosses SplitScript's Option boundary",
+        primary_label: "choose emptiness or optional absence from the value's type",
+        notes: &[
+            "for a required `String`, rewrite `String.IsNullOrEmpty(value)` as `value.isEmpty()` because the value cannot be null",
+            "for `String?`, use `match value { None => true, Some(text) => text.isEmpty() }` so absence remains explicit",
+            "process and state read failures are not automatically null strings; preserve their declared Result or Option policy before checking emptiness",
+            "there is no automatic rewrite because the static call does not reveal whether the migrated value should be required, optional, or fallible",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.numeric-parse"),
         message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
@@ -459,6 +473,9 @@ pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnos
     let [owner, method] = path else {
         return None;
     };
+    if owner == "String" && method == "IsNullOrEmpty" {
+        return Some(CSHARP_STRING_IS_NULL_OR_EMPTY_DIAGNOSTIC);
+    }
     if owner == "Duration" && method == "Parse" {
         return Some(CSHARP_TIMESPAN_PARSE_DIAGNOSTIC);
     }
@@ -871,6 +888,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         targets: &[MigrationTarget::StandardLibraryItem(
             "String.trimAsciiWhitespace",
         )],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.null-or-empty"),
+        name: "Nullable string emptiness",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `String.isEmpty` for required strings and match `String?` explicitly when absence should also count as empty.",
+        targets: &[MigrationTarget::StandardLibraryItem("String.isEmpty")],
         cookbook_anchor: Some("c-string-operations"),
         spellings: &[],
     },

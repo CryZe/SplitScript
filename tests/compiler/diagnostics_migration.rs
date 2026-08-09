@@ -244,6 +244,46 @@ fn csharp_string_trim_explains_ascii_whitespace_boundaries() {
 }
 
 #[test]
+fn csharp_is_null_or_empty_explains_required_and_optional_strings() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn missingCheckpoint(value: String?) -> bool {
+            return String.IsNullOrEmpty(value)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("C# IsNullOrEmpty needs Option-aware migration guidance");
+
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# `String.IsNullOrEmpty` crosses SplitScript's Option boundary"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "IsNullOrEmpty"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| { note.contains("required `String`") && note.contains("value.isEmpty()") })
+    );
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("String?") && note.contains("None") && note.contains("Some(text)")
+    }));
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("Result or Option policy"))
+    );
+}
+
+#[test]
 fn csharp_static_numeric_parse_explains_result_based_string_parsing() {
     for call in ["Int32.Parse(text)", "Double.Parse(text)"] {
         let source = format!(

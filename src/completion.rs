@@ -1719,6 +1719,7 @@ split {
         let literal = labels(&mut database, "2 => \"½\".");
         for member in [
             "byteLength",
+            "isEmpty",
             "contains",
             "startsWith",
             "endsWith",
@@ -1739,6 +1740,7 @@ split {
         let local = labels(&mut database, "return fraction.");
         for member in [
             "byteLength",
+            "isEmpty",
             "contains",
             "startsWith",
             "endsWith",

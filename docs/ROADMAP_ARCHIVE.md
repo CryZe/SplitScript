@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-09: typed string emptiness
+
+- Added source-defined `String.isEmpty()` as ordinary composition over
+  `byteLength`, with generated documentation, completion, hover, must-use, and
+  runtime coverage but no backend intrinsic.
+- Added focused guidance for the recurring C# `String.IsNullOrEmpty` pattern.
+  Required strings use `.isEmpty()`, while `String?` must explicitly match
+  `None` and `Some`; failed process reads retain their separate Result policy.
+- Deliberately avoided recreating nullable strings or guessing an automatic
+  rewrite from a static C# call whose migrated value type is not yet known.
+
 ## 2026-08-09: explicit ASCII whitespace trimming
 
 - Added `String.trimAsciiWhitespace()` for recurring corpus parsing of game

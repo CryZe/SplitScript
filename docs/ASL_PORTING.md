@@ -128,6 +128,28 @@ immutable string when nothing changes. The compiler does not rewrite `Trim()`
 automatically because Unicode whitespace, character-array overloads,
 `TrimStart`, and `TrimEnd` have different semantics.
 
+C# combines nullability and emptiness in `String.IsNullOrEmpty(value)`.
+SplitScript keeps those concerns in the type. A required `String` cannot be
+null, so use its source-defined method directly:
+
+```splitscript
+let missingCheckpoint = current.checkpoint.isEmpty()
+```
+
+When the migrated value is deliberately optional, handle both variants:
+
+```splitscript
+let missingCheckpoint = match current.checkpoint {
+    None => true,
+    Some(text) => text.isEmpty(),
+}
+```
+
+A failed process read is not automatically an empty or null string. Decide
+first whether that boundary should remain a `Result`, become a `String?`, or
+retain the last accepted state value. The compiler therefore gives
+`String.IsNullOrEmpty` focused guidance without guessing an automatic rewrite.
+
 C# `value.IndexOf(substring)` returns a UTF-16 code-unit index or `-1`.
 SplitScript `value.indexOf(substring)` instead returns a UTF-8 byte offset as
 `u32?`; handle `None` directly. The numeric offsets are equivalent only for

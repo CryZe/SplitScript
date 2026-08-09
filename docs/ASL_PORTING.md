@@ -114,6 +114,20 @@ For text proven to be ASCII, translate the overload shapes explicitly. C#
 For non-ASCII text, first derive UTF-8 byte boundaries rather than copying the
 original UTF-16 positions.
 
+C# `value.Trim()` recognizes Unicode whitespace. For game identifiers, log
+lines, and configuration text known to use ASCII whitespace, use the deliberately
+explicit operation:
+
+```splitscript
+let eventName = current.logLine.trimAsciiWhitespace()
+```
+
+It removes space, tab, line feed, vertical tab, form feed, and carriage return
+from both ends, preserves interior and non-ASCII bytes, and reuses the original
+immutable string when nothing changes. The compiler does not rewrite `Trim()`
+automatically because Unicode whitespace, character-array overloads,
+`TrimStart`, and `TrimEnd` have different semantics.
+
 C# `value.IndexOf(substring)` returns a UTF-16 code-unit index or `-1`.
 SplitScript `value.indexOf(substring)` instead returns a UTF-8 byte offset as
 `u32?`; handle `None` directly. The numeric offsets are equivalent only for

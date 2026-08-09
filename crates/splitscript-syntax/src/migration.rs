@@ -185,6 +185,8 @@ pub const CSHARP_STRING_INDEX_OF_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.index-of-call");
 pub const CSHARP_STRING_REPLACE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.replace-call");
+pub const CSHARP_STRING_TRIM_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.string.trim-call");
 pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.numeric.static-parse-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
@@ -393,6 +395,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_STRING_TRIM_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.ascii-trim"),
+        message: "C# `String.Trim` needs an explicit whitespace-model review",
+        primary_label: "SplitScript trims a fixed ASCII whitespace set",
+        notes: &[
+            "for game identifiers, configuration lines, and log text known to use ASCII whitespace, rewrite `text.Trim()` as `text.trimAsciiWhitespace()`",
+            "SplitScript removes only space, tab, line feed, vertical tab, form feed, and carriage return; C# `Trim()` recognizes a broader Unicode whitespace set",
+            "character-array overloads and the related `TrimStart` and `TrimEnd` operations require separate boundary logic and do not map to this method",
+            "there is no automatic rewrite because the compiler cannot prove that the input's surrounding whitespace is ASCII",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.numeric-parse"),
         message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
@@ -436,6 +450,7 @@ pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnostic
         "Substring" => Some(CSHARP_STRING_SUBSTRING_DIAGNOSTIC),
         "IndexOf" => Some(CSHARP_STRING_INDEX_OF_DIAGNOSTIC),
         "Replace" => Some(CSHARP_STRING_REPLACE_DIAGNOSTIC),
+        "Trim" => Some(CSHARP_STRING_TRIM_DIAGNOSTIC),
         _ => None,
     }
 }
@@ -844,6 +859,18 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Use fallible `replaceAll` for immutable exact replacement; explicitly handle failure and translate a null C# replacement to an empty string only when deletion was intended.",
         targets: &[MigrationTarget::StandardLibraryItem("String.replaceAll")],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.ascii-trim"),
+        name: "ASCII whitespace trimming",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `trimAsciiWhitespace` for text known to use ASCII boundary whitespace; review Unicode and character-set trimming explicitly.",
+        targets: &[MigrationTarget::StandardLibraryItem(
+            "String.trimAsciiWhitespace",
+        )],
         cookbook_anchor: Some("c-string-operations"),
         spellings: &[],
     },

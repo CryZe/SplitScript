@@ -99,6 +99,21 @@ whileAttached {
     {
         matches += 65536
     }
+    let asciiWhitespace = String.concat([
+        " \t\n",
+        '\u{000b}' as String,
+        '\u{000c}' as String,
+        "\rMap_A \r\n",
+    ])
+    let nonBreakingSpace = '\u{00a0}' as String
+    let nonAsciiPadded = String.concat([nonBreakingSpace, "Map", nonBreakingSpace])
+    if asciiWhitespace.trimAsciiWhitespace() == "Map_A"
+        && "already clean".trimAsciiWhitespace() == "already clean"
+        && nonAsciiPadded.trimAsciiWhitespace() == nonAsciiPadded
+        && " \t\r\n".trimAsciiWhitespace() == ""
+    {
+        matches += 131072
+    }
     let levelParts = "01_02_0.dds".split(".") else []
     let identifiers = levelParts[0].split("_") else []
     let emptyParts = "_a__".split("_") else []

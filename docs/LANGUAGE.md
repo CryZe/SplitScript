@@ -1430,6 +1430,7 @@ is involved:
 | `equalsIgnoreAsciiCase(text)` | Equality folding only ASCII letters |
 | `toAsciiLowerCase()` | Lowercase ASCII letters; preserve every other UTF-8 byte |
 | `toAsciiUpperCase()` | Uppercase ASCII letters; preserve every other UTF-8 byte |
+| `trimAsciiWhitespace()` | Remove ASCII boundary whitespace; preserve interior and non-ASCII bytes |
 | `split(delimiter)` | Fallible exact split preserving leading, repeated, and trailing empty segments |
 | `parse<T>()` | Strict fallible ASCII decimal parsing into an inferred numeric type |
 | `byteAt(byteIndex)` | Fallible raw UTF-8 byte lookup; continuation bytes remain observable |
@@ -1502,10 +1503,10 @@ let levelTime = `{minutes as u32}:{twoDigits(seconds as u32)}`
 let executableLabel = `version {version}`
 ```
 
-Transformations such as `toAsciiLowerCase`, `toAsciiUpperCase`, `replaceAll`,
-and `split` do not mutate their receiver. They return new values and are marked
-must-use, so a discarded result receives a focused warning explaining the
-immutable behavior.
+Transformations such as `toAsciiLowerCase`, `toAsciiUpperCase`,
+`trimAsciiWhitespace`, `replaceAll`, and `split` do not mutate their receiver.
+They return new values and are marked must-use, so a discarded result receives
+a focused warning explaining the immutable behavior.
 `print(value)` and `setVariable(key, value)` accept any `Display` value
 and apply these same conversions at the runtime boundary, so numeric values and
 addresses do not need an explicit `as String` cast. A standard-library type can

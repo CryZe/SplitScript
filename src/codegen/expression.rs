@@ -2170,6 +2170,14 @@ fn compile_expr_unconverted(
                             .function(RuntimeHelperId::StringAsciiCase),
                     ));
             }
+            IntrinsicId::StringTrimAsciiWhitespace => {
+                compile_receiver(function, target, context);
+                function.instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::StringTrimAsciiWhitespace),
+                ));
+            }
             IntrinsicId::StringReplaceAll => {
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);

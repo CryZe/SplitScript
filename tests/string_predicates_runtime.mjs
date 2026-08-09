@@ -30,7 +30,7 @@ instance.exports._start();
 instance.exports.update(); // Initialize old and current.
 instance.exports.update();
 
-const expected = "131071";
+const expected = "262143";
 if (observed !== expected) {
     throw new Error(`unexpected string-predicate output: ${JSON.stringify({ expected, observed })}`);
 }

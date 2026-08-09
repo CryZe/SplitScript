@@ -146,6 +146,13 @@ pub(super) fn build_string_slice(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_string_slice(inputs.gc)
 }
 
+pub(super) fn build_string_trim_ascii_whitespace(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_trim_ascii_whitespace(
+        inputs.plan.function(RuntimeHelperId::StringSlice),
+        inputs.gc,
+    )
+}
+
 pub(super) fn build_scan_process_range(inputs: &RuntimeHelperInputs<'_>) -> Function {
     process::compile_scan_process_range(inputs.abi, inputs.memory.scratch().scan)
 }

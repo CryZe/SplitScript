@@ -1660,6 +1660,24 @@ intrinsic type String {
     @intrinsic(StringToAsciiUpperCase)
     fn toAsciiUpperCase() -> String;
 
+    /// Removes ASCII whitespace from both ends of this string.
+    ///
+    /// ASCII space, tab, line feed, vertical tab, form feed, and carriage
+    /// return are removed. Interior bytes and every non-ASCII character are
+    /// preserved. If neither end changes, the existing immutable string is
+    /// reused without allocating.
+    ///
+    /// # Example
+    ///
+    /// Clean a line read from a game log
+    ///
+    /// ```splitscript
+    /// let eventName = line.trimAsciiWhitespace()
+    /// ```
+    @mustUse("Strings are immutable; trimAsciiWhitespace returns the trimmed string and does not modify its receiver.")
+    @intrinsic(StringTrimAsciiWhitespace)
+    fn trimAsciiWhitespace() -> String;
+
     /// Replaces every exact, non-overlapping occurrence of a string.
     ///
     /// Matches are case-sensitive and selected from left to right. An empty

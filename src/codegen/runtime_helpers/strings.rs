@@ -1628,6 +1628,110 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_slice(gc: &GcLayout) -
     function
 }
 
+/// Trims the six ASCII whitespace bytes from both ends of a UTF-8 string.
+/// Every removed byte is a complete one-byte code point, so the resulting
+/// bounds are valid inputs to the shared UTF-8 slice helper. An unchanged
+/// string reuses its existing immutable GC object.
+pub(in crate::codegen::runtime_helpers) fn compile_string_trim_ascii_whitespace(
+    string_slice: u32,
+    gc: &GcLayout,
+) -> Function {
+    let string_type = gc.standard_index(StdlibTypeId::String);
+    let mut function = Function::new([(4, ValType::I32)]);
+    let value = 0;
+    let len = 1;
+    let start = 2;
+    let end = 3;
+    let byte = 4;
+
+    function
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalTee(len))
+        .instruction(&Instruction::LocalSet(end))
+        // Scan the leading ASCII whitespace.
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(start))
+        .instruction(&Instruction::LocalGet(end))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(start))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(byte));
+    emit_is_ascii_whitespace(&mut function, byte);
+    function
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(start))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(start))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        // Scan the trailing ASCII whitespace without crossing `start`.
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(start))
+        .instruction(&Instruction::LocalGet(end))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(end))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(byte));
+    emit_is_ascii_whitespace(&mut function, byte);
+    function
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(end))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::LocalSet(end))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        // Avoid allocating when both boundaries are unchanged.
+        .instruction(&Instruction::LocalGet(start))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::LocalGet(end))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::LocalGet(start))
+        .instruction(&Instruction::LocalGet(end))
+        .instruction(&Instruction::Call(string_slice))
+        .instruction(&Instruction::End);
+    function
+}
+
+fn emit_is_ascii_whitespace(function: &mut Function, byte: u32) {
+    function
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b' ' as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'\t' as i32))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'\r' as i32))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or);
+}
+
 fn emit_null_string(function: &mut Function, string_type: u32) {
     function.instruction(&Instruction::RefNull(HeapType::Concrete(string_type)));
 }

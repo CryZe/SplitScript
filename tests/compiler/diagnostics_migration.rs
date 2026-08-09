@@ -208,6 +208,42 @@ fn csharp_string_replace_explains_fallible_immutable_replacement() {
 }
 
 #[test]
+fn csharp_string_trim_explains_ascii_whitespace_boundaries() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn cleanLine(value: String) -> String {
+            return value.Trim()
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("C# Trim needs an explicit whitespace-model review");
+
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# `String.Trim` needs an explicit whitespace-model review"
+    );
+    assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "Trim");
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic.notes.iter().any(|note| {
+            note.contains("trimAsciiWhitespace") && note.contains("ASCII whitespace")
+        })
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("Unicode whitespace"))
+    );
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("TrimStart") && note.contains("TrimEnd") && note.contains("overloads")
+    }));
+}
+
+#[test]
 fn csharp_static_numeric_parse_explains_result_based_string_parsing() {
     for call in ["Int32.Parse(text)", "Double.Parse(text)"] {
         let source = format!(

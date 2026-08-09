@@ -53,6 +53,7 @@ pub(crate) enum RuntimeHelperId {
     StringParseFloat,
     StringInspect,
     StringSlice,
+    StringTrimAsciiWhitespace,
     ScanProcessRange,
     ReadRelative32,
     StringFromMemory,
@@ -401,6 +402,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         ],
         IntrinsicId::StringByteAt | IntrinsicId::StringCharAt => &[Helper(Runtime::StringInspect)],
         IntrinsicId::StringSlice => &[Helper(Runtime::StringSlice)],
+        IntrinsicId::StringTrimAsciiWhitespace => &[Helper(Runtime::StringTrimAsciiWhitespace)],
         IntrinsicId::StringConcat => &[Helper(Runtime::ConcatStrings)],
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
         IntrinsicId::NextTick
@@ -1167,6 +1169,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::StringToAsciiUpperCase => contract!(
             StringToAsciiUpperCase,
+            Method,
+            signature(NO_TYPE_PARAMETERS, Some(STRING), params![], STRING),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringTrimAsciiWhitespace => contract!(
+            StringTrimAsciiWhitespace,
             Method,
             signature(NO_TYPE_PARAMETERS, Some(STRING), params![], STRING),
             ALLOCATES,

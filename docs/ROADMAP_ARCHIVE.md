@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-09: explicit ASCII whitespace trimming
+
+- Added `String.trimAsciiWhitespace()` for recurring corpus parsing of game
+  identifiers, log lines, and configuration text.
+- The operation removes the six ASCII whitespace bytes at the boundaries,
+  preserves non-ASCII and interior bytes, and reuses an unchanged immutable
+  string. Its single scan feeds the existing UTF-8 slice helper without
+  allocating intermediate Results.
+- Added focused no-fix guidance for C# `Trim()`: its Unicode whitespace model,
+  character-array overloads, `TrimStart`, and `TrimEnd` need explicit review.
+
 ## 2026-08-09: allocation-conscious ASCII uppercasing
 
 - Added `String.toAsciiUpperCase()` for corpus uses involving mission names,

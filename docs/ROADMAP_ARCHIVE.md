@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-09: discoverable attached-process identity migration
+
+- Triaged the campaign's reported process-name blocker against the current
+  compiler and confirmed that `process.name()` already provides the required
+  attached identity.
+- Added a compiler-owned `asl.process.identity` migration concept and cookbook
+  recipe explaining exact matched candidates versus executable paths, module
+  metadata, versions, and signatures.
+- Added a contextual diagnostic for ASL `game.ProcessName`. It offers a
+  machine-applicable `process.name()` rewrite only where a native attached
+  process is truly available, explains explicit parameter passing in ordinary
+  functions, and preserves user-defined members with the same spelling.
+
 ## 2026-08-09: reusable port-conformance host
 
 - Extracted a shared Node host for the generated LiveSplit ABI, including

@@ -454,6 +454,82 @@ fn unknown_calls_suggest_canonical_names_across_naming_styles() {
 }
 
 #[test]
+fn legacy_process_identity_points_to_the_attached_process_api() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state ["game.exe", "game-demo.exe"] {}
+
+        onAttach {
+            print(game.ProcessName)
+        }
+    "#;
+    let errors = splitscript::compile(source)
+        .expect_err("the legacy ASL process identity path should need migration");
+    assert_eq!(errors.len(), 1);
+    let diagnostic = &errors[0];
+    assert_eq!(
+        diagnostic.message,
+        "ASL `game.ProcessName` is `process.name()` in SplitScript"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "game.ProcessName"
+    );
+    assert_eq!(diagnostic.fixes.len(), 1);
+    let fix = &diagnostic.fixes[0];
+    assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+    assert_eq!(fix.edits.len(), 1);
+    assert_eq!(fix.edits[0].replacement, "process.name()");
+
+    let mut fixed = source.to_owned();
+    fixed.replace_range(
+        fix.edits[0].span.start..fix.edits[0].span.end,
+        &fix.edits[0].replacement,
+    );
+    splitscript::compile(&fixed).expect("the process identity rewrite should compile");
+}
+
+#[test]
+fn legacy_process_identity_is_not_rewritten_outside_attachment_context() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn processName() -> String {
+            return game.ProcessName
+        }
+    "#;
+    let errors = splitscript::compile(source)
+        .expect_err("ordinary functions cannot implicitly capture the process");
+    assert_eq!(errors.len(), 1);
+    assert_eq!(
+        errors[0].message,
+        "ASL `game.ProcessName` is `process.name()` in SplitScript"
+    );
+    assert!(errors[0].fixes.is_empty());
+    assert!(
+        errors[0]
+            .notes
+            .iter()
+            .any(|note| note.contains("pass the name into an ordinary function"))
+    );
+
+    let user_defined = r#"
+        state "game.exe" {}
+
+        record Game {
+            ProcessName: String,
+        }
+
+        fn readName(game: Game) -> String {
+            return game.ProcessName
+        }
+    "#;
+    splitscript::compile(user_defined)
+        .expect("a user-defined `game.ProcessName` path must retain its ordinary meaning");
+}
+
+#[test]
 fn unrelated_unknown_methods_do_not_receive_noisy_suggestions() {
     let source = r#"
         state "game.exe" {}

@@ -96,6 +96,7 @@ pub enum ForeignSpellingContext {
     Type,
     StaticTypeReceiver,
     Method,
+    ValuePath,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -396,6 +397,16 @@ const NUMERIC_SPELLINGS: &[ForeignSpelling] = &[
     numeric_spelling!("double", "f64"),
 ];
 
+const ASL_PROCESS_IDENTITY_SPELLINGS: &[ForeignSpelling] = &[ForeignSpelling {
+    source: SourceLanguage::Asl,
+    context: ForeignSpellingContext::ValuePath,
+    spelling: "game.ProcessName",
+    replacement: "process.name()",
+    message: "ASL `game.ProcessName` is `process.name()` in SplitScript",
+    primary_label: "read the exact process candidate that matched during attachment",
+    fix_title: "replace `game.ProcessName` with `process.name()`",
+}];
+
 pub const CONCEPTS: &[MigrationConcept] = &[
     MigrationConcept {
         id: MigrationConceptId::new("declaration.let"),
@@ -522,6 +533,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         ],
         cookbook_anchor: None,
         spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.process.identity"),
+        name: "Attached process identity",
+        sources: ASL,
+        support: MigrationSupport::Direct,
+        summary: "Use `process.name()` to read the exact process candidate that matched during attachment; use module metadata when the executable name alone does not identify a build.",
+        targets: &[MigrationTarget::StandardLibraryItem("Process.name")],
+        cookbook_anchor: Some("attached-process-identity"),
+        spellings: ASL_PROCESS_IDENTITY_SPELLINGS,
     },
     MigrationConcept {
         id: MigrationConceptId::new("asl.state.memory-watcher"),

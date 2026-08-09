@@ -1177,6 +1177,46 @@ impl Checker {
             }
             [name, fields @ ..] => {
                 let Some(binding) = self.binding_for_use(name, span) else {
+                    let spelling = path.join(".");
+                    if let Some(rule) =
+                        foreign_spelling(&spelling, ForeignSpellingContext::ValuePath)
+                    {
+                        let mut diagnostic = Diagnostic::type_error(rule.message, span)
+                            .with_primary_label(rule.primary_label);
+                        let process_context_is_available = self.expression_mode
+                            == ExpressionMode::StateSource
+                            || matches!(
+                                self.callable,
+                                CallableContext::LibraryFunction(_)
+                                    | CallableContext::Action(
+                                        ActionKind::OnAttach
+                                            | ActionKind::WhileAttached
+                                            | ActionKind::Start
+                                            | ActionKind::Split
+                                            | ActionKind::Reset
+                                            | ActionKind::IsLoading
+                                            | ActionKind::GameTime
+                                    )
+                            );
+                        let process_is_available = process_context_is_available
+                            && self.provider_value.is_some_and(|(provider, _)| {
+                                self.standard_library.state_provider(provider).value_name
+                                    == "process"
+                            });
+                        if process_is_available {
+                            diagnostic = diagnostic.with_machine_applicable_fix(
+                                rule.fix_title,
+                                span,
+                                rule.replacement,
+                            );
+                        } else {
+                            diagnostic = diagnostic.with_note(
+                                "the `process` value is available only in native-process attachment and attached lifecycle contexts; pass the name into an ordinary function explicitly",
+                            );
+                        }
+                        self.errors.push(diagnostic);
+                        return None;
+                    }
                     self.error(format!("unknown variable `{name}`"), span);
                     return None;
                 };

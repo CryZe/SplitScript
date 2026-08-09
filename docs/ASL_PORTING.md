@@ -175,6 +175,33 @@ is still appropriate when consumers already define that value as unavailable;
 the A Plague Tale Xbox layout uses `cutsceneState: i32 = 0` for exactly that
 reason.
 
+## Attached process identity
+
+ASL exposes the selected process through `game.ProcessName`. In a native
+SplitScript state, use `process.name()`:
+
+```splitscript
+state ["game.exe", "game-demo.exe"] {}
+
+onAttach {
+    if process.name() == "game-demo.exe" {
+        print("Attached to the demo")
+    }
+}
+```
+
+The returned string is the exact candidate from the `state` declaration that
+matched during attachment. It is not the executable path and does not perform
+another host lookup. Use it when multiple executable names genuinely select
+different behavior or layouts. When several builds share a name, discriminate
+with reliable evidence such as `process.mainModule().size`, `process.path()`,
+`Module.fileVersion()`, or a signature instead.
+
+The compiler recognizes the exact legacy path `game.ProcessName` and offers a
+machine-applicable `process.name()` rewrite where the native `process` value is
+in scope. Ordinary functions do not implicitly capture an attachment; pass the
+name as a parameter when helper logic needs it.
+
 ## Attach-time-discovered addresses
 
 Keep discovery in `onAttach` and polling in the state declaration. Polling does

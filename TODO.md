@@ -43,9 +43,9 @@ or behavioral parity.
 
 - [ ] Triage every reported limitation against the current language and the
   source ASL before planning a replacement feature. For facilities that already
-  exist—such as `process.name()`, `timer.currentSplitIndex()`, `Instant.now()`,
-  rejected state candidates, cooperative scans, and the host-fixture
-  harness—identify why the author missed them and improve the relevant search
+  exist—such as `timer.currentSplitIndex()`, `Instant.now()`, rejected state
+  candidates, and cooperative scans—identify why the author missed them and
+  improve the relevant search
   path: cookbook, standard-library docs, completion, hover, or a contextual
   diagnostic. Recompile only focused probes needed to reproduce a concrete
   report; do not rerun the campaign as though it used a stale compiler.

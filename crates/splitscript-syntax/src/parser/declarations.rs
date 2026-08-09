@@ -491,7 +491,7 @@ impl Parser<'_> {
                 None
             };
             if let Some((type_name, type_span, max_bytes)) = legacy_string {
-                let mut edits = vec![TextEdit {
+                let mut base_edits = vec![TextEdit {
                     span: Span {
                         start: type_span.start,
                         end: field_start.start,
@@ -499,13 +499,15 @@ impl Parser<'_> {
                     replacement: String::new(),
                 }];
                 if let Some(colon) = legacy_colon {
-                    edits.push(TextEdit {
+                    base_edits.push(TextEdit {
                         span: colon,
                         replacement: "at".to_owned(),
                     });
                 }
-                if decoder.is_none() {
-                    edits.push(TextEdit {
+                let had_decoder = decoder.is_some();
+                let mut utf8_edits = base_edits.clone();
+                if !had_decoder {
+                    utf8_edits.push(TextEdit {
                         span: Span {
                             start: pointer_end,
                             end: pointer_end,
@@ -517,14 +519,31 @@ impl Parser<'_> {
                         span: type_span,
                     });
                 }
-                self.diagnostics.push(
-                    self.migration_diagnostic(ASL_STRING_N_FIELD_DIAGNOSTIC, type_span)
-                        .with_fix(DiagnosticFix {
-                            title: format!("rewrite `{type_name}` using explicit UTF-8 decoding"),
-                            applicability: FixApplicability::MaybeIncorrect,
-                            edits,
-                        }),
-                );
+                let mut diagnostic = self
+                    .migration_diagnostic(ASL_STRING_N_FIELD_DIAGNOSTIC, type_span)
+                    .with_fix(DiagnosticFix {
+                        title: format!("rewrite `{type_name}` assuming the memory contains UTF-8"),
+                        applicability: FixApplicability::MaybeIncorrect,
+                        edits: utf8_edits,
+                    });
+                if !had_decoder && max_bytes % 2 == 0 {
+                    let mut utf16_edits = base_edits;
+                    utf16_edits.push(TextEdit {
+                        span: Span {
+                            start: pointer_end,
+                            end: pointer_end,
+                        },
+                        replacement: format!(" as utf16le({})", max_bytes / 2),
+                    });
+                    diagnostic = diagnostic.with_fix(DiagnosticFix {
+                        title: format!(
+                            "rewrite `{type_name}` assuming the memory contains UTF-16LE"
+                        ),
+                        applicability: FixApplicability::MaybeIncorrect,
+                        edits: utf16_edits,
+                    });
+                }
+                self.diagnostics.push(diagnostic);
             }
             StateSource::Pointer(PointerPath {
                 at_span,

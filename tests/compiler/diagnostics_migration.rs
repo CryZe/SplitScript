@@ -833,10 +833,23 @@ fn asl_string_n_fields_offer_an_encoding_aware_rewrite() {
             .iter()
             .any(|note| note.contains("auto-detects UTF-16"))
     );
-    assert_eq!(diagnostic.fixes.len(), 1);
-    let fix = &diagnostic.fixes[0];
-    assert_eq!(fix.applicability, FixApplicability::MaybeIncorrect);
-    assert_eq!(fix.edits.len(), 3);
+    assert_eq!(diagnostic.fixes.len(), 2);
+    let utf8_fix = &diagnostic.fixes[0];
+    assert_eq!(utf8_fix.applicability, FixApplicability::MaybeIncorrect);
+    assert!(
+        utf8_fix
+            .title
+            .contains("assuming the memory contains UTF-8")
+    );
+    assert_eq!(utf8_fix.edits.len(), 3);
+    let utf16_fix = &diagnostic.fixes[1];
+    assert_eq!(utf16_fix.applicability, FixApplicability::MaybeIncorrect);
+    assert!(
+        utf16_fix
+            .title
+            .contains("assuming the memory contains UTF-16LE")
+    );
+    assert_eq!(utf16_fix.edits.len(), 3);
 
     let state = recovered.syntax().state.as_ref().unwrap();
     assert_eq!(
@@ -853,12 +866,40 @@ fn asl_string_n_fields_offer_an_encoding_aware_rewrite() {
             if matches!(path.decoder, Some(StateMemoryDecoder::Utf8 { max_bytes: 50, .. }))
     ));
 
-    let mut fixed = source.to_owned();
-    for edit in fix.edits.iter().rev() {
-        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    let mut utf8_fixed = source.to_owned();
+    for edit in utf8_fix.edits.iter().rev() {
+        utf8_fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
     }
-    assert!(fixed.contains("map at \"game.exe\", 0x100, 0x20 as utf8(50)"));
-    splitscript::compile(&fixed).expect("the suggested explicit decoder syntax should compile");
+    assert!(utf8_fixed.contains("map at \"game.exe\", 0x100, 0x20 as utf8(50)"));
+    splitscript::compile(&utf8_fixed)
+        .expect("the suggested explicit UTF-8 decoder syntax should compile");
+
+    let mut utf16_fixed = source.to_owned();
+    for edit in utf16_fix.edits.iter().rev() {
+        utf16_fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+    assert!(utf16_fixed.contains("map at \"game.exe\", 0x100, 0x20 as utf16le(25)"));
+    splitscript::compile(&utf16_fixed)
+        .expect("the suggested explicit UTF-16LE decoder syntax should compile");
+}
+
+#[test]
+fn odd_asl_string_bounds_do_not_offer_an_inexact_utf16_rewrite() {
+    let source = r#"
+        state "game.exe" {
+            string15 map : 0x100
+        }
+    "#;
+    let recovered = splitscript::parse_recovering(source).unwrap();
+    let diagnostic = &recovered.diagnostics()[0];
+    assert_eq!(diagnostic.fixes.len(), 1);
+    assert!(diagnostic.fixes[0].title.contains("UTF-8"));
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("two-byte code units"))
+    );
 }
 
 #[test]

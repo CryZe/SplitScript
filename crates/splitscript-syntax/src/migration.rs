@@ -165,8 +165,8 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         message: "ASL `stringN` fields need an explicit SplitScript memory decoder",
         primary_label: "this ASL pseudo-type combines a byte bound with automatic string decoding",
         notes: &[
-            "`as utf8(N)` is appropriate only when the target bytes are UTF-8; ASL `stringN` auto-detects UTF-16 from the second byte and replacement-decodes malformed input",
-            "verify the game's in-memory encoding before accepting the suggested rewrite",
+            "ASL `stringN` reads N bytes, then auto-detects UTF-16LE from the second byte; SplitScript requires the encoding to be chosen from evidence",
+            "`utf8` bounds are bytes, while `utf16le` bounds are two-byte code units; both suggested rewrites are intentionally maybe-incorrect",
         ],
     },
     MigrationDiagnostic {
@@ -611,7 +611,7 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "Bounded native stringN state",
         sources: ASL,
         support: MigrationSupport::TypedPattern,
-        summary: "Use an explicitly decoded state path such as `as utf8(50)`; choose the encoding from evidence.",
+        summary: "Choose the native encoding explicitly: `utf8` bounds bytes and `utf16le` bounds two-byte code units.",
         targets: &[MigrationTarget::Language("state")],
         cookbook_anchor: Some("bounded-native-stringn-state"),
         spellings: &[],

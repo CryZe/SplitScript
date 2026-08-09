@@ -26,30 +26,28 @@ let splits = 0;
 let pauses = 0;
 let resumes = 0;
 let detaches = 0;
-let utf16Reads = 0;
+let stringReads = 0;
 
 const text = (pointer, length) => decoder.decode(
     new Uint8Array(instance.exports.memory.buffer, pointer, length),
 );
 
-function writeUtf16(destination, size, value) {
-    if (size !== 32) {
-        throw new Error(`endGc read used ${size} bytes instead of 32`);
+function writeString(destination, size, value) {
+    if (size !== 16) {
+        throw new Error(`endGc read used ${size} bytes instead of 16`);
     }
-    const output = new Uint16Array(instance.exports.memory.buffer, destination, 16);
-    output.fill(0x005a);
-    for (let index = 0; index < value.length; index += 1) {
-        output[index] = value.charCodeAt(index);
-    }
+    const output = new Uint8Array(instance.exports.memory.buffer, destination, size);
+    output.fill("Z".charCodeAt(0));
+    output.set(new TextEncoder().encode(value).subarray(0, size));
     if (value.length < output.length) {
         output[value.length] = 0;
         if (value.length + 2 < output.length) {
             // Data after the terminator must not participate in comparisons.
-            output[value.length + 1] = 0xd83d;
-            output[value.length + 2] = 0xde00;
+            output[value.length + 1] = "X".charCodeAt(0);
+            output[value.length + 2] = "Y".charCodeAt(0);
         }
     }
-    utf16Reads += 1;
+    stringReads += 1;
 }
 
 const env = {
@@ -70,7 +68,7 @@ const env = {
             view.setInt32(destination, loadingGame, true);
         } else if (address === 0x1abda34n) {
             if (failEndGc) return 0;
-            writeUtf16(destination, size, endGc);
+            writeString(destination, size, endGc);
         } else {
             throw new Error(`unexpected process read ${address.toString(16)} (${size})`);
         }
@@ -130,7 +128,7 @@ if (mode === "other") {
     instance.exports.update();
     instance.exports.update();
 
-    // A failed required-field refresh retains the last accepted UTF-16 value.
+    // A failed required-field refresh retains the last accepted string value.
     endGc = "playing";
     failEndGc = true;
     instance.exports.update();
@@ -167,8 +165,8 @@ if (!tooltips.get("gc")?.startsWith("Galactic Conquest load-removal ruleset")) {
 if (!tooltips.get("other")?.startsWith("Other game modes load-removal ruleset")) {
     throw new Error(`Other tooltip was not registered: ${JSON.stringify(Object.fromEntries(tooltips))}`);
 }
-if (pauses === 0 || resumes === 0 || detaches !== 1 || utf16Reads === 0 || valueHandles.size !== 0) {
-    throw new Error(`runtime invariants differed: ${JSON.stringify({ pauses, resumes, detaches, utf16Reads, leakedHandles: valueHandles.size })}`);
+if (pauses === 0 || resumes === 0 || detaches !== 1 || stringReads === 0 || valueHandles.size !== 0) {
+    throw new Error(`runtime invariants differed: ${JSON.stringify({ pauses, resumes, detaches, stringReads, leakedHandles: valueHandles.size })}`);
 }
 
-console.log(JSON.stringify({ mode, splits, pauses, resumes, detaches, utf16Reads }));
+console.log(JSON.stringify({ mode, splits, pauses, resumes, detaches, stringReads }));

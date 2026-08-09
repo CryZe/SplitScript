@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-09: encoding-aware native-string migration
+
+- Re-audited ASL `stringN` against LiveSplit's implementation: the suffix is a
+  byte count, while auto-detection chooses UTF-16LE only when the second byte is
+  zero. SplitScript continues to require an explicit encoding.
+- Added distinct maybe-incorrect migration actions for UTF-8 byte bounds and,
+  when the ASL bound is even, the equivalent half-sized UTF-16LE code-unit
+  bound. Odd bounds deliberately receive no inexact UTF-16 rewrite.
+- Corrected the maintained Battlefront II port and fixture from an erroneous
+  32-byte UTF-16 read to the source's 16-byte ASCII/UTF-8 read. The dedicated
+  process-operation fixture continues to cover UTF-16 surrogate pairs,
+  replacement decoding, NUL termination, failures, and bounds.
+
 ## 2026-08-09: semantic migration for legacy lists
 
 - Triaged the campaign's array-search and growing visited-map reports against
@@ -215,15 +228,15 @@
   detach. This validates existing timer/clock APIs instead of adding callbacks,
   a timer-phase mirror, or game-specific state.
 
-## 2026-08-09: faithful Battlefront II native UTF-16 port
+## 2026-08-09: faithful Battlefront II bounded native-string port
 
 - Promoted `swbf2_loadremover_v2.asl` into a maintained host-executed port. Its
-  16-code-unit Galactic Conquest sentinel now uses the explicit bounded
-  `utf16le(16)` decoder rather than ASL's heuristic `string16` representation.
+  16-byte Galactic Conquest sentinel now uses the explicit bounded `utf8(16)`
+  decoder rather than ASL's heuristic `string16` representation.
 - Preserved both settings, stable keys, defaults, tooltips, precedence,
   victory and Galactic Conquest split transitions, and mode-specific loading
   rules without adding a game-specific compiler abstraction.
-- Added fixtures for both settings configurations, NUL and full-bound UTF-16
+- Added fixtures for both settings configurations, NUL and full-bound native
   input, ignored data after a terminator, failed-read retention, timer action
   behavior, settings-handle cleanup, and detach. Recorded the extensionless
   process name as evidence without claiming the deferred cross-platform policy

@@ -41,8 +41,9 @@ The original ASL runtime implements `stringN` by:
 4. decoding with .NET replacement behavior; and
 5. truncating at the first decoded NUL character.
 
-For game identifiers known to contain valid ASCII or UTF-8, use a bounded UTF-8
-decoder on the state field:
+SplitScript does not preserve that heuristic. Choose the encoding from the
+game's memory layout. For identifiers known to contain valid ASCII or UTF-8,
+use a bounded UTF-8 decoder on the state field:
 
 ```splitscript
 state "game.exe" {
@@ -56,19 +57,31 @@ performs one bounded final read, stops at the first NUL byte, and rejects that
 field's candidate when UTF-8 is invalid. It deliberately does not expose
 `string50` as a type.
 
-When the parser encounters a type-first field such as
-`string50 map : 0x100`, it explains this distinction and offers a
-**maybe-incorrect** rewrite to `map at 0x100 as utf8(50)`. The edit is not
-preferred or machine-applicable because only the autosplitter author can verify
-the target encoding.
+For a known native UTF-16LE buffer, use a code-unit bound instead. An ASL
+`string32` field reads 32 bytes, so its equivalent bound is 16 UTF-16 code
+units:
 
-That stricter malformed-input policy is equivalent for A Plague Tale's ASCII
-map identifiers. For a known native UTF-16LE buffer, use
-`field at address as utf16le(maxUtf16Units)` or
-`process.readUtf16Le(address, maxUtf16Units)`. Both stop at the first NUL code
-unit and replace malformed surrogate sequences. Do not use `readManagedString`
-as a replacement: that method reads the object layout of a Unity managed
-string rather than text bytes at the supplied address.
+```splitscript
+state "game.exe" {
+    chapter at 0x123456 as utf16le(16);
+}
+```
+
+The dynamic equivalent is `process.readUtf16Le(address, maxUtf16Units)`. Both
+forms stop at the first NUL code unit and replace malformed surrogate
+sequences. An odd ASL byte bound has no exact UTF-16LE rewrite because its final
+byte is an incomplete code unit.
+
+When the parser encounters a type-first field such as
+`string50 map : 0x100`, it explains this distinction and offers separate
+**maybe-incorrect** UTF-8 and UTF-16LE rewrites. Neither edit is preferred or
+machine-applicable because only the autosplitter author can verify the target
+encoding. The UTF-16LE action is available only for an even ASL byte bound.
+
+The stricter UTF-8 malformed-input policy is equivalent for A Plague Tale's
+ASCII map identifiers. Do not use `readManagedString` for a native buffer: that
+method reads the object layout of a Unity managed string rather than text bytes
+at the supplied address.
 
 The maintained Arietta of Spirits port uses independent `utf8(128)` and
 `utf8(8)` fields for its stage and pause-menu identifiers. Its host fixture

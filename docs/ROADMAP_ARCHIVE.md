@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-09: composable C# duration-constructor migration
+
+- Verified that the common C# forms `TimeSpan.FromSeconds(...)` and
+  `TimeSpan.FromMilliseconds(...)` produce staged machine-applicable fixes for
+  both the type and callable spelling.
+- Applying all offered edits now has regression coverage proving that the
+  result is canonical, compilable `Duration.fromSeconds(...)` and
+  `Duration.fromMilliseconds(...)` source.
+- Kept JavaScript `${...}` out of typo recovery because it is valid
+  SplitScript source with observably different literal-dollar semantics.
+
 ## 2026-08-09: Rust binding-modifier recovery and literal dollar semantics
 
 - `let mut` now recovers as an ordinary mutable SplitScript `let` declaration

@@ -778,6 +778,74 @@ fn unknown_calls_suggest_canonical_names_across_naming_styles() {
 }
 
 #[test]
+fn common_timespan_constructors_have_composable_machine_fixes() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state "game.exe" {}
+
+        gameTime {
+            let seconds = TimeSpan.FromSeconds(1.5)
+            let milliseconds = TimeSpan.FromMilliseconds(250.0)
+            return seconds + milliseconds
+        }
+    "#;
+    let parsed = splitscript::parse_recovering(source).unwrap();
+    assert_eq!(parsed.diagnostics().len(), 2);
+    assert_eq!(
+        parsed
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| &source[diagnostic.span.start..diagnostic.span.end])
+            .collect::<Vec<_>>(),
+        ["TimeSpan", "TimeSpan"]
+    );
+    for diagnostic in parsed.diagnostics() {
+        assert_eq!(diagnostic.fixes.len(), 1, "{diagnostic:?}");
+        assert_eq!(
+            diagnostic.fixes[0].applicability,
+            FixApplicability::MachineApplicable
+        );
+        assert_eq!(diagnostic.fixes[0].edits.len(), 1);
+    }
+
+    let mut fixed = source.to_owned();
+    for edit in parsed
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| &diagnostic.fixes[0].edits[0])
+        .rev()
+    {
+        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+
+    let constructor_diagnostics = splitscript::compile(&fixed)
+        .expect_err("the C# constructor casing should still need migration");
+    assert_eq!(constructor_diagnostics.len(), 2);
+    assert_eq!(
+        constructor_diagnostics
+            .iter()
+            .map(|diagnostic| &fixed[diagnostic.span.start..diagnostic.span.end])
+            .collect::<Vec<_>>(),
+        ["FromSeconds", "FromMilliseconds"]
+    );
+    for diagnostic in constructor_diagnostics.iter().rev() {
+        assert_eq!(diagnostic.fixes.len(), 1, "{diagnostic:?}");
+        assert_eq!(
+            diagnostic.fixes[0].applicability,
+            FixApplicability::MachineApplicable
+        );
+        let edit = &diagnostic.fixes[0].edits[0];
+        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+
+    assert!(fixed.contains("Duration.fromSeconds(1.5)"));
+    assert!(fixed.contains("Duration.fromMilliseconds(250.0)"));
+    splitscript::compile(&fixed)
+        .expect("applying every constructor migration fix should produce valid source");
+}
+
+#[test]
 fn legacy_process_identity_points_to_the_attached_process_api() {
     use splitscript::FixApplicability;
 

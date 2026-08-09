@@ -187,11 +187,12 @@ or behavioral parity.
   resolution proves equivalence and that user-defined names are not being
   rewritten.
 - [ ] Expand the structured foreign-spelling entries beyond the existing
-  declarations, option value, strings, durations, and numeric types. Complete
-  unambiguous fixes for common `TimeSpan` constructors, casing differences, and
-  type-aware member suggestions. Keep canonical syntax unique; do not add
-  compatibility aliases. Do not diagnose JavaScript-style `${...}` because it
-  validly means a literal dollar sign followed by interpolation in SplitScript.
+  declarations, option value, strings, durations, and numeric types. Add new
+  entries only for corpus-proven, unambiguous spellings that are not already
+  handled by the type-aware callable suggestion machinery. Keep canonical
+  syntax unique; do not add compatibility aliases. Do not diagnose
+  JavaScript-style `${...}` because it validly means a literal dollar sign
+  followed by interpolation in SplitScript.
 - [ ] Write short compiler-checked guides for authors coming from ASL/C#,
   TypeScript/JavaScript, and Rust. Explain semantic differences—lifecycle,
   fixed-width numbers, `Duration`, async cancellation, `Option`/`Result`,

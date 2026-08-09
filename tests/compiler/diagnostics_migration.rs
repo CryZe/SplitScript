@@ -37,6 +37,41 @@ fn javascript_strict_equality_recovers_with_machine_applicable_fixes() {
 }
 
 #[test]
+fn rust_let_mut_recovers_by_removing_the_redundant_modifier() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state "game.exe" {}
+        let mut global = 1
+
+        whileAttached {
+            let mut local = global
+            local += 1
+            global = local
+        }
+    "#;
+    let recovered = splitscript::parse_recovering(source)
+        .expect("Rust let mut should retain recoverable variable declarations");
+    assert_eq!(recovered.diagnostics().len(), 2);
+
+    let mut fixed = source.to_owned();
+    for diagnostic in recovered.diagnostics().iter().rev() {
+        assert_eq!(
+            diagnostic.message,
+            "SplitScript `let` bindings are already mutable"
+        );
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "mut");
+        assert_eq!(diagnostic.fixes.len(), 1);
+        let fix = &diagnostic.fixes[0];
+        assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+        assert_eq!(fix.edits.len(), 1);
+        assert!(fix.edits[0].replacement.is_empty());
+        fixed.replace_range(fix.edits[0].span.start..fix.edits[0].span.end, "");
+    }
+    splitscript::compile(&fixed).expect("removing both Rust mut modifiers should compile");
+}
+
+#[test]
 fn csharp_string_equals_explains_exact_and_ascii_insensitive_equality() {
     let source = r#"
         state "game.exe" {}

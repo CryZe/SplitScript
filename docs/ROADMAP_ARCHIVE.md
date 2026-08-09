@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-09: Rust binding-modifier recovery and literal dollar semantics
+
+- `let mut` now recovers as an ordinary mutable SplitScript `let` declaration
+  with a machine-applicable removal of the redundant Rust modifier, at both
+  global and local declaration sites.
+- Deliberately did not diagnose JavaScript-style `${value}`. In SplitScript,
+  `$` is ordinary template text, so that spelling validly emits a dollar sign
+  followed by an interpolation; deleting it would change observable output.
+- Documented this template behavior and removed both decisions from active
+  foreign-spelling work.
+
 ## 2026-08-09: JavaScript strict-equality recovery
 
 - Kept JavaScript `===` and `!==` invalid while lexing each as one recoverable

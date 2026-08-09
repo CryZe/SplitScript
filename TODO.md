@@ -188,9 +188,10 @@ or behavioral parity.
   rewritten.
 - [ ] Expand the structured foreign-spelling entries beyond the existing
   declarations, option value, strings, durations, and numeric types. Complete
-  unambiguous fixes for JavaScript `${...}`, Rust `let mut`, common `TimeSpan`
-  constructors, casing differences, and type-aware member suggestions. Keep
-  canonical syntax unique; do not add compatibility aliases.
+  unambiguous fixes for common `TimeSpan` constructors, casing differences, and
+  type-aware member suggestions. Keep canonical syntax unique; do not add
+  compatibility aliases. Do not diagnose JavaScript-style `${...}` because it
+  validly means a literal dollar sign followed by interpolation in SplitScript.
 - [ ] Write short compiler-checked guides for authors coming from ASL/C#,
   TypeScript/JavaScript, and Rust. Explain semantic differences—lifecycle,
   fixed-width numbers, `Duration`, async cancellation, `Option`/`Result`,

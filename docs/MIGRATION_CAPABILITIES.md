@@ -5,7 +5,7 @@ This index maps common source-language concepts to canonical SplitScript APIs an
 
 | Foreign concept | Source | Status | SplitScript direction |
 | --- | --- | --- | --- |
-| `declaration.let` — Variable declarations | C#, JavaScript | Supported directly | Use one inferred `let` declaration; SplitScript has no const/let split. Canonical targets: `let`. |
+| `declaration.let` — Variable declarations | C#, JavaScript, Rust | Supported directly | Use one inferred `let` declaration; SplitScript has no const/let split. Canonical targets: `let`. |
 | `value.none` — Absent optional values | JavaScript | Supported directly | `None` is SplitScript's zero-sized unit value and the absent side of an option. Canonical targets: `None`. |
 | `declaration.function` — Function declarations | C#, JavaScript | Supported directly | Functions and methods use the `fn` declaration keyword. Canonical targets: `fn`. |
 | `type.string` — String type | C# | Supported directly | The immutable UTF-8 string type is named `String`. Canonical targets: `String`. |

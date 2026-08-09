@@ -972,7 +972,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "`text {expression}`",
         "Interpolates values into a String.",
-        "Backtick strings use braces without JavaScript's dollar marker. Non-String values use the same conversion rules as an as String cast.",
+        "Backtick strings use braces without JavaScript's dollar marker. A dollar sign is ordinary text, so `${value}` emits `$` followed by the interpolated value rather than being treated as a typo. Non-String values use the same conversion rules as an as String cast.",
         TEMPLATE_EXAMPLE
     ),
     language_item!(

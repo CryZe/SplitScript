@@ -267,6 +267,15 @@ impl Parser<'_> {
 
     pub(super) fn variable_decl(&mut self) -> Result<VariableDecl, Diagnostic> {
         let keyword = self.bump().clone();
+        if self.at_ident("mut") {
+            let span = self.current().span;
+            self.record_foreign_spelling_diagnostic(
+                span,
+                "mut",
+                crate::migration::ForeignSpellingContext::VariableModifier,
+            );
+            self.bump();
+        }
         let (name, name_span) = self.expect_any_ident("expected a variable name")?;
         let annotation = if self.eat(&TokenKind::Colon).is_some() {
             Some(self.parse_type("expected a type name")?.0)

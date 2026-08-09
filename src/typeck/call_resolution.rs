@@ -683,9 +683,9 @@ impl Checker {
         if let Some(migration) = foreign_spelling(method, ForeignSpellingContext::Method)
             && candidates
                 .iter()
-                .any(|candidate| candidate == migration.replacement)
+                .any(|candidate| candidate == migration.replacement.text())
         {
-            return Some(migration.replacement.to_owned());
+            return Some(migration.replacement.text().to_owned());
         }
         closest_name(method, candidates.iter().map(String::as_str))
     }
@@ -1273,7 +1273,7 @@ impl Checker {
                             diagnostic = diagnostic.with_machine_applicable_fix(
                                 rule.fix_title,
                                 span,
-                                rule.replacement,
+                                rule.replacement.text(),
                             );
                         } else {
                             diagnostic = diagnostic.with_note(

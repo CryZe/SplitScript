@@ -216,12 +216,13 @@ impl Parser<'_> {
         context: ForeignSpellingContext,
     ) -> Option<&'static str> {
         let rule = foreign_spelling(spelling, context)?;
+        let replacement = rule.replacement.text();
         self.diagnostics.push(
             Diagnostic::new(rule.message, span)
                 .with_primary_label(rule.primary_label)
-                .with_machine_applicable_fix(rule.fix_title, span, rule.replacement),
+                .with_machine_applicable_fix(rule.fix_title, span, replacement),
         );
-        Some(rule.replacement)
+        Some(replacement)
     }
 
     pub(super) fn migration_diagnostic(&self, id: MigrationDiagnosticId, span: Span) -> Diagnostic {

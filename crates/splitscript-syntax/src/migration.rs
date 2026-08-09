@@ -91,6 +91,7 @@ impl MigrationTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ForeignSpellingContext {
     VariableDeclaration,
+    VariableModifier,
     OptionalValue,
     FunctionDeclaration,
     Type,
@@ -101,11 +102,26 @@ pub enum ForeignSpellingContext {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForeignSpellingReplacement {
+    Text(&'static str),
+    Remove,
+}
+
+impl ForeignSpellingReplacement {
+    pub const fn text(self) -> &'static str {
+        match self {
+            Self::Text(value) => value,
+            Self::Remove => "",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ForeignSpelling {
     pub source: SourceLanguage,
     pub context: ForeignSpellingContext,
     pub spelling: &'static str,
-    pub replacement: &'static str,
+    pub replacement: ForeignSpellingReplacement,
     pub message: &'static str,
     pub primary_label: &'static str,
     pub fix_title: &'static str,
@@ -445,7 +461,7 @@ const LET_SPELLINGS: &[ForeignSpelling] = &[
         source: SourceLanguage::JavaScript,
         context: ForeignSpellingContext::VariableDeclaration,
         spelling: "const",
-        replacement: "let",
+        replacement: ForeignSpellingReplacement::Text("let"),
         message: "SplitScript uses `let` instead of `const` for variable declarations",
         primary_label: "replace this familiar declaration keyword",
         fix_title: "replace `const` with `let`",
@@ -454,10 +470,19 @@ const LET_SPELLINGS: &[ForeignSpelling] = &[
         source: SourceLanguage::CSharp,
         context: ForeignSpellingContext::VariableDeclaration,
         spelling: "var",
-        replacement: "let",
+        replacement: ForeignSpellingReplacement::Text("let"),
         message: "SplitScript uses `let` instead of `var` for variable declarations",
         primary_label: "replace this familiar declaration keyword",
         fix_title: "replace `var` with `let`",
+    },
+    ForeignSpelling {
+        source: SourceLanguage::Rust,
+        context: ForeignSpellingContext::VariableModifier,
+        spelling: "mut",
+        replacement: ForeignSpellingReplacement::Remove,
+        message: "SplitScript `let` bindings are already mutable",
+        primary_label: "remove this Rust-only binding modifier",
+        fix_title: "remove `mut`",
     },
 ];
 
@@ -465,7 +490,7 @@ const NONE_SPELLINGS: &[ForeignSpelling] = &[ForeignSpelling {
     source: SourceLanguage::JavaScript,
     context: ForeignSpellingContext::OptionalValue,
     spelling: "null",
-    replacement: "None",
+    replacement: ForeignSpellingReplacement::Text("None"),
     message: "SplitScript uses `None` instead of `null` for absent optional values",
     primary_label: "replace this JavaScript-style value",
     fix_title: "replace `null` with `None`",
@@ -476,7 +501,7 @@ const FN_SPELLINGS: &[ForeignSpelling] = &[
         source: SourceLanguage::Rust,
         context: ForeignSpellingContext::FunctionDeclaration,
         spelling: "func",
-        replacement: "fn",
+        replacement: ForeignSpellingReplacement::Text("fn"),
         message: "SplitScript uses `fn` instead of `func` for functions",
         primary_label: "replace this familiar function keyword",
         fix_title: "replace `func` with `fn`",
@@ -485,7 +510,7 @@ const FN_SPELLINGS: &[ForeignSpelling] = &[
         source: SourceLanguage::JavaScript,
         context: ForeignSpellingContext::FunctionDeclaration,
         spelling: "function",
-        replacement: "fn",
+        replacement: ForeignSpellingReplacement::Text("fn"),
         message: "SplitScript uses `fn` instead of `function` for functions",
         primary_label: "replace this familiar function keyword",
         fix_title: "replace `function` with `fn`",
@@ -498,7 +523,7 @@ macro_rules! type_spelling {
             source: $source,
             context: $context,
             spelling: $foreign,
-            replacement: $canonical,
+            replacement: ForeignSpellingReplacement::Text($canonical),
             message: $message,
             primary_label: $label,
             fix_title: concat!("replace `", $foreign, "` with `", $canonical, "`"),
@@ -578,7 +603,7 @@ macro_rules! numeric_spelling {
             source: SourceLanguage::CSharp,
             context: ForeignSpellingContext::Type,
             spelling: $foreign,
-            replacement: $canonical,
+            replacement: ForeignSpellingReplacement::Text($canonical),
             message: concat!(
                 "SplitScript uses `",
                 $canonical,
@@ -609,7 +634,7 @@ const ASL_PROCESS_IDENTITY_SPELLINGS: &[ForeignSpelling] = &[ForeignSpelling {
     source: SourceLanguage::Asl,
     context: ForeignSpellingContext::ValuePath,
     spelling: "game.ProcessName",
-    replacement: "process.name()",
+    replacement: ForeignSpellingReplacement::Text("process.name()"),
     message: "ASL `game.ProcessName` is `process.name()` in SplitScript",
     primary_label: "read the exact process candidate that matched during attachment",
     fix_title: "replace `game.ProcessName` with `process.name()`",
@@ -619,7 +644,11 @@ pub const CONCEPTS: &[MigrationConcept] = &[
     MigrationConcept {
         id: MigrationConceptId::new("declaration.let"),
         name: "Variable declarations",
-        sources: CSHARP_JAVASCRIPT,
+        sources: &[
+            SourceLanguage::CSharp,
+            SourceLanguage::JavaScript,
+            SourceLanguage::Rust,
+        ],
         support: MigrationSupport::Direct,
         summary: "Use one inferred `let` declaration; SplitScript has no const/let split.",
         targets: &[MigrationTarget::Language("let")],
@@ -1035,7 +1064,9 @@ mod tests {
                     "duplicate spelling {}",
                     spelling.spelling
                 );
-                assert!(!spelling.replacement.is_empty());
+                if let ForeignSpellingReplacement::Text(replacement) = spelling.replacement {
+                    assert!(!replacement.is_empty());
+                }
             }
         }
         for diagnostic in DIAGNOSTICS {

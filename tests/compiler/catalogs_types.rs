@@ -116,6 +116,13 @@ fn must_use_obligations_are_catalog_owned() {
             .expect("immutable replacement should explain its returned value")
             .contains("immutable")
     );
+    assert!(
+        library
+            .item(StdlibItemId::StringToAsciiLowerCase)
+            .must_use
+            .expect("immutable case conversion should explain its returned value")
+            .contains("immutable")
+    );
 }
 
 #[test]
@@ -903,6 +910,10 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     assert_eq!(
         library.render_signature(StdlibItemId::StringEqualsIgnoreAsciiCase),
         "String.equalsIgnoreAsciiCase(other: String) -> bool"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::StringToAsciiLowerCase),
+        "String.toAsciiLowerCase() -> String"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::StringReplaceAll),

@@ -443,6 +443,105 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_match(gc: &GcLayout) -
     function
 }
 
+/// Converts ASCII uppercase letters to lowercase while preserving all other
+/// UTF-8 bytes. Immutable strings without uppercase ASCII reuse their existing
+/// GC object; only an actual transformation allocates.
+pub(in crate::codegen::runtime_helpers) fn compile_string_to_ascii_lower_case(
+    gc: &GcLayout,
+) -> Function {
+    let string_type = gc.standard_index(StdlibTypeId::String);
+    let mut function = Function::new([
+        (3, ValType::I32),
+        (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
+    ]);
+    let value = 0;
+    let len = 1;
+    let index = 2;
+    let byte = 3;
+    let output = 4;
+
+    function
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalSet(len))
+        // First find whether any transformation is needed. Returning the
+        // immutable receiver avoids one allocation for already-normalized text.
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(byte))
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'A' as i32))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'Z' as i32))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::ArrayNewDefault(string_type))
+        .instruction(&Instruction::LocalSet(output))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(byte))
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'A' as i32))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'Z' as i32))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(32))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(byte))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::ArraySet(string_type))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::End);
+    function
+}
+
 /// Finds the first exact UTF-8 byte match at or after `start`, returning `-1`
 /// when no match exists. Both operands are valid UTF-8, so any non-empty match
 /// starts and ends at code-point boundaries.

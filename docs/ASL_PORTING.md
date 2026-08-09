@@ -75,6 +75,22 @@ The maintained Arietta of Spirits port uses independent `utf8(128)` and
 also proves the persistent-watcher rule: a failed stage-string read retains
 that field while a successful pause flag from the same poll still advances.
 
+## C# string operations
+
+SplitScript methods use lower camel case, so C# `StartsWith` becomes
+`startsWith`. For ASCII game identifiers, C# `ToLower()` becomes the more
+explicit `toAsciiLowerCase()`:
+
+```splitscript
+let normalizedMap = current.map.toAsciiLowerCase()
+```
+
+This conversion changes only `A` through `Z` and preserves all other UTF-8
+bytes. It is not culture-sensitive or full Unicode lowercasing. `slice` uses
+UTF-8 byte offsets rather than .NET UTF-16 indices and fails when an offset is
+out of range or inside a multibyte code point, so do not mechanically translate
+`Substring` without checking the target data.
+
 ## Version-labelled ASL states
 
 The second argument in `state("game.exe", "Steam")` is a layout label, not

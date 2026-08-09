@@ -327,9 +327,12 @@ Catalog entries can also declare a use obligation with
 value produces a warning while compilation and Wasm generation still succeed.
 The marker may be attached to a callable for an operation-specific explanation,
 or to a type constructor such as `Option<T>` and `Result<T>` so the obligation
-follows values returned by user functions as well. `String.replaceAll` uses a
-callable-specific reason because strings are immutable: it returns a new value
-and never changes its receiver. The checked compiler product retains these
+follows values returned by user functions as well. `String.toAsciiLowerCase`
+and `String.replaceAll` use callable-specific reasons because strings are
+immutable: they return normalized values and never change their receivers. The
+ASCII conversion's runtime helper reuses the receiver when no byte changes,
+while still conservatively advertising its possible allocation effect. The
+checked compiler product retains these
 warnings, and the database, LSP, compiler service, CLI, and watch workflow all
 publish the same structured diagnostics.
 

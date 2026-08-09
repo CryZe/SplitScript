@@ -940,6 +940,33 @@ onDetached {
     }
 
     #[test]
+    fn string_ascii_case_conversion_hover_comes_from_the_catalog() {
+        let source = r#"
+state "game.exe" {}
+whileAttached {
+    let map = "MAP_A".toAsciiLowerCase()
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(source.find("toAsciiLowerCase").unwrap() + 2)
+            .unwrap()
+            .expect("string conversion hover");
+        assert!(
+            hover
+                .markdown
+                .contains("String.toAsciiLowerCase() -> String")
+        );
+        assert!(hover.markdown.contains("Only `A` through `Z` are changed"));
+        assert!(hover.markdown.contains("**Effects:** allocates"));
+        assert!(
+            hover
+                .markdown
+                .contains("let map = mapName.toAsciiLowerCase()")
+        );
+    }
+
+    #[test]
     fn hover_uses_derived_effects_for_source_defined_catalog_functions() {
         let source = r#"
 state "game.exe" {}

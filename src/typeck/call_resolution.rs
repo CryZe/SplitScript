@@ -6,6 +6,7 @@ use crate::{
     Diagnostic,
     ast::{ActionKind, ArrayTypeId, Expr, ExprId, ExprKind, Span},
     inference::{InferenceError, Requirements, Type, type_may_have_capability},
+    migration::{ForeignSpellingContext, foreign_spelling},
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
     signature::parse_signature,
     stdlib::{
@@ -648,6 +649,13 @@ impl Checker {
                 .filter(|(candidate_receiver, _)| *candidate_receiver == receiver)
                 .map(|(_, name)| name.clone()),
         );
+        if let Some(migration) = foreign_spelling(method, ForeignSpellingContext::Method)
+            && candidates
+                .iter()
+                .any(|candidate| candidate == migration.replacement)
+        {
+            return Some(migration.replacement.to_owned());
+        }
         closest_name(method, candidates.iter().map(String::as_str))
     }
 

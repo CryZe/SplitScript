@@ -311,6 +311,12 @@ fn unknown_calls_suggest_canonical_names_across_naming_styles() {
         ),
         ("value.ClAmP(0, 10)", "ClAmP", "clamp", "clamp"),
         (
+            "\"MAP\".ToLower()",
+            "ToLower",
+            "toAsciiLowerCase",
+            "toAsciiLowerCase",
+        ),
+        (
             "value.increment_by(1)",
             "increment_by",
             "incrementBy",

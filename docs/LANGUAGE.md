@@ -1353,6 +1353,25 @@ not only a literal. Strings use content equality with `==` and `!=`, and
 `onAttach` therefore prints once per successful process attachment, while a
 message in `whileAttached` prints every attached tick.
 
+The immutable `String` API uses explicit UTF-8 byte semantics where indexing
+is involved:
+
+| Operation | Behavior |
+| --- | --- |
+| `byteLength()` | UTF-8 byte length |
+| `contains(text)` | Case-sensitive substring test |
+| `startsWith(text)` / `endsWith(text)` | Case-sensitive prefix/suffix tests |
+| `equalsIgnoreAsciiCase(text)` | Equality folding only ASCII letters |
+| `toAsciiLowerCase()` | Lowercase ASCII letters; preserve every other UTF-8 byte |
+| `slice(start, end)` | Fallible half-open UTF-8 byte range; offsets must be code-point boundaries |
+| `replaceAll(search, replacement)` | Fallible exact non-overlapping replacement |
+| `String.concat(values)` | Concatenate an array of strings |
+
+Case conversion reuses an already-normalized immutable string and allocates
+only when at least one ASCII uppercase letter changes. It intentionally has an
+ASCII-specific name: full Unicode lowercasing can change byte length and
+requires a separate, explicitly specified API.
+
 `process.readManagedString(address, maxLength)` reads a bounded IL2CPP managed
 string, decodes UTF-16 (including surrogate pairs), and returns a GC UTF-8
 `String!`. Memory-access failures are ordinary errors that can be handled with
@@ -1374,10 +1393,9 @@ let levelTime = `{minutes as u32}:{twoDigits(seconds as u32)}`
 let executableLabel = `version {version}`
 ```
 
-`String.concat` remains available as the lower-level collection operation.
-Transformations such as `replaceAll` do not mutate their receiver. They return
-a new string and are marked must-use, so a discarded result receives a focused
-warning explaining the immutable behavior.
+Transformations such as `toAsciiLowerCase` and `replaceAll` do not mutate their
+receiver. They return a string and are marked must-use, so a discarded result
+receives a focused warning explaining the immutable behavior.
 `print(value)` and `setVariable(key, value)` accept any `Display` value
 and apply these same conversions at the runtime boundary, so numeric values and
 addresses do not need an explicit `as String` cast. A standard-library type can

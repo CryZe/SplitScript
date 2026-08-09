@@ -9,6 +9,7 @@ This index maps common source-language concepts to canonical SplitScript APIs an
 | `value.none` — Absent optional values | JavaScript | Supported directly | `None` is SplitScript's zero-sized unit value and the absent side of an option. Canonical targets: `None`. |
 | `declaration.function` — Function declarations | C#, JavaScript | Supported directly | Functions and methods use the `fn` declaration keyword. Canonical targets: `fn`. |
 | `type.string` — String type | C# | Supported directly | The immutable UTF-8 string type is named `String`. Canonical targets: `String`. |
+| `string.ascii-lowercase` — ASCII string lowercasing | C# | Supported directly | Use `toAsciiLowerCase` when game identifiers require ASCII-only normalization; this is not culture-sensitive Unicode lowercasing. Canonical targets: `String.toAsciiLowerCase`. [Recipe](ASL_PORTING.md#c-string-operations). |
 | `type.duration` — Timer durations | C# | Supported directly | Use `Duration` instead of C#'s `TimeSpan`. Canonical targets: `Duration`. |
 | `type.fixed-width-number` — Fixed-width numeric types | C# | Supported directly | Memory-facing numbers use explicit signedness and bit widths. Canonical targets: `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`, `f32`, `f64`. |
 | `asl.state.string-n` — Bounded native stringN state | ASL | Use a typed pattern | Use an explicitly decoded state path such as `as utf8(50)`; choose the encoding from evidence. Canonical targets: `state`. [Recipe](ASL_PORTING.md#bounded-native-stringn-state). |

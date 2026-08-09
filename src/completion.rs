@@ -1641,6 +1641,7 @@ split {
             "startsWith",
             "endsWith",
             "equalsIgnoreAsciiCase",
+            "toAsciiLowerCase",
             "replaceAll",
             "slice",
         ] {
@@ -1656,6 +1657,7 @@ split {
             "startsWith",
             "endsWith",
             "equalsIgnoreAsciiCase",
+            "toAsciiLowerCase",
             "replaceAll",
             "slice",
         ] {

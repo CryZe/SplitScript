@@ -42,6 +42,7 @@ pub(crate) enum RuntimeHelperId {
     StringEquality,
     StringMatch,
     StringFind,
+    StringToAsciiLowerCase,
     StringReplaceAll,
     StringSlice,
     ScanProcessRange,
@@ -370,6 +371,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::StringStartsWith
         | IntrinsicId::StringEndsWith
         | IntrinsicId::StringEqualsIgnoreAsciiCase => &[Helper(Runtime::StringMatch)],
+        IntrinsicId::StringToAsciiLowerCase => &[Helper(Runtime::StringToAsciiLowerCase)],
         IntrinsicId::StringReplaceAll => &[Helper(Runtime::StringReplaceAll)],
         IntrinsicId::StringSlice => &[Helper(Runtime::StringSlice)],
         IntrinsicId::StringConcat => &[Helper(Runtime::ConcatStrings)],
@@ -1057,6 +1059,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 BOOL,
             ),
             PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringToAsciiLowerCase => contract!(
+            StringToAsciiLowerCase,
+            Method,
+            signature(NO_TYPE_PARAMETERS, Some(STRING), params![], STRING),
+            ALLOCATES,
             Everywhere,
             RepresentationPrimitive
         ),

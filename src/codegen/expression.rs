@@ -2114,6 +2114,14 @@ fn compile_expr_unconverted(
                             .function(RuntimeHelperId::StringMatch),
                     ));
             }
+            IntrinsicId::StringToAsciiLowerCase => {
+                compile_receiver(function, target, context);
+                function.instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::StringToAsciiLowerCase),
+                ));
+            }
             IntrinsicId::StringReplaceAll => {
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);

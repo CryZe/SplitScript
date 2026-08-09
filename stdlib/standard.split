@@ -1527,6 +1527,24 @@ intrinsic type String {
         other: String,
     ) -> bool;
 
+    /// Returns this string with ASCII uppercase letters converted to lowercase.
+    ///
+    /// Only `A` through `Z` are changed. Every other UTF-8 byte is preserved,
+    /// so this operation does not claim to implement Unicode lowercasing. If
+    /// the string contains no ASCII uppercase letters, the existing immutable
+    /// string is reused without allocating.
+    ///
+    /// # Example
+    ///
+    /// Normalize an ASCII map identifier
+    ///
+    /// ```splitscript
+    /// let map = mapName.toAsciiLowerCase()
+    /// ```
+    @mustUse("Strings are immutable; toAsciiLowerCase returns the normalized string and does not modify its receiver.")
+    @intrinsic(StringToAsciiLowerCase)
+    fn toAsciiLowerCase() -> String;
+
     /// Replaces every exact, non-overlapping occurrence of a string.
     ///
     /// Matches are case-sensitive and selected from left to right. An empty

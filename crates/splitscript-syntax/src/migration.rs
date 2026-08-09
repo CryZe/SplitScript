@@ -95,6 +95,7 @@ pub enum ForeignSpellingContext {
     FunctionDeclaration,
     Type,
     StaticTypeReceiver,
+    Method,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -334,6 +335,15 @@ const STRING_SPELLINGS: &[ForeignSpelling] = &[
     ),
 ];
 
+const STRING_ASCII_LOWER_SPELLINGS: &[ForeignSpelling] = &[type_spelling!(
+    SourceLanguage::CSharp,
+    ForeignSpellingContext::Method,
+    "ToLower",
+    "toAsciiLowerCase",
+    "SplitScript makes this conversion's ASCII-only semantics explicit with `toAsciiLowerCase`",
+    "replace this culture-sensitive C# method name"
+)];
+
 const DURATION_SPELLINGS: &[ForeignSpelling] = &[
     type_spelling!(
         SourceLanguage::CSharp,
@@ -426,6 +436,18 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         targets: &[MigrationTarget::StandardLibraryType("String")],
         cookbook_anchor: None,
         spellings: STRING_SPELLINGS,
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.ascii-lowercase"),
+        name: "ASCII string lowercasing",
+        sources: CSHARP,
+        support: MigrationSupport::Direct,
+        summary: "Use `toAsciiLowerCase` when game identifiers require ASCII-only normalization; this is not culture-sensitive Unicode lowercasing.",
+        targets: &[MigrationTarget::StandardLibraryItem(
+            "String.toAsciiLowerCase",
+        )],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: STRING_ASCII_LOWER_SPELLINGS,
     },
     MigrationConcept {
         id: MigrationConceptId::new("type.duration"),

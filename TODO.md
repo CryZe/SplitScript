@@ -163,10 +163,10 @@ or behavioral parity.
   straightforward to model process names, 32/64-bit memory, modules, failed
   reads, settings snapshots, timer state, attach/detach/restart, and bounded
   async polling. A compile-only port is never labelled faithful.
-- [ ] Fill corpus-proven `String` gaps through source-defined APIs where
-  possible: case conversion with stated Unicode/ASCII semantics, splitting,
-  byte/scalar inspection consistent with the language's byte-index policy, and
-  fallible numeric parsing. Improve missing-member recovery so one unknown
+- [ ] Fill the remaining corpus-proven `String` gaps through source-defined
+  APIs where possible: splitting, byte/scalar inspection consistent with the
+  language's byte-index policy, and fallible numeric parsing. ASCII case
+  conversion is complete. Improve missing-member recovery so one unknown
   method does not create unrelated unknown-local cascades.
 - [ ] Add an explicit `f32`/`f64` bit-pattern construction form and expose the
   exact rounded bits for decimal literals in tooling. Decimal exponent syntax,

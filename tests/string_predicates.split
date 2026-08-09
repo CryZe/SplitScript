@@ -76,6 +76,12 @@ whileAttached {
     {
         matches += 2048
     }
+    if "LUnIStIcE.ExE".toAsciiLowerCase() == "lunistice.exe"
+        && "Straße CAFé".toAsciiLowerCase() == "straße café"
+        && "already lower".toAsciiLowerCase() == "already lower"
+    {
+        matches += 4096
+    }
 
     setVariable("String Predicates", matches)
 }

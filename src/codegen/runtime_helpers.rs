@@ -88,8 +88,8 @@ pub(super) fn build_string_find(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_string_find(inputs.gc)
 }
 
-pub(super) fn build_string_to_ascii_lower_case(inputs: &RuntimeHelperInputs<'_>) -> Function {
-    strings::compile_string_to_ascii_lower_case(inputs.gc)
+pub(super) fn build_string_ascii_case(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_ascii_case(inputs.gc)
 }
 
 pub(super) fn build_string_replace_all(inputs: &RuntimeHelperInputs<'_>) -> Function {

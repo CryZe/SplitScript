@@ -2158,13 +2158,17 @@ fn compile_expr_unconverted(
                     ))
                     .instruction(&Instruction::End);
             }
-            IntrinsicId::StringToAsciiLowerCase => {
+            IntrinsicId::StringToAsciiLowerCase | IntrinsicId::StringToAsciiUpperCase => {
                 compile_receiver(function, target, context);
-                function.instruction(&Instruction::Call(
-                    context
-                        .runtime_helpers
-                        .function(RuntimeHelperId::StringToAsciiLowerCase),
-                ));
+                function
+                    .instruction(&Instruction::I32Const(
+                        (builtin == IntrinsicId::StringToAsciiUpperCase) as i32,
+                    ))
+                    .instruction(&Instruction::Call(
+                        context
+                            .runtime_helpers
+                            .function(RuntimeHelperId::StringAsciiCase),
+                    ));
             }
             IntrinsicId::StringReplaceAll => {
                 compile_receiver(function, target, context);

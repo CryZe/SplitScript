@@ -799,6 +799,12 @@ fn unknown_calls_suggest_canonical_names_across_naming_styles() {
             "toAsciiLowerCase",
             "toAsciiLowerCase",
         ),
+        (
+            "\"map\".ToUpper()",
+            "ToUpper",
+            "toAsciiUpperCase",
+            "toAsciiUpperCase",
+        ),
         ("\"a_b\".Split(\"_\")", "Split", "split", "split"),
         (
             "value.increment_by(1)",

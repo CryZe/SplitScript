@@ -624,6 +624,15 @@ const STRING_ASCII_LOWER_SPELLINGS: &[ForeignSpelling] = &[type_spelling!(
     "replace this culture-sensitive C# method name"
 )];
 
+const STRING_ASCII_UPPER_SPELLINGS: &[ForeignSpelling] = &[type_spelling!(
+    SourceLanguage::CSharp,
+    ForeignSpellingContext::Method,
+    "ToUpper",
+    "toAsciiUpperCase",
+    "SplitScript makes this conversion's ASCII-only semantics explicit with `toAsciiUpperCase`",
+    "replace this culture-sensitive C# method name"
+)];
+
 const STRICT_EQUALITY_SPELLINGS: &[ForeignSpelling] = &[
     type_spelling!(
         SourceLanguage::JavaScript,
@@ -769,6 +778,18 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         )],
         cookbook_anchor: Some("c-string-operations"),
         spellings: STRING_ASCII_LOWER_SPELLINGS,
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.ascii-uppercase"),
+        name: "ASCII string uppercasing",
+        sources: CSHARP,
+        support: MigrationSupport::Direct,
+        summary: "Use `toAsciiUpperCase` when game identifiers require ASCII-only normalization; this is not culture-sensitive Unicode uppercasing.",
+        targets: &[MigrationTarget::StandardLibraryItem(
+            "String.toAsciiUpperCase",
+        )],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: STRING_ASCII_UPPER_SPELLINGS,
     },
     MigrationConcept {
         id: MigrationConceptId::new("string.equality"),

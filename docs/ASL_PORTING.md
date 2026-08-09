@@ -92,14 +92,17 @@ that field while a successful pause flag from the same poll still advances.
 
 SplitScript methods use lower camel case, so C# `StartsWith` becomes
 `startsWith`. For ASCII game identifiers, C# `ToLower()` becomes the more
-explicit `toAsciiLowerCase()`:
+explicit `toAsciiLowerCase()`, while `ToUpper()` becomes
+`toAsciiUpperCase()`:
 
 ```splitscript
 let normalizedMap = current.map.toAsciiLowerCase()
+let normalizedMission = current.mission.toAsciiUpperCase()
 ```
 
-This conversion changes only `A` through `Z` and preserves all other UTF-8
-bytes. It is not culture-sensitive or full Unicode lowercasing. `slice` uses
+These conversions change only `A` through `Z` or `a` through `z` and preserve
+all other UTF-8 bytes. They are not culture-sensitive or full Unicode case
+conversion. `slice` uses
 UTF-8 byte offsets rather than .NET UTF-16 indices and fails when an offset is
 out of range or inside a multibyte code point, so do not mechanically translate
 `Substring` without checking the target data.

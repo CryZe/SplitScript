@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-09: allocation-conscious ASCII uppercasing
+
+- Added `String.toAsciiUpperCase()` for corpus uses involving mission names,
+  map identifiers, and hexadecimal text without claiming locale-sensitive or
+  full Unicode behavior.
+- Generalized lower- and uppercasing onto one Wasm runtime helper and one Rust
+  emitter. Both directions reuse an already-normalized immutable string and
+  allocate only when an ASCII letter changes.
+- Added the C# `ToUpper()` migration spelling, generated catalog metadata,
+  completion/hover coverage, and runtime tests that preserve non-ASCII bytes.
+
 ## 2026-08-09: Result-aware C# string replacement migration
 
 - Connected corpus uses of C# `String.Replace` to the existing immutable

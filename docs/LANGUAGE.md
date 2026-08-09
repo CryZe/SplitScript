@@ -1429,6 +1429,7 @@ is involved:
 | `startsWith(text)` / `endsWith(text)` | Case-sensitive prefix/suffix tests |
 | `equalsIgnoreAsciiCase(text)` | Equality folding only ASCII letters |
 | `toAsciiLowerCase()` | Lowercase ASCII letters; preserve every other UTF-8 byte |
+| `toAsciiUpperCase()` | Uppercase ASCII letters; preserve every other UTF-8 byte |
 | `split(delimiter)` | Fallible exact split preserving leading, repeated, and trailing empty segments |
 | `parse<T>()` | Strict fallible ASCII decimal parsing into an inferred numeric type |
 | `byteAt(byteIndex)` | Fallible raw UTF-8 byte lookup; continuation bytes remain observable |
@@ -1438,8 +1439,8 @@ is involved:
 | `String.concat(values)` | Concatenate an array of strings |
 
 Case conversion reuses an already-normalized immutable string and allocates
-only when at least one ASCII uppercase letter changes. It intentionally has an
-ASCII-specific name: full Unicode lowercasing can change byte length and
+only when at least one ASCII letter changes. The operations intentionally have
+ASCII-specific names: full Unicode case conversion can change byte length and
 requires a separate, explicitly specified API.
 
 All string offsets are UTF-8 byte offsets. `byteAt` is appropriate for binary
@@ -1501,9 +1502,10 @@ let levelTime = `{minutes as u32}:{twoDigits(seconds as u32)}`
 let executableLabel = `version {version}`
 ```
 
-Transformations such as `toAsciiLowerCase`, `replaceAll`, and `split` do not
-mutate their receiver. They return new values and are marked must-use, so a
-discarded result receives a focused warning explaining the immutable behavior.
+Transformations such as `toAsciiLowerCase`, `toAsciiUpperCase`, `replaceAll`,
+and `split` do not mutate their receiver. They return new values and are marked
+must-use, so a discarded result receives a focused warning explaining the
+immutable behavior.
 `print(value)` and `setVariable(key, value)` accept any `Display` value
 and apply these same conversions at the runtime boundary, so numeric values and
 addresses do not need an explicit `as String` cast. A standard-library type can

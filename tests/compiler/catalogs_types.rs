@@ -965,6 +965,10 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "String.toAsciiLowerCase() -> String"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::StringToAsciiUpperCase),
+        "String.toAsciiUpperCase() -> String"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::StringReplaceAll),
         "String.replaceAll(search: String, replacement: String) -> String!"
     );

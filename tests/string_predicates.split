@@ -92,6 +92,13 @@ whileAttached {
     {
         matches += 4096
     }
+    if "lUnIsTiCe.ExE".toAsciiUpperCase() == "LUNISTICE.EXE"
+        && "already upper".toAsciiUpperCase() == "ALREADY UPPER"
+        && "ALREADY UPPER".toAsciiUpperCase() == "ALREADY UPPER"
+        && "café".toAsciiUpperCase() == "CAFé"
+    {
+        matches += 65536
+    }
     let levelParts = "01_02_0.dds".split(".") else []
     let identifiers = levelParts[0].split("_") else []
     let emptyParts = "_a__".split("_") else []

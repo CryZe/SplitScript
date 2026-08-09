@@ -550,24 +550,31 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_match(gc: &GcLayout) -
     function
 }
 
-/// Converts ASCII uppercase letters to lowercase while preserving all other
-/// UTF-8 bytes. Immutable strings without uppercase ASCII reuse their existing
-/// GC object; only an actual transformation allocates.
-pub(in crate::codegen::runtime_helpers) fn compile_string_to_ascii_lower_case(
-    gc: &GcLayout,
-) -> Function {
+/// Converts ASCII letters to the requested case while preserving all other
+/// UTF-8 bytes. `mode` is zero for lowercase and one for uppercase. Immutable
+/// strings that are already normalized reuse their existing GC object; only
+/// an actual transformation allocates.
+pub(in crate::codegen::runtime_helpers) fn compile_string_ascii_case(gc: &GcLayout) -> Function {
     let string_type = gc.standard_index(StdlibTypeId::String);
     let mut function = Function::new([
-        (3, ValType::I32),
+        (4, ValType::I32),
         (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
     ]);
     let value = 0;
-    let len = 1;
-    let index = 2;
-    let byte = 3;
-    let output = 4;
+    let mode = 1;
+    let len = 2;
+    let index = 3;
+    let byte = 4;
+    let first = 5;
+    let output = 6;
 
     function
+        .instruction(&Instruction::I32Const(b'A' as i32))
+        .instruction(&Instruction::LocalGet(mode))
+        .instruction(&Instruction::I32Const(32))
+        .instruction(&Instruction::I32Mul)
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(first))
         .instruction(&Instruction::LocalGet(value))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::ArrayLen)
@@ -589,10 +596,12 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_to_ascii_lower_case(
         .instruction(&Instruction::ArrayGetU(string_type))
         .instruction(&Instruction::LocalSet(byte))
         .instruction(&Instruction::LocalGet(byte))
-        .instruction(&Instruction::I32Const(b'A' as i32))
+        .instruction(&Instruction::LocalGet(first))
         .instruction(&Instruction::I32GeU)
         .instruction(&Instruction::LocalGet(byte))
-        .instruction(&Instruction::I32Const(b'Z' as i32))
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(25))
+        .instruction(&Instruction::I32Add)
         .instruction(&Instruction::I32LeU)
         .instruction(&Instruction::I32And)
         .instruction(&Instruction::BrIf(1))
@@ -620,16 +629,18 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_to_ascii_lower_case(
         .instruction(&Instruction::ArrayGetU(string_type))
         .instruction(&Instruction::LocalSet(byte))
         .instruction(&Instruction::LocalGet(byte))
-        .instruction(&Instruction::I32Const(b'A' as i32))
+        .instruction(&Instruction::LocalGet(first))
         .instruction(&Instruction::I32GeU)
         .instruction(&Instruction::LocalGet(byte))
-        .instruction(&Instruction::I32Const(b'Z' as i32))
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(25))
+        .instruction(&Instruction::I32Add)
         .instruction(&Instruction::I32LeU)
         .instruction(&Instruction::I32And)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::LocalGet(byte))
         .instruction(&Instruction::I32Const(32))
-        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Xor)
         .instruction(&Instruction::LocalSet(byte))
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(output))

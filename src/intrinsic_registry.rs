@@ -43,7 +43,7 @@ pub(crate) enum RuntimeHelperId {
     StringEquality,
     StringMatch,
     StringFind,
-    StringToAsciiLowerCase,
+    StringAsciiCase,
     StringReplaceAll,
     StringSplit,
     StringParseInteger,
@@ -390,7 +390,9 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::StringEndsWith
         | IntrinsicId::StringEqualsIgnoreAsciiCase => &[Helper(Runtime::StringMatch)],
         IntrinsicId::StringIndexOf => &[Helper(Runtime::StringFind)],
-        IntrinsicId::StringToAsciiLowerCase => &[Helper(Runtime::StringToAsciiLowerCase)],
+        IntrinsicId::StringToAsciiLowerCase | IntrinsicId::StringToAsciiUpperCase => {
+            &[Helper(Runtime::StringAsciiCase)]
+        }
         IntrinsicId::StringReplaceAll => &[Helper(Runtime::StringReplaceAll)],
         IntrinsicId::StringSplit => &[Helper(Runtime::StringSplit)],
         IntrinsicId::StringParse => &[
@@ -1157,6 +1159,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::StringToAsciiLowerCase => contract!(
             StringToAsciiLowerCase,
+            Method,
+            signature(NO_TYPE_PARAMETERS, Some(STRING), params![], STRING),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringToAsciiUpperCase => contract!(
+            StringToAsciiUpperCase,
             Method,
             signature(NO_TYPE_PARAMETERS, Some(STRING), params![], STRING),
             ALLOCATES,

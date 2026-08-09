@@ -598,6 +598,16 @@ impl CompilerDatabase {
                 StdlibSymbolId::Type(ty.id),
             )));
         }
+        if let TokenKind::Ident(name) = &token.kind
+            && let Some(constructor) = self
+                .context
+                .standard_library()
+                .type_constructor_by_name(name)
+        {
+            return Ok(Some(DefinitionTarget::StandardLibrarySymbol(
+                StdlibSymbolId::TypeConstructor(constructor.id),
+            )));
+        }
         let language = LanguageCatalog::new();
         let item = match &token.kind {
             TokenKind::Ident(name) => language.item_for_source_token(name),

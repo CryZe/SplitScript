@@ -615,7 +615,28 @@ fn render_stdlib_symbol_hover(library: StandardLibrary, symbol: StdlibSymbolId) 
         }
         StdlibSymbolId::TypeConstructor(id) => {
             let declaration = library.type_constructor(id);
-            (declaration.name.to_owned(), &declaration.documentation)
+            let mut form = declaration.name.to_owned();
+            if !declaration.parameters.is_empty() {
+                form.push('<');
+                for (index, parameter) in declaration.parameters.iter().enumerate() {
+                    if index != 0 {
+                        form.push_str(", ");
+                    }
+                    form.push_str(parameter.name);
+                    let constraints = library.minimal_capabilities(parameter.constraints);
+                    if !constraints.is_empty() {
+                        form.push_str(": ");
+                        for (constraint_index, constraint) in constraints.iter().enumerate() {
+                            if constraint_index != 0 {
+                                form.push_str(" + ");
+                            }
+                            form.push_str(library.capability(*constraint).name);
+                        }
+                    }
+                }
+                form.push('>');
+            }
+            (form, &declaration.documentation)
         }
         StdlibSymbolId::Type(id) => {
             let declaration = library.type_decl(id);

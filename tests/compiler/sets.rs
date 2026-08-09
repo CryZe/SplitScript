@@ -137,6 +137,20 @@ fn set_types_and_methods_are_available_to_editor_queries() {
             && set_offset < highlight.span.end
             && highlight.kind == SemanticTokenKind::Type
     }));
+    let set_hover = database
+        .hover(set_offset + 1)
+        .unwrap()
+        .expect("type-constructor hover");
+    assert!(
+        set_hover
+            .markdown
+            .contains("```splitscript\nSet<T: Equatable>\n```")
+    );
+    assert!(
+        set_hover
+            .markdown
+            .contains("Stores a growable collection of unique values")
+    );
 
     let static_source = r#"
         state "game.exe" {}

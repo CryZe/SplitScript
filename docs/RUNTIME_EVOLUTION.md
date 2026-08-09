@@ -267,6 +267,86 @@ Do not map ASL `shutdown` to `onDetached`: the latter also runs initially and
 after each process closes, while shutdown may run once with no current process
 and may observe only partially available historical process state.
 
+## R7: affine resource values and transitive deterministic drop
+
+**Priority:** P2 / deliberately deferred
+
+**Status:** Design direction worth preserving; no implementation commitment
+until a maintained port or public host API requires user-owned resources.
+
+R1 records a host-GC direction for settings values whose cleanup need not be
+prompt. A complementary solution may be needed for files, manually attached
+processes, or other resources whose release is observable and must be
+deterministic. Core Wasm GC objects have no user-defined finalizer, so merely
+placing an owned host handle inside a GC record cannot arrange a reliable close
+when that record becomes unreachable.
+
+SplitScript could instead add an affine `resource` category. A resource leaf
+would be an opaque host handle with trusted destruction behavior. Any type that
+transitively contains a resource would derive an internal `NeedsDrop` property
+and would not be `Copy`, much like a Rust aggregate containing a non-`Copy`
+field:
+
+```splitscript
+resource File
+
+record Request {
+    file: File,
+    path: String,
+}
+```
+
+`Request`, `Request?`, `Request!`, and `[Request]` would all require
+deterministic drop. Assignment would move ownership rather than create an
+untracked GC alias, while ordinary method calls and non-consuming parameters
+could borrow implicitly. The compiler would generate structural drop glue for
+records, active enum variants, options, results, and initialized collection
+elements. It would invoke that glue on normal scope exit, overwrite, `return`,
+`throw`, `break`, `continue`, and async completion or cancellation. Returning
+or otherwise transferring a value would suppress the source owner's drop.
+
+The Wasm GC allocation could remain alive until a later collection; only the
+external resource is released by deterministic drop. This does not require
+solving general GC reachability because the type system maintains one tracked
+owner. It does require resource-bearing aggregates to lose ordinary freely
+aliased GC-reference semantics. A resource-bearing value must not be hidden
+inside another freely copied GC object: the non-`Copy`/`NeedsDrop` property has
+to propagate through every owning edge.
+
+An initial design should avoid partial field moves, arbitrary resource-bearing
+GC graphs, and implicit shared ownership. Generated async frames may own moved
+resources only when every completion and cancellation path runs their drop
+glue. The host should additionally retain an instance- or attachment-scoped
+resource table that forcibly closes remaining entries after a trap, cancelled
+instance, or failed teardown; compiler-generated normal-flow cleanup cannot be
+the sole leak barrier.
+
+Not every nominal host value should be owned. The process supplied by a normal
+`state` declaration is naturally borrowed from the attachment lifetime, and
+the ordinary settings view can remain host-owned. Explicit file opening,
+manual attachment, or a settings builder consumed by registration are better
+candidates for owned resource values.
+
+Before implementing this direction, settle:
+
+- how moves and implicit borrows appear in diagnostics, function signatures,
+  returns, globals, and editor type information;
+- whether `Option`/`Result` receive specialized resource drop glue before user
+  records and variable-length collections;
+- how current aliasable arrays, sets, records, and future closures are
+  restricted when they transitively contain a resource;
+- the exact non-suspending, non-failing destructor ABI and its behavior during
+  traps, hot reload, and store destruction;
+- whether a later explicit shared-resource wrapper is justified, rather than
+  making reference counting and its cycle rules part of every resource; and
+- how closely the ABI should mirror Component Model `own`/`borrow` resources,
+  even if SplitScript continues to emit a Core Wasm GC module.
+
+This remains lower priority than APIs needed by maintained autosplitters. Its
+purpose is to preserve a plausible deterministic ownership model so the lack
+of Wasm GC finalizers does not force source-visible `free` calls or premature
+commitment to nondeterministic cleanup.
+
 ## Recording requirements from ports
 
 When an ASL port exposes a possible runtime gap, add it here before designing a

@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-09: explicit ASCII string normalization
+
+- Added immutable `String.toAsciiLowerCase()` with an intentionally narrow
+  ASCII contract. It changes only `A` through `Z`, preserves all other UTF-8
+  bytes, and reuses the receiver without allocation when no byte changes.
+- Kept the API in the source-defined standard-library catalog with its docs,
+  example, must-use obligation, signature, effects, completion, and hover.
+  Rust owns only the validated Wasm GC byte-transform helper.
+- Extended the string runtime fixture across mixed ASCII, non-ASCII UTF-8, and
+  already-normalized input, and documented C# `ToLower()` migration without
+  pretending to provide culture-sensitive Unicode casing.
+- Promoted Tiberian Sun as the motivating maintained port, covering its
+  localized completion-text patterns, explicit native decoding, fallible byte
+  slices, timer behavior, and process lifecycle in a deterministic host.
+
 ## 2026-08-09: faithful Nioh multi-layout port
 
 - Replaced the campaign's unsafe newest-version fallback with a maintained

@@ -1,0 +1,39 @@
+// Port of TiberianSun.asl. ASL's extensionless state name is translated to
+// the current Windows host's executable name, and its string20 field is known
+// to contain localized ASCII/UTF-8 splash text.
+state "game.exe" {
+    isPlaying: u8 at "game.exe", 0x3e48fc;
+    mainMenuIndex: u8 at "game.exe", 0x408c4c;
+    gameState: u8 at "game.exe", 0x3e224c;
+    splashVisible: u8 at "game.exe", 0x34c5f4, 0x14;
+    splashText at "game.exe", 0x34c5f4, 0x14 as utf8(20);
+}
+
+isLoading {
+    return current.isPlaying == 0
+}
+
+start {
+    return old.mainMenuIndex != 0
+        && current.mainMenuIndex == 0
+        && (old.gameState == 0 || old.gameState == 30)
+        && current.gameState == 255
+}
+
+split {
+    if old.splashVisible == 0 && current.splashVisible > 0 {
+        let text = current.splashText.toAsciiLowerCase()
+        let eighth = text.slice(7, 8) else return false
+        if eighth == "c" {
+            // Spanish `MISION CUMPLIDA` pattern.
+            return true
+        }
+        if eighth != " " {
+            return false
+        }
+
+        // Common English, German, and French completion-text pattern.
+        let twelfth = text.slice(11, 12) else return false
+        return twelfth == "o"
+    }
+}

@@ -458,6 +458,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "examples/tiberian_sun.split",
+        output: "tiberian_sun.wasm",
+        profile: "release",
+        harness: "tests/tiberian_sun_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/while_loop.split",
         output: "while_loop.wasm",
         profile: "release",

@@ -205,7 +205,9 @@ native UTF-16 case in
 timer-metadata and monotonic-delay case is recorded in
 [`docs/DARK_SASI_PORT.md`](docs/DARK_SASI_PORT.md), and the ASL process-name
 migration and multi-layout case in
-[`docs/NIOH_RTA_NO_LOAD_PORT.md`](docs/NIOH_RTA_NO_LOAD_PORT.md).
+[`docs/NIOH_RTA_NO_LOAD_PORT.md`](docs/NIOH_RTA_NO_LOAD_PORT.md). The focused
+ASCII string-normalization case is recorded in
+[`docs/TIBERIAN_SUN_PORT.md`](docs/TIBERIAN_SUN_PORT.md).
 
 ## What works now
 

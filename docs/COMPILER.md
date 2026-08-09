@@ -283,6 +283,13 @@ and documentation consumers. Implicit conversions live on typed operand edges;
 for example, a non-string template interpolation carries an explicit
 `ToString` conversion and retains the operand's original `TypeId`.
 
+Global initializers are checked before function and action bodies. Before that
+pass, the checker identifies unannotated bare-`None` globals with a later plain
+non-`None` assignment and seeds them as `T?`; the assignment then constrains
+`T` through the ordinary option-lift rule. Bare `None` globals without such an
+assignment retain the unit type, so this declaration-shape pass does not make
+every `None` initializer an ambiguous option.
+
 Focused front-end snapshots render declaration identities, inferred function
 signatures, typed body edges, expression types, semantic resolutions, and
 implicit conversions without byte offsets or backend indices. A sibling

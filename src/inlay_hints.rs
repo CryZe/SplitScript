@@ -207,6 +207,33 @@ onAttach {
     }
 
     #[test]
+    fn shows_options_inferred_from_none_initialized_global_assignments() {
+        let source = r#"let pending = None
+let unit = None
+state "game.exe" {}
+whileAttached {
+    pending = Instant.now()
+    if unit == None { print("unit") }
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let snapshot = database.semantic_snapshot().unwrap();
+        let hints = inferred_type_hints(
+            &snapshot,
+            Span {
+                start: 0,
+                end: source.len(),
+            },
+        );
+        assert!(hints.iter().any(|hint| {
+            hint.position == source.find("pending").unwrap() + "pending".len()
+                && hint.label == ": Instant?"
+        }));
+        assert!(hints.iter().any(|hint| {
+            hint.position == source.find("unit").unwrap() + "unit".len() && hint.label == ": None"
+        }));
+    }
+
+    #[test]
     fn failed_inference_does_not_publish_fabricated_type_hints() {
         let source = r#"state GBA {
     ok at 0x100;

@@ -3,9 +3,10 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{ActionKind, FunctionId, Program, StateSource},
+    ast::{ActionKind, ExprKind, FunctionId, Program, StateSource, Stmt},
     inference::Type,
     stdlib::{CoreTypeId, StdlibTypeId},
+    visit::{self, Visitor},
 };
 
 use super::{
@@ -23,6 +24,7 @@ pub(super) fn check(checker: &mut Checker, program: &Program) {
 }
 
 fn check_global_initializers(checker: &mut Checker, program: &Program) {
+    let inferred_options = globals_inferred_as_options(program);
     for global in &program.globals {
         if checker.is_provider_value_name(&global.name) {
             checker.error(
@@ -42,7 +44,16 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
         let inferred = checker.with_debug_context(
             DebugContext::from_declaration(global.debug_only),
             |checker| {
-                let expected = global.annotation.map(|ty| checker.syntax_type(ty));
+                let expected = global
+                    .annotation
+                    .map(|ty| checker.syntax_type(ty))
+                    .or_else(|| {
+                        inferred_options.contains(&global.name).then(|| {
+                            let value = checker
+                                .fresh_inference(crate::inference::Requirements::none(), None);
+                            Type::Option(checker.inference.option_type(value))
+                        })
+                    });
                 checker.expr(&global.value, expected)
             },
         );
@@ -86,6 +97,48 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
             );
         }
     }
+}
+
+/// Finds unannotated `None` globals whose later assignments provide the
+/// contained type of an option. Global initializers are checked before bodies,
+/// so this small declaration-shape pass preserves bidirectional inference
+/// without treating every standalone `None` global as an ambiguous `T?`.
+fn globals_inferred_as_options(program: &Program) -> HashSet<String> {
+    let candidates = program
+        .globals
+        .iter()
+        .filter(|global| global.annotation.is_none() && matches!(global.value.kind, ExprKind::None))
+        .map(|global| global.name.clone())
+        .collect::<HashSet<_>>();
+
+    struct AssignmentCollector<'a> {
+        candidates: &'a HashSet<String>,
+        assigned: HashSet<String>,
+    }
+
+    impl<'ast> Visitor<'ast> for AssignmentCollector<'_> {
+        fn visit_stmt(&mut self, statement: &'ast Stmt) {
+            if let Stmt::Assign {
+                name,
+                op: None,
+                value,
+                ..
+            } = statement
+                && !matches!(value.kind, ExprKind::None)
+                && self.candidates.contains(name)
+            {
+                self.assigned.insert(name.clone());
+            }
+            visit::walk_stmt(self, statement);
+        }
+    }
+
+    let mut collector = AssignmentCollector {
+        candidates: &candidates,
+        assigned: HashSet::new(),
+    };
+    collector.visit_program(program);
+    collector.assigned
 }
 
 fn check_state_expressions(checker: &mut Checker, program: &Program) {

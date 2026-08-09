@@ -590,6 +590,28 @@ fn global_types_are_inferred_from_uses_and_assignments() {
 }
 
 #[test]
+fn none_initialized_globals_infer_options_from_later_assignments() {
+    let source = r#"
+        let pending = None
+        let unit = None
+
+        state "game.exe" {}
+
+        whileAttached {
+            pending = Instant.now()
+            let startedAt = pending else return
+            if startedAt == Instant.now() { print("same instant") }
+            if unit == None { print("unit remains None") }
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("a later assignment should infer an option-valued global");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("the inferred optional global should produce valid Wasm GC");
+}
+
+#[test]
 fn state_field_types_are_inferred_from_expressions_and_uses() {
     let source = r#"
         state "game.exe" {

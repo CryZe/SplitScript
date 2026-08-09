@@ -16,6 +16,12 @@ It is statically typed. There is no JavaScript-style numeric supertype and no
 implicit widening between integer widths. This is important when values come
 from process memory.
 
+Inference flows through global uses and assignments as well as initializers.
+An unannotated mutable global initialized to `None` becomes `T?` when a later
+ordinary assignment supplies a `T`; a standalone `None` global remains the
+zero-sized `None` type. An explicit annotation remains available when it makes
+the intended stored type clearer.
+
 Closed comma-separated forms use punctuation rather than line breaks to
 separate items. This includes arguments, array and record literals, match arms,
 record fields, enum variants, state layouts, settings, choice options, and file

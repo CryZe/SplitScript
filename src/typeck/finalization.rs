@@ -3,12 +3,15 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{FunctionId, Program, Span, StateSource},
+    Diagnostic,
+    ast::{Expr, ExprKind, FunctionId, Program, Span, StateSource},
     inference::Type,
+    stdlib::CoreTypeId,
     types::{
         ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType,
-        ResolvedSetType,
+        ResolvedSetType, TypeKind,
     },
+    visit::{Visitor, walk_expr},
 };
 
 use super::{CheckOutput, Checker, RecoveringCheckOutput};
@@ -106,7 +109,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     let semantics = std::mem::take(&mut checker.semantics);
     let semantic_types = checker.inference.type_store().clone();
     let enum_types = checker.declarations.enums.clone();
-    let diagnostics = std::mem::take(&mut checker.errors);
+    let mut diagnostics = std::mem::take(&mut checker.errors);
     let mut semantics = semantics.finish(
         semantic_types,
         crate::semantic::ResolvedConstructedTypes {
@@ -139,6 +142,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             .collect(),
     );
     semantics.set_function_type_parameters(function_type_parameters, generic_parameter_constraints);
+    diagnose_float_literal_ranges(program, &semantics, &mut diagnostics);
     RecoveringCheckOutput {
         output: CheckOutput {
             semantics,
@@ -151,6 +155,56 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
         },
         diagnostics,
     }
+}
+
+fn diagnose_float_literal_ranges(
+    program: &Program,
+    semantics: &crate::semantic::SemanticModel,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    struct FloatLiteralValidator<'a> {
+        semantics: &'a crate::semantic::SemanticModel,
+        diagnostics: &'a mut Vec<Diagnostic>,
+    }
+
+    impl<'ast> Visitor<'ast> for FloatLiteralValidator<'_> {
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if let ExprKind::Float(literal) = &expression.kind
+                && self
+                    .semantics
+                    .expression_type(expression.id)
+                    .is_some_and(|ty| {
+                        matches!(
+                            self.semantics.types().kind(ty),
+                            TypeKind::Builtin(CoreTypeId::F32)
+                        )
+                    })
+            {
+                let narrowed = literal
+                    .normalized
+                    .parse::<f32>()
+                    .expect("the lexer and parser validated the decimal float");
+                let message = if narrowed.is_infinite() {
+                    Some("floating-point literal overflows the finite `f32` range")
+                } else if literal.value != 0.0 && narrowed == 0.0 {
+                    Some("floating-point literal underflows `f32` to zero")
+                } else {
+                    None
+                };
+                if let Some(message) = message {
+                    self.diagnostics
+                        .push(Diagnostic::type_error(message, expression.span));
+                }
+            }
+            walk_expr(self, expression);
+        }
+    }
+
+    FloatLiteralValidator {
+        semantics,
+        diagnostics,
+    }
+    .visit_program(program);
 }
 
 fn bind_function_generics(

@@ -376,7 +376,7 @@ fn snapshot_expression_kind(
         TypedExpressionKind::None => "None".to_owned(),
         TypedExpressionKind::Bool(value) => value.to_string(),
         TypedExpressionKind::Int { value, suffix } => format!("int {value} suffix={suffix:?}"),
-        TypedExpressionKind::Float(value) => format!("float {value}"),
+        TypedExpressionKind::Float(literal) => format!("float {}", literal.value),
         TypedExpressionKind::String(value) => format!("string {value:?}"),
         TypedExpressionKind::InterpolatedString(parts) => format!(
             "interpolate [{}]",

@@ -206,7 +206,7 @@ pub enum TypedExpressionKind {
         value: u64,
         suffix: Option<TypeRef>,
     },
-    Float(f64),
+    Float(crate::ast::FloatLiteral),
     String(String),
     InterpolatedString(Vec<TypedInterpolatedPart>),
     Signature(String),
@@ -1079,7 +1079,7 @@ fn lower_expression_kind(
             value: *value,
             suffix: *suffix,
         },
-        ExprKind::Float(value) => TypedExpressionKind::Float(*value),
+        ExprKind::Float(literal) => TypedExpressionKind::Float(literal.clone()),
         ExprKind::String(value) => TypedExpressionKind::String(value.clone()),
         ExprKind::InterpolatedString(parts) => TypedExpressionKind::InterpolatedString(
             parts

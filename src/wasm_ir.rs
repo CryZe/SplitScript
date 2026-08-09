@@ -103,7 +103,7 @@ pub enum ExpressionKind {
     None,
     Bool(bool),
     Int(u64),
-    Float(f64),
+    Float(crate::ast::FloatLiteral),
     String(String),
     InterpolatedString(Vec<InterpolatedPart>),
     Signature(String),
@@ -712,7 +712,7 @@ fn lower_expression(
         TypedExpressionKind::None => ExpressionKind::None,
         TypedExpressionKind::Bool(value) => ExpressionKind::Bool(*value),
         TypedExpressionKind::Int { value, .. } => ExpressionKind::Int(*value),
-        TypedExpressionKind::Float(value) => ExpressionKind::Float(*value),
+        TypedExpressionKind::Float(value) => ExpressionKind::Float(value.clone()),
         TypedExpressionKind::String(value) => ExpressionKind::String(value.clone()),
         TypedExpressionKind::InterpolatedString(parts) => ExpressionKind::InterpolatedString(
             parts

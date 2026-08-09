@@ -232,6 +232,15 @@ or another exact type. Mutable `let` bindings are monomorphic. User functions
 are also currently monomorphic per declaration; generalized polymorphic
 functions will require Wasm signature specialization.
 
+Decimal floating-point literals may use an exponent, such as `1e-45` or
+`6.022e+23`. They are rounded once to their inferred `f32` or `f64` target and
+must remain finite and nonzero when the written significand is nonzero.
+Representable subnormal values are valid: `let value: f32 = 1e-45` produces the
+smallest positive `f32` (bit pattern `0x00000001`), while
+`let value: f64 = 5e-324` produces the smallest positive `f64`. A literal that
+underflows its target to zero or overflows it to infinity is a type error rather
+than silently changing the comparison value.
+
 Assignments support `=`, the arithmetic compound forms `+=`, `-=`, `*=`, `/=`,
 and `%=`, plus `|=`, `&=`, `^=`, `<<=`, and `>>=` for integers. A compound
 assignment uses exactly the same operand typing and runtime operation as its

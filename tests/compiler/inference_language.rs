@@ -501,6 +501,41 @@ fn integer_looking_literals_flow_into_float_contexts_exactly() {
 }
 
 #[test]
+fn decimal_exponents_preserve_representable_subnormal_float_literals() {
+    let valid = r#"
+        let smallestF32: f32 = 1e-45
+        let smallestF64: f64 = 5e-324
+        state "game.exe" {}
+
+        whileAttached {
+            let scientific: f64 = 6.022e+23
+        }
+    "#;
+    let wasm =
+        splitscript::compile(valid).expect("finite subnormal decimal literals should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("subnormal constants should lower to valid Wasm");
+
+    for (ty, literal, expected) in [
+        ("f32", "1e-46", "underflows `f32` to zero"),
+        ("f32", "1e39", "overflows the finite `f32` range"),
+        ("f64", "1e-325", "underflows `f64` to zero"),
+        ("f64", "1e309", "overflows the finite `f64` range"),
+    ] {
+        let source = format!("let value: {ty} = {literal}\nstate \"game.exe\" {{}}");
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("an out-of-range floating-point literal must be diagnosed");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(expected)),
+            "missing `{expected}` diagnostic for {literal} as {ty}: {diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
 fn numeric_defaults_do_not_select_process_memory_representations() {
     let source = r#"
         state "game.exe" {

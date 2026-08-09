@@ -519,6 +519,30 @@ impl Lexer<'_> {
                     self.pos += 1;
                 }
             }
+            if matches!(self.bytes.get(self.pos), Some(b'e' | b'E')) {
+                is_float = true;
+                self.pos += 1;
+                if matches!(self.bytes.get(self.pos), Some(b'+' | b'-')) {
+                    self.pos += 1;
+                }
+                let exponent_digits = self.pos;
+                while self
+                    .bytes
+                    .get(self.pos)
+                    .is_some_and(|byte| byte.is_ascii_digit() || *byte == b'_')
+                {
+                    self.pos += 1;
+                }
+                if self.pos == exponent_digits {
+                    return Err(Error::lexical(
+                        "expected exponent digits after `e`",
+                        Span {
+                            start,
+                            end: self.pos,
+                        },
+                    ));
+                }
+            }
         }
 
         if !is_float {
@@ -672,6 +696,27 @@ mod tests {
         assert!(tokens.iter().any(|token| {
             matches!(&token.kind, TokenKind::TemplateChunk(value) if value.contains("{literal}"))
         }));
+    }
+
+    #[test]
+    fn lexes_decimal_exponents_as_floating_point_literals() {
+        let tokens = lex("1e-45 5E-324 6.022e+23", SyntaxMode::Program).unwrap();
+        assert_eq!(
+            tokens
+                .iter()
+                .filter_map(|token| match &token.kind {
+                    TokenKind::Float(value) => Some(value.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            ["1e-45", "5E-324", "6.022e+23"]
+        );
+
+        for source in ["1e", "1e+", "1.0E-"] {
+            let error = lex(source, SyntaxMode::Program)
+                .expect_err("an exponent requires at least one digit");
+            assert_eq!(error.message, "expected exponent digits after `e`");
+        }
     }
 
     #[test]

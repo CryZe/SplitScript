@@ -1437,11 +1437,15 @@ fn compile_expr_unconverted(
             function.instruction(&Instruction::I32Const(*value as i32));
         }
         wasm_ir::ExpressionKind::Int(value) => emit_int(function, *value, ty),
-        wasm_ir::ExpressionKind::Float(value) => {
+        wasm_ir::ExpressionKind::Float(literal) => {
             if ty == Type::F32 {
-                function.instruction(&Instruction::F32Const((*value as f32).into()));
+                let value = literal
+                    .normalized
+                    .parse::<f32>()
+                    .expect("checked f32 literals fit their target");
+                function.instruction(&Instruction::F32Const(value.into()));
             } else {
-                function.instruction(&Instruction::F64Const((*value).into()));
+                function.instruction(&Instruction::F64Const(literal.value.into()));
             }
         }
         wasm_ir::ExpressionKind::String(value) => emit_string_literal(function, value, context.gc),

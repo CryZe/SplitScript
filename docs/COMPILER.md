@@ -76,6 +76,14 @@ parser/recovery grammar, structured syntax diagnostics, and lossless source docu
 is no mirrored compiler AST or conversion layer. The privileged library parser
 uses the same lexer and cursor infrastructure under an explicit syntax mode.
 
+Decimal-number lexing recognizes optional fractional and exponent components
+without treating `e` as an integer suffix. Parsing rejects values outside the
+finite `f64` domain or nonzero significands that become zero. After inference,
+the finalization pass performs the corresponding range check for expressions
+resolved as `f32`; this preserves target-dependent inference while preventing
+code generation from silently emitting zero or infinity. Representable
+subnormals continue to the ordinary Wasm `f32.const`/`f64.const` lowering.
+
 Every successful compiler stage also retains a `SourceDocument` produced by
 the same lexer pass used by the parser. Its ordered lexeme stream includes
 ordinary line and block comments, whitespace, documentation comments, and

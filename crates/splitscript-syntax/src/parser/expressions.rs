@@ -496,12 +496,34 @@ impl Parser<'_> {
                 Ok(self.new_expr(ExprKind::Int { value, suffix }, token.span))
             }
             TokenKind::Float(text) => {
-                let value = text
-                    .replace('_', "")
+                let normalized = text.replace('_', "");
+                let value: f64 = normalized
                     .parse()
                     .map_err(|_| Diagnostic::new("invalid floating-point literal", token.span))?;
+                if !value.is_finite() {
+                    return Err(Diagnostic::new(
+                        "floating-point literal overflows the finite `f64` range",
+                        token.span,
+                    ));
+                }
+                let significand = normalized
+                    .split_once(['e', 'E'])
+                    .map_or(normalized.as_str(), |(significand, _)| significand);
+                if value == 0.0
+                    && significand
+                        .bytes()
+                        .any(|digit| matches!(digit, b'1'..=b'9'))
+                {
+                    return Err(Diagnostic::new(
+                        "floating-point literal underflows `f64` to zero",
+                        token.span,
+                    ));
+                }
                 self.bump();
-                Ok(self.new_expr(ExprKind::Float(value), token.span))
+                Ok(self.new_expr(
+                    ExprKind::Float(crate::ast::FloatLiteral { normalized, value }),
+                    token.span,
+                ))
             }
             TokenKind::String(value) => {
                 self.bump();

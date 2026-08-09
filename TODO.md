@@ -174,10 +174,11 @@ or behavioral parity.
   byte/scalar inspection consistent with the language's byte-index policy, and
   fallible numeric parsing. Improve missing-member recovery so one unknown
   method does not create unrelated unknown-local cascades.
-- [ ] Accept and round-trip finite IEEE-754 subnormal literals when their value
-  is representable. If decimal parsing would underflow or round, report the
-  exact result and offer an explicit bit-pattern form rather than rejecting a
-  valid memory comparison without guidance.
+- [ ] Add an explicit `f32`/`f64` bit-pattern construction form and expose the
+  exact rounded bits for decimal literals in tooling. Decimal exponent syntax,
+  representable subnormal lowering, formatter preservation, and target-width
+  underflow/overflow diagnostics are complete; do not add a novel literal form
+  until its spelling fits the ordinary numeric model.
 - [ ] Prove `setTickRate` units, transition timing, and reset-to-default behavior
   in the host harness at representative 60, 100, 120, and default rates. Show
   `Instant.now()` as the process-independent tool for debounce/delay logic, and

@@ -1011,15 +1011,15 @@ define_language_catalog! {
         F32,
         "f32",
         "Stores a 32-bit floating-point number.",
-        "Floating-point values are useful for game coordinates, timers, and duration conversion.",
-        "let elapsedSeconds: f32 = 12.5"
+        "Floating-point values are useful for game coordinates, timers, and duration conversion. Decimal exponents and finite subnormal values are supported; target-width underflow and overflow are diagnosed.",
+        "let smallestPositive: f32 = 1e-45"
     ),
     builtin_type_item!(
         F64,
         "f64",
         "Stores a 64-bit floating-point number.",
-        "Floating-point values are useful for game coordinates, timers, and duration conversion. Unconstrained floating-point literals and values specifically constrained as Float default to f64. Memory reads never use this default and require an explicit or otherwise exact representation.",
-        "let tickRate: f64 = 60.0"
+        "Floating-point values are useful for game coordinates, timers, and duration conversion. Decimal exponents and finite subnormal values are supported. Unconstrained floating-point literals and values specifically constrained as Float default to f64. Memory reads never use this default and require an explicit or otherwise exact representation.",
+        "let smallestPositive: f64 = 5e-324"
     ),
     }
     compiler_symbols {

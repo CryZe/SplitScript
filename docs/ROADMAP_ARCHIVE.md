@@ -2341,3 +2341,13 @@ language catalog document the refinement rule.
 - Added range diagnostics and a host-executed fixture covering a negative
   module root, negative intermediate/final offsets, dynamic pointer following,
   reusable paths, and a high unsigned absolute address.
+
+# 2026-08-09: decimal exponents and finite subnormal floats
+
+- Added decimal exponent syntax while preserving its exact source spelling in
+  the formatter and editor token stream.
+- Accepted representable `f32` and `f64` subnormal constants, while diagnosing
+  target-specific underflow to zero and overflow to infinity.
+- Added a host-executed fixture that reads IEEE-754 bit pattern one from process
+  memory at both widths and compares it with decimal literals and global
+  constants.

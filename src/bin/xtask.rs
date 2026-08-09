@@ -318,6 +318,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/subnormal_float_literals.split",
+        output: "subnormal_float_literals.wasm",
+        profile: "release",
+        harness: "tests/subnormal_float_literals_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/float_helpers.split",
         output: "float_helpers.wasm",
         profile: "release",

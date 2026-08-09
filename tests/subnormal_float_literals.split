@@ -1,0 +1,14 @@
+let smallestSingle: f32 = 1e-45
+let smallestDouble: f64 = 5e-324
+
+state "game.exe" {
+    single: f32 at 0x100;
+    double: f64 at 0x108;
+}
+
+whileAttached {
+    setVariable(
+        "Subnormal Float Literals",
+        `{current.single == 1e-45},{current.double == 5e-324},{smallestSingle == current.single},{smallestDouble == current.double}`,
+    )
+}

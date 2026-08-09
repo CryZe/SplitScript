@@ -888,7 +888,7 @@ pub enum ExprKind {
         value: u64,
         suffix: Option<TypeRef>,
     },
-    Float(f64),
+    Float(FloatLiteral),
     String(String),
     InterpolatedString(Vec<InterpolatedPart>),
     Signature(String),
@@ -951,6 +951,17 @@ pub enum ExprKind {
         type_arguments: Vec<TypeRef>,
         args: Vec<Expr>,
     },
+}
+
+/// A decimal floating-point literal together with its finite `f64` parse.
+///
+/// The normalized decimal spelling is retained so contextual `f32` literals
+/// can be rounded directly to their target width instead of being double
+/// rounded through the stored `f64` value.
+#[derive(Debug, Clone)]
+pub struct FloatLiteral {
+    pub normalized: String,
+    pub value: f64,
 }
 
 #[derive(Debug, Clone)]

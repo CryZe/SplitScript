@@ -908,16 +908,16 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
         } else {
             *value as i32
         }),
-        wasm_ir::ExpressionKind::Float(value) if ty == Type::F32 => ConstExpr::f32_const(
-            (if negative {
-                -(*value as f32)
-            } else {
-                *value as f32
-            })
-            .into(),
-        ),
-        wasm_ir::ExpressionKind::Float(value) => {
-            ConstExpr::f64_const((if negative { -*value } else { *value }).into())
+        wasm_ir::ExpressionKind::Float(literal) if ty == Type::F32 => {
+            let value = literal
+                .normalized
+                .parse::<f32>()
+                .expect("checked f32 literals fit their target");
+            ConstExpr::f32_const((if negative { -value } else { value }).into())
+        }
+        wasm_ir::ExpressionKind::Float(literal) => {
+            let value = literal.value;
+            ConstExpr::f64_const((if negative { -value } else { value }).into())
         }
         _ => unreachable!(),
     }

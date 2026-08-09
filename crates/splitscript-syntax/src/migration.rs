@@ -98,6 +98,7 @@ pub enum ForeignSpellingContext {
     StaticTypeReceiver,
     Method,
     ValuePath,
+    AttachedProcessValuePath,
     Operator,
 }
 
@@ -595,6 +596,14 @@ const DURATION_SPELLINGS: &[ForeignSpelling] = &[
         "SplitScript uses `Duration` instead of `TimeSpan` for timer durations",
         "replace this C# type name"
     ),
+    type_spelling!(
+        SourceLanguage::CSharp,
+        ForeignSpellingContext::ValuePath,
+        "Duration.Zero",
+        "Duration.zero()",
+        "SplitScript constructs a zero duration with `Duration.zero()`",
+        "replace this C# static property"
+    ),
 ];
 
 macro_rules! numeric_spelling {
@@ -632,7 +641,7 @@ const NUMERIC_SPELLINGS: &[ForeignSpelling] = &[
 
 const ASL_PROCESS_IDENTITY_SPELLINGS: &[ForeignSpelling] = &[ForeignSpelling {
     source: SourceLanguage::Asl,
-    context: ForeignSpellingContext::ValuePath,
+    context: ForeignSpellingContext::AttachedProcessValuePath,
     spelling: "game.ProcessName",
     replacement: ForeignSpellingReplacement::Text("process.name()"),
     message: "ASL `game.ProcessName` is `process.name()` in SplitScript",

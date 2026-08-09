@@ -1244,8 +1244,15 @@ impl Checker {
                         self.errors.push(diagnostic);
                         return None;
                     }
-                    if let Some(rule) =
-                        foreign_spelling(&spelling, ForeignSpellingContext::ValuePath)
+                    let ordinary_rule =
+                        foreign_spelling(&spelling, ForeignSpellingContext::ValuePath);
+                    let attached_process_rule = foreign_spelling(
+                        &spelling,
+                        ForeignSpellingContext::AttachedProcessValuePath,
+                    );
+                    if let Some((rule, requires_attached_process)) = ordinary_rule
+                        .map(|rule| (rule, false))
+                        .or_else(|| attached_process_rule.map(|rule| (rule, true)))
                     {
                         let mut diagnostic = Diagnostic::type_error(rule.message, span)
                             .with_primary_label(rule.primary_label);
@@ -1269,7 +1276,7 @@ impl Checker {
                                 self.standard_library.state_provider(provider).value_name
                                     == "process"
                             });
-                        if process_is_available {
+                        if !requires_attached_process || process_is_available {
                             diagnostic = diagnostic.with_machine_applicable_fix(
                                 rule.fix_title,
                                 span,

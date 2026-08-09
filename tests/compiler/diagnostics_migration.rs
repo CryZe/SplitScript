@@ -846,6 +846,54 @@ fn common_timespan_constructors_have_composable_machine_fixes() {
 }
 
 #[test]
+fn timespan_zero_migrates_to_the_duration_constructor() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state "game.exe" {}
+
+        gameTime {
+            return TimeSpan.Zero
+        }
+    "#;
+    let parsed = splitscript::parse_recovering(source).unwrap();
+    assert_eq!(parsed.diagnostics().len(), 1);
+    let type_edit = &parsed.diagnostics()[0].fixes[0].edits[0];
+    assert_eq!(
+        &source[type_edit.span.start..type_edit.span.end],
+        "TimeSpan"
+    );
+    assert_eq!(type_edit.replacement, "Duration");
+
+    let mut fixed = source.to_owned();
+    fixed.replace_range(
+        type_edit.span.start..type_edit.span.end,
+        &type_edit.replacement,
+    );
+    let diagnostics = splitscript::compile(&fixed)
+        .expect_err("the C# static property still needs a constructor-call rewrite");
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        &fixed[diagnostic.span.start..diagnostic.span.end],
+        "Duration.Zero"
+    );
+    assert_eq!(diagnostic.fixes.len(), 1);
+    assert_eq!(
+        diagnostic.fixes[0].applicability,
+        FixApplicability::MachineApplicable
+    );
+    let value_edit = &diagnostic.fixes[0].edits[0];
+    assert_eq!(value_edit.replacement, "Duration.zero()");
+    fixed.replace_range(
+        value_edit.span.start..value_edit.span.end,
+        &value_edit.replacement,
+    );
+
+    splitscript::compile(&fixed).expect("the fully migrated zero duration should compile");
+}
+
+#[test]
 fn legacy_process_identity_points_to_the_attached_process_api() {
     use splitscript::FixApplicability;
 

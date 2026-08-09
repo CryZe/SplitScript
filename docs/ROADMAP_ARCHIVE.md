@@ -8,6 +8,12 @@
 - Applying all offered edits now has regression coverage proving that the
   result is canonical, compilable `Duration.fromSeconds(...)` and
   `Duration.fromMilliseconds(...)` source.
+- Added the corpus-proven C# static-property rewrite from `TimeSpan.Zero` to
+  the canonical constructor call `Duration.zero()`; no compatibility property
+  was introduced.
+- Separated ordinary value-path migrations from rewrites that require an
+  attached native process, so process availability no longer leaks into
+  unrelated fixes.
 - Kept JavaScript `${...}` out of typo recovery because it is valid
   SplitScript source with observably different literal-dollar semantics.
 

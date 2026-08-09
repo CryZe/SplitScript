@@ -15,6 +15,8 @@ const UTF16_INPUT_CAPACITY: u32 = 4_096;
 // character, so this is the exact worst case for the bounded input bank.
 const UTF16_OUTPUT_CAPACITY: u32 = UTF16_INPUT_CAPACITY / 2 * 3;
 const SIGNATURE_SCAN_WINDOW: u32 = 4_096;
+pub(super) const FLOAT_PARSE_DIGITS: u32 = 768;
+const FLOAT_PARSE_TEMP: u32 = 800;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ScratchRequirements {
@@ -127,6 +129,11 @@ pub(super) struct RuntimeScratch {
     pub scan: ScratchRegion,
     pub c_string: ScratchRegion,
     pub native_utf8: ScratchRegion,
+    /// Significant decimal digits used by the allocation-free, correctly
+    /// rounded floating-point parser.
+    pub float_parse_digits: ScratchRegion,
+    /// Temporary multiplication output that coexists with the digit buffer.
+    pub float_parse_temp: ScratchRegion,
     pub utf16_input: ScratchRegion,
     pub utf16_output: ScratchRegion,
     /// Unbounded host-call staging starts after all immutable data. Helpers
@@ -218,6 +225,11 @@ impl LinearMemoryLayout {
                 0,
                 MAX_NATIVE_STRING_BYTES as i32,
             ),
+            float_parse_digits: ScratchRegion::new(
+                ScratchAliasClass::Primary,
+                0,
+                FLOAT_PARSE_DIGITS as i32,
+            ),
             utf16_input: ScratchRegion::new(
                 ScratchAliasClass::Primary,
                 0,
@@ -228,6 +240,11 @@ impl LinearMemoryLayout {
                 bank_1_start,
                 UTF16_OUTPUT_CAPACITY as i32,
             ),
+            float_parse_temp: ScratchRegion::new(
+                ScratchAliasClass::Companion,
+                bank_1_start,
+                FLOAT_PARSE_TEMP as i32,
+            ),
             host_strings_start,
         };
         assert_eq!(scratch.abi_read.start() % 8, 0);
@@ -237,12 +254,17 @@ impl LinearMemoryLayout {
             scratch.scan,
             scratch.c_string,
             scratch.native_utf8,
+            scratch.float_parse_digits,
             scratch.utf16_input,
         ] {
             assert_eq!(region.alias_class(), ScratchAliasClass::Primary);
             assert_eq!(region.start(), 0);
         }
-        for region in [scratch.settings_length, scratch.utf16_output] {
+        for region in [
+            scratch.settings_length,
+            scratch.utf16_output,
+            scratch.float_parse_temp,
+        ] {
             assert_eq!(region.alias_class(), ScratchAliasClass::Companion);
             assert_eq!(region.start(), bank_1_start);
         }
@@ -251,12 +273,14 @@ impl LinearMemoryLayout {
         assert!(scratch.scan.end() <= bank_0_capacity);
         assert!(scratch.c_string.end() <= bank_0_capacity);
         assert!(scratch.native_utf8.end() <= bank_0_capacity);
+        assert!(scratch.float_parse_digits.end() <= bank_0_capacity);
         assert!(scratch.utf16_input.end() <= bank_0_capacity);
         assert_eq!(
             scratch.settings_length.start(),
             scratch.utf16_output.start()
         );
         assert!(scratch.utf16_output.end() as u64 <= u64::from(static_data_start));
+        assert!(scratch.float_parse_temp.end() as u64 <= u64::from(static_data_start));
         assert!(host_strings_address >= static_data_end);
         Self {
             scratch,
@@ -293,7 +317,7 @@ const fn align_up(value: u64, alignment: u64) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{LinearMemoryLayout, ScratchRequirements, WASM_PAGE_SIZE};
+    use super::{FLOAT_PARSE_DIGITS, LinearMemoryLayout, ScratchRequirements, WASM_PAGE_SIZE};
 
     #[test]
     fn reserves_runtime_scratch_and_sizes_memory_for_static_data() {
@@ -308,8 +332,17 @@ mod tests {
         assert_eq!(empty.scratch().abi_read.start(), 0);
         assert_eq!(empty.scratch().abi_read.capacity(), 16);
         assert_eq!(empty.scratch().settings_string.start(), 0);
+        assert_eq!(empty.scratch().float_parse_digits.start(), 0);
+        assert_eq!(
+            empty.scratch().float_parse_digits.capacity(),
+            FLOAT_PARSE_DIGITS as i32
+        );
         assert_eq!(
             empty.scratch().settings_length.start(),
+            empty.scratch().utf16_output.start()
+        );
+        assert_eq!(
+            empty.scratch().float_parse_temp.start(),
             empty.scratch().utf16_output.start()
         );
         assert_eq!(empty.scratch().host_strings_start, WASM_PAGE_SIZE as i32);

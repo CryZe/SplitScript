@@ -1408,11 +1408,18 @@ let lives = current.livesText.parse<u8>()?
 ```
 
 Parsing accepts an optional ASCII sign and decimal digits. Floating-point
-targets additionally accept a decimal point and `e`/`E` exponent. Whitespace,
-digit separators, trailing text, `NaN`, and `Infinity` are rejected; integer
-overflow and target-width floating-point overflow are errors. This strictness
-keeps text read from game memory deterministic and makes malformed input use
-ordinary `Result` handling rather than silently producing a partial value.
+targets additionally accept a decimal point and `e`/`E` exponent, plus
+case-insensitive `NaN`, `inf`, and `Infinity`. Floating-point decimals are
+correctly rounded directly to the target width with ties to even: finite
+overflow produces signed infinity and underflow produces signed zero. Integer
+overflow remains an error. Whitespace, digit separators, and trailing text are
+rejected, so malformed game-memory input uses ordinary `Result` handling
+rather than silently producing a partial value.
+
+The Wasm implementation uses allocation-free Simple Decimal Conversion with a
+reused 768-digit scratch buffer. It does not parse through an intermediate
+`f64` when the target is `f32`, avoiding double rounding, and it does not call a
+locale-sensitive host routine.
 
 `process.readManagedString(address, maxLength)` reads a bounded IL2CPP managed
 string, decodes UTF-16 (including surrogate pairs), and returns a GC UTF-8

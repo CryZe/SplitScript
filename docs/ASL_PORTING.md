@@ -117,8 +117,11 @@ Unlike an exception-catching `Parse` call, failure is an ordinary `Result`.
 Use `else` for a fallback, `?` to propagate the error from a function or state
 field, or `match` when failure needs its own behavior. C# `TryParse` therefore
 does not need an output parameter. Parsing consumes the complete ASCII decimal
-string and rejects whitespace, separators, trailing text, non-finite float
-names, and values outside the chosen numeric type.
+string and rejects whitespace, separators, and trailing text. Float targets
+accept case-insensitive `NaN`, `inf`, and `Infinity`; decimal overflow produces
+infinity and underflow produces zero, while integer overflow remains an error.
+Float conversion is correctly rounded directly to `f32` or `f64` and does not
+inherit C# culture settings.
 
 ## Version-labelled ASL states
 

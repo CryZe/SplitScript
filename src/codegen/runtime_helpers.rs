@@ -17,7 +17,9 @@ use super::memory_plan::LinearMemoryLayout;
 use super::runtime_helper_registry;
 use super::{GcLayout, RuntimeHelperPlan, SettingStorage, Type, settings, try_array_element_type};
 
+mod decimal_conversion;
 mod equality;
+mod float_parse;
 mod gba;
 mod process;
 mod strings;
@@ -106,7 +108,30 @@ pub(super) fn build_string_parse_integer(inputs: &RuntimeHelperInputs<'_>) -> Fu
 }
 
 pub(super) fn build_string_parse_float(inputs: &RuntimeHelperInputs<'_>) -> Function {
-    strings::compile_string_parse_float(inputs.gc)
+    let scratch = inputs.memory.scratch();
+    float_parse::compile_string_parse_float(
+        inputs.plan.function(RuntimeHelperId::DecimalLeftShift),
+        inputs.plan.function(RuntimeHelperId::DecimalRightShift),
+        inputs.plan.function(RuntimeHelperId::DecimalRound),
+        scratch.float_parse_digits,
+        inputs.gc,
+    )
+}
+
+pub(super) fn build_decimal_left_shift(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    let scratch = inputs.memory.scratch();
+    decimal_conversion::compile_decimal_left_shift(
+        scratch.float_parse_digits,
+        scratch.float_parse_temp,
+    )
+}
+
+pub(super) fn build_decimal_right_shift(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    decimal_conversion::compile_decimal_right_shift(inputs.memory.scratch().float_parse_digits)
+}
+
+pub(super) fn build_decimal_round(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    decimal_conversion::compile_decimal_round(inputs.memory.scratch().float_parse_digits)
 }
 
 pub(super) fn build_string_slice(inputs: &RuntimeHelperInputs<'_>) -> Function {

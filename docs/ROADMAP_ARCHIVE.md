@@ -2459,8 +2459,10 @@ language catalog document the refinement rule.
 - Added `String.parse<T: Numeric>() -> T!`, with bidirectional target-type
   inference and ordinary `Result` fallback, propagation, and matching.
 - Integer parsing is exact across every signed and unsigned width (including
-  `address`); floating-point parsing supports decimal points and exponents and
-  rejects non-finite names and target-width overflow.
+  `address`); floating-point parsing uses allocation-free exact decimal
+  conversion with ties-to-even rounding directly to `f32` or `f64`, including
+  subnormals, signed overflow/underflow, `NaN`, `inf`, and `Infinity`.
 - Added compiler/editor catalog coverage, ASL/C# migration guidance, and a
-  host-executed regression for boundaries, malformed input, inference,
-  floating-point syntax, overflow, and underflow.
+  host-executed differential regression covering thousands of boundaries,
+  long and randomized decimals, malformed input, inference, non-finite values,
+  overflow, underflow, and hard halfway cases.

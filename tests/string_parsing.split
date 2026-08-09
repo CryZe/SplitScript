@@ -1,4 +1,8 @@
-state "game.exe" {}
+state "game.exe" {
+    dynamicText at 0x100 as utf8(1024);
+    dynamicExpected: f64 at 0x500;
+    dynamicValid: bool at 0x508;
+}
 
 fn failed(value) {
     return match value {
@@ -60,12 +64,18 @@ whileAttached {
         matches += 16
     }
 
-    if failed("NaN".parse<f64>())
-        && failed("Infinity".parse<f64>())
+    let nan = "NaN".parse<f64>() else 0.0
+    let infinity = "+inFiNiTy".parse<f64>() else 0.0
+    let overflow = "1.7976931348623159e308".parse<f64>() else 0.0
+    let negativeInfinity = "-inf".parse<f32>() else 0.0
+    let negativeZero = "-0".parse<f64>() else 1.0
+    let negativeInfinity64 = "-Infinity".parse<f64>() else 0.0
+    if nan != nan
+        && infinity == overflow
+        && negativeInfinity < 0.0
+        && 1.0 / negativeZero == negativeInfinity64
         && failed("1e".parse<f64>())
         && failed("1.2.3".parse<f64>())
-        && failed("1e309".parse<f64>())
-        && failed("3.5e38".parse<f32>())
     {
         matches += 32
     }
@@ -79,6 +89,41 @@ whileAttached {
     if addressValue == 0x100000000 {
         matches += 128
     }
+
+    // Exact halfway cases must use ties-to-even rather than intermediate
+    // floating-point multiplication and double rounding.
+    let halfway64: f64 = "1.00000000000000011102230246251565404236316680908203125".parse()
+        else 0.0
+    let aboveHalfway64: f64 =
+        "1.00000000000000011102230246251565404236316680908203126".parse() else 0.0
+    let halfway32: f32 = "1.000000059604644775390625".parse() else 0.0
+    let aboveHalfway32: f32 = "1.000000059604644775390626".parse() else 0.0
+    let minimumSubnormal32: f32 = "1.401298464324817e-45".parse() else 0.0
+    let belowMinimumSubnormal32: f32 = "7.006492321624085e-46".parse() else 1.0
+    let aboveMinimumSubnormal32: f32 = "7.006492321624086e-46".parse() else 0.0
+    if halfway64 != 1.0
+        || aboveHalfway64 != 1.0000000000000002
+        || halfway32 != 1.0
+        || aboveHalfway32 != 1.00000011920928955078125
+        || minimumSubnormal32 != 1.401298464324817e-45
+        || belowMinimumSubnormal32 != 0.0
+        || aboveMinimumSubnormal32 != 1.401298464324817e-45
+    {
+        setVariable("String Parsing", -1)
+        return
+    }
+
+    let dynamicMatches = match current.dynamicText.parse<f64>() {
+        Ok(value) =>
+        current.dynamicValid
+            && if current.dynamicExpected != current.dynamicExpected {
+                value != value
+            } else {
+                value == current.dynamicExpected
+            },
+        Err(_) => !current.dynamicValid,
+    }
+    setVariable("String Parsing Dynamic", dynamicMatches)
 
     setVariable("String Parsing", matches)
 }

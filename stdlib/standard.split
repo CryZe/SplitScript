@@ -1594,8 +1594,9 @@ intrinsic type String {
     /// Parsing consumes the entire string and accepts only ASCII decimal text;
     /// surrounding whitespace and digit separators are errors. Integers allow
     /// an optional sign and are checked against the exact target width. Floats
-    /// additionally allow a decimal point and `e` or `E` exponent, but not
-    /// named values such as `NaN` or `Infinity`.
+    /// additionally allow a decimal point and `e` or `E` exponent. `NaN`,
+    /// `inf`, and `Infinity` are accepted case-insensitively. Finite overflow
+    /// produces signed infinity and underflow produces signed zero.
     ///
     /// # Example
     ///

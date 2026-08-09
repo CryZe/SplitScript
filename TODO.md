@@ -56,12 +56,12 @@ or behavioral parity.
   non-lifecycle misunderstandings found by the campaign. Do not add
   compatibility aliases.
 - [ ] Use those maintained ports to decide each next implementation slice.
-  Exercise the existing fixed-array search, `Set<String>`, and explicit native
-  UTF-16LE decoder before adding adjacent abstractions. Prefer recurring static
-  settings, signed offsets, or focused string gaps over callbacks, reflection,
-  UI prompts, or unrestricted filesystem access. Move a gap back down the
-  roadmap when the current language can already express it clearly and only
-  documentation or diagnostics were missing.
+  Exercise the existing explicit native UTF-16LE decoder before adding adjacent
+  abstractions. Prefer recurring static settings, signed offsets, or focused
+  string gaps over callbacks, reflection, UI prompts, or unrestricted
+  filesystem access. Move a gap back down the roadmap when the current language
+  can already express it clearly and only documentation or diagnostics were
+  missing.
 
 ## P0 — unblock the next representative native ports
 

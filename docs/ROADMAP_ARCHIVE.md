@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-09: semantic migration for legacy lists
+
+- Triaged the campaign's array-search and growing visited-map reports against
+  the source-defined array methods, `Set<T>`, and maintained OpenJK-Speed and A
+  Plague Tale ports.
+- Documented the semantic split between fixed ordered arrays, growable unique
+  sets, compact closed-domain bit sets, and the still-planned growable ordered
+  collection that preserves duplicates.
+- Added a focused `List<T>` diagnostic that explains both supported choices,
+  including `indexOf`'s optional `u32` result, without offering a rewrite that
+  could silently change ordering, duplication, or lifetime behavior.
+
 ## 2026-08-09: discoverable cooperative scan migration
 
 - Confirmed that module, explicit-range, and process-wide signature scans

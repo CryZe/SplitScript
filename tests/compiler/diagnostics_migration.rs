@@ -1,6 +1,59 @@
 //! diagnostics migration integration tests.
 
 #[test]
+fn legacy_list_types_explain_the_semantic_collection_choices() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn remember(values: List<String>) {
+            print(values)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("List should require an explicit collection migration");
+
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "`List<T>` has no single SplitScript replacement"
+    );
+    assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "List");
+    assert!(diagnostic.fixes.is_empty());
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("`[T]`") && note.contains("`.indexOf(value)`") && note.contains("`u32?`")
+    }));
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("`Set<T>`") && note.contains("`Set.new<T>()`") && note.contains("`insert`")
+    }));
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("preserves duplicates") && note.contains("not currently provided")
+    }));
+}
+
+#[test]
+fn a_source_type_named_list_is_not_mistaken_for_the_legacy_collection() {
+    let source = r#"
+        record List {
+            value: i32,
+        }
+        state "game.exe" {}
+        fn invalid(value: List<i32>) {}
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("ordinary source records are not generic constructors");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message == "unknown generic type constructor `List`" })
+    );
+    assert!(!diagnostics.iter().any(|diagnostic| {
+        diagnostic.message == "`List<T>` has no single SplitScript replacement"
+    }));
+}
+
+#[test]
 fn assignments_to_current_explain_immutable_snapshot_migrations() {
     let source = r#"
         state "game.exe" {

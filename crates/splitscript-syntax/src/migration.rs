@@ -155,6 +155,8 @@ pub const ASL_TIMER_REAL_TIME_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.timer.current-real-time-path");
 pub const ASL_MUTABLE_CURRENT_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.state.mutable-current-assignment");
+pub const ASL_LIST_TYPE_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.collection.list-type");
 
 pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
@@ -285,6 +287,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "there is no automatic rewrite because an assignment to `current` can represent filtering, derivation, or mutable run state in legacy ASL",
         ],
     },
+    MigrationDiagnostic {
+        id: ASL_LIST_TYPE_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.collection.list"),
+        message: "`List<T>` has no single SplitScript replacement",
+        primary_label: "choose the collection from the behavior the script requires",
+        notes: &[
+            "use `[T]` for a fixed ordered table; `.contains(value)` searches it and `.indexOf(value)` returns `u32?`, with `None` instead of C#'s `-1` sentinel",
+            "use `Set<T>` for growable unique membership such as visited maps; construct it with `Set.new<T>()` and use `insert`, `contains`, `remove`, and `clear`",
+            "a growable ordered collection that preserves duplicates is not currently provided; do not silently replace one with a set",
+            "there is no automatic rewrite because choosing an array or set changes ordering, duplication, mutation, and absence semantics",
+        ],
+    },
 ];
 
 pub fn legacy_lifecycle_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
@@ -314,6 +328,13 @@ pub fn legacy_value_path_diagnostic(path: &str) -> Option<MigrationDiagnosticId>
         return Some(ASL_TIMER_REAL_TIME_DIAGNOSTIC);
     }
     None
+}
+
+pub fn legacy_type_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
+    match name {
+        "List" => Some(ASL_LIST_TYPE_DIAGNOSTIC),
+        _ => None,
+    }
 }
 
 const ASL: &[SourceLanguage] = &[SourceLanguage::Asl];
@@ -757,6 +778,23 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         summary: "Use a compile-time settings family for bounded integer-keyed booleans; it lowers to ordinary declarations and remains available through `settings.enabled(key)`.",
         targets: &[MigrationTarget::Language("settings family")],
         cookbook_anchor: Some("finite-settings-families"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.collection.list"),
+        name: "List<T> collections",
+        sources: ASL_CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `[T]` with `contains` or `indexOf` for fixed ordered tables, and `Set<T>` for growable unique membership. Ordered growable lists with duplicates remain a distinct planned collection.",
+        targets: &[
+            MigrationTarget::StandardLibraryItem("Array.contains"),
+            MigrationTarget::StandardLibraryItem("Array.indexOf"),
+            MigrationTarget::StandardLibraryItem("Set.new"),
+            MigrationTarget::StandardLibraryItem("Set.insert"),
+            MigrationTarget::StandardLibraryItem("Set.contains"),
+            MigrationTarget::StandardLibraryItem("Set.clear"),
+        ],
+        cookbook_anchor: Some("collection-search-and-run-scoped-sets"),
         spellings: &[],
     },
     MigrationConcept {

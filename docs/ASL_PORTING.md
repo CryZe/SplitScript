@@ -400,12 +400,55 @@ does not add a separate lifecycle concept for that behavior until a maintained
 port demonstrates that ordinary field expressions and `whileAttached` cannot
 represent the required result clearly.
 
-## Run-scoped one-shot splits
+## Collection search and run-scoped sets
 
-ASL frequently uses a `List<string>` or dictionary to prevent checkpoint loads
-from splitting the same chapter twice. When the set of chapters is closed and
-small, model it as an enum plus a typed bit set instead of introducing dynamic
-string keys:
+Do not translate every C# `List<T>` into one compatibility collection. First
+identify whether the source needs a fixed ordered table, growable unique
+membership, or a genuinely ordered growable sequence with duplicates.
+
+Use an array for a fixed route or lookup table. Arrays provide `contains` and
+`indexOf` when their elements support equality:
+
+```splitscript
+let levelRoute = [12, 5, 6, 7, 9, 10, 11, 14]
+
+split {
+    let oldIndex = levelRoute.indexOf(old.level) else return false
+    let currentIndex = levelRoute.indexOf(current.level) else return false
+    return currentIndex == oldIndex + 1
+}
+```
+
+Unlike C# `List<T>.IndexOf`, `indexOf` returns `u32?`; absence is `None`, never
+a signed `-1` sentinel. A fixed array is not growable, though its existing
+elements can be replaced with `set(index, value)`.
+
+Use `Set<T>` when values are discovered while the run progresses and only
+membership matters:
+
+```splitscript
+let visitedMaps = Set.new<String>()
+
+onAttach {
+    visitedMaps.clear()
+}
+
+split {
+    if current.map == old.map {
+        return false
+    }
+    return visitedMaps.insert(current.map)
+}
+```
+
+`insert` returns true only for a new value. The set object and its contents
+persist across ticks and detachments until explicitly cleared or the script is
+unloaded. Clear it at the lifecycle boundary that matches the original source:
+`onAttach` for per-process state, or a detected timer-start transition for
+per-attempt state. The maintained OpenJK-Speed port exercises the former.
+
+When membership comes from a small closed enum, a typed bit set remains more
+compact and makes the finite domain explicit:
 
 ```splitscript
 enum Chapter {
@@ -427,6 +470,11 @@ Detect the timer transition in `whileAttached`, clear the bit set, and mark the
 starting map before `split` is evaluated. This reproduces an ASL `timer.OnStart`
 handler without a separate event API. The generated update loop runs
 `whileAttached` before timer-decision actions.
+
+SplitScript does not yet provide a growable ordered collection that preserves
+duplicates. If the original script relies on insertion order, positional
+insertion, or repeated equal values, keep that as a `List<T>` requirement
+rather than silently substituting a set.
 
 ## Finite settings families
 
@@ -459,10 +507,6 @@ do not create artificial members such as `settings.level17`. Label and key
 templates may interpolate only the range binding, and a documentation comment
 on the family becomes every generated tooltip. See the maintained Drug Dealer
 Simulator port for registration and runtime evidence.
-
-Use a growable `Set<T>` only when the keys are genuinely discovered or
-unbounded. A fixed 16-chapter route does not justify per-tick collection
-allocation or a new compiler special case.
 
 ## Legacy ASL lifecycle blocks
 

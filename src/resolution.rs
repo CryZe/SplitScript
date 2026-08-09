@@ -12,6 +12,7 @@ use crate::{
         EnumReference, ExprId, ExprKind, MatchPattern, PatternId, Program, SettingKind, Span,
         TypeApplicationId, TypeNameId, TypeRef, ValueId,
     },
+    migration::{legacy_type_diagnostic, migration_diagnostic},
     stdlib::{StandardLibrary, StdlibStateProviderId, StdlibTypeKind},
     types::{EnumTypeId, ResolvedTypeRef},
     visit::{self, Visitor},
@@ -137,10 +138,14 @@ pub(crate) fn validate_declarations(
                 .iter()
                 .any(|enumeration| enumeration.name == *name)
         {
-            diagnostics.push(Diagnostic::type_error(
-                format!("unknown type `{name}`"),
-                *span,
-            ));
+            if let Some(diagnostic) = legacy_type_migration_diagnostic(name, *span) {
+                diagnostics.push(diagnostic);
+            } else {
+                diagnostics.push(Diagnostic::type_error(
+                    format!("unknown type `{name}`"),
+                    *span,
+                ));
+            }
         }
     }
 
@@ -229,10 +234,18 @@ pub(crate) fn resolve_program(
     for application in &program.type_applications {
         let name = program.type_name(application.constructor);
         let Some(constructor) = standard_library.type_constructor_by_name(name) else {
-            provider_diagnostics.push(Diagnostic::type_error(
-                format!("unknown generic type constructor `{name}`"),
-                program.type_name_span(application.constructor),
-            ));
+            let is_undeclared_legacy_type = legacy_type_diagnostic(name).is_some()
+                && !program.records.iter().any(|record| record.name == name)
+                && !program
+                    .enums
+                    .iter()
+                    .any(|enumeration| enumeration.name == name);
+            if !is_undeclared_legacy_type {
+                provider_diagnostics.push(Diagnostic::type_error(
+                    format!("unknown generic type constructor `{name}`"),
+                    program.type_name_span(application.constructor),
+                ));
+            }
             continue;
         };
         if application.arguments.len() != constructor.parameters.len() {
@@ -273,6 +286,18 @@ pub(crate) fn resolve_program(
     resolver.visit_program(program);
     provider_diagnostics.extend(resolver.diagnostics);
     provider_diagnostics
+}
+
+fn legacy_type_migration_diagnostic(name: &str, span: Span) -> Option<Diagnostic> {
+    let id = legacy_type_diagnostic(name)?;
+    let metadata = migration_diagnostic(id)
+        .expect("resolution migration diagnostic IDs must exist in the migration catalog");
+    let mut diagnostic =
+        Diagnostic::type_error(metadata.message, span).with_primary_label(metadata.primary_label);
+    for note in metadata.notes {
+        diagnostic = diagnostic.with_note(*note);
+    }
+    Some(diagnostic)
 }
 
 struct EnumResolver<'a> {

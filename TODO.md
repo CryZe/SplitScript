@@ -181,7 +181,7 @@ or behavioral parity.
 - [ ] Expand capability-driven diagnostics and code actions beyond the initial
   structured entries. Emit one focused explanation and suppress predictable
   cascades for recognizable ASL constructs, including legacy lifecycle blocks,
-  timer member chains, `List<T>` operations, `settings.Add`, member casing, and
+  timer member chains, member casing, and
   string decoders. Distinguish “supported under a different spelling,”
   “requires a semantic rewrite,” “requires host support,” and “intentionally
   sandboxed out.” Use machine-applicable rewrites only after resolution proves

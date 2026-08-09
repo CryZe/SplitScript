@@ -1,5 +1,13 @@
 # SplitScript roadmap
 
+## 2026-08-09: ASL runtime settings-registration guidance
+
+- Bounded startup-generated boolean settings were already expressible as
+  compile-time settings families. The migration catalog now separately records
+  legacy runtime registration, and `settings.Add(...)` receives focused
+  guidance for individual declarations, finite families, stable keys, and
+  data-driven lookup without offering an unsafe mechanical rewrite.
+
 ## 2026-08-09: safe named-layout selection discovery
 
 - Made the missing-`onAttach` diagnostic generate a placeholder selector for

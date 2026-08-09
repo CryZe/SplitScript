@@ -157,6 +157,8 @@ pub const ASL_MUTABLE_CURRENT_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.state.mutable-current-assignment");
 pub const ASL_LIST_TYPE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.collection.list-type");
+pub const ASL_SETTINGS_ADD_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.settings.add-call");
 
 pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
@@ -297,6 +299,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "use `Set<T>` for growable unique membership such as visited maps; construct it with `Set.new<T>()` and use `insert`, `contains`, `remove`, and `clear`",
             "a growable ordered collection that preserves duplicates is not currently provided; do not silently replace one with a set",
             "there is no automatic rewrite because choosing an array or set changes ordering, duplication, mutation, and absence semantics",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_SETTINGS_ADD_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.settings.registration"),
+        message: "ASL `settings.Add` calls become declarations in SplitScript",
+        primary_label: "settings are declared statically rather than registered at runtime",
+        notes: &[
+            "declare one boolean setting as `\"Label\" => name key \"host-key\": true,` inside `settings`",
+            "for a bounded numbered family, use `for value in start..=end { `Label {value}` key `{value}`: true, }` instead of expanding every member by hand",
+            "read a statically named setting through `settings.name`; use `settings.enabled(key)` only when a data-driven string selects among declared boolean settings",
+            "there is no automatic rewrite because `settings.Add` overloads encode labels, parents, defaults, and runtime control flow differently",
         ],
     },
 ];
@@ -768,6 +782,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
             MigrationTarget::Language("oldSettings"),
         ],
         cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.settings.registration"),
+        name: "Runtime settings registration",
+        sources: ASL,
+        support: MigrationSupport::TypedPattern,
+        summary: "Move `settings.Add` calls into the static `settings` declaration; use a compile-time family for a bounded integer range instead of hand-expanding it.",
+        targets: &[MigrationTarget::Language("settings")],
+        cookbook_anchor: Some("finite-settings-families"),
         spellings: &[],
     },
     MigrationConcept {

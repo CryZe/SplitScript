@@ -7,8 +7,8 @@ use crate::{
     ast::{ActionKind, ArrayTypeId, Expr, ExprId, ExprKind, Span},
     inference::{InferenceError, Requirements, Type, type_may_have_capability},
     migration::{
-        ForeignSpellingContext, foreign_spelling, legacy_value_path_diagnostic,
-        migration_diagnostic,
+        ASL_SETTINGS_ADD_DIAGNOSTIC, ForeignSpellingContext, foreign_spelling,
+        legacy_value_path_diagnostic, migration_diagnostic,
     },
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
     signature::parse_signature,
@@ -714,6 +714,23 @@ impl Checker {
         span: Span,
         suggestion: Option<&str>,
     ) {
+        if method == "Add"
+            && matches!(
+                receiver,
+                Type::Known(id)
+                    if matches!(self.inference.type_store().kind(id), TypeKind::SettingsView)
+            )
+        {
+            let metadata = migration_diagnostic(ASL_SETTINGS_ADD_DIAGNOSTIC)
+                .expect("type checker migration diagnostic IDs must exist");
+            let mut diagnostic = Diagnostic::type_error(metadata.message, name_span)
+                .with_primary_label(metadata.primary_label);
+            for note in metadata.notes {
+                diagnostic = diagnostic.with_note(*note);
+            }
+            self.errors.push(diagnostic);
+            return;
+        }
         let receiver = self.type_name(receiver);
         let Some(suggestion) = suggestion else {
             self.error(format!("type `{receiver}` has no method `{method}`"), span);

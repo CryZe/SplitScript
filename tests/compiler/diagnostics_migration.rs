@@ -1,6 +1,41 @@
 //! diagnostics migration integration tests.
 
 #[test]
+fn legacy_settings_add_explains_static_declarations_and_families() {
+    let source = r#"
+        state "game.exe" {}
+
+        setup {
+            settings.Add("2", true, "Levels")
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("legacy runtime settings registration should need migration guidance");
+
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "ASL `settings.Add` calls become declarations in SplitScript"
+    );
+    assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "Add");
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic.notes.iter().any(|note| {
+            note.contains("inside `settings`") && note.contains("key \"host-key\"")
+        })
+    );
+    assert!(
+        diagnostic.notes.iter().any(|note| {
+            note.contains("bounded numbered family") && note.contains("start..=end")
+        })
+    );
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("settings.enabled(key)") && note.contains("declared boolean settings")
+    }));
+}
+
+#[test]
 fn legacy_list_types_explain_the_semantic_collection_choices() {
     let source = r#"
         state "game.exe" {}

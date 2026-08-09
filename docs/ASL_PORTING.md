@@ -176,6 +176,18 @@ let separator = current.map.indexOf("_") else return false
 Comparison-mode and start-index overloads need an explicit rewrite rather than
 a method-name substitution.
 
+C# `value.LastIndexOf(substring)` has the same index-unit and absence hazards.
+For exact searches over proven ASCII text, use `value.lastIndexOf(substring)`
+and handle its `u32?` result directly:
+
+```splitscript
+let separator = current.path.lastIndexOf("/") else return false
+```
+
+The operation searches the complete string and returns a UTF-8 byte offset.
+An empty substring is found at the final byte boundary. C# comparison-mode,
+start-index, and count overloads need a deliberate rewrite.
+
 C# `value.Replace(search, replacement)` maps to immutable
 `value.replaceAll(search, replacement)` when `search` is non-empty and
 `replacement` is not null. The SplitScript operation is fallible, so retain

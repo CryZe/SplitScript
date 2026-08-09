@@ -125,6 +125,18 @@ whileAttached {
     {
         matches += 524288
     }
+    let missingLastIndex = match "chapter/room/exit".lastIndexOf("missing") {
+        Some(_) => false,
+        None => true,
+    }
+    if ("chapter/room/exit".lastIndexOf("/") else 99) == 12
+        && ("bananana".lastIndexOf("ana") else 99) == 5
+        && ("Aé🙂".lastIndexOf("") else 99) == 7
+        && ("é🙂é".lastIndexOf("é") else 99) == 6
+        && missingLastIndex
+    {
+        matches += 1048576
+    }
     let levelParts = "01_02_0.dds".split(".") else []
     let identifiers = levelParts[0].split("_") else []
     let emptyParts = "_a__".split("_") else []

@@ -168,6 +168,34 @@ fn csharp_string_index_of_explains_option_and_utf8_offsets() {
 }
 
 #[test]
+fn csharp_string_last_index_of_explains_option_and_utf8_offsets() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let index = "folder/route/level".LastIndexOf("/")
+            print(index)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("C# LastIndexOf needs index-unit and absence review");
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# `String.LastIndexOf` needs an explicit index-model review"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "LastIndexOf"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(diagnostic.notes.iter().any(|note| note.contains("None")));
+    assert!(diagnostic.notes.iter().any(|note| note.contains("UTF-16")));
+    assert!(diagnostic.notes.iter().any(|note| note.contains("UTF-8")));
+}
+
+#[test]
 fn csharp_string_replace_explains_fallible_immutable_replacement() {
     let source = r#"
         state "game.exe" {}

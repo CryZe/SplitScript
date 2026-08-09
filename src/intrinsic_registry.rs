@@ -43,6 +43,7 @@ pub(crate) enum RuntimeHelperId {
     StringEquality,
     StringMatch,
     StringFind,
+    StringRFind,
     StringAsciiCase,
     StringReplaceAll,
     StringSplit,
@@ -303,7 +304,9 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         IntrinsicId::TimerState => scratch(ScratchType::Core(CoreTypeId::U32), 1),
         IntrinsicId::TimerCurrentSplitIndex => scratch(ScratchType::Core(CoreTypeId::I64), 1),
         IntrinsicId::TimerSegmentWasSplit => scratch(ScratchType::Core(CoreTypeId::I32), 1),
-        IntrinsicId::StringIndexOf => scratch(ScratchType::Core(CoreTypeId::I32), 1),
+        IntrinsicId::StringIndexOf | IntrinsicId::StringLastIndexOf => {
+            scratch(ScratchType::Core(CoreTypeId::I32), 1)
+        }
         IntrinsicId::ProcessFollow
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::ProcessReadUtf8
@@ -391,6 +394,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::StringEndsWith
         | IntrinsicId::StringEqualsIgnoreAsciiCase => &[Helper(Runtime::StringMatch)],
         IntrinsicId::StringIndexOf => &[Helper(Runtime::StringFind)],
+        IntrinsicId::StringLastIndexOf => &[Helper(Runtime::StringRFind)],
         IntrinsicId::StringToAsciiLowerCase | IntrinsicId::StringToAsciiUpperCase => {
             &[Helper(Runtime::StringAsciiCase)]
         }
@@ -1109,6 +1113,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::StringIndexOf => contract!(
             StringIndexOf,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(STRING)],
+                U32_OPTION,
+            ),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringLastIndexOf => contract!(
+            StringLastIndexOf,
             Method,
             signature(
                 NO_TYPE_PARAMETERS,

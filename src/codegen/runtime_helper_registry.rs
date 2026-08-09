@@ -93,6 +93,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(StringEquality, (StringValue, StringValue) -> (I32), deps [], imports [], build_string_equality),
     helper!(StringMatch, (StringValue, StringValue, I32) -> (I32), deps [], imports [], build_string_match),
     helper!(StringFind, (StringValue, StringValue, I32) -> (I32), deps [], imports [], build_string_find),
+    helper!(StringRFind, (StringValue, StringValue) -> (I32), deps [], imports [], build_string_rfind),
     helper!(StringAsciiCase, (StringValue, I32) -> (StringValue), deps [], imports [], build_string_ascii_case),
     helper!(StringReplaceAll, (StringValue, StringValue, StringValue) -> (StringValue), deps [StringFind], imports [], build_string_replace_all),
     helper!(StringSplit, (StringValue, StringValue) -> (StringArray), deps [StringFind], imports [], build_string_split),

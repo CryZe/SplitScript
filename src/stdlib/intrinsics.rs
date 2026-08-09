@@ -62,6 +62,7 @@ macro_rules! trusted_intrinsics {
             StringLength,
             StringContains,
             StringIndexOf,
+            StringLastIndexOf,
             StringStartsWith,
             StringEndsWith,
             StringEqualsIgnoreAsciiCase,

@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-09: allocation-free reverse string search
+
+- Added `String.lastIndexOf(substring) -> u32?` for the recurring path,
+  filename, and object-name searches found in seven corpus scripts.
+- Kept the language's explicit string model: positions are UTF-8 byte offsets,
+  absence is `None`, the empty substring matches the final byte boundary, and
+  the reverse scan performs no intermediate allocation.
+- Added focused C# `LastIndexOf` migration guidance for the UTF-16 index and
+  `-1` sentinel differences rather than silently rewriting surrounding index
+  arithmetic or overloads.
+- Covered missing, empty, overlapping, ASCII, and multibyte matches in the
+  deterministic WebAssembly string runtime fixture.
+
 ## 2026-08-09: single-allocation string joining
 
 - Added `String.join(values, separator)` for typed `[String]` collections,

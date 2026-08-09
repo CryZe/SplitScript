@@ -766,6 +766,93 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_find(gc: &GcLayout) ->
     function
 }
 
+/// Finds the last exact UTF-8 byte match, returning `-1` when no match exists.
+/// Both operands are valid UTF-8, so any non-empty match starts and ends at
+/// code-point boundaries. The empty string matches the final byte boundary.
+pub(in crate::codegen::runtime_helpers) fn compile_string_rfind(gc: &GcLayout) -> Function {
+    let string_type = gc.standard_index(StdlibTypeId::String);
+    let mut function = Function::new([(4, ValType::I32)]);
+    let value = 0;
+    let needle = 1;
+    let value_len = 2;
+    let needle_len = 3;
+    let candidate = 4;
+    let index = 5;
+
+    function
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalSet(value_len))
+        .instruction(&Instruction::LocalGet(needle))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalSet(needle_len))
+        .instruction(&Instruction::LocalGet(needle_len))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(value_len))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(needle_len))
+        .instruction(&Instruction::LocalGet(value_len))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(value_len))
+        .instruction(&Instruction::LocalGet(needle_len))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::LocalSet(candidate))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(needle_len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(candidate))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(candidate))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalGet(needle))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::I32Ne)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(candidate))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(candidate))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::LocalSet(candidate))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::End);
+    function
+}
+
 /// Replaces exact, non-overlapping matches after first computing the precise
 /// output size. A null reference is the failure sentinel for an empty search or
 /// a result whose byte length cannot be represented by a WebAssembly array.

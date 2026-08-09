@@ -183,6 +183,8 @@ pub const CSHARP_STRING_SUBSTRING_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.substring-call");
 pub const CSHARP_STRING_INDEX_OF_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.index-of-call");
+pub const CSHARP_STRING_LAST_INDEX_OF_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.string.last-index-of-call");
 pub const CSHARP_STRING_REPLACE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.replace-call");
 pub const CSHARP_STRING_TRIM_DIAGNOSTIC: MigrationDiagnosticId =
@@ -387,6 +389,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_STRING_LAST_INDEX_OF_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.last-index-of"),
+        message: "C# `String.LastIndexOf` needs an explicit index-model review",
+        primary_label: "SplitScript returns an optional UTF-8 byte offset",
+        notes: &[
+            "rewrite an ordinal ASCII search as `text.lastIndexOf(substring)` and handle `None` instead of comparing the result with C#'s `-1` sentinel",
+            "SplitScript offsets count UTF-8 bytes; C# string offsets count UTF-16 code units, so copied arithmetic is only equivalent for proven ASCII text",
+            "comparison-mode, start-index, and count overloads need separate review; the canonical operation is exact and case-sensitive over the complete string",
+            "there is no automatic rewrite because changing both the index unit and absence representation can require surrounding control-flow changes",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_STRING_REPLACE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.replacement"),
         message: "C# `String.Replace` becomes fallible `replaceAll` in SplitScript",
@@ -477,6 +491,7 @@ pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnostic
         "Equals" => Some(CSHARP_STRING_EQUALS_DIAGNOSTIC),
         "Substring" => Some(CSHARP_STRING_SUBSTRING_DIAGNOSTIC),
         "IndexOf" => Some(CSHARP_STRING_INDEX_OF_DIAGNOSTIC),
+        "LastIndexOf" => Some(CSHARP_STRING_LAST_INDEX_OF_DIAGNOSTIC),
         "Replace" => Some(CSHARP_STRING_REPLACE_DIAGNOSTIC),
         "Trim" => Some(CSHARP_STRING_TRIM_DIAGNOSTIC),
         _ => None,
@@ -883,6 +898,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Use `indexOf` for an optional UTF-8 byte offset; review C# UTF-16 index arithmetic and replace the `-1` sentinel with Option handling.",
         targets: &[MigrationTarget::StandardLibraryItem("String.indexOf")],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.last-index-of"),
+        name: "Last substring position",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `lastIndexOf` for an optional final UTF-8 byte offset; review C# UTF-16 index arithmetic and replace the `-1` sentinel with Option handling.",
+        targets: &[MigrationTarget::StandardLibraryItem("String.lastIndexOf")],
         cookbook_anchor: Some("c-string-operations"),
         spellings: &[],
     },

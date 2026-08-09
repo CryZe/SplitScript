@@ -2133,21 +2133,24 @@ fn compile_expr_unconverted(
                             .function(RuntimeHelperId::StringMatch),
                     ));
             }
-            IntrinsicId::StringIndexOf => {
+            IntrinsicId::StringIndexOf | IntrinsicId::StringLastIndexOf => {
                 let found = context.matches.intrinsic_temps[&expression][0];
                 let Type::Option(option) = ty else {
-                    unreachable!("String.indexOf returns the declared optional u32")
+                    unreachable!("string position methods return the declared optional u32")
                 };
                 let option_type = context.gc.val_type(Type::Option(option));
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
+                if builtin == IntrinsicId::StringIndexOf {
+                    function.instruction(&Instruction::I32Const(0));
+                }
+                let helper = if builtin == IntrinsicId::StringIndexOf {
+                    RuntimeHelperId::StringFind
+                } else {
+                    RuntimeHelperId::StringRFind
+                };
                 function
-                    .instruction(&Instruction::I32Const(0))
-                    .instruction(&Instruction::Call(
-                        context
-                            .runtime_helpers
-                            .function(RuntimeHelperId::StringFind),
-                    ))
+                    .instruction(&Instruction::Call(context.runtime_helpers.function(helper)))
                     .instruction(&Instruction::LocalTee(found))
                     .instruction(&Instruction::I32Const(0))
                     .instruction(&Instruction::I32LtS)

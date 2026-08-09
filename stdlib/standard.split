@@ -1586,6 +1586,26 @@ intrinsic type String {
         substring: String,
     ) -> u32?;
 
+    /// Finds the last exact substring and returns its UTF-8 byte offset.
+    ///
+    /// Returns `None` when the substring is absent. An empty substring is found
+    /// at the string's final byte boundary. Searching is allocation-free and
+    /// case-sensitive.
+    ///
+    /// # Example
+    ///
+    /// Find the final separator in a path
+    ///
+    /// ```splitscript
+    /// let separator = modulePath.lastIndexOf("/") else return
+    /// ```
+    @mustUse("The optional byte offset must be used.")
+    @intrinsic(StringLastIndexOf)
+    fn lastIndexOf(
+        /// The substring to search for.
+        substring: String,
+    ) -> u32?;
+
     /// Tests whether this string starts with an exact prefix.
     ///
     /// Matching is case-sensitive over the UTF-8 text. Every string starts

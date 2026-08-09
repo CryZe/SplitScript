@@ -88,6 +88,10 @@ pub(super) fn build_string_find(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_string_find(inputs.gc)
 }
 
+pub(super) fn build_string_rfind(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_rfind(inputs.gc)
+}
+
 pub(super) fn build_string_ascii_case(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_string_ascii_case(inputs.gc)
 }

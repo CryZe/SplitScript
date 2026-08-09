@@ -202,6 +202,34 @@ machine-applicable `process.name()` rewrite where the native `process` value is
 in scope. Ordinary functions do not implicitly capture an attachment; pass the
 name as a parameter when helper logic needs it.
 
+## Timer split index
+
+ASL exposes `timer.CurrentSplitIndex` as a signed integer. SplitScript uses
+`timer.currentSplitIndex()` and makes the no-attempt state explicit as `None`:
+
+```splitscript
+split {
+    let index = timer.currentSplitIndex() else return false
+    return match index {
+        0 => current.level == 2,
+        1 => current.level == 7,
+        _ => false,
+    }
+}
+```
+
+The result type is `u64?`. Every negative value from the host ABI maps to
+`None`; nonnegative values map to the corresponding `u64`. Do not cast the
+signed sentinel into an unsigned index. A skipped segment advances the index,
+and after the final split the index equals the route's segment count. The index
+is therefore authoritative route progress, not a count of splits requested by
+this autosplitter.
+
+The compiler recognizes `timer.CurrentSplitIndex`, but deliberately does not
+rewrite it automatically because the correct `None` behavior depends on the
+surrounding control flow. Use `else` for an early fallback or `match` when the
+absent state needs distinct behavior.
+
 ## Attach-time-discovered addresses
 
 Keep discovery in `onAttach` and polling in the state declaration. Polling does

@@ -6,7 +6,10 @@ use crate::{
     Diagnostic,
     ast::{ActionKind, ArrayTypeId, Expr, ExprId, ExprKind, Span},
     inference::{InferenceError, Requirements, Type, type_may_have_capability},
-    migration::{ForeignSpellingContext, foreign_spelling},
+    migration::{
+        ForeignSpellingContext, foreign_spelling, legacy_value_path_diagnostic,
+        migration_diagnostic,
+    },
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
     signature::parse_signature,
     stdlib::{
@@ -1178,6 +1181,17 @@ impl Checker {
             [name, fields @ ..] => {
                 let Some(binding) = self.binding_for_use(name, span) else {
                     let spelling = path.join(".");
+                    if let Some(id) = legacy_value_path_diagnostic(&spelling) {
+                        let metadata = migration_diagnostic(id)
+                            .expect("type checker migration diagnostic IDs must exist");
+                        let mut diagnostic = Diagnostic::type_error(metadata.message, span)
+                            .with_primary_label(metadata.primary_label);
+                        for note in metadata.notes {
+                            diagnostic = diagnostic.with_note(*note);
+                        }
+                        self.errors.push(diagnostic);
+                        return None;
+                    }
                     if let Some(rule) =
                         foreign_spelling(&spelling, ForeignSpellingContext::ValuePath)
                     {

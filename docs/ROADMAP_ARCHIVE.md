@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-09: explicit timer split-index migration
+
+- Triaged the campaign's reported split-index blocker against the legacy ASL
+  corpus and the current `timer.currentSplitIndex()` implementation.
+- Added a compiler-owned migration concept and cookbook recipe that preserve
+  the optional `u64` model, including the negative no-attempt sentinel, skipped
+  segments, and the post-final-split index.
+- Added a focused diagnostic for `timer.CurrentSplitIndex` without an automatic
+  rewrite: correct migration must choose how `None` affects the surrounding
+  control flow rather than merely changing member casing.
+
 ## 2026-08-09: discoverable attached-process identity migration
 
 - Triaged the campaign's reported process-name blocker against the current

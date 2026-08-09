@@ -530,6 +530,74 @@ fn legacy_process_identity_is_not_rewritten_outside_attachment_context() {
 }
 
 #[test]
+fn legacy_timer_split_index_requires_explicit_none_handling() {
+    let source = r#"
+        state "game.exe" {
+            level: u32 at 0x100
+        }
+
+        split {
+            return timer.CurrentSplitIndex == 0 && current.level == 2
+        }
+    "#;
+    let errors = splitscript::compile(source)
+        .expect_err("the legacy signed split-index property should need migration");
+    assert_eq!(errors.len(), 1);
+    let diagnostic = &errors[0];
+    assert_eq!(
+        diagnostic.message,
+        "ASL `timer.CurrentSplitIndex` is optional in SplitScript"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "timer.CurrentSplitIndex"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("returns `u64?`"))
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("else return false"))
+    );
+
+    let migrated = r#"
+        state "game.exe" {
+            level: u32 at 0x100
+        }
+
+        split {
+            let index = timer.currentSplitIndex() else return false
+            return index == 0 && current.level == 2
+        }
+    "#;
+    splitscript::compile(migrated)
+        .expect("handling the absent split index explicitly should compile");
+}
+
+#[test]
+fn user_defined_timer_split_index_member_keeps_its_meaning() {
+    let source = r#"
+        state "game.exe" {}
+
+        record LegacyTimer {
+            CurrentSplitIndex: u64,
+        }
+
+        fn readIndex(timer: LegacyTimer) -> u64 {
+            return timer.CurrentSplitIndex
+        }
+    "#;
+    splitscript::compile(source)
+        .expect("a user-defined timer member must not trigger ASL migration guidance");
+}
+
+#[test]
 fn unrelated_unknown_methods_do_not_receive_noisy_suggestions() {
     let source = r#"
         state "game.exe" {}

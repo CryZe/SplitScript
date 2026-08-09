@@ -147,6 +147,8 @@ pub const ASL_SHUTDOWN_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.lifecycle.shutdown-block");
 pub const ASL_TIMER_EVENT_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.lifecycle.timer-event-block");
+pub const ASL_CURRENT_SPLIT_INDEX_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.timer.current-split-index-path");
 
 pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
@@ -232,6 +234,17 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "exact `onStart`, `onSplit`, and `onReset` delivery needs the planned ordered host event contract",
         ],
     },
+    MigrationDiagnostic {
+        id: ASL_CURRENT_SPLIT_INDEX_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.timer.current-split-index"),
+        message: "ASL `timer.CurrentSplitIndex` is optional in SplitScript",
+        primary_label: "call `timer.currentSplitIndex()` and handle the no-attempt case",
+        notes: &[
+            "`timer.currentSplitIndex()` returns `u64?`; `None` represents every negative host value when no attempt is in progress",
+            "a decision block commonly uses `let index = timer.currentSplitIndex() else return false`, while other contexts can use `match`",
+            "the index also advances for skipped segments and equals the segment count after the final split",
+        ],
+    },
 ];
 
 pub fn legacy_lifecycle_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
@@ -244,6 +257,13 @@ pub fn legacy_lifecycle_diagnostic(name: &str) -> Option<MigrationDiagnosticId> 
         "onStart" | "onSplit" | "onReset" => ASL_TIMER_EVENT_DIAGNOSTIC,
         _ => return None,
     })
+}
+
+pub fn legacy_value_path_diagnostic(path: &str) -> Option<MigrationDiagnosticId> {
+    match path {
+        "timer.CurrentSplitIndex" => Some(ASL_CURRENT_SPLIT_INDEX_DIAGNOSTIC),
+        _ => None,
+    }
 }
 
 const ASL: &[SourceLanguage] = &[SourceLanguage::Asl];
@@ -612,6 +632,18 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         summary: "Simple start transitions can be reconstructed in `whileAttached`; exact ordered start, split, and reset events need host support.",
         targets: &[],
         cookbook_anchor: Some("legacy-asl-lifecycle-blocks"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.timer.current-split-index"),
+        name: "Current timer split index",
+        sources: ASL,
+        support: MigrationSupport::Direct,
+        summary: "Call `timer.currentSplitIndex()` and handle its optional `u64` result so the host's negative no-attempt sentinel cannot become a route index.",
+        targets: &[MigrationTarget::StandardLibraryItem(
+            "timer.currentSplitIndex",
+        )],
+        cookbook_anchor: Some("timer-split-index"),
         spellings: &[],
     },
     MigrationConcept {

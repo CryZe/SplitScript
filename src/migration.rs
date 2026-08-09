@@ -3,7 +3,7 @@
 pub use splitscript_syntax::migration::{
     ForeignSpelling, ForeignSpellingContext, MigrationConcept, MigrationConceptId,
     MigrationDiagnostic, MigrationDiagnosticId, MigrationSupport, MigrationTarget, SourceLanguage,
-    foreign_spelling,
+    diagnostic as migration_diagnostic, foreign_spelling, legacy_value_path_diagnostic,
 };
 
 use crate::{CompilerContext, language::LanguageCatalog};

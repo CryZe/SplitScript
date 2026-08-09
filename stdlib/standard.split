@@ -1608,6 +1608,52 @@ intrinsic type String {
     @intrinsic(StringParse)
     fn parse<T: Numeric>() -> T!;
 
+    /// Returns the raw UTF-8 byte at an offset.
+    ///
+    /// The index uses the same zero-based byte offsets as `byteLength` and
+    /// `slice`. Every in-range byte is observable, including a continuation
+    /// byte within a multibyte code point. An out-of-range index returns an
+    /// error.
+    ///
+    /// # Example
+    ///
+    /// Inspect a fixed-format ASCII identifier
+    ///
+    /// ```splitscript
+    /// let separator = "map_01".byteAt(3) else 0
+    /// if separator == 0x5f {
+    ///     print("Found the separator")
+    /// }
+    /// ```
+    @intrinsic(StringByteAt)
+    fn byteAt(
+        /// The zero-based UTF-8 byte offset.
+        byteIndex: u32,
+    ) -> u8!;
+
+    /// Returns the Unicode code point beginning at a UTF-8 byte offset.
+    ///
+    /// The index uses the same zero-based byte offsets as `byteLength` and
+    /// `slice`, not JavaScript's UTF-16 code-unit indexes. The index must point
+    /// to the first byte of a code point. An out-of-range index or a
+    /// continuation-byte index returns an error.
+    ///
+    /// # Example
+    ///
+    /// Inspect a non-ASCII code point
+    ///
+    /// ```splitscript
+    /// let sharpS = "Straße".codePointAt(4) else 0
+    /// if sharpS == 0x00df {
+    ///     print("Found sharp S")
+    /// }
+    /// ```
+    @intrinsic(StringCodePointAt)
+    fn codePointAt(
+        /// The zero-based UTF-8 byte offset of the code point's first byte.
+        byteIndex: u32,
+    ) -> u32!;
+
     /// Extracts text between two UTF-8 byte offsets.
     ///
     /// The start index is inclusive and the end index is exclusive. Invalid,

@@ -1389,6 +1389,8 @@ is involved:
 | `toAsciiLowerCase()` | Lowercase ASCII letters; preserve every other UTF-8 byte |
 | `split(delimiter)` | Fallible exact split preserving leading, repeated, and trailing empty segments |
 | `parse<T>()` | Strict fallible ASCII decimal parsing into an inferred numeric type |
+| `byteAt(byteIndex)` | Fallible raw UTF-8 byte lookup; continuation bytes remain observable |
+| `codePointAt(byteIndex)` | Fallible Unicode code-point lookup at a UTF-8 byte boundary |
 | `slice(start, end)` | Fallible half-open UTF-8 byte range; offsets must be code-point boundaries |
 | `replaceAll(search, replacement)` | Fallible exact non-overlapping replacement |
 | `String.concat(values)` | Concatenate an array of strings |
@@ -1397,6 +1399,17 @@ Case conversion reuses an already-normalized immutable string and allocates
 only when at least one ASCII uppercase letter changes. It intentionally has an
 ASCII-specific name: full Unicode lowercasing can change byte length and
 requires a separate, explicitly specified API.
+
+All string offsets are UTF-8 byte offsets. `byteAt` is appropriate for known
+ASCII or binary-shaped identifiers and accepts every in-range byte.
+`codePointAt` decodes the complete Unicode scalar beginning at an offset and
+fails when the offset points into a multibyte sequence. Despite its familiar
+name, it deliberately does not use JavaScript's UTF-16 code-unit indexing:
+
+```splitscript
+let separator = "map_01".byteAt(3) else 0
+let sharpS = "Straße".codePointAt(4) else 0
+```
 
 `text.parse<T>() -> T!` parses the complete string as a numeric value. The
 target type is normally inferred from the assignment, return value, or

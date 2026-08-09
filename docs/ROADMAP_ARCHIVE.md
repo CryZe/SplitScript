@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-09: explicit UTF-8 string inspection
+
+- Added fallible `String.byteAt(byteIndex)` for raw UTF-8 bytes and
+  `String.codePointAt(byteIndex)` for the Unicode scalar beginning at a byte
+  boundary. Both operations follow the existing byte-index policy instead of
+  inheriting JavaScript or C# UTF-16 indexes.
+- Kept inspection allocation-free below the language-level error boundary. The
+  shared Wasm helper checks bounds and defensively validates complete UTF-8,
+  including overlong encodings, surrogate code points, and U+10FFFF.
+- Extended the deterministic string fixture across one- through four-byte
+  values, continuation-byte rejection, raw continuation-byte access, and
+  end/out-of-range failures.
+- Updated the maintained Tiberian Sun port to inspect its proven ASCII splash
+  positions without allocating temporary one-byte strings.
+
 ## 2026-08-09: compile-time boolean settings families
 
 - Added a finite inclusive `for value in start..=end` form to the settings DSL.

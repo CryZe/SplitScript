@@ -134,6 +134,10 @@ pub(super) fn build_decimal_round(inputs: &RuntimeHelperInputs<'_>) -> Function 
     decimal_conversion::compile_decimal_round(inputs.memory.scratch().float_parse_digits)
 }
 
+pub(super) fn build_string_inspect(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_inspect(inputs.gc)
+}
+
 pub(super) fn build_string_slice(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_string_slice(inputs.gc)
 }

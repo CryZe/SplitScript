@@ -2225,6 +2225,29 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
+            IntrinsicId::StringByteAt | IntrinsicId::StringCodePointAt => {
+                let (mode, value_type, message) = match builtin {
+                    IntrinsicId::StringByteAt => {
+                        (0, Type::U8, "string byte index is out of bounds")
+                    }
+                    IntrinsicId::StringCodePointAt => (
+                        1,
+                        Type::U32,
+                        "string byte index is out of bounds or not a UTF-8 boundary",
+                    ),
+                    _ => unreachable!(),
+                };
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                function
+                    .instruction(&Instruction::I32Const(mode))
+                    .instruction(&Instruction::Call(
+                        context
+                            .runtime_helpers
+                            .function(RuntimeHelperId::StringInspect),
+                    ));
+                emit_status_result(function, expression, value_type, message, context);
+            }
             IntrinsicId::StringSlice => {
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);

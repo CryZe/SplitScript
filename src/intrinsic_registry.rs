@@ -50,6 +50,7 @@ pub(crate) enum RuntimeHelperId {
     DecimalRightShift,
     DecimalRound,
     StringParseFloat,
+    StringInspect,
     StringSlice,
     ScanProcessRange,
     ReadRelative32,
@@ -312,6 +313,8 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::StringReplaceAll
         | IntrinsicId::StringSplit
         | IntrinsicId::StringParse
+        | IntrinsicId::StringByteAt
+        | IntrinsicId::StringCodePointAt
         | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
         IntrinsicId::GbaEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
         _ => None,
@@ -386,6 +389,9 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
             Helper(Runtime::StringParseInteger),
             Helper(Runtime::StringParseFloat),
         ],
+        IntrinsicId::StringByteAt | IntrinsicId::StringCodePointAt => {
+            &[Helper(Runtime::StringInspect)]
+        }
         IntrinsicId::StringSlice => &[Helper(Runtime::StringSlice)],
         IntrinsicId::StringConcat => &[Helper(Runtime::ConcatStrings)],
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
@@ -434,6 +440,7 @@ const NEXT_TICK: EffectSet = EffectSet::one(Effect::RequiresAttachedProcess)
 
 const NONE: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::None);
 const BOOL: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Bool);
+const U8: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U8);
 const I64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::I64);
 const U32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U32);
 const U64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U64);
@@ -491,6 +498,14 @@ const SIGNATURE_ARRAY: ContractTypeRef = ContractTypeRef::Application {
 const T_RESULT: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Result,
     arguments: &[T],
+};
+const U8_RESULT: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Result,
+    arguments: &[U8],
+};
+const U32_RESULT: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Result,
+    arguments: &[U32],
 };
 const ADDRESS_RESULT: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Result,
@@ -1117,6 +1132,32 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             StringParse,
             Method,
             signature(NUMERIC_T, Some(STRING), params![], T_RESULT),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringByteAt => contract!(
+            StringByteAt,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(U32)],
+                U8_RESULT,
+            ),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringCodePointAt => contract!(
+            StringCodePointAt,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(U32)],
+                U32_RESULT,
+            ),
             ALLOCATES,
             Everywhere,
             RepresentationPrimitive

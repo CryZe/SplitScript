@@ -928,6 +928,14 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "String.parse<T>() -> T! where T: Numeric"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::StringByteAt),
+        "String.byteAt(byteIndex: u32) -> u8!"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::StringCodePointAt),
+        "String.codePointAt(byteIndex: u32) -> u32!"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::StringSlice),
         "String.slice(start: u32, end: u32) -> String!"
     );

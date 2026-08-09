@@ -113,6 +113,33 @@ whileAttached {
     {
         matches += 8192
     }
+    let utf8 = "Aé🙂"
+    let byteOutOfRange = match utf8.byteAt(7) {
+        Ok(_) => false,
+        Err(_) => true,
+    }
+    let continuationRejected = match utf8.codePointAt(2) {
+        Ok(_) => false,
+        Err(_) => true,
+    }
+    let endRejected = match utf8.codePointAt(7) {
+        Ok(_) => false,
+        Err(_) => true,
+    }
+    if utf8.byteLength() == 7
+        && (utf8.byteAt(0) else 0) == 0x41
+        && (utf8.byteAt(1) else 0) == 0xc3
+        && (utf8.byteAt(2) else 0) == 0xa9
+        && (utf8.byteAt(6) else 0) == 0x82
+        && (utf8.codePointAt(0) else 0) == 0x41
+        && (utf8.codePointAt(1) else 0) == 0x00e9
+        && (utf8.codePointAt(3) else 0) == 0x01f642
+        && byteOutOfRange
+        && continuationRejected
+        && endRejected
+    {
+        matches += 16384
+    }
 
     setVariable("String Predicates", matches)
 }

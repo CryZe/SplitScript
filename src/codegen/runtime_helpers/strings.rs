@@ -1148,10 +1148,261 @@ fn emit_integer_parse_failure(function: &mut Function) {
         .instruction(&Instruction::Return);
 }
 
-/// Parses strict ASCII decimal floating-point text. A bounded decimal scaling
-/// loop keeps hostile exponents cooperative: positive overflow is an error and
-/// sufficiently small negative exponents produce zero. Named non-finite values
-/// and surrounding whitespace are deliberately rejected.
+/// Reads either one raw UTF-8 byte (mode 0) or the Unicode scalar beginning at
+/// a UTF-8 byte boundary (mode 1). The `(success, value)` result keeps both
+/// operations allocation-free; expression lowering supplies the language-level
+/// error value. Although every SplitScript String is valid UTF-8, decoding is
+/// deliberately defensive so an invalid internal value cannot cause an
+/// out-of-bounds array access or manufacture a Unicode scalar.
+pub(in crate::codegen::runtime_helpers) fn compile_string_inspect(gc: &GcLayout) -> Function {
+    let string_type = gc.standard_index(StdlibTypeId::String);
+    let mut function = Function::new([(6, ValType::I32)]);
+    let value = 0;
+    let index = 1;
+    let mode = 2;
+    let value_len = 3;
+    let first = 4;
+    let second = 5;
+    let third = 6;
+    let fourth = 7;
+    let code_point = 8;
+
+    function
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalTee(value_len))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_string_inspect_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(first))
+        // Raw byte inspection accepts continuation bytes because the operation
+        // intentionally exposes the UTF-8 representation.
+        .instruction(&Instruction::LocalGet(mode))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_string_inspect_success(&mut function, first);
+    function
+        .instruction(&Instruction::End)
+        // ASCII is already the scalar value.
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0x80))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_string_inspect_success(&mut function, first);
+    function
+        .instruction(&Instruction::End)
+        // A valid two-byte sequence starts at C2. C0/C1 are overlong and
+        // 80..BF are continuation bytes rather than scalar boundaries.
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0xC2))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_string_inspect_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0xE0))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_string_inspect_require_bytes(&mut function, value_len, index, 2);
+    emit_string_inspect_load_byte(&mut function, string_type, value, index, 1, second);
+    emit_string_inspect_require_continuation(&mut function, second);
+    function
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0x1F))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Const(6))
+        .instruction(&Instruction::I32Shl)
+        .instruction(&Instruction::LocalGet(second))
+        .instruction(&Instruction::I32Const(0x3F))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalSet(code_point));
+    emit_string_inspect_success(&mut function, code_point);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0xF0))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_string_inspect_require_bytes(&mut function, value_len, index, 3);
+    emit_string_inspect_load_byte(&mut function, string_type, value, index, 1, second);
+    emit_string_inspect_load_byte(&mut function, string_type, value, index, 2, third);
+    emit_string_inspect_require_continuation(&mut function, second);
+    emit_string_inspect_require_continuation(&mut function, third);
+    // E0 A0..BF excludes overlong encodings; ED 80..9F excludes UTF-16
+    // surrogate code points, which are not Unicode scalar values.
+    function
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0xE0))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalGet(second))
+        .instruction(&Instruction::I32Const(0xA0))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0xED))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalGet(second))
+        .instruction(&Instruction::I32Const(0xA0))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_string_inspect_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0x0F))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Const(12))
+        .instruction(&Instruction::I32Shl)
+        .instruction(&Instruction::LocalGet(second))
+        .instruction(&Instruction::I32Const(0x3F))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Const(6))
+        .instruction(&Instruction::I32Shl)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalGet(third))
+        .instruction(&Instruction::I32Const(0x3F))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalSet(code_point));
+    emit_string_inspect_success(&mut function, code_point);
+    function
+        .instruction(&Instruction::End)
+        // Unicode ends at U+10FFFF, so F5..FF can never begin valid UTF-8.
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0xF4))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_string_inspect_failure(&mut function);
+    function.instruction(&Instruction::End);
+    emit_string_inspect_require_bytes(&mut function, value_len, index, 4);
+    emit_string_inspect_load_byte(&mut function, string_type, value, index, 1, second);
+    emit_string_inspect_load_byte(&mut function, string_type, value, index, 2, third);
+    emit_string_inspect_load_byte(&mut function, string_type, value, index, 3, fourth);
+    emit_string_inspect_require_continuation(&mut function, second);
+    emit_string_inspect_require_continuation(&mut function, third);
+    emit_string_inspect_require_continuation(&mut function, fourth);
+    // F0 90..BF excludes overlong encodings; F4 80..8F caps the result at
+    // U+10FFFF.
+    function
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0xF0))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalGet(second))
+        .instruction(&Instruction::I32Const(0x90))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0xF4))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalGet(second))
+        .instruction(&Instruction::I32Const(0x90))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_string_inspect_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(first))
+        .instruction(&Instruction::I32Const(0x07))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Const(18))
+        .instruction(&Instruction::I32Shl)
+        .instruction(&Instruction::LocalGet(second))
+        .instruction(&Instruction::I32Const(0x3F))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Const(12))
+        .instruction(&Instruction::I32Shl)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalGet(third))
+        .instruction(&Instruction::I32Const(0x3F))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Const(6))
+        .instruction(&Instruction::I32Shl)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalGet(fourth))
+        .instruction(&Instruction::I32Const(0x3F))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::LocalSet(code_point));
+    emit_string_inspect_success(&mut function, code_point);
+    function.instruction(&Instruction::End);
+    function
+}
+
+fn emit_string_inspect_failure(function: &mut Function) {
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Return);
+}
+
+fn emit_string_inspect_success(function: &mut Function, value: u32) {
+    function
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::Return);
+}
+
+fn emit_string_inspect_require_bytes(
+    function: &mut Function,
+    value_len: u32,
+    index: u32,
+    required: i32,
+) {
+    function
+        .instruction(&Instruction::LocalGet(value_len))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::I32Const(required))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_string_inspect_failure(function);
+    function.instruction(&Instruction::End);
+}
+
+fn emit_string_inspect_load_byte(
+    function: &mut Function,
+    string_type: u32,
+    value: u32,
+    index: u32,
+    offset: i32,
+    destination: u32,
+) {
+    function
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(offset))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(destination));
+}
+
+fn emit_string_inspect_require_continuation(function: &mut Function, byte: u32) {
+    function
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xC0))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Const(0x80))
+        .instruction(&Instruction::I32Ne)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_string_inspect_failure(function);
+    function.instruction(&Instruction::End);
+}
+
 /// Extracts a UTF-8 byte range. Returning a null reference is the helper ABI's
 /// failure sentinel for reversed or out-of-range bounds and offsets that split
 /// a UTF-8 code point; expression lowering converts it to `String!`.

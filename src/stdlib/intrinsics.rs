@@ -64,6 +64,8 @@ macro_rules! trusted_intrinsics {
             StringReplaceAll,
             StringSplit,
             StringParse,
+            StringByteAt,
+            StringCodePointAt,
             StringSlice,
             StringConcat,
             ModuleScan,

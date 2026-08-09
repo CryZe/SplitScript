@@ -207,6 +207,8 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::StringReplaceAll
         | StdlibItemId::StringSplit
         | StdlibItemId::StringParse
+        | StdlibItemId::StringByteAt
+        | StdlibItemId::StringCodePointAt
         | StdlibItemId::StringSlice
         | StdlibItemId::StringConcat => BASIC_EXAMPLE,
         _ => BASIC_EXAMPLE,

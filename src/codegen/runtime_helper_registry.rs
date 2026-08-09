@@ -100,6 +100,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(DecimalRightShift, (I32, I32, I32, I32) -> (I32, I32, I32), deps [], imports [], build_decimal_right_shift),
     helper!(DecimalRound, (I32, I32, I32) -> (I64), deps [], imports [], build_decimal_round),
     helper!(StringParseFloat, (StringValue, I32) -> (I32, F64), deps [DecimalLeftShift, DecimalRightShift, DecimalRound], imports [], build_string_parse_float),
+    helper!(StringInspect, (StringValue, I32, I32) -> (I32, I32), deps [], imports [], build_string_inspect),
     helper!(StringSlice, (StringValue, I32, I32) -> (StringValue), deps [], imports [], build_string_slice),
     helper!(ScanProcessRange, (I64, I64, I64, I32, I32, I32) -> (I64), deps [], imports [ProcessRead], build_scan_process_range),
     helper!(ReadRelative32, (I64, I64) -> (I64), deps [], imports [ProcessRead], build_read_relative32),

@@ -255,6 +255,8 @@ starting map before `split` is evaluated. This reproduces an ASL `timer.OnStart`
 handler without a separate event API. The generated update loop runs
 `whileAttached` before timer-decision actions.
 
+## Finite settings families
+
 Prefer direct `settings.name` access when the setting is known statically. For
 data tables whose entries select among declared boolean settings, give each
 declaration its exact host-map string with `key "..."` and use
@@ -263,6 +265,27 @@ unknown key; it is not a dynamically typed replacement for choice or file
 settings. If the original settings have a boolean parent, gate the child result
 explicitly; a quoted SplitScript heading is visual only. The complete A Plague
 Tale example preserves its **All Chapters** parent semantics this way.
+
+When legacy `startup` creates a bounded numbered family, declare it at compile
+time rather than expanding dozens of source members or mutating the settings
+map:
+
+```splitscript
+settings {
+    "Levels" {
+        for level in 2..=36 {
+            `{level}` key `{level}`: true,
+        },
+    },
+}
+```
+
+This registers the exact stable keys `"2"` through `"36"`. The generated
+entries are intentionally available only through `settings.enabled(key)`; they
+do not create artificial members such as `settings.level17`. Label and key
+templates may interpolate only the range binding, and a documentation comment
+on the family becomes every generated tooltip. See the maintained Drug Dealer
+Simulator port for registration and runtime evidence.
 
 Use a growable `Set<T>` only when the keys are genuinely discovered or
 unbounded. A fixed 16-chapter route does not justify per-tick collection

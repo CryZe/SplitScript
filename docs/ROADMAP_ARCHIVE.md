@@ -1,5 +1,24 @@
 # SplitScript roadmap
 
+## 2026-08-09: compile-time boolean settings families
+
+- Added a finite inclusive `for value in start..=end` form to the settings DSL.
+  Label and stable-key templates interpolate the compile-time u32 binding, one
+  default applies to every generated boolean, and family documentation becomes
+  every generated tooltip.
+- Preserved the ordinary settings pipeline by lowering families into concrete
+  declarations before validation and code generation. The retained source
+  declaration independently powers formatting, highlighting, hover, and
+  binding navigation; generated implementation names never appear as typed
+  settings members.
+- Promoted Drug Dealer Simulator as the motivating maintained port. Its 35
+  level settings, exact keys and labels, defaults, tooltips, live changes,
+  pointer path, split behavior, process lifecycle, and `.exe` host identity are
+  covered by a deterministic runtime fixture.
+- Kept truly discovered or unbounded mutable settings deferred to the host
+  evolution work rather than making a compile-time convenience imply runtime
+  mutation.
+
 ## 2026-08-09: explicit ASCII string normalization
 
 - Added immutable `String.toAsciiLowerCase()` with an intentionally narrow

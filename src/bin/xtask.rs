@@ -465,6 +465,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "examples/dds.split",
+        output: "dds.wasm",
+        profile: "release",
+        harness: "tests/dds_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/while_loop.split",
         output: "while_loop.wasm",
         profile: "release",

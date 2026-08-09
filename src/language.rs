@@ -99,6 +99,24 @@ const STATE_LAYOUT_SOURCE: &str = include_str!("../examples/state_layouts.split"
 
 const SETTINGS_SOURCE: &str = include_str!("../examples/lso_desktop_settings.split");
 
+const SETTINGS_FAMILY_SOURCE: &str = r#"state "game.exe" {}
+
+settings {
+    "Levels" {
+        /// Controls the corresponding level split.
+        for level in 2..=36 {
+            `Level {level}` key `{level}`: true,
+        },
+    },
+}
+
+split {
+    return settings.enabled(currentLevel as String)
+}
+
+let currentLevel = 2
+"#;
+
 const DOCUMENTATION_COMMENT_SOURCE: &str = r#"state "game.exe" {}
 
 /// Formats a level number for display.
@@ -495,6 +513,12 @@ focused_example!(
     "\"Layout\" => layout: file {\n    \"Layout files\" => \"*.lsl\"\n}",
     SETTINGS_SOURCE
 );
+focused_example!(
+    SETTINGS_FAMILY_EXAMPLE,
+    "Declare numbered level settings",
+    "for level in 2..=36 {\n    `Level {level}` key `{level}`: true,\n}",
+    SETTINGS_FAMILY_SOURCE
+);
 
 macro_rules! language_item {
     ($id:ident, $name:expr, $kind:expr, $form:expr, $summary:expr, $details:expr, $examples:expr) => {
@@ -693,6 +717,15 @@ define_language_catalog! {
         "Declares live user settings.",
         "Settings support nested headings, documentation-comment tooltips, booleans, choices, and file selectors. An optional quoted key is the exact stable string stored in the host settings map; otherwise the source identifier is used. Current and previous values refresh every update.",
         SETTINGS_DECL_EXAMPLE
+    ),
+    language_item!(
+        SettingFamily,
+        "settings family",
+        LanguageItemKind::Syntax,
+        "for value in start..=end { `label {value}` key `{value}`: default }",
+        "Declares a finite family of boolean settings at compile time.",
+        "The inclusive u32 range is expanded during compilation into ordinary host settings. Label and key templates may interpolate only the loop binding. Generated entries deliberately have no statically named settings member; query them with settings.enabled(key). A documentation comment on the family becomes every generated setting's tooltip, and nesting it in a quoted group preserves the normal heading structure.",
+        SETTINGS_FAMILY_EXAMPLE
     ),
     language_item!(
         StableSettingKey,

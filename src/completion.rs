@@ -352,7 +352,7 @@ fn complete_member(
         }
         ["settings"] | ["oldSettings"] => {
             for setting in &syntax.settings {
-                if !matches!(setting.kind, SettingKind::Title { .. }) {
+                if setting.source_visible && !matches!(setting.kind, SettingKind::Title { .. }) {
                     let mut completion = simple_completion(
                         &setting.name,
                         CompletionKind::Setting,
@@ -984,7 +984,7 @@ fn add_inferred_fields(
         }
         TypeKind::SettingsView => {
             for setting in &syntax.settings {
-                if !matches!(setting.kind, SettingKind::Title { .. }) {
+                if setting.source_visible && !matches!(setting.kind, SettingKind::Title { .. }) {
                     let mut completion = simple_completion(
                         &setting.name,
                         CompletionKind::Setting,
@@ -1535,6 +1535,14 @@ whileAttached {
             "state \"game.exe\" {}\nsettings { \"Flag\" => flag key \"flag\": true }\nwhileAttached { settings.en }",
         );
         assert!(labels(&mut keyed_settings, "settings.en").contains(&"enabled".to_owned()));
+
+        let mut generated_settings = CompilerDatabase::new(
+            "state \"game.exe\" {}\nsettings { for level in 2..=4 { `{level}`: true } }\nwhileAttached { settings._setting }",
+        );
+        assert!(
+            labels(&mut generated_settings, "settings._setting").is_empty(),
+            "compile-time family implementation names must not become members"
+        );
     }
 
     #[test]

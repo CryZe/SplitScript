@@ -7,7 +7,8 @@ use crate::{
     Diagnostic,
     ast::{
         Action, EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, Program, RecordDecl, SettingDecl,
-        SettingKind, StateDecl, StateField, Stmt, TypeApplicationDecl, VariableDecl,
+        SettingFamilyDecl, SettingKind, StateDecl, StateField, Stmt, TypeApplicationDecl,
+        VariableDecl,
     },
     lexer::{Lexeme, TokenKind, TriviaKind},
     syntax::SourceDocument,
@@ -343,6 +344,29 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             SettingKind::Title { .. } => {}
         }
         self.mark_separator_after(setting.span.end);
+    }
+
+    fn visit_setting_family(&mut self, family: &'ast SettingFamilyDecl) {
+        let tokens = self
+            .document
+            .tokens()
+            .filter(|token| {
+                family.span.start <= token.span.start && token.span.end <= family.span.end
+            })
+            .collect::<Vec<_>>();
+        if let Some(opening) = tokens.iter().find(|token| token.kind == TokenKind::LBrace) {
+            self.break_after.insert(opening.span.end);
+        }
+        if let Some(closing_index) = tokens
+            .iter()
+            .rposition(|token| token.kind == TokenKind::RBrace)
+            && let Some(previous) = closing_index
+                .checked_sub(1)
+                .and_then(|index| tokens.get(index))
+        {
+            self.break_after.insert(previous.span.end);
+        }
+        self.mark_separator_after(family.span.end);
     }
 
     fn visit_expr(&mut self, expression: &'ast Expr) {
@@ -1083,6 +1107,11 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
         visit::walk_setting(self, setting);
     }
 
+    fn visit_setting_family(&mut self, family: &'ast SettingFamilyDecl) {
+        self.mark_comma(family.span);
+        visit::walk_setting_family(self, family);
+    }
+
     fn visit_expr(&mut self, expression: &'ast Expr) {
         match &expression.kind {
             ExprKind::Record { fields, .. } if !fields.is_empty() => {
@@ -1213,6 +1242,9 @@ fn needs_space(
     };
 
     if matches!(previous, TokenKind::Minus) && matches!(current, TokenKind::Gt) {
+        return false;
+    }
+    if matches!(previous, TokenKind::DotDotEq) || matches!(current, TokenKind::DotDotEq) {
         return false;
     }
     if matches!(previous, TokenKind::Ident(name) if matches!(name.as_str(), "sig" | "v"))
@@ -1560,6 +1592,27 @@ settings {
         let formatted = format_source(source).unwrap();
         assert_eq!(formatted, expected);
         assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn formats_compile_time_setting_families() {
+        let source = r#"state "game.exe"{}
+settings{"Levels"{/// One switch per level.
+for level in 2 ..= 36{`Level {level}` key `{level}`:true}}}"#;
+        let expected = r#"state "game.exe" {}
+settings {
+    "Levels" {
+        /// One switch per level.
+        for level in 2..=36 {
+            `Level {level}` key `{level}`: true,
+        },
+    },
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        crate::compile(&formatted).expect("formatted settings families should compile");
     }
 
     #[test]

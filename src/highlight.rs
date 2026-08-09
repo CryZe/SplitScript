@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
     ast::{
-        Action, Expr, ExprKind, FunctionDecl, MatchPattern, Program, SettingKind, Span, Stmt,
-        TypeRef, ValueId, VariableDecl,
+        Action, Expr, ExprKind, FunctionDecl, MatchPattern, Program, SettingFamilyDecl,
+        SettingKind, SettingTextPart, Span, Stmt, TypeRef, ValueId, VariableDecl,
     },
     lexer::{Lexeme, Token, TokenKind, TriviaKind},
     semantic::{ResolvedCall, ResolvedMember, ResolvedValue, SemanticModel},
@@ -182,6 +182,11 @@ impl<'ast> Visitor<'ast> for ValueKindCollector {
 
     fn visit_setting(&mut self, setting: &'ast crate::ast::SettingDecl) {
         self.kinds.insert(setting.id, SemanticTokenKind::Setting);
+    }
+
+    fn visit_setting_family(&mut self, family: &'ast SettingFamilyDecl) {
+        self.kinds
+            .insert(family.binding_id, SemanticTokenKind::Variable);
     }
 
     fn visit_function(&mut self, function: &'ast FunctionDecl) {
@@ -781,6 +786,25 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
         }
     }
 
+    fn visit_setting_family(&mut self, family: &'ast SettingFamilyDecl) {
+        self.insert(family.in_span, SemanticTokenKind::Keyword, 0);
+        self.insert(
+            family.binding_span,
+            SemanticTokenKind::Variable,
+            MODIFIER_DECLARATION | MODIFIER_READONLY,
+        );
+        if let Some(span) = family.key_keyword_span {
+            self.insert(span, SemanticTokenKind::Keyword, 0);
+        }
+        for pattern in family.key.iter().chain(std::iter::once(&family.label)) {
+            for part in &pattern.parts {
+                if let SettingTextPart::Binding { span } = part {
+                    self.insert(*span, SemanticTokenKind::Variable, MODIFIER_READONLY);
+                }
+            }
+        }
+    }
+
     fn visit_record(&mut self, record: &'ast crate::ast::RecordDecl) {
         self.mark_ident(
             record.span,
@@ -1048,6 +1072,7 @@ fn is_operator(kind: &TokenKind) -> bool {
             | TokenKind::Ge
             | TokenKind::Shl
             | TokenKind::Shr
+            | TokenKind::DotDotEq
     )
 }
 

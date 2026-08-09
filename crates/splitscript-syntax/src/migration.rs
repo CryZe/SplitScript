@@ -597,6 +597,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: &[],
     },
     MigrationConcept {
+        id: MigrationConceptId::new("asl.settings.finite-family"),
+        name: "Finite startup-generated settings",
+        sources: ASL,
+        support: MigrationSupport::Direct,
+        summary: "Use a compile-time settings family for bounded integer-keyed booleans; it lowers to ordinary declarations and remains available through `settings.enabled(key)`.",
+        targets: &[MigrationTarget::Language("settings family")],
+        cookbook_anchor: Some("finite-settings-families"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("asl.state.mutable-current"),
         name: "Assignments to current",
         sources: ASL,

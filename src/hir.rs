@@ -64,11 +64,13 @@ impl DeclarationIndex {
             }
         }
         for setting in &syntax.settings {
-            program.push(
-                DeclarationId::Setting(setting.id),
-                &setting.name,
-                setting.span,
-            );
+            if setting.source_visible {
+                program.push(
+                    DeclarationId::Setting(setting.id),
+                    &setting.name,
+                    setting.span,
+                );
+            }
         }
         for global in &syntax.globals {
             program.push(DeclarationId::Global(global.id), &global.name, global.span);

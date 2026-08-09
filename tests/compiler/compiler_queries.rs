@@ -1492,3 +1492,39 @@ fn setting_runtime_keys_are_nonempty_and_unique() {
             .any(|diagnostic| diagnostic.message == "a setting key cannot be empty")
     );
 }
+
+#[test]
+fn setting_family_bindings_navigate_without_exposing_generated_members() {
+    let source = r#"
+        state "game.exe" {}
+        settings {
+            for level in 2..=4 {
+                `Level {level}` key `{level}`: true,
+            },
+        }
+    "#;
+    let mut database = splitscript::tooling::database::CompilerDatabase::new(source);
+    let checked = database.check().expect("settings family should check");
+    let family = &checked.syntax().setting_families[0];
+    let use_offset = source.find("{level}").unwrap() + 1;
+    assert!(matches!(
+        database.definition_at(use_offset).unwrap(),
+        Some(splitscript::tooling::database::DefinitionTarget::Source(definition))
+            if definition.id == splitscript::tooling::database::SourceDefinitionId::Value(family.binding_id)
+                && definition.span == family.binding_span
+    ));
+    let for_offset = source.find("for level").unwrap();
+    assert_eq!(
+        database.definition_at(for_offset).unwrap(),
+        Some(splitscript::tooling::database::DefinitionTarget::Language(
+            splitscript::tooling::language::LanguageItemId::SettingFamily
+        ))
+    );
+    let in_offset = source.find(" in 2").unwrap() + 1;
+    assert_eq!(
+        database.definition_at(in_offset).unwrap(),
+        Some(splitscript::tooling::database::DefinitionTarget::Language(
+            splitscript::tooling::language::LanguageItemId::SettingFamily
+        ))
+    );
+}

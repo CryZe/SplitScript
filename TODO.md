@@ -131,14 +131,6 @@ or behavioral parity.
 
 ### Polling, mutable watcher patterns, and settings
 
-- [ ] Add a compile-time repeated/table form for large but finite settings
-  families before exposing runtime mutation. It must generate stable string
-  keys, labels, defaults, parent gating, and tooltips through the same settings
-  declaration model, and make 35–110-entry level/mission tables auditable
-  without hand expansion. `settings.enabled(key)` remains lookup over declared
-  boolean keys and should diagnose or clearly document unknown-key behavior.
-  Truly game-discovered or unbounded settings remain separate host/runtime work
-  under R1/R4 in [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
 - [ ] Add conditional settings visibility or enablement only with explicit host
   semantics for persisted hidden values and parent changes. Until then,
   document that headings are visual and parent boolean settings must gate child

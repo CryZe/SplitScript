@@ -207,7 +207,8 @@ timer-metadata and monotonic-delay case is recorded in
 migration and multi-layout case in
 [`docs/NIOH_RTA_NO_LOAD_PORT.md`](docs/NIOH_RTA_NO_LOAD_PORT.md). The focused
 ASCII string-normalization case is recorded in
-[`docs/TIBERIAN_SUN_PORT.md`](docs/TIBERIAN_SUN_PORT.md).
+[`docs/TIBERIAN_SUN_PORT.md`](docs/TIBERIAN_SUN_PORT.md), and the compile-time
+numbered-settings case in [`docs/DDS_PORT.md`](docs/DDS_PORT.md).
 
 ## What works now
 
@@ -264,9 +265,10 @@ ASCII string-normalization case is recorded in
 - Typed `print` calls in any action block.
 - Runtime variables, timer-state inspection, explicit game-time pause/resume,
   tick-rate control, and normalized duration conversion.
-- Live typed settings: nested titles and tooltips, booleans, stable string
-  host-map keys, enum-backed choices, file selectors with glob/MIME filters, and automatic
-  `settings`/`oldSettings` tick snapshots.
+- Live typed settings: nested titles and tooltips, booleans, compile-time finite
+  integer-keyed families, stable string host-map keys, enum-backed choices,
+  file selectors with glob/MIME filters, and automatic `settings`/`oldSettings`
+  tick snapshots.
 - `whileAttached`, `start`, `split`, `reset`, `isLoading`, and `gameTime`
   actions, plus one-shot `onAttach` and `onDetached` lifecycle blocks.
 - LiveSplit timer-state ordering matching the ASL v2 prototype.

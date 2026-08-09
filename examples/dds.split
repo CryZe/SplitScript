@@ -1,0 +1,20 @@
+state "DrugDealerSimulator-Win64-Shipping.exe" {
+    /// The player's current level.
+    level: i32 at 0x02fd_8bb0, 0x20, 0xb0, 0x7d0, 0x350, 0x348;
+}
+
+settings {
+    "Levels" {
+        /// Splits when the player reaches this level.
+        for level in 2..=36 {
+            `{level}` key `{level}`: true,
+        },
+    },
+}
+
+split {
+    if current.level <= old.level {
+        return false
+    }
+    return settings.enabled(current.level as String)
+}

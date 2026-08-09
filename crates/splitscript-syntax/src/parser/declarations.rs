@@ -5,13 +5,14 @@
 use super::{
     Action, ActionKind, Diagnostic, EnumDecl, EnumId, EnumReference, EnumVariant, FunctionDecl,
     FunctionId, Parameter, Parser, PointerPath, PointerPathBase, RecordDecl, RecordField, RecordId,
-    SettingChoiceOption, SettingDecl, SettingExternalKey, SettingFileFilter, SettingKind, Span,
-    StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource,
-    StateTransform, TokenKind, TypeRef,
+    SettingChoiceOption, SettingDecl, SettingExternalKey, SettingFamilyDecl, SettingFileFilter,
+    SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl,
+    StateMemoryDecoder, StateProviderRef, StateSource, StateTransform, TokenKind, TypeRef,
 };
 use crate::{
     diagnostic::{DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_STRING_N_FIELD_DIAGNOSTIC, legacy_lifecycle_diagnostic},
+    parser::parse_integer,
 };
 
 impl Parser<'_> {
@@ -597,21 +598,25 @@ impl Parser<'_> {
         Ok(names)
     }
 
-    pub(super) fn settings_block_decl(&mut self) -> Result<Vec<SettingDecl>, Diagnostic> {
+    pub(super) fn settings_block_decl(
+        &mut self,
+    ) -> Result<(Vec<SettingDecl>, Vec<SettingFamilyDecl>), Diagnostic> {
         self.expect_ident("settings")?;
         self.expect(TokenKind::LBrace, "expected `{` after `settings`")?;
         let mut settings = Vec::new();
+        let mut families = Vec::new();
         let mut heading_count = 0;
-        self.settings_dsl_entries(&mut settings, 0, &mut heading_count)?;
+        self.settings_dsl_entries(&mut settings, &mut families, 0, &mut heading_count)?;
         if let Err(error) = self.expect(TokenKind::RBrace, "expected `}` after settings") {
             self.record_missing(error);
         }
-        Ok(settings)
+        Ok((settings, families))
     }
 
     pub(super) fn settings_dsl_entries(
         &mut self,
         settings: &mut Vec<SettingDecl>,
+        families: &mut Vec<SettingFamilyDecl>,
         heading_level: u32,
         heading_count: &mut u32,
     ) -> Result<(), Diagnostic> {
@@ -622,7 +627,7 @@ impl Parser<'_> {
                 return Ok(());
             }
             let item_start = self.cursor.position();
-            let parsed = self.settings_dsl_entry(settings, heading_level, heading_count);
+            let parsed = self.settings_dsl_entry(settings, families, heading_level, heading_count);
             self.recover_delimited_item(parsed, item_start, body_depth);
         }
         Ok(())
@@ -631,12 +636,16 @@ impl Parser<'_> {
     pub(super) fn settings_dsl_entry(
         &mut self,
         settings: &mut Vec<SettingDecl>,
+        families: &mut Vec<SettingFamilyDecl>,
         heading_level: u32,
         heading_count: &mut u32,
     ) -> Result<(), Diagnostic> {
         let tooltip = self.take_doc_tooltip();
         if self.at(&TokenKind::RBrace) {
             return Err(self.error("a documentation comment must precede a setting or title"));
+        }
+        if self.at_ident("for") {
+            return self.setting_family(settings, families, tooltip);
         }
         if matches!(self.current().kind, TokenKind::Ident(_))
             && matches!(self.peek(1).kind, TokenKind::Colon)
@@ -693,9 +702,10 @@ impl Parser<'_> {
                 tooltip,
                 external_key: None,
                 kind: SettingKind::Title { heading_level },
+                source_visible: true,
                 span: label_token.span,
             });
-            self.settings_dsl_entries(settings, heading_level + 1, heading_count)?;
+            self.settings_dsl_entries(settings, families, heading_level + 1, heading_count)?;
             let end = self.expect(TokenKind::RBrace, "expected `}` after setting group")?;
             settings[title_index].span = label_token.span.join(end);
             self.require_comma_between("settings");
@@ -747,10 +757,179 @@ impl Parser<'_> {
             tooltip,
             external_key,
             kind,
+            source_visible: true,
             span: label_token.span.join(end).join(name_span),
         });
         self.require_comma_between("settings");
         Ok(())
+    }
+
+    fn setting_family(
+        &mut self,
+        settings: &mut Vec<SettingDecl>,
+        families: &mut Vec<SettingFamilyDecl>,
+        tooltip: Option<String>,
+    ) -> Result<(), Diagnostic> {
+        let start_span = self.expect_ident("for")?;
+        let (binding, binding_span) = self.expect_any_ident("expected a binding after `for`")?;
+        let in_span = self.expect_ident("in")?;
+        let (range_start, range_start_span) = self.setting_family_bound()?;
+        self.expect(
+            TokenKind::DotDotEq,
+            "expected an inclusive `..=` range in a settings family",
+        )?;
+        let (range_end, range_end_span) = self.setting_family_bound()?;
+        if range_start > range_end {
+            return Err(Diagnostic::new(
+                "a settings-family range cannot run backwards",
+                range_start_span.join(range_end_span),
+            ));
+        }
+        if range_end - range_start > 4095 {
+            return Err(Diagnostic::new(
+                "a settings family may declare at most 4096 settings",
+                range_start_span.join(range_end_span),
+            ));
+        }
+        self.expect(
+            TokenKind::LBrace,
+            "expected `{` after the settings-family range",
+        )?;
+        let label = self.setting_text_pattern(&binding, "expected a quoted or template label")?;
+        let (key_keyword_span, key) = if self.at_ident("key") {
+            let keyword_span = self.bump().span;
+            (
+                Some(keyword_span),
+                Some(self.setting_text_pattern(
+                    &binding,
+                    "expected a quoted or template key after `key`",
+                )?),
+            )
+        } else {
+            (None, None)
+        };
+        self.expect(TokenKind::Colon, "expected `:` before the family default")?;
+        let default = self.expect_bool("expected a boolean family default")?;
+        self.eat(&TokenKind::Comma);
+        let closing = self.expect(TokenKind::RBrace, "expected `}` after the settings family")?;
+        let span = start_span.join(closing);
+        let family_index = families.len();
+        let family = SettingFamilyDecl {
+            keyword_span: start_span,
+            binding_id: self.new_value_id(),
+            binding,
+            binding_span,
+            in_span,
+            start: range_start,
+            end_inclusive: range_end,
+            range_span: range_start_span.join(range_end_span),
+            label,
+            key_keyword_span,
+            key,
+            default,
+            tooltip,
+            span,
+        };
+        for value in range_start..=range_end {
+            let description = family.label.render(value);
+            let key_pattern = family.key.as_ref().unwrap_or(&family.label);
+            settings.push(SettingDecl {
+                id: self.new_value_id(),
+                name: format!("_setting_family_{family_index}_{value}"),
+                description,
+                tooltip: family.tooltip.clone(),
+                external_key: Some(SettingExternalKey {
+                    value: key_pattern.render(value),
+                    keyword_span: key_pattern.span,
+                    span: key_pattern.span,
+                }),
+                kind: SettingKind::Bool { default },
+                source_visible: false,
+                span,
+            });
+        }
+        families.push(family);
+        self.require_comma_between("settings");
+        Ok(())
+    }
+
+    fn setting_family_bound(&mut self) -> Result<(u32, Span), Diagnostic> {
+        let token = self.current().clone();
+        let TokenKind::Int(text) = token.kind else {
+            return Err(Diagnostic::new(
+                "expected a non-negative integer settings-family bound",
+                token.span,
+            ));
+        };
+        self.bump();
+        let (value, suffix) =
+            parse_integer(&text).map_err(|message| Diagnostic::new(message, token.span))?;
+        if suffix.is_some() {
+            return Err(Diagnostic::new(
+                "settings-family bounds do not need integer suffixes",
+                token.span,
+            ));
+        }
+        let value = u32::try_from(value)
+            .map_err(|_| Diagnostic::new("a settings-family bound must fit in u32", token.span))?;
+        Ok((value, token.span))
+    }
+
+    fn setting_text_pattern(
+        &mut self,
+        binding: &str,
+        message: &'static str,
+    ) -> Result<SettingTextPattern, Diagnostic> {
+        let token = self.current().clone();
+        if let TokenKind::String(value) = token.kind {
+            self.bump();
+            return Ok(SettingTextPattern {
+                parts: vec![SettingTextPart::Text(value)],
+                span: token.span,
+            });
+        }
+        if self.eat(&TokenKind::TemplateStart).is_none() {
+            return Err(Diagnostic::new(message, token.span));
+        }
+        let start = token.span;
+        let mut parts = Vec::new();
+        loop {
+            match self.current().kind.clone() {
+                TokenKind::TemplateChunk(value) => {
+                    self.bump();
+                    parts.push(SettingTextPart::Text(value));
+                }
+                TokenKind::TemplateExprStart => {
+                    self.bump();
+                    let (name, span) =
+                        self.expect_any_ident("expected the family binding in this template")?;
+                    if name != binding {
+                        return Err(Diagnostic::new(
+                            format!("settings-family templates may only interpolate `{binding}`"),
+                            span,
+                        ));
+                    }
+                    self.expect(
+                        TokenKind::TemplateExprEnd,
+                        "expected `}` after the family binding",
+                    )?;
+                    parts.push(SettingTextPart::Binding { span });
+                }
+                TokenKind::TemplateEnd => {
+                    let end = self.bump().span;
+                    return Ok(SettingTextPattern {
+                        parts,
+                        span: start.join(end),
+                    });
+                }
+                _ => {
+                    return Err(Diagnostic::new(
+                        "settings-family templates only support their integer binding",
+                        self.current().span,
+                    ));
+                }
+            }
+        }
     }
 
     pub(super) fn take_doc_tooltip(&mut self) -> Option<String> {

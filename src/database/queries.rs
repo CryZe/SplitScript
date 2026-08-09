@@ -735,6 +735,14 @@ impl<'ast> Visitor<'ast> for ContextualLanguageItemAt {
         }
     }
 
+    fn visit_setting_family(&mut self, family: &'ast crate::ast::SettingFamilyDecl) {
+        if family.keyword_span == self.target || family.in_span == self.target {
+            self.item = Some(LanguageItemId::SettingFamily);
+        } else if family.key_keyword_span == Some(self.target) {
+            self.item = Some(LanguageItemId::StableSettingKey);
+        }
+    }
+
     fn visit_stmt(&mut self, statement: &'ast crate::ast::Stmt) {
         if let crate::ast::Stmt::For { in_span, .. } = statement
             && *in_span == self.target

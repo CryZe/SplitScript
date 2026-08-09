@@ -941,6 +941,30 @@ key. Script code always uses the readable declaration name, such as
 and data-driven lookup. Keys must be nonempty and unique across the complete
 settings block.
 
+Large finite boolean families use a compile-time `for` declaration instead of
+hand-written members or mutable runtime registration:
+
+```text
+settings {
+    "Levels" {
+        /// Splits when the player reaches this level.
+        for level in 2..=36 {
+            `Level {level}` key `{level}`: true,
+        },
+    },
+}
+```
+
+The bounds are inclusive non-negative `u32` constants, and one family may
+produce at most 4096 settings. Label and key templates may interpolate only
+the family binding. The compiler expands the range into ordinary boolean
+settings, so generated entries use the same registration, stable-key,
+snapshot, default, tooltip, and validation paths as explicit declarations.
+They intentionally do not invent statically named members; use
+`settings.enabled(key)` or `oldSettings.enabled(key)` for lookup. A `///`
+comment before `for` becomes every generated setting's tooltip. Quoted groups
+remain visual headings and do not implicitly gate child values.
+
 `settings.enabled(key)` performs allocation-free data-driven lookup over the
 declared boolean settings, using those same host-map strings. `oldSettings`
 provides the corresponding method for the preceding snapshot. Unknown keys—or

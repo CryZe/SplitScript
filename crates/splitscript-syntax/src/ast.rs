@@ -275,6 +275,10 @@ pub struct Program {
     pub state: Option<StateDecl>,
     /// The complete `settings` declaration, including its keyword and body.
     pub settings_span: Option<Span>,
+    /// Source-level compile-time families. Their concrete host settings are
+    /// expanded into `settings`, while this representation keeps tooling tied
+    /// to the declaration the author actually wrote.
+    pub setting_families: Vec<SettingFamilyDecl>,
     pub settings: Vec<SettingDecl>,
     pub globals: Vec<VariableDecl>,
     pub records: Vec<RecordDecl>,
@@ -644,6 +648,10 @@ pub struct SettingDecl {
     /// absent, the source identifier remains the key.
     pub external_key: Option<SettingExternalKey>,
     pub kind: SettingKind,
+    /// False for concrete host settings produced by a compile-time family.
+    /// Such entries participate in validation and code generation but do not
+    /// introduce statically named members on `settings`.
+    pub source_visible: bool,
     pub span: Span,
 }
 
@@ -654,6 +662,50 @@ impl SettingDecl {
             None => &self.name,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct SettingFamilyDecl {
+    pub keyword_span: Span,
+    pub binding_id: ValueId,
+    pub binding: String,
+    pub binding_span: Span,
+    pub in_span: Span,
+    pub start: u32,
+    pub end_inclusive: u32,
+    pub range_span: Span,
+    pub label: SettingTextPattern,
+    pub key_keyword_span: Option<Span>,
+    pub key: Option<SettingTextPattern>,
+    pub default: bool,
+    pub tooltip: Option<String>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct SettingTextPattern {
+    pub parts: Vec<SettingTextPart>,
+    pub span: Span,
+}
+
+impl SettingTextPattern {
+    pub fn render(&self, value: u32) -> String {
+        let value = value.to_string();
+        let mut output = String::new();
+        for part in &self.parts {
+            match part {
+                SettingTextPart::Text(text) => output.push_str(text),
+                SettingTextPart::Binding { .. } => output.push_str(&value),
+            }
+        }
+        output
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SettingTextPart {
+    Text(String),
+    Binding { span: Span },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

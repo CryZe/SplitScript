@@ -24,6 +24,10 @@ pub trait Visitor<'ast>: Sized {
         walk_setting(self, setting);
     }
 
+    fn visit_setting_family(&mut self, family: &'ast SettingFamilyDecl) {
+        walk_setting_family(self, family);
+    }
+
     fn visit_record(&mut self, record: &'ast RecordDecl) {
         walk_record(self, record);
     }
@@ -97,8 +101,15 @@ pub fn walk_program<'ast, V: Visitor<'ast>>(visitor: &mut V, program: &'ast Prog
     if let Some(state) = &program.state {
         visitor.visit_state(state);
     }
-    for setting in &program.settings {
+    for setting in program
+        .settings
+        .iter()
+        .filter(|setting| setting.source_visible)
+    {
         visitor.visit_setting(setting);
+    }
+    for family in &program.setting_families {
+        visitor.visit_setting_family(family);
     }
     for global in &program.globals {
         visitor.visit_variable(global);
@@ -156,6 +167,12 @@ pub fn walk_state_field<'ast, V: Visitor<'ast>>(visitor: &mut V, field: &'ast St
 }
 
 pub fn walk_setting<'ast, V: Visitor<'ast>>(_visitor: &mut V, _setting: &'ast SettingDecl) {}
+
+pub fn walk_setting_family<'ast, V: Visitor<'ast>>(
+    _visitor: &mut V,
+    _family: &'ast SettingFamilyDecl,
+) {
+}
 
 pub fn walk_record<'ast, V: Visitor<'ast>>(visitor: &mut V, record: &'ast RecordDecl) {
     for field in &record.fields {
@@ -369,6 +386,10 @@ pub trait Folder: Sized {
         walk_setting_mut(self, setting);
     }
 
+    fn fold_setting_family(&mut self, family: &mut SettingFamilyDecl) {
+        walk_setting_family_mut(self, family);
+    }
+
     fn fold_record(&mut self, record: &mut RecordDecl) {
         walk_record_mut(self, record);
     }
@@ -436,8 +457,15 @@ pub fn walk_program_mut<F: Folder>(folder: &mut F, program: &mut Program) {
     if let Some(state) = &mut program.state {
         folder.fold_state(state);
     }
-    for setting in &mut program.settings {
+    for setting in program
+        .settings
+        .iter_mut()
+        .filter(|setting| setting.source_visible)
+    {
         folder.fold_setting(setting);
+    }
+    for family in &mut program.setting_families {
+        folder.fold_setting_family(family);
     }
     for global in &mut program.globals {
         folder.fold_variable(global);
@@ -492,6 +520,8 @@ pub fn walk_state_field_mut<F: Folder>(folder: &mut F, field: &mut StateField) {
 }
 
 pub fn walk_setting_mut<F: Folder>(_folder: &mut F, _setting: &mut SettingDecl) {}
+
+pub fn walk_setting_family_mut<F: Folder>(_folder: &mut F, _family: &mut SettingFamilyDecl) {}
 
 pub fn walk_record_mut<F: Folder>(folder: &mut F, record: &mut RecordDecl) {
     for field in &mut record.fields {

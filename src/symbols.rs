@@ -66,7 +66,7 @@ pub fn document_symbols(document: &SourceDocument, program: &Program) -> Vec<Doc
             kind: DocumentSymbolKind::Namespace,
             range,
             selection_range: selection,
-            children: setting_symbols(document, &program.settings),
+            children: setting_symbols(document, program),
         });
     }
 
@@ -160,7 +160,13 @@ pub fn document_symbols(document: &SourceDocument, program: &Program) -> Vec<Doc
     symbols
 }
 
-fn setting_symbols(document: &SourceDocument, settings: &[SettingDecl]) -> Vec<DocumentSymbol> {
+fn setting_symbols(document: &SourceDocument, program: &Program) -> Vec<DocumentSymbol> {
+    let settings = program
+        .settings
+        .iter()
+        .filter(|setting| setting.source_visible)
+        .cloned()
+        .collect::<Vec<_>>();
     fn one(
         document: &SourceDocument,
         settings: &[SettingDecl],
@@ -208,9 +214,37 @@ fn setting_symbols(document: &SourceDocument, settings: &[SettingDecl]) -> Vec<D
     let mut cursor = 0;
     let mut symbols = Vec::new();
     while cursor < settings.len() {
-        symbols.push(one(document, settings, &mut cursor));
+        symbols.push(one(document, &settings, &mut cursor));
     }
+    for family in &program.setting_families {
+        let symbol = DocumentSymbol {
+            name: format!(
+                "{} in {}..={}",
+                family.binding, family.start, family.end_inclusive
+            ),
+            detail: Some("boolean settings family".to_owned()),
+            kind: DocumentSymbolKind::Property,
+            range: family.span,
+            selection_range: family.binding_span,
+            children: Vec::new(),
+        };
+        insert_setting_family_symbol(&mut symbols, symbol);
+    }
+    sort_symbols(&mut symbols);
     symbols
+}
+
+fn insert_setting_family_symbol(symbols: &mut Vec<DocumentSymbol>, symbol: DocumentSymbol) {
+    if let Some(parent) = symbols
+        .iter_mut()
+        .filter(|candidate| contains(candidate.range, symbol.range))
+        .min_by_key(|candidate| candidate.range.end - candidate.range.start)
+    {
+        insert_setting_family_symbol(&mut parent.children, symbol);
+        sort_symbols(&mut parent.children);
+    } else {
+        symbols.push(symbol);
+    }
 }
 
 fn identifier_in(document: &SourceDocument, span: Span, name: &str) -> Option<Span> {

@@ -291,6 +291,11 @@ fn collect_state_field_type(
 
 fn collect_settings(checker: &mut Checker, program: &Program) {
     let mut runtime_keys = HashMap::<String, Span>::new();
+    for family in &program.setting_families {
+        checker
+            .semantics
+            .resolve_value_type(family.binding_id, checker.core_type(CoreTypeId::U32));
+    }
     for setting in &program.settings {
         let runtime_key = setting.runtime_key();
         let key_span = setting
@@ -310,11 +315,12 @@ fn collect_settings(checker: &mut Checker, program: &Program) {
         }
         if let Some(ty) = setting_value_type(checker, setting) {
             checker.semantics.resolve_value_type(setting.id, ty);
-            if checker
-                .declarations
-                .settings
-                .insert(setting.name.clone(), (setting.id, ty))
-                .is_some()
+            if setting.source_visible
+                && checker
+                    .declarations
+                    .settings
+                    .insert(setting.name.clone(), (setting.id, ty))
+                    .is_some()
             {
                 checker.error(
                     format!("duplicate setting `{}`", setting.name),

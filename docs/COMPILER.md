@@ -487,6 +487,16 @@ retain only the resulting ID-to-index binding. A conformance test parses the
 emitted module and verifies `docs/ABI.md` against the catalog-rendered table, so
 the runtime contract cannot silently drift across code and prose.
 
+Compile-time settings families preserve two deliberately separate views in the
+syntax tree. `Program::setting_families` retains the written range, templates,
+binding spans, and documentation for formatting and editor queries. Parsing
+also expands the finite range into ordinary non-source-visible `SettingDecl`
+values in `Program::settings`. Validation, storage planning, static-data
+collection, host registration, refresh, tooltips, and `settings.enabled(key)`
+therefore consume one concrete declaration model. Source symbols, member
+completion, rename, and document outlines filter the generated declarations so
+implementation names never leak into the language.
+
 The first physical backend split follows that boundary:
 [`src/codegen/imports.rs`](../src/codegen/imports.rs) owns host-import type
 emission and the catalog-order-to-function-index mapping. It returns the import

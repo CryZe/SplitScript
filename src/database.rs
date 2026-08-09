@@ -733,6 +733,17 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
         }
     }
 
+    fn visit_setting_family(&mut self, family: &'ast crate::ast::SettingFamilyDecl) {
+        self.insert_value(family.binding_id, &family.binding, family.binding_span);
+        for pattern in family.key.iter().chain(std::iter::once(&family.label)) {
+            for part in &pattern.parts {
+                if let crate::ast::SettingTextPart::Binding { span } = part {
+                    self.add_reference(SourceDefinitionId::Value(family.binding_id), *span);
+                }
+            }
+        }
+    }
+
     fn visit_record(&mut self, record: &'ast crate::ast::RecordDecl) {
         if let Some(definition) = self.definition(
             SourceDefinitionId::Record(record.id),

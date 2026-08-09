@@ -15,9 +15,10 @@ use crate::{
         FunctionId, InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId,
         Parameter, PatternBinding, PatternId, PointerPath, PointerPathBase, Program, RecordDecl,
         RecordField, RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
-        SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFileFilter, SettingKind,
-        Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
-        StateSource, StateTransform, Stmt, SuspensionMode, TypeApplicationDecl, TypeApplicationId,
+        SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFamilyDecl,
+        SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl,
+        StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource,
+        StateTransform, Stmt, SuspensionMode, TypeApplicationDecl, TypeApplicationId,
         TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::Diagnostic,
@@ -223,12 +224,13 @@ impl Parser<'_> {
                 } else {
                     let start = self.current().span.start;
                     let declarations = self.settings_block_decl();
-                    declarations.map(|declarations| {
+                    declarations.map(|(settings, families)| {
                         program.settings_span = Some(Span {
                             start,
                             end: self.previous().span.end,
                         });
-                        program.settings = declarations;
+                        program.settings = settings;
+                        program.setting_families = families;
                     })
                 }
             } else if self.at_ident("let") || self.at_ident("const") || self.at_ident("var") {
@@ -724,6 +726,43 @@ mod tests {
         assert_eq!(program.settings[0].runtime_key(), "42");
         assert_eq!(program.settings[1].runtime_key(), "final-boss");
         assert_eq!(program.settings[2].runtime_key(), "ordinary");
+    }
+
+    #[test]
+    fn expands_compile_time_boolean_setting_families() {
+        let source = r#"
+            state "game.exe" {}
+            settings {
+                "Levels" {
+                    /// Controls this level split.
+                    for level in 2..=4 {
+                        `Level {level}` key `{level}`: true
+                    },
+                },
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        assert_eq!(program.setting_families.len(), 1);
+        let family = &program.setting_families[0];
+        assert_eq!(family.binding, "level");
+        assert_eq!((family.start, family.end_inclusive), (2, 4));
+        let concrete = program
+            .settings
+            .iter()
+            .filter(|setting| !setting.source_visible)
+            .collect::<Vec<_>>();
+        assert_eq!(concrete.len(), 3);
+        assert_eq!(
+            concrete
+                .iter()
+                .map(|setting| (setting.description.as_str(), setting.runtime_key()))
+                .collect::<Vec<_>>(),
+            [("Level 2", "2"), ("Level 3", "3"), ("Level 4", "4")]
+        );
+        assert!(concrete.iter().all(|setting| {
+            setting.tooltip.as_deref() == Some("Controls this level split.")
+                && matches!(setting.kind, SettingKind::Bool { default: true })
+        }));
     }
 
     #[test]

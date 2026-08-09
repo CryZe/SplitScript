@@ -22,7 +22,7 @@ use crate::{
         TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::Diagnostic,
-    migration::DUPLICATE_STATE_DIAGNOSTIC,
+    migration::{ASL_MUTABLE_CURRENT_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
     source::{RecoveryNode, RecoveryNodeKind},
 };
 

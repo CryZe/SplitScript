@@ -1,6 +1,49 @@
 //! diagnostics migration integration tests.
 
 #[test]
+fn assignments_to_current_explain_immutable_snapshot_migrations() {
+    let source = r#"
+        state "game.exe" {
+            scene: i32 at 0x1000;
+        }
+
+        whileAttached {
+            if current.scene == 7 || current.scene == 8 {
+                current.scene = old.scene
+            }
+        }
+    "#;
+    let diagnostics = splitscript::parse(source)
+        .expect_err("legacy assignments to current should receive migration guidance");
+
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "SplitScript state snapshots are immutable"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "current.scene"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| { note.contains("trailing `if`") && note.contains("`Err(message)`") })
+    );
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("initial candidate") && note.contains("successful sibling fields")
+    }));
+    assert!(
+        diagnostic.notes.iter().any(|note| {
+            note.contains("state-field expression") && note.contains("global `let`")
+        })
+    );
+}
+
+#[test]
 fn repeated_option_and_result_postfixes_have_a_focused_diagnostic() {
     use splitscript::{DiagnosticLabelStyle, FixApplicability};
 

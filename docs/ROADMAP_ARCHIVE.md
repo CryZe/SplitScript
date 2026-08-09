@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-09: discoverable immutable-snapshot migration
+
+- Triaged legacy assignments to `current` against the ASL corpus and the
+  existing state-field rejection semantics. Retaining the prior watcher value
+  is already supported; arbitrary derived or run-owned mutations require a
+  different destination rather than mutable snapshots.
+- Corrected the migration catalog to describe the supported trailing field
+  `if` and `Err(message)` pattern, including its first-snapshot and independent
+  sibling-field behavior.
+- Added a focused diagnostic for legacy `current.field = ...` statements. It
+  explains filtering, derivation, and script-owned state without offering an
+  unsafe structural rewrite.
+
 ## 2026-08-09: monotonic-delay migration boundary
 
 - Triaged campaign reports that treated every real-time delay as unavailable.

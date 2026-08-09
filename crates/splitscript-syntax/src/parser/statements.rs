@@ -3,8 +3,8 @@
 //! Statement grammar.
 
 use super::{
-    Block, Diagnostic, ForBinding, Parser, RecoveryNode, RecoveryNodeKind, Span, Stmt, TokenKind,
-    VariableDecl, assignment_operator, statement_span,
+    ASL_MUTABLE_CURRENT_DIAGNOSTIC, Block, Diagnostic, ForBinding, Parser, RecoveryNode,
+    RecoveryNodeKind, Span, Stmt, TokenKind, VariableDecl, assignment_operator, statement_span,
 };
 
 impl Parser<'_> {
@@ -200,6 +200,14 @@ impl Parser<'_> {
                     end: self.previous().span.end,
                 },
             });
+        }
+        if self.at_ident("current")
+            && self.peek(1).kind == TokenKind::Dot
+            && matches!(self.peek(2).kind, TokenKind::Ident(_))
+            && assignment_operator(&self.peek(3).kind).is_some()
+        {
+            let target = self.current().span.join(self.peek(2).span);
+            return Err(self.migration_diagnostic(ASL_MUTABLE_CURRENT_DIAGNOSTIC, target));
         }
         if let TokenKind::Ident(name) = &self.current().kind
             && let Some(op) = assignment_operator(&self.peek(1).kind)

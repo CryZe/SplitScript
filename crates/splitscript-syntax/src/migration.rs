@@ -153,6 +153,8 @@ pub const ASL_MONOTONIC_TIME_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.time.monotonic-path");
 pub const ASL_TIMER_REAL_TIME_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.timer.current-real-time-path");
+pub const ASL_MUTABLE_CURRENT_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.state.mutable-current-assignment");
 
 pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
@@ -269,6 +271,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "for a delay anchored to a game event, store `Instant.now()` at that event and compare a `Duration`",
             "the exact LiveSplit `CurrentTime.RealTime` phase is not exposed by the current host contract",
             "do not silently replace run-relative time used for offsets or game-time calculations with elapsed process-independent time",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_MUTABLE_CURRENT_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.state.mutable-current"),
+        message: "SplitScript state snapshots are immutable",
+        primary_label: "move this transformation to the state declaration or script-owned state",
+        notes: &[
+            "to retain an old field when a transient candidate is read, add a trailing `if` to that state field and return `Err(message)` for the rejected candidate",
+            "after initialization, rejecting one field retains its last accepted value while successful sibling fields continue to advance; rejecting the initial candidate prevents publishing a fabricated snapshot",
+            "computed values that are not process snapshots belong in a state-field expression or an ordinary global `let`, depending on whether they should refresh with memory or remain script-owned",
+            "there is no automatic rewrite because an assignment to `current` can represent filtering, derivation, or mutable run state in legacy ASL",
         ],
     },
 ];
@@ -733,10 +747,10 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         id: MigrationConceptId::new("asl.state.mutable-current"),
         name: "Assignments to current",
         sources: ASL,
-        support: MigrationSupport::Planned,
-        summary: "Snapshots stay immutable; a typed retain-last-valid normalization pattern is planned.",
-        targets: &[MigrationTarget::Language("current")],
-        cookbook_anchor: None,
+        support: MigrationSupport::TypedPattern,
+        summary: "Keep snapshots immutable. Define derived values in the state declaration; when a transient candidate should retain its last accepted value, use a trailing field `if` and return `Err(message)`.",
+        targets: &[MigrationTarget::Language("state")],
+        cookbook_anchor: Some("retaining-the-last-accepted-field-value"),
         spellings: &[],
     },
     MigrationConcept {

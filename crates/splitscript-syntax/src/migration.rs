@@ -619,6 +619,22 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: &[],
     },
     MigrationConcept {
+        id: MigrationConceptId::new("asl.memory.background-scan"),
+        name: "Background signature scans",
+        sources: ASL,
+        support: MigrationSupport::TypedPattern,
+        summary: "Remove legacy worker threads and await a module, explicit-range, or process-wide scan. Scans inspect a bounded window per tick and process closure cancels pending discovery.",
+        targets: &[
+            MigrationTarget::StandardLibraryItem("Module.scan"),
+            MigrationTarget::StandardLibraryItem("Module.scanAny"),
+            MigrationTarget::StandardLibraryItem("Process.scan"),
+            MigrationTarget::StandardLibraryItem("Process.scanMemory"),
+            MigrationTarget::StandardLibraryItem("Process.scanMemoryAny"),
+        ],
+        cookbook_anchor: Some("background-signature-scans"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("asl.process.identity"),
         name: "Attached process identity",
         sources: ASL,

@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-09: discoverable cooperative scan migration
+
+- Confirmed that module, explicit-range, and process-wide signature scans
+  already yield after bounded work, preserve their cursor across ticks, and
+  cancel with the attached process. The maintained A Hat in Time port and
+  deterministic process-scan fixtures exercise that behavior.
+- Added a migration concept and cookbook recipe explaining that legacy C# scan
+  threads should be removed rather than translated, and how to choose among
+  `scan`, `scanAny`, `scanMemory`, and `scanMemoryAny`.
+- Kept timeout or race behavior explicit and planned instead of changing a
+  retrying awaited scan into an implicit one-shot result.
+
 ## 2026-08-09: discoverable immutable-snapshot migration
 
 - Triaged legacy assignments to `current` against the ASL corpus and the

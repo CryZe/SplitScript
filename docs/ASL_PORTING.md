@@ -327,6 +327,44 @@ the final read. This keeps mixed-width discovery auditable without an `at32`
 pseudo-keyword. See the maintained ABZÛ and Borderlands examples for the full
 discovery and PE32 forms.
 
+## Background signature scans
+
+Legacy ASL often starts a C# `Thread` or task for signature discovery so a
+large scan does not block LiveSplit's update loop. Do not translate that worker
+or its cancellation token. SplitScript scans are already asynchronous: they
+inspect only a bounded memory window per tick, yield to the host between
+windows, preserve their cursor, and are discarded automatically if the
+attached process closes.
+
+Choose the narrowest range justified by the source:
+
+```splitscript
+onAttach {
+    let executable = await process.mainModule()
+    let code = await executable.scan(sig"48 8B 05 ?? ?? ?? ??")
+    let table = retry process.readRelative32(code.offset(3))
+
+    let heapMarker = await process.scanMemory(
+        sig"54 49 4D 52 ?? ?? ?? ??",
+    )
+    print(`table {table}, marker {heapMarker}`)
+}
+```
+
+Use `Module.scan` when a pattern belongs to one known image and `process.scan`
+for another explicit address range. Use `process.scanMemory` only when the
+legacy source genuinely enumerates readable mappings or the target may live
+outside known modules. `scanAny` and `scanMemoryAny` accept an array of
+signatures and return both the address and selected index, which keeps fallback
+layout selection in one cooperative pass.
+
+An awaited scan remains pending when no signature is present; it does not
+produce a temporary zero address. This matches attach-time discovery that
+should wait for a module or runtime allocation to become ready. If an absent
+pattern must instead select an unsupported-build path after a deadline, keep
+that as an explicit timeout/race requirement—the language does not silently
+turn a retrying scan into a one-shot result.
+
 ## Retaining the last accepted field value
 
 Some ASL `update` blocks overwrite one newly read watcher with its old value to

@@ -60,8 +60,8 @@ or behavioral parity.
   compatibility aliases.
 - [ ] Promote a small pressure set from the campaign into repository-owned,
   host-executed ports: one extensionless-name/multi-layout port, one native
-  UTF-16 or parsed-string port, one run-scoped visited-set port, and one
-  timer/run-metadata port. Each must record the preserved behavior and prove
+  UTF-16 or parsed-string port, and one timer/run-metadata port. Each must
+  record the preserved behavior and prove
   pointer width, failed reads, attach/detach, unsupported builds, settings,
   timer-action order, and tick cadence as applicable.
 - [ ] Use those maintained ports to decide each next implementation slice.
@@ -475,9 +475,9 @@ remaining work is product hardening and distribution.
    improve the documentation, completion, and diagnostics that failed to reveal
    existing features. Defer process-name warnings until the host's
    cross-platform matching contract is settled.
-2. Promote the pressure set into repository-owned runtime fixtures, starting
-   with native UTF-16 and a run-scoped visited set; implement only gaps that
-   remain after semantic review.
+2. Continue promoting the pressure set into repository-owned runtime fixtures,
+   starting with native UTF-16; implement only gaps that remain after semantic
+   review.
 3. Add the remaining smallest recurring game-independent pieces—repeated
    static settings and focused string operations—with runtime and editor
    coverage.

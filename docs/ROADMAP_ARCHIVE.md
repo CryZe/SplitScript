@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-09: faithful OpenJK run-scoped-set port
+
+- Promoted the reviewed `OpenJK-Speed.asl` behavior into a maintained
+  SplitScript port instead of treating the generated campaign candidate as
+  authoritative. The port preserves start/reset/loading transitions, ignored
+  academy and empty maps, and one split per other visited map.
+- Replaced the ASL `List<string>` with one global `Set<String>`. The set is
+  cleared at the per-process `onAttach` boundary and by the original reset
+  action on a stable opening-map tick, retaining state across ordinary ticks
+  without allocating on every update.
+- Added a deterministic host fixture covering the exact process name, bounded
+  string read, timer-action order, duplicate suppression, run reset, loading,
+  detach, and reattach. Documented the explicit UTF-8 choice and preserved the
+  reset-block cleanup at its original lifecycle boundary.
+
 ## 2026-08-06: run-scoped sets and source generic type applications
 
 - Added `Set<T>` as the first growable run-scoped collection, with

@@ -198,6 +198,9 @@ compiler architecture, and
 compile-time and output-size measurements are recorded in
 [`docs/BASELINES.md`](docs/BASELINES.md).
 
+Reviewed production-port evidence also includes the run-scoped visited-map
+translation in [`docs/OPENJK_SPEED_PORT.md`](docs/OPENJK_SPEED_PORT.md).
+
 ## What works now
 
 - A small scripting expression language with optional semicolons at line endings.

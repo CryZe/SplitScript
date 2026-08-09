@@ -1,0 +1,44 @@
+// Faithful port of OpenJK-Speed.asl. The original run-scoped List<string> is
+// represented by one Set<String> that persists across polling ticks.
+let visitedMaps = Set.new<String>()
+
+state "openjk_sp.x86" {
+    isActive: bool at 0x407aa4;
+    level at 0x40e10c as utf8(30);
+}
+
+onAttach {
+    // ASL's init block creates a fresh collection for each attached process.
+    visitedMaps.clear()
+}
+
+start {
+    return current.isActive && current.level == "maps/yavin1b.bsp"
+}
+
+reset {
+    if current.level == "maps/yavin1b.bsp" && old.level == "maps/yavin1b.bsp" {
+        visitedMaps.clear()
+    }
+
+    return !current.isActive
+        && current.level == "maps/yavin1b.bsp"
+        && old.level != "maps/yavin1b.bsp"
+}
+
+split {
+    if current.level == old.level
+        || current.level.startsWith("maps/academy")
+        || current.level == ""
+        || visitedMaps.contains(current.level)
+    {
+        return false
+    }
+
+    visitedMaps.insert(current.level)
+    return true
+}
+
+isLoading {
+    return !current.isActive
+}

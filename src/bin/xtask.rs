@@ -360,6 +360,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "examples/openjk_speed.split",
+        output: "openjk_speed.wasm",
+        profile: "release",
+        harness: "tests/openjk_speed_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/process_results.split",
         output: "process_results.wasm",
         profile: "release",

@@ -154,10 +154,6 @@ or behavioral parity.
   straightforward to model process names, 32/64-bit memory, modules, failed
   reads, settings snapshots, timer state, attach/detach/restart, and bounded
   async polling. A compile-only port is never labelled faithful.
-- [ ] Prove `setTickRate` units, transition timing, and reset-to-default behavior
-  in the host harness at representative 60, 100, 120, and default rates. Show
-  `Instant.now()` as the process-independent tool for debounce/delay logic, and
-  distinguish it from reading the LiveSplit timer's real-time value.
 
 ### Standard-library and type-system boundaries
 

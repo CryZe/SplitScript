@@ -1018,12 +1018,10 @@ label; `///` documentation comments are the only way to define its tooltip.
 `setup` runs once for each loaded WebAssembly instance at the beginning of its
 first host update, after global values and the settings UI have been initialized
 and the current settings have been loaded. It is intended for
-process-independent startup work such as choosing an initial tick rate or
-printing a startup message:
+process-independent startup work such as printing a startup message:
 
 ```text
 setup {
-    setTickRate(30.0)
     print("Autosplitter loaded")
 }
 ```
@@ -1045,6 +1043,14 @@ onDetached {
     setTickRate(1.0)
 }
 ```
+
+`setTickRate(hz)` uses updates per second. The LiveSplit runner reads the
+resulting interval after the current `update` returns, so a call affects the
+wait before the following update rather than the invocation already in
+progress. The selected rate persists until another call; process closure does
+not restore either the host's 120 Hz initial rate or a script-defined baseline
+automatically. Set the baseline in `onDetached`, which already runs once before
+the first attachment, and let `onAttach` override it only while attached.
 
 ```text
 start {

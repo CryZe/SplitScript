@@ -347,6 +347,43 @@ purpose is to preserve a plausible deterministic ownership model so the lack
 of Wasm GC finalizers does not force source-visible `free` calls or premature
 commitment to nondeterministic cleanup.
 
+## R8: total and bounded tick-rate scheduling
+
+**Priority:** P1 / runtime correctness
+
+**Status:** The frequency unit and transition timing are proven; invalid-value
+and scheduler bounds need a host fix.
+
+`runtime_set_tick_rate` receives updates per second and stores its reciprocal
+as the wait duration used after the current update. The selected interval is
+persistent, including across process detachments. SplitScript therefore owns
+its policy explicitly through the initial and subsequent `onDetached` calls
+plus `onAttach`; the host must not invent a process-lifecycle reset.
+
+The current host rejects non-positive finite inputs but does not reject every
+non-finite value. `NaN` can reach the stored interval and fail later when it is
+converted to a duration; positive infinity produces a zero interval and can
+turn the runner into a busy loop. Extremely small or large positive values
+also need an explicit scheduling policy rather than relying on floating-point
+reciprocal edge cases.
+
+The existing import signature can retain its `f64` parameter, but the host
+implementation should:
+
+- reject `NaN`, both infinities, zero, and negative values before publishing a
+  new interval;
+- define finite minimum and maximum frequencies that keep the resulting wait
+  representable and prevent an accidental busy loop or impractically long
+  sleep;
+- leave the previous valid interval unchanged when validation fails;
+- guarantee that reading the current interval is total and cannot panic; and
+- test the initial 120 Hz interval, 60/100/120 Hz updates, invalid inputs, and
+  persistence across ordinary process detachments.
+
+Until that host validation is tightened, SplitScript documents a positive,
+finite source contract and emits ordinary calls without duplicating scheduler
+policy in generated Wasm.
+
 ## Recording requirements from ports
 
 When an ASL port exposes a possible runtime gap, add it here before designing a

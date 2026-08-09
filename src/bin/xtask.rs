@@ -290,6 +290,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/tick_rate_lifecycle.split",
+        output: "tick_rate_lifecycle.wasm",
+        profile: "release",
+        harness: "tests/tick_rate_lifecycle_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/timer_split_index.split",
         output: "timer_split_index.wasm",
         profile: "release",

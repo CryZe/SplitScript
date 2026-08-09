@@ -85,7 +85,10 @@ root {
 
     /// Changes the autosplitter tick rate.
     ///
-    /// The runtime applies the requested polling frequency.
+    /// The value is a frequency in updates per second. It takes effect for the
+    /// wait after the current update and remains active until another call;
+    /// detaching from a process does not reset it. Establish and restore the
+    /// detached baseline in `onDetached`, which also runs once initially.
     ///
     /// # Example
     ///
@@ -96,7 +99,7 @@ root {
     /// ```
     @intrinsic(RuntimeSetTickRate)
     fn setTickRate(
-        /// The requested updates per second.
+        /// The positive, finite number of requested updates per second.
         hz: f64,
     ) -> None;
 

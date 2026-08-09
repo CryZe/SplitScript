@@ -1,5 +1,19 @@
 # SplitScript roadmap
 
+## 2026-08-09: executable tick-rate lifecycle contract
+
+- Added a deterministic host fixture covering an initial 60 Hz detached baseline,
+  process-specific 100 and 120 Hz attachment rates, and restoration to 60 Hz
+  after both detachments.
+- Documented that `setTickRate` is measured in updates per second, controls the
+  host wait after the current update returns, and persists until another call.
+  Process closure does not reset it automatically.
+- Established the approachable lifecycle pattern: `onDetached` establishes the
+  baseline initially and restores it after closure, while `onAttach` selects
+  the attached cadence. No duplicate `setup` call is needed.
+- Recorded finite-value and scheduler-bound validation as a host-runtime
+  correctness requirement rather than hiding it in the compiler.
+
 ## 2026-08-09: exact floating-point representations and result obligations
 
 - Added `f32.fromBits`/`f64.fromBits` and `.toBits()` as ordinary documented

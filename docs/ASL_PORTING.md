@@ -352,7 +352,6 @@ For example, process-independent ASL startup statements belong in `setup`, not
 
 ```splitscript
 setup {
-    setTickRate(30.0)
     print("Autosplitter loaded")
 }
 ```
@@ -361,6 +360,25 @@ setup {
 after settings are available, but cannot use `process`, `gba`, `current`,
 `old`, `await`, or `retry`. A debug-watch replacement loads a new module and
 therefore runs it again on that module's first update.
+
+ASL `refreshRate` is a frequency, so migrate `refreshRate = 60` to
+`setTickRate(60)`. The host converts it to the wait interval `1 / hz` after the
+current update returns. The chosen rate persists across process closure; it is
+not reset by attachment management. If `onAttach` increases the rate, restore
+the script's baseline explicitly:
+
+```splitscript
+onDetached {
+    setTickRate(60)
+}
+
+onAttach {
+    setTickRate(120)
+}
+```
+
+`onDetached` already runs once before the first attachment, so a duplicate
+`setup` call is unnecessary.
 
 ## Process-exit game-time cleanup
 

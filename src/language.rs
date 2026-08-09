@@ -1139,14 +1139,14 @@ define_language_catalog! {
         "setup",
         "Initializes one loaded script instance.",
         "Runs once from the module start entry point, after globals and settings are initialized and refreshed. The LiveSplit runtime defers that entry point until the beginning of the first interruptible update. Settings and process-independent operations are available, but process providers, state snapshots, and suspension are not.",
-        "setup {\n    setTickRate(60.0)\n}"
+        "setup {\n    print(\"Autosplitter loaded\")\n}"
     ),
     action_item!(
         OnDetached,
         OnDetached,
         "onDetached",
-        "Runs once while no process is attached.",
-        "Process-dependent operations are rejected directly and through user-function call graphs.",
+        "Establishes the detached state initially and after process closure.",
+        "Runs once before the first attachment attempt, then once immediately each time an attached process closes. It does not run on every detached tick. Use it to establish and restore detached policy such as the baseline tick rate. Process-dependent operations are rejected directly and through user-function call graphs.",
         "onDetached {\n    setTickRate(1.0)\n}"
     ),
     action_item!(

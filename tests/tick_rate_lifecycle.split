@@ -1,0 +1,13 @@
+state ["hundred.exe", "hundred-twenty.exe"] {}
+
+onDetached {
+    setTickRate(60)
+}
+
+onAttach {
+    if process.name() == "hundred.exe" {
+        setTickRate(100)
+    } else {
+        setTickRate(120)
+    }
+}

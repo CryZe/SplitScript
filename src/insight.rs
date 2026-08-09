@@ -1264,6 +1264,27 @@ split { return layout == StateLayout.Steam }
     }
 
     #[test]
+    fn detached_lifecycle_hover_makes_the_initial_invocation_explicit() {
+        let source = "state \"game.exe\" {}\nonDetached { setTickRate(1) }";
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(source.find("onDetached").unwrap() + 1)
+            .unwrap()
+            .expect("onDetached hover");
+        assert!(
+            hover
+                .markdown
+                .contains("before the first attachment attempt")
+        );
+        assert!(
+            hover
+                .markdown
+                .contains("does not run on every detached tick")
+        );
+        assert!(hover.markdown.contains("baseline tick rate"));
+    }
+
+    #[test]
     fn source_hover_renders_inferred_value_and_field_types() {
         let source = r#"
 record Point { x: i32 }

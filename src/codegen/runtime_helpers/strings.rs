@@ -290,6 +290,113 @@ pub(in crate::codegen::runtime_helpers) fn compile_format_i64(gc: &GcLayout) -> 
     function
 }
 
+/// Encodes one validated Unicode scalar into an immutable UTF-8 String.
+pub(in crate::codegen::runtime_helpers) fn compile_format_char(gc: &GcLayout) -> Function {
+    let string_type = gc.standard_index(StdlibTypeId::String);
+    let mut function = Function::new([
+        (4, ValType::I32),
+        (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
+    ]);
+    let value = 0;
+    let byte_len = 1;
+    let index = 2;
+    let remaining = 3;
+    let prefix = 4;
+    let output = 5;
+
+    function
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::I32Const(0x80))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::I32Const(0x800))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::I32Const(0x10000))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(3))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalTee(byte_len))
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::LocalGet(byte_len))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(byte_len))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(0xC0))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(byte_len))
+        .instruction(&Instruction::I32Const(3))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(0xE0))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(0xF0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalSet(prefix))
+        .instruction(&Instruction::LocalGet(byte_len))
+        .instruction(&Instruction::ArrayNewDefault(string_type))
+        .instruction(&Instruction::LocalSet(output))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::LocalSet(remaining))
+        // Emit continuation bytes from the end towards the leading byte.
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::LocalTee(index))
+        .instruction(&Instruction::LocalSet(byte_len))
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(byte_len))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I32Const(0x3F))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Const(0x80))
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::ArraySet(string_type))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I32Const(6))
+        .instruction(&Instruction::I32ShrU)
+        .instruction(&Instruction::LocalSet(remaining))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::LocalGet(prefix))
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::ArraySet(string_type))
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::End);
+    function
+}
+
 /// Compares a UTF-8 byte sequence using contains (0), starts with (1), ends with
 /// (2), or equal while ignoring ASCII case (3) semantics. Exact byte matching
 /// is equivalent to Unicode scalar matching for the first three modes because

@@ -878,6 +878,7 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
             ty: AbstractHeapType::None,
         }),
         wasm_ir::ExpressionKind::Bool(value) => ConstExpr::i32_const(*value as i32),
+        wasm_ir::ExpressionKind::Char(value) => ConstExpr::i32_const(*value as i32),
         wasm_ir::ExpressionKind::Int(value) if ty == Type::F32 => ConstExpr::f32_const(
             (if negative {
                 -(*value as f32)

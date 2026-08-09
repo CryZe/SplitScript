@@ -313,7 +313,8 @@ impl HighlightCollector<'_> {
                             if previous_token.is_some_and(|previous| {
                                 matches!(&previous.kind, TokenKind::Ident(name) if name == "v")
                             }) => Some(SemanticTokenKind::Version),
-                        TokenKind::String(_)
+                        TokenKind::Char(_)
+                        | TokenKind::String(_)
                         | TokenKind::TemplateStart
                         | TokenKind::TemplateChunk(_)
                         | TokenKind::TemplateEnd => Some(SemanticTokenKind::String),
@@ -1101,6 +1102,29 @@ mod tests {
             .iter()
             .find(|highlight| highlight.span.start <= offset && offset < highlight.span.end)
             .map(|highlight| highlight.kind)
+    }
+
+    #[test]
+    fn highlights_character_literals_as_strings_and_char_as_a_builtin_type() {
+        let source = "state \"game.exe\" {}\nfn identity(value: char) -> char { return 'x' }";
+        let mut database = CompilerDatabase::new(source);
+        database.check().expect("character highlighting fixture");
+        let highlights = database.semantic_highlights().unwrap();
+
+        assert!(contains(
+            source,
+            &highlights,
+            "char",
+            SemanticTokenKind::Type,
+            0,
+        ));
+        assert!(contains(
+            source,
+            &highlights,
+            "'x'",
+            SemanticTokenKind::String,
+            0,
+        ));
     }
 
     #[test]

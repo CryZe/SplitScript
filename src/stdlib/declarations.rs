@@ -72,6 +72,7 @@ macro_rules! with_core_types {
         $consumer! {
             None => { name: "None", capabilities: &[StdlibCapabilityId::Equatable], memory_layout: None },
             Bool => { name: "bool", capabilities: BOOL_CAPABILITIES, memory_layout: Some(ScalarMemoryLayout { size: 1, alignment: 1 }) },
+            Char => { name: "char", capabilities: CHAR_CAPABILITIES, memory_layout: None },
             I8 => { name: "i8", capabilities: SIGNED_INTEGER_CAPABILITIES, memory_layout: Some(ScalarMemoryLayout { size: 1, alignment: 1 }) },
             U8 => { name: "u8", capabilities: UNSIGNED_INTEGER_CAPABILITIES, memory_layout: Some(ScalarMemoryLayout { size: 1, alignment: 1 }) },
             I16 => { name: "i16", capabilities: SIGNED_INTEGER_CAPABILITIES, memory_layout: Some(ScalarMemoryLayout { size: 2, alignment: 2 }) },
@@ -221,6 +222,8 @@ const BOOL_CAPABILITIES: &[StdlibCapabilityId] = &[
     StdlibCapabilityId::Display,
     StdlibCapabilityId::MemoryReadable,
 ];
+const CHAR_CAPABILITIES: &[StdlibCapabilityId] =
+    &[StdlibCapabilityId::Equatable, StdlibCapabilityId::Display];
 const SIGNED_INTEGER_CAPABILITIES: &[StdlibCapabilityId] = &[
     StdlibCapabilityId::Integer,
     StdlibCapabilityId::Signed,

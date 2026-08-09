@@ -871,6 +871,22 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         splitscript::compiler::stdlib::CoreTypeId::F64,
         splitscript::compiler::stdlib::StdlibCapabilityId::Display,
     ));
+    assert!(library.core_type_has_capability(
+        splitscript::compiler::stdlib::CoreTypeId::Char,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Equatable,
+    ));
+    assert!(library.core_type_has_capability(
+        splitscript::compiler::stdlib::CoreTypeId::Char,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Display,
+    ));
+    assert!(!library.core_type_has_capability(
+        splitscript::compiler::stdlib::CoreTypeId::Char,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Integer,
+    ));
+    assert!(!library.core_type_has_capability(
+        splitscript::compiler::stdlib::CoreTypeId::Char,
+        splitscript::compiler::stdlib::StdlibCapabilityId::MemoryReadable,
+    ));
     assert!(library.type_has_capability(
         splitscript::compiler::stdlib::StdlibTypeId::String,
         splitscript::compiler::stdlib::StdlibCapabilityId::Display,
@@ -932,8 +948,8 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "String.byteAt(byteIndex: u32) -> u8!"
     );
     assert_eq!(
-        library.render_signature(StdlibItemId::StringCodePointAt),
-        "String.codePointAt(byteIndex: u32) -> u32!"
+        library.render_signature(StdlibItemId::StringCharAt),
+        "String.charAt(byteIndex: u32) -> char!"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::StringSlice),

@@ -91,14 +91,14 @@ UTF-8 byte offsets rather than .NET UTF-16 indices and fails when an offset is
 out of range or inside a multibyte code point, so do not mechanically translate
 `Substring` without checking the target data.
 
-For a known ASCII character check, use `byteAt(byteIndex)` and compare the
-returned `u8` with its byte value. For Unicode text, `codePointAt(byteIndex)`
-returns a `u32` Unicode code point but still takes a UTF-8 byte offset. Neither
-operation adopts C#'s or JavaScript's UTF-16 indexing:
+Use `charAt(byteIndex)` for textual character checks. It returns a `char` and
+still takes a UTF-8 byte offset; an offset into the middle of a multibyte scalar
+is an error. Use `byteAt(byteIndex)` only when the ASL is genuinely inspecting
+encoded bytes. Neither operation adopts C#'s or JavaScript's UTF-16 indexing:
 
 ```splitscript
-let slash = current.map.byteAt(7) else return false
-return slash == 0x2f
+let slash = current.map.charAt(7) else return false
+return slash == '/'
 ```
 
 C# `Split` maps to fallible, lower-camel-case `split`. SplitScript matches one

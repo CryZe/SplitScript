@@ -614,6 +614,12 @@ pub(super) fn compile_statement_pattern(
                 .instruction(&Instruction::I32Const(*expected as i32))
                 .instruction(&Instruction::I32Eq);
         }
+        wasm_ir::LoweredPattern::Char(expected) => {
+            function
+                .instruction(&Instruction::LocalGet(value_local))
+                .instruction(&Instruction::I32Const(*expected as i32))
+                .instruction(&Instruction::I32Eq);
+        }
         wasm_ir::LoweredPattern::Int(value) => {
             function.instruction(&Instruction::LocalGet(value_local));
             emit_int(function, *value, value_type);
@@ -1437,6 +1443,9 @@ fn compile_expr_unconverted(
             function.instruction(&Instruction::I32Const(*value as i32));
         }
         wasm_ir::ExpressionKind::Int(value) => emit_int(function, *value, ty),
+        wasm_ir::ExpressionKind::Char(value) => {
+            function.instruction(&Instruction::I32Const(*value as i32));
+        }
         wasm_ir::ExpressionKind::Float(literal) => {
             if ty == Type::F32 {
                 let value = literal
@@ -1848,6 +1857,12 @@ fn compile_expr_unconverted(
                             .instruction(&Instruction::I32Const(*expected as i32))
                             .instruction(&Instruction::I32Eq);
                     }
+                    wasm_ir::LoweredPattern::Char(expected) => {
+                        function
+                            .instruction(&Instruction::LocalGet(value_local))
+                            .instruction(&Instruction::I32Const(*expected as i32))
+                            .instruction(&Instruction::I32Eq);
+                    }
                     wasm_ir::LoweredPattern::Int(value) => {
                         function.instruction(&Instruction::LocalGet(value_local));
                         emit_int(function, *value, value_type);
@@ -2225,14 +2240,14 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
-            IntrinsicId::StringByteAt | IntrinsicId::StringCodePointAt => {
+            IntrinsicId::StringByteAt | IntrinsicId::StringCharAt => {
                 let (mode, value_type, message) = match builtin {
                     IntrinsicId::StringByteAt => {
                         (0, Type::U8, "string byte index is out of bounds")
                     }
-                    IntrinsicId::StringCodePointAt => (
+                    IntrinsicId::StringCharAt => (
                         1,
-                        Type::U32,
+                        Type::Char,
                         "string byte index is out of bounds or not a UTF-8 boundary",
                     ),
                     _ => unreachable!(),
@@ -2992,6 +3007,14 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
             function.instruction(&Instruction::End);
             return;
         }
+        if source == Type::Char {
+            function.instruction(&Instruction::Call(
+                context
+                    .runtime_helpers
+                    .function(RuntimeHelperId::FormatChar),
+            ));
+            return;
+        }
         if let Type::Standard(standard) = source
             && let Some(display) = context.display_functions.get(&standard)
         {
@@ -3016,7 +3039,7 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
 
     let source_i32 = matches!(
         source,
-        Type::I8 | Type::U8 | Type::I16 | Type::U16 | Type::I32 | Type::U32
+        Type::Char | Type::I8 | Type::U8 | Type::I16 | Type::U16 | Type::I32 | Type::U32
     );
     let source_i64 = matches!(source, Type::I64 | Type::U64 | Type::Address);
     let target_i32 = matches!(

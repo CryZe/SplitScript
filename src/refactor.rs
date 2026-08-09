@@ -831,6 +831,7 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
             | MatchPattern::ResultSuccess(binding)
             | MatchPattern::ResultError(binding) => binding.as_ref(),
             MatchPattern::Bool(_)
+            | MatchPattern::Char(_)
             | MatchPattern::Int { .. }
             | MatchPattern::None
             | MatchPattern::Wildcard => None,

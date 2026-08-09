@@ -134,6 +134,7 @@ fn is_word_like(kind: &crate::TokenKind) -> bool {
         crate::TokenKind::Ident(_)
             | crate::TokenKind::Int(_)
             | crate::TokenKind::Float(_)
+            | crate::TokenKind::Char(_)
             | crate::TokenKind::String(_)
             | crate::TokenKind::DocComment(_)
             | crate::TokenKind::TemplateChunk(_)

@@ -57,6 +57,7 @@ pub enum TokenKind {
     Ident(String),
     Int(String),
     Float(String),
+    Char(char),
     String(String),
     DocComment(String),
     At,
@@ -186,7 +187,8 @@ impl Lexer<'_> {
             let kind = match self.bytes[self.pos] {
                 b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'$' => self.identifier(),
                 b'0'..=b'9' => self.number()?,
-                b'"' | b'\'' => self.string()?,
+                b'"' => self.string()?,
+                b'\'' => self.character()?,
                 b'`' => {
                     self.pos += 1;
                     self.modes.push(LexMode::Template { start });
@@ -566,11 +568,10 @@ impl Lexer<'_> {
 
     fn string(&mut self) -> Result<TokenKind, Error> {
         let start = self.pos;
-        let quote = self.bytes[self.pos];
         self.pos += 1;
         let mut value = String::new();
         while let Some(&byte) = self.bytes.get(self.pos) {
-            if byte == quote {
+            if byte == b'"' {
                 self.pos += 1;
                 return Ok(TokenKind::String(value));
             }
@@ -616,6 +617,152 @@ impl Lexer<'_> {
                 end: self.pos,
             },
         ))
+    }
+
+    fn character(&mut self) -> Result<TokenKind, Error> {
+        let start = self.pos;
+        self.pos += 1;
+        let value_start = self.pos;
+        let Some(&byte) = self.bytes.get(self.pos) else {
+            return Err(Error::lexical(
+                "unterminated character literal",
+                Span {
+                    start,
+                    end: self.pos,
+                },
+            ));
+        };
+        if byte == b'\'' {
+            self.pos += 1;
+            return Err(Error::lexical(
+                "a character literal must contain exactly one Unicode scalar value",
+                Span {
+                    start,
+                    end: self.pos,
+                },
+            ));
+        }
+        if matches!(byte, b'\r' | b'\n') {
+            return Err(Error::lexical(
+                "unterminated character literal",
+                Span {
+                    start,
+                    end: self.pos,
+                },
+            ));
+        }
+
+        let value = if byte == b'\\' {
+            self.character_escape(start)?
+        } else {
+            let value = self.source[self.pos..]
+                .chars()
+                .next()
+                .expect("the current byte begins a source character");
+            self.pos += value.len_utf8();
+            value
+        };
+
+        if self.bytes.get(self.pos) != Some(&b'\'') {
+            while let Some(&byte) = self.bytes.get(self.pos) {
+                if matches!(byte, b'\r' | b'\n') {
+                    break;
+                }
+                self.pos += 1;
+                if byte == b'\'' {
+                    break;
+                }
+            }
+            return Err(Error::lexical(
+                "a character literal must contain exactly one Unicode scalar value",
+                Span {
+                    start: value_start,
+                    end: self.pos,
+                },
+            ));
+        }
+        self.pos += 1;
+        Ok(TokenKind::Char(value))
+    }
+
+    fn character_escape(&mut self, literal_start: usize) -> Result<char, Error> {
+        let escape_start = self.pos;
+        self.pos += 1;
+        let Some(&escaped) = self.bytes.get(self.pos) else {
+            return Err(Error::lexical(
+                "unterminated character literal",
+                Span {
+                    start: literal_start,
+                    end: self.pos,
+                },
+            ));
+        };
+        let value = match escaped {
+            b'0' => '\0',
+            b'n' => '\n',
+            b'r' => '\r',
+            b't' => '\t',
+            b'\\' => '\\',
+            b'"' => '"',
+            b'\'' => '\'',
+            b'u' => return self.unicode_character_escape(escape_start),
+            _ => {
+                self.pos += 1;
+                return Err(Error::lexical(
+                    "unsupported character escape",
+                    Span {
+                        start: escape_start,
+                        end: self.pos,
+                    },
+                ));
+            }
+        };
+        self.pos += 1;
+        Ok(value)
+    }
+
+    fn unicode_character_escape(&mut self, escape_start: usize) -> Result<char, Error> {
+        self.pos += 1;
+        if self.bytes.get(self.pos) != Some(&b'{') {
+            return Err(Error::lexical(
+                "a Unicode character escape must use `\\u{...}`",
+                Span {
+                    start: escape_start,
+                    end: self.pos,
+                },
+            ));
+        }
+        self.pos += 1;
+        let digits_start = self.pos;
+        while self
+            .bytes
+            .get(self.pos)
+            .is_some_and(|byte| byte.is_ascii_hexdigit())
+        {
+            self.pos += 1;
+        }
+        let digit_count = self.pos - digits_start;
+        if digit_count == 0 || digit_count > 6 || self.bytes.get(self.pos) != Some(&b'}') {
+            return Err(Error::lexical(
+                "a Unicode character escape requires one to six hexadecimal digits",
+                Span {
+                    start: escape_start,
+                    end: self.pos,
+                },
+            ));
+        }
+        let value = u32::from_str_radix(&self.source[digits_start..self.pos], 16)
+            .expect("validated hexadecimal digits fit in u32");
+        self.pos += 1;
+        char::from_u32(value).ok_or_else(|| {
+            Error::lexical(
+                "a character literal must be a Unicode scalar value",
+                Span {
+                    start: escape_start,
+                    end: self.pos,
+                },
+            )
+        })
     }
 
     fn starts_with(&self, pattern: &[u8]) -> bool {
@@ -718,6 +865,40 @@ mod tests {
             let error = lex(source, SyntaxMode::Program)
                 .expect_err("an exponent requires at least one digit");
             assert_eq!(error.message, "expected exponent digits after `e`");
+        }
+    }
+
+    #[test]
+    fn lexes_exactly_one_unicode_scalar_per_character_literal() {
+        let source = format!(
+            "'a' '{}' '{}' '\\n' '\\'' '\\u{{1f642}}'",
+            '\u{df}', '\u{1f642}'
+        );
+        let tokens = lex(&source, SyntaxMode::Program).unwrap();
+        assert_eq!(
+            tokens
+                .iter()
+                .filter_map(|token| match token.kind {
+                    TokenKind::Char(value) => Some(value),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            ['a', '\u{df}', '\u{1f642}', '\n', '\'', '\u{1f642}']
+        );
+
+        for source in ["''", "'ab'", "'e\u{301}'"] {
+            let error = lex(source, SyntaxMode::Program)
+                .expect_err("character literals contain exactly one Unicode scalar");
+            assert!(error.message.contains("exactly one Unicode scalar value"));
+        }
+    }
+
+    #[test]
+    fn rejects_non_scalar_unicode_character_escapes() {
+        for source in [r"'\u{d800}'", r"'\u{110000}'"] {
+            let error = lex(source, SyntaxMode::Program)
+                .expect_err("surrogates and out-of-range values are not Unicode scalars");
+            assert!(error.message.contains("Unicode scalar value"));
         }
     }
 

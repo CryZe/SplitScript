@@ -402,6 +402,7 @@ impl Parser<'_> {
                     self.current().kind,
                     TokenKind::Ident(_)
                         | TokenKind::Int(_)
+                        | TokenKind::Char(_)
                         | TokenKind::String(_)
                         | TokenKind::DocComment(_)
                 )
@@ -459,6 +460,7 @@ impl Parser<'_> {
             TokenKind::Ident(_)
                 | TokenKind::Int(_)
                 | TokenKind::Float(_)
+                | TokenKind::Char(_)
                 | TokenKind::String(_)
                 | TokenKind::TemplateStart
                 | TokenKind::LParen

@@ -39,6 +39,7 @@ pub(crate) enum RuntimeHelperId {
     PrintString,
     TimerSetVariable,
     FormatI64,
+    FormatChar,
     StringEquality,
     StringMatch,
     StringFind,
@@ -314,7 +315,7 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::StringSplit
         | IntrinsicId::StringParse
         | IntrinsicId::StringByteAt
-        | IntrinsicId::StringCodePointAt
+        | IntrinsicId::StringCharAt
         | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
         IntrinsicId::GbaEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
         _ => None,
@@ -327,10 +328,15 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
     use RuntimeHelperId as Runtime;
 
     match id {
-        IntrinsicId::Print => &[Helper(Runtime::PrintString), Helper(Runtime::FormatI64)],
+        IntrinsicId::Print => &[
+            Helper(Runtime::PrintString),
+            Helper(Runtime::FormatI64),
+            Helper(Runtime::FormatChar),
+        ],
         IntrinsicId::TimerSetVariable => &[
             Helper(Runtime::TimerSetVariable),
             Helper(Runtime::FormatI64),
+            Helper(Runtime::FormatChar),
         ],
         IntrinsicId::RuntimeSetTickRate => &[HostImport(Host::RuntimeSetTickRate)],
         IntrinsicId::SettingsEnabled => &[Helper(Runtime::SettingsEnabled)],
@@ -389,9 +395,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
             Helper(Runtime::StringParseInteger),
             Helper(Runtime::StringParseFloat),
         ],
-        IntrinsicId::StringByteAt | IntrinsicId::StringCodePointAt => {
-            &[Helper(Runtime::StringInspect)]
-        }
+        IntrinsicId::StringByteAt | IntrinsicId::StringCharAt => &[Helper(Runtime::StringInspect)],
         IntrinsicId::StringSlice => &[Helper(Runtime::StringSlice)],
         IntrinsicId::StringConcat => &[Helper(Runtime::ConcatStrings)],
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
@@ -440,6 +444,7 @@ const NEXT_TICK: EffectSet = EffectSet::one(Effect::RequiresAttachedProcess)
 
 const NONE: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::None);
 const BOOL: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Bool);
+const CHAR: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Char);
 const U8: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U8);
 const I64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::I64);
 const U32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U32);
@@ -503,9 +508,9 @@ const U8_RESULT: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Result,
     arguments: &[U8],
 };
-const U32_RESULT: ContractTypeRef = ContractTypeRef::Application {
+const CHAR_RESULT: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Result,
-    arguments: &[U32],
+    arguments: &[CHAR],
 };
 const ADDRESS_RESULT: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Result,
@@ -1149,14 +1154,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             RepresentationPrimitive
         ),
-        IntrinsicId::StringCodePointAt => contract!(
-            StringCodePointAt,
+        IntrinsicId::StringCharAt => contract!(
+            StringCharAt,
             Method,
             signature(
                 NO_TYPE_PARAMETERS,
                 Some(STRING),
                 params![value(U32)],
-                U32_RESULT,
+                CHAR_RESULT,
             ),
             ALLOCATES,
             Everywhere,

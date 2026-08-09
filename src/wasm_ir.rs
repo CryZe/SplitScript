@@ -104,6 +104,7 @@ pub enum ExpressionKind {
     Bool(bool),
     Int(u64),
     Float(crate::ast::FloatLiteral),
+    Char(char),
     String(String),
     InterpolatedString(Vec<InterpolatedPart>),
     Signature(String),
@@ -234,6 +235,7 @@ pub enum LoweredPattern {
         binding: Option<ValueId>,
     },
     Bool(bool),
+    Char(char),
     Int(u64),
     OptionNone(OptionTypeId),
     OptionSome {
@@ -258,7 +260,9 @@ impl LoweredPattern {
             | Self::OptionSome { binding, .. }
             | Self::ResultSuccess { binding, .. }
             | Self::ResultError { binding, .. } => *binding,
-            Self::Bool(_) | Self::Int(_) | Self::OptionNone(_) | Self::Wildcard => None,
+            Self::Bool(_) | Self::Char(_) | Self::Int(_) | Self::OptionNone(_) | Self::Wildcard => {
+                None
+            }
         }
     }
 }
@@ -713,6 +717,7 @@ fn lower_expression(
         TypedExpressionKind::Bool(value) => ExpressionKind::Bool(*value),
         TypedExpressionKind::Int { value, .. } => ExpressionKind::Int(*value),
         TypedExpressionKind::Float(value) => ExpressionKind::Float(value.clone()),
+        TypedExpressionKind::Char(value) => ExpressionKind::Char(*value),
         TypedExpressionKind::String(value) => ExpressionKind::String(value.clone()),
         TypedExpressionKind::InterpolatedString(parts) => ExpressionKind::InterpolatedString(
             parts
@@ -874,6 +879,7 @@ fn lower_expression(
                             binding: binding.as_ref().map(|binding| binding.id),
                         },
                         TypedPattern::Bool(value) => LoweredPattern::Bool(*value),
+                        TypedPattern::Char(value) => LoweredPattern::Char(*value),
                         TypedPattern::Int { value, .. } => LoweredPattern::Int(*value),
                         TypedPattern::None => {
                             let Some(ResolvedWrapperPattern::OptionNone(option)) =
@@ -1783,6 +1789,7 @@ fn capture_await_value(
             | ExpressionKind::Bool(_)
             | ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
+            | ExpressionKind::Char(_)
             | ExpressionKind::String(_)
             | ExpressionKind::Signature(_)
             | ExpressionKind::Temporary(_)
@@ -1984,6 +1991,7 @@ fn map_expression_children(
         | ExpressionKind::Bool(_)
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
+        | ExpressionKind::Char(_)
         | ExpressionKind::String(_)
         | ExpressionKind::Signature(_)
         | ExpressionKind::Temporary(_)

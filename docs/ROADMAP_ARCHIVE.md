@@ -1,19 +1,23 @@
 # SplitScript roadmap
 
-## 2026-08-09: explicit UTF-8 string inspection
+## 2026-08-09: Unicode characters and explicit UTF-8 string inspection
 
+- Added the nominal `char` type and single-quoted literals for exactly one
+  Unicode scalar value. Characters support equality, matching, `Display`, and
+  lossless conversion to `u32`, while remaining separate from integer and
+  process-memory types.
 - Added fallible `String.byteAt(byteIndex)` for raw UTF-8 bytes and
-  `String.codePointAt(byteIndex)` for the Unicode scalar beginning at a byte
-  boundary. Both operations follow the existing byte-index policy instead of
-  inheriting JavaScript or C# UTF-16 indexes.
+  `String.charAt(byteIndex)` for the character beginning at a byte boundary.
+  Both operations follow the existing byte-index policy instead of inheriting
+  JavaScript or C# UTF-16 indexes.
 - Kept inspection allocation-free below the language-level error boundary. The
   shared Wasm helper checks bounds and defensively validates complete UTF-8,
   including overlong encodings, surrogate code points, and U+10FFFF.
 - Extended the deterministic string fixture across one- through four-byte
   values, continuation-byte rejection, raw continuation-byte access, and
   end/out-of-range failures.
-- Updated the maintained Tiberian Sun port to inspect its proven ASCII splash
-  positions without allocating temporary one-byte strings.
+- Updated the maintained Tiberian Sun port to compare its proven ASCII splash
+  positions with character literals without allocating temporary strings.
 
 ## 2026-08-09: compile-time boolean settings families
 

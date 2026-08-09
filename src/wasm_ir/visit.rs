@@ -174,6 +174,7 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
         | ExpressionKind::Bool(_)
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
+        | ExpressionKind::Char(_)
         | ExpressionKind::String(_)
         | ExpressionKind::Signature(_)
         | ExpressionKind::Temporary(_)

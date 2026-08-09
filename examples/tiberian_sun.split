@@ -23,17 +23,17 @@ start {
 split {
     if old.splashVisible == 0 && current.splashVisible > 0 {
         let text = current.splashText.toAsciiLowerCase()
-        let eighth = text.byteAt(7) else return false
-        if eighth == 0x63 {
+        let eighth = text.charAt(7) else return false
+        if eighth == 'c' {
             // Spanish `MISION CUMPLIDA` pattern.
             return true
         }
-        if eighth != 0x20 {
+        if eighth != ' ' {
             return false
         }
 
         // Common English, German, and French completion-text pattern.
-        let twelfth = text.byteAt(11) else return false
-        return twelfth == 0x6f
+        let twelfth = text.charAt(11) else return false
+        return twelfth == 'o'
     }
 }

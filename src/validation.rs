@@ -635,6 +635,7 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
             | ast::MatchPattern::ResultError(Some(binding)) => Some(binding),
             ast::MatchPattern::Enum { binding: None, .. }
             | ast::MatchPattern::Bool(_)
+            | ast::MatchPattern::Char(_)
             | ast::MatchPattern::Int { .. }
             | ast::MatchPattern::None
             | ast::MatchPattern::OptionSome(None)

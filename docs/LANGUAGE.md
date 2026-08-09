@@ -301,6 +301,7 @@ program must still preserve every resolved declaration identity.
 Supported value types are:
 
 - `bool`
+- `char`, exactly one Unicode scalar value
 - `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64`
 - `address`, a nominal 64-bit target-process address
 - `f32`, `f64`
@@ -311,6 +312,19 @@ Supported value types are:
 - `T!`, a result containing either `T` or a standard string error
 - the built-in GC reference types `Duration`, `FileVersion`, and `Module`
 - `Signature`, the compile-time-only type produced by `sig"..."`
+
+Character literals use single quotes and contain exactly one Unicode scalar
+value. They support the ordinary escaped characters plus `\u{...}` scalar
+escapes. A `char` is distinct from an integer: it supports equality and
+`Display`, and `value as u32` exposes its scalar value, but arbitrary integers
+cannot be cast into characters. It is also not directly memory-readable,
+because an address alone does not specify a character encoding.
+
+```splitscript
+let separator = '/'
+let smile = '\u{1f642}'
+print(`Character: {smile}`)
+```
 
 The usual arithmetic, comparison, logical, bitwise, and shift operators are
 supported. Because values are statically typed, `==` and `!=` are unambiguous;
@@ -1390,7 +1404,7 @@ is involved:
 | `split(delimiter)` | Fallible exact split preserving leading, repeated, and trailing empty segments |
 | `parse<T>()` | Strict fallible ASCII decimal parsing into an inferred numeric type |
 | `byteAt(byteIndex)` | Fallible raw UTF-8 byte lookup; continuation bytes remain observable |
-| `codePointAt(byteIndex)` | Fallible Unicode code-point lookup at a UTF-8 byte boundary |
+| `charAt(byteIndex)` | Fallible `char` lookup at a UTF-8 byte boundary |
 | `slice(start, end)` | Fallible half-open UTF-8 byte range; offsets must be code-point boundaries |
 | `replaceAll(search, replacement)` | Fallible exact non-overlapping replacement |
 | `String.concat(values)` | Concatenate an array of strings |
@@ -1400,15 +1414,16 @@ only when at least one ASCII uppercase letter changes. It intentionally has an
 ASCII-specific name: full Unicode lowercasing can change byte length and
 requires a separate, explicitly specified API.
 
-All string offsets are UTF-8 byte offsets. `byteAt` is appropriate for known
-ASCII or binary-shaped identifiers and accepts every in-range byte.
-`codePointAt` decodes the complete Unicode scalar beginning at an offset and
-fails when the offset points into a multibyte sequence. Despite its familiar
-name, it deliberately does not use JavaScript's UTF-16 code-unit indexing:
+All string offsets are UTF-8 byte offsets. `byteAt` is appropriate for binary
+inspection and accepts every in-range byte. `charAt` decodes the complete
+Unicode scalar beginning at an offset and returns it as a `char`; it fails when
+the offset points into a multibyte sequence. It deliberately does not use
+JavaScript's or C#'s UTF-16 code-unit indexing:
 
 ```splitscript
-let separator = "map_01".byteAt(3) else 0
-let sharpS = "Straße".codePointAt(4) else 0
+let separator = "map_01".charAt(3) else return
+let sharpS = "Straße".charAt(4) else return
+return separator == '_' && sharpS == 'ß'
 ```
 
 `text.parse<T>() -> T!` parses the complete string as a numeric value. The

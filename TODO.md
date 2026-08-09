@@ -158,7 +158,7 @@ or behavioral parity.
 - [ ] Improve missing-member recovery so one unknown method does not create
   unrelated unknown-local cascades. The corpus-proven immutable `String`
   surface now includes explicit ASCII normalization, fallible numeric parsing,
-  raw UTF-8 byte inspection, and Unicode code-point inspection under one
+  raw UTF-8 byte inspection, and Unicode `char` inspection under one
   byte-index policy; add further operations only from maintained-port evidence.
 - [ ] Add an explicit `f32`/`f64` bit-pattern construction form and expose the
   exact rounded bits for decimal literals in tooling. Decimal exponent syntax,

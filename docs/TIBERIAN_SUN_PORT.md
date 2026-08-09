@@ -13,8 +13,8 @@ behavioral evidence.
 | Remove loads when `isPlaying` is zero | Original `isLoading` predicate |
 | Start on the vanilla or Firestorm menu-to-game transition | Original menu and game-state edge |
 | Lowercase localized splash text | `toAsciiLowerCase()` with explicit ASCII semantics |
-| Match English, German, and French completion text | Raw UTF-8 byte inspection at offsets 7 and 11 |
-| Match Spanish `MISION CUMPLIDA` | Lowercase `c` at byte offset 7 |
+| Match English, German, and French completion text | `charAt` checks at UTF-8 byte offsets 7 and 11 |
+| Match Spanish `MISION CUMPLIDA` | Lowercase `'c'` at byte offset 7 |
 
 The source uses ASL `string20`, whose runtime guesses UTF-16LE from the second
 byte. The known splash identifiers used by this script are ASCII, so the port
@@ -23,10 +23,10 @@ keeps byte offsets equivalent to the source's .NET character indexes for the
 supported patterns. A future non-ASCII localization would require revisiting
 that evidence rather than silently relying on these offsets.
 
-`byteAt` is fallible because an offset can be outside the decoded string. Both
-accesses therefore return `false` on unexpectedly short text instead of
-trapping. The source patterns are known ASCII, so inspecting their raw UTF-8
-bytes avoids allocating one-byte strings on each matching transition.
+`charAt` is fallible because an offset can be outside the decoded string or in
+the middle of a multibyte scalar. Both accesses therefore return `false` on
+unexpected text instead of trapping. Comparing the returned `char` with a
+single-quoted literal remains allocation-free.
 
 ## Runtime status
 

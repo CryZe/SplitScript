@@ -5,7 +5,7 @@ use crate::{
     ast::{ActionKind, Program, SettingFileFilter, SettingKind, StateSource},
     intrinsic_registry::{self, DependencyRoot, RuntimeHelperId},
     semantic::SemanticModel,
-    stdlib::{Implementation, IntrinsicId, StdlibItemId, StdlibTypeId},
+    stdlib::{CoreTypeId, Implementation, IntrinsicId, StdlibItemId, StdlibTypeId},
     types::TypeKind,
     wasm_ir,
 };
@@ -105,25 +105,45 @@ impl BackendDependencies {
                 }
                 wasm_ir::ExpressionKind::InterpolatedString(parts) => {
                     dependencies.require(RuntimeHelperId::ConcatStrings);
-                    if parts.iter().any(|part| {
-                        matches!(
-                            part,
-                            wasm_ir::InterpolatedPart::Expression {
-                                string_conversion_source: Some(_),
-                                ..
-                            }
-                        )
+                    for source in parts.iter().filter_map(|part| match part {
+                        wasm_ir::InterpolatedPart::Expression {
+                            string_conversion_source,
+                            ..
+                        } => *string_conversion_source,
+                        wasm_ir::InterpolatedPart::Text(_) => None,
                     }) {
-                        dependencies.require(RuntimeHelperId::FormatI64);
+                        dependencies.require(
+                            if matches!(
+                                semantics.types().kind(source),
+                                TypeKind::Builtin(CoreTypeId::Char)
+                            ) {
+                                RuntimeHelperId::FormatChar
+                            } else {
+                                RuntimeHelperId::FormatI64
+                            },
+                        );
                     }
                 }
-                wasm_ir::ExpressionKind::Cast { .. }
+                wasm_ir::ExpressionKind::Cast { value }
                     if matches!(
                         semantics.types().kind(expression.ty),
                         TypeKind::Standard(StdlibTypeId::String)
                     ) =>
                 {
-                    dependencies.require(RuntimeHelperId::FormatI64);
+                    let source = wasm_ir
+                        .expression(*value)
+                        .expect("cast operand belongs to Wasm IR")
+                        .ty;
+                    dependencies.require(
+                        if matches!(
+                            semantics.types().kind(source),
+                            TypeKind::Builtin(CoreTypeId::Char)
+                        ) {
+                            RuntimeHelperId::FormatChar
+                        } else {
+                            RuntimeHelperId::FormatI64
+                        },
+                    );
                 }
                 _ => {}
             }

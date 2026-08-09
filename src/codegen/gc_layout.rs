@@ -321,6 +321,7 @@ impl GcLayout {
                 },
             }),
             Type::Bool
+            | Type::Char
             | Type::I8
             | Type::U8
             | Type::I16

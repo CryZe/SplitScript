@@ -936,6 +936,7 @@ pub enum ExprKind {
     Error,
     None,
     Bool(bool),
+    Char(char),
     Int {
         value: u64,
         suffix: Option<TypeRef>,
@@ -1071,6 +1072,7 @@ pub enum MatchPattern {
         binding: Option<PatternBinding>,
     },
     Bool(bool),
+    Char(char),
     Int {
         value: u64,
         suffix: Option<TypeRef>,

@@ -72,6 +72,10 @@ pub(super) fn build_format_i64(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_format_i64(inputs.gc)
 }
 
+pub(super) fn build_format_char(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_format_char(inputs.gc)
+}
+
 pub(super) fn build_string_equality(inputs: &RuntimeHelperInputs<'_>) -> Function {
     equality::compile_string_eq(inputs.gc)
 }

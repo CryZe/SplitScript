@@ -1316,19 +1316,19 @@ fn explicit_generic_calls_accept_named_and_constructed_types() {
     splitscript::compile(source)
         .expect("explicit generic calls should accept every MemoryReadable source type");
 
-    let errors = splitscript::compile(
-        r#"
-            state "game.exe" {}
-            whileAttached { let value = process.read<String>(0) }
-        "#,
-    )
-    .expect_err("generic constraints still apply to explicit type arguments");
-    assert!(
-        errors
-            .iter()
-            .any(|error| error.message.contains("MemoryReadable")),
-        "{errors:#?}"
-    );
+    for rejected_type in ["String", "char"] {
+        let source = format!(
+            "state \"game.exe\" {{}}\nwhileAttached {{ let value = process.read<{rejected_type}>(0) }}"
+        );
+        let errors = splitscript::compile(&source)
+            .expect_err("generic constraints still apply to explicit type arguments");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("MemoryReadable")),
+            "{errors:#?}"
+        );
+    }
 
     splitscript::compile(
         r#"

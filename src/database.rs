@@ -862,6 +862,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             | MatchPattern::ResultError(Some(binding)) => Some(binding),
             MatchPattern::Enum { binding: None, .. }
             | MatchPattern::Bool(_)
+            | MatchPattern::Char(_)
             | MatchPattern::Int { .. }
             | MatchPattern::None
             | MatchPattern::OptionSome(None)
@@ -1019,6 +1020,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             | ExprKind::Bool(_)
             | ExprKind::Int { .. }
             | ExprKind::Float(_)
+            | ExprKind::Char(_)
             | ExprKind::String(_)
             | ExprKind::InterpolatedString(_)
             | ExprKind::Signature(_)

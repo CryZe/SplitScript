@@ -189,6 +189,7 @@ pub enum TypedPattern {
         binding: Option<PatternBinding>,
     },
     Bool(bool),
+    Char(char),
     Int {
         value: u64,
         suffix: Option<TypeRef>,
@@ -209,6 +210,7 @@ pub enum TypedExpressionKind {
         suffix: Option<TypeRef>,
     },
     Float(crate::ast::FloatLiteral),
+    Char(char),
     String(String),
     InterpolatedString(Vec<TypedInterpolatedPart>),
     Signature(String),
@@ -1008,6 +1010,7 @@ pub fn walk_typed_expression<V: TypedVisitor>(
         | TypedExpressionKind::Bool(_)
         | TypedExpressionKind::Int { .. }
         | TypedExpressionKind::Float(_)
+        | TypedExpressionKind::Char(_)
         | TypedExpressionKind::String(_)
         | TypedExpressionKind::Signature(_)
         | TypedExpressionKind::Path(_) => {}
@@ -1082,6 +1085,7 @@ fn lower_expression_kind(
             suffix: *suffix,
         },
         ExprKind::Float(literal) => TypedExpressionKind::Float(literal.clone()),
+        ExprKind::Char(value) => TypedExpressionKind::Char(*value),
         ExprKind::String(value) => TypedExpressionKind::String(value.clone()),
         ExprKind::InterpolatedString(parts) => TypedExpressionKind::InterpolatedString(
             parts
@@ -1138,6 +1142,7 @@ fn lower_expression_kind(
                             binding: binding.clone(),
                         },
                         MatchPattern::Bool(value) => TypedPattern::Bool(*value),
+                        MatchPattern::Char(value) => TypedPattern::Char(*value),
                         MatchPattern::Int { value, suffix } => TypedPattern::Int {
                             value: *value,
                             suffix: *suffix,

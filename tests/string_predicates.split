@@ -118,11 +118,11 @@ whileAttached {
         Ok(_) => false,
         Err(_) => true,
     }
-    let continuationRejected = match utf8.codePointAt(2) {
+    let continuationRejected = match utf8.charAt(2) {
         Ok(_) => false,
         Err(_) => true,
     }
-    let endRejected = match utf8.codePointAt(7) {
+    let endRejected = match utf8.charAt(7) {
         Ok(_) => false,
         Err(_) => true,
     }
@@ -131,9 +131,19 @@ whileAttached {
         && (utf8.byteAt(1) else 0) == 0xc3
         && (utf8.byteAt(2) else 0) == 0xa9
         && (utf8.byteAt(6) else 0) == 0x82
-        && (utf8.codePointAt(0) else 0) == 0x41
-        && (utf8.codePointAt(1) else 0) == 0x00e9
-        && (utf8.codePointAt(3) else 0) == 0x01f642
+        && (utf8.charAt(0) else '\0') == 'A'
+        && (utf8.charAt(1) else '\0') == 'é'
+        && (utf8.charAt(3) else '\0') == '🙂'
+        && ((utf8.charAt(3) else '\0') as u32) == 0x01f642
+        && ('A' as String) == "A"
+        && ((utf8.charAt(1) else '\0') as String) == "é"
+        && ('€' as String) == "€"
+        && ('\u{1f642}' as String) == "🙂"
+        && `A character: {utf8.charAt(3) else '\0'}` == "A character: 🙂"
+        && match utf8.charAt(1) else '\0' {
+            'é' => true,
+            _ => false,
+        }
         && byteOutOfRange
         && continuationRejected
         && endRejected

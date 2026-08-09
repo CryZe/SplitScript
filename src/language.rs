@@ -978,6 +978,13 @@ define_language_catalog! {
         "let isBoss = current.level == 7"
     ),
     builtin_type_item!(
+        Char,
+        "char",
+        "Stores one Unicode scalar value.",
+        "Character literals use single quotes and contain exactly one Unicode scalar value. A char is distinct from u32, implements Display and equality, converts losslessly to u32 with `as`, and has no implicit process-memory encoding.",
+        "let marker: char = 'ß'"
+    ),
+    builtin_type_item!(
         I8,
         "i8",
         "Stores an 8-bit signed integer.",

@@ -906,6 +906,7 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
         | ExprKind::Bool(_)
         | ExprKind::Int { .. }
         | ExprKind::Float(_)
+        | ExprKind::Char(_)
         | ExprKind::String(_)
         | ExprKind::Signature(_)
         | ExprKind::Path(_) => {}
@@ -929,6 +930,7 @@ fn add_pattern_binding(builder: &mut CompletionBuilder, pattern: &MatchPattern) 
         | MatchPattern::ResultSuccess(binding)
         | MatchPattern::ResultError(binding) => binding.as_ref(),
         MatchPattern::Bool(_)
+        | MatchPattern::Char(_)
         | MatchPattern::Int { .. }
         | MatchPattern::None
         | MatchPattern::Wildcard => None,

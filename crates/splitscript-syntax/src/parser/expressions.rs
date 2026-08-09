@@ -525,6 +525,10 @@ impl Parser<'_> {
                     token.span,
                 ))
             }
+            TokenKind::Char(value) => {
+                self.bump();
+                Ok(self.new_expr(ExprKind::Char(value), token.span))
+            }
             TokenKind::String(value) => {
                 self.bump();
                 Ok(self.new_expr(ExprKind::String(value), token.span))
@@ -898,9 +902,13 @@ impl Parser<'_> {
                     .map_err(|message| Diagnostic::new(message, pattern_start))?;
                 MatchPattern::Int { value, suffix }
             }
+            TokenKind::Char(value) => {
+                self.bump();
+                MatchPattern::Char(value)
+            }
             _ => {
                 return Err(Diagnostic::new(
-                    "expected an enum variant, integer, boolean, `None`, `Some(value)`, `Ok(value)`, `Err(error)`, or `_` pattern",
+                    "expected an enum variant, character, integer, boolean, `None`, `Some(value)`, `Ok(value)`, `Err(error)`, or `_` pattern",
                     pattern_start,
                 ));
             }

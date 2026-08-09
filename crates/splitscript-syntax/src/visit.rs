@@ -345,6 +345,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
         | ExprKind::Bool(_)
         | ExprKind::Int { .. }
         | ExprKind::Float(_)
+        | ExprKind::Char(_)
         | ExprKind::String(_)
         | ExprKind::Signature(_)
         | ExprKind::Path(_) => {}
@@ -698,6 +699,7 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
         | ExprKind::Bool(_)
         | ExprKind::Int { .. }
         | ExprKind::Float(_)
+        | ExprKind::Char(_)
         | ExprKind::String(_)
         | ExprKind::Signature(_)
         | ExprKind::Path(_) => {}

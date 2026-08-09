@@ -89,6 +89,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(PrintString, (StringValue) -> (), deps [], imports [RuntimePrintMessage], build_print_string),
     helper!(TimerSetVariable, (StringValue, StringValue) -> (), deps [], imports [TimerSetVariable], build_timer_set_variable),
     helper!(FormatI64, (I64, I32) -> (StringValue), deps [], imports [], build_format_i64),
+    helper!(FormatChar, (I32) -> (StringValue), deps [], imports [], build_format_char),
     helper!(StringEquality, (StringValue, StringValue) -> (I32), deps [], imports [], build_string_equality),
     helper!(StringMatch, (StringValue, StringValue, I32) -> (I32), deps [], imports [], build_string_match),
     helper!(StringFind, (StringValue, StringValue, I32) -> (I32), deps [], imports [], build_string_find),

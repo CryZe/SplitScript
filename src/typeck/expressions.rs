@@ -81,6 +81,12 @@ impl Checker {
                 let ty = self.inference.fresh_float_literal();
                 self.expect_expression(expr.id, ty, expected, expr.span)?
             }
+            ExprKind::Char(_) => self.expect_expression(
+                expr.id,
+                self.core_type(crate::stdlib::CoreTypeId::Char),
+                expected,
+                expr.span,
+            )?,
             ExprKind::String(_) => self.expect_expression(
                 expr.id,
                 self.standard_type(StdlibTypeId::String),
@@ -373,6 +379,14 @@ impl Checker {
                             );
                             format!("bool:{value}")
                         }
+                        MatchPattern::Char(value) => {
+                            self.unify(
+                                value_type,
+                                self.core_type(crate::stdlib::CoreTypeId::Char),
+                                arm.span,
+                            );
+                            format!("char:{value}")
+                        }
                         MatchPattern::Int { value, suffix } => {
                             let pattern_type = if let Some(suffix) = suffix {
                                 if !suffix.is_integer() {
@@ -541,6 +555,9 @@ impl Checker {
                         }
                         ty if self.inference.is_integer(ty) => {
                             self.error("non-exhaustive integer match: add a `_` arm", expr.span)
+                        }
+                        ty if ty == self.core_type(crate::stdlib::CoreTypeId::Char) => {
+                            self.error("non-exhaustive character match: add a `_` arm", expr.span)
                         }
                         ty @ Type::Known(_) => {
                             if let Some((enum_key, declaration)) = self.enum_info_for_type(ty) {
@@ -792,7 +809,11 @@ impl Checker {
             } => {
                 let source = self.expr(inner, None)?;
                 let target = self.syntax_type(*target);
-                if self.inference.is_numeric(target) {
+                if target == self.core_type(crate::stdlib::CoreTypeId::U32)
+                    && source == self.core_type(crate::stdlib::CoreTypeId::Char)
+                {
+                    // Unicode scalar values convert losslessly to their code point.
+                } else if self.inference.is_numeric(target) {
                     self.require(
                         source,
                         Requirements::capability(StdlibCapabilityId::Numeric),

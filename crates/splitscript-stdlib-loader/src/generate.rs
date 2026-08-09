@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use splitscript_syntax::PrimitiveType;
+
 use crate::{
     Attribute, AttributeArgument, CallableOwnerDeclaration, Declaration, Error,
     FunctionDeclaration, Library, StructDeclaration, Type, TypeParameter,
@@ -676,22 +678,7 @@ fn quote(value: &str) -> String {
 }
 
 fn is_core_type(name: &str) -> bool {
-    matches!(
-        name,
-        "None"
-            | "bool"
-            | "i8"
-            | "u8"
-            | "i16"
-            | "u16"
-            | "i32"
-            | "u32"
-            | "i64"
-            | "u64"
-            | "address"
-            | "f32"
-            | "f64"
-    )
+    PrimitiveType::parse(name).is_some()
 }
 
 pub fn generate_ids(library: &Library) -> Result<String, Vec<Error>> {

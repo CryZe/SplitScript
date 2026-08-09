@@ -50,6 +50,7 @@ pub enum SyntaxMode {
 pub enum PrimitiveType {
     None,
     Bool,
+    Char,
     I8,
     U8,
     I16,
@@ -67,6 +68,7 @@ impl PrimitiveType {
     pub const ALL: &'static [Self] = &[
         Self::None,
         Self::Bool,
+        Self::Char,
         Self::I8,
         Self::U8,
         Self::I16,
@@ -84,6 +86,7 @@ impl PrimitiveType {
         match self {
             Self::None => "None",
             Self::Bool => "bool",
+            Self::Char => "char",
             Self::I8 => "i8",
             Self::U8 => "u8",
             Self::I16 => "i16",

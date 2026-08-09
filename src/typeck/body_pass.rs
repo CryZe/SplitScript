@@ -3,7 +3,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{ActionKind, ExprKind, FunctionId, Program, StateSource, Stmt},
+    Diagnostic, DiagnosticFix, FixApplicability, TextEdit,
+    ast::{ActionKind, ExprKind, FunctionId, Program, Span, StateDecl, StateSource, Stmt},
     inference::Type,
     stdlib::{CoreTypeId, StdlibTypeId},
     visit::{self, Visitor},
@@ -383,23 +384,89 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
                 .is_some_and(|state| !state.layouts.is_empty())
             && !layout_selection_is_terminal(checker, &action.body)
         {
-            checker.error(
+            let mut diagnostic = Diagnostic::type_error(
                 "`onAttach` must return a layout on every completing path",
                 action.span,
-            );
+            )
+            .with_primary_label("this selector can finish without choosing a layout");
+            if program
+                .state
+                .as_ref()
+                .is_some_and(|state| state.provider.is_none())
+            {
+                let insertion = action.body.span.end.saturating_sub(1);
+                diagnostic = diagnostic
+                    .with_note(
+                        "keep an unsupported build attached but inert by awaiting `process.closed()` instead of selecting a fallback layout",
+                    )
+                    .with_machine_applicable_fix(
+                        "wait for an unsupported process to close",
+                        Span {
+                            start: insertion,
+                            end: insertion,
+                        },
+                        "\n    await process.closed()\n",
+                    );
+            } else {
+                diagnostic = diagnostic.with_note(
+                    "return a layout on every completing path; this state provider has no generic process-close wait",
+                );
+            }
+            checker.errors.push(diagnostic);
         }
     }
-    if program
+    if let Some(state) = program
         .state
         .as_ref()
-        .is_some_and(|state| !state.layouts.is_empty())
+        .filter(|state| !state.layouts.is_empty())
         && !actions.contains(&ActionKind::OnAttach)
     {
-        checker.error(
-            "named state layouts require an `onAttach` block that returns the selected layout",
-            program.state.as_ref().unwrap().span,
+        checker
+            .errors
+            .push(missing_layout_selector_diagnostic(state));
+    }
+}
+
+fn missing_layout_selector_diagnostic(state: &StateDecl) -> Diagnostic {
+    let diagnostic = Diagnostic::type_error(
+        "named state layouts require an `onAttach` block that returns the selected layout",
+        state.span,
+    )
+    .with_primary_label("these layouts need an explicit attach-time selector");
+    if state.provider.is_some() {
+        return diagnostic.with_note(
+            "return a layout only after identifying the supported target; this state provider has no generic process-close wait",
         );
     }
+    let variants = state
+        .layout_enum
+        .as_ref()
+        .expect("named layouts have a generated enum")
+        .variants
+        .iter()
+        .map(|variant| {
+            format!(
+                "    // if <{} build check> {{\n    //     return StateLayout.{}\n    // }}\n",
+                variant.name, variant.name
+            )
+        })
+        .collect::<String>();
+    let fix = DiagnosticFix {
+        title: "add a safe `onAttach` layout-selection skeleton".to_owned(),
+        applicability: FixApplicability::HasPlaceholders,
+        edits: vec![TextEdit {
+            span: Span {
+                start: state.span.end,
+                end: state.span.end,
+            },
+            replacement: format!("\n\nonAttach {{\n{variants}    await process.closed()\n}}"),
+        }],
+    };
+    diagnostic
+        .with_note(
+            "select only builds identified by reliable process or module evidence; leave every unknown build at `await process.closed()`",
+        )
+        .with_fix(fix)
 }
 
 fn layout_selection_is_terminal(checker: &Checker, block: &crate::ast::Block) -> bool {

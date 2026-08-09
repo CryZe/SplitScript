@@ -124,6 +124,78 @@ fn named_state_layouts_require_a_total_on_attach_selection() {
 }
 
 #[test]
+fn named_layout_diagnostics_offer_safe_selection_fixes() {
+    use splitscript::FixApplicability;
+
+    let missing = r#"state "game.exe" {
+    layout Steam { level: u32 at 0x100 },
+    layout GOG { level: u32 at 0x200 },
+}"#;
+    let diagnostics = splitscript::compile(missing).unwrap_err();
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic
+                .message
+                .starts_with("named state layouts require")
+        })
+        .expect("missing selector diagnostic");
+    let fix = diagnostic.fixes.first().expect("selector skeleton fix");
+    assert_eq!(fix.applicability, FixApplicability::HasPlaceholders);
+    let fixed = apply_fix(missing, fix);
+    assert!(fixed.contains("return StateLayout.Steam"));
+    assert!(fixed.contains("return StateLayout.GOG"));
+    assert!(fixed.ends_with("await process.closed()\n}"));
+    splitscript::compile(&fixed).expect("the inert skeleton should compile safely");
+
+    let fallthrough = r#"state "game.exe" {
+    layout Steam { level: u32 at 0x100 },
+}
+onAttach {
+    if process.name() == "game.exe" {
+        return StateLayout.Steam
+    }
+}"#;
+    let diagnostics = splitscript::compile(fallthrough).unwrap_err();
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.starts_with("`onAttach` must return"))
+        .expect("non-total selector diagnostic");
+    let fix = diagnostic.fixes.first().expect("unsupported-build fix");
+    assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+    let fixed = apply_fix(fallthrough, fix);
+    splitscript::compile(&fixed).expect("the process-close fallback should make selection total");
+
+    let provider = r#"state GBA {
+    layout English { level: u8 at 0x100 },
+}"#;
+    let diagnostics = splitscript::compile(provider).unwrap_err();
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic
+                .message
+                .starts_with("named state layouts require")
+        })
+        .expect("provider selector diagnostic");
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("no generic process-close wait"))
+    );
+}
+
+fn apply_fix(source: &str, fix: &splitscript::DiagnosticFix) -> String {
+    let mut fixed = source.to_owned();
+    for edit in fix.edits.iter().rev() {
+        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+    fixed
+}
+
+#[test]
 fn generated_layout_type_and_value_navigate_but_are_not_renameable() {
     use splitscript::tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId};
 

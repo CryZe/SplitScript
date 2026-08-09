@@ -88,12 +88,6 @@ or behavioral parity.
 
 ### State layouts, discovery, and process identity
 
-- [ ] Make unsupported-build handling explicit in named-layout diagnostics and
-  completion. The generated `onAttach` skeleton should select only proven
-  layouts and end unknown or unavailable metadata paths with
-  `await process.closed()`; it must not encourage a typed fallback that can
-  silently poll the wrong addresses. Document when process name, executable
-  path, module size, `FileVersion`, or a signature is a reliable discriminator.
 - [ ] Add layout sharing or overrides only if a maintained port proves that
   repeated pointer paths across many versions are materially unmaintainable.
   Keep the selected physical layout auditable.

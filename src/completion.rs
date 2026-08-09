@@ -77,6 +77,7 @@ pub(crate) fn complete(
             .iter()
             .find(|action| contains_offset(action.body.span, offset))
             .map(|action| action.kind);
+        let top_level = action.is_none() && is_top_level_offset(&syntax, offset);
         let has_attached_process = action.is_none_or(action_has_attached_process);
         let effects = (!has_attached_process)
             .then(|| {
@@ -95,6 +96,7 @@ pub(crate) fn complete(
             standard_library,
             has_attached_process,
             effects.as_ref(),
+            top_level,
         ))
     }
 }
@@ -285,6 +287,7 @@ fn complete_root(
     standard_library: StandardLibrary,
     has_attached_process: bool,
     effects: Option<&OperationAnalysis>,
+    top_level: bool,
 ) -> CompletionList {
     let replacement = identifier_span(source, offset);
     let prefix = source[replacement.start..offset].to_owned();
@@ -294,6 +297,18 @@ fn complete_root(
         if let Some(completion) = language_completion(item) {
             builder.add(completion);
         }
+    }
+    if top_level
+        && let Some(state) = syntax
+            .state
+            .as_ref()
+            .filter(|state| state.provider.is_none() && !state.layouts.is_empty())
+        && !syntax
+            .actions
+            .iter()
+            .any(|action| action.kind == crate::ast::ActionKind::OnAttach)
+    {
+        builder.add_scoped(layout_selector_completion(state));
     }
     let provider = selected_provider(syntax, &standard_library);
     add_root_standard_library(&mut builder, &standard_library, has_attached_process);
@@ -311,6 +326,63 @@ fn complete_root(
     add_source_declarations(&mut builder, syntax, has_attached_process, effects);
     add_visible_bindings(&mut builder, syntax, offset);
     builder.finish()
+}
+
+fn layout_selector_completion(state: &crate::ast::StateDecl) -> CompletionItem {
+    let checks = state
+        .layout_enum
+        .as_ref()
+        .expect("named layouts have a generated enum")
+        .variants
+        .iter()
+        .enumerate()
+        .map(|(index, variant)| {
+            let placeholder = index + 1;
+            format!(
+                "    if ${{{placeholder}:{} build check}} {{\n        return StateLayout.{}\n    }}\n",
+                variant.name, variant.name
+            )
+        })
+        .collect::<String>();
+    let item = LanguageCatalog::new().action(crate::ast::ActionKind::OnAttach);
+    catalog_language_completion(
+        item.name,
+        CompletionKind::Snippet,
+        item,
+        format!("onAttach {{\n{checks}    $0\n    await process.closed()\n}}"),
+        true,
+    )
+}
+
+fn is_top_level_offset(syntax: &Program, offset: usize) -> bool {
+    !syntax
+        .actions
+        .iter()
+        .any(|action| contains_offset(action.body.span, offset))
+        && !syntax
+            .functions
+            .iter()
+            .any(|function| contains_offset(function.body.span, offset))
+        && syntax
+            .state
+            .as_ref()
+            .is_none_or(|state| !contains_offset(state.span, offset))
+        && syntax
+            .settings
+            .iter()
+            .all(|setting| !contains_offset(setting.span, offset))
+        && syntax
+            .records
+            .iter()
+            .all(|record| !contains_offset(record.span, offset))
+        && syntax
+            .enums
+            .iter()
+            .all(|enumeration| !contains_offset(enumeration.span, offset))
+        && syntax
+            .globals
+            .iter()
+            .all(|global| !contains_offset(global.span, offset))
 }
 
 fn complete_member(
@@ -1881,6 +1953,23 @@ split { lay }
         assert!(variants.contains(&"Steam".to_owned()));
         assert!(variants.contains(&"GOG".to_owned()));
         assert!(labels(&mut database, "lay }").contains(&"layout".to_owned()));
+
+        let missing_selector = r#"state "game.exe" {
+    layout Steam { level: u32 at 0x100 },
+    layout GOG { level: u32 at 0x200 },
+}
+onA"#;
+        let mut database = CompilerDatabase::new(missing_selector);
+        let completions = database.completions(missing_selector.len()).unwrap();
+        let selector = completions
+            .items
+            .iter()
+            .find(|item| item.label == "onAttach")
+            .expect("named layouts should offer a safe selector snippet");
+        assert!(selector.is_snippet);
+        assert!(selector.insert_text.contains("return StateLayout.Steam"));
+        assert!(selector.insert_text.contains("return StateLayout.GOG"));
+        assert!(selector.insert_text.ends_with("await process.closed()\n}"));
     }
 
     #[test]

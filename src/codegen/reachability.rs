@@ -231,6 +231,13 @@ impl Reachability {
         // storage or signatures, not only the result types of live expressions.
         let mut type_roots = Vec::new();
         if let Some(state) = &program.state {
+            if let Some(layout) = state.layout_value {
+                type_roots.push(
+                    semantics
+                        .value_type(layout)
+                        .expect("checked layout values have types"),
+                );
+            }
             for field in state.all_fields() {
                 type_roots.push(
                     semantics

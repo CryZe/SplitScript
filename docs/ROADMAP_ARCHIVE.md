@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-09: safe named-layout selection discovery
+
+- Made the missing-`onAttach` diagnostic generate a placeholder selector for
+  every declared layout, always ending in `await process.closed()` so unknown
+  builds remain attached but inert instead of polling a guessed layout.
+- Added a machine-applicable process-close fallback when an existing selector
+  can complete without returning a layout, together with focused rationale in
+  the diagnostic.
+- Specialized top-level `onAttach` completion for named layouts with the same
+  exhaustive, unsupported-build-safe structure while retaining ordinary action
+  completion elsewhere.
+- Treated the generated layout value's type as a GC storage root, allowing a
+  deliberately inert process-close-only selector to compile without requiring
+  any reachable layout constructor.
+
 ## 2026-08-09: conventional compiler CLI discovery
 
 - Replaced the hand-written native argument parser with one derived Clap model,

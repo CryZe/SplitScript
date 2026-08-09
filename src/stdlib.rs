@@ -416,6 +416,23 @@ impl StandardLibrary {
             .expect("every standard-library ID must have a catalog entry")
     }
 
+    /// Returns the use obligation for a callable's result.
+    ///
+    /// Catalog declarations can provide a more specific explanation, but the
+    /// default follows the language-wide value semantics: discarding a
+    /// returned value is a mistake unless the operation mutates its receiver.
+    pub fn must_use(&self, id: StdlibItemId) -> Option<&'static str> {
+        const VALUE_MUST_BE_USED: &str =
+            "This operation only produces a value; use or explicitly store its returned value.";
+
+        let item = self.item(id);
+        item.must_use.or_else(|| {
+            (item.signature.result != TypeRef::Core(CoreTypeId::None)
+                && !self.effects(id).contains(&Effect::MutatesValue))
+            .then_some(VALUE_MUST_BE_USED)
+        })
+    }
+
     /// Returns the authoritative effects and availability for a catalog item.
     /// Intrinsics use their trusted declarations; source bodies use the
     /// compiler-derived result cached in this library graph.
@@ -471,7 +488,8 @@ impl StandardLibrary {
             StdlibOwner::TypeConstructor(constructor) => {
                 vec![self.type_constructor(constructor).name]
             }
-            StdlibOwner::Core(_) | StdlibOwner::Capability(_) => return None,
+            StdlibOwner::Core(core) => vec![self.core_type(core).name],
+            StdlibOwner::Capability(_) => return None,
         };
         path.push(item.name);
         Some(path)

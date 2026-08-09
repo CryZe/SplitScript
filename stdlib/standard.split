@@ -1021,6 +1021,82 @@ capability Float<T: Signed> {
     }
 }
 
+extend f32 {
+    /// Constructs a 32-bit float from its exact IEEE-754 bit pattern.
+    ///
+    /// Every bit pattern is accepted, including signed zero, infinities, and
+    /// NaN payloads. This is a reinterpretation and performs no numeric
+    /// conversion.
+    ///
+    /// # Example
+    ///
+    /// Construct the smallest positive 32-bit subnormal
+    ///
+    /// ```splitscript
+    /// let smallest = f32.fromBits(0x00000001)
+    /// ```
+    @mustUse("The constructed floating-point value must be used.")
+    @intrinsic(F32FromBits)
+    static fn fromBits(
+        /// The exact IEEE-754 binary32 representation.
+        bits: u32,
+    ) -> f32;
+
+    /// Returns this float's exact IEEE-754 bit pattern.
+    ///
+    /// Signed zero and NaN payload bits are preserved. This is a
+    /// reinterpretation and performs no numeric conversion.
+    ///
+    /// # Example
+    ///
+    /// Inspect a 32-bit float
+    ///
+    /// ```splitscript
+    /// let bits = (-0.0 as f32).toBits()
+    /// ```
+    @mustUse("The returned bit pattern must be used.")
+    @intrinsic(F32ToBits)
+    fn toBits() -> u32;
+}
+
+extend f64 {
+    /// Constructs a 64-bit float from its exact IEEE-754 bit pattern.
+    ///
+    /// Every bit pattern is accepted, including signed zero, infinities, and
+    /// NaN payloads. This is a reinterpretation and performs no numeric
+    /// conversion.
+    ///
+    /// # Example
+    ///
+    /// Construct the smallest positive 64-bit subnormal
+    ///
+    /// ```splitscript
+    /// let smallest = f64.fromBits(0x0000000000000001u64)
+    /// ```
+    @mustUse("The constructed floating-point value must be used.")
+    @intrinsic(F64FromBits)
+    static fn fromBits(
+        /// The exact IEEE-754 binary64 representation.
+        bits: u64,
+    ) -> f64;
+
+    /// Returns this float's exact IEEE-754 bit pattern.
+    ///
+    /// Signed zero and NaN payload bits are preserved. This is a
+    /// reinterpretation and performs no numeric conversion.
+    ///
+    /// # Example
+    ///
+    /// Inspect a 64-bit float
+    ///
+    /// ```splitscript
+    /// let bits = (-0.0 as f64).toBits()
+    /// ```
+    @mustUse("The returned bit pattern must be used.")
+    @intrinsic(F64ToBits)
+    fn toBits() -> u64;
+}
+
 /// Supports equality comparison.
 ///
 /// Equality is available for values whose representation can be compared safely.

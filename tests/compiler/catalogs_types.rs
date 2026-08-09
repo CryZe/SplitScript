@@ -123,6 +123,19 @@ fn must_use_obligations_are_catalog_owned() {
             .expect("immutable case conversion should explain its returned value")
             .contains("immutable")
     );
+    assert!(
+        library
+            .must_use(StdlibItemId::F32FromBits)
+            .expect("float construction should carry a use obligation")
+            .contains("constructed")
+    );
+    assert!(
+        library
+            .must_use(StdlibItemId::ProcessRead)
+            .expect("non-mutating reads should receive the catalog default")
+            .contains("only produces")
+    );
+    assert_eq!(library.must_use(StdlibItemId::SetInsert), None);
 }
 
 #[test]
@@ -970,6 +983,22 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     assert_eq!(
         library.render_signature(StdlibItemId::FloatIsFinite),
         "T.isFinite() -> bool where T: Float"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::F32FromBits),
+        "f32.fromBits(bits: u32) -> f32"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::F32ToBits),
+        "f32.toBits() -> u32"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::F64FromBits),
+        "f64.fromBits(bits: u64) -> f64"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::F64ToBits),
+        "f64.toBits() -> u64"
     );
     for removed in [
         "timer.setVariable",

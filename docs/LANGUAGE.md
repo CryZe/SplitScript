@@ -247,6 +247,17 @@ smallest positive `f32` (bit pattern `0x00000001`), while
 underflows its target to zero or overflows it to infinity is a type error rather
 than silently changing the comparison value.
 
+Hovering a decimal floating-point literal shows both its inferred width and
+the exact rounded IEEE-754 bits. Use `f32.fromBits(bits)` or
+`f64.fromBits(bits)` when the bit pattern itself is the source data, and
+`.toBits()` for the inverse reinterpretation. These operations preserve signed
+zero and NaN payloads and do not perform a numeric conversion.
+
+```splitscript
+let negativeZero = f32.fromBits(0x8000_0000u32)
+let representation = negativeZero.toBits()
+```
+
 Assignments support `=`, the arithmetic compound forms `+=`, `-=`, `*=`, `/=`,
 and `%=`, plus `|=`, `&=`, `^=`, `<<=`, and `>>=` for integers. A compound
 assignment uses exactly the same operand typing and runtime operation as its
@@ -528,11 +539,19 @@ successes or errors. Successes compare their values, errors compare their
 error strings by content, and a success never equals an error. This composes
 through records and enums that contain wrapper fields or payloads.
 
-`Option` and `Result` values are marked as must-use. Writing a call that returns
-one as a bare expression statement produces a warning because absence or
-failure would otherwise be silently ignored. Using the value in an assignment,
-argument, return, match, `else`, or `?` consumes it. The warning is non-fatal:
-debug watch and release builds still emit their Wasm artifact.
+Standard-library operations that return a value without mutating their receiver
+are must-use by default. Writing such a call as a bare expression statement
+produces a warning because discarding its only useful outcome is normally a
+mistake. Mutating operations such as `Set.insert` remain intentionally
+discardable even when they return status information. Individual declarations
+can provide a more specific explanation; immutable string transforms do so to
+make clear that they return a new string.
+
+`Option` and `Result` additionally carry a must-use obligation on the value
+type itself, because absence or failure must not be silently ignored. Using a
+must-use value in an assignment, argument, return, match, `else`, or `?`
+consumes it. The warning is non-fatal: debug watch and release builds still emit
+their Wasm artifact.
 
 Both wrappers can be matched exhaustively with explicit state patterns:
 

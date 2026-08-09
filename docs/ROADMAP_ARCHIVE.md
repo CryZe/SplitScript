@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-09: exact floating-point representations and result obligations
+
+- Added `f32.fromBits`/`f64.fromBits` and `.toBits()` as ordinary documented
+  standard-library operations backed by Wasm reinterpret instructions. Signed
+  zero, subnormals, infinities, and NaN payloads round-trip without numeric
+  conversion or allocation.
+- Decimal-literal hover now reports the inferred `f32` or `f64` width and its
+  exact rounded IEEE-754 bit pattern, complementing the existing target-width
+  underflow and overflow diagnostics.
+- Made non-mutating value-producing standard-library operations must-use by
+  default, while preserving specific authored explanations and leaving
+  mutating status-returning operations intentionally discardable.
+- Covered exact runtime bit patterns for both widths, catalog signatures,
+  hover output, and the generic must-use policy.
+
 ## 2026-08-09: cascade-free failed-declaration recovery
 
 - Failed global, local, and suspending `let` initializers now retain their

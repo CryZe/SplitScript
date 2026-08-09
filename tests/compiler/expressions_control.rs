@@ -14,6 +14,10 @@ fn discarded_must_use_values_warn_without_failing_compilation() {
         whileAttached {
             "abc".replaceAll("a", "b")
             maybeValue()
+            timer.state()
+
+            let values = Set.new<i32>()
+            values.insert(1)
 
             let replaced = "abc".replaceAll("a", "b") else "abc"
             let optional = maybeValue()
@@ -23,7 +27,7 @@ fn discarded_must_use_values_warn_without_failing_compilation() {
     "#;
     let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
         .expect("warnings must not reject a valid program");
-    assert_eq!(checked.diagnostics().len(), 2);
+    assert_eq!(checked.diagnostics().len(), 3);
     assert!(checked.diagnostics().iter().all(|diagnostic| {
         diagnostic.severity == splitscript::DiagnosticSeverity::Warning
             && diagnostic.code == splitscript::DiagnosticCode::MustUse
@@ -42,6 +46,13 @@ fn discarded_must_use_values_warn_without_failing_compilation() {
                 .notes
                 .iter()
                 .any(|note| note.contains("inspected"))
+    }));
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.message.contains("timer.state")
+            && diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("only produces"))
     }));
 
     let (wasm, warnings) = splitscript::compile_with_context_and_options_diagnostics(
@@ -145,7 +156,7 @@ fn unused_bindings_warn_by_identity_and_support_intentional_underscores() {
     let unused = checked
         .diagnostics()
         .iter()
-        .filter(|diagnostic| diagnostic.message.starts_with("unused "))
+        .filter(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::UnusedBinding)
         .collect::<Vec<_>>();
     assert_eq!(unused.len(), 6, "{unused:#?}");
     assert!(

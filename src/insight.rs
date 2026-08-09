@@ -20,7 +20,7 @@ use crate::{
     stdlib_semantic::StandardLibrarySemanticExt,
     syntax::SourceDocument,
     type_display::display_type,
-    types::{TypeId, TypeKind},
+    types::{BuiltinType, TypeId, TypeKind},
     visit::{self, Visitor},
 };
 
@@ -59,6 +59,12 @@ pub(crate) fn hover(
     let Some(token) = database.token_at(offset)? else {
         return Ok(None);
     };
+    if let Some(markdown) = float_literal_markdown(database, &token, offset)? {
+        return Ok(Some(HoverInfo {
+            span: token.span,
+            markdown,
+        }));
+    }
     let target = database.definition_at_query_offset(offset)?;
     if target.is_none()
         && let Some(analysis) = database.analysis_at(offset)?
@@ -119,6 +125,38 @@ pub(crate) fn hover(
         span: token.span,
         markdown,
     }))
+}
+
+fn float_literal_markdown(
+    database: &mut CompilerDatabase,
+    token: &Token,
+    offset: usize,
+) -> SemanticQueryResult<Option<String>> {
+    let TokenKind::Float(spelling) = &token.kind else {
+        return Ok(None);
+    };
+    let Some(analysis) = database.analysis_at(offset)? else {
+        return Ok(None);
+    };
+    let normalized = spelling.replace('_', "");
+    let (ty, bits) = match analysis.type_kind {
+        TypeKind::Builtin(BuiltinType::F32) => {
+            let Ok(value) = normalized.parse::<f32>() else {
+                return Ok(None);
+            };
+            ("f32", format!("0x{:08x}", value.to_bits()))
+        }
+        TypeKind::Builtin(BuiltinType::F64) => {
+            let Ok(value) = normalized.parse::<f64>() else {
+                return Ok(None);
+            };
+            ("f64", format!("0x{:016x}", value.to_bits()))
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(format!(
+        "```splitscript\n{spelling}: {ty}\n```\n\n**Rounded IEEE-754 bits:** `{bits}`"
+    )))
 }
 
 fn state_transform_binding(
@@ -1067,6 +1105,42 @@ whileAttached {
                 .markdown
                 .contains("exactly four decimal u16 components")
         );
+    }
+
+    #[test]
+    fn floating_point_literal_hover_shows_the_resolved_width_and_exact_bits() {
+        let source = r#"state "game.exe" {}
+whileAttached {
+    let smallest32: f32 = 1e-45
+    let smallest64: f64 = 5e-324
+    let ordinary = 1.25
+}"#;
+        let mut database = CompilerDatabase::new(source);
+
+        let single_offset = source.find("1e-45").unwrap();
+        let single = database.hover(single_offset).unwrap().expect("f32 hover");
+        assert_eq!(
+            single.span,
+            Span {
+                start: single_offset,
+                end: single_offset + 5,
+            }
+        );
+        assert!(single.markdown.contains("1e-45: f32"));
+        assert!(single.markdown.contains("`0x00000001`"));
+
+        let double_offset = source.find("5e-324").unwrap();
+        let double = database.hover(double_offset).unwrap().expect("f64 hover");
+        assert!(double.markdown.contains("5e-324: f64"));
+        assert!(double.markdown.contains("`0x0000000000000001`"));
+
+        let ordinary_offset = source.find("1.25").unwrap();
+        let ordinary = database
+            .hover(ordinary_offset)
+            .unwrap()
+            .expect("default f64 hover");
+        assert!(ordinary.markdown.contains("1.25: f64"));
+        assert!(ordinary.markdown.contains("`0x3ff4000000000000`"));
     }
 
     #[test]

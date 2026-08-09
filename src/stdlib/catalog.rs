@@ -159,7 +159,11 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::FloatRound
         | StdlibItemId::FloatRoundTo
         | StdlibItemId::FloatIsNaN
-        | StdlibItemId::FloatIsFinite => FLOAT_EXAMPLE,
+        | StdlibItemId::FloatIsFinite
+        | StdlibItemId::F32FromBits
+        | StdlibItemId::F32ToBits
+        | StdlibItemId::F64FromBits
+        | StdlibItemId::F64ToBits => FLOAT_EXAMPLE,
         StdlibItemId::ArrayLength | StdlibItemId::ArraySet => ARRAY_EXAMPLE,
         StdlibItemId::AddressOffset | StdlibItemId::AddressAdd => ADDRESS_EXAMPLE,
         StdlibItemId::ProcessModule

@@ -408,6 +408,10 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::FloatFloor
         | IntrinsicId::FloatCeil
         | IntrinsicId::FloatRound
+        | IntrinsicId::F32FromBits
+        | IntrinsicId::F32ToBits
+        | IntrinsicId::F64FromBits
+        | IntrinsicId::F64ToBits
         | IntrinsicId::ArrayLength
         | IntrinsicId::ArraySet
         | IntrinsicId::SetNew
@@ -449,6 +453,7 @@ const U8: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U8);
 const I64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::I64);
 const U32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U32);
 const U64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U64);
+const F32: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::F32);
 const F64: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::F64);
 const ADDRESS: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Address);
 const STRING: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::String);
@@ -704,6 +709,38 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             FloatRound,
             Method,
             signature(FLOAT_T, Some(T), params![], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::F32FromBits => contract!(
+            F32FromBits,
+            Function,
+            signature(NO_TYPE_PARAMETERS, None, params![value(U32)], F32),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::F32ToBits => contract!(
+            F32ToBits,
+            Method,
+            signature(NO_TYPE_PARAMETERS, Some(F32), params![], U32),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::F64FromBits => contract!(
+            F64FromBits,
+            Function,
+            signature(NO_TYPE_PARAMETERS, None, params![value(U64)], F64),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::F64ToBits => contract!(
+            F64ToBits,
+            Method,
+            signature(NO_TYPE_PARAMETERS, Some(F64), params![], U64),
             PURE,
             Everywhere,
             RepresentationPrimitive

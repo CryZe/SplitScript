@@ -2726,6 +2726,22 @@ fn compile_expr_unconverted(
                     _ => unreachable!("float intrinsics require an f32 or f64 receiver"),
                 });
             }
+            IntrinsicId::F32FromBits => {
+                compile_expr(function, args[0], context);
+                function.instruction(&Instruction::F32ReinterpretI32);
+            }
+            IntrinsicId::F32ToBits => {
+                compile_receiver(function, target, context);
+                function.instruction(&Instruction::I32ReinterpretF32);
+            }
+            IntrinsicId::F64FromBits => {
+                compile_expr(function, args[0], context);
+                function.instruction(&Instruction::F64ReinterpretI64);
+            }
+            IntrinsicId::F64ToBits => {
+                compile_receiver(function, target, context);
+                function.instruction(&Instruction::I64ReinterpretF64);
+            }
             IntrinsicId::AddressAdd => {
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);

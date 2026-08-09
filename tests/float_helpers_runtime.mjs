@@ -30,7 +30,7 @@ instance.exports._start();
 instance.exports.update(); // Initialize old and current.
 instance.exports.update();
 
-const expected = "15";
+const expected = "31";
 if (observed !== expected) {
     throw new Error(`unexpected float-helper output: ${JSON.stringify({ expected, observed })}`);
 }

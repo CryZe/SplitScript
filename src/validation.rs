@@ -1322,7 +1322,9 @@ fn validate_must_use_block(
                         return None;
                     };
                     let item = standard_library.item(*item);
-                    item.must_use.map(|reason| (item.qualified_name, reason))
+                    standard_library
+                        .must_use(item.id)
+                        .map(|reason| (item.qualified_name, reason))
                 });
                 let constructed = match semantics.types().kind(expression.ty) {
                     TypeKind::Option { .. } => Some(StdlibTypeConstructorId::Option),

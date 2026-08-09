@@ -945,6 +945,10 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "String.contains(substring: String) -> bool"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::StringIndexOf),
+        "String.indexOf(substring: String) -> u32?"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::StringStartsWith),
         "String.startsWith(prefix: String) -> bool"
     );

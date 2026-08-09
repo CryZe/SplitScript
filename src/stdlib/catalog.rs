@@ -204,6 +204,7 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::TimerIsRunning
         | StdlibItemId::StringByteLength
         | StdlibItemId::StringContains
+        | StdlibItemId::StringIndexOf
         | StdlibItemId::StringStartsWith
         | StdlibItemId::StringEndsWith
         | StdlibItemId::StringEqualsIgnoreAsciiCase

@@ -181,6 +181,8 @@ pub const CSHARP_STRING_EQUALS_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.equals-call");
 pub const CSHARP_STRING_SUBSTRING_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.substring-call");
+pub const CSHARP_STRING_INDEX_OF_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.string.index-of-call");
 pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.numeric.static-parse-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
@@ -365,6 +367,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_STRING_INDEX_OF_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.index-of"),
+        message: "C# `String.IndexOf` needs an explicit index-model review",
+        primary_label: "SplitScript returns an optional UTF-8 byte offset",
+        notes: &[
+            "rewrite an ordinal ASCII search as `text.indexOf(substring)` and handle `None` instead of comparing the result with C#'s `-1` sentinel",
+            "SplitScript offsets count UTF-8 bytes; C# string offsets count UTF-16 code units, so copied arithmetic is only equivalent for proven ASCII text",
+            "comparison-mode and start-index overloads need separate review; the canonical operation is exact and case-sensitive from the beginning of the string",
+            "there is no automatic rewrite because changing both the index unit and absence representation can require surrounding control-flow changes",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.numeric-parse"),
         message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
@@ -406,6 +420,7 @@ pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnostic
     match name {
         "Equals" => Some(CSHARP_STRING_EQUALS_DIAGNOSTIC),
         "Substring" => Some(CSHARP_STRING_SUBSTRING_DIAGNOSTIC),
+        "IndexOf" => Some(CSHARP_STRING_INDEX_OF_DIAGNOSTIC),
         _ => None,
     }
 }
@@ -773,6 +788,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Use fallible `slice(start, exclusiveEnd)` only after translating C#'s length argument and verifying that UTF-16 source positions are valid UTF-8 byte offsets.",
         targets: &[MigrationTarget::StandardLibraryItem("String.slice")],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.index-of"),
+        name: "Substring position",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `indexOf` for an optional UTF-8 byte offset; review C# UTF-16 index arithmetic and replace the `-1` sentinel with Option handling.",
+        targets: &[MigrationTarget::StandardLibraryItem("String.indexOf")],
         cookbook_anchor: Some("c-string-operations"),
         spellings: &[],
     },

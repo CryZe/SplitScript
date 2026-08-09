@@ -1425,6 +1425,7 @@ is involved:
 | --- | --- |
 | `byteLength()` | UTF-8 byte length |
 | `contains(text)` | Case-sensitive substring test |
+| `indexOf(text)` | First matching UTF-8 byte offset as `u32?` |
 | `startsWith(text)` / `endsWith(text)` | Case-sensitive prefix/suffix tests |
 | `equalsIgnoreAsciiCase(text)` | Equality folding only ASCII letters |
 | `toAsciiLowerCase()` | Lowercase ASCII letters; preserve every other UTF-8 byte |

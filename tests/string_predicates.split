@@ -16,6 +16,16 @@ whileAttached {
     if text.contains("") && text.startsWith("") && text.endsWith("") {
         matches += 8
     }
+    let missingIndex = match text.indexOf("Missing") {
+        Some(_) => false,
+        None => true,
+    }
+    if (text.indexOf("_") else 99) == 7
+        && (text.indexOf("") else 99) == 0
+        && missingIndex
+    {
+        matches += 32768
+    }
     if !text.contains("STRASSE")
         && !text.startsWith("traße")
         && !text.endsWith("Complete!")

@@ -61,6 +61,7 @@ macro_rules! trusted_intrinsics {
             RuntimeArchitecture,
             StringLength,
             StringContains,
+            StringIndexOf,
             StringStartsWith,
             StringEndsWith,
             StringEqualsIgnoreAsciiCase,

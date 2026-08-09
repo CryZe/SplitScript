@@ -111,6 +111,18 @@ For text proven to be ASCII, translate the overload shapes explicitly. C#
 For non-ASCII text, first derive UTF-8 byte boundaries rather than copying the
 original UTF-16 positions.
 
+C# `value.IndexOf(substring)` returns a UTF-16 code-unit index or `-1`.
+SplitScript `value.indexOf(substring)` instead returns a UTF-8 byte offset as
+`u32?`; handle `None` directly. The numeric offsets are equivalent only for
+text proven to be ASCII:
+
+```splitscript
+let separator = current.map.indexOf("_") else return false
+```
+
+Comparison-mode and start-index overloads need an explicit rewrite rather than
+a method-name substitution.
+
 C# `left.Equals(right)` normally becomes `left == right`; SplitScript compares
 strings by exact UTF-8 text rather than GC reference identity. If the source
 intentionally ignores ASCII letter case, write

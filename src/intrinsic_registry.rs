@@ -302,6 +302,7 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         IntrinsicId::TimerState => scratch(ScratchType::Core(CoreTypeId::U32), 1),
         IntrinsicId::TimerCurrentSplitIndex => scratch(ScratchType::Core(CoreTypeId::I64), 1),
         IntrinsicId::TimerSegmentWasSplit => scratch(ScratchType::Core(CoreTypeId::I32), 1),
+        IntrinsicId::StringIndexOf => scratch(ScratchType::Core(CoreTypeId::I32), 1),
         IntrinsicId::ProcessFollow
         | IntrinsicId::ProcessReadRelative32
         | IntrinsicId::ProcessReadUtf8
@@ -388,6 +389,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::StringStartsWith
         | IntrinsicId::StringEndsWith
         | IntrinsicId::StringEqualsIgnoreAsciiCase => &[Helper(Runtime::StringMatch)],
+        IntrinsicId::StringIndexOf => &[Helper(Runtime::StringFind)],
         IntrinsicId::StringToAsciiLowerCase => &[Helper(Runtime::StringToAsciiLowerCase)],
         IntrinsicId::StringReplaceAll => &[Helper(Runtime::StringReplaceAll)],
         IntrinsicId::StringSplit => &[Helper(Runtime::StringSplit)],
@@ -492,6 +494,10 @@ const I64_ARRAY: ContractTypeRef = ContractTypeRef::Application {
 const U64_OPTION: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Option,
     arguments: &[U64],
+};
+const U32_OPTION: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Option,
+    arguments: &[U32],
 };
 const BOOL_OPTION: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Option,
@@ -1092,6 +1098,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 Some(STRING),
                 params![value(STRING)],
                 BOOL,
+            ),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringIndexOf => contract!(
+            StringIndexOf,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(STRING)],
+                U32_OPTION,
             ),
             PURE,
             Everywhere,

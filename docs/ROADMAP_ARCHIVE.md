@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-09: allocation-free UTF-8 substring positions
+
+- Added `String.indexOf(substring) -> u32?` using the existing allocation-free
+  runtime search helper. It returns the first UTF-8 byte offset, zero for an
+  empty needle, and `None` when absent.
+- Added runtime coverage including a non-ASCII prefix, proving that the result
+  is a byte offset rather than a Unicode-scalar or UTF-16 index.
+- Added a focused C# `IndexOf` diagnostic with no automatic edit because C#
+  uses UTF-16 code units and a `-1` sentinel while SplitScript uses byte offsets
+  and `Option`.
+
 ## 2026-08-09: composable C# duration-constructor migration
 
 - Verified that the common C# forms `TimeSpan.FromSeconds(...)` and

@@ -140,6 +140,34 @@ fn csharp_substring_explains_length_and_utf8_boundary_differences() {
 }
 
 #[test]
+fn csharp_string_index_of_explains_option_and_utf8_offsets() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let index = "Straße_Complete".IndexOf("_")
+            print(index)
+        }
+    "#;
+    let diagnostics =
+        splitscript::compile(source).expect_err("C# IndexOf needs index-unit and absence review");
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# `String.IndexOf` needs an explicit index-model review"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "IndexOf"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(diagnostic.notes.iter().any(|note| note.contains("None")));
+    assert!(diagnostic.notes.iter().any(|note| note.contains("UTF-16")));
+    assert!(diagnostic.notes.iter().any(|note| note.contains("UTF-8")));
+}
+
+#[test]
 fn csharp_static_numeric_parse_explains_result_based_string_parsing() {
     for call in ["Int32.Parse(text)", "Double.Parse(text)"] {
         let source = format!(

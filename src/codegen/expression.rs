@@ -2129,6 +2129,35 @@ fn compile_expr_unconverted(
                             .function(RuntimeHelperId::StringMatch),
                     ));
             }
+            IntrinsicId::StringIndexOf => {
+                let found = context.matches.intrinsic_temps[&expression][0];
+                let Type::Option(option) = ty else {
+                    unreachable!("String.indexOf returns the declared optional u32")
+                };
+                let option_type = context.gc.val_type(Type::Option(option));
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                function
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::Call(
+                        context
+                            .runtime_helpers
+                            .function(RuntimeHelperId::StringFind),
+                    ))
+                    .instruction(&Instruction::LocalTee(found))
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::I32LtS)
+                    .instruction(&Instruction::If(BlockType::Result(option_type)))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(
+                        context.gc.index(Type::Option(option)),
+                    )))
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::LocalGet(found))
+                    .instruction(&Instruction::StructNew(
+                        context.gc.index(Type::Option(option)),
+                    ))
+                    .instruction(&Instruction::End);
+            }
             IntrinsicId::StringToAsciiLowerCase => {
                 compile_receiver(function, target, context);
                 function.instruction(&Instruction::Call(

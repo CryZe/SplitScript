@@ -157,6 +157,10 @@ pub(super) fn build_string_trim_ascii_whitespace(inputs: &RuntimeHelperInputs<'_
     )
 }
 
+pub(super) fn build_string_pad(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_pad(inputs.gc)
+}
+
 pub(super) fn build_scan_process_range(inputs: &RuntimeHelperInputs<'_>) -> Function {
     process::compile_scan_process_range(inputs.abi, inputs.memory.scratch().scan)
 }

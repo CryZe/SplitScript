@@ -1804,6 +1804,215 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_trim_ascii_whitespace(
     function
 }
 
+/// Pads an immutable UTF-8 string to a minimum Unicode-scalar length. The
+/// original GC object is reused when no padding is required; otherwise the
+/// result is allocated once at its exact byte length. `pad_end` selects whether
+/// the padding precedes (0) or follows (1) the original bytes.
+pub(in crate::codegen::runtime_helpers) fn compile_string_pad(gc: &GcLayout) -> Function {
+    let string_type = gc.standard_index(StdlibTypeId::String);
+    let mut function = Function::new([
+        (12, ValType::I32),
+        (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
+    ]);
+    let value = 0;
+    let width = 1;
+    let fill = 2;
+    let pad_end = 3;
+    let value_len = 4;
+    let char_count = 5;
+    let input_index = 6;
+    let byte = 7;
+    let fill_len = 8;
+    let padding_count = 9;
+    let padding_bytes = 10;
+    let output_len = 11;
+    let output_index = 12;
+    let padding_index = 13;
+    let remaining = 14;
+    let char_byte_index = 15;
+    let output = 16;
+
+    function
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalSet(value_len))
+        // Count UTF-8 leading bytes, which are exactly the Unicode scalars.
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(input_index))
+        .instruction(&Instruction::LocalGet(value_len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(input_index))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(byte))
+        .instruction(&Instruction::LocalGet(char_count))
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0xc0))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Const(0x80))
+        .instruction(&Instruction::I32Ne)
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(char_count))
+        .instruction(&Instruction::LocalGet(input_index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(input_index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(char_count))
+        .instruction(&Instruction::LocalGet(width))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(fill))
+        .instruction(&Instruction::I32Const(0x80))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(fill))
+        .instruction(&Instruction::I32Const(0x800))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(fill))
+        .instruction(&Instruction::I32Const(0x10000))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(3))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalSet(fill_len))
+        .instruction(&Instruction::LocalGet(width))
+        .instruction(&Instruction::LocalGet(char_count))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::LocalTee(padding_count))
+        .instruction(&Instruction::LocalGet(fill_len))
+        .instruction(&Instruction::I32Mul)
+        .instruction(&Instruction::LocalTee(padding_bytes))
+        .instruction(&Instruction::LocalGet(value_len))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalTee(output_len))
+        .instruction(&Instruction::ArrayNewDefault(string_type))
+        .instruction(&Instruction::LocalSet(output))
+        // Copy the original bytes into their final position.
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(pad_end))
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(padding_bytes))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalGet(value_len))
+        .instruction(&Instruction::ArrayCopy {
+            array_type_index_dst: string_type,
+            array_type_index_src: string_type,
+        })
+        .instruction(&Instruction::LocalGet(pad_end))
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::LocalGet(value_len))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalSet(output_index))
+        // Encode the fill character directly for each required scalar.
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(padding_index))
+        .instruction(&Instruction::LocalGet(padding_count))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(fill))
+        .instruction(&Instruction::LocalSet(remaining))
+        .instruction(&Instruction::LocalGet(fill_len))
+        .instruction(&Instruction::LocalSet(char_byte_index))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(char_byte_index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(char_byte_index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::LocalSet(char_byte_index))
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(output_index))
+        .instruction(&Instruction::LocalGet(char_byte_index))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I32Const(0x3f))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Const(0x80))
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::ArraySet(string_type))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::I32Const(6))
+        .instruction(&Instruction::I32ShrU)
+        .instruction(&Instruction::LocalSet(remaining))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(output_index))
+        .instruction(&Instruction::LocalGet(remaining))
+        .instruction(&Instruction::LocalGet(fill_len))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(fill_len))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(0xc0))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(fill_len))
+        .instruction(&Instruction::I32Const(3))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(0xe0))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(0xf0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::ArraySet(string_type))
+        .instruction(&Instruction::LocalGet(output_index))
+        .instruction(&Instruction::LocalGet(fill_len))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(output_index))
+        .instruction(&Instruction::LocalGet(padding_index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(padding_index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::End);
+    function
+}
+
 fn emit_is_ascii_whitespace(function: &mut Function, byte: u32) {
     function
         .instruction(&Instruction::LocalGet(byte))

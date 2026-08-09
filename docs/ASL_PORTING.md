@@ -128,6 +128,20 @@ immutable string when nothing changes. The compiler does not rewrite `Trim()`
 automatically because Unicode whitespace, character-array overloads,
 `TrimStart`, and `TrimEnd` have different semantics.
 
+C# `PadLeft` and `PadRight` map to directionally named immutable operations:
+
+```splitscript
+let chapter = chapterNumber as String
+let chapterKey = chapter.padStart(2, '0')
+let column = chapterKey.padEnd(8, ' ')
+```
+
+SplitScript always requires the fill `char`; pass `' '` explicitly for C#
+overloads that omit it. Width counts Unicode scalar values rather than .NET
+UTF-16 code units or terminal display columns, so copied widths are directly
+equivalent only for text proven to be ASCII. An already-wide string is reused;
+otherwise the result is allocated once at its exact UTF-8 byte length.
+
 C# combines nullability and emptiness in `String.IsNullOrEmpty(value)`.
 SplitScript keeps those concerns in the type. A required `String` cannot be
 null, so use its source-defined method directly:

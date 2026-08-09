@@ -212,6 +212,8 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::StringToAsciiLowerCase
         | StdlibItemId::StringToAsciiUpperCase
         | StdlibItemId::StringTrimAsciiWhitespace
+        | StdlibItemId::StringPadStart
+        | StdlibItemId::StringPadEnd
         | StdlibItemId::StringReplaceAll
         | StdlibItemId::StringSplit
         | StdlibItemId::StringParse

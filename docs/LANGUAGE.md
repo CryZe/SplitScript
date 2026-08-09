@@ -1433,6 +1433,7 @@ is involved:
 | `toAsciiLowerCase()` | Lowercase ASCII letters; preserve every other UTF-8 byte |
 | `toAsciiUpperCase()` | Uppercase ASCII letters; preserve every other UTF-8 byte |
 | `trimAsciiWhitespace()` | Remove ASCII boundary whitespace; preserve interior and non-ASCII bytes |
+| `padStart(width, fill)` / `padEnd(width, fill)` | Pad to a minimum Unicode-scalar length with one `char` |
 | `split(delimiter)` | Fallible exact split preserving leading, repeated, and trailing empty segments |
 | `parse<T>()` | Strict fallible ASCII decimal parsing into an inferred numeric type |
 | `byteAt(byteIndex)` | Fallible raw UTF-8 byte lookup; continuation bytes remain observable |

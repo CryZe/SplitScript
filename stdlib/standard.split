@@ -1715,6 +1715,50 @@ intrinsic type String {
     @intrinsic(StringTrimAsciiWhitespace)
     fn trimAsciiWhitespace() -> String;
 
+    /// Pads the beginning of this string to a minimum Unicode-scalar length.
+    ///
+    /// The original string is returned unchanged when it already contains at
+    /// least `width` Unicode scalar values. Otherwise `fill` is repeated before
+    /// it. This measures scalar values, not UTF-8 bytes or terminal columns.
+    ///
+    /// # Example
+    ///
+    /// Zero-pad a numeric identifier
+    ///
+    /// ```splitscript
+    /// let identifier = "7".padStart(3, '0')
+    /// ```
+    @mustUse("Strings are immutable; padStart returns the padded string and does not modify its receiver.")
+    @intrinsic(StringPadStart)
+    fn padStart(
+        /// The minimum number of Unicode scalar values in the result.
+        width: u32,
+        /// The character repeated before the original string.
+        fill: char,
+    ) -> String;
+
+    /// Pads the end of this string to a minimum Unicode-scalar length.
+    ///
+    /// The original string is returned unchanged when it already contains at
+    /// least `width` Unicode scalar values. Otherwise `fill` is repeated after
+    /// it. This measures scalar values, not UTF-8 bytes or terminal columns.
+    ///
+    /// # Example
+    ///
+    /// Space-pad a diagnostic label
+    ///
+    /// ```splitscript
+    /// let label = "Split".padEnd(9, ' ')
+    /// ```
+    @mustUse("Strings are immutable; padEnd returns the padded string and does not modify its receiver.")
+    @intrinsic(StringPadEnd)
+    fn padEnd(
+        /// The minimum number of Unicode scalar values in the result.
+        width: u32,
+        /// The character repeated after the original string.
+        fill: char,
+    ) -> String;
+
     /// Replaces every exact, non-overlapping occurrence of a string.
     ///
     /// Matches are case-sensitive and selected from left to right. An empty

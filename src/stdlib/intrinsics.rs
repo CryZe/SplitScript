@@ -69,6 +69,8 @@ macro_rules! trusted_intrinsics {
             StringToAsciiLowerCase,
             StringToAsciiUpperCase,
             StringTrimAsciiWhitespace,
+            StringPadStart,
+            StringPadEnd,
             StringReplaceAll,
             StringSplit,
             StringParse,

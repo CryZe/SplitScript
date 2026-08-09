@@ -236,6 +236,45 @@ fn csharp_string_replace_explains_fallible_immutable_replacement() {
 }
 
 #[test]
+fn csharp_string_padding_explains_direction_fill_and_width_model() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let left = "7".PadLeft(3, '0')
+            let right = "Split".PadRight(9)
+            print(`{left}{right}`)
+        }
+    "#;
+    let diagnostics =
+        splitscript::compile(source).expect_err("C# padding needs width-model guidance");
+    assert_eq!(diagnostics.len(), 2);
+    for diagnostic in &diagnostics {
+        assert_eq!(
+            diagnostic.message,
+            "C# string padding needs an explicit width-model review"
+        );
+        assert!(diagnostic.fixes.is_empty());
+        assert!(diagnostic.notes.iter().any(|note| note.contains("UTF-16")));
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("Unicode scalar"))
+        );
+        assert!(diagnostic.notes.iter().any(|note| note.contains("' '")));
+    }
+    assert_eq!(
+        &source[diagnostics[0].span.start..diagnostics[0].span.end],
+        "PadLeft"
+    );
+    assert_eq!(
+        &source[diagnostics[1].span.start..diagnostics[1].span.end],
+        "PadRight"
+    );
+}
+
+#[test]
 fn csharp_string_trim_explains_ascii_whitespace_boundaries() {
     let source = r#"
         state "game.exe" {}

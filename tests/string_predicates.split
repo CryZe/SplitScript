@@ -137,6 +137,14 @@ whileAttached {
     {
         matches += 1048576
     }
+    if "7".padStart(3, '0') == "007"
+        && "route".padEnd(7, ' ') == "route  "
+        && "already wide".padStart(3, '0') == "already wide"
+        && "é".padStart(3, '🙂') == "🙂🙂é"
+        && "🙂".padEnd(3, 'é') == "🙂éé"
+    {
+        matches += 2097152
+    }
     let levelParts = "01_02_0.dds".split(".") else []
     let identifiers = levelParts[0].split("_") else []
     let emptyParts = "_a__".split("_") else []

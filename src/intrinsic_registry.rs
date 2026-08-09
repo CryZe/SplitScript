@@ -55,6 +55,7 @@ pub(crate) enum RuntimeHelperId {
     StringInspect,
     StringSlice,
     StringTrimAsciiWhitespace,
+    StringPad,
     ScanProcessRange,
     ReadRelative32,
     StringFromMemory,
@@ -407,6 +408,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::StringByteAt | IntrinsicId::StringCharAt => &[Helper(Runtime::StringInspect)],
         IntrinsicId::StringSlice => &[Helper(Runtime::StringSlice)],
         IntrinsicId::StringTrimAsciiWhitespace => &[Helper(Runtime::StringTrimAsciiWhitespace)],
+        IntrinsicId::StringPadStart | IntrinsicId::StringPadEnd => &[Helper(Runtime::StringPad)],
         IntrinsicId::StringConcat | IntrinsicId::StringJoin => &[Helper(Runtime::JoinStrings)],
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
         IntrinsicId::NextTick
@@ -1196,6 +1198,32 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             StringTrimAsciiWhitespace,
             Method,
             signature(NO_TYPE_PARAMETERS, Some(STRING), params![], STRING),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringPadStart => contract!(
+            StringPadStart,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(U32), value(CHAR)],
+                STRING,
+            ),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringPadEnd => contract!(
+            StringPadEnd,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(U32), value(CHAR)],
+                STRING,
+            ),
             ALLOCATES,
             Everywhere,
             RepresentationPrimitive

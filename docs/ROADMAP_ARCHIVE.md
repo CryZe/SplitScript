@@ -1,5 +1,19 @@
 # SplitScript roadmap
 
+## 2026-08-10: Unicode-scalar string padding
+
+- Added immutable `String.padStart(width, fill)` and
+  `String.padEnd(width, fill)` for corpus-backed zero-padding and diagnostic
+  table alignment without adopting C# method aliases or optional parameters.
+- Defined width as a count of Unicode scalar values. The runtime counts UTF-8
+  leading bytes, reuses an already-wide string, and otherwise encodes the fill
+  `char` directly into one exact-sized output allocation.
+- Added focused `PadLeft`/`PadRight` migration guidance covering direction,
+  explicit space filling, and the difference between .NET UTF-16 code units,
+  Unicode scalar values, and terminal display columns.
+- Extended catalog, documentation, diagnostics, and deterministic Wasm runtime
+  coverage across ASCII and multibyte receivers and fill characters.
+
 ## 2026-08-09: allocation-free reverse string search
 
 - Added `String.lastIndexOf(substring) -> u32?` for the recurring path,

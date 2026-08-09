@@ -189,6 +189,8 @@ pub const CSHARP_STRING_REPLACE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.replace-call");
 pub const CSHARP_STRING_TRIM_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.trim-call");
+pub const CSHARP_STRING_PADDING_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.string.padding-call");
 pub const CSHARP_STRING_IS_NULL_OR_EMPTY_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.is-null-or-empty-call");
 pub const CSHARP_STRING_JOIN_DIAGNOSTIC: MigrationDiagnosticId =
@@ -425,6 +427,19 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_STRING_PADDING_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.padding"),
+        message: "C# string padding needs an explicit width-model review",
+        primary_label: "use `padStart(width, fill)` or `padEnd(width, fill)`",
+        notes: &[
+            "rewrite `text.PadLeft(width, fill)` as `text.padStart(width, fill)` and `text.PadRight(width, fill)` as `text.padEnd(width, fill)`",
+            "SplitScript always requires one `char` fill; pass `' '` explicitly for C# overloads that omit the padding character",
+            "SplitScript width counts Unicode scalar values, while C# width counts UTF-16 code units; copied widths are equivalent for proven ASCII text",
+            "padding returns the original immutable string when it is already wide enough and otherwise performs one exact-sized allocation",
+            "there is no automatic rewrite because direction, omitted fill, and the surrounding width assumptions need to remain visible",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_STRING_IS_NULL_OR_EMPTY_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.null-or-empty"),
         message: "C# `String.IsNullOrEmpty` crosses SplitScript's Option boundary",
@@ -494,6 +509,7 @@ pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnostic
         "LastIndexOf" => Some(CSHARP_STRING_LAST_INDEX_OF_DIAGNOSTIC),
         "Replace" => Some(CSHARP_STRING_REPLACE_DIAGNOSTIC),
         "Trim" => Some(CSHARP_STRING_TRIM_DIAGNOSTIC),
+        "PadLeft" | "PadRight" => Some(CSHARP_STRING_PADDING_DIAGNOSTIC),
         _ => None,
     }
 }
@@ -930,6 +946,19 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         targets: &[MigrationTarget::StandardLibraryItem(
             "String.trimAsciiWhitespace",
         )],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.padding"),
+        name: "String padding",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `padStart(width, fill)` or `padEnd(width, fill)` with an explicit character; review C# UTF-16 widths against SplitScript's Unicode-scalar widths.",
+        targets: &[
+            MigrationTarget::StandardLibraryItem("String.padStart"),
+            MigrationTarget::StandardLibraryItem("String.padEnd"),
+        ],
         cookbook_anchor: Some("c-string-operations"),
         spellings: &[],
     },

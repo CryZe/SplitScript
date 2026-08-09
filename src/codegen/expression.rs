@@ -2185,6 +2185,18 @@ fn compile_expr_unconverted(
                         .function(RuntimeHelperId::StringTrimAsciiWhitespace),
                 ));
             }
+            IntrinsicId::StringPadStart | IntrinsicId::StringPadEnd => {
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
+                function
+                    .instruction(&Instruction::I32Const(
+                        (builtin == IntrinsicId::StringPadEnd) as i32,
+                    ))
+                    .instruction(&Instruction::Call(
+                        context.runtime_helpers.function(RuntimeHelperId::StringPad),
+                    ));
+            }
             IntrinsicId::StringReplaceAll => {
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);

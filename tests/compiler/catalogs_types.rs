@@ -953,6 +953,14 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "String.lastIndexOf(substring: String) -> u32?"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::StringPadStart),
+        "String.padStart(width: u32, fill: char) -> String"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::StringPadEnd),
+        "String.padEnd(width: u32, fill: char) -> String"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::StringStartsWith),
         "String.startsWith(prefix: String) -> bool"
     );

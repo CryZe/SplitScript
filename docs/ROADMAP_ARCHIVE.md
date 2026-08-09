@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-09: conventional compiler CLI discovery
+
+- Replaced the hand-written native argument parser with one derived Clap model,
+  while keeping Clap out of the embedded compiler's Wasm dependency graph.
+- Added successful `splitc --help`/`-h` and `splitc --version`/`-V` queries,
+  plus `help`, `watch --help`, and `fmt --help` command-specific discovery.
+- Documented compilation outputs, profiles, warning policy, watch behavior, and
+  formatting checks in the CLI itself rather than treating help flags as input
+  paths.
+- Kept malformed or incomplete invocations distinct with exit status 2 and a
+  concise standard-error usage hint; integration tests exercise the real
+  binary's streams, status codes, and stable version form.
+
 ## 2026-08-09: encoding-aware native-string migration
 
 - Re-audited ASL `stringN` against LiveSplit's implementation: the suffix is a

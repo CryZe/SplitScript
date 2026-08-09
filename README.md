@@ -104,7 +104,15 @@ splitc game.split -o game.wasm --profile release
 splitc game.split -o game.wasm --deny warnings --allow SS1003
 splitc fmt game.split
 splitc fmt game.split --check
+splitc --help
+splitc --version
 ```
+
+`splitc --help` documents compilation, watch, formatting, profiles, and warning
+policy. Command-specific help is available through `splitc help watch`,
+`splitc watch --help`, and the corresponding `fmt` forms. Help and version
+queries write to standard output and exit successfully; invalid invocations
+retain a distinct usage-error exit status.
 
 `splitc fmt` formats a syntactically valid source file in place. `--check`
 performs the same operation without writing and succeeds only when the file is

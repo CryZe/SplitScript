@@ -8,6 +8,8 @@ use std::{
     time::Duration,
 };
 
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+
 const WATCH_INTERVAL: Duration = Duration::from_millis(150);
 
 #[derive(Debug, PartialEq, Eq)]
@@ -30,101 +32,168 @@ enum Command {
     },
 }
 
-fn usage() {
-    eprintln!(
-        "usage: splitc <input.split> [-o <output.wasm>] [--profile debug|release] [--allow|--warn|--deny <SS100x|warnings>]..."
-    );
-    eprintln!(
-        "       splitc watch <input.split> [-o <output.wasm>] [--profile debug|release] [--allow|--warn|--deny <SS100x|warnings>]..."
-    );
-    eprintln!("       splitc fmt <input.split> [--check]");
+/// Compile, watch, and format SplitScript autosplitters.
+#[derive(Debug, Parser)]
+#[command(
+    name = "splitc",
+    bin_name = "splitc",
+    version,
+    args_conflicts_with_subcommands = true
+)]
+struct Cli {
+    /// Source file to compile. The output defaults to the same path with a
+    /// `.wasm` extension.
+    #[arg(value_name = "INPUT.split")]
+    input: Option<PathBuf>,
+
+    #[command(flatten)]
+    build: BuildArgs,
+
+    #[command(subcommand)]
+    command: Option<CliCommand>,
 }
 
-fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command, ()> {
-    let mut args = args.into_iter();
-    let Some(first) = args.next() else {
-        return Err(());
-    };
-    if first == "fmt" {
-        let Some(input) = args.next() else {
-            return Err(());
-        };
-        let mut check = false;
-        for arg in args {
-            if arg != "--check" || check {
-                return Err(());
-            }
-            check = true;
-        }
-        return Ok(Command::Format {
-            input: PathBuf::from(input),
-            check,
-        });
-    }
-    let (watch, input) = if first == "watch" {
-        let Some(input) = args.next() else {
-            return Err(());
-        };
-        (true, PathBuf::from(input))
-    } else {
-        (false, PathBuf::from(first))
-    };
+#[derive(Debug, Subcommand)]
+enum CliCommand {
+    /// Compile immediately, then rebuild whenever the source changes.
+    #[command(
+        after_help = "A failed build leaves the last successful output untouched. Press Ctrl+C to stop watching."
+    )]
+    Watch(CompileArgs),
+    /// Format a source file in place.
+    Fmt(FormatArgs),
+}
 
-    let mut output = input.with_extension("wasm");
-    let mut profile = splitscript::BuildProfile::Debug;
-    let mut profile_set = false;
-    let mut warnings = splitscript::WarningPolicy::default();
-    while let Some(arg) = args.next() {
-        if arg == "-o" || arg == "--output" {
-            let Some(path) = args.next() else {
-                return Err(());
-            };
-            output = PathBuf::from(path);
-        } else if arg == "--profile" {
-            if profile_set {
-                return Err(());
-            }
-            let Some(value) = args.next() else {
-                return Err(());
-            };
-            profile = if value == "debug" {
-                splitscript::BuildProfile::Debug
-            } else if value == "release" {
-                splitscript::BuildProfile::Release
-            } else {
-                return Err(());
-            };
-            profile_set = true;
-        } else if arg == "--allow" || arg == "--warn" || arg == "--deny" {
-            let level = if arg == "--allow" {
-                splitscript::WarningLevel::Allow
-            } else if arg == "--warn" {
-                splitscript::WarningLevel::Warn
-            } else {
-                splitscript::WarningLevel::Deny
-            };
-            let Some(selector) = args.next() else {
-                return Err(());
-            };
-            let Some(selector) = selector.to_str() else {
-                return Err(());
-            };
-            if selector.eq_ignore_ascii_case("warnings") {
-                warnings.set_all(level);
-            } else {
-                let Ok(code) = selector.parse::<splitscript::DiagnosticCode>() else {
-                    return Err(());
-                };
-                if !warnings.set(code, level) {
-                    return Err(());
-                }
-            }
-        } else {
-            return Err(());
+#[derive(Debug, Args)]
+struct CompileArgs {
+    /// Source file to compile.
+    #[arg(value_name = "INPUT.split")]
+    input: PathBuf,
+
+    #[command(flatten)]
+    build: BuildArgs,
+}
+
+#[derive(Debug, Args)]
+struct FormatArgs {
+    /// Source file to format.
+    #[arg(value_name = "INPUT.split")]
+    input: PathBuf,
+
+    /// Verify canonical formatting without writing the file.
+    #[arg(long)]
+    check: bool,
+}
+
+#[derive(Debug, Args)]
+struct BuildArgs {
+    /// Output path. Defaults to INPUT.wasm.
+    #[arg(short = 'o', long, value_name = "OUTPUT.wasm")]
+    output: Option<PathBuf>,
+
+    /// Select debug information and debug-only code, or an optimized release
+    /// module.
+    #[arg(long, value_enum, default_value_t)]
+    profile: CliProfile,
+
+    #[command(flatten)]
+    warnings: WarningArgs,
+}
+
+#[derive(Debug, Default, Clone, Copy, ValueEnum)]
+enum CliProfile {
+    #[default]
+    Debug,
+    Release,
+}
+
+impl From<CliProfile> for splitscript::BuildProfile {
+    fn from(profile: CliProfile) -> Self {
+        match profile {
+            CliProfile::Debug => Self::Debug,
+            CliProfile::Release => Self::Release,
         }
     }
+}
 
-    Ok(if watch {
+#[derive(Debug, Args)]
+struct WarningArgs {
+    /// Suppress a warning code, or every warning with `warnings`.
+    #[arg(long, value_name = "CODE|warnings", value_parser = parse_warning_selector)]
+    allow: Vec<WarningSelector>,
+
+    /// Emit a warning code, or every warning with `warnings`.
+    #[arg(long, value_name = "CODE|warnings", value_parser = parse_warning_selector)]
+    warn: Vec<WarningSelector>,
+
+    /// Treat a warning code, or every warning with `warnings`, as an error.
+    #[arg(long, value_name = "CODE|warnings", value_parser = parse_warning_selector)]
+    deny: Vec<WarningSelector>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum WarningSelector {
+    All,
+    Code(splitscript::DiagnosticCode),
+}
+
+fn parse_warning_selector(value: &str) -> Result<WarningSelector, String> {
+    if value.eq_ignore_ascii_case("warnings") {
+        return Ok(WarningSelector::All);
+    }
+    let code = value
+        .parse::<splitscript::DiagnosticCode>()
+        .map_err(|_| format!("`{value}` is not a warning code such as SS1002 or `warnings`"))?;
+    splitscript::WarningPolicy::default()
+        .level(code)
+        .is_some()
+        .then_some(WarningSelector::Code(code))
+        .ok_or_else(|| format!("`{value}` is not a configurable warning code"))
+}
+
+fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command, clap::Error> {
+    let matches = Cli::command().try_get_matches_from(args)?;
+    let cli = Cli::from_arg_matches(&matches)?;
+    match cli.command {
+        Some(CliCommand::Watch(arguments)) => {
+            let subcommand = matches
+                .subcommand_matches("watch")
+                .expect("Clap should retain matches for the parsed watch command");
+            Ok(compile_command(
+                arguments.input,
+                arguments.build,
+                subcommand,
+                true,
+            ))
+        }
+        Some(CliCommand::Fmt(arguments)) => Ok(Command::Format {
+            input: arguments.input,
+            check: arguments.check,
+        }),
+        None => {
+            let Some(input) = cli.input else {
+                return Err(Cli::command().error(
+                    clap::error::ErrorKind::MissingRequiredArgument,
+                    "the required <INPUT.split> argument was not provided",
+                ));
+            };
+            Ok(compile_command(input, cli.build, &matches, false))
+        }
+    }
+}
+
+fn compile_command(
+    input: PathBuf,
+    arguments: BuildArgs,
+    matches: &clap::ArgMatches,
+    watch: bool,
+) -> Command {
+    let output = arguments
+        .output
+        .unwrap_or_else(|| input.with_extension("wasm"));
+    let profile = arguments.profile.into();
+    let warnings = warning_policy(&arguments.warnings, matches);
+    if watch {
         Command::Watch {
             input,
             output,
@@ -138,15 +207,53 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command, ()> {
             profile,
             warnings,
         }
-    })
+    }
+}
+
+fn warning_policy(
+    arguments: &WarningArgs,
+    matches: &clap::ArgMatches,
+) -> splitscript::WarningPolicy {
+    let mut directives = Vec::new();
+    for (name, level, selectors) in [
+        ("allow", splitscript::WarningLevel::Allow, &arguments.allow),
+        ("warn", splitscript::WarningLevel::Warn, &arguments.warn),
+        ("deny", splitscript::WarningLevel::Deny, &arguments.deny),
+    ] {
+        if let Some(indices) = matches.indices_of(name) {
+            directives.extend(
+                indices
+                    .zip(selectors)
+                    .map(|(index, selector)| (index, level, *selector)),
+            );
+        }
+    }
+    directives.sort_unstable_by_key(|(index, _, _)| *index);
+
+    let mut policy = splitscript::WarningPolicy::default();
+    for (_, level, selector) in directives {
+        match selector {
+            WarningSelector::All => policy.set_all(level),
+            WarningSelector::Code(code) => {
+                assert!(
+                    policy.set(code, level),
+                    "Clap accepted an unknown warning code"
+                );
+            }
+        }
+    }
+    policy
 }
 
 fn main() -> ExitCode {
-    let command = match parse_args(env::args_os().skip(1)) {
+    let command = match parse_args(env::args_os()) {
         Ok(command) => command,
-        Err(()) => {
-            usage();
-            return ExitCode::from(2);
+        Err(error) => {
+            let exit_code = error.exit_code();
+            if let Err(print_error) = error.print() {
+                eprintln!("splitc: could not print command-line error: {print_error}");
+            }
+            return ExitCode::from(exit_code as u8);
         }
     };
 
@@ -330,46 +437,55 @@ mod tests {
     #[test]
     fn parses_compile_and_watch_commands() {
         assert_eq!(
-            parse_args(["game.split".into()]),
-            Ok(Command::Compile {
+            parse_args(["splitc".into(), "game.split".into()]).unwrap(),
+            Command::Compile {
                 input: "game.split".into(),
                 output: "game.wasm".into(),
                 profile: splitscript::BuildProfile::Debug,
                 warnings: splitscript::WarningPolicy::default(),
-            })
+            }
         );
         assert_eq!(
-            parse_args(["fmt".into(), "game.split".into()]),
-            Ok(Command::Format {
+            parse_args(["splitc".into(), "fmt".into(), "game.split".into()]).unwrap(),
+            Command::Format {
                 input: "game.split".into(),
                 check: false,
-            })
-        );
-        assert_eq!(
-            parse_args(["fmt".into(), "game.split".into(), "--check".into()]),
-            Ok(Command::Format {
-                input: "game.split".into(),
-                check: true,
-            })
+            }
         );
         assert_eq!(
             parse_args([
+                "splitc".into(),
+                "fmt".into(),
+                "game.split".into(),
+                "--check".into(),
+            ])
+            .unwrap(),
+            Command::Format {
+                input: "game.split".into(),
+                check: true,
+            }
+        );
+        assert_eq!(
+            parse_args([
+                "splitc".into(),
                 "watch".into(),
                 "game.split".into(),
                 "-o".into(),
                 "build/game.wasm".into(),
                 "--profile".into(),
                 "release".into(),
-            ]),
-            Ok(Command::Watch {
+            ])
+            .unwrap(),
+            Command::Watch {
                 input: "game.split".into(),
                 output: "build/game.wasm".into(),
                 profile: splitscript::BuildProfile::Release,
                 warnings: splitscript::WarningPolicy::default(),
-            })
+            }
         );
 
         let command = parse_args([
+            "splitc".into(),
             "game.split".into(),
             "--deny".into(),
             "warnings".into(),
@@ -391,13 +507,51 @@ mod tests {
     }
 
     #[test]
+    fn clap_handles_help_and_version_in_conventional_positions() {
+        for arguments in [
+            vec!["splitc", "--help"],
+            vec!["splitc", "-h"],
+            vec!["splitc", "help", "watch"],
+            vec!["splitc", "watch", "--help"],
+            vec!["splitc", "fmt", "game.split", "--help"],
+        ] {
+            assert_eq!(
+                parse_args(arguments.into_iter().map(OsString::from))
+                    .unwrap_err()
+                    .kind(),
+                clap::error::ErrorKind::DisplayHelp
+            );
+        }
+        for argument in ["--version", "-V"] {
+            assert_eq!(
+                parse_args(["splitc".into(), argument.into()])
+                    .unwrap_err()
+                    .kind(),
+                clap::error::ErrorKind::DisplayVersion
+            );
+        }
+    }
+
+    #[test]
     fn rejects_incomplete_or_unknown_arguments() {
-        assert!(parse_args(Vec::<OsString>::new()).is_err());
-        assert!(parse_args(["watch".into()]).is_err());
-        assert!(parse_args(["fmt".into()]).is_err());
-        assert!(parse_args(["fmt".into(), "game.split".into(), "--write".into()]).is_err());
+        assert!(parse_args(["splitc".into()]).is_err());
+        assert!(parse_args(["splitc".into(), "--help".into(), "extra".into()]).is_err());
+        assert!(parse_args(["splitc".into(), "--version".into(), "extra".into()]).is_err());
+        assert!(parse_args(["splitc".into(), "help".into(), "unknown".into()]).is_err());
+        assert!(parse_args(["splitc".into(), "watch".into()]).is_err());
+        assert!(parse_args(["splitc".into(), "fmt".into()]).is_err());
         assert!(
             parse_args([
+                "splitc".into(),
+                "fmt".into(),
+                "game.split".into(),
+                "--write".into()
+            ])
+            .is_err()
+        );
+        assert!(
+            parse_args([
+                "splitc".into(),
                 "fmt".into(),
                 "game.split".into(),
                 "--check".into(),
@@ -405,13 +559,37 @@ mod tests {
             ])
             .is_err()
         );
-        assert!(parse_args(["game.split".into(), "--wat".into()]).is_err());
-        assert!(parse_args(["game.split".into(), "-o".into()]).is_err());
-        assert!(parse_args(["game.split".into(), "--profile".into()]).is_err());
-        assert!(parse_args(["game.split".into(), "--profile".into(), "fast".into(),]).is_err());
-        assert!(parse_args(["game.split".into(), "--deny".into()]).is_err());
-        assert!(parse_args(["game.split".into(), "--deny".into(), "SS0003".into()]).is_err());
-        assert!(parse_args(["game.split".into(), "--allow".into(), "SS9999".into()]).is_err());
+        assert!(parse_args(["splitc".into(), "game.split".into(), "--wat".into()]).is_err());
+        assert!(parse_args(["splitc".into(), "game.split".into(), "-o".into()]).is_err());
+        assert!(parse_args(["splitc".into(), "game.split".into(), "--profile".into()]).is_err());
+        assert!(
+            parse_args([
+                "splitc".into(),
+                "game.split".into(),
+                "--profile".into(),
+                "fast".into(),
+            ])
+            .is_err()
+        );
+        assert!(parse_args(["splitc".into(), "game.split".into(), "--deny".into()]).is_err());
+        assert!(
+            parse_args([
+                "splitc".into(),
+                "game.split".into(),
+                "--deny".into(),
+                "SS0003".into()
+            ])
+            .is_err()
+        );
+        assert!(
+            parse_args([
+                "splitc".into(),
+                "game.split".into(),
+                "--allow".into(),
+                "SS9999".into()
+            ])
+            .is_err()
+        );
     }
 
     #[test]

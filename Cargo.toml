@@ -18,6 +18,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 wasm-encoder = "0.254.0"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+clap = { version = "4.6", features = ["derive"] }
+
 [build-dependencies]
 splitscript-stdlib-loader = { path = "crates/splitscript-stdlib-loader" }
 

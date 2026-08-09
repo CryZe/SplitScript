@@ -27,6 +27,8 @@ const SETTINGS_EXAMPLE: &str = include_str!("../examples/lso_desktop_settings.sp
 mod async_runtime;
 #[path = "compiler/catalogs_types.rs"]
 mod catalogs_types;
+#[path = "compiler/cli.rs"]
+mod cli;
 #[path = "compiler/compiler_queries.rs"]
 mod compiler_queries;
 #[path = "compiler/diagnostics_migration.rs"]

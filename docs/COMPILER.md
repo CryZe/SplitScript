@@ -954,6 +954,15 @@ It writes only after parsing and formatting succeed and skips unchanged files.
 `splitc fmt <file> --check` performs no write and returns failure when the
 canonical text differs, making it suitable for CI.
 
+The native frontend derives its command model, validation, and help from Clap;
+the dependency is native-only and is not pulled into the embedded compiler
+Wasm. `splitc --help` and `splitc -h` print the complete command surface, while
+`splitc help watch`, `splitc watch --help`, and their formatting equivalents
+show command-specific behavior. `splitc --version` and `splitc -V` print the
+package version. These successful queries use standard output; malformed or
+incomplete invocations keep exit status 2 and a concise standard-error usage
+message, so scripts can distinguish discovery from misuse.
+
 ## Language server
 
 [`src/lsp.rs`](../src/lsp.rs) owns transport-independent routing and lifecycle

@@ -201,9 +201,8 @@ or behavioral parity.
   TypeScript/JavaScript, and Rust. Explain semantic differences—lifecycle,
   fixed-width numbers, `Duration`, async cancellation, `Option`/`Result`,
   settings, and process reads—not only token substitutions.
-- [ ] Add conventional `splitc --help` and `splitc --version` behavior. Include
-  the compiler version/Git revision in machine-readable port reports so future
-  evidence remains reproducible.
+- [ ] Include the compiler version and Git revision in machine-readable port
+  reports so future evidence remains reproducible.
 
 ## P1 — source-level debugging in debug builds
 

@@ -31,8 +31,8 @@ const env = {
 
 ({ instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), { env }));
 instance.exports._start();
-// One initialization poll followed by the eight observable helper steps.
-for (let index = 0; index < 9; index += 1) {
+// One initialization poll followed by the eleven observable helper steps.
+for (let index = 0; index < 12; index += 1) {
     instance.exports.update();
 }
 
@@ -44,6 +44,9 @@ const expected = [
     [-2, 499_000_000],
     [2, 250_000_000],
     [-2, 750_000_000],
+    [90, 0],
+    [4_500, 0],
+    [129_600, 0],
     [-2, 749_999_900],
 ];
 if (helperStatus !== "ok" || JSON.stringify(gameTimes) !== JSON.stringify(expected)) {

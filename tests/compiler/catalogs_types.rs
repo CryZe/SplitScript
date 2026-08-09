@@ -150,6 +150,18 @@ fn duration_convenience_constructors_are_source_defined() {
         "Duration.fromMilliseconds<T>(milliseconds: T) -> Duration where T: Float"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::DurationFromMinutes),
+        "Duration.fromMinutes<T>(minutes: T) -> Duration where T: Float"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::DurationFromHours),
+        "Duration.fromHours<T>(hours: T) -> Duration where T: Float"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::DurationFromDays),
+        "Duration.fromDays<T>(days: T) -> Duration where T: Float"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::DurationFromWholeMilliseconds),
         "Duration.fromWholeMilliseconds(milliseconds: i64) -> Duration"
     );
@@ -181,6 +193,10 @@ fn duration_convenience_constructors_are_source_defined() {
         "Duration.fromNanoseconds(-1_250_000_100)",
         "Duration.fromMilliseconds(1_500.25)",
         "Duration.fromMilliseconds(1_500.25 as f32)",
+        "Duration.fromMinutes(1.5)",
+        "Duration.fromMinutes(1.5 as f32)",
+        "Duration.fromHours(1.25)",
+        "Duration.fromDays(1.5)",
         "Duration.fromSeconds(1.25)",
         "Duration.fromSeconds(1.25 as f32)",
     ] {

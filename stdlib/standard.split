@@ -1944,6 +1944,62 @@ struct Duration {
         return Duration.fromSeconds(milliseconds / 1_000)
     }
 
+    /// Constructs a duration from floating-point minutes.
+    ///
+    /// Both f32 and f64 inputs are accepted. Exact integer counters can be
+    /// converted to whole seconds before calling `fromWholeSeconds`.
+    ///
+    /// # Example
+    ///
+    /// Convert a route timer measured in minutes
+    ///
+    /// ```splitscript
+    /// return Duration.fromMinutes(elapsedMinutes)
+    /// ```
+    static fn fromMinutes<T: Float>(
+        /// Floating-point minutes. Both f32 and f64 are accepted.
+        minutes: T,
+    ) -> Duration {
+        return Duration.fromSeconds(minutes * 60)
+    }
+
+    /// Constructs a duration from floating-point hours.
+    ///
+    /// Both f32 and f64 inputs are accepted.
+    ///
+    /// # Example
+    ///
+    /// Construct a one-hour timeout
+    ///
+    /// ```splitscript
+    /// return Duration.fromHours(1.0)
+    /// ```
+    static fn fromHours<T: Float>(
+        /// Floating-point hours. Both f32 and f64 are accepted.
+        hours: T,
+    ) -> Duration {
+        return Duration.fromSeconds(hours * 3_600)
+    }
+
+    /// Constructs a duration from floating-point days.
+    ///
+    /// Both f32 and f64 inputs are accepted. A day is exactly 86,400 seconds;
+    /// calendar and time-zone rules are intentionally not involved.
+    ///
+    /// # Example
+    ///
+    /// Construct a multi-day sentinel
+    ///
+    /// ```splitscript
+    /// return Duration.fromDays(2.0)
+    /// ```
+    static fn fromDays<T: Float>(
+        /// Floating-point 24-hour days. Both f32 and f64 are accepted.
+        days: T,
+    ) -> Duration {
+        return Duration.fromSeconds(days * 86_400)
+    }
+
     /// Constructs a duration from frames.
     ///
     /// The conversion preserves whole seconds and nanoseconds.

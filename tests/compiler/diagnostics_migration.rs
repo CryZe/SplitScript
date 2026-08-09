@@ -712,6 +712,18 @@ fn unknown_calls_suggest_canonical_names_across_naming_styles() {
             "fromSeconds",
             "Duration.fromSeconds",
         ),
+        (
+            "Duration.FromMinutes(1.0)",
+            "FromMinutes",
+            "fromMinutes",
+            "Duration.fromMinutes",
+        ),
+        (
+            "Duration.from_hours(1.0)",
+            "from_hours",
+            "fromHours",
+            "Duration.fromHours",
+        ),
         ("value.ClAmP(0, 10)", "ClAmP", "clamp", "clamp"),
         (
             "\"MAP\".ToLower()",

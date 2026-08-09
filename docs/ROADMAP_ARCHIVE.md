@@ -18,6 +18,11 @@
   compatibility parser. The compiler now distinguishes fixed duration data
   from needless timer-value string round trips and explains why each requires
   an explicit rewrite.
+- Added source-defined `Duration.fromMinutes`, `fromHours`, and `fromDays`
+  conversions from corpus evidence. They reuse `fromSeconds`, carry ordinary
+  generated documentation and editor metadata, and add no backend intrinsic.
+- Deliberately kept C# ticks out of the public API; exact subsecond sources use
+  the language-level nanosecond constructor instead.
 - Kept JavaScript `${...}` out of typo recovery because it is valid
   SplitScript source with observably different literal-dollar semantics.
 

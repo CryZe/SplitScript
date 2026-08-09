@@ -1087,10 +1087,12 @@ domain default:
 represents a real third state. It is deliberately rejected in `start`, `split`,
 and `reset`; those blocks are simply boolean and default to `false`.
 `gameTime` otherwise returns a `Duration`. Source-defined constructors include
-`Duration.zero()`, `Duration.fromMilliseconds(i64)`,
+`Duration.zero()`, exact whole-unit and nanosecond constructors,
 `Duration.fromFrames(i64, i64)`, and `Duration.fromParts(i64, i32)`.
-`Duration.fromSeconds(f32)` performs the safe game-time conversion used by
-Unity timers. `setup`, `whileAttached`, and `onDetached` return nothing.
+`Duration.fromMilliseconds`, `fromSeconds`, `fromMinutes`, `fromHours`, and
+`fromDays` accept either floating-point type. A day is always exactly 86,400
+seconds; these are elapsed durations, not calendar values. `setup`,
+`whileAttached`, and `onDetached` return nothing.
 `whileAttached` runs before timer actions on every attached tick.
 
 ## Discovered state and watchers

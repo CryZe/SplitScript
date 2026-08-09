@@ -28,6 +28,9 @@ gameTime {
         5 => Duration.fromWholeMilliseconds(-1_501),
         6 => Duration.fromSeconds(1.75) + Duration.fromMilliseconds(500.0),
         7 => Duration.fromSeconds(1.25) - Duration.fromSeconds(2.5),
+        8 => Duration.fromMinutes(1.5),
+        9 => Duration.fromHours(1.25),
+        10 => Duration.fromDays(1.5),
         _ => Duration.fromNanoseconds(-1_250_000_100),
     }
 }

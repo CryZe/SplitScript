@@ -33,7 +33,7 @@ fn version_is_successful_and_stable() {
         assert!(output.stderr.is_empty());
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
-            format!("splitc {}\n", env!("CARGO_PKG_VERSION"))
+            format!("splitc {}\n", splitscript::COMPILER_VERSION_TEXT)
         );
     }
 }

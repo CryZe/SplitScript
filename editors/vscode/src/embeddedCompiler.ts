@@ -22,6 +22,11 @@ export interface EmbeddedCompileRequest {
     warnings?: EmbeddedWarningPolicy;
 }
 
+export interface EmbeddedCompilerIdentity {
+    version: string;
+    gitRevision: string | null;
+}
+
 export interface EmbeddedServiceSpan {
     start: number;
     end: number;
@@ -44,6 +49,7 @@ interface EmbeddedServiceError {
 
 interface EmbeddedCompileMetadata {
     protocolVersion: number;
+    compiler: EmbeddedCompilerIdentity;
     uri: string;
     revision: number;
     diagnostics: EmbeddedServiceDiagnostic[];
@@ -53,6 +59,7 @@ interface EmbeddedCompileMetadata {
 
 export interface EmbeddedCompileResponse {
     protocolVersion: number;
+    compiler: EmbeddedCompilerIdentity;
     uri: string;
     revision: number;
     diagnostics: readonly EmbeddedServiceDiagnostic[];
@@ -181,6 +188,7 @@ export function decodeEmbeddedCompileResponse(
     }
     return {
         protocolVersion: metadata.protocolVersion,
+        compiler: metadata.compiler,
         uri: metadata.uri,
         revision: metadata.revision,
         diagnostics: metadata.diagnostics,

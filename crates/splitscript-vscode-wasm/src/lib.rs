@@ -18,6 +18,7 @@ use splitscript::compiler::service::{
     CompileServiceErrorCode, CompilerService, ServiceDiagnostic,
 };
 use splitscript::tooling::lsp::LanguageServer;
+use splitscript::{CompilerIdentity, compiler_identity};
 
 const RESPONSE_MAGIC: &[u8; 4] = b"SSCR";
 const LSP_PROTOCOL_VERSION: u32 = 1;
@@ -33,6 +34,7 @@ thread_local! {
 #[serde(rename_all = "camelCase")]
 struct ResponseMetadata {
     protocol_version: u32,
+    compiler: CompilerIdentity,
     uri: String,
     revision: u64,
     diagnostics: Vec<ServiceDiagnostic>,
@@ -71,6 +73,7 @@ pub extern "C" fn splitscript_service_compile(pointer: u32, length: u32) {
                 encode_response(
                     ResponseMetadata {
                         protocol_version: response.protocol_version,
+                        compiler: response.compiler,
                         uri: response.uri,
                         revision: response.revision,
                         diagnostics: response.diagnostics,
@@ -152,6 +155,7 @@ fn encode_error(error: CompileServiceError) -> Vec<u8> {
     encode_response(
         ResponseMetadata {
             protocol_version: COMPILER_SERVICE_PROTOCOL_VERSION,
+            compiler: compiler_identity(),
             uri: String::new(),
             revision: 0,
             diagnostics: Vec::new(),
@@ -168,6 +172,7 @@ fn encode_response(metadata: ResponseMetadata, artifact: &[u8]) -> Vec<u8> {
         Err(error) => {
             let fallback = ResponseMetadata {
                 protocol_version: COMPILER_SERVICE_PROTOCOL_VERSION,
+                compiler: compiler_identity(),
                 uri: String::new(),
                 revision: 0,
                 diagnostics: Vec::new(),

@@ -53,7 +53,7 @@ pub(super) fn finish(
     module.section(&data);
     module.section(&CustomSection {
         name: Cow::Borrowed("splitscript"),
-        data: Cow::Borrowed(b"version=0.1;target=wasm-gc;abi=livesplit-asr"),
+        data: Cow::Owned(crate::build_identity::module_metadata()),
     });
     module.finish()
 }

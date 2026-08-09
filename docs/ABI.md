@@ -138,5 +138,7 @@ actions are skipped for that poll. Later refreshes populate a new GC state
 object field by field. Successful results advance, while failed results copy
 that field from `current`; unrelated fields can therefore advance independently.
 
-The module includes a `splitscript` custom section identifying compiler version,
-GC target, and host ABI.
+The module includes a `splitscript` custom section containing UTF-8 JSON with
+the compiler package version, optional full Git revision, GC target, and host
+ABI. The same compiler identity is reported by native frontends and the
+embedded compiler service, so an artifact can be traced back to its producer.

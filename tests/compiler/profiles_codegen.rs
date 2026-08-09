@@ -387,10 +387,27 @@ fn compiles_a_complete_autosplitter_to_valid_wasm_gc() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&wasm)
         .expect("generated WebAssembly GC should validate");
-    assert!(
-        wasm.windows("splitscript".len())
-            .any(|bytes| bytes == b"splitscript")
+    let metadata = Parser::new(0)
+        .parse_all(&wasm)
+        .find_map(
+            |payload| match payload.expect("generated module should parse") {
+                Payload::CustomSection(section) if section.name() == "splitscript" => {
+                    Some(serde_json::from_slice::<serde_json::Value>(section.data()).unwrap())
+                }
+                _ => None,
+            },
+        )
+        .expect("generated modules should identify their compiler");
+    assert_eq!(
+        metadata["compiler"]["version"],
+        splitscript::COMPILER_VERSION
     );
+    assert_eq!(metadata["target"], "wasm-gc");
+    assert_eq!(metadata["hostAbi"], "livesplit-auto-splitting");
+    match splitscript::COMPILER_GIT_REVISION {
+        Some(revision) => assert_eq!(metadata["compiler"]["gitRevision"], revision),
+        None => assert!(metadata["compiler"]["gitRevision"].is_null()),
+    }
 }
 
 #[test]

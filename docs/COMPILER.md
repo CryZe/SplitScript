@@ -1149,6 +1149,10 @@ generated module bytes for the same revision. It deliberately knows nothing
 about files, polling, child processes, VS Code, or terminal rendering. The
 native `splitc` and `splitls` binaries remain independent shells around the
 shared compiler/tooling implementation and remain publishable native products.
+Every response also carries the canonical compiler package version and optional
+full Git revision. Generated autosplitters embed that identity in their
+`splitscript` custom section as JSON, while native version output and LSP server
+information use the same build-time source.
 
 [`crates/splitscript-vscode-wasm`](../crates/splitscript-vscode-wasm) is the
 first direct-WebAssembly adapter for that service. It is a separate unpublished

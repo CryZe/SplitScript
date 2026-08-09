@@ -5,6 +5,7 @@
 
 mod abi;
 pub use splitscript_syntax::ast;
+mod build_identity;
 mod capabilities;
 mod catalog;
 mod codegen;
@@ -45,6 +46,10 @@ mod types;
 mod validation;
 mod wasm_ir;
 
+pub use build_identity::{
+    COMPILER_GIT_REVISION, COMPILER_VERSION, COMPILER_VERSION_TEXT, CompilerIdentity,
+    compiler_identity,
+};
 pub use diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticFix, DiagnosticLabel, DiagnosticLabelStyle,
     DiagnosticSeverity, FixApplicability, TextEdit,

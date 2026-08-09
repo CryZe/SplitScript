@@ -42,6 +42,11 @@ function compile(source, revision) {
 
 const successful = compile('state "game.exe" {}', 11);
 assert.equal(successful.metadata.revision, 11);
+assert.equal(typeof successful.metadata.compiler.version, "string");
+assert.ok(
+    successful.metadata.compiler.gitRevision === null
+    || typeof successful.metadata.compiler.gitRevision === "string",
+);
 assert.equal(successful.metadata.error, null);
 assert.deepEqual(successful.artifact.subarray(0, 4), new Uint8Array([0, 0x61, 0x73, 0x6d]));
 

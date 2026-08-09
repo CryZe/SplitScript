@@ -10,9 +10,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BuildProfile, CompilerContext, CompilerOptions, Diagnostic, DiagnosticFix, DiagnosticLabel,
-    DiagnosticLabelStyle, DiagnosticSeverity, FixApplicability, TextEdit, WarningPolicy,
-    compile_with_context_and_options_diagnostics,
+    BuildProfile, CompilerContext, CompilerIdentity, CompilerOptions, Diagnostic, DiagnosticFix,
+    DiagnosticLabel, DiagnosticLabelStyle, DiagnosticSeverity, FixApplicability, TextEdit,
+    WarningPolicy, compile_with_context_and_options_diagnostics, compiler_identity,
 };
 
 pub const COMPILER_SERVICE_PROTOCOL_VERSION: u32 = 1;
@@ -33,6 +33,7 @@ pub struct CompileRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompileResponse {
     pub protocol_version: u32,
+    pub compiler: CompilerIdentity,
     pub uri: String,
     pub revision: u64,
     pub diagnostics: Vec<ServiceDiagnostic>,
@@ -218,6 +219,7 @@ impl CompilerService {
         };
         Ok(CompileResponse {
             protocol_version,
+            compiler: compiler_identity(),
             uri,
             revision,
             diagnostics,

@@ -37,7 +37,7 @@ enum Command {
 #[command(
     name = "splitc",
     bin_name = "splitc",
-    version,
+    version = splitscript::COMPILER_VERSION_TEXT,
     args_conflicts_with_subcommands = true
 )]
 struct Cli {

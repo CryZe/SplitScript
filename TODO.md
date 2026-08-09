@@ -201,8 +201,9 @@ or behavioral parity.
   TypeScript/JavaScript, and Rust. Explain semantic differences—lifecycle,
   fixed-width numbers, `Duration`, async cancellation, `Option`/`Result`,
   settings, and process reads—not only token substitutions.
-- [ ] Include the compiler version and Git revision in machine-readable port
-  reports so future evidence remains reproducible.
+- [ ] Include the canonical compiler identity already exposed by the compiler
+  service and generated-module metadata in machine-readable port reports so
+  future evidence remains reproducible.
 
 ## P1 — source-level debugging in debug builds
 

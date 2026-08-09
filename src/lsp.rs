@@ -107,7 +107,7 @@ impl LanguageServer {
                             },
                             "serverInfo": {
                                 "name": "splitls",
-                                "version": env!("CARGO_PKG_VERSION")
+                                "version": crate::COMPILER_VERSION_TEXT
                             }
                         }),
                     )]

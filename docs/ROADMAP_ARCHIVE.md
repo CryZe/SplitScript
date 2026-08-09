@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-09: type-aware C# string-equality migration
+
+- Added a focused diagnostic for C# `String.Equals` on the resolved
+  standard-library string type. It directs exact comparisons to `==` and
+  explicitly case-insensitive ASCII identifiers to `equalsIgnoreAsciiCase`
+  without mistaking user-defined methods or mechanically rewriting C#
+  comparison-mode overloads.
+- Extended the checked migration catalog and ASL porting guide with the same
+  equality distinction.
+
 ## 2026-08-09: ASL runtime settings-registration guidance
 
 - Bounded startup-generated boolean settings were already expressible as

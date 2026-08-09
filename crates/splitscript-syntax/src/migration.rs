@@ -159,6 +159,8 @@ pub const ASL_LIST_TYPE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.collection.list-type");
 pub const ASL_SETTINGS_ADD_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.settings.add-call");
+pub const CSHARP_STRING_EQUALS_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.string.equals-call");
 
 pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
@@ -313,7 +315,25 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "there is no automatic rewrite because `settings.Add` overloads encode labels, parents, defaults, and runtime control flow differently",
         ],
     },
+    MigrationDiagnostic {
+        id: CSHARP_STRING_EQUALS_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.equality"),
+        message: "C# `String.Equals` becomes an equality expression in SplitScript",
+        primary_label: "compare string values with `==` or `!=`",
+        notes: &[
+            "`left == right` compares immutable strings by their exact UTF-8 text, not by object identity",
+            "use `left.equalsIgnoreAsciiCase(right)` only when the game identifier intentionally ignores ASCII letter case",
+            "there is no automatic rewrite because C# also has static and comparison-mode overloads whose semantics must be reviewed",
+        ],
+    },
 ];
+
+pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
+    match name {
+        "Equals" => Some(CSHARP_STRING_EQUALS_DIAGNOSTIC),
+        _ => None,
+    }
+}
 
 pub fn legacy_lifecycle_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
     Some(match name {
@@ -565,6 +585,19 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         )],
         cookbook_anchor: Some("c-string-operations"),
         spellings: STRING_ASCII_LOWER_SPELLINGS,
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.equality"),
+        name: "String equality",
+        sources: CSHARP,
+        support: MigrationSupport::Direct,
+        summary: "Use `==` or `!=` for exact string content equality; use `equalsIgnoreAsciiCase` only when ASCII-insensitive matching is intended.",
+        targets: &[
+            MigrationTarget::StandardLibraryType("String"),
+            MigrationTarget::StandardLibraryItem("String.equalsIgnoreAsciiCase"),
+        ],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
     },
     MigrationConcept {
         id: MigrationConceptId::new("string.numeric-parse"),

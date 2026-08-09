@@ -104,6 +104,13 @@ UTF-8 byte offsets rather than .NET UTF-16 indices and fails when an offset is
 out of range or inside a multibyte code point, so do not mechanically translate
 `Substring` without checking the target data.
 
+C# `left.Equals(right)` normally becomes `left == right`; SplitScript compares
+strings by exact UTF-8 text rather than GC reference identity. If the source
+intentionally ignores ASCII letter case, write
+`left.equalsIgnoreAsciiCase(right)` instead. The compiler does not rewrite
+`Equals` automatically because C#'s static and comparison-mode overloads need
+semantic review.
+
 Use `charAt(byteIndex)` for textual character checks. It returns a `char` and
 still takes a UTF-8 byte offset; an offset into the middle of a multibyte scalar
 is an error. Use `byteAt(byteIndex)` only when the ASL is genuinely inspecting

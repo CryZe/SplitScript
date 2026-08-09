@@ -1,6 +1,40 @@
 //! diagnostics migration integration tests.
 
 #[test]
+fn csharp_string_equals_explains_exact_and_ascii_insensitive_equality() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn sameMap(left: String, right: String) -> bool {
+            return left.Equals(right)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("C# String.Equals should receive semantic migration guidance");
+
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# `String.Equals` becomes an equality expression in SplitScript"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "Equals"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("left == right") && note.contains("exact UTF-8 text"))
+    );
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("equalsIgnoreAsciiCase") && note.contains("ASCII letter case")
+    }));
+}
+
+#[test]
 fn legacy_settings_add_explains_static_declarations_and_families() {
     let source = r#"
         state "game.exe" {}

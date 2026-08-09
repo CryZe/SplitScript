@@ -367,6 +367,20 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "examples/battlefront_ii.split",
+        output: "battlefront_ii.wasm",
+        profile: "release",
+        harness: "tests/battlefront_ii_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
+        source: "examples/battlefront_ii.split",
+        output: "battlefront_ii.wasm",
+        profile: "release",
+        harness: "tests/battlefront_ii_runtime.mjs",
+        extra_arguments: &["gc"],
+    },
+    RuntimeFixture {
         source: "tests/process_results.split",
         output: "process_results.wasm",
         profile: "release",

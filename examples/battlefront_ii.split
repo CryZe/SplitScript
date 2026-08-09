@@ -1,0 +1,32 @@
+// Faithful port of swbf2_loadremover_v2.asl. The legacy string16 field stores
+// the Galactic Conquest screen name as 16 little-endian UTF-16 code units.
+state "BattlefrontII" {
+    victoryScreen: i32 at 0x1aafca0;
+    loadingGame: i32 at 0x05cefc0;
+    endGc at 0x1abda34 as utf16le(16);
+}
+
+settings {
+    /// Galactic Conquest load-removal ruleset: pauses on every loading screen
+    /// and resumes after loading.
+    "Galactic Conquest" => galacticConquest key "gc": false,
+    /// Other game modes load-removal ruleset: pauses on the Victory/Defeat
+    /// screen and resumes after loading the next map.
+    "Other Game Modes" => otherModes key "other": true,
+}
+
+split {
+    return current.victoryScreen != 0 && old.victoryScreen == 0
+        || (settings.galacticConquest
+            && current.endGc == "ifs_freeform_end"
+            && old.endGc != "ifs_freeform_end")
+}
+
+isLoading {
+    if settings.galacticConquest {
+        return current.loadingGame != 0 || current.endGc == "ifs_freeform_end"
+    } else if settings.otherModes {
+        return current.loadingGame != 0 || current.victoryScreen != 0
+    }
+    return false
+}

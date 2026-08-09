@@ -1,5 +1,19 @@
 # SplitScript roadmap
 
+## 2026-08-09: faithful Battlefront II native UTF-16 port
+
+- Promoted `swbf2_loadremover_v2.asl` into a maintained host-executed port. Its
+  16-code-unit Galactic Conquest sentinel now uses the explicit bounded
+  `utf16le(16)` decoder rather than ASL's heuristic `string16` representation.
+- Preserved both settings, stable keys, defaults, tooltips, precedence,
+  victory and Galactic Conquest split transitions, and mode-specific loading
+  rules without adding a game-specific compiler abstraction.
+- Added fixtures for both settings configurations, NUL and full-bound UTF-16
+  input, ignored data after a terminator, failed-read retention, timer action
+  behavior, settings-handle cleanup, and detach. Recorded the extensionless
+  process name as evidence without claiming the deferred cross-platform policy
+  is solved.
+
 ## 2026-08-09: faithful OpenJK run-scoped-set port
 
 - Promoted the reviewed `OpenJK-Speed.asl` behavior into a maintained

@@ -199,7 +199,9 @@ compile-time and output-size measurements are recorded in
 [`docs/BASELINES.md`](docs/BASELINES.md).
 
 Reviewed production-port evidence also includes the run-scoped visited-map
-translation in [`docs/OPENJK_SPEED_PORT.md`](docs/OPENJK_SPEED_PORT.md).
+translation in [`docs/OPENJK_SPEED_PORT.md`](docs/OPENJK_SPEED_PORT.md) and the
+native UTF-16 case in
+[`docs/BATTLEFRONT_II_PORT.md`](docs/BATTLEFRONT_II_PORT.md).
 
 ## What works now
 

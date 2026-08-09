@@ -8,7 +8,7 @@ use crate::{
     inference::{InferenceError, Requirements, Type, type_may_have_capability},
     migration::{
         ASL_SETTINGS_ADD_DIAGNOSTIC, ForeignSpellingContext, foreign_spelling,
-        legacy_static_numeric_parse_diagnostic, legacy_string_method_diagnostic,
+        legacy_static_call_diagnostic, legacy_string_method_diagnostic,
         legacy_value_path_diagnostic, migration_diagnostic,
     },
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
@@ -336,7 +336,7 @@ impl Checker {
         if callee
             .first()
             .is_some_and(|receiver| self.binding(receiver).is_none())
-            && let Some(id) = legacy_static_numeric_parse_diagnostic(callee)
+            && let Some(id) = legacy_static_call_diagnostic(callee)
         {
             let metadata =
                 migration_diagnostic(id).expect("type checker migration diagnostic IDs must exist");

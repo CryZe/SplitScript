@@ -894,6 +894,54 @@ fn timespan_zero_migrates_to_the_duration_constructor() {
 }
 
 #[test]
+fn timespan_parse_requests_an_explicit_semantic_migration() {
+    let source = r#"
+        state "game.exe" {}
+
+        gameTime {
+            return TimeSpan.Parse("00:00:55.75")
+        }
+    "#;
+    let parsed = splitscript::parse_recovering(source).unwrap();
+    assert_eq!(parsed.diagnostics().len(), 1);
+    let type_edit = &parsed.diagnostics()[0].fixes[0].edits[0];
+    let mut fixed = source.to_owned();
+    fixed.replace_range(
+        type_edit.span.start..type_edit.span.end,
+        &type_edit.replacement,
+    );
+
+    let diagnostics = splitscript::compile(&fixed)
+        .expect_err("culture-sensitive duration parsing requires an explicit rewrite");
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# `TimeSpan.Parse` needs an explicit duration migration"
+    );
+    assert_eq!(&fixed[diagnostic.span.start..diagnostic.span.end], "Parse");
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("fixed literal"))
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("converted to text"))
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("culture-sensitive"))
+    );
+}
+
+#[test]
 fn legacy_process_identity_points_to_the_attached_process_api() {
     use splitscript::FixApplicability;
 

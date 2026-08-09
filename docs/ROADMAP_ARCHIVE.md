@@ -14,6 +14,10 @@
 - Separated ordinary value-path migrations from rewrites that require an
   attached native process, so process availability no longer leaks into
   unrelated fixes.
+- Classified corpus uses of `TimeSpan.Parse` instead of adding a misleading
+  compatibility parser. The compiler now distinguishes fixed duration data
+  from needless timer-value string round trips and explains why each requires
+  an explicit rewrite.
 - Kept JavaScript `${...}` out of typo recovery because it is valid
   SplitScript source with observably different literal-dollar semantics.
 

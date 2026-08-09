@@ -183,6 +183,8 @@ pub const CSHARP_STRING_SUBSTRING_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.substring-call");
 pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.numeric.static-parse-call");
+pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.timespan.parse-call");
 
 pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
@@ -372,6 +374,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "there is no automatic rewrite because the call alone does not identify the receiving declaration, fallback behavior, or `TryParse` control flow",
         ],
     },
+    MigrationDiagnostic {
+        id: CSHARP_TIMESPAN_PARSE_DIAGNOSTIC,
+        concept: MigrationConceptId::new("duration.parse"),
+        message: "C# `TimeSpan.Parse` needs an explicit duration migration",
+        primary_label: "review whether this text is data or a serialized timer value",
+        notes: &[
+            "for a fixed literal, construct the exact value with `Duration.fromWholeSeconds`, `Duration.fromWholeMilliseconds`, or `Duration.fromParts` rather than preserving a runtime parser",
+            "when the input came from `timer.CurrentTime` or another duration converted to text, keep the value typed instead of serializing and reparsing it",
+            "C# parsing is culture-sensitive and accepts a broad grammar; SplitScript does not provide a compatibility parser whose meaning could vary by host locale",
+            "there is no automatic rewrite because the call does not reveal the input format or whether the surrounding timer API itself needs redesign",
+        ],
+    },
 ];
 
 pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
@@ -382,10 +396,13 @@ pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnostic
     }
 }
 
-pub fn legacy_static_numeric_parse_diagnostic(path: &[String]) -> Option<MigrationDiagnosticId> {
+pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnosticId> {
     let [owner, method] = path else {
         return None;
     };
+    if owner == "Duration" && method == "Parse" {
+        return Some(CSHARP_TIMESPAN_PARSE_DIAGNOSTIC);
+    }
     if method != "Parse" && method != "TryParse" {
         return None;
     }
@@ -761,6 +778,20 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         targets: &[MigrationTarget::StandardLibraryType("Duration")],
         cookbook_anchor: None,
         spellings: DURATION_SPELLINGS,
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("duration.parse"),
+        name: "Text duration parsing",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Replace `TimeSpan.Parse` according to whether the input is fixed data or an already-typed timer value; do not preserve culture-sensitive parsing by default.",
+        targets: &[
+            MigrationTarget::StandardLibraryItem("Duration.fromWholeSeconds"),
+            MigrationTarget::StandardLibraryItem("Duration.fromWholeMilliseconds"),
+            MigrationTarget::StandardLibraryItem("Duration.fromParts"),
+        ],
+        cookbook_anchor: None,
+        spellings: &[],
     },
     MigrationConcept {
         id: MigrationConceptId::new("asl.time.monotonic-delay"),

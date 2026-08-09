@@ -201,7 +201,9 @@ compile-time and output-size measurements are recorded in
 Reviewed production-port evidence also includes the run-scoped visited-map
 translation in [`docs/OPENJK_SPEED_PORT.md`](docs/OPENJK_SPEED_PORT.md) and the
 native UTF-16 case in
-[`docs/BATTLEFRONT_II_PORT.md`](docs/BATTLEFRONT_II_PORT.md).
+[`docs/BATTLEFRONT_II_PORT.md`](docs/BATTLEFRONT_II_PORT.md). The
+timer-metadata and monotonic-delay case is recorded in
+[`docs/DARK_SASI_PORT.md`](docs/DARK_SASI_PORT.md).
 
 ## What works now
 

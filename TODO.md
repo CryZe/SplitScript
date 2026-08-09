@@ -59,8 +59,8 @@ or behavioral parity.
   follow-on errors after a missing member or failed declaration. Do not add
   compatibility aliases.
 - [ ] Promote a small pressure set from the campaign into repository-owned,
-  host-executed ports: one extensionless-name/multi-layout port and one
-  timer/run-metadata port. Each must record the preserved behavior and prove
+  host-executed ports, with an extensionless-name/multi-layout port still
+  remaining. Each must record the preserved behavior and prove
   pointer width, failed reads, attach/detach, unsupported builds, settings,
   timer-action order, and tick cadence as applicable.
 - [ ] Use those maintained ports to decide each next implementation slice.
@@ -474,9 +474,9 @@ remaining work is product hardening and distribution.
    improve the documentation, completion, and diagnostics that failed to reveal
    existing features. Defer process-name warnings until the host's
    cross-platform matching contract is settled.
-2. Continue promoting the pressure set into repository-owned runtime fixtures,
-   prioritizing timer/run metadata and safe unsupported-build behavior;
-   implement only gaps that remain after semantic review.
+2. Complete the pressure set with an extensionless-name/multi-layout port that
+   demonstrates safe unsupported-build behavior; implement only gaps that
+   remain after semantic review.
 3. Add the remaining smallest recurring game-independent pieces—repeated
    static settings and focused string operations—with runtime and editor
    coverage.

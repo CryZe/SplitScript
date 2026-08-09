@@ -1,0 +1,41 @@
+// Faithful port of DarkSASI.asl. The original stopwatch is represented by an
+// optional monotonic Instant, while LiveSplit's route position remains host
+// metadata rather than duplicated script state.
+let finalDelayStarted = None
+
+state "Dark_SASI-Win64-Shipping" {
+    level: i32 at 0x293c1d8;
+}
+
+start {
+    if current.level == 15 && old.level == 0 {
+        finalDelayStarted = None
+        return true
+    }
+    return false
+}
+
+split {
+    let splitIndex = timer.currentSplitIndex() else return false
+    if splitIndex == 0 {
+        return current.level == 8
+    } else if splitIndex == 1 {
+        return current.level == 12
+    } else if splitIndex == 2 {
+        // ASL restarts its stopwatch on every index-2 poll. The timestamp that
+        // survives is therefore the poll that actually advances to index 3.
+        finalDelayStarted = Instant.now()
+        return current.level == 8
+    }
+
+    let startedAt = finalDelayStarted else return false
+    if startedAt.hasElapsed(Duration.fromMilliseconds(52_000)) {
+        finalDelayStarted = None
+        return true
+    }
+    return false
+}
+
+isLoading {
+    return current.level == 0
+}

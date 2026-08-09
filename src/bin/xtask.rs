@@ -381,6 +381,20 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &["gc"],
     },
     RuntimeFixture {
+        source: "examples/dark_sasi.split",
+        output: "dark_sasi.wasm",
+        profile: "release",
+        harness: "tests/dark_sasi_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
+        source: "examples/dark_sasi.split",
+        output: "dark_sasi.wasm",
+        profile: "release",
+        harness: "tests/dark_sasi_runtime.mjs",
+        extra_arguments: &["skipped"],
+    },
+    RuntimeFixture {
         source: "tests/process_results.split",
         output: "process_results.wasm",
         profile: "release",

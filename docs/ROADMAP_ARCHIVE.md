@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-09: faithful Dark SASI timer-metadata port
+
+- Replaced the campaign's level-only partial translation with a maintained
+  port of DarkSASI's split-index dispatch. `timer.currentSplitIndex()` keeps
+  LiveSplit authoritative and exposes the signed host sentinel as `None`.
+- Recreated the source stopwatch through monotonic `Instant` values. Index 2
+  restarts the timestamp on every poll until its level-8 split; the final split
+  occurs at the exact 52-second threshold and clears the pending value.
+- Added host fixtures for full and skipped routes, absent split indices,
+  manual timer restart, loading, exact nanosecond threshold behavior, and
+  detach. This validates existing timer/clock APIs instead of adding callbacks,
+  a timer-phase mirror, or game-specific state.
+
 ## 2026-08-09: faithful Battlefront II native UTF-16 port
 
 - Promoted `swbf2_loadremover_v2.asl` into a maintained host-executed port. Its

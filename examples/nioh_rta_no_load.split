@@ -1,0 +1,47 @@
+// Faithful port of NiohRTANoLoad.asl for versions 1.21.04 through 1.21.06.
+// ASL omits Windows' executable suffix; the current WASM host requires it.
+state "Nioh.exe" {
+    /// Nioh 1.21.04 memory layout.
+    layout V12104 {
+        onMap: u8 at 0x2171030;
+        missionTimer: f32 at 0x20d8588, 0x1e0aac;
+    },
+    /// Nioh 1.21.05 memory layout.
+    layout V12105 {
+        onMap: u8 at 0x2176f80, 0x90;
+        missionTimer: f32 at 0x20a7418, 0x5d8;
+    },
+    /// Nioh 1.21.06 memory layout.
+    layout V12106 {
+        onMap: u8 at 0x2176f80, 0x90;
+        missionTimer: f32 at 0x20a7418, 0x5d8;
+    },
+}
+
+onAttach {
+    let executable = await process.mainModule()
+    if executable.size == 63_766_528 {
+        print(`Nioh 1.21.04 detected, module size {executable.size}`)
+        setTickRate(29)
+        return StateLayout.V12104
+    } else if executable.size == 63_827_968 {
+        print(`Nioh 1.21.05 detected, module size {executable.size}`)
+        setTickRate(29)
+        return StateLayout.V12105
+    } else if executable.size == 63_848_448 {
+        print(`Nioh 1.21.06 detected, module size {executable.size}`)
+        setTickRate(29)
+        return StateLayout.V12106
+    }
+
+    print(`unsupported Nioh module size {executable.size}`)
+    await process.closed()
+}
+
+onDetached {
+    setTickRate(1)
+}
+
+isLoading {
+    return current.missionTimer == old.missionTimer && current.onMap == 0
+}

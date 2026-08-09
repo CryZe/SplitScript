@@ -58,11 +58,6 @@ or behavioral parity.
   non-lifecycle misunderstandings found by the campaign. Suppress predictable
   follow-on errors after a missing member or failed declaration. Do not add
   compatibility aliases.
-- [ ] Promote a small pressure set from the campaign into repository-owned,
-  host-executed ports, with an extensionless-name/multi-layout port still
-  remaining. Each must record the preserved behavior and prove
-  pointer width, failed reads, attach/detach, unsupported builds, settings,
-  timer-action order, and tick cadence as applicable.
 - [ ] Use those maintained ports to decide each next implementation slice.
   Exercise the existing fixed-array search, `Set<String>`, and explicit native
   UTF-16LE decoder before adding adjacent abstractions. Prefer recurring static
@@ -474,18 +469,15 @@ remaining work is product hardening and distribution.
    improve the documentation, completion, and diagnostics that failed to reveal
    existing features. Defer process-name warnings until the host's
    cross-platform matching contract is settled.
-2. Complete the pressure set with an extensionless-name/multi-layout port that
-   demonstrates safe unsupported-build behavior; implement only gaps that
-   remain after semantic review.
-3. Add the remaining smallest recurring game-independent pieces—repeated
+2. Add the remaining smallest recurring game-independent pieces—repeated
    static settings and focused string operations—with runtime and editor
    coverage.
-4. In parallel with stable language semantics, establish the Wasmtime/DWARF
+3. In parallel with stable language semantics, establish the Wasmtime/DWARF
    compatibility fixture and land debug names plus source-line stepping.
-5. Harden and publish the bundled VSIX and native releases, then evaluate the
+4. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench.
-6. Add Unity Mono and the next emulator/engine provider from representative
+5. Add Unity Mono and the next emulator/engine provider from representative
    ports.
-7. Keep physical `None` aggregate specialization and sandbox-sensitive host
+6. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-09: faithful Nioh multi-layout port
+
+- Replaced the campaign's unsafe newest-version fallback with a maintained
+  port of all three Nioh layouts selected by main-module size. Unsupported
+  builds report their size and remain inert until the process closes.
+- Translated ASL's extensionless `Nioh` process name to the current Windows
+  host's required `Nioh.exe`, while retaining the 29 Hz cadence, direct and
+  indirect fields, and loading predicate. Detach restores 1 Hz.
+- Added host fixtures for versions 1.21.04, 1.21.05, and 1.21.06 plus an
+  unsupported build. They cover 64-bit pointer traversal, independent field
+  progress after a failed read, timer-action order, attach/detach, layout
+  selection, messages, and tick-rate transitions.
+- This completes the first repository-owned campaign pressure set alongside
+  OpenJK, Battlefront II, and Dark SASI.
+
 ## 2026-08-09: faithful Dark SASI timer-metadata port
 
 - Replaced the campaign's level-only partial translation with a maintained

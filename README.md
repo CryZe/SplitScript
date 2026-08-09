@@ -203,7 +203,9 @@ translation in [`docs/OPENJK_SPEED_PORT.md`](docs/OPENJK_SPEED_PORT.md) and the
 native UTF-16 case in
 [`docs/BATTLEFRONT_II_PORT.md`](docs/BATTLEFRONT_II_PORT.md). The
 timer-metadata and monotonic-delay case is recorded in
-[`docs/DARK_SASI_PORT.md`](docs/DARK_SASI_PORT.md).
+[`docs/DARK_SASI_PORT.md`](docs/DARK_SASI_PORT.md), and the ASL process-name
+migration and multi-layout case in
+[`docs/NIOH_RTA_NO_LOAD_PORT.md`](docs/NIOH_RTA_NO_LOAD_PORT.md).
 
 ## What works now
 

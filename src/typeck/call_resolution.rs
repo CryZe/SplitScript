@@ -8,7 +8,8 @@ use crate::{
     inference::{InferenceError, Requirements, Type, type_may_have_capability},
     migration::{
         ASL_SETTINGS_ADD_DIAGNOSTIC, ForeignSpellingContext, foreign_spelling,
-        legacy_string_method_diagnostic, legacy_value_path_diagnostic, migration_diagnostic,
+        legacy_static_numeric_parse_diagnostic, legacy_string_method_diagnostic,
+        legacy_value_path_diagnostic, migration_diagnostic,
     },
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
     signature::parse_signature,
@@ -331,6 +332,21 @@ impl Checker {
                 expression,
                 span,
             );
+        }
+        if callee
+            .first()
+            .is_some_and(|receiver| self.binding(receiver).is_none())
+            && let Some(id) = legacy_static_numeric_parse_diagnostic(callee)
+        {
+            let metadata =
+                migration_diagnostic(id).expect("type checker migration diagnostic IDs must exist");
+            let mut diagnostic = Diagnostic::type_error(metadata.message, name_span)
+                .with_primary_label(metadata.primary_label);
+            for note in metadata.notes {
+                diagnostic = diagnostic.with_note(*note);
+            }
+            self.errors.push(diagnostic);
+            return None;
         }
         let (display_name, signature_id, signature_result, parameters, resolved_call) =
             if let [name] = callee {

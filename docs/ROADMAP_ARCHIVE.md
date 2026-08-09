@@ -1,5 +1,14 @@
 # SplitScript roadmap
 
+## 2026-08-09: C# static numeric-parser discovery
+
+- Connected the existing strict `String.parse<T>()` implementation to familiar
+  C# `Parse` and `TryParse` calls across fixed-width integer and floating-point
+  type names.
+- The focused diagnostic moves the target type to the receiving boundary and
+  explains Result-based fallbacks and output-parameter migration without an
+  unsafe mechanical rewrite.
+
 ## 2026-08-09: boundary-aware C# substring migration
 
 - Confirmed that `Substring` is a recurring ASL corpus pattern and added a

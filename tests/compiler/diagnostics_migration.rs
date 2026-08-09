@@ -69,6 +69,60 @@ fn csharp_substring_explains_length_and_utf8_boundary_differences() {
 }
 
 #[test]
+fn csharp_static_numeric_parse_explains_result_based_string_parsing() {
+    for call in ["Int32.Parse(text)", "Double.Parse(text)"] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+
+                fn parseLegacy(text: String) {{
+                    {call}
+                }}
+            "#
+        );
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("C# static parsing should receive Result-based migration guidance");
+
+        assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(
+            diagnostic.message,
+            "C# static numeric parsing becomes `String.parse<T>()` in SplitScript"
+        );
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "Parse");
+        assert!(diagnostic.fixes.is_empty());
+        assert!(diagnostic.notes.iter().any(|note| {
+            note.contains("let value: i32 = text.parse()?") && note.contains("fallback")
+        }));
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| { note.contains("TryParse") && note.contains("Result control flow") })
+        );
+    }
+}
+
+#[test]
+fn a_user_binding_named_int32_keeps_its_parse_method() {
+    let source = r#"
+        record Parser {}
+        state "game.exe" {}
+
+        fn Parser.Parse(text: String) -> i32 {
+            return text.parse() else 0
+        }
+
+        fn parseWith(Int32: Parser, text: String) -> i32 {
+            return Int32.Parse(text)
+        }
+    "#;
+
+    splitscript::compile(source)
+        .expect("a resolved user binding must take precedence over foreign migration patterns");
+}
+
+#[test]
 fn legacy_settings_add_explains_static_declarations_and_families() {
     let source = r#"
         state "game.exe" {}

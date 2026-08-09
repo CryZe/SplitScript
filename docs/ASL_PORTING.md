@@ -150,6 +150,11 @@ let inference flow backward:
 let percentage: f64 = current.percentageText.parse() else 0.0
 ```
 
+The compiler recognizes the C# static `Parse` and `TryParse` families and
+points to this pattern. It intentionally does not rewrite them: `TryParse`
+output parameters become ordinary `Result` control flow, and the receiving
+declaration or fallback determines the target type.
+
 Unlike an exception-catching `Parse` call, failure is an ordinary `Result`.
 Use `else` for a fallback, `?` to propagate the error from a function or state
 field, or `match` when failure needs its own behavior. C# `TryParse` therefore

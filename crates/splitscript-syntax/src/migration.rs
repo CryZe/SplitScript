@@ -163,6 +163,8 @@ pub const CSHARP_STRING_EQUALS_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.equals-call");
 pub const CSHARP_STRING_SUBSTRING_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.substring-call");
+pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.numeric.static-parse-call");
 
 pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
@@ -340,6 +342,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "there is no automatic rewrite because the compiler cannot prove the source text is ASCII or recover C# overload semantics from the method name alone",
         ],
     },
+    MigrationDiagnostic {
+        id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.numeric-parse"),
+        message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
+        primary_label: "move the target type to the receiving boundary",
+        notes: &[
+            "rewrite `Int32.Parse(text)` as `let value: i32 = text.parse()?`, or use `else` when malformed input needs a fallback",
+            "rewrite `TryParse` output parameters with ordinary Result control flow such as `match` or `else`; SplitScript does not mutate an out argument",
+            "SplitScript parsing consumes strict ASCII decimal text in full; whitespace, separators, trailing text, and integer overflow are errors",
+            "there is no automatic rewrite because the call alone does not identify the receiving declaration, fallback behavior, or `TryParse` control flow",
+        ],
+    },
 ];
 
 pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
@@ -348,6 +362,39 @@ pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnostic
         "Substring" => Some(CSHARP_STRING_SUBSTRING_DIAGNOSTIC),
         _ => None,
     }
+}
+
+pub fn legacy_static_numeric_parse_diagnostic(path: &[String]) -> Option<MigrationDiagnosticId> {
+    let [owner, method] = path else {
+        return None;
+    };
+    if method != "Parse" && method != "TryParse" {
+        return None;
+    }
+    matches!(
+        owner.as_str(),
+        "SByte"
+            | "Byte"
+            | "Int16"
+            | "UInt16"
+            | "Int32"
+            | "UInt32"
+            | "Int64"
+            | "UInt64"
+            | "Single"
+            | "Double"
+            | "sbyte"
+            | "byte"
+            | "short"
+            | "ushort"
+            | "int"
+            | "uint"
+            | "long"
+            | "ulong"
+            | "float"
+            | "double"
+    )
+    .then_some(CSHARP_NUMERIC_PARSE_DIAGNOSTIC)
 }
 
 pub fn legacy_lifecycle_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {

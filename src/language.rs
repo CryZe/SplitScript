@@ -169,6 +169,17 @@ whileAttached {
     }
 }"#;
 
+const EQUALITY_SOURCE: &str = r#"state "game.exe" {}
+
+fn same(left: i32, right: i32) -> bool {
+    return left == right
+}
+
+fn different(left: i32, right: i32) -> bool {
+    return left != right
+}
+"#;
+
 const FAILURE_SOURCE: &str = r#"state "game.exe" {}
 
 fn readOrZero() {
@@ -519,6 +530,18 @@ focused_example!(
     "for level in 2..=36 {\n    `Level {level}` key `{level}`: true,\n}",
     SETTINGS_FAMILY_SOURCE
 );
+focused_example!(
+    EQUALITY_EXAMPLE,
+    "Compare equal values",
+    "left == right",
+    EQUALITY_SOURCE
+);
+focused_example!(
+    INEQUALITY_EXAMPLE,
+    "Compare different values",
+    "left != right",
+    EQUALITY_SOURCE
+);
 
 macro_rules! language_item {
     ($id:ident, $name:expr, $kind:expr, $form:expr, $summary:expr, $details:expr, $examples:expr) => {
@@ -744,6 +767,24 @@ define_language_catalog! {
         "Branches as a statement or expression.",
         "Expression-valued if requires an else branch and infers both branch values against one result type.",
         IF_EXAMPLE
+    ),
+    language_item!(
+        Equality,
+        "==",
+        LanguageItemKind::Syntax,
+        "left == right",
+        "Compares two values for equality.",
+        "Equality is typed and never coerces between unrelated representations. Strings compare by text content, while records and enums compare structurally when their contents are equatable.",
+        EQUALITY_EXAMPLE
+    ),
+    language_item!(
+        Inequality,
+        "!=",
+        LanguageItemKind::Syntax,
+        "left != right",
+        "Compares two values for inequality.",
+        "Inequality is the typed negation of equality and supports the same exact types and structural comparisons.",
+        INEQUALITY_EXAMPLE
     ),
     language_item!(
         Else,

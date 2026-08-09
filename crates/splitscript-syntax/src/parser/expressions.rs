@@ -157,6 +157,16 @@ impl Parser<'_> {
             if precedence < min_precedence {
                 break;
             }
+            let operator_span = self.current().span;
+            if let Some(spelling) = self.source.get(operator_span.start..operator_span.end)
+                && matches!(spelling, "===" | "!==")
+            {
+                self.record_foreign_spelling_diagnostic(
+                    operator_span,
+                    spelling,
+                    crate::migration::ForeignSpellingContext::Operator,
+                );
+            }
             let is_comparison = matches!(
                 op,
                 BinaryOp::Eq

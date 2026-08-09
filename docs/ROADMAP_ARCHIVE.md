@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-09: JavaScript strict-equality recovery
+
+- Kept JavaScript `===` and `!==` invalid while lexing each as one recoverable
+  source token. The parser now reports a single structured migration diagnostic
+  and offers a machine-applicable `==` or `!=` replacement.
+- Added `==` and `!=` as documented language-catalog syntax, giving migration
+  metadata, generated documentation, hover queries, and validation one
+  canonical target rather than a parser-only spelling table.
+- Removed the completed operator fixes from the active foreign-spelling work.
+
 ## 2026-08-09: C# static numeric-parser discovery
 
 - Connected the existing strict `String.parse<T>()` implementation to familiar

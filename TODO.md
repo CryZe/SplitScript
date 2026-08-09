@@ -188,9 +188,9 @@ or behavioral parity.
   rewritten.
 - [ ] Expand the structured foreign-spelling entries beyond the existing
   declarations, option value, strings, durations, and numeric types. Complete
-  unambiguous fixes for JavaScript `===`/`!==` and `${...}`, Rust `let mut`,
-  common `TimeSpan` constructors, casing differences, and type-aware member
-  suggestions. Keep canonical syntax unique; do not add compatibility aliases.
+  unambiguous fixes for JavaScript `${...}`, Rust `let mut`, common `TimeSpan`
+  constructors, casing differences, and type-aware member suggestions. Keep
+  canonical syntax unique; do not add compatibility aliases.
 - [ ] Write short compiler-checked guides for authors coming from ASL/C#,
   TypeScript/JavaScript, and Rust. Explain semantic differences—lifecycle,
   fixed-width numbers, `Duration`, async cancellation, `Option`/`Result`,

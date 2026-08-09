@@ -97,6 +97,7 @@ pub enum ForeignSpellingContext {
     StaticTypeReceiver,
     Method,
     ValuePath,
+    Operator,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -533,6 +534,25 @@ const STRING_ASCII_LOWER_SPELLINGS: &[ForeignSpelling] = &[type_spelling!(
     "replace this culture-sensitive C# method name"
 )];
 
+const STRICT_EQUALITY_SPELLINGS: &[ForeignSpelling] = &[
+    type_spelling!(
+        SourceLanguage::JavaScript,
+        ForeignSpellingContext::Operator,
+        "===",
+        "==",
+        "SplitScript uses typed `==` instead of JavaScript's `===`",
+        "replace this JavaScript equality operator"
+    ),
+    type_spelling!(
+        SourceLanguage::JavaScript,
+        ForeignSpellingContext::Operator,
+        "!==",
+        "!=",
+        "SplitScript uses typed `!=` instead of JavaScript's `!==`",
+        "replace this JavaScript inequality operator"
+    ),
+];
+
 const DURATION_SPELLINGS: &[ForeignSpelling] = &[
     type_spelling!(
         SourceLanguage::CSharp,
@@ -660,6 +680,19 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         ],
         cookbook_anchor: Some("c-string-operations"),
         spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("operator.strict-equality"),
+        name: "Strict equality operators",
+        sources: JAVASCRIPT,
+        support: MigrationSupport::Direct,
+        summary: "Use typed `==` and `!=`; SplitScript has no coercing equality operators, so JavaScript's extra `=` is unnecessary.",
+        targets: &[
+            MigrationTarget::Language("=="),
+            MigrationTarget::Language("!="),
+        ],
+        cookbook_anchor: None,
+        spellings: STRICT_EQUALITY_SPELLINGS,
     },
     MigrationConcept {
         id: MigrationConceptId::new("string.substring"),

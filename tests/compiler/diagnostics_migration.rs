@@ -1,6 +1,42 @@
 //! diagnostics migration integration tests.
 
 #[test]
+fn javascript_strict_equality_recovers_with_machine_applicable_fixes() {
+    use splitscript::FixApplicability;
+
+    for (operator, replacement) in [("===", "=="), ("!==", "!=")] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+
+                fn compare(left: i32, right: i32) -> bool {{
+                    return left {operator} right
+                }}
+            "#
+        );
+        let recovered = splitscript::parse_recovering(&source)
+            .expect("strict equality should retain a recoverable syntax tree");
+        assert_eq!(recovered.diagnostics().len(), 1);
+        let diagnostic = &recovered.diagnostics()[0];
+        assert!(diagnostic.message.contains(replacement));
+        assert_eq!(
+            &source[diagnostic.span.start..diagnostic.span.end],
+            operator
+        );
+        assert_eq!(diagnostic.fixes.len(), 1);
+        let fix = &diagnostic.fixes[0];
+        assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+        assert_eq!(fix.edits.len(), 1);
+        assert_eq!(fix.edits[0].replacement, replacement);
+
+        let mut fixed = source.clone();
+        let edit = &fix.edits[0];
+        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+        splitscript::compile(&fixed).expect("the canonical equality replacement should compile");
+    }
+}
+
+#[test]
 fn csharp_string_equals_explains_exact_and_ascii_insensitive_equality() {
     let source = r#"
         state "game.exe" {}

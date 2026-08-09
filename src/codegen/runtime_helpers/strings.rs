@@ -1736,25 +1736,40 @@ fn emit_null_string(function: &mut Function, string_type: u32) {
     function.instruction(&Instruction::RefNull(HeapType::Concrete(string_type)));
 }
 
-pub(in crate::codegen::runtime_helpers) fn compile_concat_strings(
+pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
     strings_array: u32,
     gc: &GcLayout,
 ) -> Function {
     let mut function = Function::new([
-        (5, ValType::I32),
+        (6, ValType::I32),
         (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
         (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
     ]);
     let strings = 0;
-    let string_index = 1;
-    let total_len = 2;
-    let byte_index = 3;
-    let output_index = 4;
-    let unused = 5;
-    let current = 6;
-    let output = 7;
-    let _ = unused;
+    let separator = 1;
+    let string_index = 2;
+    let total_len = 3;
+    let byte_index = 4;
+    let output_index = 5;
+    let separator_len = 6;
+    let string_count = 7;
+    let current = 8;
+    let output = 9;
     function
+        .instruction(&Instruction::LocalGet(strings))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalSet(string_count))
+        .instruction(&Instruction::LocalGet(separator))
+        .instruction(&Instruction::RefIsNull)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(separator))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalSet(separator_len))
         .instruction(&Instruction::Block(BlockType::Empty))
         .instruction(&Instruction::Loop(BlockType::Empty))
         .instruction(&Instruction::LocalGet(string_index))
@@ -1784,6 +1799,19 @@ pub(in crate::codegen::runtime_helpers) fn compile_concat_strings(
         .instruction(&Instruction::Br(0))
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(string_count))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(total_len))
+        .instruction(&Instruction::LocalGet(string_count))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::LocalGet(separator_len))
+        .instruction(&Instruction::I32Mul)
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(total_len))
+        .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(total_len))
         .instruction(&Instruction::ArrayNewDefault(
             gc.standard_index(StdlibTypeId::String),
@@ -1799,6 +1827,30 @@ pub(in crate::codegen::runtime_helpers) fn compile_concat_strings(
         .instruction(&Instruction::ArrayLen)
         .instruction(&Instruction::I32GeU)
         .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(string_index))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::LocalGet(separator_len))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(output_index))
+        .instruction(&Instruction::LocalGet(separator))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalGet(separator_len))
+        .instruction(&Instruction::ArrayCopy {
+            array_type_index_dst: gc.standard_index(StdlibTypeId::String),
+            array_type_index_src: gc.standard_index(StdlibTypeId::String),
+        })
+        .instruction(&Instruction::LocalGet(output_index))
+        .instruction(&Instruction::LocalGet(separator_len))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(output_index))
+        .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(strings))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(string_index));

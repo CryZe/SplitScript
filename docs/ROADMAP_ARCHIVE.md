@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-09: single-allocation string joining
+
+- Added `String.join(values, separator)` for typed `[String]` collections,
+  preserving empty elements and adding separators only between adjacent values.
+- Generalized interpolation, `String.concat`, and `String.join` onto one Wasm
+  helper. Concatenation uses an internal null separator, so it does not allocate
+  a synthetic empty string; the final output remains one exact-sized allocation.
+- Added focused C# `String.Join` guidance without swapping arguments
+  automatically because its object, enumerable, variadic, and range overloads
+  require explicit conversion to `[String]`.
+
 ## 2026-08-09: typed string emptiness
 
 - Added source-defined `String.isEmpty()` as ordinary composition over

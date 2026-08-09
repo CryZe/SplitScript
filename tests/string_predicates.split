@@ -117,6 +117,14 @@ whileAttached {
     if "".isEmpty() && !"Map_A".isEmpty() {
         matches += 262144
     }
+    if String.join(["chapter", "room", "exit"], ".") == "chapter.room.exit"
+        && String.join([], "-") == ""
+        && String.join(["only"], "-") == "only"
+        && String.join(["a", "", "b"], "🙂") == "a🙂🙂b"
+        && String.concat(["a", "b", "c"]) == "abc"
+    {
+        matches += 524288
+    }
     let levelParts = "01_02_0.dds".split(".") else []
     let identifiers = levelParts[0].split("_") else []
     let emptyParts = "_a__".split("_") else []

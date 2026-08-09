@@ -75,6 +75,7 @@ macro_rules! trusted_intrinsics {
             StringCharAt,
             StringSlice,
             StringConcat,
+            StringJoin,
             ModuleScan,
             ModuleScanAny,
             ModulePath,

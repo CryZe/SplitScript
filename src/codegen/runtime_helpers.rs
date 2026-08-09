@@ -286,8 +286,8 @@ pub(super) fn build_unity_get_static_instance(inputs: &RuntimeHelperInputs<'_>) 
     )
 }
 
-pub(super) fn build_concat_strings(inputs: &RuntimeHelperInputs<'_>) -> Function {
-    strings::compile_concat_strings(
+pub(super) fn build_join_strings(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_join_strings(
         array_layout(inputs, Type::Standard(StdlibTypeId::String)),
         inputs.gc,
     )

@@ -150,6 +150,20 @@ first whether that boundary should remain a `Result`, become a `String?`, or
 retain the last accepted state value. The compiler therefore gives
 `String.IsNullOrEmpty` focused guidance without guessing an automatic rewrite.
 
+C# `String.Join` puts the separator first and has many object, enumerable,
+variadic, and range overloads. SplitScript accepts one typed string array and
+puts the values first:
+
+```splitscript
+let routeName = String.join(routeParts, ".")
+```
+
+The implementation measures the complete UTF-8 result and allocates it once.
+Empty and single-element arrays add no separator; empty elements are preserved.
+Convert non-string values explicitly before joining. The compiler does not
+swap arguments automatically because a C# call does not prove that its chosen
+overload already contains a `[String]`.
+
 C# `value.IndexOf(substring)` returns a UTF-16 code-unit index or `-1`.
 SplitScript `value.indexOf(substring)` instead returns a UTF-8 byte offset as
 `u32?`; handle `None` directly. The numeric offsets are equivalent only for

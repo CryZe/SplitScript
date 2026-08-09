@@ -72,7 +72,7 @@ pub(crate) enum RuntimeHelperId {
     UnityGetFieldOffset,
     UnityGetFieldAny,
     UnityGetStaticInstance,
-    ConcatStrings,
+    JoinStrings,
     FollowAddress,
     GbaTranslateAddress,
     RefreshSettings,
@@ -403,7 +403,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::StringByteAt | IntrinsicId::StringCharAt => &[Helper(Runtime::StringInspect)],
         IntrinsicId::StringSlice => &[Helper(Runtime::StringSlice)],
         IntrinsicId::StringTrimAsciiWhitespace => &[Helper(Runtime::StringTrimAsciiWhitespace)],
-        IntrinsicId::StringConcat => &[Helper(Runtime::ConcatStrings)],
+        IntrinsicId::StringConcat | IntrinsicId::StringJoin => &[Helper(Runtime::JoinStrings)],
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
         IntrinsicId::NextTick
         | IntrinsicId::NumericAdd
@@ -1263,6 +1263,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 NO_TYPE_PARAMETERS,
                 None,
                 params![value(STRING_ARRAY)],
+                STRING,
+            ),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringJoin => contract!(
+            StringJoin,
+            Function,
+            signature(
+                NO_TYPE_PARAMETERS,
+                None,
+                params![value(STRING_ARRAY), value(STRING)],
                 STRING,
             ),
             ALLOCATES,

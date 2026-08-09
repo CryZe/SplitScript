@@ -1842,6 +1842,27 @@ intrinsic type String {
         /// The strings to concatenate in order.
         values: [String],
     ) -> String;
+
+    /// Joins an array of strings with one separator between adjacent values.
+    ///
+    /// Empty and single-element arrays add no separators. The final string is
+    /// allocated once after measuring every value and separator.
+    ///
+    /// # Example
+    ///
+    /// Format a route identifier
+    ///
+    /// ```splitscript
+    /// let route = String.join(["chapter", "room", "exit"], ".")
+    /// ```
+    @mustUse("The joined string must be used.")
+    @intrinsic(StringJoin)
+    static fn join(
+        /// The strings to join in order.
+        values: [String],
+        /// The string inserted between adjacent values.
+        separator: String,
+    ) -> String;
 }
 
 /// Stores a compiled process-memory signature.

@@ -1494,11 +1494,15 @@ fn compile_expr_unconverted(
                 array_type_index: context.gc.index(Type::Array(strings.id)),
                 array_size: parts.len() as u32,
             });
-            function.instruction(&Instruction::Call(
-                context
-                    .runtime_helpers
-                    .function(RuntimeHelperId::ConcatStrings),
-            ));
+            function
+                .instruction(&Instruction::RefNull(HeapType::Concrete(
+                    context.gc.standard_index(StdlibTypeId::String),
+                )))
+                .instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::JoinStrings),
+                ));
         }
         wasm_ir::ExpressionKind::Signature(signature) => {
             let entry = context.signatures.get(signature);
@@ -2324,10 +2328,23 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::StringConcat => {
                 compile_expr(function, args[0], context);
+                function
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(
+                        context.gc.standard_index(StdlibTypeId::String),
+                    )))
+                    .instruction(&Instruction::Call(
+                        context
+                            .runtime_helpers
+                            .function(RuntimeHelperId::JoinStrings),
+                    ));
+            }
+            IntrinsicId::StringJoin => {
+                compile_expr(function, args[0], context);
+                compile_expr(function, args[1], context);
                 function.instruction(&Instruction::Call(
                     context
                         .runtime_helpers
-                        .function(RuntimeHelperId::ConcatStrings),
+                        .function(RuntimeHelperId::JoinStrings),
                 ));
             }
             IntrinsicId::TimerSetVariable => {

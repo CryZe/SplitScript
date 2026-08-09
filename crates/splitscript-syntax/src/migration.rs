@@ -189,6 +189,8 @@ pub const CSHARP_STRING_TRIM_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.trim-call");
 pub const CSHARP_STRING_IS_NULL_OR_EMPTY_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.is-null-or-empty-call");
+pub const CSHARP_STRING_JOIN_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.string.join-call");
 pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.numeric.static-parse-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
@@ -421,6 +423,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_STRING_JOIN_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.join"),
+        message: "C# `String.Join` needs an explicit collection conversion",
+        primary_label: "SplitScript joins one typed string array",
+        notes: &[
+            "rewrite `String.Join(separator, values)` as `String.join(values, separator)` when `values` is a `[String]`",
+            "SplitScript allocates the final UTF-8 string once and inserts the separator only between adjacent values; empty and single-element arrays add no separators",
+            "C# overloads accepting objects, variadic arguments, generic enumerables, or a start/count range require the values to be converted into a string array explicitly",
+            "there is no automatic rewrite because the argument order changes and the C# overload does not prove a `[String]` input",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.numeric-parse"),
         message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
@@ -475,6 +489,9 @@ pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnos
     };
     if owner == "String" && method == "IsNullOrEmpty" {
         return Some(CSHARP_STRING_IS_NULL_OR_EMPTY_DIAGNOSTIC);
+    }
+    if owner == "String" && method == "Join" {
+        return Some(CSHARP_STRING_JOIN_DIAGNOSTIC);
     }
     if owner == "Duration" && method == "Parse" {
         return Some(CSHARP_TIMESPAN_PARSE_DIAGNOSTIC);
@@ -898,6 +915,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Use `String.isEmpty` for required strings and match `String?` explicitly when absence should also count as empty.",
         targets: &[MigrationTarget::StandardLibraryItem("String.isEmpty")],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.join"),
+        name: "String collection joining",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `String.join(values, separator)` for a typed string array; convert C# object, variadic, enumerable, and range overloads explicitly.",
+        targets: &[MigrationTarget::StandardLibraryItem("String.join")],
         cookbook_anchor: Some("c-string-operations"),
         spellings: &[],
     },

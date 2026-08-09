@@ -284,6 +284,40 @@ fn csharp_is_null_or_empty_explains_required_and_optional_strings() {
 }
 
 #[test]
+fn csharp_string_join_explains_array_and_argument_order() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn route(values: [String]) -> String {
+            return String.Join(".", values)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("C# String.Join needs typed-array migration guidance");
+
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# `String.Join` needs an explicit collection conversion"
+    );
+    assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "Join");
+    assert!(diagnostic.fixes.is_empty());
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("String.join(values, separator)") && note.contains("[String]")
+    }));
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("argument order changes"))
+    );
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("variadic") && note.contains("enumerables") && note.contains("range")
+    }));
+}
+
+#[test]
 fn csharp_static_numeric_parse_explains_result_based_string_parsing() {
     for call in ["Int32.Parse(text)", "Double.Parse(text)"] {
         let source = format!(

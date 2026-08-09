@@ -104,7 +104,7 @@ impl BackendDependencies {
                     dependencies.require_intrinsic(*intrinsic);
                 }
                 wasm_ir::ExpressionKind::InterpolatedString(parts) => {
-                    dependencies.require(RuntimeHelperId::ConcatStrings);
+                    dependencies.require(RuntimeHelperId::JoinStrings);
                     for source in parts.iter().filter_map(|part| match part {
                         wasm_ir::InterpolatedPart::Expression {
                             string_conversion_source,

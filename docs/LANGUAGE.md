@@ -1439,6 +1439,7 @@ is involved:
 | `slice(start, end)` | Fallible half-open UTF-8 byte range; offsets must be code-point boundaries |
 | `replaceAll(search, replacement)` | Fallible exact non-overlapping replacement |
 | `String.concat(values)` | Concatenate an array of strings |
+| `String.join(values, separator)` | Join a string array with one separator between adjacent values |
 
 Case conversion reuses an already-normalized immutable string and allocates
 only when at least one ASCII letter changes. The operations intentionally have

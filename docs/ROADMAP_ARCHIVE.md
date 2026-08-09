@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-09: boundary-aware C# substring migration
+
+- Confirmed that `Substring` is a recurring ASL corpus pattern and added a
+  type-aware diagnostic instead of treating it as an ordinary method typo.
+- The diagnostic and checked porting guide distinguish C#'s `(start, length)`
+  and suffix overloads from SplitScript's fallible `(start, exclusiveEnd)`
+  slice, and explicitly require an encoding review because C# positions are
+  UTF-16 code units while SplitScript positions are UTF-8 bytes.
+- Removed the already-completed native-string decoder diagnostic slice from
+  the active migration roadmap.
+
 ## 2026-08-09: type-aware C# string-equality migration
 
 - Added a focused diagnostic for C# `String.Equals` on the resolved

@@ -35,6 +35,40 @@ fn csharp_string_equals_explains_exact_and_ascii_insensitive_equality() {
 }
 
 #[test]
+fn csharp_substring_explains_length_and_utf8_boundary_differences() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn mapCode(value: String, start: u32, length: u32) -> String! {
+            return value.Substring(start, length)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("C# Substring should require a boundary-aware migration");
+
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# `String.Substring` needs an explicit UTF-8 boundary review"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "Substring"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("slice(start, start + length)") && note.contains("proven ASCII")
+    }));
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| { note.contains("UTF-16 code units") && note.contains("UTF-8 bytes") })
+    );
+}
+
+#[test]
 fn legacy_settings_add_explains_static_declarations_and_families() {
     let source = r#"
         state "game.exe" {}

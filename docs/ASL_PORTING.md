@@ -104,6 +104,13 @@ UTF-8 byte offsets rather than .NET UTF-16 indices and fails when an offset is
 out of range or inside a multibyte code point, so do not mechanically translate
 `Substring` without checking the target data.
 
+For text proven to be ASCII, translate the overload shapes explicitly. C#
+`value.Substring(start, length)` becomes
+`value.slice(start, start + length)`, while `value.Substring(start)` becomes
+`value.slice(start, value.byteLength())`. Both SplitScript calls are fallible.
+For non-ASCII text, first derive UTF-8 byte boundaries rather than copying the
+original UTF-16 positions.
+
 C# `left.Equals(right)` normally becomes `left == right`; SplitScript compares
 strings by exact UTF-8 text rather than GC reference identity. If the source
 intentionally ignores ASCII letter case, write

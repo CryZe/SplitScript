@@ -161,6 +161,8 @@ pub const ASL_SETTINGS_ADD_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.settings.add-call");
 pub const CSHARP_STRING_EQUALS_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.equals-call");
+pub const CSHARP_STRING_SUBSTRING_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.string.substring-call");
 
 pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
@@ -326,11 +328,24 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "there is no automatic rewrite because C# also has static and comparison-mode overloads whose semantics must be reviewed",
         ],
     },
+    MigrationDiagnostic {
+        id: CSHARP_STRING_SUBSTRING_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.substring"),
+        message: "C# `String.Substring` needs an explicit UTF-8 boundary review",
+        primary_label: "SplitScript `slice` uses UTF-8 byte offsets and an exclusive end",
+        notes: &[
+            "for proven ASCII text, `value.Substring(start, length)` becomes `value.slice(start, start + length)` with ordinary Result handling",
+            "for proven ASCII text, `value.Substring(start)` becomes `value.slice(start, value.byteLength())`",
+            "C# indexes UTF-16 code units; non-ASCII offsets cannot be copied into `slice` because SplitScript indexes UTF-8 bytes and rejects positions inside a character",
+            "there is no automatic rewrite because the compiler cannot prove the source text is ASCII or recover C# overload semantics from the method name alone",
+        ],
+    },
 ];
 
 pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
     match name {
         "Equals" => Some(CSHARP_STRING_EQUALS_DIAGNOSTIC),
+        "Substring" => Some(CSHARP_STRING_SUBSTRING_DIAGNOSTIC),
         _ => None,
     }
 }
@@ -596,6 +611,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
             MigrationTarget::StandardLibraryType("String"),
             MigrationTarget::StandardLibraryItem("String.equalsIgnoreAsciiCase"),
         ],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.substring"),
+        name: "Substring extraction",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use fallible `slice(start, exclusiveEnd)` only after translating C#'s length argument and verifying that UTF-16 source positions are valid UTF-8 byte offsets.",
+        targets: &[MigrationTarget::StandardLibraryItem("String.slice")],
         cookbook_anchor: Some("c-string-operations"),
         spellings: &[],
     },

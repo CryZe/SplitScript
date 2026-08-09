@@ -181,11 +181,11 @@ or behavioral parity.
 - [ ] Expand capability-driven diagnostics and code actions beyond the initial
   structured entries. Emit one focused explanation and suppress predictable
   cascades for recognizable ASL constructs, including legacy lifecycle blocks,
-  timer member chains, member casing, and
-  string decoders. Distinguish “supported under a different spelling,”
-  “requires a semantic rewrite,” “requires host support,” and “intentionally
-  sandboxed out.” Use machine-applicable rewrites only after resolution proves
-  equivalence and that user-defined names are not being rewritten.
+  timer member chains and member casing. Distinguish “supported under a
+  different spelling,” “requires a semantic rewrite,” “requires host support,”
+  and “intentionally sandboxed out.” Use machine-applicable rewrites only after
+  resolution proves equivalence and that user-defined names are not being
+  rewritten.
 - [ ] Expand the structured foreign-spelling entries beyond the existing
   declarations, option value, strings, durations, and numeric types. Complete
   unambiguous fixes for JavaScript `===`/`!==` and `${...}`, Rust `let mut`,

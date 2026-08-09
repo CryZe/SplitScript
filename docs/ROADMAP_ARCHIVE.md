@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-09: monotonic-delay migration boundary
+
+- Triaged campaign reports that treated every real-time delay as unavailable.
+  Confirmed that event-anchored debouncing, cooldowns, and delayed actions map
+  to the existing monotonic `Instant` and exact `Duration` APIs.
+- Added a migration concept, cookbook recipe, and focused `DateTime.Now`
+  diagnostics for that supported pattern.
+- Kept LiveSplit's `timer.CurrentTime.RealTime` as a distinct planned host
+  capability and added a separate diagnostic, preventing run-relative timer
+  metadata from being silently replaced with process-independent elapsed time.
+
 ## 2026-08-09: explicit timer split-index migration
 
 - Triaged the campaign's reported split-index blocker against the legacy ASL

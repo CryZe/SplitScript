@@ -230,6 +230,44 @@ rewrite it automatically because the correct `None` behavior depends on the
 surrounding control flow. Use `else` for an early fallback or `match` when the
 absent state needs distinct behavior.
 
+## Monotonic delays and debouncing
+
+ASL scripts often use `DateTime.Now`, `DateTime.Now.TimeOfDay`, or a
+`Stopwatch` only to measure time since a game event. Use `Instant` for that
+process-independent elapsed time:
+
+```splitscript
+let enteredMenuAt: Instant? = None
+
+whileAttached {
+    if current.inMenu && !old.inMenu {
+        enteredMenuAt = Instant.now()
+    } else if !current.inMenu {
+        enteredMenuAt = None
+    }
+}
+
+reset {
+    let detectedAt = enteredMenuAt else return false
+    return detectedAt.hasElapsed(Duration.fromMilliseconds(500))
+}
+```
+
+`Instant.now()` reads a monotonic host clock. It never moves backwards during
+one autosplitter instance and has no meaningful absolute or calendar value.
+`elapsed()`, `durationSince(...)`, and `hasElapsed(...)` produce or compare
+exact `Duration` values, making them appropriate for cooldowns, debouncing,
+delayed splits, and retry deadlines. They continue advancing independently of
+LiveSplit's loading and pause state.
+
+Do not mechanically replace `timer.CurrentTime.RealTime`. That ASL expression
+may mean the current LiveSplit attempt's run-relative time rather than an
+independent delay. If the original logic starts its measurement at a game event,
+capture an `Instant` there. If it needs the actual timer phase for an offset,
+run-age check, or custom game-time calculation, the current host contract does
+not expose equivalent metadata. The compiler diagnoses these paths separately
+so this distinction is not hidden by a convenient but incorrect rewrite.
+
 ## Attach-time-discovered addresses
 
 Keep discovery in `onAttach` and polling in the state declaration. Polling does

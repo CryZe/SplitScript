@@ -598,6 +598,100 @@ fn user_defined_timer_split_index_member_keeps_its_meaning() {
 }
 
 #[test]
+fn legacy_wall_clock_delay_paths_point_to_monotonic_instants() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let direct = DateTime.Now
+            let timeOfDay = System.DateTime.Now.TimeOfDay
+            print(direct)
+            print(timeOfDay)
+        }
+    "#;
+    let errors = splitscript::compile(source)
+        .expect_err("legacy wall-clock delay paths should need a monotonic rewrite");
+    assert_eq!(errors.len(), 2);
+    for diagnostic in &errors {
+        assert_eq!(
+            diagnostic.message,
+            "use SplitScript's monotonic clock for elapsed-time checks"
+        );
+        assert!(diagnostic.fixes.is_empty());
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("hasElapsed"))
+        );
+    }
+    assert_eq!(
+        &source[errors[0].span.start..errors[0].span.end],
+        "DateTime.Now"
+    );
+    assert_eq!(
+        &source[errors[1].span.start..errors[1].span.end],
+        "System.DateTime.Now.TimeOfDay"
+    );
+
+    let migrated = r#"
+        state "game.exe" {}
+
+        fn debounceReady(startedAt: Instant) -> bool {
+            return startedAt.hasElapsed(Duration.fromMilliseconds(500))
+        }
+    "#;
+    splitscript::compile(migrated).expect("an event-anchored monotonic delay should compile");
+}
+
+#[test]
+fn livesplit_run_real_time_is_not_silently_replaced_with_an_instant() {
+    let source = r#"
+        state "game.exe" {}
+
+        split {
+            return timer.CurrentTime.RealTime.Value.TotalMilliseconds > 500
+        }
+    "#;
+    let errors = splitscript::compile(source)
+        .expect_err("LiveSplit run-relative time needs a distinct host capability");
+    assert_eq!(errors.len(), 1);
+    let diagnostic = &errors[0];
+    assert_eq!(
+        diagnostic.message,
+        "LiveSplit run real time is not the same as SplitScript's monotonic clock"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "timer.CurrentTime.RealTime.Value.TotalMilliseconds"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("not exposed by the current host contract"))
+    );
+}
+
+#[test]
+fn user_defined_datetime_member_keeps_its_meaning() {
+    let source = r#"
+        state "game.exe" {}
+
+        record Clock {
+            Now: u64,
+        }
+
+        fn readTimestamp(DateTime: Clock) -> u64 {
+            return DateTime.Now
+        }
+    "#;
+    splitscript::compile(source)
+        .expect("a user-defined DateTime value must not trigger migration guidance");
+}
+
+#[test]
 fn unrelated_unknown_methods_do_not_receive_noisy_suggestions() {
     let source = r#"
         state "game.exe" {}

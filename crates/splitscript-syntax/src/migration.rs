@@ -149,6 +149,10 @@ pub const ASL_TIMER_EVENT_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.lifecycle.timer-event-block");
 pub const ASL_CURRENT_SPLIT_INDEX_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.timer.current-split-index-path");
+pub const ASL_MONOTONIC_TIME_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.time.monotonic-path");
+pub const ASL_TIMER_REAL_TIME_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.timer.current-real-time-path");
 
 pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
@@ -245,6 +249,28 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "the index also advances for skipped segments and equals the segment count after the final split",
         ],
     },
+    MigrationDiagnostic {
+        id: ASL_MONOTONIC_TIME_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.time.monotonic-delay"),
+        message: "use SplitScript's monotonic clock for elapsed-time checks",
+        primary_label: "capture `Instant.now()` at the event and compare an exact `Duration`",
+        notes: &[
+            "`Instant` is appropriate for debouncing, cooldowns, and delayed actions because it never moves backwards during one runtime instance",
+            "it has no calendar value; logging timestamps and other wall-clock uses are intentionally outside this API",
+            "use `startedAt.hasElapsed(Duration.fromMilliseconds(...))` for the common polling pattern",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_TIMER_REAL_TIME_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.timer.current-real-time"),
+        message: "LiveSplit run real time is not the same as SplitScript's monotonic clock",
+        primary_label: "determine whether this code needs an independent delay or actual timer metadata",
+        notes: &[
+            "for a delay anchored to a game event, store `Instant.now()` at that event and compare a `Duration`",
+            "the exact LiveSplit `CurrentTime.RealTime` phase is not exposed by the current host contract",
+            "do not silently replace run-relative time used for offsets or game-time calculations with elapsed process-independent time",
+        ],
+    },
 ];
 
 pub fn legacy_lifecycle_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
@@ -260,16 +286,27 @@ pub fn legacy_lifecycle_diagnostic(name: &str) -> Option<MigrationDiagnosticId> 
 }
 
 pub fn legacy_value_path_diagnostic(path: &str) -> Option<MigrationDiagnosticId> {
-    match path {
-        "timer.CurrentSplitIndex" => Some(ASL_CURRENT_SPLIT_INDEX_DIAGNOSTIC),
-        _ => None,
+    if path == "timer.CurrentSplitIndex" {
+        return Some(ASL_CURRENT_SPLIT_INDEX_DIAGNOSTIC);
     }
+    if path == "DateTime.Now"
+        || path.starts_with("DateTime.Now.")
+        || path == "System.DateTime.Now"
+        || path.starts_with("System.DateTime.Now.")
+    {
+        return Some(ASL_MONOTONIC_TIME_DIAGNOSTIC);
+    }
+    if path == "timer.CurrentTime.RealTime" || path.starts_with("timer.CurrentTime.RealTime.") {
+        return Some(ASL_TIMER_REAL_TIME_DIAGNOSTIC);
+    }
+    None
 }
 
 const ASL: &[SourceLanguage] = &[SourceLanguage::Asl];
 const CSHARP: &[SourceLanguage] = &[SourceLanguage::CSharp];
 const JAVASCRIPT: &[SourceLanguage] = &[SourceLanguage::JavaScript];
 const CSHARP_JAVASCRIPT: &[SourceLanguage] = &[SourceLanguage::CSharp, SourceLanguage::JavaScript];
+const ASL_CSHARP: &[SourceLanguage] = &[SourceLanguage::Asl, SourceLanguage::CSharp];
 
 const LET_SPELLINGS: &[ForeignSpelling] = &[
     ForeignSpelling {
@@ -501,6 +538,19 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: DURATION_SPELLINGS,
     },
     MigrationConcept {
+        id: MigrationConceptId::new("asl.time.monotonic-delay"),
+        name: "Monotonic delays and debouncing",
+        sources: ASL_CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Replace elapsed-time uses of `DateTime.Now` or `Stopwatch` with an `Instant` captured at the source event and an exact `Duration` comparison.",
+        targets: &[
+            MigrationTarget::StandardLibraryType("Instant"),
+            MigrationTarget::StandardLibraryType("Duration"),
+        ],
+        cookbook_anchor: Some("monotonic-delays-and-debouncing"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("type.fixed-width-number"),
         name: "Fixed-width numeric types",
         sources: CSHARP,
@@ -644,6 +694,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
             "timer.currentSplitIndex",
         )],
         cookbook_anchor: Some("timer-split-index"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.timer.current-real-time"),
+        name: "LiveSplit current real time",
+        sources: ASL,
+        support: MigrationSupport::Planned,
+        summary: "Use `Instant` only for independent elapsed-time checks; exact `timer.CurrentTime.RealTime` metadata requires additional host support.",
+        targets: &[],
+        cookbook_anchor: Some("monotonic-delays-and-debouncing"),
         spellings: &[],
     },
     MigrationConcept {

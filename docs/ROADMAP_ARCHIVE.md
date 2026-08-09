@@ -1,5 +1,22 @@
 # SplitScript roadmap
 
+## 2026-08-09: reusable port-conformance host
+
+- Extracted a shared Node host for the generated LiveSplit ABI, including
+  exact process attachment, modules, 64-bit memory ranges and custom reads,
+  settings registration and snapshots, timer state and actions, host metadata,
+  monotonic time, variables, messages, and tick-rate observations.
+- Added bounded `updateUntil` polling with diagnostic state, explicit process
+  close/restart control, settings mutation, and handle-leak observability so
+  maintained ports can cover failures and lifecycle transitions without
+  copying ABI boilerplate.
+- Migrated action defaults, tick-rate lifecycle, host metadata, the complete
+  settings showcase, and signed pointer traversal to exercise distinct parts
+  of the shared harness.
+- Added a port-conformance guide explaining fixture construction, CI
+  registration, evidence boundaries, and why compilation alone is not runtime
+  fidelity.
+
 ## 2026-08-09: executable tick-rate lifecycle contract
 
 - Added a deterministic host fixture covering an initial 60 Hz detached baseline,

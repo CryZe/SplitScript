@@ -147,14 +147,6 @@ or behavioral parity.
   array versus growable collection behavior, bounds failure, and interaction
   with globals and Wasm GC before enabling `values[index] = value`.
 
-### Runtime validation and ordinary library gaps
-
-- [ ] Turn the existing JavaScript host fixtures into a documented reusable
-  port-conformance harness rather than inventing a second test system. Make it
-  straightforward to model process names, 32/64-bit memory, modules, failed
-  reads, settings snapshots, timer state, attach/detach/restart, and bounded
-  async polling. A compile-only port is never labelled faithful.
-
 ### Standard-library and type-system boundaries
 
 - [ ] Design the user-facing trait/type-class model around the existing

@@ -81,6 +81,13 @@ validates the release/debug fixture modules, and executes every Node host
 runtime—including both Lunistice layouts. Generated modules stay under the
 ignored `target/verify` directory.
 
+Maintained ports use the shared deterministic
+[`SplitScriptHost`](docs/PORT_CONFORMANCE.md) fixture instead of duplicating
+the runtime ABI. It models exact process attachment, modules and memory,
+settings snapshots, timer state, detach/restart transitions, and bounded async
+polling; the guide explains what runtime-verified evidence does and does not
+prove.
+
 The public standard library is authored in
 [`stdlib/standard.split`](stdlib/standard.split). A small privileged loader
 uses the same syntax crate and lexer as ordinary programs, then generates the

@@ -1,5 +1,21 @@
 # SplitScript roadmap
 
+## 2026-08-09: cascade-free failed-declaration recovery
+
+- Failed global, local, and suspending `let` initializers now retain their
+  declared source identity with an internal poison type. Later references no
+  longer become misleading unknown-variable errors merely because the
+  initializer already produced a focused diagnostic.
+- The poison type absorbs contextual unification and capability requirements,
+  and propagates through member access, indexing, calls, and operators without
+  inventing secondary type errors. Strict compilation still fails and the
+  poison type can never reach code generation.
+- Preserved editor navigation through invalid code: go to definition and rename
+  continue to resolve a failed binding while inlay hints hide its deliberately
+  unknown type. Regression coverage includes globals, ordinary locals, and
+  awaited declarations plus chained members, indexes, calls, comparisons, and
+  generic `Display` consumers.
+
 ## 2026-08-09: Unicode characters and explicit UTF-8 string inspection
 
 - Added the nominal `char` type and single-quoted literals for exactly one

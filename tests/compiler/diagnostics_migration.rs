@@ -41,6 +41,85 @@ fn repeated_option_and_result_postfixes_have_a_focused_diagnostic() {
 }
 
 #[test]
+fn failed_initializers_keep_poisoned_bindings_without_follow_on_errors() {
+    use splitscript::{
+        compiler::ast::Stmt,
+        tooling::database::{CompilerDatabase, DefinitionTarget, SourceDefinitionId},
+    };
+
+    let source = r#"
+        state "game.exe" {}
+
+        let globalBroken = missingGlobal()
+
+        whileAttached {
+            let localBroken = [1, 2].missingMember(1)
+            let member = localBroken.value
+            let indexed = localBroken[0]
+            let optional: i32? = localBroken
+            let fallible: i32! = localBroken
+            localBroken.missingAgain()
+            if localBroken == 0 {
+                print(localBroken)
+                print(globalBroken)
+                print(member)
+                print(indexed)
+                print(optional)
+                print(fallible)
+            }
+        }
+
+        onAttach {
+            let attachedBroken = await process.missingAwait()
+            print(attachedBroken)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("the three unresolved calls remain primary compilation errors");
+    let messages = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        messages.len(),
+        3,
+        "unexpected diagnostic cascade: {messages:#?}"
+    );
+    assert!(messages.contains(&"unknown function `missingGlobal`"));
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("has no method `missingMember`"))
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("has no method `missingAwait`"))
+    );
+    assert!(!messages.iter().any(|message| {
+        message.contains("unknown variable")
+            || message.contains("<unknown>")
+            || message.contains("does not satisfy")
+            || message.contains("cannot be indexed")
+    }));
+
+    let mut database = CompilerDatabase::new(source);
+    database.check().expect_err("the source remains invalid");
+    let recovered = database.recovering_check().unwrap();
+    let Stmt::Variable(local) = &recovered.syntax().actions[0].body.statements[0] else {
+        panic!("expected the failed local declaration");
+    };
+    let use_site = source.find("localBroken.value").unwrap();
+    assert!(matches!(
+        database.definition_at(use_site).unwrap(),
+        Some(DefinitionTarget::Source(definition))
+            if definition.id == SourceDefinitionId::Value(local.id)
+    ));
+    assert!(database.rename_target_at(use_site).unwrap().is_some());
+}
+
+#[test]
 fn familiar_declaration_keywords_recover_as_let_with_machine_applicable_fixes() {
     use splitscript::{FixApplicability, compiler::ast::Stmt};
 

@@ -303,7 +303,8 @@ impl Checker {
                         self.unify(result, expected, value.span)
                     })
                 });
-                if let (Some(binding), Some(ty)) = (binding, result) {
+                if let Some(binding) = binding {
+                    let ty = result.unwrap_or_else(|| self.error_type());
                     let duplicate = self
                         .scopes
                         .iter()
@@ -397,33 +398,34 @@ impl Checker {
             );
         }
         let expected = variable.annotation.map(|ty| self.syntax_type(ty));
-        if let Some(ty) = self.expr(&variable.value, expected) {
-            let unsupported_standard = self.standard_type_id(ty).is_some_and(|standard| {
-                !self
-                    .standard_library
-                    .type_decl(standard)
-                    .value_usage
-                    .local_variable
-            });
-            if unsupported_standard {
-                let ty = self.type_name(ty);
-                self.error(
-                    format!("local variables cannot currently store `{ty}`"),
-                    variable.span,
-                );
-                return;
-            }
-            self.semantics.resolve_value_type(variable.id, ty);
-            self.scopes.last_mut().unwrap().insert(
-                variable.name.clone(),
-                Binding {
-                    id: Some(variable.id),
-                    ty,
-                    mutable: variable.mutable,
-                    debug_only: self.debug_context.is_debug() || variable.debug_only,
-                },
+        let mut ty = self
+            .expr(&variable.value, expected)
+            .unwrap_or_else(|| self.error_type());
+        let unsupported_standard = self.standard_type_id(ty).is_some_and(|standard| {
+            !self
+                .standard_library
+                .type_decl(standard)
+                .value_usage
+                .local_variable
+        });
+        if unsupported_standard {
+            let name = self.type_name(ty);
+            self.error(
+                format!("local variables cannot currently store `{name}`"),
+                variable.span,
             );
+            ty = self.error_type();
         }
+        self.semantics.resolve_value_type(variable.id, ty);
+        self.scopes.last_mut().unwrap().insert(
+            variable.name.clone(),
+            Binding {
+                id: Some(variable.id),
+                ty,
+                mutable: variable.mutable,
+                debug_only: self.debug_context.is_debug() || variable.debug_only,
+            },
+        );
     }
 
     pub(super) fn binding(&self, name: &str) -> Option<Binding> {

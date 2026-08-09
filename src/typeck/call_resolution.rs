@@ -372,6 +372,12 @@ impl Checker {
                 }
                 let (method, receiver_path) = callee.split_last().unwrap();
                 let receiver = self.path(receiver_path, span, None)?;
+                if self.is_error_type(receiver.ty) {
+                    for argument in args {
+                        self.expr(argument, None);
+                    }
+                    return self.expect_expression(expression, receiver.ty, expected, span);
+                }
                 let receiver_value = receiver
                     .value
                     .expect("method receiver paths resolve to a declaration or snapshot value");
@@ -500,6 +506,12 @@ impl Checker {
         let standard_library = self.standard_library.clone();
         let base_type = self.expr(written_receiver, None)?;
         let base_type = self.shallow_type(base_type);
+        if self.is_error_type(base_type) {
+            for argument in args {
+                self.expr(argument, None);
+            }
+            return self.expect_expression(expression, base_type, expected, span);
+        }
         let method = callee.last().expect("postfix calls name a method");
         let (receiver_type, receiver_members) =
             self.resolve_members(base_type, &callee[..callee.len() - 1], span)?;
@@ -1230,6 +1242,9 @@ impl Checker {
     ) -> Option<(Type, Option<Vec<ResolvedMember>>)> {
         if fields.is_empty() {
             return Some((ty, Some(Vec::new())));
+        }
+        if self.is_error_type(ty) {
+            return Some((ty, None));
         }
         if matches!(self.shallow_type(ty), Type::Variable(_))
             && let Some(expression) = expression

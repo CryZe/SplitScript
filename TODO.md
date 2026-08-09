@@ -55,8 +55,7 @@ or behavioral parity.
   compiler revision for future campaigns as provenance, not because this
   campaign used a different compiler.
 - [ ] Continue refreshing the ASL migration catalog and cookbook for
-  non-lifecycle misunderstandings found by the campaign. Suppress predictable
-  follow-on errors after a missing member or failed declaration. Do not add
+  non-lifecycle misunderstandings found by the campaign. Do not add
   compatibility aliases.
 - [ ] Use those maintained ports to decide each next implementation slice.
   Exercise the existing fixed-array search, `Set<String>`, and explicit native
@@ -155,11 +154,6 @@ or behavioral parity.
   straightforward to model process names, 32/64-bit memory, modules, failed
   reads, settings snapshots, timer state, attach/detach/restart, and bounded
   async polling. A compile-only port is never labelled faithful.
-- [ ] Improve missing-member recovery so one unknown method does not create
-  unrelated unknown-local cascades. The corpus-proven immutable `String`
-  surface now includes explicit ASCII normalization, fallible numeric parsing,
-  raw UTF-8 byte inspection, and Unicode `char` inspection under one
-  byte-index policy; add further operations only from maintained-port evidence.
 - [ ] Add an explicit `f32`/`f64` bit-pattern construction form and expose the
   exact rounded bits for decimal literals in tooling. Decimal exponent syntax,
   representable subnormal lowering, formatter preservation, and target-width

@@ -749,6 +749,10 @@ impl Checker {
                 bracket_span,
             } => {
                 let receiver_ty = self.expr(receiver, None)?;
+                if self.is_error_type(receiver_ty) {
+                    self.expr(index, None);
+                    return self.expect_expression(expr.id, receiver_ty, expected, expr.span);
+                }
                 let element = match self.shallow_type(receiver_ty) {
                     Type::Array(array) => self.inference.array_element(array),
                     Type::Known(id) => match self.inference.type_store().kind(id) {
@@ -1017,6 +1021,15 @@ impl Checker {
             }
         };
         let operand_ty = self.unify(left_ty, right_ty, span)?;
+
+        if self.is_error_type(operand_ty) {
+            let result = if result_is_bool {
+                self.core_type(crate::stdlib::CoreTypeId::Bool)
+            } else {
+                operand_ty
+            };
+            return self.expect_expression(expression, result, expected, span);
+        }
 
         if let Some(result) =
             self.resolve_binary_operator(op, operand_ty, expression, left.id, span)

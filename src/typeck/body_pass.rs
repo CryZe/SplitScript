@@ -59,43 +59,44 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
         );
         let run_scoped_initializer = checker.semantics.standard_library_item(global.value.id)
             == Some(crate::stdlib::StdlibItemId::SetNew);
-        if !constant_initializer && !run_scoped_initializer {
+        let initializer_checked = inferred.is_some();
+        if initializer_checked && !constant_initializer && !run_scoped_initializer {
             checker.error(
                 "global initializers must be literal values composed from None, numbers, booleans, strings, payload-free enums, records, or arrays, or a run-scoped Set.new value",
                 global.value.span,
             );
         }
-        if let Some(ty) = inferred {
-            let unsupported_standard = checker.standard_type_id(ty).is_some_and(|standard| {
-                standard != StdlibTypeId::String
-                    && !checker
-                        .standard_library
-                        .type_decl(standard)
-                        .value_usage
-                        .global_variable
-            });
-            if unsupported_standard
-                || matches!(ty, Type::Result(_))
-                || matches!(ty, Type::Option(_))
-                    && !matches!(global.value.kind, crate::ast::ExprKind::None)
-            {
-                let ty = checker.type_name(ty);
-                checker.error(
-                    format!("global variables cannot currently store `{ty}`"),
-                    global.span,
-                );
-            }
-            checker.semantics.resolve_value_type(global.id, ty);
-            checker.declarations.globals.insert(
-                global.name.clone(),
-                Binding {
-                    id: Some(global.id),
-                    ty,
-                    mutable: global.mutable,
-                    debug_only: global.debug_only,
-                },
+        let mut ty = inferred.unwrap_or_else(|| checker.error_type());
+        let unsupported_standard = checker.standard_type_id(ty).is_some_and(|standard| {
+            standard != StdlibTypeId::String
+                && !checker
+                    .standard_library
+                    .type_decl(standard)
+                    .value_usage
+                    .global_variable
+        });
+        if unsupported_standard
+            || matches!(ty, Type::Result(_))
+            || matches!(ty, Type::Option(_))
+                && !matches!(global.value.kind, crate::ast::ExprKind::None)
+        {
+            let name = checker.type_name(ty);
+            checker.error(
+                format!("global variables cannot currently store `{name}`"),
+                global.span,
             );
+            ty = checker.error_type();
         }
+        checker.semantics.resolve_value_type(global.id, ty);
+        checker.declarations.globals.insert(
+            global.name.clone(),
+            Binding {
+                id: Some(global.id),
+                ty,
+                mutable: global.mutable,
+                debug_only: global.debug_only,
+            },
+        );
     }
 }
 

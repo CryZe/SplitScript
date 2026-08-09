@@ -285,6 +285,20 @@ impl InferenceContext {
         &self.types
     }
 
+    /// Produces the semantic poison type used after an already-diagnosed
+    /// expression failure. It preserves declaration identity for later editor
+    /// queries without making the failed program eligible for code generation.
+    pub(crate) fn error_type(&mut self) -> Type {
+        Type::Known(self.types.id_for_error())
+    }
+
+    pub(crate) fn is_error_type(&mut self, ty: Type) -> bool {
+        matches!(
+            self.shallow(ty),
+            Type::Known(id) if matches!(self.types.kind(id), TypeKind::Error)
+        )
+    }
+
     pub(crate) fn standard_type(&self, ty: Type) -> Option<StdlibTypeId> {
         let Type::Known(id) = ty else {
             return None;
@@ -526,6 +540,9 @@ impl InferenceContext {
     pub(crate) fn unify(&mut self, left: Type, right: Type) -> Result<Type, InferenceError> {
         let left = self.shallow(left);
         let right = self.shallow(right);
+        if self.is_error_type(left) || self.is_error_type(right) {
+            return Ok(self.error_type());
+        }
         match (left, right) {
             (Type::Variable(left), Type::Variable(right)) => self.unify_variables(left, right),
             (Type::Variable(variable), ty) | (ty, Type::Variable(variable)) => {
@@ -580,7 +597,11 @@ impl InferenceContext {
         ty: Type,
         requirements: Requirements,
     ) -> Result<(), InferenceError> {
-        match self.shallow(ty) {
+        let ty = self.shallow(ty);
+        if self.is_error_type(ty) {
+            return Ok(());
+        }
+        match ty {
             Type::Variable(variable) => {
                 let variable = self.root(variable);
                 let combined =
@@ -1345,6 +1366,12 @@ fn type_meets_requirements(
     requirements: &Requirements,
 ) -> bool {
     if matches!(ty, Type::Variable(_)) {
+        return true;
+    }
+    if matches!(
+        ty,
+        Type::Known(id) if matches!(types.kind(id), TypeKind::Error)
+    ) {
         return true;
     }
     requirements

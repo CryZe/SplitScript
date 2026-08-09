@@ -325,6 +325,9 @@ impl Checker {
         };
         let expected = self.shallow_type(expected);
         let actual_shallow = self.shallow_type(actual);
+        if self.is_error_type(actual_shallow) || self.is_error_type(expected) {
+            return Some(self.error_type());
+        }
         let none = self.core_type(crate::stdlib::CoreTypeId::None);
         let nested_wrapper_lift = match (expected, actual_shallow) {
             (Type::Option(option), Type::Result(_)) => matches!(
@@ -415,6 +418,14 @@ impl Checker {
 
     fn shallow_type(&mut self, ty: Type) -> Type {
         self.inference.shallow(ty)
+    }
+
+    fn error_type(&mut self) -> Type {
+        self.inference.error_type()
+    }
+
+    fn is_error_type(&mut self, ty: Type) -> bool {
+        self.inference.is_error_type(ty)
     }
 
     fn unify(&mut self, left: Type, right: Type, span: Span) -> Option<Type> {

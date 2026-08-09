@@ -62,6 +62,7 @@ macro_rules! trusted_intrinsics {
             StringEqualsIgnoreAsciiCase,
             StringToAsciiLowerCase,
             StringReplaceAll,
+            StringSplit,
             StringSlice,
             StringConcat,
             ModuleScan,

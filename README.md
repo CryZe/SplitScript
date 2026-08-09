@@ -54,6 +54,13 @@ variables, delayed splits, and frame-based game time:
 cargo run --bin splitc -- examples/minish_cap.split -o target/minish_cap.wasm
 ```
 
+The maintained Operation Matriarchy port demonstrates bounded native strings
+and exact structured-name parsing with the immutable `String.split` API:
+
+```console
+cargo run --bin splitc -- examples/operation_matriarchy.split -o target/operation_matriarchy.wasm
+```
+
 ## Build and use
 
 ```console

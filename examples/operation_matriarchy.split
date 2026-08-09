@@ -1,0 +1,50 @@
+// Faithful port of the Operation Matriarchy ASL autosplitter. The game exposes
+// level-picture names such as `01_01_0.dds`: the first two components identify
+// the level and the third reports whether gameplay is active.
+
+state "GAME.exe" {
+    /// Current level-picture resource name.
+    levelPicture: String at "Game.dll", 0x992b4 as utf8(12);
+}
+
+let active = false
+let wasActive = false
+let level = ""
+let oldLevel = ""
+
+onAttach {
+    active = false
+    wasActive = false
+    level = ""
+    oldLevel = ""
+}
+
+whileAttached {
+    oldLevel = level
+    wasActive = active
+
+    if current.levelPicture.contains("_") {
+        let fileParts = current.levelPicture.split(".") else []
+        let parts = fileParts[0].split("_") else []
+        if parts.length() >= 3 {
+            level = `{parts[0]}_{parts[1]}`
+            active = parts[2] != "0"
+        }
+    }
+}
+
+start {
+    return level == "01_01" && active && !wasActive
+}
+
+reset {
+    return level == "01_01" && !active && wasActive
+}
+
+split {
+    return level != oldLevel && level != "01_01"
+}
+
+isLoading {
+    return !active
+}

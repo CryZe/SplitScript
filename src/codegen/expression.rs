@@ -2140,6 +2140,32 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
+            IntrinsicId::StringSplit => {
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                function.instruction(&Instruction::Call(
+                    context
+                        .runtime_helpers
+                        .function(RuntimeHelperId::StringSplit),
+                ));
+                let array = context
+                    .arrays
+                    .iter()
+                    .find(|array| {
+                        try_array_element_type(array.id, context.semantics)
+                            == Some(Type::Standard(StdlibTypeId::String))
+                    })
+                    .expect("String.split has a reachable [String] result layout")
+                    .id;
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Array(array),
+                    Instruction::RefIsNull,
+                    "string split delimiter is empty or its result is too large",
+                    context,
+                );
+            }
             IntrinsicId::StringSlice => {
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);

@@ -1568,6 +1568,27 @@ intrinsic type String {
         replacement: String,
     ) -> String!;
 
+    /// Splits this string at every exact, non-overlapping delimiter.
+    ///
+    /// Matching is case-sensitive over UTF-8 text. Empty segments before,
+    /// between, and after delimiters are preserved. An empty delimiter returns
+    /// an error rather than defining insertion points between UTF-8 bytes.
+    ///
+    /// # Example
+    ///
+    /// Parse a structured level identifier
+    ///
+    /// ```splitscript
+    /// let parts = "01_02_0".split("_") else []
+    /// let chapter = parts[0]
+    /// ```
+    @mustUse("Strings are immutable; split returns the resulting string array.")
+    @intrinsic(StringSplit)
+    fn split(
+        /// The non-empty delimiter removed between segments.
+        delimiter: String,
+    ) -> [String]!;
+
     /// Extracts text between two UTF-8 byte offsets.
     ///
     /// The start index is inclusive and the end index is exclusive. Invalid,

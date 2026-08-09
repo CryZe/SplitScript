@@ -1387,6 +1387,7 @@ is involved:
 | `startsWith(text)` / `endsWith(text)` | Case-sensitive prefix/suffix tests |
 | `equalsIgnoreAsciiCase(text)` | Equality folding only ASCII letters |
 | `toAsciiLowerCase()` | Lowercase ASCII letters; preserve every other UTF-8 byte |
+| `split(delimiter)` | Fallible exact split preserving leading, repeated, and trailing empty segments |
 | `slice(start, end)` | Fallible half-open UTF-8 byte range; offsets must be code-point boundaries |
 | `replaceAll(search, replacement)` | Fallible exact non-overlapping replacement |
 | `String.concat(values)` | Concatenate an array of strings |
@@ -1417,9 +1418,9 @@ let levelTime = `{minutes as u32}:{twoDigits(seconds as u32)}`
 let executableLabel = `version {version}`
 ```
 
-Transformations such as `toAsciiLowerCase` and `replaceAll` do not mutate their
-receiver. They return a string and are marked must-use, so a discarded result
-receives a focused warning explaining the immutable behavior.
+Transformations such as `toAsciiLowerCase`, `replaceAll`, and `split` do not
+mutate their receiver. They return new values and are marked must-use, so a
+discarded result receives a focused warning explaining the immutable behavior.
 `print(value)` and `setVariable(key, value)` accept any `Display` value
 and apply these same conversions at the runtime boundary, so numeric values and
 addresses do not need an explicit `as String` cast. A standard-library type can

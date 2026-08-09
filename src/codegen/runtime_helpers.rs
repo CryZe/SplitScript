@@ -93,6 +93,14 @@ pub(super) fn build_string_replace_all(inputs: &RuntimeHelperInputs<'_>) -> Func
     )
 }
 
+pub(super) fn build_string_split(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_split(
+        inputs.plan.function(RuntimeHelperId::StringFind),
+        array_layout(inputs, Type::Standard(StdlibTypeId::String)),
+        inputs.gc,
+    )
+}
+
 pub(super) fn build_string_slice(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_string_slice(inputs.gc)
 }

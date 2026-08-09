@@ -156,7 +156,7 @@ or behavioral parity.
   reads, settings snapshots, timer state, attach/detach/restart, and bounded
   async polling. A compile-only port is never labelled faithful.
 - [ ] Fill the remaining corpus-proven `String` gaps through source-defined
-  APIs where possible: splitting, byte/scalar inspection consistent with the
+  APIs where possible: byte/scalar inspection consistent with the
   language's byte-index policy, and fallible numeric parsing. ASCII case
   conversion is complete. Improve missing-member recovery so one unknown
   method does not create unrelated unknown-local cascades.

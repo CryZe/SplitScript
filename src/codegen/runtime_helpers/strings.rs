@@ -1,6 +1,6 @@
 //! String host-boundary, formatting, and concatenation runtime helpers.
 
-use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
+use wasm_encoder::{BlockType, Function, HeapType, Instruction, RefType, ValType};
 
 use crate::{abi::AbiImportId, stdlib::StdlibTypeId};
 
@@ -830,6 +830,179 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_replace_all(
         .instruction(&Instruction::LocalGet(output))
         .instruction(&Instruction::End);
     function
+}
+
+/// Splits at exact, non-overlapping UTF-8 delimiters while preserving empty
+/// segments. A null array is the helper ABI's failure sentinel for an empty
+/// delimiter or an unrepresentable segment count.
+pub(in crate::codegen::runtime_helpers) fn compile_string_split(
+    string_find: u32,
+    strings_array: u32,
+    gc: &GcLayout,
+) -> Function {
+    let string_type = gc.standard_index(StdlibTypeId::String);
+    let mut function = Function::new([
+        (8, ValType::I32),
+        (
+            1,
+            ValType::Ref(RefType {
+                nullable: true,
+                heap_type: HeapType::Concrete(strings_array),
+            }),
+        ),
+        (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
+    ]);
+    let value = 0;
+    let delimiter = 1;
+    let value_len = 2;
+    let delimiter_len = 3;
+    let scan_index = 4;
+    let match_index = 5;
+    let segment_count = 6;
+    let segment_start = 7;
+    let output_index = 8;
+    let segment_len = 9;
+    let output = 10;
+    let segment = 11;
+
+    function
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalSet(value_len))
+        .instruction(&Instruction::LocalGet(delimiter))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalTee(delimiter_len))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(strings_array)))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalSet(segment_count))
+        // Count matches before allocating the exact-length result array.
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::LocalGet(delimiter))
+        .instruction(&Instruction::LocalGet(scan_index))
+        .instruction(&Instruction::Call(string_find))
+        .instruction(&Instruction::LocalTee(match_index))
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(segment_count))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalTee(segment_count))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(strings_array)))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(match_index))
+        .instruction(&Instruction::LocalGet(delimiter_len))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(scan_index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(segment_count))
+        .instruction(&Instruction::ArrayNewDefault(strings_array))
+        .instruction(&Instruction::LocalSet(output))
+        // Materialize each segment, including zero-length edge segments.
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::LocalGet(delimiter))
+        .instruction(&Instruction::LocalGet(segment_start))
+        .instruction(&Instruction::Call(string_find))
+        .instruction(&Instruction::LocalTee(match_index))
+        .instruction(&Instruction::I32Const(-1))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(value_len))
+        .instruction(&Instruction::LocalGet(segment_start))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::LocalSet(segment_len));
+    emit_split_segment(
+        &mut function,
+        value,
+        segment_start,
+        segment_len,
+        output,
+        output_index,
+        segment,
+        string_type,
+        strings_array,
+    );
+    function
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(match_index))
+        .instruction(&Instruction::LocalGet(segment_start))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::LocalSet(segment_len));
+    emit_split_segment(
+        &mut function,
+        value,
+        segment_start,
+        segment_len,
+        output,
+        output_index,
+        segment,
+        string_type,
+        strings_array,
+    );
+    function
+        .instruction(&Instruction::LocalGet(output_index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(output_index))
+        .instruction(&Instruction::LocalGet(match_index))
+        .instruction(&Instruction::LocalGet(delimiter_len))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(segment_start))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::RefNull(HeapType::Concrete(strings_array)))
+        .instruction(&Instruction::End);
+    function
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_split_segment(
+    function: &mut Function,
+    value: u32,
+    segment_start: u32,
+    segment_len: u32,
+    output: u32,
+    output_index: u32,
+    segment: u32,
+    string_type: u32,
+    strings_array: u32,
+) {
+    function
+        .instruction(&Instruction::LocalGet(segment_len))
+        .instruction(&Instruction::ArrayNewDefault(string_type))
+        .instruction(&Instruction::LocalSet(segment))
+        .instruction(&Instruction::LocalGet(segment))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(segment_start))
+        .instruction(&Instruction::LocalGet(segment_len))
+        .instruction(&Instruction::ArrayCopy {
+            array_type_index_dst: string_type,
+            array_type_index_src: string_type,
+        })
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(output_index))
+        .instruction(&Instruction::LocalGet(segment))
+        .instruction(&Instruction::ArraySet(strings_array));
 }
 
 /// Extracts a UTF-8 byte range. Returning a null reference is the helper ABI's

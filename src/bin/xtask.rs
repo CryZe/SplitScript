@@ -171,6 +171,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "examples/operation_matriarchy.split",
+        output: "operation_matriarchy.wasm",
+        profile: "release",
+        harness: "tests/operation_matriarchy_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "examples/borderlands.split",
         output: "borderlands.wasm",
         profile: "release",

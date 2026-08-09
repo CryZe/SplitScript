@@ -82,6 +82,37 @@ whileAttached {
     {
         matches += 4096
     }
+    let levelParts = "01_02_0.dds".split(".") else []
+    let identifiers = levelParts[0].split("_") else []
+    let emptyParts = "_a__".split("_") else []
+    let unicodeParts = "a🙂b🙂".split("🙂") else []
+    let unchangedParts = "unchanged".split("_") else []
+    let emptyDelimiterFailed = match "abc".split("") {
+        Ok(_) => false,
+        Err(_) => true,
+    }
+    if levelParts.length() == 2
+        && levelParts[0] == "01_02_0"
+        && levelParts[1] == "dds"
+        && identifiers.length() == 3
+        && identifiers[0] == "01"
+        && identifiers[1] == "02"
+        && identifiers[2] == "0"
+        && emptyParts.length() == 4
+        && emptyParts[0] == ""
+        && emptyParts[1] == "a"
+        && emptyParts[2] == ""
+        && emptyParts[3] == ""
+        && unicodeParts.length() == 3
+        && unicodeParts[0] == "a"
+        && unicodeParts[1] == "b"
+        && unicodeParts[2] == ""
+        && unchangedParts.length() == 1
+        && unchangedParts[0] == "unchanged"
+        && emptyDelimiterFailed
+    {
+        matches += 8192
+    }
 
     setVariable("String Predicates", matches)
 }

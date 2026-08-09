@@ -91,6 +91,20 @@ UTF-8 byte offsets rather than .NET UTF-16 indices and fails when an offset is
 out of range or inside a multibyte code point, so do not mechanically translate
 `Substring` without checking the target data.
 
+C# `Split` maps to fallible, lower-camel-case `split`. SplitScript matches one
+exact non-empty delimiter from left to right and preserves leading, adjacent,
+and trailing empty segments:
+
+```splitscript
+let fileParts = current.levelPicture.split(".") else []
+let levelParts = fileParts[0].split("_") else []
+```
+
+The empty delimiter is an error rather than a request to split UTF-8 bytes.
+[`examples/operation_matriarchy.split`](../examples/operation_matriarchy.split)
+uses this mapping to parse names such as `01_02_1.dds`; its host fixture proves
+the resulting start, reset, split, and loading transitions.
+
 ## Version-labelled ASL states
 
 The second argument in `state("game.exe", "Steam")` is a layout label, not

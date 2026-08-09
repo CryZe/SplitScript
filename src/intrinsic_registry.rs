@@ -44,6 +44,7 @@ pub(crate) enum RuntimeHelperId {
     StringFind,
     StringToAsciiLowerCase,
     StringReplaceAll,
+    StringSplit,
     StringSlice,
     ScanProcessRange,
     ReadRelative32,
@@ -304,6 +305,7 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::RuntimeOperatingSystem
         | IntrinsicId::RuntimeArchitecture
         | IntrinsicId::StringReplaceAll
+        | IntrinsicId::StringSplit
         | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
         IntrinsicId::GbaEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
         _ => None,
@@ -373,6 +375,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::StringEqualsIgnoreAsciiCase => &[Helper(Runtime::StringMatch)],
         IntrinsicId::StringToAsciiLowerCase => &[Helper(Runtime::StringToAsciiLowerCase)],
         IntrinsicId::StringReplaceAll => &[Helper(Runtime::StringReplaceAll)],
+        IntrinsicId::StringSplit => &[Helper(Runtime::StringSplit)],
         IntrinsicId::StringSlice => &[Helper(Runtime::StringSlice)],
         IntrinsicId::StringConcat => &[Helper(Runtime::ConcatStrings)],
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
@@ -486,6 +489,10 @@ const ADDRESS_RESULT: ContractTypeRef = ContractTypeRef::Application {
 const STRING_RESULT: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Result,
     arguments: &[STRING],
+};
+const STRING_ARRAY_RESULT: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Result,
+    arguments: &[STRING_ARRAY],
 };
 
 const NO_TYPE_PARAMETERS: Option<&[StdlibCapabilityId]> = None;
@@ -1078,6 +1085,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 Some(STRING),
                 params![value(STRING), value(STRING)],
                 STRING_RESULT,
+            ),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringSplit => contract!(
+            StringSplit,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(STRING),
+                params![value(STRING)],
+                STRING_ARRAY_RESULT,
             ),
             ALLOCATES,
             Everywhere,

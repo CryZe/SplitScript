@@ -2442,3 +2442,14 @@ language catalog document the refinement rule.
 - Added a host-executed fixture that reads IEEE-754 bit pattern one from process
   memory at both widths and compares it with decimal literals and global
   constants.
+
+# 2026-08-09: exact string splitting and Operation Matriarchy
+
+- Added `String.split(delimiter) -> [String]!` with exact UTF-8 matching,
+  preserved leading/adjacent/trailing empty segments, and an error for an empty
+  delimiter. Its trusted helper allocates the exact WebAssembly GC result array
+  and exposes the same catalog documentation to compiler and editor tooling.
+- Added a maintained Operation Matriarchy port and deterministic host fixture.
+  The port reads the original bounded `Game.dll` level-picture field, parses
+  identifiers such as `01_02_1.dds`, and proves start, reset, split, loading,
+  attachment, and executable/module-name behavior.

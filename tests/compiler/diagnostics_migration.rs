@@ -168,6 +168,46 @@ fn csharp_string_index_of_explains_option_and_utf8_offsets() {
 }
 
 #[test]
+fn csharp_string_replace_explains_fallible_immutable_replacement() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn normalizeMap(value: String) -> String! {
+            return value.Replace("_", " ")
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("C# Replace needs Result-aware replacement guidance");
+
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# `String.Replace` becomes fallible `replaceAll` in SplitScript"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "Replace"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("replaceAll(search, replacement)") && note.contains("non-null")
+    }));
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("String!") && note.contains("Result"))
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("empty string") && note.contains("deletion"))
+    );
+}
+
+#[test]
 fn csharp_static_numeric_parse_explains_result_based_string_parsing() {
     for call in ["Int32.Parse(text)", "Double.Parse(text)"] {
         let source = format!(

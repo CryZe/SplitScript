@@ -183,6 +183,8 @@ pub const CSHARP_STRING_SUBSTRING_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.substring-call");
 pub const CSHARP_STRING_INDEX_OF_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.index-of-call");
+pub const CSHARP_STRING_REPLACE_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.string.replace-call");
 pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.numeric.static-parse-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
@@ -379,6 +381,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_STRING_REPLACE_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.replacement"),
+        message: "C# `String.Replace` becomes fallible `replaceAll` in SplitScript",
+        primary_label: "use the immutable replacement result and handle failure",
+        notes: &[
+            "for a non-empty exact search and a non-null replacement, rewrite `text.Replace(search, replacement)` as `text.replaceAll(search, replacement)`",
+            "`replaceAll` returns the Result type `String!`; use `?`, `else`, or `match` according to the surrounding failure policy because an empty search or unrepresentable result length is an error",
+            "C# permits a null replacement to mean deletion; SplitScript has no null string, so pass the empty string explicitly when deletion is intended",
+            "there is no automatic rewrite because the compiler cannot choose the surrounding Result handling or prove that a nullable C# replacement is non-null",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.numeric-parse"),
         message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
@@ -421,6 +435,7 @@ pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnostic
         "Equals" => Some(CSHARP_STRING_EQUALS_DIAGNOSTIC),
         "Substring" => Some(CSHARP_STRING_SUBSTRING_DIAGNOSTIC),
         "IndexOf" => Some(CSHARP_STRING_INDEX_OF_DIAGNOSTIC),
+        "Replace" => Some(CSHARP_STRING_REPLACE_DIAGNOSTIC),
         _ => None,
     }
 }
@@ -798,6 +813,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Use `indexOf` for an optional UTF-8 byte offset; review C# UTF-16 index arithmetic and replace the `-1` sentinel with Option handling.",
         targets: &[MigrationTarget::StandardLibraryItem("String.indexOf")],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.replacement"),
+        name: "Exact string replacement",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use fallible `replaceAll` for immutable exact replacement; explicitly handle failure and translate a null C# replacement to an empty string only when deletion was intended.",
+        targets: &[MigrationTarget::StandardLibraryItem("String.replaceAll")],
         cookbook_anchor: Some("c-string-operations"),
         spellings: &[],
     },

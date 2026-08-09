@@ -123,6 +123,21 @@ let separator = current.map.indexOf("_") else return false
 Comparison-mode and start-index overloads need an explicit rewrite rather than
 a method-name substitution.
 
+C# `value.Replace(search, replacement)` maps to immutable
+`value.replaceAll(search, replacement)` when `search` is non-empty and
+`replacement` is not null. The SplitScript operation is fallible, so retain
+that policy explicitly rather than discarding the result:
+
+```splitscript
+let displayName = current.map.replaceAll("_", " ") else current.map
+```
+
+C# permits a null replacement to mean deletion; pass `""` explicitly in
+SplitScript only when that was the source's intent. An empty search is an error,
+as is a result whose byte length cannot be represented. The compiler therefore
+explains `.Replace(...)` but does not offer a blind rename that would leave
+Result handling unresolved.
+
 C# `left.Equals(right)` normally becomes `left == right`; SplitScript compares
 strings by exact UTF-8 text rather than GC reference identity. If the source
 intentionally ignores ASCII letter case, write

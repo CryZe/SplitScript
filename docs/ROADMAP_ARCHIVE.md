@@ -1,5 +1,14 @@
 # SplitScript roadmap
 
+## 2026-08-09: Result-aware C# string replacement migration
+
+- Connected corpus uses of C# `String.Replace` to the existing immutable
+  `String.replaceAll` operation with a focused diagnostic and cookbook entry.
+- Kept the migration free of automatic edits: SplitScript requires explicit
+  Result handling, while C# also permits a null replacement to mean deletion.
+- Reused the source-defined standard-library catalog rather than adding a
+  compatibility alias or another string implementation.
+
 ## 2026-08-09: allocation-free UTF-8 substring positions
 
 - Added `String.indexOf(substring) -> u32?` using the existing allocation-free

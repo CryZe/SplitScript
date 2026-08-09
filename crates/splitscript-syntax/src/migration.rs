@@ -185,6 +185,8 @@ pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.numeric.static-parse-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.timespan.parse-call");
+pub const CSHARP_TIMESPAN_TICKS_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.timespan.from-ticks-call");
 
 pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
@@ -386,6 +388,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "there is no automatic rewrite because the call does not reveal the input format or whether the surrounding timer API itself needs redesign",
         ],
     },
+    MigrationDiagnostic {
+        id: CSHARP_TIMESPAN_TICKS_DIAGNOSTIC,
+        concept: MigrationConceptId::new("duration.csharp-ticks"),
+        message: "C# ticks must be converted to a language-level duration unit",
+        primary_label: "one C# tick is exactly 100 nanoseconds",
+        notes: &[
+            "for a proven in-range tick count, use `Duration.fromNanoseconds(ticks * 100)` with an explicit `i64` value",
+            "prefer the source's native seconds, milliseconds, frames, or nanoseconds when available instead of preserving a C# representation detail",
+            "multiplying an arbitrary signed 64-bit tick count by 100 can overflow even though C# `TimeSpan` accepts that tick count",
+            "there is no automatic rewrite because SplitScript's exact nanosecond constructor cannot represent the full C# tick range through a single `i64` nanosecond count",
+        ],
+    },
 ];
 
 pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
@@ -402,6 +416,9 @@ pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnos
     };
     if owner == "Duration" && method == "Parse" {
         return Some(CSHARP_TIMESPAN_PARSE_DIAGNOSTIC);
+    }
+    if owner == "Duration" && method == "FromTicks" {
+        return Some(CSHARP_TIMESPAN_TICKS_DIAGNOSTIC);
     }
     if method != "Parse" && method != "TryParse" {
         return None;
@@ -790,6 +807,18 @@ pub const CONCEPTS: &[MigrationConcept] = &[
             MigrationTarget::StandardLibraryItem("Duration.fromWholeMilliseconds"),
             MigrationTarget::StandardLibraryItem("Duration.fromParts"),
         ],
+        cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("duration.csharp-ticks"),
+        name: "C# duration ticks",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Convert 100-nanosecond C# ticks to a source unit explicitly, with range review; SplitScript does not expose C# ticks as a native duration unit.",
+        targets: &[MigrationTarget::StandardLibraryItem(
+            "Duration.fromNanoseconds",
+        )],
         cookbook_anchor: None,
         spellings: &[],
     },

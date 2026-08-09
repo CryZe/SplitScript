@@ -954,6 +954,52 @@ fn timespan_parse_requests_an_explicit_semantic_migration() {
 }
 
 #[test]
+fn timespan_ticks_explain_the_exact_unit_and_range_boundary() {
+    let source = r#"
+        state "game.exe" {}
+
+        gameTime {
+            return TimeSpan.FromTicks(12_345)
+        }
+    "#;
+    let parsed = splitscript::parse_recovering(source).unwrap();
+    assert_eq!(parsed.diagnostics().len(), 1);
+    let type_edit = &parsed.diagnostics()[0].fixes[0].edits[0];
+    let mut fixed = source.to_owned();
+    fixed.replace_range(
+        type_edit.span.start..type_edit.span.end,
+        &type_edit.replacement,
+    );
+
+    let diagnostics = splitscript::compile(&fixed)
+        .expect_err("C# ticks require an explicit unit and range review");
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# ticks must be converted to a language-level duration unit"
+    );
+    assert_eq!(
+        &fixed[diagnostic.span.start..diagnostic.span.end],
+        "FromTicks"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(diagnostic.notes.iter().any(|note| note.contains("100")));
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("overflow"))
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("fromNanoseconds"))
+    );
+}
+
+#[test]
 fn legacy_process_identity_points_to_the_attached_process_api() {
     use splitscript::FixApplicability;
 

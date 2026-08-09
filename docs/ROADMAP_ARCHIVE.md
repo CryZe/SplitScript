@@ -23,6 +23,9 @@
   generated documentation and editor metadata, and add no backend intrinsic.
 - Deliberately kept C# ticks out of the public API; exact subsecond sources use
   the language-level nanosecond constructor instead.
+- Added a dedicated `TimeSpan.FromTicks` diagnostic that states the
+  100-nanosecond conversion and its signed-range limitation rather than
+  offering an unsafe whole-expression edit.
 - Kept JavaScript `${...}` out of typo recovery because it is valid
   SplitScript source with observably different literal-dollar semantics.
 

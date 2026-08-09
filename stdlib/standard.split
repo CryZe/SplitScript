@@ -1589,6 +1589,24 @@ intrinsic type String {
         delimiter: String,
     ) -> [String]!;
 
+    /// Parses this string as an inferred numeric type.
+    ///
+    /// Parsing consumes the entire string and accepts only ASCII decimal text;
+    /// surrounding whitespace and digit separators are errors. Integers allow
+    /// an optional sign and are checked against the exact target width. Floats
+    /// additionally allow a decimal point and `e` or `E` exponent, but not
+    /// named values such as `NaN` or `Infinity`.
+    ///
+    /// # Example
+    ///
+    /// Parse a percentage read from process memory
+    ///
+    /// ```splitscript
+    /// let percentage: f64 = percentageText.parse() else 0.0
+    /// ```
+    @intrinsic(StringParse)
+    fn parse<T: Numeric>() -> T!;
+
     /// Extracts text between two UTF-8 byte offsets.
     ///
     /// The start index is inclusive and the end index is exclusive. Invalid,

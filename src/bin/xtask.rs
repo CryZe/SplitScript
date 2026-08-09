@@ -465,6 +465,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/string_parsing.split",
+        output: "string_parsing.wasm",
+        profile: "release",
+        harness: "tests/string_parsing_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "examples/tiberian_sun.split",
         output: "tiberian_sun.wasm",
         profile: "release",

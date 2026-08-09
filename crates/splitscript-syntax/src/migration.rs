@@ -450,6 +450,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: STRING_ASCII_LOWER_SPELLINGS,
     },
     MigrationConcept {
+        id: MigrationConceptId::new("string.numeric-parse"),
+        name: "Numeric string parsing",
+        sources: CSHARP,
+        support: MigrationSupport::Direct,
+        summary: "Replace static Parse/TryParse calls and output parameters with fallible `text.parse()` and ordinary Result handling.",
+        targets: &[MigrationTarget::StandardLibraryItem("String.parse")],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("type.duration"),
         name: "Timer durations",
         sources: CSHARP,

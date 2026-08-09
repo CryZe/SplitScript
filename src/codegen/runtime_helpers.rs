@@ -101,6 +101,14 @@ pub(super) fn build_string_split(inputs: &RuntimeHelperInputs<'_>) -> Function {
     )
 }
 
+pub(super) fn build_string_parse_integer(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_parse_integer(inputs.gc)
+}
+
+pub(super) fn build_string_parse_float(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_string_parse_float(inputs.gc)
+}
+
 pub(super) fn build_string_slice(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_string_slice(inputs.gc)
 }

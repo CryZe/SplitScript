@@ -924,6 +924,10 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "String.split(delimiter: String) -> [String]!"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::StringParse),
+        "String.parse<T>() -> T! where T: Numeric"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::StringSlice),
         "String.slice(start: u32, end: u32) -> String!"
     );

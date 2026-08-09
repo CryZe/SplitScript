@@ -2453,3 +2453,14 @@ language catalog document the refinement rule.
   The port reads the original bounded `Game.dll` level-picture field, parses
   identifiers such as `01_02_1.dds`, and proves start, reset, split, loading,
   attachment, and executable/module-name behavior.
+
+# 2026-08-09: strict fallible numeric parsing
+
+- Added `String.parse<T: Numeric>() -> T!`, with bidirectional target-type
+  inference and ordinary `Result` fallback, propagation, and matching.
+- Integer parsing is exact across every signed and unsigned width (including
+  `address`); floating-point parsing supports decimal points and exponents and
+  rejects non-finite names and target-width overflow.
+- Added compiler/editor catalog coverage, ASL/C# migration guidance, and a
+  host-executed regression for boundaries, malformed input, inference,
+  floating-point syntax, overflow, and underflow.

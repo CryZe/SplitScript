@@ -1652,6 +1652,7 @@ split {
             "toAsciiLowerCase",
             "replaceAll",
             "split",
+            "parse",
             "slice",
         ] {
             assert!(literal.contains(&member.to_owned()), "{literal:#?}");
@@ -1669,6 +1670,7 @@ split {
             "toAsciiLowerCase",
             "replaceAll",
             "split",
+            "parse",
             "slice",
         ] {
             assert!(local.contains(&member.to_owned()), "{local:#?}");

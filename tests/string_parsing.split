@@ -1,0 +1,84 @@
+state "game.exe" {}
+
+fn failed(value) {
+    return match value {
+        Ok(_) => false,
+        Err(_) => true,
+    }
+}
+
+whileAttached {
+    let matches = 0
+
+    let inferredInteger = "42".parse() else 0
+    if inferredInteger == 42
+        && ("+127".parse<i8>() else 0) == 127
+        && ("-128".parse<i8>() else 0) == (-128i16 as i8)
+    {
+        matches += 1
+    }
+
+    let signedMinimum: i64 = "-9223372036854775808".parse() else 0
+    if signedMinimum == (-9223372036854775807i64 - 1i64)
+        && failed("128".parse<i8>())
+        && failed("-129".parse<i8>())
+        && failed("4294967296".parse<u32>())
+    {
+        matches += 2
+    }
+
+    let unsignedMaximum: u64 = "18446744073709551615".parse() else 0
+    if unsignedMaximum == 18446744073709551615u64
+        && failed("18446744073709551616".parse<u64>())
+        && failed("-1".parse<u64>())
+    {
+        matches += 4
+    }
+
+    if failed("".parse<i32>())
+        && failed("+".parse<i32>())
+        && failed(" 1".parse<i32>())
+        && failed("1 ".parse<i32>())
+        && failed("1_000".parse<i32>())
+        && failed("１２".parse<i32>())
+        && failed("1.0".parse<i32>())
+    {
+        matches += 8
+    }
+
+    let percentage: f64 = "100.25".parse() else 0.0
+    let exponent: f32 = "+1.25e2".parse() else 0.0
+    let leadingDot: f64 = ".25".parse() else 0.0
+    let trailingDot: f64 = "1.".parse() else 0.0
+    let negative: f64 = "-0.5".parse() else 0.0
+    if percentage == 100.25
+        && exponent == 125.0
+        && leadingDot == 0.25
+        && trailingDot == 1.0
+        && negative == -0.5
+    {
+        matches += 16
+    }
+
+    if failed("NaN".parse<f64>())
+        && failed("Infinity".parse<f64>())
+        && failed("1e".parse<f64>())
+        && failed("1.2.3".parse<f64>())
+        && failed("1e309".parse<f64>())
+        && failed("3.5e38".parse<f32>())
+    {
+        matches += 32
+    }
+
+    let underflow: f64 = "1e-9999".parse() else 1.0
+    if underflow == 0.0 {
+        matches += 64
+    }
+
+    let addressValue: address = "4294967296".parse() else 0
+    if addressValue == 0x100000000 {
+        matches += 128
+    }
+
+    setVariable("String Parsing", matches)
+}

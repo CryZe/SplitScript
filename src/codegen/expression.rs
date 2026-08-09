@@ -2166,6 +2166,65 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
+            IntrinsicId::StringParse => {
+                let Type::Result(result) = ty else {
+                    unreachable!("String.parse produces a Result value")
+                };
+                let parsed_type = result_value_type(result, context.semantics);
+                compile_receiver(function, target, context);
+                match parsed_type {
+                    Type::I8
+                    | Type::U8
+                    | Type::I16
+                    | Type::U16
+                    | Type::I32
+                    | Type::U32
+                    | Type::I64
+                    | Type::U64
+                    | Type::Address => {
+                        let (allow_negative, positive_limit, negative_limit) =
+                            integer_parse_limits(parsed_type);
+                        function
+                            .instruction(&Instruction::I32Const(i32::from(allow_negative)))
+                            .instruction(&Instruction::I64Const(positive_limit))
+                            .instruction(&Instruction::I64Const(negative_limit))
+                            .instruction(&Instruction::Call(
+                                context
+                                    .runtime_helpers
+                                    .function(RuntimeHelperId::StringParseInteger),
+                            ));
+                        if matches!(
+                            parsed_type,
+                            Type::I8 | Type::U8 | Type::I16 | Type::U16 | Type::I32 | Type::U32
+                        ) {
+                            function.instruction(&Instruction::I32WrapI64);
+                            emit_narrow_i32(function, parsed_type);
+                        }
+                    }
+                    Type::F32 | Type::F64 => {
+                        function
+                            .instruction(&Instruction::I32Const(i32::from(
+                                parsed_type == Type::F32,
+                            )))
+                            .instruction(&Instruction::Call(
+                                context
+                                    .runtime_helpers
+                                    .function(RuntimeHelperId::StringParseFloat),
+                            ));
+                        if parsed_type == Type::F32 {
+                            function.instruction(&Instruction::F32DemoteF64);
+                        }
+                    }
+                    _ => unreachable!("Numeric parsing requires a concrete numeric type"),
+                }
+                emit_status_result(
+                    function,
+                    expression,
+                    parsed_type,
+                    "string is not valid decimal text for the inferred numeric type",
+                    context,
+                );
+            }
             IntrinsicId::StringSlice => {
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
@@ -2849,6 +2908,47 @@ fn emit_sentinel_result(
         .instruction(&Instruction::LocalGet(value_local));
     emit_result_success(function, result, context.gc);
     function.instruction(&Instruction::End);
+}
+
+/// Converts a helper's `(success, value)` multi-value result into `T!`. The
+/// value is stored first, leaving the success flag on the operand stack.
+fn emit_status_result(
+    function: &mut Function,
+    expression: ExprId,
+    value_type: Type,
+    message: &str,
+    context: &ExprContext<'_>,
+) {
+    let Type::Result(result) = context.expression_type(expression) else {
+        unreachable!("status-bearing helpers produce Result values")
+    };
+    let value_local = context.matches.intrinsic_temps[&expression][0];
+    function
+        .instruction(&Instruction::LocalSet(value_local))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Result(
+            context.gc.val_type(Type::Result(result)),
+        )));
+    emit_result_error(function, result, value_type, message, context.gc);
+    function
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(value_local));
+    emit_result_success(function, result, context.gc);
+    function.instruction(&Instruction::End);
+}
+
+fn integer_parse_limits(ty: Type) -> (bool, i64, i64) {
+    match ty {
+        Type::I8 => (true, i8::MAX as i64, 1_i64 << 7),
+        Type::U8 => (false, u8::MAX as i64, u8::MAX as i64),
+        Type::I16 => (true, i16::MAX as i64, 1_i64 << 15),
+        Type::U16 => (false, u16::MAX as i64, u16::MAX as i64),
+        Type::I32 => (true, i32::MAX as i64, 1_i64 << 31),
+        Type::U32 => (false, u32::MAX as i64, u32::MAX as i64),
+        Type::I64 => (true, i64::MAX, i64::MIN),
+        Type::U64 | Type::Address => (false, -1, -1),
+        _ => unreachable!("integer parse limits require an integer type"),
+    }
 }
 
 fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context: &ExprContext<'_>) {

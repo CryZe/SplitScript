@@ -41,6 +41,7 @@ impl RuntimeHelperPlan {
 pub(super) enum HelperValueType {
     I32,
     I64,
+    F64,
     String,
     Standard(StdlibTypeId),
     StringArray,
@@ -80,7 +81,7 @@ macro_rules! helper {
     };
 }
 
-use HelperValueType::{I32, I64, I64Array, Standard, String as StringValue, StringArray};
+use HelperValueType::{F64, I32, I64, I64Array, Standard, String as StringValue, StringArray};
 
 /// Canonical function-index and body order. Dependencies always occur before
 /// the helpers that call them, which is validated by the registry tests.
@@ -94,6 +95,8 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(StringToAsciiLowerCase, (StringValue) -> (StringValue), deps [], imports [], build_string_to_ascii_lower_case),
     helper!(StringReplaceAll, (StringValue, StringValue, StringValue) -> (StringValue), deps [StringFind], imports [], build_string_replace_all),
     helper!(StringSplit, (StringValue, StringValue) -> (StringArray), deps [StringFind], imports [], build_string_split),
+    helper!(StringParseInteger, (StringValue, I32, I64, I64) -> (I32, I64), deps [], imports [], build_string_parse_integer),
+    helper!(StringParseFloat, (StringValue, I32) -> (I32, F64), deps [], imports [], build_string_parse_float),
     helper!(StringSlice, (StringValue, I32, I32) -> (StringValue), deps [], imports [], build_string_slice),
     helper!(ScanProcessRange, (I64, I64, I64, I32, I32, I32) -> (I64), deps [], imports [ProcessRead], build_scan_process_range),
     helper!(ReadRelative32, (I64, I64) -> (I64), deps [], imports [ProcessRead], build_read_relative32),
@@ -216,6 +219,7 @@ pub(super) fn resolve_signature(
     let resolve = |ty| match ty {
         HelperValueType::I32 => ValType::I32,
         HelperValueType::I64 => ValType::I64,
+        HelperValueType::F64 => ValType::F64,
         HelperValueType::String => gc.val_type(Type::Standard(StdlibTypeId::String)),
         HelperValueType::Standard(standard) => gc.val_type(Type::Standard(standard)),
         HelperValueType::StringArray | HelperValueType::I64Array => gc.val_type(Type::Array(
@@ -255,6 +259,7 @@ fn required_array_layout(
         HelperValueType::I64Array => Type::I64,
         HelperValueType::I32
         | HelperValueType::I64
+        | HelperValueType::F64
         | HelperValueType::String
         | HelperValueType::Standard(_) => return None,
     };

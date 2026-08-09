@@ -1388,6 +1388,7 @@ is involved:
 | `equalsIgnoreAsciiCase(text)` | Equality folding only ASCII letters |
 | `toAsciiLowerCase()` | Lowercase ASCII letters; preserve every other UTF-8 byte |
 | `split(delimiter)` | Fallible exact split preserving leading, repeated, and trailing empty segments |
+| `parse<T>()` | Strict fallible ASCII decimal parsing into an inferred numeric type |
 | `slice(start, end)` | Fallible half-open UTF-8 byte range; offsets must be code-point boundaries |
 | `replaceAll(search, replacement)` | Fallible exact non-overlapping replacement |
 | `String.concat(values)` | Concatenate an array of strings |
@@ -1396,6 +1397,22 @@ Case conversion reuses an already-normalized immutable string and allocates
 only when at least one ASCII uppercase letter changes. It intentionally has an
 ASCII-specific name: full Unicode lowercasing can change byte length and
 requires a separate, explicitly specified API.
+
+`text.parse<T>() -> T!` parses the complete string as a numeric value. The
+target type is normally inferred from the assignment, return value, or
+fallback, and can be written explicitly when needed:
+
+```splitscript
+let percentage: f64 = current.percentageText.parse() else 0.0
+let lives = current.livesText.parse<u8>()?
+```
+
+Parsing accepts an optional ASCII sign and decimal digits. Floating-point
+targets additionally accept a decimal point and `e`/`E` exponent. Whitespace,
+digit separators, trailing text, `NaN`, and `Infinity` are rejected; integer
+overflow and target-width floating-point overflow are errors. This strictness
+keeps text read from game memory deterministic and makes malformed input use
+ordinary `Result` handling rather than silently producing a partial value.
 
 `process.readManagedString(address, maxLength)` reads a bounded IL2CPP managed
 string, decodes UTF-16 (including surrogate pairs), and returns a GC UTF-8

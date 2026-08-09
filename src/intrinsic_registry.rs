@@ -45,6 +45,8 @@ pub(crate) enum RuntimeHelperId {
     StringToAsciiLowerCase,
     StringReplaceAll,
     StringSplit,
+    StringParseInteger,
+    StringParseFloat,
     StringSlice,
     ScanProcessRange,
     ReadRelative32,
@@ -306,6 +308,7 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::RuntimeArchitecture
         | IntrinsicId::StringReplaceAll
         | IntrinsicId::StringSplit
+        | IntrinsicId::StringParse
         | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
         IntrinsicId::GbaEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
         _ => None,
@@ -376,6 +379,10 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::StringToAsciiLowerCase => &[Helper(Runtime::StringToAsciiLowerCase)],
         IntrinsicId::StringReplaceAll => &[Helper(Runtime::StringReplaceAll)],
         IntrinsicId::StringSplit => &[Helper(Runtime::StringSplit)],
+        IntrinsicId::StringParse => &[
+            Helper(Runtime::StringParseInteger),
+            Helper(Runtime::StringParseFloat),
+        ],
         IntrinsicId::StringSlice => &[Helper(Runtime::StringSlice)],
         IntrinsicId::StringConcat => &[Helper(Runtime::ConcatStrings)],
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
@@ -1099,6 +1106,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 params![value(STRING)],
                 STRING_ARRAY_RESULT,
             ),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::StringParse => contract!(
+            StringParse,
+            Method,
+            signature(NUMERIC_T, Some(STRING), params![], T_RESULT),
             ALLOCATES,
             Everywhere,
             RepresentationPrimitive

@@ -105,6 +105,21 @@ The empty delimiter is an error rather than a request to split UTF-8 bytes.
 uses this mapping to parse names such as `01_02_1.dds`; its host fixture proves
 the resulting start, reset, split, and loading transitions.
 
+C# `Int32.Parse`, `Double.Parse`, and their fixed-width relatives map to
+`text.parse()`. Put the SplitScript numeric type at the receiving boundary and
+let inference flow backward:
+
+```splitscript
+let percentage: f64 = current.percentageText.parse() else 0.0
+```
+
+Unlike an exception-catching `Parse` call, failure is an ordinary `Result`.
+Use `else` for a fallback, `?` to propagate the error from a function or state
+field, or `match` when failure needs its own behavior. C# `TryParse` therefore
+does not need an output parameter. Parsing consumes the complete ASCII decimal
+string and rejects whitespace, separators, trailing text, non-finite float
+names, and values outside the chosen numeric type.
+
 ## Version-labelled ASL states
 
 The second argument in `state("game.exe", "Steam")` is a layout label, not

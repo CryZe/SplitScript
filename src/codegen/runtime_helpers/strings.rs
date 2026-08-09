@@ -1005,6 +1005,504 @@ fn emit_split_segment(
         .instruction(&Instruction::ArraySet(strings_array));
 }
 
+/// Parses strict ASCII decimal integers into an unsigned magnitude before
+/// applying the sign. The caller supplies the exact positive and negative
+/// magnitude limits for its inferred integer representation. The first result
+/// is a success flag; the second is the parsed two's-complement bit pattern.
+pub(in crate::codegen::runtime_helpers) fn compile_string_parse_integer(gc: &GcLayout) -> Function {
+    let string_type = gc.standard_index(StdlibTypeId::String);
+    let mut function = Function::new([(4, ValType::I32), (3, ValType::I64)]);
+    let value = 0;
+    let allow_negative = 1;
+    let positive_limit = 2;
+    let negative_limit = 3;
+    let len = 4;
+    let index = 5;
+    let byte = 6;
+    let negative = 7;
+    let limit = 8;
+    let magnitude = 9;
+    let digit = 10;
+
+    function
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalTee(len))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_integer_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(byte))
+        // Consume one optional leading sign.
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'+' as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'-' as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(allow_negative))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_integer_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalSet(negative))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_integer_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(negative))
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::LocalGet(negative_limit))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(positive_limit))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalSet(limit))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalTee(byte))
+        .instruction(&Instruction::I32Const(b'0' as i32))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'9' as i32))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_integer_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'0' as i32))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::LocalSet(digit))
+        // magnitude > (limit - digit) / 10 would overflow the target.
+        .instruction(&Instruction::LocalGet(magnitude))
+        .instruction(&Instruction::LocalGet(limit))
+        .instruction(&Instruction::LocalGet(digit))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::I64Const(10))
+        .instruction(&Instruction::I64DivU)
+        .instruction(&Instruction::I64GtU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_integer_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(magnitude))
+        .instruction(&Instruction::I64Const(10))
+        .instruction(&Instruction::I64Mul)
+        .instruction(&Instruction::LocalGet(digit))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalSet(magnitude))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalGet(negative))
+        .instruction(&Instruction::If(BlockType::Result(ValType::I64)))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::LocalGet(magnitude))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(magnitude))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+    function
+}
+
+fn emit_integer_parse_failure(function: &mut Function) {
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::Return);
+}
+
+/// Parses strict ASCII decimal floating-point text. A bounded decimal scaling
+/// loop keeps hostile exponents cooperative: positive overflow is an error and
+/// sufficiently small negative exponents produce zero. Named non-finite values
+/// and surrounding whitespace are deliberately rejected.
+pub(in crate::codegen::runtime_helpers) fn compile_string_parse_float(gc: &GcLayout) -> Function {
+    let string_type = gc.standard_index(StdlibTypeId::String);
+    let mut function = Function::new([(11, ValType::I32), (2, ValType::F64)]);
+    let value = 0;
+    let target_is_f32 = 1;
+    let len = 2;
+    let index = 3;
+    let byte = 4;
+    let negative = 5;
+    let saw_digit = 6;
+    let saw_dot = 7;
+    let fractional_digits = 8;
+    let skipped_digits = 9;
+    let exponent_negative = 10;
+    let exponent_value = 11;
+    let scale_exponent = 12;
+    let parsed = 13;
+    let digit = 14;
+
+    function
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalTee(len))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_float_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(byte))
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'+' as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'-' as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalSet(negative))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_float_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        // Parse the mantissa and stop immediately before an optional exponent.
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(byte))
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'0' as i32))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'9' as i32))
+        .instruction(&Instruction::I32LeU)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalSet(saw_digit))
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'0' as i32))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::F64ConvertI32U)
+        .instruction(&Instruction::LocalSet(digit))
+        .instruction(&Instruction::LocalGet(parsed))
+        .instruction(&Instruction::F64Const(1.0e300.into()))
+        .instruction(&Instruction::F64Lt)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(parsed))
+        .instruction(&Instruction::F64Const(10.0.into()))
+        .instruction(&Instruction::F64Mul)
+        .instruction(&Instruction::LocalGet(digit))
+        .instruction(&Instruction::F64Add)
+        .instruction(&Instruction::LocalSet(parsed))
+        .instruction(&Instruction::Else);
+    emit_capped_increment(&mut function, skipped_digits);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(saw_dot))
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_capped_increment(&mut function, fractional_digits);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(1))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'.' as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalGet(saw_dot))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalSet(saw_dot))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(1))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::Br(1))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(saw_digit))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_float_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        // Consume an exponent if the mantissa did not reach the end.
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'e' as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'E' as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_float_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_float_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(byte))
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'+' as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'-' as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalSet(exponent_negative))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_float_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(value))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalTee(byte))
+        .instruction(&Instruction::I32Const(b'0' as i32))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'9' as i32))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_float_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(exponent_value))
+        .instruction(&Instruction::I32Const(10_000))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(exponent_value))
+        .instruction(&Instruction::I32Const(10))
+        .instruction(&Instruction::I32Mul)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(b'0' as i32))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(exponent_value))
+        .instruction(&Instruction::LocalGet(exponent_value))
+        .instruction(&Instruction::I32Const(10_000))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(10_000))
+        .instruction(&Instruction::LocalSet(exponent_value))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(exponent_negative))
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalGet(exponent_value))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(exponent_value))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(fractional_digits))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::LocalGet(skipped_digits))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(scale_exponent))
+        // Apply the decimal exponent cooperatively, stopping once underflow
+        // reaches zero or overflow becomes observable.
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(scale_exponent))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32LeS)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(parsed))
+        .instruction(&Instruction::F64Const(0.0.into()))
+        .instruction(&Instruction::F64Eq)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(parsed))
+        .instruction(&Instruction::F64Const(10.0.into()))
+        .instruction(&Instruction::F64Mul)
+        .instruction(&Instruction::LocalTee(parsed))
+        .instruction(&Instruction::F64Abs)
+        .instruction(&Instruction::F64Const(f64::MAX.into()))
+        .instruction(&Instruction::F64Gt)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_float_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(scale_exponent))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::LocalSet(scale_exponent))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(scale_exponent))
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32GeS)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(parsed))
+        .instruction(&Instruction::F64Const(0.0.into()))
+        .instruction(&Instruction::F64Eq)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(parsed))
+        .instruction(&Instruction::F64Const(10.0.into()))
+        .instruction(&Instruction::F64Div)
+        .instruction(&Instruction::LocalSet(parsed))
+        .instruction(&Instruction::LocalGet(scale_exponent))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(scale_exponent))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(negative))
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(parsed))
+        .instruction(&Instruction::F64Neg)
+        .instruction(&Instruction::LocalSet(parsed))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(target_is_f32))
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(parsed))
+        .instruction(&Instruction::F64Abs)
+        .instruction(&Instruction::F64Const((f32::MAX as f64).into()))
+        .instruction(&Instruction::F64Gt)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_float_parse_failure(&mut function);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalGet(parsed))
+        .instruction(&Instruction::End);
+    function
+}
+
+fn emit_capped_increment(function: &mut Function, local: u32) {
+    function
+        .instruction(&Instruction::LocalGet(local))
+        .instruction(&Instruction::I32Const(10_000))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(local))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(local))
+        .instruction(&Instruction::End);
+}
+
+fn emit_float_parse_failure(function: &mut Function) {
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::F64Const(0.0.into()))
+        .instruction(&Instruction::Return);
+}
+
 /// Extracts a UTF-8 byte range. Returning a null reference is the helper ABI's
 /// failure sentinel for reversed or out-of-range bounds and offsets that split
 /// a UTF-8 code point; expression lowering converts it to `String!`.

@@ -629,16 +629,16 @@ arithmetic may still need an explicit width cast.
 
 After choosing a SplitScript collection shape, C# `.Count` also becomes
 `.length()`. For an array this is the element count; for `Set<T>` it is the
-number of unique stored values. This rewrite cannot decide whether a legacy
-`List<T>` should become an array or set—the source's ordering, growth, and
-duplicate behavior must make that decision first.
+number of unique stored values.
 
-Do not translate every C# `List<T>` into one compatibility collection. First
-identify whether the source needs a fixed ordered table, growable unique
-membership, or a genuinely ordered growable sequence with duplicates.
+C# `List<T>` maps to SplitScript's `[T]` array type. SplitScript will not add a
+separate compatibility-shaped `List<T>`. `[T]` is the variable-length ordered
+sequence, while `[T; N]` carries an exact fixed length for layouts and other
+code where the size is part of the type. Use `Set<T>` only when the original
+data is genuinely an unordered collection of unique values, not merely because
+its current API happens to be mutable.
 
-Use an array for a fixed route or lookup table. Arrays provide `contains` and
-`indexOf` when their elements support equality:
+Arrays provide `contains` and `indexOf` when their elements support equality:
 
 ```splitscript
 let levelRoute = [12, 5, 6, 7, 9, 10, 11, 14]
@@ -651,8 +651,11 @@ split {
 ```
 
 Unlike C# `List<T>.IndexOf`, `indexOf` returns `u32?`; absence is `None`, never
-a signed `-1` sentinel. A fixed array is not growable, though its existing
-elements can be replaced with `set(index, value)`.
+a signed `-1` sentinel. Existing elements can be replaced with
+`set(index, value)`. Size-changing operations for `[T]` are planned; until that
+work lands, keep ports that append, insert, remove, or clear list elements
+marked as behavior-limited rather than substituting a set. `[T; N]` will remain
+fixed-length after growable arrays are implemented.
 
 Use `Set<T>` when values are discovered while the run progresses and only
 membership matters:
@@ -702,10 +705,10 @@ starting map before `split` is evaluated. This reproduces an ASL `timer.OnStart`
 handler without a separate event API. The generated update loop runs
 `whileAttached` before timer-decision actions.
 
-SplitScript does not yet provide a growable ordered collection that preserves
-duplicates. If the original script relies on insertion order, positional
-insertion, or repeated equal values, keep that as a `List<T>` requirement
-rather than silently substituting a set.
+Growable ordered storage, insertion order, and repeated equal values all belong
+to `[T]`. They do not justify another collection type. Until size-changing
+array operations are implemented, record those particular operations as the
+remaining gap rather than describing `List<T>` itself as missing.
 
 ## Finite settings families
 

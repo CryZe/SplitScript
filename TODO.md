@@ -135,8 +135,18 @@ or behavioral parity.
   deterministic but easy to misuse when insertion, removal, or clearing occurs
   in the loop body. Choose and document one approachable rule: diagnose
   mutation of the iterated collection, or define snapshot traversal with an
-  explicit allocation policy. Add `List<T>` or `Map<K, V>` only when the next
-  maintained port requires ordering, duplicates, or stored values.
+  explicit allocation policy. Apply the same rule to growable arrays; add
+  `Map<K, V>` only when the next maintained port requires stored key/value
+  associations.
+- [ ] Make `[T]` the growable ordered sequence instead of adding a separate
+  `List<T>` type. Keep `[T; N]` fixed-length and memory-readable. Because Wasm
+  GC arrays have immutable physical lengths, represent `[T]` with a stable
+  identity containing logical length and replaceable capacity-backed storage;
+  preserve aliases and amortized growth without allocating on every append.
+  Design `push`, bulk extension, indexed insertion/removal, value removal,
+  `pop`, and `clear` from corpus evidence, with explicit bounds/failure and
+  must-use behavior. Restrict size-changing methods to `[T]`; both forms retain
+  indexing, iteration, search, length, and element replacement.
 - [ ] Design indexed mutation together with collection mutability rather than
   adding an isolated array-assignment special case. Specify aliasing, fixed
   array versus growable collection behavior, bounds failure, and interaction

@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: one array family for C# list migration
+
+- Rejected a separate future `List<T>` compatibility type: C# ordered list
+  semantics belong on variable-length `[T]`, while `[T; N]` remains the exact
+  fixed-length form.
+- Corrected migration diagnostics and documentation so `Set<T>` is recommended
+  only for genuinely unique unordered data, never as a substitute for a list.
+- Planned stable identity plus capacity-backed storage for growable arrays so
+  Wasm GC's fixed physical array length does not break aliases or force one
+  allocation per append. This supersedes earlier archived array-or-set wording.
+
 ## 2026-08-10: typed ASL timer-phase migration
 
 - Mapped the recurring `timer.CurrentPhase` and `TimerPhase` variant patterns

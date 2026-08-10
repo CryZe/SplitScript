@@ -1180,7 +1180,7 @@ fn legacy_settings_add_explains_static_declarations_and_families() {
 }
 
 #[test]
-fn legacy_list_types_explain_the_semantic_collection_choices() {
+fn legacy_list_types_point_to_variable_length_arrays() {
     let source = r#"
         state "game.exe" {}
 
@@ -1195,19 +1195,26 @@ fn legacy_list_types_explain_the_semantic_collection_choices() {
     let diagnostic = &diagnostics[0];
     assert_eq!(
         diagnostic.message,
-        "`List<T>` has no single SplitScript replacement"
+        "C# `List<T>` maps to SplitScript's `[T]` array type"
     );
     assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "List");
     assert!(diagnostic.fixes.is_empty());
     assert!(diagnostic.notes.iter().any(|note| {
-        note.contains("`[T]`") && note.contains("`.indexOf(value)`") && note.contains("`u32?`")
+        note.contains("`[T]`") && note.contains("`[T; N]`") && note.contains("fixed-length")
     }));
     assert!(diagnostic.notes.iter().any(|note| {
-        note.contains("`Set<T>`") && note.contains("`Set.new<T>()`") && note.contains("`insert`")
+        note.contains("`indexOf`") && note.contains("`u32?`") && note.contains("C#'s `-1`")
     }));
     assert!(diagnostic.notes.iter().any(|note| {
-        note.contains("preserves duplicates") && note.contains("not currently provided")
+        note.contains("size-changing array operations")
+            && note.contains("will not add a separate `List<T>`")
     }));
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| { note.contains("`Set<T>`") && note.contains("not a substitute") })
+    );
 }
 
 #[test]
@@ -1228,7 +1235,7 @@ fn a_source_type_named_list_is_not_mistaken_for_the_legacy_collection() {
             .any(|diagnostic| { diagnostic.message == "unknown generic type constructor `List`" })
     );
     assert!(!diagnostics.iter().any(|diagnostic| {
-        diagnostic.message == "`List<T>` has no single SplitScript replacement"
+        diagnostic.message == "C# `List<T>` maps to SplitScript's `[T]` array type"
     }));
 }
 

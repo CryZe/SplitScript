@@ -668,6 +668,67 @@ fn csharp_directed_rounding_explains_direction_width_and_qualified_paths() {
 }
 
 #[test]
+fn csharp_minimum_and_maximum_explain_type_preservation_and_float_edges() {
+    for (method, canonical, zero, message) in [
+        (
+            "Min",
+            "min",
+            "negative zero",
+            "C# minimum is a receiver-based `min` method in SplitScript",
+        ),
+        (
+            "Max",
+            "max",
+            "positive zero",
+            "C# maximum is a receiver-based `max` method in SplitScript",
+        ),
+    ] {
+        for owner in ["Math", "MathF", "System.Math", "System.MathF"] {
+            let source = format!(
+                r#"
+                    state "game.exe" {{}}
+
+                    fn bounded(left: i32, right: i32) {{
+                        return {owner}.{method}(left, right)
+                    }}
+                "#
+            );
+            let diagnostics = splitscript::compile(&source)
+                .expect_err("C# numeric bounds should receive migration guidance");
+
+            assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+            let diagnostic = &diagnostics[0];
+            assert_eq!(diagnostic.message, message);
+            assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], method);
+            assert!(diagnostic.fixes.is_empty());
+            assert!(
+                diagnostic
+                    .notes
+                    .iter()
+                    .any(|note| note.contains(&format!("left.{canonical}(right)")))
+            );
+            assert!(diagnostic.notes.iter().any(|note| {
+                note.contains("signedness") && note.contains("propagate NaN") && note.contains(zero)
+            }));
+            assert!(diagnostic.notes.iter().any(|note| {
+                note.contains("implicit numeric conversions") && note.contains("decimal")
+            }));
+        }
+    }
+
+    splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn signed(left: i16, right: i16) -> i16 { return left.min(right) }
+            fn unsigned(left: u64, right: u64) -> u64 { return left.max(right) }
+            fn narrow(left: f32, right: f32) -> f32 { return left.min(right) }
+            fn wide(left: f64, right: f64) -> f64 { return left.max(right) }
+        "#,
+    )
+    .expect("canonical numeric minimum and maximum forms should compile");
+}
+
+#[test]
 fn a_user_binding_named_int32_keeps_its_parse_method() {
     let source = r#"
         record Parser {}

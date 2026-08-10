@@ -1035,6 +1035,32 @@ fn floating_point_truncation_preserves_width_and_ieee_edges() {
 }
 
 #[test]
+fn numeric_minimum_and_maximum_preserve_types_and_ieee_edges() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let signed: i8 = (-7i8).min(4)
+            let unsigned: u16 = 500u16.max(1000)
+            let minZero = (0.0 as f32).min(-0.0).toBits() == 0x80000000u32
+            let maxZero = (-0.0 as f64).max(0.0).toBits() == 0u64
+            let nan = f32.fromBits(0x7fc00000u32)
+            let minNan = nan.min(1.0).isNaN()
+            let maxNan = (1.0 as f32).max(nan).isNaN()
+            print(`{signed}:{unsigned}:{minZero}:{maxZero}:{minNan}:{maxNan}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["-7:1000:true:true:true:true"]);
+}
+
+#[test]
 fn async_none_completion_is_status_only_but_remains_typed() {
     let source = r#"
         state "game.exe" {}

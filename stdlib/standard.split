@@ -843,6 +843,8 @@ capability Numeric<T: Equatable> {
     /// Returns the smaller of two numeric values.
     ///
     /// Both values have the same inferred numeric type and are evaluated once.
+    /// For floating-point values, either NaN input produces NaN. If the values
+    /// are positive and negative zero, negative zero is returned.
     ///
     /// # Example
     ///
@@ -860,6 +862,8 @@ capability Numeric<T: Equatable> {
     /// Returns the larger of two numeric values.
     ///
     /// Both values have the same inferred numeric type and are evaluated once.
+    /// For floating-point values, either NaN input produces NaN. If the values
+    /// are positive and negative zero, positive zero is returned.
     ///
     /// # Example
     ///

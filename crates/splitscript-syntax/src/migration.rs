@@ -207,6 +207,10 @@ pub const CSHARP_FLOOR_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.floor-call");
 pub const CSHARP_CEILING_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.ceiling-call");
+pub const CSHARP_MIN_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.math.min-call");
+pub const CSHARP_MAX_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.math.max-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.timespan.parse-call");
 pub const CSHARP_TIMESPAN_TICKS_DIAGNOSTIC: MigrationDiagnosticId =
@@ -537,6 +541,30 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_MIN_DIAGNOSTIC,
+        concept: MigrationConceptId::new("math.minimum"),
+        message: "C# minimum is a receiver-based `min` method in SplitScript",
+        primary_label: "move this operation onto the first numeric value",
+        notes: &[
+            "rewrite `Math.Min(left, right)` or `MathF.Min(left, right)` as `left.min(right)` after making both operands the same intended numeric type",
+            "SplitScript `min` preserves that type: integers retain their signedness and width, while floating-point values propagate NaN and choose negative zero over positive zero",
+            "C# implicit numeric conversions and decimal overloads need an explicit semantic rewrite",
+            "there is no automatic rewrite because the static call alone does not prove the selected C# overload or the intended result type",
+        ],
+    },
+    MigrationDiagnostic {
+        id: CSHARP_MAX_DIAGNOSTIC,
+        concept: MigrationConceptId::new("math.maximum"),
+        message: "C# maximum is a receiver-based `max` method in SplitScript",
+        primary_label: "move this operation onto the first numeric value",
+        notes: &[
+            "rewrite `Math.Max(left, right)` or `MathF.Max(left, right)` as `left.max(right)` after making both operands the same intended numeric type",
+            "SplitScript `max` preserves that type: integers retain their signedness and width, while floating-point values propagate NaN and choose positive zero over negative zero",
+            "C# implicit numeric conversions and decimal overloads need an explicit semantic rewrite",
+            "there is no automatic rewrite because the static call alone does not prove the selected C# overload or the intended result type",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.numeric-parse"),
         message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
@@ -623,6 +651,12 @@ pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnos
     }
     if matches!(owner.as_str(), "Math" | "MathF") && method == "Ceiling" {
         return Some(CSHARP_CEILING_DIAGNOSTIC);
+    }
+    if matches!(owner.as_str(), "Math" | "MathF") && method == "Min" {
+        return Some(CSHARP_MIN_DIAGNOSTIC);
+    }
+    if matches!(owner.as_str(), "Math" | "MathF") && method == "Max" {
+        return Some(CSHARP_MAX_DIAGNOSTIC);
     }
     if method != "Parse" && method != "TryParse" {
         return None;
@@ -1145,6 +1179,26 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Use `value.ceil()` with an explicit f32 or f64 boundary; review C# decimal inputs separately.",
         targets: &[MigrationTarget::StandardLibraryItem("Float.ceil")],
+        cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("math.minimum"),
+        name: "Numeric minimum",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `left.min(right)` after establishing one intended numeric type; review C# implicit conversions and decimal overloads.",
+        targets: &[MigrationTarget::StandardLibraryItem("Numeric.min")],
+        cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("math.maximum"),
+        name: "Numeric maximum",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `left.max(right)` after establishing one intended numeric type; review C# implicit conversions and decimal overloads.",
+        targets: &[MigrationTarget::StandardLibraryItem("Numeric.max")],
         cookbook_anchor: None,
         spellings: &[],
     },

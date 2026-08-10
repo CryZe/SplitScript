@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-10: typed minimum and maximum migration guidance
+
+- Added focused `Math.Min`/`MathF.Min` and `Math.Max`/`MathF.Max`
+  diagnostics that route calls to the existing type-preserving `min` and `max`
+  methods, including fully qualified `System` paths.
+- Documented and runtime-tested the floating-point contract: NaN propagation,
+  negative-zero selection for `min`, and positive-zero selection for `max`.
+- Kept implicit C# numeric conversions and decimal overloads explicit rather
+  than guessing an automatic rewrite or result type.
+
 ## 2026-08-10: directed-rounding migration guidance
 
 - Added focused `Math.Floor`/`MathF.Floor` and

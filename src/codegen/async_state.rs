@@ -2361,6 +2361,7 @@ fn collect_async_states<'a>(
             }
             wasm_ir::Statement::Store { .. }
             | wasm_ir::Statement::StoreTemporary { .. }
+            | wasm_ir::Statement::IndexStore { .. }
             | wasm_ir::Statement::Evaluate { .. }
             | wasm_ir::Statement::ForInit { .. } => {}
         }
@@ -2491,6 +2492,13 @@ fn compile_async_flow(
             wasm_ir::Statement::StoreTemporary { target, value } => {
                 compile_temporary_set(function, *target, *value, context);
             }
+            wasm_ir::Statement::IndexStore {
+                target,
+                operation,
+                value,
+            } => super::expression::compile_index_assignment(
+                function, *target, operation, *value, context,
+            ),
             wasm_ir::Statement::If {
                 condition,
                 then_block,

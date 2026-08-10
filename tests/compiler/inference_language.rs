@@ -1508,21 +1508,51 @@ fn indexed_assignment_updates_arrays_through_stable_aliases() {
 }
 
 #[test]
-fn compound_indexed_assignment_preserves_the_future_single_evaluation_boundary() {
+fn compound_indexed_assignment_uses_catalog_operators() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let values = [250u8]
+            values[0] += 10u8
+            values[0] -= 1u8
+            values[0] *= 2u8
+            values[0] /= 2u8
+            values[0] %= 7u8
+            values[0] &= 7u8
+            values[0] |= 8u8
+            values[0] ^= 3u8
+            values[0] <<= 1u8
+            values[0] >>= 1u8
+
+            let fixed: [u32; 1] = [1]
+            fixed[0] += 1
+
+            let durations = [Duration.fromSeconds(1.0)]
+            durations[0] += Duration.fromSeconds(2.0)
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("compound indexed assignment should resolve ordinary catalog operators");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("compound indexed assignment should produce valid Wasm GC mutation");
+
     let diagnostics = splitscript::compile(
         r#"
             state "game.exe" {}
             whileAttached {
-                let values = [1]
-                values[0] += 1
+                let values = [1u8]
+                values[0] += "wrong"
             }
         "#,
     )
-    .expect_err("compound indexed assignment is not yet safe to desugar");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("compound indexed assignment")
-            && diagnostic.message.contains("evaluated exactly once")
-    }));
+    .expect_err("the compound operand must satisfy the element operator");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("types do not match"))
+    );
 }
 
 #[test]

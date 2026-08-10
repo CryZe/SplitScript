@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: exactly-once compound indexed assignment
+
+- Added arithmetic, remainder, bitwise, and shift compound assignments for
+  array elements through the same catalog-defined operators as ordinary
+  assignments.
+- Evaluated the collection, index, and right operand once in source order and
+  retained compiler temporaries across suspensions without exposing synthetic
+  bindings to source tooling.
+- Preserved aliases, narrow-integer masking, bounds traps, and non-structural
+  iteration behavior, with synchronous and multi-suspension runtime coverage.
+
 ## 2026-08-10: timer metadata migration boundaries
 
 - Audited recurring ASL timer paths against the actual LiveSplit Wasm host and

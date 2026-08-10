@@ -56,6 +56,7 @@ const expected = [
     "retry 1:42",
     "nested 1:1",
     "nested 2:1",
+    "compound 7:1:1:1",
     "done",
 ];
 if (JSON.stringify(messages) !== JSON.stringify(expected)) {

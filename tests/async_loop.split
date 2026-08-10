@@ -4,6 +4,27 @@ fn readMarker() {
     return process.read<i32>(0x3000)
 }
 
+let receiverCalls = 0
+let indexCalls = 0
+let valueCalls = 0
+
+fn countedReceiver(values: [i32]) {
+    receiverCalls += 1
+    return values
+}
+
+fn delayedIndex() {
+    indexCalls += 1
+    await nextTick()
+    return 0
+}
+
+fn delayedValue() {
+    valueCalls += 1
+    await nextTick()
+    return 4
+}
+
 onAttach {
     let index = 0
     let missing: i32? = None
@@ -44,5 +65,8 @@ onAttach {
             print(`nested {outer}:{inner}`)
         }
     }
+    let compound = [3]
+    countedReceiver(compound)[await delayedIndex()] += await delayedValue()
+    print(`compound {compound[0]}:{receiverCalls}:{indexCalls}:{valueCalls}`)
     print("done")
 }

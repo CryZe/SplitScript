@@ -292,6 +292,7 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
         match statement {
             Stmt::Assign { span, .. }
+            | Stmt::IndexAssign { span, .. }
             | Stmt::Return { span, .. }
             | Stmt::Throw { span, .. }
             | Stmt::Suspend { span, .. } => {
@@ -1557,11 +1558,13 @@ fn select(matrix: [[i32]], row: u32, column: u32) -> i32 {
     fn formats_indexed_assignment_as_an_ordinary_assignment() {
         let source = r#"state "game.exe"{}
 whileAttached{let values=[1,2]
-values [ 1 ]=9}"#;
+values [ 1 ]=9
+values [ 0 ] += 2}"#;
         let expected = r#"state "game.exe" {}
 whileAttached {
     let values = [1, 2]
     values[1] = 9
+    values[0] += 2
 }
 "#;
         let formatted = format_source(source).unwrap();

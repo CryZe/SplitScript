@@ -164,6 +164,9 @@ impl TypedVisitor for CallCollector<'_> {
         {
             collect_call_facts(self.facts, call, program, false);
         }
+        if let hir::TypedStatementKind::IndexAssign { assignment, .. } = &statement.kind {
+            collect_call_facts(self.facts, &assignment.operator, program, false);
+        }
         hir::walk_typed_statement(self, statement, program);
     }
 }
@@ -295,6 +298,12 @@ impl OperationAnalysis {
                 if let hir::TypedStatementKind::Assign { assignment, .. } = &statement.kind
                     && let Some(call) = &assignment.operator
                     && let Some(violation) = self.violation(call, assignment.span, program)
+                {
+                    self.violations.push(violation);
+                }
+                if let hir::TypedStatementKind::IndexAssign { assignment, .. } = &statement.kind
+                    && let Some(violation) =
+                        self.violation(&assignment.operator, assignment.span, program)
                 {
                     self.violations.push(violation);
                 }

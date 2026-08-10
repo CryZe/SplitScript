@@ -69,6 +69,10 @@ pub fn walk_statement(
         | Statement::Evaluate {
             expression: value, ..
         } => visitor.visit_expression_id(*value, program),
+        Statement::IndexStore { target, value, .. } => {
+            visitor.visit_expression_id(*target, program);
+            visitor.visit_expression_id(*value, program);
+        }
         Statement::If {
             condition,
             then_block,

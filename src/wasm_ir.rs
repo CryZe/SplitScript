@@ -377,6 +377,11 @@ pub enum Statement {
         target: TemporaryId,
         value: ExprId,
     },
+    IndexStore {
+        target: ExprId,
+        operation: AssignmentOperation,
+        value: ExprId,
+    },
     Evaluate {
         expression: ExprId,
         discard_result: bool,
@@ -1031,6 +1036,31 @@ fn lower_assignment_operation(
         .or_else(|| op.map(AssignmentOperation::Primitive))
 }
 
+fn lower_index_assignment_operation(
+    assignment: &hir::ResolvedIndexAssignment,
+    target: ExprId,
+    typed_hir: &TypedProgram,
+    semantics: &SemanticModel,
+) -> AssignmentOperation {
+    let mut call = lower_call_target(&assignment.operator, typed_hir, semantics);
+    let receiver = ResolvedReceiver::Expression {
+        expression: target,
+        members: Vec::new(),
+    };
+    match &mut call {
+        CallTarget::UserMethod {
+            receiver: call_receiver,
+            ..
+        } => *call_receiver = receiver,
+        CallTarget::Intrinsic {
+            receiver: Some(call_receiver),
+            ..
+        } => *call_receiver = receiver,
+        _ => unreachable!("compound indexed assignments resolve binary methods"),
+    }
+    AssignmentOperation::Call(call)
+}
+
 fn lower_body(
     owner: BodyOwner,
     block: &hir::TypedBlock,
@@ -1057,7 +1087,7 @@ fn lower_body(
     let mut entry = if !matches!(abi, BodyAbi::Direct) {
         lower_async_block(block, typed_hir, semantics, profile, wasm_ir)
     } else {
-        lower_block(block, typed_hir, semantics, profile)
+        lower_block(block, typed_hir, semantics, profile, wasm_ir)
     };
     let mut next_async_state = 1;
     assign_async_states(&mut entry, &mut next_async_state);
@@ -1301,6 +1331,10 @@ fn analyze_statements_liveness(
             Statement::StoreTemporary { value, .. } => {
                 collect_expression_values(*value, live, local_values, program);
             }
+            Statement::IndexStore { target, value, .. } => {
+                collect_expression_values(*target, live, local_values, program);
+                collect_expression_values(*value, live, local_values, program);
+            }
             Statement::If {
                 condition,
                 then_block,
@@ -1475,8 +1509,9 @@ fn lower_block(
     typed_hir: &TypedProgram,
     semantics: &SemanticModel,
     profile: crate::BuildProfile,
+    wasm_ir: &mut Program,
 ) -> Block {
-    lower_statements(&block.statements, typed_hir, semantics, profile)
+    lower_statements(&block.statements, typed_hir, semantics, profile, wasm_ir)
 }
 
 fn lower_async_block(
@@ -2376,6 +2411,72 @@ fn lower_async_statements(
                 );
                 result = wrap_async_expression_steps(normalized.steps, result);
             }
+            TypedStatementKind::IndexAssign {
+                assignment,
+                target,
+                value,
+                ..
+            } => {
+                let TypedExpressionKind::Index { receiver, index } = &typed_hir
+                    .expression(*target)
+                    .expect("indexed assignment target belongs to typed HIR")
+                    .kind
+                else {
+                    unreachable!("checked indexed assignments retain an index target")
+                };
+                let normalized_receiver =
+                    normalize_expression_suspensions(*receiver, typed_hir, semantics, wasm_ir);
+                let receiver_type = wasm_ir.effective_expression_type(normalized_receiver.value);
+                let (receiver_temporary, receiver_read) = wasm_ir.temporary(receiver_type);
+
+                let normalized_index =
+                    normalize_expression_suspensions(*index, typed_hir, semantics, wasm_ir);
+                let index_type = wasm_ir.effective_expression_type(normalized_index.value);
+                let (index_temporary, index_read) = wasm_ir.temporary(index_type);
+
+                let normalized_value =
+                    normalize_expression_suspensions(*value, typed_hir, semantics, wasm_ir);
+                let target_type = wasm_ir.effective_expression_type(*target);
+                let lowered_target = wasm_ir.push_generated_expression(
+                    target_type,
+                    ExpressionKind::Index {
+                        receiver: receiver_read,
+                        index: index_read,
+                    },
+                    None,
+                );
+
+                result.statements.insert(
+                    0,
+                    Statement::IndexStore {
+                        target: lowered_target,
+                        operation: lower_index_assignment_operation(
+                            assignment,
+                            lowered_target,
+                            typed_hir,
+                            semantics,
+                        ),
+                        value: normalized_value.value,
+                    },
+                );
+                result = wrap_async_expression_steps(normalized_value.steps, result);
+                result.statements.insert(
+                    0,
+                    Statement::StoreTemporary {
+                        target: index_temporary,
+                        value: normalized_index.value,
+                    },
+                );
+                result = wrap_async_expression_steps(normalized_index.steps, result);
+                result.statements.insert(
+                    0,
+                    Statement::StoreTemporary {
+                        target: receiver_temporary,
+                        value: normalized_receiver.value,
+                    },
+                );
+                result = wrap_async_expression_steps(normalized_receiver.steps, result);
+            }
             TypedStatementKind::If {
                 condition,
                 then_block,
@@ -2429,9 +2530,9 @@ fn lower_async_statements(
                     0,
                     Statement::If {
                         condition: normalized.value,
-                        then_block: lower_block(then_block, typed_hir, semantics, profile),
+                        then_block: lower_block(then_block, typed_hir, semantics, profile, wasm_ir),
                         else_block: else_block.as_ref().map_or_else(Block::default, |block| {
-                            lower_block(block, typed_hir, semantics, profile)
+                            lower_block(block, typed_hir, semantics, profile, wasm_ir)
                         }),
                     },
                 );
@@ -2481,7 +2582,7 @@ fn lower_async_statements(
                     0,
                     Statement::While {
                         condition: *condition,
-                        body: lower_block(body, typed_hir, semantics, profile),
+                        body: lower_block(body, typed_hir, semantics, profile, wasm_ir),
                     },
                 );
             }
@@ -2539,7 +2640,7 @@ fn lower_async_statements(
                         index_value: *index_value,
                         version_value: *version_value,
                         iterable: normalized.value,
-                        body: lower_block(body, typed_hir, semantics, profile),
+                        body: lower_block(body, typed_hir, semantics, profile, wasm_ir),
                     },
                 );
                 result = wrap_async_expression_steps(normalized.steps, result);
@@ -2724,6 +2825,7 @@ fn assign_async_states(block: &mut Block, next: &mut u32) {
             }
             Statement::Store { .. }
             | Statement::StoreTemporary { .. }
+            | Statement::IndexStore { .. }
             | Statement::Evaluate { .. }
             | Statement::ForInit { .. } => {}
         }
@@ -2807,6 +2909,7 @@ fn set_async_while_targets(
             }
             Statement::Store { .. }
             | Statement::StoreTemporary { .. }
+            | Statement::IndexStore { .. }
             | Statement::Evaluate { .. }
             | Statement::ForInit { .. } => {}
         }
@@ -2838,6 +2941,7 @@ fn lower_statements(
     typed_hir: &TypedProgram,
     semantics: &SemanticModel,
     profile: crate::BuildProfile,
+    wasm_ir: &mut Program,
 ) -> Block {
     let mut block = Block::default();
     for (index, statement) in statements.iter().enumerate() {
@@ -2865,21 +2969,68 @@ fn lower_statements(
                     value: *value,
                 });
             }
+            TypedStatementKind::IndexAssign {
+                assignment,
+                target,
+                value,
+                ..
+            } => {
+                let TypedExpressionKind::Index { receiver, index } = &typed_hir
+                    .expression(*target)
+                    .expect("indexed assignment target belongs to typed HIR")
+                    .kind
+                else {
+                    unreachable!("checked indexed assignments retain an index target")
+                };
+                let receiver_type = wasm_ir.effective_expression_type(*receiver);
+                let index_type = wasm_ir.effective_expression_type(*index);
+                let target_type = wasm_ir.effective_expression_type(*target);
+                let (receiver_temporary, receiver_read) = wasm_ir.temporary(receiver_type);
+                let (index_temporary, index_read) = wasm_ir.temporary(index_type);
+                let lowered_target = wasm_ir.push_generated_expression(
+                    target_type,
+                    ExpressionKind::Index {
+                        receiver: receiver_read,
+                        index: index_read,
+                    },
+                    None,
+                );
+                block.statements.extend([
+                    Statement::StoreTemporary {
+                        target: receiver_temporary,
+                        value: *receiver,
+                    },
+                    Statement::StoreTemporary {
+                        target: index_temporary,
+                        value: *index,
+                    },
+                    Statement::IndexStore {
+                        target: lowered_target,
+                        operation: lower_index_assignment_operation(
+                            assignment,
+                            lowered_target,
+                            typed_hir,
+                            semantics,
+                        ),
+                        value: *value,
+                    },
+                ]);
+            }
             TypedStatementKind::If {
                 condition,
                 then_block,
                 else_block,
             } => block.statements.push(Statement::If {
                 condition: *condition,
-                then_block: lower_block(then_block, typed_hir, semantics, profile),
+                then_block: lower_block(then_block, typed_hir, semantics, profile, wasm_ir),
                 else_block: else_block.as_ref().map_or_else(Block::default, |block| {
-                    lower_block(block, typed_hir, semantics, profile)
+                    lower_block(block, typed_hir, semantics, profile, wasm_ir)
                 }),
             }),
             TypedStatementKind::While { condition, body } => {
                 block.statements.push(Statement::While {
                     condition: *condition,
-                    body: lower_block(body, typed_hir, semantics, profile),
+                    body: lower_block(body, typed_hir, semantics, profile, wasm_ir),
                 });
             }
             TypedStatementKind::For {
@@ -2896,7 +3047,7 @@ fn lower_statements(
                     index_value: *index_value,
                     version_value: *version_value,
                     iterable: *iterable,
-                    body: lower_block(body, typed_hir, semantics, profile),
+                    body: lower_block(body, typed_hir, semantics, profile, wasm_ir),
                 });
             }
             TypedStatementKind::Break => {
@@ -2942,7 +3093,13 @@ fn lower_statements(
                     continuation: Box::new(if *returns {
                         Block::default()
                     } else {
-                        lower_statements(&statements[index + 1..], typed_hir, semantics, profile)
+                        lower_statements(
+                            &statements[index + 1..],
+                            typed_hir,
+                            semantics,
+                            profile,
+                            wasm_ir,
+                        )
                     }),
                 };
                 return block;
@@ -3127,6 +3284,7 @@ impl Visitor for LocalPlanner<'_> {
                 self.value(*version_value);
             }
             Statement::Store { .. }
+            | Statement::IndexStore { .. }
             | Statement::Evaluate { .. }
             | Statement::If { .. }
             | Statement::While { .. } => {}

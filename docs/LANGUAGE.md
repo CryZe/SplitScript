@@ -261,7 +261,8 @@ let representation = negativeZero.toBits()
 Assignments support `=`, the arithmetic compound forms `+=`, `-=`, `*=`, `/=`,
 and `%=`, plus `|=`, `&=`, `^=`, `<<=`, and `>>=` for integers. A compound
 assignment uses exactly the same operand typing and runtime operation as its
-ordinary binary operator while resolving the destination only once.
+ordinary binary operator while resolving the destination only once. These
+forms also work on indexed array elements.
 
 Unread parameters, local variables, loop elements, match payloads, and
 `await`/`retry` bindings produce non-fatal warnings. The analysis follows
@@ -861,6 +862,7 @@ discovered.push(0x8bu8) // discovered is [u8]
 discovered.clear()
 
 bytes[1] = 0x8b
+bytes[2] += 1
 let opcode = bytes[1]
 let count = bytes.length()
 let hasTerminator = bytes.contains(0)
@@ -873,9 +875,10 @@ resolved through the standard library's array-mutation capability: the array
 and index are each evaluated once, aliases observe the replacement, both `[T]`
 and `[T; N]` support it, and Wasm performs bounds checks. Replacement does not
 change collection structure, so it does not invalidate active iteration.
-Compound indexed assignments are not yet accepted because their future
-lowering must retain the same single-evaluation guarantee. `contains(value)`
-tests every element from the beginning, while
+Compound indexed assignments use the same catalog-defined operators as local
+and global assignments. The collection, index, and right operand are evaluated
+once in that order; compiler temporaries preserve them across `await` and
+`retry`. `contains(value)` tests every element from the beginning, while
 `indexOf(value)` returns the first matching `u32` index or `None`. These search
 methods are available when the element type supports `Equatable`; they are
 ordinary source-defined library loops rather than dedicated compiler

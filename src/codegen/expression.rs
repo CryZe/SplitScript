@@ -279,6 +279,11 @@ fn compile_block_with_loop(
             wasm_ir::Statement::StoreTemporary { target, value } => {
                 compile_temporary_set(function, *target, *value, context);
             }
+            wasm_ir::Statement::IndexStore {
+                target,
+                operation,
+                value,
+            } => compile_index_assignment(function, *target, operation, *value, context),
             wasm_ir::Statement::If {
                 condition,
                 then_block,
@@ -830,6 +835,45 @@ pub(super) fn compile_assignment(
             function.instruction(&Instruction::GlobalSet(global));
         }
     }
+}
+
+pub(super) fn compile_index_assignment(
+    function: &mut Function,
+    target: ExprId,
+    operation: &wasm_ir::AssignmentOperation,
+    value: ExprId,
+    context: &ExprContext<'_>,
+) {
+    let wasm_ir::ExpressionKind::Index { receiver, index } = &context
+        .wasm_ir
+        .expression(target)
+        .expect("indexed assignment target belongs to Wasm IR")
+        .kind
+    else {
+        unreachable!("indexed assignment lowering produces an index target")
+    };
+    let Type::Array(array_id) = context.expression_type(*receiver) else {
+        unreachable!("checked indexed assignment receivers are arrays")
+    };
+    compile_expr(function, *receiver, context);
+    super::array_value::emit_backing(function, context.gc, array_id);
+    compile_expr(function, *index, context);
+    let element = array_element_type(array_id, context.semantics);
+    compile_assignment_value(
+        function,
+        Some(operation),
+        value,
+        element,
+        context,
+        |function| compile_expr(function, target, context),
+    );
+    function.instruction(&Instruction::ArraySet(context.gc.index(
+        Type::ArrayStorage(super::array_value::storage_id(
+            array_id,
+            context.arrays,
+            context.semantics,
+        )),
+    )));
 }
 
 pub(super) fn compile_temporary_set(

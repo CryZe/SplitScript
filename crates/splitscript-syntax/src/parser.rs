@@ -356,6 +356,7 @@ fn statement_span(statement: &Stmt) -> Span {
     match statement {
         Stmt::Debug { span, .. }
         | Stmt::Assign { span, .. }
+        | Stmt::IndexAssign { span, .. }
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
         | Stmt::For { span, .. }

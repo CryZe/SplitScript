@@ -257,6 +257,21 @@ impl Parser<'_> {
             let value = self.root_expression();
             self.terminator()?;
             let span = expr.span.join(self.previous().span);
+            if let Some(op) = op {
+                if !matches!(expr.kind, ExprKind::Index { .. }) {
+                    return Err(Diagnostic::new(
+                        "only variables and array elements can be assigned",
+                        expr.span,
+                    ));
+                }
+                return Ok(Stmt::IndexAssign {
+                    id: self.new_assignment_id(),
+                    target: expr,
+                    op,
+                    value,
+                    span,
+                });
+            }
             let ExprKind::Index {
                 receiver, index, ..
             } = expr.kind
@@ -266,12 +281,6 @@ impl Parser<'_> {
                     expr.span,
                 ));
             };
-            if op.is_some() {
-                return Err(Diagnostic::new(
-                    "compound indexed assignment is not yet supported because the array and index must each be evaluated exactly once",
-                    operator_span,
-                ));
-            }
             return Ok(Stmt::Expression(self.new_expr(
                 ExprKind::Call {
                     callee: vec!["set".to_owned()],

@@ -295,6 +295,21 @@ fn render_typed_block(
                 )
                 .unwrap();
             }
+            TypedStatementKind::IndexAssign {
+                assignment,
+                target,
+                op,
+                value,
+            } => {
+                writeln!(
+                    output,
+                    "{indent}index-assign a{} target=e{} op={op:?} value=e{}",
+                    assignment.id.index(),
+                    target.index(),
+                    value.index()
+                )
+                .unwrap();
+            }
             TypedStatementKind::If {
                 condition,
                 then_block,

@@ -748,14 +748,15 @@ fn collect_assignment_function_roots(
 
     impl Visitor for AssignmentCollector<'_> {
         fn visit_statement(&mut self, statement: &wasm_ir::Statement, program: &wasm_ir::Program) {
-            if let wasm_ir::Statement::Store {
-                operation:
-                    Some(wasm_ir::AssignmentOperation::Call(wasm_ir::CallTarget::UserMethod {
-                        function,
-                        ..
-                    })),
+            let operation = match statement {
+                wasm_ir::Statement::Store { operation, .. } => operation.as_ref(),
+                wasm_ir::Statement::IndexStore { operation, .. } => Some(operation),
+                _ => None,
+            };
+            if let Some(wasm_ir::AssignmentOperation::Call(wasm_ir::CallTarget::UserMethod {
+                function,
                 ..
-            } = statement
+            })) = operation
             {
                 self.output.push((self.owner.clone(), function.clone()));
             }

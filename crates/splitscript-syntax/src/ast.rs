@@ -846,6 +846,13 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    IndexAssign {
+        id: AssignmentId,
+        target: Expr,
+        op: BinaryOp,
+        value: Expr,
+        span: Span,
+    },
     If {
         condition: Expr,
         then_block: Block,

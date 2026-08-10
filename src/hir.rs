@@ -303,6 +303,13 @@ pub struct ResolvedAssignment {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedIndexAssignment {
+    pub id: AssignmentId,
+    pub operator: ResolvedCall,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedPattern {
     pub id: PatternId,
@@ -320,6 +327,12 @@ pub enum TypedStatementKind {
     Assign {
         assignment: ResolvedAssignment,
         op: Option<BinaryOp>,
+        value: ExprId,
+    },
+    IndexAssign {
+        assignment: ResolvedIndexAssignment,
+        target: ExprId,
+        op: BinaryOp,
         value: ExprId,
     },
     If {
@@ -889,6 +902,10 @@ pub fn walk_typed_statement<V: TypedVisitor>(
     match &statement.kind {
         TypedStatementKind::Variable { initializer, .. } => visit_expression(*initializer),
         TypedStatementKind::Assign { value, .. } => visit_expression(*value),
+        TypedStatementKind::IndexAssign { target, value, .. } => {
+            visit_expression(*target);
+            visit_expression(*value);
+        }
         TypedStatementKind::If {
             condition,
             then_block,
@@ -1289,6 +1306,7 @@ fn lower_block(
                         let span = match statement {
                             Stmt::Variable(variable) => variable.span,
                             Stmt::Assign { span, .. }
+                            | Stmt::IndexAssign { span, .. }
                             | Stmt::If { span, .. }
                             | Stmt::While { span, .. }
                             | Stmt::For { span, .. }
@@ -1331,6 +1349,25 @@ fn lower_block(
                                 operator: semantics.assignment_call(*id).cloned(),
                                 span: *span,
                             },
+                            op: *op,
+                            value: value.id,
+                        },
+                        Stmt::IndexAssign {
+                            id,
+                            target,
+                            op,
+                            value,
+                            span,
+                        } => TypedStatementKind::IndexAssign {
+                            assignment: ResolvedIndexAssignment {
+                                id: *id,
+                                operator: semantics
+                                    .assignment_call(*id)
+                                    .expect("checked indexed assignments have resolved operators")
+                                    .clone(),
+                                span: *span,
+                            },
+                            target: target.id,
                             op: *op,
                             value: value.id,
                         },

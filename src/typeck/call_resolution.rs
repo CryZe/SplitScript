@@ -127,6 +127,29 @@ impl Checker {
         Some(result)
     }
 
+    pub(super) fn resolve_index_assignment_operator(
+        &mut self,
+        assignment: crate::ast::AssignmentId,
+        op: crate::ast::BinaryOp,
+        left_type: Type,
+        right_type: Type,
+        receiver: crate::ast::ExprId,
+        span: Span,
+    ) -> Option<Type> {
+        let (result, call) = self.binary_operator_call(
+            op,
+            left_type,
+            right_type,
+            ResolvedReceiver::Expression {
+                expression: receiver,
+                members: Vec::new(),
+            },
+            span,
+        )?;
+        self.semantics.resolve_assignment_call(assignment, call);
+        Some(result)
+    }
+
     fn binary_operator_call(
         &mut self,
         op: crate::ast::BinaryOp,

@@ -824,6 +824,7 @@ fn add_completed_statement_binding(builder: &mut CompletionBuilder, statement: &
             ..
         } => add_scoped_variable(builder, &binding.name, "local variable"),
         Stmt::Assign { .. }
+        | Stmt::IndexAssign { .. }
         | Stmt::If { .. }
         | Stmt::While { .. }
         | Stmt::For { .. }
@@ -851,6 +852,14 @@ fn add_statement_inner_bindings(builder: &mut CompletionBuilder, statement: &Stm
         | Stmt::Throw { error: value, .. }
         | Stmt::Expression(value) => {
             add_expression_bindings(builder, value, offset);
+        }
+        Stmt::IndexAssign { target, value, .. } => {
+            for expression in [target, value] {
+                if contains_offset(expression.span, offset) {
+                    add_expression_bindings(builder, expression, offset);
+                    break;
+                }
+            }
         }
         Stmt::If {
             condition,
@@ -1027,6 +1036,7 @@ fn statement_span(statement: &Stmt) -> Span {
     match statement {
         Stmt::Debug { span, .. }
         | Stmt::Assign { span, .. }
+        | Stmt::IndexAssign { span, .. }
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
         | Stmt::For { span, .. }

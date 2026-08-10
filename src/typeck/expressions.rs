@@ -762,43 +762,7 @@ impl Checker {
                 index,
                 bracket_span,
             } => {
-                let receiver_ty = self.expr(receiver, None)?;
-                if self.is_error_type(receiver_ty) {
-                    self.expr(index, None);
-                    return self.expect_expression(expr.id, receiver_ty, expected, expr.span);
-                }
-                let element = match self.shallow_type(receiver_ty) {
-                    Type::Array(array) => self.inference.array_element(array),
-                    Type::Known(id) => match self.inference.type_store().kind(id) {
-                        crate::types::TypeKind::Array { element, .. } => Type::Known(*element),
-                        _ => {
-                            let actual = self.type_name(receiver_ty);
-                            self.error(
-                                format!("type `{actual}` cannot be indexed; expected an array"),
-                                *bracket_span,
-                            );
-                            return None;
-                        }
-                    },
-                    Type::Variable(variable)
-                        if self.inference.variable_requirements(variable).is_empty() =>
-                    {
-                        let element = self.fresh_inference(Requirements::none(), None);
-                        let array = Type::Array(self.array_type_id(element));
-                        self.unify(receiver_ty, array, receiver.span)?;
-                        element
-                    }
-                    _ => {
-                        let actual = self.type_name(receiver_ty);
-                        self.error(
-                            format!("type `{actual}` cannot be indexed; expected an array"),
-                            *bracket_span,
-                        );
-                        return None;
-                    }
-                };
-                let u32_type = self.core_type(crate::stdlib::CoreTypeId::U32);
-                self.expr(index, Some(u32_type));
+                let element = self.indexed_element_type(receiver, index, *bracket_span)?;
                 self.expect_expression(expr.id, element, expected, expr.span)?
             }
             ExprKind::Unary { op, expr: inner } => match op {
@@ -1115,5 +1079,51 @@ impl Checker {
                 unreachable!("logical operators are checked separately")
             }
         }
+    }
+
+    pub(super) fn indexed_element_type(
+        &mut self,
+        receiver: &Expr,
+        index: &Expr,
+        bracket_span: Span,
+    ) -> Option<Type> {
+        let receiver_ty = self.expr(receiver, None)?;
+        if self.is_error_type(receiver_ty) {
+            self.expr(index, None);
+            return Some(receiver_ty);
+        }
+        let element = match self.shallow_type(receiver_ty) {
+            Type::Array(array) => self.inference.array_element(array),
+            Type::Known(id) => match self.inference.type_store().kind(id) {
+                crate::types::TypeKind::Array { element, .. } => Type::Known(*element),
+                _ => {
+                    let actual = self.type_name(receiver_ty);
+                    self.error(
+                        format!("type `{actual}` cannot be indexed; expected an array"),
+                        bracket_span,
+                    );
+                    return None;
+                }
+            },
+            Type::Variable(variable)
+                if self.inference.variable_requirements(variable).is_empty() =>
+            {
+                let element = self.fresh_inference(Requirements::none(), None);
+                let array = Type::Array(self.array_type_id(element));
+                self.unify(receiver_ty, array, receiver.span)?;
+                element
+            }
+            _ => {
+                let actual = self.type_name(receiver_ty);
+                self.error(
+                    format!("type `{actual}` cannot be indexed; expected an array"),
+                    bracket_span,
+                );
+                return None;
+            }
+        };
+        let u32_type = self.core_type(crate::stdlib::CoreTypeId::U32);
+        self.expr(index, Some(u32_type));
+        Some(element)
     }
 }

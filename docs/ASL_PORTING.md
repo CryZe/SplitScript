@@ -681,13 +681,14 @@ index traps just like an indexed read:
 
 ```splitscript
 route[currentIndex] = nextLevel
+route[currentIndex] += 1
 ```
 
 Plain indexed assignment evaluates the collection and index once. Compound
-forms such as `route[nextIndex()] += 1` are deliberately not accepted yet;
-their eventual lowering must not call `nextIndex()` twice. Growable `[T]`
-supports `push`, `extend`, indexed `removeAt`, optional `pop`, first-match
-`remove(value)`, and capacity-preserving `clear`. C#
+forms such as `route[nextIndex()] += 1` additionally evaluate the right operand
+once and use the same typed operator as an ordinary `+=`; `nextIndex()` is not
+called twice. Growable `[T]` supports `push`, `extend`, indexed `removeAt`,
+optional `pop`, first-match `remove(value)`, and capacity-preserving `clear`. C#
 `list.AddRange(values)` becomes
 `list.extend(values)` once both collections are represented as typed arrays;
 self-extension duplicates the original elements once. Successful structural

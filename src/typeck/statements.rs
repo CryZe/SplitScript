@@ -94,6 +94,33 @@ impl Checker {
                     None => self.error(format!("unknown variable `{name}`"), *span),
                 }
             }
+            Stmt::IndexAssign {
+                id,
+                target,
+                op,
+                value,
+                span,
+            } => {
+                let Some(element_type) = self.expr(target, None) else {
+                    self.expr(value, None);
+                    return;
+                };
+                let Some(right_type) = self.expr(value, None) else {
+                    return;
+                };
+                if let Some(result) = self.resolve_index_assignment_operator(
+                    *id,
+                    *op,
+                    element_type,
+                    right_type,
+                    target.id,
+                    *span,
+                ) {
+                    self.unify(result, element_type, *span);
+                } else if let Some(operand_type) = self.unify(element_type, right_type, *span) {
+                    self.require_binary_operand(*op, operand_type, *span);
+                }
+            }
             Stmt::If {
                 condition,
                 then_block,

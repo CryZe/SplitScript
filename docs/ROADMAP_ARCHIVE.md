@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-10: fail-fast structural collection iteration
+
+- Added a structural version to stable array and set wrappers and captured it
+  when a `for` loop begins, including across suspending loop bodies.
+- Made array append and successful set insertion/removal/clearing invalidate
+  active traversal through every alias, trapping on the next loop advance
+  instead of silently skipping or revisiting values.
+- Kept element replacement and no-op set mutations valid during traversal and
+  avoided per-loop collection snapshots or hot-path allocations.
+- Added host runtime coverage for alias mutation, fail-fast traps, and the
+  permitted non-structural/no-op cases.
+
 ## 2026-08-10: stable source-array values
 
 - Replaced the public array value's raw Wasm GC array representation with a

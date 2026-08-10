@@ -122,6 +122,7 @@ impl Checker {
                 binding,
                 iterable_value,
                 index_value,
+                version_value,
                 iterable,
                 body,
                 ..
@@ -196,6 +197,10 @@ impl Checker {
                     .resolve_value_type(*iterable_value, iterable_ty);
                 self.semantics.resolve_value_type(
                     *index_value,
+                    self.core_type(crate::stdlib::CoreTypeId::U32),
+                );
+                self.semantics.resolve_value_type(
+                    *version_value,
                     self.core_type(crate::stdlib::CoreTypeId::U32),
                 );
                 self.semantics.resolve_value_type(binding.id, element_ty);

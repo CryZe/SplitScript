@@ -237,6 +237,10 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                                 element_type: StorageType::Val(ValType::I32),
                                 mutable: true,
                             },
+                            FieldType {
+                                element_type: StorageType::Val(ValType::I32),
+                                mutable: true,
+                            },
                         ]
                         .into(),
                     }),
@@ -312,6 +316,10 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                         fields: vec![
                             FieldType {
                                 element_type: layout.storage_type(Type::ArrayStorage(set.backing)),
+                                mutable: true,
+                            },
+                            FieldType {
+                                element_type: StorageType::Val(ValType::I32),
                                 mutable: true,
                             },
                             FieldType {

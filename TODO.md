@@ -130,14 +130,6 @@ or behavioral parity.
   document that headings are visual and parent boolean settings must gate child
   behavior in source; do not let a compiling hierarchy imply behavior the host
   does not provide.
-- [ ] Settle mutation during collection iteration before adding more mutable
-  collections. `Set<T>` traversal currently observes the live set, which is
-  deterministic but easy to misuse when insertion, removal, or clearing occurs
-  in the loop body. Choose and document one approachable rule: diagnose
-  mutation of the iterated collection, or define snapshot traversal with an
-  explicit allocation policy. Apply the same rule to growable arrays; add
-  `Map<K, V>` only when the next maintained port requires stored key/value
-  associations.
 - [ ] Continue `[T]` as the growable ordered sequence instead of adding a
   separate `List<T>` type. Stable wrapper identity, replaceable capacity-backed
   storage, logical length, and amortized `push` now preserve aliases across
@@ -145,8 +137,17 @@ or behavioral parity.
   size-changing methods. Next design bulk extension, indexed insertion/removal,
   value removal, `pop`, and `clear` from corpus evidence, with explicit
   bounds/failure and must-use behavior. Both array forms retain indexing,
-  iteration, search, length, and element replacement. Settle mutation during
-  iteration before expanding the mutable surface.
+  iteration, search, length, and element replacement. Structural mutation now
+  invalidates active iteration without allocating snapshots; preserve that
+  rule for every future collection mutator.
+- [ ] Strengthen usage-driven collection inference. `let values = []` should
+  retain one unresolved element type that later `push`, indexing context,
+  assignment, return type, or function arguments can constrain; do not require
+  an annotation merely because the literal itself is empty. Audit the same
+  behavior for `Set.new()` followed by `insert`/`contains`, and preserve a
+  focused ambiguity diagnostic only when the collection remains genuinely
+  unconstrained. Cover backward constraints across locals and functions,
+  completion/inlay hints after resolution, and avoid field-name-based guesses.
 - [ ] Design indexed mutation together with collection mutability rather than
   adding an isolated array-assignment special case. Specify aliasing, fixed
   array versus growable collection behavior, bounds failure, and interaction
@@ -397,6 +398,18 @@ remaining work is product hardening and distribution.
 
 ## P2 / deliberately deferred
 
+- [ ] Design a contextual `default` literal backed by a source-defined
+  `Default` capability. Like `None`, it may be assigned directly where the
+  expected type or later constraints determine a unique target, but it must not
+  silently become the fallback for failed inference. Define capability
+  membership for primitives and standard-library types; make records defaultable
+  only when every field is defaultable; and require an explicit decision for
+  enums and collections rather than assuming a first variant or allocating
+  implicitly. Keep `default` distinct from `None`: `None` is the unit value and
+  absent option case, while `default` constructs the target type's declared
+  default value. Add focused ambiguity/unsupported-type diagnostics, hover,
+  completion, formatting, and source-defined capability documentation when the
+  feature is implemented.
 - [ ] Settle cross-platform process-name semantics with the host runtime before
   warning about extensionless native `state` names. ASL commonly omits
   Windows' `.exe`, but extensionless names are valid on Linux and macOS, so a

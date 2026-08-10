@@ -1144,8 +1144,9 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_split(
     );
     function
         .instruction(&Instruction::LocalGet(output))
-        .instruction(&Instruction::LocalGet(segment_count))
-        .instruction(&Instruction::StructNew(strings_array))
+        .instruction(&Instruction::LocalGet(segment_count));
+    super::super::array_value::emit_wrap_loaded(&mut function, strings_array);
+    function
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(match_index))

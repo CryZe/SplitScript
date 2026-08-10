@@ -346,11 +346,18 @@ fn compile_async_body(
                 binding,
                 iterable_value,
                 index_value,
+                version_value,
                 body,
                 header_state,
                 exit_state,
             } => {
-                compile_for_has_next(&mut function, iterable_value, index_value, &context);
+                compile_for_has_next(
+                    &mut function,
+                    iterable_value,
+                    index_value,
+                    version_value,
+                    &context,
+                );
                 function.instruction(&Instruction::If(BlockType::Empty));
                 compile_for_bind_and_advance(
                     &mut function,
@@ -2288,6 +2295,7 @@ enum AsyncState<'a> {
         binding: ValueId,
         iterable_value: ValueId,
         index_value: ValueId,
+        version_value: ValueId,
         body: &'a wasm_ir::Block,
         header_state: wasm_ir::AsyncStateId,
         exit_state: wasm_ir::AsyncStateId,
@@ -2409,6 +2417,7 @@ fn collect_async_states<'a>(
             binding,
             iterable_value,
             index_value,
+            version_value,
             body,
             continuation,
             header_state,
@@ -2422,6 +2431,7 @@ fn collect_async_states<'a>(
                 binding: *binding,
                 iterable_value: *iterable_value,
                 index_value: *index_value,
+                version_value: *version_value,
                 body,
                 header_state: *header_state,
                 exit_state: *exit_state,
@@ -2633,14 +2643,28 @@ fn compile_async_flow(
                 binding,
                 iterable_value,
                 index_value,
+                version_value,
                 iterable,
                 body,
             } => {
-                compile_for_init(function, *iterable_value, *index_value, *iterable, context);
+                compile_for_init(
+                    function,
+                    *iterable_value,
+                    *index_value,
+                    *version_value,
+                    *iterable,
+                    context,
+                );
                 function
                     .instruction(&Instruction::Block(BlockType::Empty))
                     .instruction(&Instruction::Loop(BlockType::Empty));
-                compile_for_has_next(function, *iterable_value, *index_value, context);
+                compile_for_has_next(
+                    function,
+                    *iterable_value,
+                    *index_value,
+                    *version_value,
+                    context,
+                );
                 function
                     .instruction(&Instruction::I32Eqz)
                     .instruction(&Instruction::BrIf(1));
@@ -2673,9 +2697,17 @@ fn compile_async_flow(
             wasm_ir::Statement::ForInit {
                 iterable_value,
                 index_value,
+                version_value,
                 iterable,
                 ..
-            } => compile_for_init(function, *iterable_value, *index_value, *iterable, context),
+            } => compile_for_init(
+                function,
+                *iterable_value,
+                *index_value,
+                *version_value,
+                *iterable,
+                context,
+            ),
             wasm_ir::Statement::Evaluate {
                 expression,
                 discard_result,

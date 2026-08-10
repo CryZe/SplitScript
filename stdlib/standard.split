@@ -1570,6 +1570,7 @@ typeConstructor Array<T> {
     /// Capacity grows geometrically when needed, while the array value keeps
     /// the same identity so every alias observes the appended element.
     /// Exact `[T; N]` arrays cannot change length and do not support `push`.
+    /// Appending through any alias invalidates active iteration of this array.
     ///
     /// # Example
     ///
@@ -1665,6 +1666,8 @@ typeConstructor Set<T: Equatable> {
     /// Inserts a value if it is not already present.
     ///
     /// Returns whether the value was newly inserted.
+    /// A successful insertion invalidates active iteration of this set;
+    /// inserting an existing value does not.
     ///
     /// # Example
     ///
@@ -1682,6 +1685,8 @@ typeConstructor Set<T: Equatable> {
     /// Removes an equal value if it is present.
     ///
     /// Returns whether a value was removed.
+    /// A successful removal invalidates active iteration of this set; removing
+    /// a missing value does not.
     ///
     /// # Example
     ///
@@ -1699,6 +1704,7 @@ typeConstructor Set<T: Equatable> {
     /// Removes every stored value while retaining the set itself.
     ///
     /// Later insertions reuse the same logical set value.
+    /// Clearing invalidates active iteration of this set.
     ///
     /// # Example
     ///

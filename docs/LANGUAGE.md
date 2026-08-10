@@ -423,8 +423,16 @@ for item in inventory {
 
 `for` supports the same `break`, `continue`, and fallback control flow as
 `while`. A `for` body in `onAttach` may also use `await` or `retry`; the array,
-next index, and current element are retained across suspension without
-evaluating the array expression again.
+next index, current element, and collection identity are retained across
+suspension without evaluating the array expression again.
+
+Structurally changing the iterated collection invalidates that traversal. If
+an alias appends to the array, or successfully inserts into, removes from, or
+clears the set, the loop stops with a runtime error when it next advances. This
+fail-fast rule catches aliasing too and does not allocate a snapshot on every
+tick. Replacing an existing array element with `set` is not a structural
+change. A duplicate set insertion or removal of a missing value is also a
+no-op and does not invalidate the loop.
 
 `break` exits the nearest enclosing loop. `continue` skips the rest of the
 current iteration and evaluates that loop's condition again. Both are
@@ -920,11 +928,10 @@ for room in visited {
 }
 ```
 
-Set iteration order is not a language guarantee. Traversal currently observes
-the live collection, so mutating that same set from its loop body can change
-which values remain to be visited. Avoid doing so; the language will adopt a
-stricter diagnostic or snapshot rule before more mutable collection types are
-introduced.
+Set iteration order is not a language guarantee. Structurally mutating the set
+while traversing it invalidates the loop using the same fail-fast rule as
+growable arrays. Compute pending additions or removals separately and apply
+them after the loop.
 
 ## Settings
 

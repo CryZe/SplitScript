@@ -335,6 +335,7 @@ pub enum TypedStatementKind {
         binding: ValueId,
         iterable_value: ValueId,
         index_value: ValueId,
+        version_value: ValueId,
         iterable: ExprId,
         body: TypedBlock,
     },
@@ -1355,6 +1356,7 @@ fn lower_block(
                             binding,
                             iterable_value,
                             index_value,
+                            version_value,
                             iterable,
                             body,
                             ..
@@ -1362,6 +1364,7 @@ fn lower_block(
                             binding: binding.id,
                             iterable_value: *iterable_value,
                             index_value: *index_value,
+                            version_value: *version_value,
                             iterable: iterable.id,
                             body: lower_block(body, semantics, failure_boundary),
                         },

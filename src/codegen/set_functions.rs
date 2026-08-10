@@ -11,6 +11,10 @@ use super::{
     runtime_helpers::emit_value_equality, set_element_type,
 };
 
+pub(super) const BACKING_FIELD: u32 = 0;
+pub(super) const LENGTH_FIELD: u32 = 1;
+pub(super) const VERSION_FIELD: u32 = 2;
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct SetFunctionPlan {
     pub new: u32,
@@ -86,6 +90,7 @@ fn compile_new(set: &ResolvedSetType, gc: &GcLayout) -> Function {
             gc.index(Type::ArrayStorage(set.backing)),
         ))
         .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::StructNew(gc.index(Type::Set(set.id))))
         .instruction(&Instruction::End);
     function
@@ -98,7 +103,7 @@ fn compile_length(set: &ResolvedSetType, gc: &GcLayout) -> Function {
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.index(Type::Set(set.id)),
-            field_index: 1,
+            field_index: LENGTH_FIELD,
         })
         .instruction(&Instruction::End);
     function
@@ -207,7 +212,7 @@ fn compile_insert(set: &ResolvedSetType, contains: u32, gc: &GcLayout) -> Functi
         .instruction(&Instruction::LocalGet(replacement))
         .instruction(&Instruction::StructSet {
             struct_type_index: gc.index(Type::Set(set.id)),
-            field_index: 0,
+            field_index: BACKING_FIELD,
         })
         .instruction(&Instruction::LocalGet(replacement))
         .instruction(&Instruction::LocalSet(backing))
@@ -226,7 +231,21 @@ fn compile_insert(set: &ResolvedSetType, contains: u32, gc: &GcLayout) -> Functi
         .instruction(&Instruction::I32Add)
         .instruction(&Instruction::StructSet {
             struct_type_index: gc.index(Type::Set(set.id)),
-            field_index: 1,
+            field_index: LENGTH_FIELD,
+        })
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: gc.index(Type::Set(set.id)),
+            field_index: VERSION_FIELD,
+        })
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: gc.index(Type::Set(set.id)),
+            field_index: VERSION_FIELD,
         })
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::End);
@@ -309,7 +328,21 @@ fn compile_remove(
         .instruction(&Instruction::I32Sub)
         .instruction(&Instruction::StructSet {
             struct_type_index: gc.index(Type::Set(set.id)),
-            field_index: 1,
+            field_index: LENGTH_FIELD,
+        })
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: gc.index(Type::Set(set.id)),
+            field_index: VERSION_FIELD,
+        })
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: gc.index(Type::Set(set.id)),
+            field_index: VERSION_FIELD,
         })
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::Return)
@@ -337,14 +370,28 @@ fn compile_clear(set: &ResolvedSetType, gc: &GcLayout) -> Function {
         ))
         .instruction(&Instruction::StructSet {
             struct_type_index: gc.index(Type::Set(set.id)),
-            field_index: 0,
+            field_index: BACKING_FIELD,
         })
         .instruction(&Instruction::LocalGet(0))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::StructSet {
             struct_type_index: gc.index(Type::Set(set.id)),
-            field_index: 1,
+            field_index: LENGTH_FIELD,
+        })
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: gc.index(Type::Set(set.id)),
+            field_index: VERSION_FIELD,
+        })
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: gc.index(Type::Set(set.id)),
+            field_index: VERSION_FIELD,
         })
         .instruction(&Instruction::End);
     function
@@ -363,14 +410,14 @@ fn load_set_state(
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: set_type,
-            field_index: 0,
+            field_index: BACKING_FIELD,
         })
         .instruction(&Instruction::LocalSet(backing))
         .instruction(&Instruction::LocalGet(0))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: set_type,
-            field_index: 1,
+            field_index: LENGTH_FIELD,
         })
         .instruction(&Instruction::LocalSet(length));
 }

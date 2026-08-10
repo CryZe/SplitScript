@@ -138,6 +138,7 @@ impl Parser<'_> {
                 in_span,
                 iterable_value: self.new_value_id(),
                 index_value: self.new_value_id(),
+                version_value: self.new_value_id(),
                 iterable,
                 body,
                 span: Span { start, end },

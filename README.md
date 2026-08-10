@@ -255,9 +255,10 @@ numbered-settings case in [`docs/DDS_PORT.md`](docs/DDS_PORT.md).
   elements support one transactional typed process-memory read.
 - Run-scoped `Set<T>` values with source-declared `Equatable` constraints,
   persistent mutation, containment, insertion/removal, clearing, and length.
-- Inferred `for value in collection` loops over `[T]`, `[T; N]`, and `Set<T>`, with read-only
-  scoped bindings, `break`/`continue`, single evaluation of the iterable, and
-  suspension-safe `await`/`retry` bodies in `onAttach`.
+- Inferred `for value in collection` loops over `[T]`, `[T; N]`, and `Set<T>`,
+  with read-only scoped bindings, `break`/`continue`, single evaluation of the
+  iterable, suspension-safe `await`/`retry` bodies in `onAttach`, and fail-fast
+  detection of structural mutation through any alias.
 - Strict width checking: a `u16` is never silently treated as a `u32`.
 - Module-relative and absolute 64-bit pointer paths.
 - Ordered fallback process attachment with one or more executable names.

@@ -121,7 +121,8 @@ fn compile_push(
         .instruction(&Instruction::StructSet {
             struct_type_index: array_type,
             field_index: array_value::LENGTH_FIELD,
-        })
-        .instruction(&Instruction::End);
+        });
+    array_value::emit_increment_version(&mut function, gc, array.id);
+    function.instruction(&Instruction::End);
     function
 }

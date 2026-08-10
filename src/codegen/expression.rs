@@ -368,14 +368,28 @@ fn compile_block_with_loop(
                 binding,
                 iterable_value,
                 index_value,
+                version_value,
                 iterable,
                 body,
             } => {
-                compile_for_init(function, *iterable_value, *index_value, *iterable, context);
+                compile_for_init(
+                    function,
+                    *iterable_value,
+                    *index_value,
+                    *version_value,
+                    *iterable,
+                    context,
+                );
                 function
                     .instruction(&Instruction::Block(BlockType::Empty))
                     .instruction(&Instruction::Loop(BlockType::Empty));
-                compile_for_has_next(function, *iterable_value, *index_value, context);
+                compile_for_has_next(
+                    function,
+                    *iterable_value,
+                    *index_value,
+                    *version_value,
+                    context,
+                );
                 function
                     .instruction(&Instruction::I32Eqz)
                     .instruction(&Instruction::BrIf(1));
@@ -404,9 +418,17 @@ fn compile_block_with_loop(
             wasm_ir::Statement::ForInit {
                 iterable_value,
                 index_value,
+                version_value,
                 iterable,
                 ..
-            } => compile_for_init(function, *iterable_value, *index_value, *iterable, context),
+            } => compile_for_init(
+                function,
+                *iterable_value,
+                *index_value,
+                *version_value,
+                *iterable,
+                context,
+            ),
             wasm_ir::Statement::Evaluate {
                 expression,
                 discard_result,
@@ -1175,6 +1197,7 @@ pub(super) fn compile_for_init(
     function: &mut Function,
     iterable_value: ValueId,
     index_value: ValueId,
+    version_value: ValueId,
     iterable: ExprId,
     context: &ExprContext<'_>,
 ) {
@@ -1184,6 +1207,22 @@ pub(super) fn compile_for_init(
     compile_value_set(function, index_value, context, |function| {
         function.instruction(&Instruction::I32Const(0));
     });
+    compile_value_set(function, version_value, context, |function| {
+        compile_value_get(function, iterable_value, context);
+        match for_collection_type(iterable_value, context).0 {
+            ForCollection::Array(array) => {
+                super::array_value::emit_version(function, context.gc, array);
+            }
+            ForCollection::Set { set, .. } => {
+                function
+                    .instruction(&Instruction::RefAsNonNull)
+                    .instruction(&Instruction::StructGet {
+                        struct_type_index: context.gc.index(Type::Set(set)),
+                        field_index: super::set_functions::VERSION_FIELD,
+                    });
+            }
+        }
+    });
 }
 
 /// Leaves whether another element exists on the stack.
@@ -1191,8 +1230,29 @@ pub(super) fn compile_for_has_next(
     function: &mut Function,
     iterable_value: ValueId,
     index_value: ValueId,
+    version_value: ValueId,
     context: &ExprContext<'_>,
 ) {
+    compile_value_get(function, iterable_value, context);
+    match for_collection_type(iterable_value, context).0 {
+        ForCollection::Array(array) => {
+            super::array_value::emit_version(function, context.gc, array);
+        }
+        ForCollection::Set { set, .. } => {
+            function
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: context.gc.index(Type::Set(set)),
+                    field_index: super::set_functions::VERSION_FIELD,
+                });
+        }
+    }
+    compile_value_get(function, version_value, context);
+    function
+        .instruction(&Instruction::I32Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::Unreachable)
+        .instruction(&Instruction::End);
     compile_value_get(function, index_value, context);
     compile_value_get(function, iterable_value, context);
     match for_collection_type(iterable_value, context).0 {
@@ -1203,7 +1263,7 @@ pub(super) fn compile_for_has_next(
             function.instruction(&Instruction::RefAsNonNull);
             function.instruction(&Instruction::StructGet {
                 struct_type_index: context.gc.index(Type::Set(set)),
-                field_index: 1,
+                field_index: super::set_functions::LENGTH_FIELD,
             });
         }
     }
@@ -1231,7 +1291,7 @@ pub(super) fn compile_for_bind_and_advance(
                 function.instruction(&Instruction::RefAsNonNull);
                 function.instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.index(Type::Set(set)),
-                    field_index: 0,
+                    field_index: super::set_functions::BACKING_FIELD,
                 });
                 function.instruction(&Instruction::RefAsNonNull);
                 backing

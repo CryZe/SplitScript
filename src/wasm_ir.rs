@@ -405,6 +405,7 @@ pub enum Statement {
         binding: ValueId,
         iterable_value: ValueId,
         index_value: ValueId,
+        version_value: ValueId,
         iterable: ExprId,
         body: Block,
     },
@@ -412,6 +413,7 @@ pub enum Statement {
         binding: ValueId,
         iterable_value: ValueId,
         index_value: ValueId,
+        version_value: ValueId,
         iterable: ExprId,
     },
 }
@@ -452,6 +454,7 @@ pub enum Terminator {
         binding: ValueId,
         iterable_value: ValueId,
         index_value: ValueId,
+        version_value: ValueId,
         body: Box<Block>,
         continuation: Box<Block>,
         header_state: AsyncStateId,
@@ -1217,6 +1220,7 @@ fn analyze_suspension_liveness(
             binding,
             iterable_value,
             index_value,
+            version_value,
             body,
             continuation,
             ..
@@ -1232,6 +1236,7 @@ fn analyze_suspension_liveness(
             let mut loop_live = continuation_live;
             loop_live.insert(*iterable_value);
             loop_live.insert(*index_value);
+            loop_live.insert(*version_value);
             loop {
                 let body_live = analyze_suspension_liveness(
                     body,
@@ -1385,6 +1390,7 @@ fn analyze_statements_liveness(
                 binding,
                 iterable_value,
                 index_value,
+                version_value,
                 iterable,
                 body,
             } => {
@@ -1400,6 +1406,7 @@ fn analyze_statements_liveness(
                 body_live.remove(binding);
                 body_live.remove(iterable_value);
                 body_live.remove(index_value);
+                body_live.remove(version_value);
                 collect_expression_values(*iterable, &mut body_live, local_values, program);
                 *live = body_live;
             }
@@ -1407,11 +1414,13 @@ fn analyze_statements_liveness(
                 binding,
                 iterable_value,
                 index_value,
+                version_value,
                 iterable,
             } => {
                 live.remove(binding);
                 live.remove(iterable_value);
                 live.remove(index_value);
+                live.remove(version_value);
                 collect_expression_values(*iterable, live, local_values, program);
             }
         }
@@ -2480,6 +2489,7 @@ fn lower_async_statements(
                 binding,
                 iterable_value,
                 index_value,
+                version_value,
                 iterable,
                 body,
             } => {
@@ -2502,12 +2512,14 @@ fn lower_async_statements(
                             binding: *binding,
                             iterable_value: *iterable_value,
                             index_value: *index_value,
+                            version_value: *version_value,
                             iterable: normalized.value,
                         }],
                         terminator: Terminator::AsyncFor {
                             binding: *binding,
                             iterable_value: *iterable_value,
                             index_value: *index_value,
+                            version_value: *version_value,
                             body: Box::new(body),
                             continuation: Box::new(result),
                             header_state: AsyncStateId::ENTRY,
@@ -2525,6 +2537,7 @@ fn lower_async_statements(
                         binding: *binding,
                         iterable_value: *iterable_value,
                         index_value: *index_value,
+                        version_value: *version_value,
                         iterable: normalized.value,
                         body: lower_block(body, typed_hir, semantics, profile),
                     },
@@ -2873,6 +2886,7 @@ fn lower_statements(
                 binding,
                 iterable_value,
                 index_value,
+                version_value,
                 iterable,
                 body,
             } => {
@@ -2880,6 +2894,7 @@ fn lower_statements(
                     binding: *binding,
                     iterable_value: *iterable_value,
                     index_value: *index_value,
+                    version_value: *version_value,
                     iterable: *iterable,
                     body: lower_block(body, typed_hir, semantics, profile),
                 });
@@ -3096,17 +3111,20 @@ impl Visitor for LocalPlanner<'_> {
                 binding,
                 iterable_value,
                 index_value,
+                version_value,
                 ..
             }
             | Statement::ForInit {
                 binding,
                 iterable_value,
                 index_value,
+                version_value,
                 ..
             } => {
                 self.value(*binding);
                 self.value(*iterable_value);
                 self.value(*index_value);
+                self.value(*version_value);
             }
             Statement::Store { .. }
             | Statement::Evaluate { .. }

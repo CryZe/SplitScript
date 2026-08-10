@@ -367,6 +367,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/collection_iteration_runtime.split",
+        output: "collection_iteration_runtime.wasm",
+        profile: "release",
+        harness: "tests/collection_iteration_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/array_push_runtime.split",
         output: "array_push_runtime.wasm",
         profile: "release",

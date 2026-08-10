@@ -865,6 +865,8 @@ pub enum Stmt {
         iterable_value: ValueId,
         /// Compiler-owned `u32` index storage used by lowering.
         index_value: ValueId,
+        /// Compiler-owned structural version captured when iteration begins.
+        version_value: ValueId,
         iterable: Expr,
         body: Block,
         span: Span,

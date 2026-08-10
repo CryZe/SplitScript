@@ -14,6 +14,7 @@ use super::{GcLayout, Type, try_array_element_type};
 
 pub(super) const BACKING_FIELD: u32 = 0;
 pub(super) const LENGTH_FIELD: u32 = 1;
+pub(super) const VERSION_FIELD: u32 = 2;
 
 /// Returns the general raw storage used by a source wrapper when one exists.
 pub(super) fn storage_id(
@@ -39,9 +40,18 @@ pub(super) fn storage_id(
 
 /// Wraps the raw array storage currently on the operand stack.
 pub(super) fn emit_wrap(function: &mut Function, gc: &GcLayout, array: ArrayTypeId, length: u32) {
+    function.instruction(&Instruction::I32Const(length as i32));
+    emit_wrap_loaded(function, gc.index(Type::Array(array)));
+}
+
+/// Wraps backing storage and a logical length already on the operand stack.
+///
+/// Keeping wrapper construction here prevents runtime helpers from needing to
+/// know about compiler-owned metadata fields such as the structural version.
+pub(super) fn emit_wrap_loaded(function: &mut Function, array_type: u32) {
     function
-        .instruction(&Instruction::I32Const(length as i32))
-        .instruction(&Instruction::StructNew(gc.index(Type::Array(array))));
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::StructNew(array_type));
 }
 
 /// Creates exact raw storage from the values on the operand stack and wraps it.
@@ -76,5 +86,35 @@ pub(super) fn emit_length(function: &mut Function, gc: &GcLayout, array: ArrayTy
         .instruction(&Instruction::StructGet {
             struct_type_index: gc.index(Type::Array(array)),
             field_index: LENGTH_FIELD,
+        });
+}
+
+/// Replaces a source array on the operand stack with its structural version.
+pub(super) fn emit_version(function: &mut Function, gc: &GcLayout, array: ArrayTypeId) {
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: gc.index(Type::Array(array)),
+            field_index: VERSION_FIELD,
+        });
+}
+
+/// Increments the structural version of the source array in local zero.
+pub(super) fn emit_increment_version(function: &mut Function, gc: &GcLayout, array: ArrayTypeId) {
+    let array_type = gc.index(Type::Array(array));
+    function
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: array_type,
+            field_index: VERSION_FIELD,
+        })
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: array_type,
+            field_index: VERSION_FIELD,
         });
 }

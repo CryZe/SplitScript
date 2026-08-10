@@ -315,16 +315,18 @@ fn render_typed_block(
                 binding,
                 iterable_value,
                 index_value,
+                version_value,
                 iterable,
                 body,
             } => {
                 writeln!(
                     output,
-                    "{indent}for v{} in e{} storage=v{} index=v{}:",
+                    "{indent}for v{} in e{} storage=v{} index=v{} version=v{}:",
                     binding.index(),
                     iterable.index(),
                     iterable_value.index(),
-                    index_value.index()
+                    index_value.index(),
+                    version_value.index()
                 )
                 .unwrap();
                 render_typed_block(output, body, depth + 1);

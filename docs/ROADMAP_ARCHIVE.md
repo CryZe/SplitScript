@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: overload-aware C# rounding guidance
+
+- Added focused migration diagnostics for `Math.Round` and `MathF.Round`,
+  directing default midpoint-to-even calls to `round()` and decimal-place
+  calls to `roundTo(digits)`.
+- Made the `Math`/`MathF` result-width distinction explicit and deliberately
+  withheld an automatic rewrite for decimal inputs and explicit
+  `MidpointRounding` modes such as `AwayFromZero`.
+- Added the compiler-owned rounding concept to the generated migration
+  capability index and covered canonical f32 and f64 forms.
+
 ## 2026-08-10: source-declared floating-point truncation
 
 - Added `Float.truncate()` to the canonical standard-library source with an

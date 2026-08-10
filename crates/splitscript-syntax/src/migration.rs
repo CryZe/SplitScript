@@ -201,6 +201,8 @@ pub const CSHARP_SQUARE_ROOT_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.square-root-call");
 pub const CSHARP_TRUNCATE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.truncate-call");
+pub const CSHARP_ROUND_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.math.round-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.timespan.parse-call");
 pub const CSHARP_TIMESPAN_TICKS_DIAGNOSTIC: MigrationDiagnosticId =
@@ -492,6 +494,19 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_ROUND_DIAGNOSTIC,
+        concept: MigrationConceptId::new("math.round"),
+        message: "C# rounding needs a receiver method and overload review in SplitScript",
+        primary_label: "move this operation onto the floating-point value",
+        notes: &[
+            "rewrite the default midpoint-to-even form as `(value as f64).round()` for `Math.Round`, or `(value as f32).round()` for `MathF.Round`",
+            "rewrite the integer-digits overload as `(value as f64).roundTo(digits)` for `Math.Round`; preserve f32 instead when migrating `MathF.Round`",
+            "SplitScript `round` and `roundTo` preserve their receiver type and round halfway values to even",
+            "decimal inputs and explicit `MidpointRounding` modes such as `AwayFromZero` are not equivalent to the available floating-point methods and need a semantic rewrite",
+            "there is no automatic rewrite because the selected C# overload determines the result width, decimal behavior, and midpoint rule",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.numeric-parse"),
         message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
@@ -563,6 +578,9 @@ pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnos
     }
     if matches!(owner.as_str(), "Math" | "MathF") && method == "Truncate" {
         return Some(CSHARP_TRUNCATE_DIAGNOSTIC);
+    }
+    if matches!(owner.as_str(), "Math" | "MathF") && method == "Round" {
+        return Some(CSHARP_ROUND_DIAGNOSTIC);
     }
     if method != "Parse" && method != "TryParse" {
         return None;
@@ -1052,6 +1070,19 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Use `value.truncate()` with an explicit f32 or f64 boundary when preserving C# Math versus MathF semantics.",
         targets: &[MigrationTarget::StandardLibraryItem("Float.truncate")],
+        cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("math.round"),
+        name: "Floating-point rounding",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `value.round()` or `value.roundTo(digits)` for midpoint-to-even floating-point rounding; review result width, decimal inputs, and explicit midpoint modes.",
+        targets: &[
+            MigrationTarget::StandardLibraryItem("Float.round"),
+            MigrationTarget::StandardLibraryItem("Float.roundTo"),
+        ],
         cookbook_anchor: None,
         spellings: &[],
     },

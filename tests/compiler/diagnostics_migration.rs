@@ -549,6 +549,56 @@ fn csharp_truncation_explains_receiver_width() {
 }
 
 #[test]
+fn csharp_rounding_explains_overloads_and_receiver_width() {
+    for (owner, width) in [("Math", "f64"), ("MathF", "f32")] {
+        for arguments in ["value", "value, 2"] {
+            let source = format!(
+                r#"
+                    state "game.exe" {{}}
+
+                    fn rounded(value: f64) {{
+                        return {owner}.Round({arguments})
+                    }}
+                "#
+            );
+            let diagnostics = splitscript::compile(&source)
+                .expect_err("C# rounding should receive overload migration guidance");
+
+            assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+            let diagnostic = &diagnostics[0];
+            assert_eq!(
+                diagnostic.message,
+                "C# rounding needs a receiver method and overload review in SplitScript"
+            );
+            assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "Round");
+            assert!(diagnostic.fixes.is_empty());
+            assert!(diagnostic.notes.iter().any(|note| {
+                note.contains(&format!("as {width}")) && note.contains(".round()")
+            }));
+            assert!(
+                diagnostic
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("roundTo(digits)"))
+            );
+            assert!(diagnostic.notes.iter().any(|note| {
+                note.contains("MidpointRounding") && note.contains("AwayFromZero")
+            }));
+        }
+    }
+
+    splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn wide(value: f64) -> f64 { return value.round() }
+            fn narrow(value: f32) -> f32 { return value.round() }
+            fn precise(value: f64) -> f64 { return value.roundTo(2) }
+        "#,
+    )
+    .expect("canonical midpoint-to-even rounding forms should compile");
+}
+
+#[test]
 fn a_user_binding_named_int32_keeps_its_parse_method() {
     let source = r#"
         record Parser {}

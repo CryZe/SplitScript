@@ -1,5 +1,14 @@
 # SplitScript roadmap
 
+## 2026-08-10: compiler-internal array storage identity
+
+- Separated raw capacity-backed Wasm GC arrays from source-level `[T]` in the
+  backend type and reachability graphs.
+- Migrated `Set<T>` allocation, growth, copying, removal, clearing, and
+  iteration to the internal storage identity without changing source behavior.
+- Established the representation boundary needed to make source arrays stable
+  wrappers while retaining raw fixed storage for memory layouts.
+
 ## 2026-08-10: one array family for C# list migration
 
 - Rejected a separate future `List<T>` compatibility type: C# ordered list

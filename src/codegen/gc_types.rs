@@ -234,6 +234,28 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                     supertype_idx,
                 )
             }
+            Type::ArrayStorage(id) => {
+                let declaration = array_types
+                    .iter()
+                    .find(|array| array.id == id)
+                    .expect("reachable array storage has a resolved declaration");
+                let supertype_idx = declaration.length.and_then(|_| {
+                    array_types
+                        .iter()
+                        .find(|array| {
+                            array.length.is_none() && array.element == declaration.element
+                        })
+                        .map(|array| layout.index(Type::ArrayStorage(array.id)))
+                });
+                (
+                    CompositeInnerType::Array(ArrayType(FieldType {
+                        element_type: layout.storage_type(array_element_type(id, semantics)),
+                        mutable: true,
+                    })),
+                    declaration.length.is_some(),
+                    supertype_idx,
+                )
+            }
             Type::Option(id) => (
                 CompositeInnerType::Struct(StructType {
                     fields: vec![FieldType {
@@ -277,7 +299,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                     CompositeInnerType::Struct(StructType {
                         fields: vec![
                             FieldType {
-                                element_type: layout.storage_type(Type::Array(set.backing)),
+                                element_type: layout.storage_type(Type::ArrayStorage(set.backing)),
                                 mutable: true,
                             },
                             FieldType {

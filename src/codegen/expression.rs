@@ -1234,7 +1234,11 @@ pub(super) fn compile_for_bind_and_advance(
             }
         };
         compile_value_get(function, index_value, context);
-        emit_array_get(function, context.gc.index(Type::Array(array)), element);
+        let backing_type = match collection {
+            ForCollection::Array(_) => Type::Array(array),
+            ForCollection::Set { .. } => Type::ArrayStorage(array),
+        };
+        emit_array_get(function, context.gc.index(backing_type), element);
     });
     compile_value_set(function, index_value, context, |function| {
         compile_value_get(function, index_value, context);

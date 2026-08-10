@@ -83,7 +83,7 @@ fn compile_new(set: &ResolvedSetType, gc: &GcLayout) -> Function {
     function
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::ArrayNewDefault(
-            gc.index(Type::Array(set.backing)),
+            gc.index(Type::ArrayStorage(set.backing)),
         ))
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::StructNew(gc.index(Type::Set(set.id))))
@@ -113,7 +113,7 @@ fn compile_contains(
 ) -> Function {
     // Parameters: set, value. Locals: backing, length, index.
     let mut function = Function::new([
-        (1, gc.val_type(Type::Array(set.backing))),
+        (1, gc.val_type(Type::ArrayStorage(set.backing))),
         (2, ValType::I32),
     ]);
     let backing = 2;
@@ -130,7 +130,11 @@ fn compile_contains(
         .instruction(&Instruction::LocalGet(backing))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(index));
-    emit_array_get(&mut function, gc.index(Type::Array(set.backing)), element);
+    emit_array_get(
+        &mut function,
+        gc.index(Type::ArrayStorage(set.backing)),
+        element,
+    );
     function.instruction(&Instruction::LocalGet(1));
     emit_value_equality(&mut function, element, equality, string_equality);
     function
@@ -152,7 +156,7 @@ fn compile_contains(
 
 fn compile_insert(set: &ResolvedSetType, contains: u32, gc: &GcLayout) -> Function {
     // Parameters: set, value. Locals: backing, replacement, length, capacity.
-    let backing_type = gc.val_type(Type::Array(set.backing));
+    let backing_type = gc.val_type(Type::ArrayStorage(set.backing));
     let mut function = Function::new([(2, backing_type), (2, ValType::I32)]);
     let backing = 2;
     let replacement = 3;
@@ -185,7 +189,7 @@ fn compile_insert(set: &ResolvedSetType, contains: u32, gc: &GcLayout) -> Functi
         .instruction(&Instruction::I32Mul)
         .instruction(&Instruction::End)
         .instruction(&Instruction::ArrayNewDefault(
-            gc.index(Type::Array(set.backing)),
+            gc.index(Type::ArrayStorage(set.backing)),
         ))
         .instruction(&Instruction::LocalTee(replacement))
         .instruction(&Instruction::RefAsNonNull)
@@ -195,8 +199,8 @@ fn compile_insert(set: &ResolvedSetType, contains: u32, gc: &GcLayout) -> Functi
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::LocalGet(length))
         .instruction(&Instruction::ArrayCopy {
-            array_type_index_dst: gc.index(Type::Array(set.backing)),
-            array_type_index_src: gc.index(Type::Array(set.backing)),
+            array_type_index_dst: gc.index(Type::ArrayStorage(set.backing)),
+            array_type_index_src: gc.index(Type::ArrayStorage(set.backing)),
         })
         .instruction(&Instruction::LocalGet(0))
         .instruction(&Instruction::RefAsNonNull)
@@ -212,7 +216,9 @@ fn compile_insert(set: &ResolvedSetType, contains: u32, gc: &GcLayout) -> Functi
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(length))
         .instruction(&Instruction::LocalGet(1))
-        .instruction(&Instruction::ArraySet(gc.index(Type::Array(set.backing))))
+        .instruction(&Instruction::ArraySet(
+            gc.index(Type::ArrayStorage(set.backing)),
+        ))
         .instruction(&Instruction::LocalGet(0))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(length))
@@ -236,7 +242,7 @@ fn compile_remove(
 ) -> Function {
     // Parameters: set, value. Locals: backing, length, index.
     let mut function = Function::new([
-        (1, gc.val_type(Type::Array(set.backing))),
+        (1, gc.val_type(Type::ArrayStorage(set.backing))),
         (2, ValType::I32),
     ]);
     let backing = 2;
@@ -253,7 +259,11 @@ fn compile_remove(
         .instruction(&Instruction::LocalGet(backing))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(index));
-    emit_array_get(&mut function, gc.index(Type::Array(set.backing)), element);
+    emit_array_get(
+        &mut function,
+        gc.index(Type::ArrayStorage(set.backing)),
+        element,
+    );
     function.instruction(&Instruction::LocalGet(1));
     emit_value_equality(&mut function, element, equality, string_equality);
     function
@@ -278,8 +288,8 @@ fn compile_remove(
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::I32Sub)
         .instruction(&Instruction::ArrayCopy {
-            array_type_index_dst: gc.index(Type::Array(set.backing)),
-            array_type_index_src: gc.index(Type::Array(set.backing)),
+            array_type_index_dst: gc.index(Type::ArrayStorage(set.backing)),
+            array_type_index_src: gc.index(Type::ArrayStorage(set.backing)),
         })
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(backing))
@@ -289,7 +299,9 @@ fn compile_remove(
         .instruction(&Instruction::I32Sub);
     emit_default(&mut function, element, gc);
     function
-        .instruction(&Instruction::ArraySet(gc.index(Type::Array(set.backing))))
+        .instruction(&Instruction::ArraySet(
+            gc.index(Type::ArrayStorage(set.backing)),
+        ))
         .instruction(&Instruction::LocalGet(0))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(length))
@@ -321,7 +333,7 @@ fn compile_clear(set: &ResolvedSetType, gc: &GcLayout) -> Function {
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::ArrayNewDefault(
-            gc.index(Type::Array(set.backing)),
+            gc.index(Type::ArrayStorage(set.backing)),
         ))
         .instruction(&Instruction::StructSet {
             struct_type_index: gc.index(Type::Set(set.id)),

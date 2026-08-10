@@ -27,6 +27,7 @@ pub(super) struct Reachability {
     gc_records: BTreeSet<RecordId>,
     gc_enums: BTreeSet<EnumId>,
     gc_arrays: BTreeSet<ArrayTypeId>,
+    gc_array_storage: BTreeSet<ArrayTypeId>,
     gc_options: BTreeSet<OptionTypeId>,
     gc_results: BTreeSet<ResultTypeId>,
     gc_asyncs: BTreeSet<AsyncTypeId>,
@@ -431,6 +432,10 @@ impl Reachability {
         self.gc_arrays.contains(&array)
     }
 
+    pub fn contains_array_storage(&self, array: ArrayTypeId) -> bool {
+        self.gc_array_storage.contains(&array)
+    }
+
     pub fn contains_option_type(&self, option: OptionTypeId) -> bool {
         self.gc_options.contains(&option)
     }
@@ -550,7 +555,7 @@ impl Reachability {
                     backing,
                 } => {
                     self.gc_sets.insert(*layout);
-                    self.gc_arrays.insert(*backing);
+                    self.gc_array_storage.insert(*backing);
                     pending.push(*element);
                 }
             }

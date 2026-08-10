@@ -24,6 +24,9 @@ macro_rules! define_backend_type {
             SettingsView,
             Record(RecordId),
             Enum(EnumId),
+            /// Compiler-internal raw Wasm GC array storage.
+            ArrayStorage(ArrayTypeId),
+            /// Source-level `[T]` or `[T; N]` value.
             Array(ArrayTypeId),
             Option(OptionTypeId),
             Result(ResultTypeId),

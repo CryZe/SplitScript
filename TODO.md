@@ -143,9 +143,13 @@ or behavioral parity.
   GC arrays have immutable physical lengths, represent `[T]` with a stable
   identity containing logical length and replaceable capacity-backed storage;
   preserve aliases and amortized growth without allocating on every append.
-  Design `push`, bulk extension, indexed insertion/removal, value removal,
-  `pop`, and `clear` from corpus evidence, with explicit bounds/failure and
-  must-use behavior. Restrict size-changing methods to `[T]`; both forms retain
+  The backend now gives raw capacity storage its own compiler-internal GC type,
+  so sets no longer consume a source-array representation; next make source
+  arrays stable wrappers over that storage and adapt literals, memory reads,
+  indexing, iteration, length, and element replacement together. Then design
+  `push`, bulk extension, indexed insertion/removal, value removal, `pop`, and
+  `clear` from corpus evidence, with explicit bounds/failure and must-use
+  behavior. Restrict size-changing methods to `[T]`; both forms retain
   indexing, iteration, search, length, and element replacement.
 - [ ] Design indexed mutation together with collection mutability rather than
   adding an isolated array-assignment special case. Specify aliasing, fixed

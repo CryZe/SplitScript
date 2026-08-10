@@ -146,6 +146,32 @@ impl GcLayout {
             next += 1;
         }
 
+        let mut reachable_storage = arrays
+            .iter()
+            .filter(|array| reachability.contains_array_storage(array.id))
+            .collect::<Vec<_>>();
+        let storage_sized_elements = reachable_storage
+            .iter()
+            .filter(|array| array.length.is_some())
+            .map(|array| array.element)
+            .collect::<Vec<_>>();
+        let reachable_storage_ids = reachable_storage
+            .iter()
+            .map(|array| array.id)
+            .collect::<Vec<_>>();
+        reachable_storage.extend(arrays.iter().filter(|array| {
+            array.length.is_none()
+                && storage_sized_elements.contains(&array.element)
+                && !reachable_storage_ids.contains(&array.id)
+        }));
+        reachable_storage.sort_by_key(|array| (array.length.is_some(), array.id.index()));
+        for array in reachable_storage {
+            let ty = Type::ArrayStorage(array.id);
+            dynamic.insert(ty, next);
+            ordered.push(ty);
+            next += 1;
+        }
+
         for set in sets
             .iter()
             .filter(|set| reachability.contains_set_type(set.id))
@@ -300,6 +326,7 @@ impl GcLayout {
             Type::Standard(standard) => self.standard_index(standard),
             Type::Record(_)
             | Type::Enum(_)
+            | Type::ArrayStorage(_)
             | Type::Array(_)
             | Type::Option(_)
             | Type::Result(_)
@@ -351,6 +378,7 @@ impl GcLayout {
             }
             Type::Record(_)
             | Type::Enum(_)
+            | Type::ArrayStorage(_)
             | Type::Array(_)
             | Type::Option(_)
             | Type::Result(_)

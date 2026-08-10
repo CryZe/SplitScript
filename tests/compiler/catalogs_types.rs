@@ -1177,6 +1177,10 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         library.render_signature(StdlibItemId::FloatSqrt),
         "T.sqrt() -> T where T: Float"
     );
+    assert_eq!(
+        library.render_signature(StdlibItemId::FloatTruncate),
+        "T.truncate() -> T where T: Float"
+    );
     assert!(matches!(
         library.item(StdlibItemId::FloatRound).implementation,
         Implementation::Intrinsic { .. }

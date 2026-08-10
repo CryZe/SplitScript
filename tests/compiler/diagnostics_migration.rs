@@ -500,6 +500,55 @@ fn csharp_square_root_explains_receiver_width() {
 }
 
 #[test]
+fn csharp_truncation_explains_receiver_width() {
+    for (owner, width) in [("Math", "f64"), ("MathF", "f32")] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+
+                fn whole(value: f64) {{
+                    return {owner}.Truncate(value)
+                }}
+            "#
+        );
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("C# truncation should receive receiver-width migration guidance");
+
+        assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(
+            diagnostic.message,
+            "C# truncation is a type-preserving `truncate` method in SplitScript"
+        );
+        assert_eq!(
+            &source[diagnostic.span.start..diagnostic.span.end],
+            "Truncate"
+        );
+        assert!(diagnostic.fixes.is_empty());
+        assert!(
+            diagnostic.notes.iter().any(|note| {
+                note.contains(&format!("as {width}")) && note.contains(".truncate()")
+            })
+        );
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("toward zero") && note.contains("IEEE 754"))
+        );
+    }
+
+    splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn wide(value: f64) -> f64 { return value.truncate() }
+            fn narrow(value: f32) -> f32 { return value.truncate() }
+        "#,
+    )
+    .expect("both canonical receiver widths should compile");
+}
+
+#[test]
 fn a_user_binding_named_int32_keeps_its_parse_method() {
     let source = r#"
         record Parser {}

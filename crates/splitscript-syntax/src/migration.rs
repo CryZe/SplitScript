@@ -199,6 +199,8 @@ pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.numeric.static-parse-call");
 pub const CSHARP_SQUARE_ROOT_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.square-root-call");
+pub const CSHARP_TRUNCATE_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.math.truncate-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.timespan.parse-call");
 pub const CSHARP_TIMESPAN_TICKS_DIAGNOSTIC: MigrationDiagnosticId =
@@ -478,6 +480,18 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_TRUNCATE_DIAGNOSTIC,
+        concept: MigrationConceptId::new("math.truncate"),
+        message: "C# truncation is a type-preserving `truncate` method in SplitScript",
+        primary_label: "move this operation onto the floating-point value",
+        notes: &[
+            "rewrite `Math.Truncate(value)` as `(value as f64).truncate()` when C#'s binary64 result is required",
+            "rewrite `MathF.Truncate(value)` as `(value as f32).truncate()` when the source intentionally uses binary32",
+            "SplitScript `truncate` preserves its receiver type and rounds toward zero; signed zero, infinity, and NaN follow IEEE 754",
+            "there is no automatic rewrite because selecting f32 or f64 is part of the migrated program's memory and comparison semantics",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.numeric-parse"),
         message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
@@ -546,6 +560,9 @@ pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnos
     }
     if matches!(owner.as_str(), "Math" | "MathF") && method == "Sqrt" {
         return Some(CSHARP_SQUARE_ROOT_DIAGNOSTIC);
+    }
+    if matches!(owner.as_str(), "Math" | "MathF") && method == "Truncate" {
+        return Some(CSHARP_TRUNCATE_DIAGNOSTIC);
     }
     if method != "Parse" && method != "TryParse" {
         return None;
@@ -1025,6 +1042,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Use `value.sqrt()` with an explicit f32 or f64 boundary when preserving C# Math versus MathF semantics.",
         targets: &[MigrationTarget::StandardLibraryItem("Float.sqrt")],
+        cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("math.truncate"),
+        name: "Floating-point truncation",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `value.truncate()` with an explicit f32 or f64 boundary when preserving C# Math versus MathF semantics.",
+        targets: &[MigrationTarget::StandardLibraryItem("Float.truncate")],
         cookbook_anchor: None,
         spellings: &[],
     },

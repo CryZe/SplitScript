@@ -33,6 +33,7 @@ macro_rules! trusted_intrinsics {
             NumericMax,
             FloatAbs,
             FloatSqrt,
+            FloatTruncate,
             FloatFloor,
             FloatCeil,
             FloatRound,

@@ -1010,6 +1010,31 @@ fn floating_point_square_root_preserves_width_and_ieee_edges() {
 }
 
 #[test]
+fn floating_point_truncation_preserves_width_and_ieee_edges() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let narrow = (3.75 as f32).truncate() == (3.0 as f32)
+            let wide = (-3.75 as f64).truncate() == -3.0
+            let negativeZero = (-0.5 as f32).truncate().toBits() == 0x80000000u32
+            let infinity = f64.fromBits(0x7ff0000000000000u64).truncate().toBits()
+                == 0x7ff0000000000000u64
+            let nan = f64.fromBits(0x7ff8000000000000u64).truncate().isNaN()
+            print(`{narrow}:{wide}:{negativeZero}:{infinity}:{nan}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["true:true:true:true:true"]);
+}
+
+#[test]
 fn async_none_completion_is_status_only_but_remains_typed() {
     let source = r#"
         state "game.exe" {}

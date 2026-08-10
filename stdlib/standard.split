@@ -1120,6 +1120,21 @@ capability Float<T: Signed> {
     @intrinsic(FloatSqrt)
     fn sqrt() -> T;
 
+    /// Rounds this value toward zero to an integral value.
+    ///
+    /// Positive fractions round down and negative fractions round up. Signed
+    /// zero preserves its sign. Infinity and NaN are returned unchanged.
+    ///
+    /// # Example
+    ///
+    /// Remove the fractional part of a measured time
+    ///
+    /// ```splitscript
+    /// let wholeSeconds = seconds.truncate()
+    /// ```
+    @intrinsic(FloatTruncate)
+    fn truncate() -> T;
+
     /// Rounds down to the nearest integral value.
     ///
     /// Finite fractional values move toward negative infinity. Infinity and

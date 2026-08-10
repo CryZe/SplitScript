@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: source-declared floating-point truncation
+
+- Added `Float.truncate()` to the canonical standard-library source with an
+  exact trusted contract and direct `f32.trunc`/`f64.trunc` WebAssembly
+  lowering.
+- Documented and tested rounding toward zero, signed zero, infinity, NaN, and
+  preservation of the receiver's f32 or f64 width.
+- Added focused `Math.Truncate`/`MathF.Truncate` migration guidance that makes
+  the C# result-width distinction explicit rather than applying an unsafe
+  rewrite.
+
 ## 2026-08-10: source-declared floating-point square root
 
 - Added `Float.sqrt()` to the canonical standard-library source with an exact

@@ -137,10 +137,111 @@ fn compiler_profiles_flow_through_staged_and_one_shot_compilation() {
         outputs.push(staged);
     }
 
-    assert_eq!(
-        outputs[0], outputs[1],
-        "profiles intentionally remain identical until debug constructs exist"
+    assert_ne!(outputs[0], outputs[1]);
+    assert!(debug_function_names(&outputs[0]).is_some());
+    assert!(
+        debug_function_names(&outputs[1]).is_none(),
+        "release modules must not leak the WebAssembly name section"
     );
+}
+
+#[test]
+fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
+    use splitscript::{BuildProfile, CompilerOptions};
+
+    let source = r#"
+        state "game.exe" {
+            level: u16 at 0x1234
+        }
+
+        fn identity(value) {
+            return value
+        }
+
+        whileAttached {
+            let visible: u16 = identity(current.level)
+            print(visible)
+        }
+    "#;
+    let compile = |profile| {
+        splitscript::compile_with_options(
+            source,
+            CompilerOptions {
+                profile,
+                ..CompilerOptions::default()
+            },
+        )
+        .expect("debug-name fixture should compile")
+    };
+    let debug = compile(BuildProfile::Debug);
+    let release = compile(BuildProfile::Release);
+
+    let (module_name, function_names) =
+        debug_function_names(&debug).expect("debug modules should contain names");
+    assert_eq!(module_name, "SplitScript autosplitter");
+    assert!(
+        function_names
+            .iter()
+            .any(|(_, name)| name == "env::process_read")
+    );
+    assert!(
+        function_names
+            .iter()
+            .any(|(_, name)| name.starts_with("identity"))
+    );
+    for expected in ["state::level::read", "whileAttached", "_start", "update"] {
+        assert!(
+            function_names.iter().any(|(_, name)| name == expected),
+            "missing debug function name `{expected}`: {function_names:#?}"
+        );
+    }
+    assert_eq!(
+        function_names
+            .iter()
+            .map(|(index, _)| *index)
+            .collect::<Vec<_>>(),
+        (0..function_names.len() as u32).collect::<Vec<_>>(),
+        "imports and definitions should all receive one deterministic name"
+    );
+    assert!(debug_function_names(&release).is_none());
+    assert!(Parser::new(0).parse_all(&release).all(|payload| {
+        !matches!(
+            payload.expect("release module should parse"),
+            Payload::CustomSection(section)
+                if section.name() == "name" || section.name().starts_with(".debug_")
+        )
+    }));
+}
+
+fn debug_function_names(wasm: &[u8]) -> Option<(String, Vec<(u32, String)>)> {
+    for payload in Parser::new(0).parse_all(wasm) {
+        let Payload::CustomSection(section) = payload.expect("generated module should parse")
+        else {
+            continue;
+        };
+        let wasmparser::KnownCustom::Name(reader) = section.as_known() else {
+            continue;
+        };
+        let mut module_name = None;
+        let mut functions = Vec::new();
+        for subsection in reader {
+            match subsection.expect("generated name subsection should parse") {
+                wasmparser::Name::Module { name, .. } => module_name = Some(name.to_owned()),
+                wasmparser::Name::Function(names) => {
+                    functions.extend(names.into_iter().map(|name| {
+                        let name = name.expect("generated function name should parse");
+                        (name.index, name.name.to_owned())
+                    }));
+                }
+                _ => {}
+            }
+        }
+        return Some((
+            module_name.expect("debug name section should identify its module"),
+            functions,
+        ));
+    }
+    None
 }
 
 #[test]

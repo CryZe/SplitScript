@@ -248,13 +248,17 @@ Do not add JavaScript source maps.
 - [ ] Retain source origins for typed-HIR statements, expressions, control
   flow, lexical scopes, and async suspend/resume boundaries. Generated runtime
   scaffolding must have no source location.
-- [ ] Build one profile-aware `DebugArtifactPlan` after function, global,
-  local, GC-layout, and body indices are final. Record exact instruction
-  boundaries during encoding and verify them with `wasmparser`.
-- [ ] Emit the WebAssembly `name` section in debug builds from existing plans:
-  functions, lifecycle/state readers, parameters, locals, globals, GC types,
-  and fields. Assert that release modules contain no name or `.debug_*`
-  sections and leak no source paths.
+- [ ] Extend the profile-aware `DebugArtifactPlan` beyond its completed final
+  function-index map. Add global, local, GC-layout, and body-boundary plans;
+  record exact instruction boundaries during encoding and verify them with
+  `wasmparser`.
+- [x] Emit a deterministic WebAssembly `name` section for every imported and
+  defined function in debug builds, including runtime helpers, generic source
+  specializations, async init/poll functions, lifecycle/state readers, and the
+  exported entry points. Release modules contain no `name` or `.debug_*`
+  sections.
+- [ ] Extend the same `name` section with parameters, locals, globals, GC types,
+  and fields after their final index plans expose stable source identities.
 - [ ] Emit DWARF incrementally with `gimli::write`: compilation unit,
   subprograms and line table first; scalar types and variable locations next;
   GC aggregates only to the level proven usable by the compatibility fixture.

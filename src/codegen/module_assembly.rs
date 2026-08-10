@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use wasm_encoder::{
     CodeSection, CustomSection, ExportKind, ExportSection, FunctionSection, GlobalSection,
-    ImportSection, MemorySection, MemoryType, Module, TypeSection,
+    ImportSection, MemorySection, MemoryType, Module, NameSection, TypeSection,
 };
 
 use super::data_plan::StaticData;
@@ -20,6 +20,7 @@ pub(super) fn finish(
     data: &StaticData,
     start_function: u32,
     update_function: u32,
+    debug_names: Option<&NameSection>,
 ) -> Vec<u8> {
     let Sections {
         types,
@@ -51,6 +52,9 @@ pub(super) fn finish(
     module.section(&exports);
     module.section(&codes);
     module.section(&data);
+    if let Some(debug_names) = debug_names {
+        module.section(debug_names);
+    }
     module.section(&CustomSection {
         name: Cow::Borrowed("splitscript"),
         data: Cow::Owned(crate::build_identity::module_metadata()),

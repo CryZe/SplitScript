@@ -24,6 +24,7 @@ mod async_state;
 mod backend_type;
 mod context;
 mod data_plan;
+mod debug_artifacts;
 mod dependencies;
 mod equality_plan;
 mod expression;
@@ -326,6 +327,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         start: start_function,
         update: update_function,
         arrays: helper_arrays,
+        debug_names: function_debug_names,
     } = function_plan::encode(
         &mut types,
         next_type_index,
@@ -524,6 +526,9 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &update_context,
     ));
 
+    let debug_artifacts = (wasm_ir.profile() == crate::BuildProfile::Debug)
+        .then(|| debug_artifacts::DebugArtifactPlan::new(&abi, &function_debug_names));
+
     module_assembly::finish(
         module_assembly::Sections {
             types,
@@ -535,6 +540,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &static_data,
         start_function,
         update_function,
+        debug_artifacts.as_ref().map(|artifacts| artifacts.names()),
     )
 }
 

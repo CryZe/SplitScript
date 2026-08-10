@@ -205,7 +205,9 @@ The default profile is `debug`. `--profile release` is the canonical release
 spelling for both one-shot and watch builds. Statements, bindings, globals, and
 functions prefixed with `debug` are checked in both profiles and erased from
 release semantic lowering before backend reachability analysis, so their
-storage, strings, and imports are omitted.
+storage, strings, and imports are omitted. Debug modules include symbolic names
+for every imported and generated WebAssembly function; release modules strip
+that name section entirely.
 
 The full example is in [`examples/lunistice.split`](examples/lunistice.split).
 See [`docs/LANGUAGE.md`](docs/LANGUAGE.md) for the language,

@@ -524,6 +524,14 @@ Wasm lowering, before reachability, string collection, import selection, and
 helper discovery. Consequently, a release module does not retain debug-only
 messages or logging imports.
 
+Debug builds also contain a WebAssembly `name` section derived from final
+function indices. It names host imports, generated helpers, concrete generic
+specializations, async initializer/poller pairs, state readers and transforms,
+lifecycle blocks, `_start`, and `update`. Release builds omit the section
+entirely. These symbolic stack names are the first layer of debugger metadata;
+source breakpoints and line stepping require the separately planned DWARF line
+tables.
+
 The statement form accepts bindings, expression statements, assignments, `if`,
 `while`, and `await` or `retry` statements. It rejects `return`, `throw`,
 `break`, and `continue` until profile-dependent termination rules are

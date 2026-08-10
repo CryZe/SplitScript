@@ -22,6 +22,15 @@ impl Abi {
     pub fn function(&self, id: AbiImportId) -> u32 {
         self.functions[id.index()].expect("emitted code requires a planned host import")
     }
+
+    pub(super) fn debug_names(&self) -> impl Iterator<Item = (u32, &'static str)> + '_ {
+        AbiImportId::ALL.iter().filter_map(|id| {
+            self.functions[id.index()].map(|index| {
+                let declaration = AbiCatalog::new().import(*id);
+                (index, declaration.name)
+            })
+        })
+    }
 }
 
 pub(super) fn encode(

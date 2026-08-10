@@ -37,6 +37,9 @@ pub(super) struct FunctionPlan<'a> {
     pub start: u32,
     pub update: u32,
     pub arrays: &'a [ResolvedArrayType],
+    /// Names assigned alongside final function indices. Encoding remains a
+    /// separate profile-aware step so release modules cannot leak symbols.
+    pub debug_names: Vec<(u32, String)>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -86,14 +89,16 @@ pub(super) fn encode<'a>(
     } = inputs;
     let mut section = FunctionSection::new();
     let mut next_function = imported_functions;
+    let mut debug_names = Vec::new();
 
-    let mut declare = |params: Vec<ValType>, results: Vec<ValType>| {
+    let mut declare = |name: String, params: Vec<ValType>, results: Vec<ValType>| {
         let type_index = next_type;
         next_type += 1;
         types.ty().function(params, results);
         section.function(type_index);
         let function_index = next_function;
         next_function += 1;
+        debug_names.push((function_index, name));
         function_index
     };
 
@@ -103,7 +108,14 @@ pub(super) fn encode<'a>(
         let descriptor = runtime_helper_registry::descriptor(helper);
         let (params, results) =
             runtime_helper_registry::resolve_signature(descriptor.signature, arrays, semantics, gc);
-        helper_functions.insert(helper, declare(params, results));
+        helper_functions.insert(
+            helper,
+            declare(
+                format!("__splitscript::runtime::{helper:?}"),
+                params,
+                results,
+            ),
+        );
     }
 
     let mut equality = EqualityFunctions {
@@ -118,7 +130,11 @@ pub(super) fn encode<'a>(
             )
     }) {
         let record_type = gc.val_type(Type::Standard(record.id));
-        let function = declare(vec![record_type, record_type], vec![ValType::I32]);
+        let function = declare(
+            format!("__splitscript::equals::{}", record.name),
+            vec![record_type, record_type],
+            vec![ValType::I32],
+        );
         equality.standard_records.insert(record.id, function);
     }
     for record in &program.records {
@@ -126,7 +142,11 @@ pub(super) fn encode<'a>(
             && equality_capabilities.record(record.id).is_ok()
         {
             let record_type = gc.val_type(Type::Record(record.id));
-            let function = declare(vec![record_type, record_type], vec![ValType::I32]);
+            let function = declare(
+                format!("__splitscript::equals::{}", record.name),
+                vec![record_type, record_type],
+                vec![ValType::I32],
+            );
             equality.records.insert(record.id, function);
         }
     }
@@ -135,21 +155,33 @@ pub(super) fn encode<'a>(
             && equality_capabilities.enumeration(enumeration.id).is_ok()
         {
             let enum_type = gc.val_type(Type::Enum(enumeration.id));
-            let function = declare(vec![enum_type, enum_type], vec![ValType::I32]);
+            let function = declare(
+                format!("__splitscript::equals::{}", enumeration.name),
+                vec![enum_type, enum_type],
+                vec![ValType::I32],
+            );
             equality.enums.insert(enumeration.id, function);
         }
     }
     for option in options {
         if reachability.requires_option_equality(option.id) {
             let option_type = gc.val_type(Type::Option(option.id));
-            let function = declare(vec![option_type, option_type], vec![ValType::I32]);
+            let function = declare(
+                format!("__splitscript::equals::option#{}", option.id.index()),
+                vec![option_type, option_type],
+                vec![ValType::I32],
+            );
             equality.options.insert(option.id, function);
         }
     }
     for result in results {
         if reachability.requires_result_equality(result.id) {
             let result_type = gc.val_type(Type::Result(result.id));
-            let function = declare(vec![result_type, result_type], vec![ValType::I32]);
+            let function = declare(
+                format!("__splitscript::equals::result#{}", result.id.index()),
+                vec![result_type, result_type],
+                vec![ValType::I32],
+            );
             equality.results.insert(result.id, function);
         }
     }
@@ -172,14 +204,34 @@ pub(super) fn encode<'a>(
                 super::try_array_element_type(array.id, semantics)
                     .expect("reachable arrays have lowerable element types"),
             );
-            array_functions.insert_push(array.id, declare(vec![array_type, element_type], vec![]));
+            array_functions.insert_push(
+                array.id,
+                declare(
+                    format!("__splitscript::array#{}::push", array.id.index()),
+                    vec![array_type, element_type],
+                    vec![],
+                ),
+            );
         }
         if reachability.requires_array_remove_at(array.id) {
-            array_functions
-                .insert_remove_at(array.id, declare(vec![array_type, ValType::I32], vec![]));
+            array_functions.insert_remove_at(
+                array.id,
+                declare(
+                    format!("__splitscript::array#{}::removeAt", array.id.index()),
+                    vec![array_type, ValType::I32],
+                    vec![],
+                ),
+            );
         }
         if reachability.requires_array_clear(array.id) {
-            array_functions.insert_clear(array.id, declare(vec![array_type], vec![]));
+            array_functions.insert_clear(
+                array.id,
+                declare(
+                    format!("__splitscript::array#{}::clear", array.id.index()),
+                    vec![array_type],
+                    vec![],
+                ),
+            );
         }
     }
 
@@ -193,12 +245,36 @@ pub(super) fn encode<'a>(
         set_functions.insert(
             set.id,
             SetFunctionPlan {
-                new: declare(vec![], vec![set_type]),
-                length: declare(vec![set_type], vec![ValType::I32]),
-                contains: declare(vec![set_type, element_type], vec![ValType::I32]),
-                insert: declare(vec![set_type, element_type], vec![ValType::I32]),
-                remove: declare(vec![set_type, element_type], vec![ValType::I32]),
-                clear: declare(vec![set_type], vec![]),
+                new: declare(
+                    super::debug_artifacts::set_function_name(set.id, "new"),
+                    vec![],
+                    vec![set_type],
+                ),
+                length: declare(
+                    super::debug_artifacts::set_function_name(set.id, "length"),
+                    vec![set_type],
+                    vec![ValType::I32],
+                ),
+                contains: declare(
+                    super::debug_artifacts::set_function_name(set.id, "contains"),
+                    vec![set_type, element_type],
+                    vec![ValType::I32],
+                ),
+                insert: declare(
+                    super::debug_artifacts::set_function_name(set.id, "insert"),
+                    vec![set_type, element_type],
+                    vec![ValType::I32],
+                ),
+                remove: declare(
+                    super::debug_artifacts::set_function_name(set.id, "remove"),
+                    vec![set_type, element_type],
+                    vec![ValType::I32],
+                ),
+                clear: declare(
+                    super::debug_artifacts::set_function_name(set.id, "clear"),
+                    vec![set_type],
+                    vec![],
+                ),
             },
         );
     }
@@ -238,18 +314,31 @@ pub(super) fn encode<'a>(
         let body = wasm_ir
             .body(crate::wasm_ir::BodyOwner::Function(instance.clone()))
             .expect("reachable functions have Wasm IR bodies");
+        let source_name = super::debug_artifacts::user_function_name(
+            &function.name,
+            instance,
+            program,
+            semantics,
+            standard_library,
+            enums,
+        );
         let plan = if matches!(body.abi, crate::wasm_ir::BodyAbi::AsyncFunction(_)) {
             let frame = ValType::Ref(RefType {
                 nullable: false,
                 heap_type: HeapType::Concrete(gc.function_frame_index(instance)),
             });
             UserFunctionPlan {
-                call: declare(params, vec![frame]),
-                poll: Some(declare(vec![frame], vec![ValType::I32])),
+                call: declare(format!("{source_name}::init"), params, vec![frame]),
+                poll: Some(declare(
+                    format!("{source_name}::poll"),
+                    vec![frame],
+                    vec![ValType::I32],
+                )),
             }
         } else {
             UserFunctionPlan {
                 call: declare(
+                    source_name,
                     params,
                     (result != Type::None)
                         .then(|| gc.val_type(result))
@@ -268,7 +357,17 @@ pub(super) fn encode<'a>(
             nullable: false,
             heap_type: HeapType::Concrete(gc.intrinsic_frame_index(instance)),
         });
-        intrinsic_futures.insert(instance.clone(), declare(vec![frame], vec![ValType::I32]));
+        intrinsic_futures.insert(
+            instance.clone(),
+            declare(
+                format!(
+                    "__splitscript::future::expr{}::poll",
+                    instance.expression.index()
+                ),
+                vec![frame],
+                vec![ValType::I32],
+            ),
+        );
     }
 
     let mut reads = Vec::with_capacity(
@@ -286,7 +385,11 @@ pub(super) fn encode<'a>(
                     .expect("checked state fields have poll-result types"),
                 semantics,
             );
-            reads.push(declare(vec![ValType::I64], vec![gc.val_type(poll_result)]));
+            reads.push(declare(
+                format!("state::{}::read", field.name),
+                vec![ValType::I64],
+                vec![gc.val_type(poll_result)],
+            ));
             transforms.push(field.transform.as_ref().map(|_| {
                 let ty = semantic_type(
                     semantics
@@ -295,7 +398,11 @@ pub(super) fn encode<'a>(
                     semantics,
                 );
                 let value = gc.val_type(ty);
-                declare(vec![value], vec![gc.val_type(poll_result)])
+                declare(
+                    format!("state::{}::transform", field.name),
+                    vec![value],
+                    vec![gc.val_type(poll_result)],
+                )
             }));
         }
     }
@@ -317,11 +424,14 @@ pub(super) fn encode<'a>(
                     .collect(),
             ),
         };
-        actions.insert(action.kind, declare(params, results));
+        actions.insert(
+            action.kind,
+            declare(action.kind.name().to_owned(), params, results),
+        );
     }
 
-    let start = declare(vec![], vec![]);
-    let update = declare(vec![], vec![]);
+    let start = declare("_start".to_owned(), vec![], vec![]);
+    let update = declare("update".to_owned(), vec![], vec![]);
 
     FunctionPlan {
         section,
@@ -341,5 +451,6 @@ pub(super) fn encode<'a>(
         start,
         update,
         arrays,
+        debug_names,
     }
 }

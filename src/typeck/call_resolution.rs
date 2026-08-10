@@ -8,7 +8,8 @@ use crate::{
     inference::{InferenceError, Requirements, Type, type_may_have_capability},
     migration::{
         ASL_SETTINGS_ADD_DIAGNOSTIC, ForeignSpellingContext, foreign_spelling,
-        legacy_static_call_diagnostic, legacy_string_method_diagnostic,
+        legacy_array_field_diagnostic, legacy_static_call_diagnostic,
+        legacy_string_field_diagnostic, legacy_string_method_diagnostic,
         legacy_value_path_diagnostic, migration_diagnostic,
     },
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
@@ -1518,6 +1519,30 @@ impl Checker {
         if let Some(resolved) = self.lookup_member(ty, field) {
             return Some(resolved);
         }
+        if self.standard_type_id(ty) == Some(StdlibTypeId::String)
+            && let Some(id) = legacy_string_field_diagnostic(field)
+        {
+            let name_span = Span {
+                start: span.end.saturating_sub(field.len()),
+                end: span.end,
+            };
+            self.migration_member_error(id, name_span, None);
+            return None;
+        }
+        if matches!(ty, Type::Array(_))
+            && let Some(id) = legacy_array_field_diagnostic(field)
+        {
+            let name_span = Span {
+                start: span.end.saturating_sub(field.len()),
+                end: span.end,
+            };
+            self.migration_member_error(
+                id,
+                name_span,
+                Some(("replace `Length` with `length()`", "length()")),
+            );
+            return None;
+        }
         match ty {
             Type::Known(id)
                 if matches!(
@@ -1540,6 +1565,25 @@ impl Checker {
             }
         }
         None
+    }
+
+    fn migration_member_error(
+        &mut self,
+        id: crate::migration::MigrationDiagnosticId,
+        span: Span,
+        fix: Option<(&str, &str)>,
+    ) {
+        let metadata =
+            migration_diagnostic(id).expect("type checker migration diagnostic IDs must exist");
+        let mut diagnostic = Diagnostic::type_error(metadata.message, span)
+            .with_primary_label(metadata.primary_label);
+        for note in metadata.notes {
+            diagnostic = diagnostic.with_note(*note);
+        }
+        if let Some((title, replacement)) = fix {
+            diagnostic = diagnostic.with_machine_applicable_fix(title, span, replacement);
+        }
+        self.errors.push(diagnostic);
     }
 
     pub(super) fn lookup_member(&self, ty: Type, field: &str) -> Option<(Type, ResolvedMember)> {

@@ -193,6 +193,10 @@ pub const CSHARP_STRING_PADDING_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.padding-call");
 pub const CSHARP_STRING_IS_NULL_OR_EMPTY_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.is-null-or-empty-call");
+pub const CSHARP_STRING_LENGTH_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.string.length-property");
+pub const CSHARP_ARRAY_LENGTH_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.array.length-property");
 pub const CSHARP_STRING_JOIN_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.join-call");
 pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
@@ -470,6 +474,28 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_STRING_LENGTH_DIAGNOSTIC,
+        concept: MigrationConceptId::new("string.length"),
+        message: "C# string `Length` has no encoding-neutral SplitScript rename",
+        primary_label: "choose the length unit required by the surrounding logic",
+        notes: &[
+            "use `value.isEmpty()` for zero-length checks so encoded length units do not matter",
+            "use `value.byteLength()` for proven ASCII text or logic that intentionally works with SplitScript UTF-8 byte offsets",
+            "C# `String.Length` counts UTF-16 code units, while SplitScript `byteLength()` counts UTF-8 bytes; the values can differ for non-ASCII text",
+            "there is no automatic rewrite because indexing, slicing, display width, and emptiness require different canonical operations",
+        ],
+    },
+    MigrationDiagnostic {
+        id: CSHARP_ARRAY_LENGTH_DIAGNOSTIC,
+        concept: MigrationConceptId::new("array.length"),
+        message: "C# array `Length` is `length()` in SplitScript",
+        primary_label: "array length is exposed as a method",
+        notes: &[
+            "`values.length()` returns the element count as `u32` for both `[T]` and fixed `[T; N]` arrays",
+            "review arithmetic copied from C# when it relied on the signed `i32` result of `Array.Length`",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_STRING_JOIN_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.join"),
         message: "C# `String.Join` needs an explicit collection conversion",
@@ -643,6 +669,14 @@ pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnostic
         "PadLeft" | "PadRight" => Some(CSHARP_STRING_PADDING_DIAGNOSTIC),
         _ => None,
     }
+}
+
+pub fn legacy_string_field_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
+    (name == "Length").then_some(CSHARP_STRING_LENGTH_DIAGNOSTIC)
+}
+
+pub fn legacy_array_field_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
+    (name == "Length").then_some(CSHARP_ARRAY_LENGTH_DIAGNOSTIC)
 }
 
 pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnosticId> {
@@ -1153,6 +1187,29 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         summary: "Use `String.isEmpty` for required strings and match `String?` explicitly when absence should also count as empty.",
         targets: &[MigrationTarget::StandardLibraryItem("String.isEmpty")],
         cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("string.length"),
+        name: "String length",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `isEmpty()` for emptiness and `byteLength()` only for UTF-8 byte-oriented or proven ASCII logic; C# `Length` counts UTF-16 code units.",
+        targets: &[
+            MigrationTarget::StandardLibraryItem("String.isEmpty"),
+            MigrationTarget::StandardLibraryItem("String.byteLength"),
+        ],
+        cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("array.length"),
+        name: "Array length",
+        sources: CSHARP,
+        support: MigrationSupport::Direct,
+        summary: "Call `values.length()` for the `u32` element count of dynamic and fixed arrays.",
+        targets: &[MigrationTarget::StandardLibraryItem("Array.length")],
+        cookbook_anchor: Some("collection-search-and-run-scoped-sets"),
         spellings: &[],
     },
     MigrationConcept {

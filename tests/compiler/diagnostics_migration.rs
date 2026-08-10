@@ -384,6 +384,96 @@ fn csharp_is_null_or_empty_explains_required_and_optional_strings() {
 }
 
 #[test]
+fn csharp_length_distinguishes_arrays_from_utf8_strings() {
+    use splitscript::FixApplicability;
+
+    let array_source = r#"
+        state "game.exe" {}
+
+        fn count() -> u32 {
+            let values = [2, 4, 7]
+            return values.Length
+        }
+    "#;
+    let diagnostics = splitscript::compile(array_source)
+        .expect_err("C# array Length should receive a direct migration fix");
+
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# array `Length` is `length()` in SplitScript"
+    );
+    assert_eq!(
+        &array_source[diagnostic.span.start..diagnostic.span.end],
+        "Length"
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("u32") && note.contains("[T; N]"))
+    );
+    assert_eq!(diagnostic.fixes.len(), 1);
+    let fix = &diagnostic.fixes[0];
+    assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+    assert_eq!(fix.edits.len(), 1);
+    assert_eq!(fix.edits[0].span, diagnostic.span);
+    assert_eq!(fix.edits[0].replacement, "length()");
+
+    let mut fixed = array_source.to_owned();
+    fixed.replace_range(
+        fix.edits[0].span.start..fix.edits[0].span.end,
+        &fix.edits[0].replacement,
+    );
+    splitscript::compile(&fixed).expect("the array length fix should compile");
+
+    let string_source = r#"
+        state "game.exe" {}
+
+        fn encodedLength(value: String) -> u32 {
+            return value.Length
+        }
+    "#;
+    let diagnostics = splitscript::compile(string_source)
+        .expect_err("C# string Length should require an index-unit decision");
+
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "C# string `Length` has no encoding-neutral SplitScript rename"
+    );
+    assert_eq!(
+        &string_source[diagnostic.span.start..diagnostic.span.end],
+        "Length"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| { note.contains("value.isEmpty()") && note.contains("zero-length") })
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| { note.contains("UTF-16 code units") && note.contains("UTF-8 bytes") })
+    );
+
+    splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn arrayLength(values: [u8]) -> u32 { return values.length() }
+            fn stringLength(value: String) -> u32 { return value.byteLength() }
+            fn empty(value: String) -> bool { return value.isEmpty() }
+        "#,
+    )
+    .expect("canonical length operations should compile");
+}
+
+#[test]
 fn csharp_string_join_explains_array_and_argument_order() {
     let source = r#"
         state "game.exe" {}

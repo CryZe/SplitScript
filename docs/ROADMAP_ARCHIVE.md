@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-10: type-aware C# length migration
+
+- Added separate diagnostics for C# array and string `.Length` instead of
+  treating the shared spelling as one operation.
+- Made array length a machine-applicable `.length()` rewrite while preserving
+  its `u32` result in the guidance.
+- Kept string length deliberate: emptiness becomes `isEmpty()`, while
+  `byteLength()` is reserved for proven ASCII or UTF-8 byte-oriented logic
+  because C# counts UTF-16 code units.
+
 ## 2026-08-10: source-defined numeric squaring
 
 - Added `Numeric.squared()` as a canonical source-defined method implemented

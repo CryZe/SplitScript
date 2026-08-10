@@ -164,6 +164,23 @@ first whether that boundary should remain a `Result`, become a `String?`, or
 retain the last accepted state value. The compiler therefore gives
 `String.IsNullOrEmpty` focused guidance without guessing an automatic rewrite.
 
+C# `String.Length` counts UTF-16 code units, so it has no encoding-neutral
+rename for SplitScript's immutable UTF-8 strings. Prefer the operation that
+expresses the surrounding intent. An emptiness check does not need a numeric
+unit:
+
+```splitscript
+if current.map.isEmpty() {
+    return false
+}
+```
+
+Use `byteLength()` only for text proven to be ASCII or code intentionally
+working with the UTF-8 byte offsets returned by `indexOf`, `lastIndexOf`, and
+accepted by `slice`, `byteAt`, and `charAt`. Non-ASCII text can have different
+UTF-16 code-unit and UTF-8 byte counts, so the compiler diagnoses `.Length`
+without applying a speculative fix.
+
 C# `String.Join` puts the separator first and has many object, enumerable,
 variadic, and range overloads. SplitScript accepts one typed string array and
 puts the values first:
@@ -539,6 +556,11 @@ port demonstrates that ordinary field expressions and `whileAttached` cannot
 represent the required result clearly.
 
 ## Collection search and run-scoped sets
+
+C# array `.Length` maps directly to the SplitScript method `.length()`. It
+returns the `u32` element count for both `[T]` and fixed `[T; N]` arrays. The
+compiler can apply this rename automatically, after which signed C# index
+arithmetic may still need an explicit width cast.
 
 Do not translate every C# `List<T>` into one compatibility collection. First
 identify whether the source needs a fixed ordered table, growable unique

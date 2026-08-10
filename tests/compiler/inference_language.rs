@@ -1385,3 +1385,39 @@ fn array_indexing_is_first_class_bidirectional_and_array_only() {
             .any(|error| error.message.contains("no method `get`"))
     );
 }
+
+#[test]
+fn growable_arrays_support_push_but_fixed_arrays_reject_it() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let values: [u32] = [1, 2]
+            let alias = values
+            values.push(3)
+            alias.push(4)
+            print(values[3])
+        }
+    "#;
+    let wasm = splitscript::compile(source).expect("growable array push should compile");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("growable array push should produce valid Wasm");
+
+    let errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let fixed: [u8; 2] = [1, 2]
+                fixed.push(3)
+            }
+        "#,
+    )
+    .expect_err("fixed arrays must reject push");
+    assert!(errors.iter().any(|error| {
+        error
+            .message
+            .contains("cannot change the length of fixed array")
+            && error.message.contains("only available on growable `[T]`")
+    }));
+}

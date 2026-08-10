@@ -155,6 +155,7 @@ fn emit_aggregate_global_initializers(
         intrinsic_futures: lowering.intrinsic_futures,
         display_functions: lowering.display_functions,
         equality_functions: lowering.equality_functions,
+        array_functions: lowering.array_functions,
         set_functions: lowering.set_functions,
         records: lowering.records,
         enums: lowering.enums,

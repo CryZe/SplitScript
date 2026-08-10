@@ -12,7 +12,8 @@ use crate::{
 };
 
 use super::{
-    EqualityFunctions, GcLayout, RuntimeHelperPlan, SetFunctions, SettingStorage, Type,
+    ArrayFunctions, EqualityFunctions, GcLayout, RuntimeHelperPlan, SetFunctions, SettingStorage,
+    Type,
     data_plan::{SignaturePool, StringPool},
     global_plan::RuntimeGlobals,
     imports::Abi,
@@ -37,6 +38,7 @@ pub(super) struct EmissionContext<'a> {
     pub intrinsic_futures: &'a HashMap<super::async_frame::IntrinsicFutureInstance, u32>,
     pub display_functions: &'a HashMap<StdlibTypeId, FunctionInstance>,
     pub equality_functions: &'a EqualityFunctions,
+    pub array_functions: &'a ArrayFunctions,
     pub set_functions: &'a SetFunctions,
     pub records: &'a [RecordDecl],
     pub enums: &'a [EnumDecl],

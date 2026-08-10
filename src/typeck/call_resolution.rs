@@ -980,6 +980,18 @@ impl Checker {
                 &variables,
             );
             self.unify(receiver.ty, declared_receiver, span)?;
+            if item.id == StdlibItemId::ArrayPush
+                && let Type::Array(array) = self.shallow_type(receiver.ty)
+                && let Some(length) = self.inference.array_length(array)
+            {
+                self.error(
+                    format!(
+                        "cannot change the length of fixed array `[T; {length}]`; `push` is only available on growable `[T]`"
+                    ),
+                    span,
+                );
+                return None;
+            }
             concrete_signature.push(declared_receiver);
         }
         let operation = self.standard_library.operation_semantics(item.id);

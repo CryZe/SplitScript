@@ -3059,3 +3059,14 @@ language catalog document the refinement rule.
   host-executed differential regression covering thousands of boundaries,
   long and randomized decimals, malformed input, inference, non-finite values,
   overflow, underflow, and hard halfway cases.
+
+# 2026-08-10: stable growable arrays and amortized push
+
+- Represented every source array as a stable WebAssembly GC wrapper over
+  compiler-internal raw storage, keeping logical length separate from physical
+  capacity so aliases remain valid when storage is replaced.
+- Added catalog-defined `[T].push(value)`, geometric capacity growth, and a
+  focused `[T; N]` diagnostic and completion filter. Fixed arrays remain exact,
+  memory-readable values and cannot change length.
+- Added compiler, editor, validation, and host-runtime coverage that crosses
+  multiple growth boundaries and observes mutations through an alias.

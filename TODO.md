@@ -138,21 +138,15 @@ or behavioral parity.
   explicit allocation policy. Apply the same rule to growable arrays; add
   `Map<K, V>` only when the next maintained port requires stored key/value
   associations.
-- [ ] Make `[T]` the growable ordered sequence instead of adding a separate
-  `List<T>` type. Keep `[T; N]` fixed-length and memory-readable. Because Wasm
-  GC arrays have immutable physical lengths, represent `[T]` with a stable
-  identity containing logical length and replaceable capacity-backed storage;
-  preserve aliases and amortized growth without allocating on every append.
-  The backend now gives raw capacity storage its own compiler-internal GC type,
-  and source arrays are stable wrappers over it; literals, fixed memory reads,
-  indexing, iteration, logical length, element replacement, async scanning,
-  and array-consuming helpers all cross that representation boundary. Next
-  implement amortized `push` as the first size-changing operation and prove
-  alias preservation when growth replaces the backing. Then design bulk
-  extension, indexed insertion/removal, value removal, `pop`, and `clear` from
-  corpus evidence, with explicit bounds/failure and must-use behavior. Restrict
-  size-changing methods to `[T]`; both forms retain indexing, iteration,
-  search, length, and element replacement.
+- [ ] Continue `[T]` as the growable ordered sequence instead of adding a
+  separate `List<T>` type. Stable wrapper identity, replaceable capacity-backed
+  storage, logical length, and amortized `push` now preserve aliases across
+  growth; `[T; N]` remains fixed-length and does not advertise or accept
+  size-changing methods. Next design bulk extension, indexed insertion/removal,
+  value removal, `pop`, and `clear` from corpus evidence, with explicit
+  bounds/failure and must-use behavior. Both array forms retain indexing,
+  iteration, search, length, and element replacement. Settle mutation during
+  iteration before expanding the mutable surface.
 - [ ] Design indexed mutation together with collection mutability rather than
   adding an isolated array-assignment special case. Specify aliasing, fixed
   array versus growable collection behavior, bounds failure, and interaction

@@ -15,7 +15,10 @@ use crate::{
     language::{LanguageCatalog, LanguageItem, LanguageItemId, LanguageItemKind},
     lexer::{self, TokenKind},
     semantic::ResolvedCall,
-    stdlib::{ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibNamespace, TypeRef},
+    stdlib::{
+        ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibItemId, StdlibNamespace,
+        TypeRef,
+    },
     stdlib_semantic::StandardLibrarySemanticExt,
     types::TypeKind,
     visit::{self, Visitor},
@@ -1246,6 +1249,16 @@ fn add_inferred_methods(
     let methods = standard_library
         .methods_for_type(receiver)
         .into_iter()
+        .filter(|item| {
+            !(item.id == StdlibItemId::ArrayPush
+                && matches!(
+                    receiver,
+                    TypeKind::Array {
+                        length: Some(_),
+                        ..
+                    }
+                ))
+        })
         .chain(
             matches!(receiver, TypeKind::GenericParameter { .. })
                 .then(|| {
@@ -1708,6 +1721,19 @@ split {
         assert!(completions.contains(&"isEmpty".to_owned()));
         assert!(completions.contains(&"contains".to_owned()));
         assert!(completions.contains(&"indexOf".to_owned()));
+        assert!(!completions.contains(&"push".to_owned()));
+
+        let growable = r#"
+state "game.exe" {}
+
+split {
+    let values: [u8] = []
+    values.
+}
+"#;
+        let mut database = CompilerDatabase::new(growable);
+        let completions = labels(&mut database, "values.");
+        assert!(completions.contains(&"push".to_owned()));
     }
 
     #[test]

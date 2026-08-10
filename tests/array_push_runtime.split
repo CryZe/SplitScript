@@ -1,0 +1,21 @@
+state "game.exe" {}
+
+let tick = 0
+
+whileAttached {
+    tick += 1
+    if tick == 1 {
+        let values: [u32] = []
+        let alias = values
+        values.push(10)
+        values.push(20)
+        values.push(30)
+        values.push(40)
+        values.push(50)
+        alias.push(60)
+        setVariable(
+            "Array Push",
+            `{values.length()},{alias.length()},{alias[0]},{values[4]},{values[5]}`,
+        )
+    }
+}

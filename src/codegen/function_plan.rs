@@ -11,7 +11,8 @@ use crate::{
 };
 
 use super::{
-    EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, Type, action_result_val_type,
+    ArrayFunctions, EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, Type,
+    action_result_val_type,
     async_frame::IntrinsicFutureInstance,
     dependencies::BackendDependencies,
     reachability, runtime_helper_registry, semantic_type, set_element_type,
@@ -25,6 +26,7 @@ pub(super) struct FunctionPlan<'a> {
     pub section: FunctionSection,
     pub runtime_helpers: RuntimeHelperPlan,
     pub equality: EqualityFunctions,
+    pub array_functions: ArrayFunctions,
     pub sets: SetFunctions,
     pub users: HashMap<FunctionInstance, UserFunctionPlan>,
     pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
@@ -156,6 +158,20 @@ pub(super) fn encode<'a>(
         ordered: ordered_helpers,
         functions: helper_functions,
     };
+
+    let mut array_functions = ArrayFunctions::default();
+    for array in arrays
+        .iter()
+        .filter(|array| reachability.requires_array_push(array.id))
+    {
+        debug_assert!(array.length.is_none());
+        let array_type = gc.val_type(Type::Array(array.id));
+        let element_type = gc.val_type(
+            super::try_array_element_type(array.id, semantics)
+                .expect("reachable arrays have lowerable element types"),
+        );
+        array_functions.insert_push(array.id, declare(vec![array_type, element_type], vec![]));
+    }
 
     let mut set_functions = SetFunctions::default();
     for set in sets
@@ -301,6 +317,7 @@ pub(super) fn encode<'a>(
         section,
         runtime_helpers,
         equality,
+        array_functions,
         sets: set_functions,
         users,
         intrinsic_futures,

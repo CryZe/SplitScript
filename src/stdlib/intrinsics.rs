@@ -42,6 +42,7 @@ macro_rules! trusted_intrinsics {
             F64ToBits,
             ArrayLength,
             ArraySet,
+            ArrayPush,
             SetNew,
             SetLength,
             SetContains,

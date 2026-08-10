@@ -17,6 +17,7 @@ use crate::stdlib::{
 use crate::types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, TypeId, TypeKind};
 use crate::wasm_ir::{self, BodyOwner};
 
+mod array_functions;
 mod array_value;
 mod async_frame;
 mod async_state;
@@ -44,6 +45,7 @@ mod specialization;
 mod unity_layout;
 mod update;
 
+use self::array_functions::ArrayFunctions;
 use self::async_frame::AsyncFrameLayouts;
 use self::async_state::{
     compile_async_attach, compile_async_function_poll, compile_intrinsic_future_poll,
@@ -313,6 +315,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         section: functions,
         runtime_helpers,
         equality: equality_functions,
+        array_functions,
         sets: set_functions,
         users: user_functions,
         intrinsic_futures,
@@ -357,6 +360,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         intrinsic_futures: &intrinsic_futures,
         display_functions: &display_functions,
         equality_functions: &equality_functions,
+        array_functions: &array_functions,
         set_functions: &set_functions,
         records: &program.records,
         enums,
@@ -436,6 +440,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &equality_functions,
         &gc,
     );
+    let array_bodies = array_functions::compile(array_types, &array_functions, semantics, &gc);
     let set_bodies = set_functions::compile(
         set_types,
         &set_functions,
@@ -451,6 +456,9 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     }
     let refresh_settings = runtime_helpers.optional_function(RuntimeHelperId::RefreshSettings);
     for body in equality_bodies {
+        codes.function(&body);
+    }
+    for body in array_bodies {
         codes.function(&body);
     }
     for body in set_bodies {

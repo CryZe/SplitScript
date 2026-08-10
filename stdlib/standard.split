@@ -1564,6 +1564,26 @@ typeConstructor Array<T> {
         /// The new element value.
         value: T,
     ) -> None;
+
+    /// Appends an element to a growable array.
+    ///
+    /// Capacity grows geometrically when needed, while the array value keeps
+    /// the same identity so every alias observes the appended element.
+    /// Exact `[T; N]` arrays cannot change length and do not support `push`.
+    ///
+    /// # Example
+    ///
+    /// Append a discovered checkpoint
+    ///
+    /// ```splitscript
+    /// let checkpoints: [u32] = [1, 2]
+    /// checkpoints.push(3)
+    /// ```
+    @intrinsic(ArrayPush)
+    fn push(
+        /// The element to append.
+        value: T,
+    ) -> None;
 }
 
 /// Stores a growable collection of unique values for one script instance.

@@ -440,6 +440,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::F64ToBits
         | IntrinsicId::ArrayLength
         | IntrinsicId::ArraySet
+        | IntrinsicId::ArrayPush
         | IntrinsicId::SetNew
         | IntrinsicId::SetLength
         | IntrinsicId::SetContains
@@ -456,6 +457,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
 const PURE: EffectSet = EffectSet::one(Effect::Pure);
 const ALLOCATES: EffectSet = EffectSet::one(Effect::Allocates);
 const MUTATES: EffectSet = EffectSet::one(Effect::MutatesValue);
+const MUTATES_ALLOCATES: EffectSet = MUTATES.with(Effect::Allocates);
 const TIMER_READ: EffectSet = EffectSet::one(Effect::ReadsTimer);
 const RUNTIME_READ_ALLOCATES: EffectSet =
     EffectSet::one(Effect::ReadsRuntime).with(Effect::Allocates);
@@ -907,6 +909,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 NONE,
             ),
             MUTATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::ArrayPush => contract!(
+            ArrayPush,
+            Method,
+            signature(UNCONSTRAINED_T, Some(T_ARRAY), params![value(T)], NONE),
+            MUTATES_ALLOCATES,
             Everywhere,
             RepresentationPrimitive
         ),

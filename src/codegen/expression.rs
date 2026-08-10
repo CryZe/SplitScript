@@ -99,6 +99,7 @@ pub(super) struct ExprContext<'a> {
     pub intrinsic_futures: &'a HashMap<IntrinsicFutureInstance, u32>,
     pub display_functions: &'a HashMap<StdlibTypeId, FunctionInstance>,
     pub equality_functions: &'a EqualityFunctions,
+    pub array_functions: &'a super::ArrayFunctions,
     pub set_functions: &'a SetFunctions,
     pub records: &'a [RecordDecl],
     pub enums: &'a [EnumDecl],
@@ -2879,6 +2880,16 @@ fn compile_expr_unconverted(
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::I64Add);
+            }
+            IntrinsicId::ArrayPush => {
+                let receiver_type = compile_receiver(function, target, context);
+                let Type::Array(array_id) = receiver_type else {
+                    unreachable!("Array.push has an array receiver");
+                };
+                for argument in args {
+                    compile_expr(function, *argument, context);
+                }
+                function.instruction(&Instruction::Call(context.array_functions.push(array_id)));
             }
             IntrinsicId::ArrayLength | IntrinsicId::ArraySet => {
                 let receiver_type = compile_receiver(function, target, context);

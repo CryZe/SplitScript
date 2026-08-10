@@ -859,16 +859,22 @@ let empty: [u16] = []
 let discovered = []
 discovered.push(0x8bu8) // discovered is [u8]
 
-bytes.set(1, 0x8b)
+bytes[1] = 0x8b
 let opcode = bytes[1]
 let count = bytes.length()
 let hasTerminator = bytes.contains(0)
 let marker = bytes.indexOf(0x8b) // u32?
 ```
 
-`length()` returns `u32`, `array[index]` returns `T`, and `set(index, value)`
-mutates the selected element. The index is a `u32`, and Wasm performs bounds
-checks. `contains(value)` tests every element from the beginning, while
+`length()` returns `u32`, `array[index]` returns `T`, and
+`array[index] = value` replaces the selected element. The assignment is
+resolved through the standard library's array-mutation capability: the array
+and index are each evaluated once, aliases observe the replacement, both `[T]`
+and `[T; N]` support it, and Wasm performs bounds checks. Replacement does not
+change collection structure, so it does not invalidate active iteration.
+Compound indexed assignments are not yet accepted because their future
+lowering must retain the same single-evaluation guarantee. `contains(value)`
+tests every element from the beginning, while
 `indexOf(value)` returns the first matching `u32` index or `None`. These search
 methods are available when the element type supports `Equatable`; they are
 ordinary source-defined library loops rather than dedicated compiler

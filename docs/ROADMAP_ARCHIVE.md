@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-10: capability-backed indexed array assignment
+
+- Added `array[index] = value` for both growable and exact-length arrays by
+  lowering it through the source-declared `Array.set` standard-library
+  operation rather than adding a second mutation backend.
+- Preserved stable aliases, Wasm bounds checks, and non-structural iteration
+  semantics while evaluating the array and index exactly once.
+- Added a focused boundary for compound indexed assignment until its lowering
+  can guarantee the same single evaluation for effectful receivers and indices.
+- Replaced the maintained runtime fixture's direct `set` call with the new
+  syntax and added formatter, type, aliasing, and diagnostic coverage.
+
 ## 2026-08-10: usage-driven empty-collection inference
 
 - Allowed `[]` and `Set.new()` to retain an unresolved element variable across

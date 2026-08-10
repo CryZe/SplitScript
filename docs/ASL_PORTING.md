@@ -651,11 +651,19 @@ split {
 ```
 
 Unlike C# `List<T>.IndexOf`, `indexOf` returns `u32?`; absence is `None`, never
-a signed `-1` sentinel. Existing elements can be replaced with
-`set(index, value)`. Size-changing operations for `[T]` are planned; until that
-work lands, keep ports that append, insert, remove, or clear list elements
-marked as behavior-limited rather than substituting a set. `[T; N]` will remain
-fixed-length after growable arrays are implemented.
+a signed `-1` sentinel. Replace an existing element with ordinary indexed
+assignment; the index is `u32`, aliases observe the change, and an out-of-range
+index traps just like an indexed read:
+
+```splitscript
+route[currentIndex] = nextLevel
+```
+
+Plain indexed assignment evaluates the collection and index once. Compound
+forms such as `route[nextIndex()] += 1` are deliberately not accepted yet;
+their eventual lowering must not call `nextIndex()` twice. Growable `[T]`
+supports `push`, while insertion, removal, `pop`, and clearing remain specific
+behavior gaps. `[T; N]` remains fixed-length.
 
 Use `Set<T>` when values are discovered while the run progresses and only
 membership matters:
@@ -706,9 +714,9 @@ handler without a separate event API. The generated update loop runs
 `whileAttached` before timer-decision actions.
 
 Growable ordered storage, insertion order, and repeated equal values all belong
-to `[T]`. They do not justify another collection type. Until size-changing
-array operations are implemented, record those particular operations as the
-remaining gap rather than describing `List<T>` itself as missing.
+to `[T]`. They do not justify another collection type. Record any still-missing
+specific operation—indexed insertion, removal, `pop`, or clearing—rather than
+describing `List<T>` itself as missing.
 
 ## Finite settings families
 

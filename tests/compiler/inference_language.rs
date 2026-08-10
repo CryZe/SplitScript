@@ -1440,6 +1440,71 @@ fn array_indexing_is_first_class_bidirectional_and_array_only() {
 }
 
 #[test]
+fn indexed_assignment_updates_arrays_through_stable_aliases() {
+    let source = r#"
+        state "game.exe" {}
+
+        record Holder {
+            bar: [u8],
+            matrix: [[u8]],
+        }
+
+        whileAttached {
+            let values = [1u8, 2u8]
+            let alias = values
+            values[1] = 9u8
+            let updated: u8 = alias[1]
+            let foo = Holder {
+                bar: [3u8, 4u8],
+                matrix: [[5u8]],
+            }
+            foo.bar[1] = updated
+            foo.matrix[0][0] = 8u8
+            print(`{foo.bar[1]} {foo.matrix[0][0]}`)
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("plain indexed assignment should use the array mutation capability");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("indexed assignment should produce valid in-place Wasm GC mutation");
+
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let values = [1u8]
+                values[0] = "wrong"
+            }
+        "#,
+    )
+    .expect_err("the assigned value must match the element type");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("types do not match"))
+    );
+}
+
+#[test]
+fn compound_indexed_assignment_preserves_the_future_single_evaluation_boundary() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let values = [1]
+                values[0] += 1
+            }
+        "#,
+    )
+    .expect_err("compound indexed assignment is not yet safe to desugar");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("compound indexed assignment")
+            && diagnostic.message.contains("evaluated exactly once")
+    }));
+}
+
+#[test]
 fn growable_arrays_support_push_but_fixed_arrays_reject_it() {
     let source = r#"
         state "game.exe" {}

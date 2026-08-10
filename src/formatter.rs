@@ -380,22 +380,39 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             self.mark_top_level_commas(opening.span.start, expression.span.end);
         }
         if let ExprKind::Call {
+            callee,
             name_span,
+            receiver,
             type_arguments,
             ..
         } = &expression.kind
-            && !type_arguments.is_empty()
         {
-            let mut angles = self.document.tokens().filter(|token| {
-                name_span.end <= token.span.start
-                    && token.span.end <= expression.span.end
-                    && matches!(token.kind, TokenKind::Lt | TokenKind::Gt)
-            });
-            if let Some(open) = angles.next() {
-                self.generic_opens.insert(open.span.start);
+            if !type_arguments.is_empty() {
+                let mut angles = self.document.tokens().filter(|token| {
+                    name_span.end <= token.span.start
+                        && token.span.end <= expression.span.end
+                        && matches!(token.kind, TokenKind::Lt | TokenKind::Gt)
+                });
+                if let Some(open) = angles.next() {
+                    self.generic_opens.insert(open.span.start);
+                }
+                if let Some(close) = angles.next() {
+                    self.generic_closes.insert(close.span.start);
+                }
             }
-            if let Some(close) = angles.next() {
-                self.generic_closes.insert(close.span.start);
+            // Indexed assignment is represented as a compiler-inserted call
+            // to Array.set. Its outer Index node is intentionally absent, so
+            // recover the one bracket between the receiver and `=` for layout.
+            if callee.as_slice() == ["set"]
+                && name_span.start == name_span.end
+                && let Some(receiver) = receiver
+                && let Some(opening) = self.document.tokens().find(|token| {
+                    receiver.span.end <= token.span.start
+                        && token.span.end <= name_span.start
+                        && token.kind == TokenKind::LBracket
+                })
+            {
+                self.index_opens.insert(opening.span.start);
             }
         }
         if let ExprKind::Index { bracket_span, .. } = &expression.kind {
@@ -1532,6 +1549,23 @@ fn select(matrix: [[i32]], row: u32, column: u32) -> i32 {
             formatted.contains("return matrix[row][column]"),
             "{formatted}"
         );
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        crate::check(crate::lower(crate::parse(&formatted).unwrap())).unwrap();
+    }
+
+    #[test]
+    fn formats_indexed_assignment_as_an_ordinary_assignment() {
+        let source = r#"state "game.exe"{}
+whileAttached{let values=[1,2]
+values [ 1 ]=9}"#;
+        let expected = r#"state "game.exe" {}
+whileAttached {
+    let values = [1, 2]
+    values[1] = 9
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
         assert_eq!(format_source(&formatted).unwrap(), formatted);
         crate::check(crate::lower(crate::parse(&formatted).unwrap())).unwrap();
     }

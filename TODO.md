@@ -137,13 +137,12 @@ or behavioral parity.
   size-changing methods. Next design bulk extension, indexed insertion/removal,
   value removal, `pop`, and `clear` from corpus evidence, with explicit
   bounds/failure and must-use behavior. Both array forms retain indexing,
-  iteration, search, length, and element replacement. Structural mutation now
-  invalidates active iteration without allocating snapshots; preserve that
-  rule for every future collection mutator.
-- [ ] Design indexed mutation together with collection mutability rather than
-  adding an isolated array-assignment special case. Specify aliasing, fixed
-  array versus growable collection behavior, bounds failure, and interaction
-  with globals and Wasm GC before enabling `values[index] = value`.
+  iteration, search, length, and `values[index] = value` replacement. Plain
+  indexed assignment is non-structural and preserves aliases; add compound
+  indexed assignment only with temporaries that evaluate the collection and
+  index exactly once. Structural mutation invalidates active iteration without
+  allocating snapshots; preserve that rule for every future collection
+  mutator.
 
 ### Standard-library and type-system boundaries
 

@@ -1548,7 +1548,9 @@ typeConstructor Array<T> {
 
     /// Updates an array element.
     ///
-    /// The array is evaluated once and updated in place.
+    /// This is the standard-library operation behind `array[index] = value`.
+    /// The array and index are evaluated once and the element is updated in
+    /// place without structurally invalidating active iteration.
     ///
     /// # Example
     ///

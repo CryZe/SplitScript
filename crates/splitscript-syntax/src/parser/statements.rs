@@ -3,7 +3,7 @@
 //! Statement grammar.
 
 use super::{
-    ASL_MUTABLE_CURRENT_DIAGNOSTIC, Block, Diagnostic, ForBinding, Parser, RecoveryNode,
+    ASL_MUTABLE_CURRENT_DIAGNOSTIC, Block, Diagnostic, ExprKind, ForBinding, Parser, RecoveryNode,
     RecoveryNodeKind, Span, Stmt, TokenKind, VariableDecl, assignment_operator, statement_span,
 };
 
@@ -230,6 +230,42 @@ impl Parser<'_> {
             });
         }
         let expr = self.root_expression();
+        if let Some(op) = assignment_operator(&self.current().kind) {
+            let operator_span = self.bump().span;
+            let value = self.root_expression();
+            self.terminator()?;
+            let span = expr.span.join(self.previous().span);
+            let ExprKind::Index {
+                receiver, index, ..
+            } = expr.kind
+            else {
+                return Err(Diagnostic::new(
+                    "only variables and array elements can be assigned",
+                    expr.span,
+                ));
+            };
+            if op.is_some() {
+                return Err(Diagnostic::new(
+                    "compound indexed assignment is not yet supported because the array and index must each be evaluated exactly once",
+                    operator_span,
+                ));
+            }
+            return Ok(Stmt::Expression(self.new_expr(
+                ExprKind::Call {
+                    callee: vec!["set".to_owned()],
+                    // The catalog method is compiler-inserted syntax sugar,
+                    // so it has no source identifier to highlight or navigate.
+                    name_span: Span {
+                        start: operator_span.start,
+                        end: operator_span.start,
+                    },
+                    receiver: Some(receiver),
+                    type_arguments: Vec::new(),
+                    args: vec![*index, value],
+                },
+                span,
+            )));
+        }
         self.terminator()?;
         Ok(Stmt::Expression(expr))
     }

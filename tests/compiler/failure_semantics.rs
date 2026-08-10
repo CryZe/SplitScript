@@ -239,8 +239,8 @@ fn option_and_result_values_use_explicit_typed_hir_conversions() {
 }
 
 #[test]
-fn wasm_ir_owns_scalar_expression_operations_and_resolved_paths() {
-    use splitscript::compiler::wasm_ir::ExpressionKind;
+fn wasm_ir_owns_scalar_expression_operations_catalog_calls_and_resolved_paths() {
+    use splitscript::compiler::wasm_ir::{CallTarget, ExpressionKind};
 
     let source = r#"
         state "game.exe" {}
@@ -260,7 +260,8 @@ fn wasm_ir_owns_scalar_expression_operations_and_resolved_paths() {
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
     let lowered = splitscript::lower_wasm(&checked);
     let mut saw_path = false;
-    let mut saw_unary = false;
+    let mut saw_negate = false;
+    let mut saw_not = false;
     let mut saw_binary = false;
     let mut saw_cast = false;
     for typed in checked.typed_hir().expressions() {
@@ -272,13 +273,23 @@ fn wasm_ir_owns_scalar_expression_operations_and_resolved_paths() {
                 assert!(root.is_some());
                 saw_path = true;
             }
-            ExpressionKind::Unary { .. } => saw_unary = true,
+            ExpressionKind::Call {
+                target: CallTarget::Intrinsic { intrinsic, .. },
+                ..
+            } if *intrinsic == IntrinsicId::SignedNegate => saw_negate = true,
+            ExpressionKind::Call {
+                target: CallTarget::Intrinsic { intrinsic, .. },
+                ..
+            } if *intrinsic == IntrinsicId::BoolNot => saw_not = true,
+            ExpressionKind::Unary { .. } => {
+                panic!("checked unary operators must lower through catalog calls")
+            }
             ExpressionKind::Binary { .. } => saw_binary = true,
             ExpressionKind::Cast { .. } => saw_cast = true,
             _ => {}
         }
     }
-    assert!(saw_path && saw_unary && saw_binary && saw_cast);
+    assert!(saw_path && saw_negate && saw_not && saw_binary && saw_cast);
 
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))

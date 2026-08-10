@@ -798,10 +798,19 @@ fn lower_expression(
         TypedExpressionKind::Unary {
             op,
             expression: operand,
-        } => ExpressionKind::Unary {
-            op: *op,
-            operand: *operand,
-        },
+        } => {
+            if let Some(ExpressionResolution::Call(target)) = &expression.resolution {
+                ExpressionKind::Call {
+                    target: lower_call_target(target, typed_hir, semantics),
+                    arguments: Vec::new(),
+                }
+            } else {
+                ExpressionKind::Unary {
+                    op: *op,
+                    operand: *operand,
+                }
+            }
+        }
         TypedExpressionKind::Cast {
             expression: value, ..
         } => ExpressionKind::Cast { value: *value },

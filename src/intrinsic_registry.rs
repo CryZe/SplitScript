@@ -412,6 +412,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::StringConcat | IntrinsicId::StringJoin => &[Helper(Runtime::JoinStrings)],
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
         IntrinsicId::NextTick
+        | IntrinsicId::BoolNot
         | IntrinsicId::NumericAdd
         | IntrinsicId::NumericSubtract
         | IntrinsicId::NumericMultiply
@@ -424,6 +425,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::IntegerShiftRight
         | IntrinsicId::EquatableEquals
         | IntrinsicId::EquatableNotEquals
+        | IntrinsicId::SignedNegate
         | IntrinsicId::NumericMin
         | IntrinsicId::NumericMax
         | IntrinsicId::FloatAbs
@@ -560,6 +562,7 @@ const NO_TYPE_PARAMETERS: Option<&[StdlibCapabilityId]> = None;
 const UNCONSTRAINED_T: Option<&[StdlibCapabilityId]> = Some(&[]);
 const NUMERIC_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Numeric]);
 const INTEGER_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Integer]);
+const SIGNED_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Signed]);
 const FLOAT_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Float]);
 const EQUATABLE_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Equatable]);
 const MEMORY_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::MemoryReadable]);
@@ -684,6 +687,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             RepresentationPrimitive
         ),
+        IntrinsicId::BoolNot => contract!(
+            BoolNot,
+            Method,
+            signature(NO_TYPE_PARAMETERS, Some(BOOL), params![], BOOL),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
         IntrinsicId::NumericAdd => contract!(
             NumericAdd,
             Method,
@@ -776,6 +787,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             EquatableNotEquals,
             Method,
             signature(EQUATABLE_T, Some(T), params![value(T)], BOOL),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::SignedNegate => contract!(
+            SignedNegate,
+            Method,
+            signature(SIGNED_T, Some(T), params![], T),
             PURE,
             Everywhere,
             RepresentationPrimitive

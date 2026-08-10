@@ -1035,7 +1035,24 @@ capability Integer<T: Numeric + Display> {
 /// let levelDelta: i32 = -4
 /// ```
 @behavior(declared)
-capability Signed<T: Numeric> {}
+capability Signed<T: Numeric> {
+    /// Returns this value with its sign inverted.
+    ///
+    /// This method is also the implementation of unary `-`. Integer minimum
+    /// values wrap to themselves, matching WebAssembly integer subtraction;
+    /// floating-point values toggle their sign bit, including zero and NaN.
+    ///
+    /// # Example
+    ///
+    /// Invert a signed offset
+    ///
+    /// ```splitscript
+    /// let reverseOffset = -forwardOffset
+    /// ```
+    @intrinsic(SignedNegate)
+    @operator(negate)
+    fn negate() -> T;
+}
 
 /// Identifies floating-point types.
 ///
@@ -1252,6 +1269,23 @@ extend f64 {
     @mustUse("The returned bit pattern must be used.")
     @intrinsic(F64ToBits)
     fn toBits() -> u64;
+}
+
+extend bool {
+    /// Inverts a boolean value.
+    ///
+    /// This method is also the implementation of the `!` operator.
+    ///
+    /// # Example
+    ///
+    /// Invert a loading flag
+    ///
+    /// ```splitscript
+    /// let isPlaying = !isLoading
+    /// ```
+    @intrinsic(BoolNot)
+    @operator(not)
+    fn not() -> bool;
 }
 
 /// Supports equality comparison.

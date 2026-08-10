@@ -943,6 +943,30 @@ fn stored_discovery_future_executes_and_is_cancelled_with_its_attachment() {
 }
 
 #[test]
+fn catalog_declared_unary_operators_execute_for_globals_and_methods() {
+    let source = r#"
+        let negative: i32 = -7
+        let ready = !false
+
+        state "game.exe" {}
+
+        whileAttached {
+            let reverse = negative.negate()
+            let disabled = ready.not()
+            print(`{negative}:{reverse}:{ready}:{disabled}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["-7:7:true:false"]);
+}
+
+#[test]
 fn async_none_completion_is_status_only_but_remains_typed() {
     let source = r#"
         state "game.exe" {}

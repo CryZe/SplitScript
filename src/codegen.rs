@@ -5,11 +5,11 @@ use wasm_encoder::{
 
 use crate::ast::{
     ActionKind, ArrayTypeId, EnumDecl, EnumVariantId, ExprId, OptionTypeId, Program, RecordFieldId,
-    ResultTypeId, UnaryOp, ValueId,
+    ResultTypeId, ValueId,
 };
 use crate::equality::EqualityCapabilities;
 use crate::memory::{MemoryLayouts, MemoryTypeLayout};
-use crate::semantic::{FunctionInstance, SemanticModel};
+use crate::semantic::{FunctionInstance, ResolvedReceiver, SemanticModel};
 use crate::stdlib::{
     Implementation, IntrinsicId, StandardLibrary, StateProviderAttachment, StateProviderProcesses,
     StdlibTypeId,
@@ -858,26 +858,35 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
     let expression = wasm_ir
         .expression(expression)
         .expect("global initializer belongs to Wasm IR");
-    let negative = matches!(
-        expression.kind,
-        wasm_ir::ExpressionKind::Unary {
-            op: UnaryOp::Neg,
-            ..
-        }
-    );
-    let inner = if let wasm_ir::ExpressionKind::Unary { operand: inner, .. } = expression.kind {
-        wasm_ir
-            .expression(inner)
-            .expect("global initializer operand belongs to Wasm IR")
-    } else {
-        expression
+    let (operator, inner) = match &expression.kind {
+        wasm_ir::ExpressionKind::Call {
+            target:
+                wasm_ir::CallTarget::Intrinsic {
+                    intrinsic: intrinsic @ (IntrinsicId::SignedNegate | IntrinsicId::BoolNot),
+                    receiver:
+                        Some(ResolvedReceiver::Expression {
+                            expression: inner,
+                            members,
+                        }),
+                    ..
+                },
+            arguments,
+        } if members.is_empty() && arguments.is_empty() => (
+            Some(*intrinsic),
+            wasm_ir
+                .expression(*inner)
+                .expect("global initializer operand belongs to Wasm IR"),
+        ),
+        _ => (None, expression),
     };
+    let negative = operator == Some(IntrinsicId::SignedNegate);
+    let inverted = operator == Some(IntrinsicId::BoolNot);
     match &inner.kind {
         wasm_ir::ExpressionKind::None => ConstExpr::ref_null(HeapType::Abstract {
             shared: false,
             ty: AbstractHeapType::None,
         }),
-        wasm_ir::ExpressionKind::Bool(value) => ConstExpr::i32_const(*value as i32),
+        wasm_ir::ExpressionKind::Bool(value) => ConstExpr::i32_const((*value ^ inverted) as i32),
         wasm_ir::ExpressionKind::Char(value) => ConstExpr::i32_const(*value as i32),
         wasm_ir::ExpressionKind::Int(value) if ty == Type::F32 => ConstExpr::f32_const(
             (if negative {

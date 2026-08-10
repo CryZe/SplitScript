@@ -7,10 +7,10 @@ use std::{
 
 use super::{
     CoreType, CoreTypeId, FieldVisibility, ItemKind, OperationMetadata, StandardBinaryOperator,
-    StdlibCapability, StdlibCapabilityId, StdlibField, StdlibFieldId, StdlibItem, StdlibItemId,
-    StdlibNamespace, StdlibNamespaceId, StdlibOwner, StdlibStateProvider, StdlibStateProviderId,
-    StdlibSymbolId, StdlibType, StdlibTypeConstructor, StdlibTypeConstructorId, StdlibTypeId,
-    StdlibVariant, StdlibVariantId, TypeRef,
+    StandardUnaryOperator, StdlibCapability, StdlibCapabilityId, StdlibField, StdlibFieldId,
+    StdlibItem, StdlibItemId, StdlibNamespace, StdlibNamespaceId, StdlibOwner, StdlibStateProvider,
+    StdlibStateProviderId, StdlibSymbolId, StdlibType, StdlibTypeConstructor,
+    StdlibTypeConstructorId, StdlibTypeId, StdlibVariant, StdlibVariantId, TypeRef,
     catalog::{
         CAPABILITIES, FIELDS, ITEMS, NAMESPACES, STATE_PROVIDERS, TYPE_CONSTRUCTORS, TYPES,
         VARIANTS,
@@ -43,6 +43,7 @@ pub(super) struct StandardLibraryGraph {
     pub(super) methods: Vec<&'static StdlibItem>,
     pub(super) methods_by_name: HashMap<&'static str, Vec<&'static StdlibItem>>,
     pub(super) binary_operators: HashMap<StandardBinaryOperator, Vec<&'static StdlibItem>>,
+    pub(super) unary_operators: HashMap<StandardUnaryOperator, Vec<&'static StdlibItem>>,
     pub(super) children_by_owner: HashMap<StdlibOwner, Vec<StdlibSymbolId>>,
     source_body_operations: OnceLock<HashMap<StdlibItemId, OperationMetadata>>,
 }
@@ -142,7 +143,14 @@ impl StandardLibraryGraph {
             ITEMS.iter().filter(|item| item.binary_operator.is_some()),
             |item| item.binary_operator.expect("filtered operator binding"),
         );
-        let mut operator_bindings = HashMap::new();
+        let unary_operators = group(
+            ITEMS.iter().filter(|item| item.unary_operator.is_some()),
+            |item| {
+                item.unary_operator
+                    .expect("filtered unary operator binding")
+            },
+        );
+        let mut binary_operator_bindings = HashMap::new();
         for item in ITEMS.iter().filter(|item| item.binary_operator.is_some()) {
             let operator = item.binary_operator.expect("filtered operator binding");
             let ItemKind::Method { receiver } = item.kind else {
@@ -176,7 +184,36 @@ impl StandardLibraryGraph {
                     item.qualified_name
                 ));
             }
-            if let Some(previous) = operator_bindings.insert((item.owner, operator), item) {
+            if let Some(previous) = binary_operator_bindings.insert((item.owner, operator), item) {
+                errors.push(format!(
+                    "operator implementations `{}` and `{}` have the same owner and operator",
+                    previous.qualified_name, item.qualified_name
+                ));
+            }
+        }
+        let mut unary_operator_bindings = HashMap::new();
+        for item in ITEMS.iter().filter(|item| item.unary_operator.is_some()) {
+            let operator = item
+                .unary_operator
+                .expect("filtered unary operator binding");
+            let ItemKind::Method { receiver } = item.kind else {
+                errors.push(format!(
+                    "unary operator implementation `{}` is not a method",
+                    item.qualified_name
+                ));
+                continue;
+            };
+            let expected_result = match operator {
+                StandardUnaryOperator::Not => TypeRef::Core(CoreTypeId::Bool),
+                StandardUnaryOperator::Negate => receiver,
+            };
+            if !item.signature.parameters.is_empty() || item.signature.result != expected_result {
+                errors.push(format!(
+                    "operator implementation `{}` has an invalid unary signature",
+                    item.qualified_name
+                ));
+            }
+            if let Some(previous) = unary_operator_bindings.insert((item.owner, operator), item) {
                 errors.push(format!(
                     "operator implementations `{}` and `{}` have the same owner and operator",
                     previous.qualified_name, item.qualified_name
@@ -205,6 +242,7 @@ impl StandardLibraryGraph {
             methods,
             methods_by_name,
             binary_operators,
+            unary_operators,
             children_by_owner: HashMap::new(),
             source_body_operations: OnceLock::new(),
         };

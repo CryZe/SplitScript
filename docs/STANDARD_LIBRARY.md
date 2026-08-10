@@ -269,6 +269,11 @@ context used by ordinary expressions. Candidate discovery itself commits no
 new constraints, and ambiguous applicable candidates produce a diagnostic
 before a candidate is committed. The catalog validates duplicate callable
 shapes so accidental indistinguishable overloads are caught by tests.
+Binary and unary operator syntax uses this same path. Privileged declarations
+bind methods to operator identities with `@operator`, so `value + other`,
+`value == other`, `-value`, and `!value` resolve to the same items exposed as
+ordinary documented methods. Short-circuit `&&` and `||` remain language-level
+control flow rather than eager method calls.
 
 Read-only queries cover item enumeration, exact canonical lookup, path and
 method candidate lookup, signature rendering, and the documentation stored on

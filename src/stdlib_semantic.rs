@@ -6,8 +6,8 @@
 
 use crate::{
     stdlib::{
-        CapabilityBehavior, ItemKind, StandardBinaryOperator, StandardLibrary, StdlibCapabilityId,
-        StdlibItem, StdlibTypeConstructorId, TypeRef,
+        CapabilityBehavior, ItemKind, StandardBinaryOperator, StandardLibrary,
+        StandardUnaryOperator, StdlibCapabilityId, StdlibItem, StdlibTypeConstructorId, TypeRef,
     },
     types::TypeKind,
 };
@@ -31,6 +31,7 @@ pub trait StandardLibrarySemanticExt {
     fn function_candidates(&self, path: &[String]) -> Vec<CallCandidate>;
     fn method_candidates(&self, name: &str) -> Vec<CallCandidate>;
     fn binary_operator_candidates(&self, operator: StandardBinaryOperator) -> Vec<CallCandidate>;
+    fn unary_operator_candidates(&self, operator: StandardUnaryOperator) -> Vec<CallCandidate>;
     fn methods_for_type(&self, receiver: &TypeKind) -> Vec<&'static StdlibItem>;
     fn resolve_path(&self, path: &[String]) -> Option<CallCandidate>;
 }
@@ -56,6 +57,12 @@ impl StandardLibrarySemanticExt for StandardLibrary {
 
     fn binary_operator_candidates(&self, operator: StandardBinaryOperator) -> Vec<CallCandidate> {
         self.binary_operator_items(operator)
+            .map(|item| CallCandidate { item })
+            .collect()
+    }
+
+    fn unary_operator_candidates(&self, operator: StandardUnaryOperator) -> Vec<CallCandidate> {
+        self.unary_operator_items(operator)
             .map(|item| CallCandidate { item })
             .collect()
     }

@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: catalog-owned unary operators
+
+- Added `bool.not()` and `Signed.negate()` to the canonical source-defined
+  standard library and bound `!` and unary `-` to those declarations.
+- Extended the backend-neutral operator schema, catalog validation, intrinsic
+  contracts, inference, and Wasm IR lowering so unary syntax and direct method
+  calls publish the same semantic call identities.
+- Preserved zero-overhead global constants and primitive Wasm lowering,
+  including boolean inversion, signed integer wrapping, floating-point sign
+  changes, and direct Wasmtime execution coverage.
+
 ## 2026-08-10: catalog-owned structural equality
 
 - Added `equals` and `notEquals` to the source-defined `Equatable` capability

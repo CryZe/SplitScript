@@ -465,39 +465,33 @@ impl<'a> Validator<'a> {
         else {
             return;
         };
-        let valid_name = matches!(
-            operator.arguments.as_slice(),
-            [AttributeArgument::Name(name)] if matches!(
-                name.as_str(),
-                "add"
-                    | "subtract"
-                    | "multiply"
-                    | "divide"
-                    | "remainder"
-                    | "bitOr"
-                    | "bitXor"
-                    | "bitAnd"
-                    | "shiftLeft"
-                    | "shiftRight"
-                    | "equal"
-                    | "notEqual"
-                    | "lessThan"
-                    | "lessThanOrEqual"
-                    | "greaterThan"
-                    | "greaterThanOrEqual"
-            )
-        );
-        if !valid_name {
+        let name = match operator.arguments.as_slice() {
+            [AttributeArgument::Name(name)] => Some(name.as_str()),
+            _ => None,
+        };
+        let arity = match name {
+            Some(
+                "add" | "subtract" | "multiply" | "divide" | "remainder" | "bitOr" | "bitXor"
+                | "bitAnd" | "shiftLeft" | "shiftRight" | "equal" | "notEqual" | "lessThan"
+                | "lessThanOrEqual" | "greaterThan" | "greaterThanOrEqual",
+            ) => Some(1),
+            Some("not" | "negate") => Some(0),
+            _ => None,
+        };
+        if arity.is_none() {
             self.error(format!(
-                "`{qualified}` attribute `@operator` expects a supported binary operator name"
+                "`{qualified}` attribute `@operator` expects a supported operator name"
             ));
         }
         let owner_supports_methods = self.types.contains(owner)
             || self.capabilities.contains(owner)
             || PrimitiveType::parse(owner).is_some();
-        if !owner_supports_methods || function.is_static || function.parameters.len() != 1 {
+        if !owner_supports_methods
+            || function.is_static
+            || arity.is_some_and(|arity| function.parameters.len() != arity)
+        {
             self.error(format!(
-                "`{qualified}` operator implementation must be a method with exactly one parameter"
+                "`{qualified}` operator implementation must be a method with the operator's required arity"
             ));
         }
     }

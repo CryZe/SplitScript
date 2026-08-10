@@ -790,21 +790,30 @@ impl Checker {
             ExprKind::Unary { op, expr: inner } => match op {
                 UnaryOp::Not => {
                     let bool_type = self.core_type(crate::stdlib::CoreTypeId::Bool);
-                    self.expr(inner, Some(bool_type));
-                    self.expect_expression(expr.id, bool_type, expected, expr.span)?
+                    let inner_ty = self.expr(inner, Some(bool_type))?;
+                    let result = self
+                        .resolve_unary_operator(*op, inner_ty, expr.id, inner.id, expr.span)
+                        .unwrap_or(bool_type);
+                    self.expect_expression(expr.id, result, expected, expr.span)?
                 }
                 UnaryOp::Neg => {
                     let operand_hint = expected.map(|ty| self.expected_value_type(ty));
                     let inner_ty = self.expr(inner, operand_hint)?;
-                    self.require(
-                        inner_ty,
-                        Requirements::capabilities([
-                            StdlibCapabilityId::Numeric,
-                            StdlibCapabilityId::Signed,
-                        ]),
-                        expr.span,
-                    )?;
-                    self.expect_expression(expr.id, inner_ty, expected, expr.span)?
+                    if let Some(result) =
+                        self.resolve_unary_operator(*op, inner_ty, expr.id, inner.id, expr.span)
+                    {
+                        self.expect_expression(expr.id, result, expected, expr.span)?
+                    } else {
+                        self.require(
+                            inner_ty,
+                            Requirements::capabilities([
+                                StdlibCapabilityId::Numeric,
+                                StdlibCapabilityId::Signed,
+                            ]),
+                            expr.span,
+                        )?;
+                        self.expect_expression(expr.id, inner_ty, expected, expr.span)?
+                    }
                 }
             },
             ExprKind::Cast {

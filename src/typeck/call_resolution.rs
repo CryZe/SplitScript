@@ -14,9 +14,9 @@ use crate::{
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
     signature::parse_signature,
     stdlib::{
-        Availability, DeclaredTypeRef, ItemKind, ParameterRule, StandardBinaryOperator, StdlibItem,
-        StdlibItemId, StdlibOwner, StdlibTypeConstructorId, StdlibTypeId,
-        TypeRef as CatalogTypeRef,
+        Availability, DeclaredTypeRef, ItemKind, ParameterRule, StandardBinaryOperator,
+        StandardUnaryOperator, StdlibItem, StdlibItemId, StdlibOwner, StdlibTypeConstructorId,
+        StdlibTypeId, TypeRef as CatalogTypeRef,
     },
     stdlib_semantic::{CallCandidate, StandardLibrarySemanticExt},
     types::TypeKind,
@@ -29,6 +29,38 @@ use super::{
 };
 
 impl Checker {
+    /// Resolves unary syntax through a catalog-declared zero-argument method.
+    pub(super) fn resolve_unary_operator(
+        &mut self,
+        op: crate::ast::UnaryOp,
+        operand_type: Type,
+        expression: ExprId,
+        operand: ExprId,
+        span: Span,
+    ) -> Option<Type> {
+        let operator = match op {
+            crate::ast::UnaryOp::Not => StandardUnaryOperator::Not,
+            crate::ast::UnaryOp::Neg => StandardUnaryOperator::Negate,
+        };
+        let candidates = self
+            .standard_library
+            .unary_operator_candidates(operator)
+            .into_iter()
+            .collect();
+        let (result, call) = self.operator_call(
+            candidates,
+            operand_type,
+            None,
+            ResolvedReceiver::Expression {
+                expression: operand,
+                members: Vec::new(),
+            },
+            span,
+        )?;
+        self.semantics.resolve_call(expression, call);
+        Some(result)
+    }
+
     /// Resolves binary syntax through a catalog-declared method. Inferred
     /// operands select capability bindings; concrete operands may select a
     /// more specific implementation owned by their exact type.
@@ -105,15 +137,29 @@ impl Checker {
             crate::ast::BinaryOp::Ge => StandardBinaryOperator::GreaterThanOrEqual,
             _ => return None,
         };
-        let inferred_receiver = matches!(self.shallow_type(left_type), Type::Variable(_));
         let candidates = self
             .standard_library
             .binary_operator_candidates(operator)
             .into_iter()
+            .collect();
+        self.operator_call(candidates, left_type, Some(right_type), receiver, span)
+    }
+
+    fn operator_call(
+        &mut self,
+        candidates: Vec<CallCandidate>,
+        receiver_operand: Type,
+        argument_operand: Option<Type>,
+        receiver: ResolvedReceiver,
+        span: Span,
+    ) -> Option<(Type, PendingResolvedCall)> {
+        let inferred_receiver = matches!(self.shallow_type(receiver_operand), Type::Variable(_));
+        let candidates = candidates
+            .into_iter()
             .filter(|candidate| {
                 (!inferred_receiver
                     || matches!(candidate.receiver(), Some(CatalogTypeRef::Parameter(_))))
-                    && self.catalog_candidate_may_apply(candidate, left_type)
+                    && self.catalog_candidate_may_apply(candidate, receiver_operand)
             })
             .collect::<Vec<_>>();
         let [candidate] = candidates.as_slice() else {
@@ -153,13 +199,19 @@ impl Checker {
                 .expect("operator bindings are validated methods"),
             &variables,
         );
-        self.unify(left_type, receiver_type, span)?;
-        let [parameter] = item.signature.parameters else {
-            unreachable!("operator bindings are validated binary methods")
+        self.unify(receiver_operand, receiver_type, span)?;
+        let mut signature = vec![receiver_type];
+        match (argument_operand, item.signature.parameters) {
+            (Some(argument_operand), [parameter]) => {
+                let parameter_type = self.catalog_type(parameter.ty, &variables);
+                self.unify(argument_operand, parameter_type, span)?;
+                signature.push(parameter_type);
+            }
+            (None, []) => {}
+            _ => unreachable!("operator bindings have a validated arity"),
         };
-        let parameter_type = self.catalog_type(parameter.ty, &variables);
-        self.unify(right_type, parameter_type, span)?;
         let result = self.catalog_type(item.signature.result, &variables);
+        signature.push(result);
         let type_arguments = item
             .signature
             .type_parameters
@@ -171,7 +223,7 @@ impl Checker {
             PendingResolvedCall::StandardLibrary {
                 item: item.id,
                 type_arguments,
-                signature: vec![receiver_type, parameter_type, result],
+                signature,
                 receiver: Some(receiver),
                 receiver_type: Some(receiver_type),
             },

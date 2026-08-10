@@ -400,6 +400,65 @@ fn binary_syntax_resolves_through_catalog_declared_methods() {
 }
 
 #[test]
+fn unary_syntax_resolves_through_catalog_declared_methods() {
+    let library = StandardLibrary::new();
+    assert_eq!(
+        library.item(StdlibItemId::BoolNot).unary_operator,
+        Some(StandardUnaryOperator::Not)
+    );
+    assert_eq!(
+        library.item(StdlibItemId::SignedNegate).unary_operator,
+        Some(StandardUnaryOperator::Negate)
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::BoolNot),
+        "bool.not() -> bool"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::SignedNegate),
+        "T.negate() -> T where T: Signed"
+    );
+
+    let source = r#"
+        state "game.exe" {}
+        whileAttached {
+            let offset: i32 = -42
+            let reverse = offset.negate()
+            let ready = !false
+            let disabled = ready.not()
+            print(`{offset}:{reverse}:{ready}:{disabled}`)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("catalog-declared unary operators should type-check as ordinary calls");
+    let resolved_items = checked
+        .semantics()
+        .calls()
+        .filter_map(|(_, call)| match call {
+            ResolvedCall::StandardLibrary { item, .. } => Some(*item),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        resolved_items
+            .iter()
+            .filter(|item| **item == StdlibItemId::SignedNegate)
+            .count(),
+        2
+    );
+    assert_eq!(
+        resolved_items
+            .iter()
+            .filter(|item| **item == StdlibItemId::BoolNot)
+            .count(),
+        2
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("catalog-declared unary operators should lower to valid Wasm");
+}
+
+#[test]
 fn compound_assignment_resolves_through_the_same_catalog_method() {
     let source = r#"
         state "game.exe" {}

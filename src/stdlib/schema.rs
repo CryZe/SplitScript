@@ -287,6 +287,13 @@ pub enum StandardBinaryOperator {
     GreaterThanOrEqual,
 }
 
+/// Source-language unary syntax implemented by an ordinary catalog method.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StandardUnaryOperator {
+    Not,
+    Negate,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StdlibItem {
     pub id: StdlibItemId,
@@ -295,6 +302,7 @@ pub struct StdlibItem {
     pub qualified_name: &'static str,
     pub kind: ItemKind,
     pub binary_operator: Option<StandardBinaryOperator>,
+    pub unary_operator: Option<StandardUnaryOperator>,
     pub signature: Signature,
     pub must_use: Option<&'static str>,
     pub deprecation: Option<Deprecation>,

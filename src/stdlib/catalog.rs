@@ -20,7 +20,7 @@ use super::{
     },
     schema::{
         Implementation, ItemKind, Parameter, ParameterRule, Signature, StandardBinaryOperator,
-        StdlibItem, TypeParameter, TypeRef,
+        StandardUnaryOperator, StdlibItem, TypeParameter, TypeRef,
     },
 };
 
@@ -160,6 +160,7 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::IntegerShiftRight
         | StdlibItemId::EquatableEquals
         | StdlibItemId::EquatableNotEquals
+        | StdlibItemId::SignedNegate
         | StdlibItemId::NumericMin
         | StdlibItemId::NumericMax
         | StdlibItemId::NumericClamp => NUMERIC_EXAMPLE,

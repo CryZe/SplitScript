@@ -20,7 +20,8 @@ pub use ids::{
 pub use schema::{
     Availability, CancellationKind, Deprecation, Effect, EffectSet, Implementation, ItemKind,
     OperationMetadata, OperationSemantics, Parameter, ParameterRule, Signature,
-    StandardBinaryOperator, StdlibItem, SuspensionKind, TypeParameter, TypeRef,
+    StandardBinaryOperator, StandardUnaryOperator, StdlibItem, SuspensionKind, TypeParameter,
+    TypeRef,
 };
 
 pub use declarations::{
@@ -327,6 +328,18 @@ impl StandardLibrary {
     ) -> impl Iterator<Item = &'static StdlibItem> + '_ {
         self.graph
             .binary_operators
+            .get(&operator)
+            .into_iter()
+            .flat_map(|items| items.iter().copied())
+    }
+
+    /// Returns every catalog method bound to the requested unary syntax.
+    pub fn unary_operator_items(
+        &self,
+        operator: StandardUnaryOperator,
+    ) -> impl Iterator<Item = &'static StdlibItem> + '_ {
+        self.graph
+            .unary_operators
             .get(&operator)
             .into_iter()
             .flat_map(|items| items.iter().copied())
@@ -1034,6 +1047,11 @@ impl StandardLibrary {
                         StandardBinaryOperator::LessThanOrEqual => " <= ",
                         StandardBinaryOperator::GreaterThan => " > ",
                         StandardBinaryOperator::GreaterThanOrEqual => " >= ",
+                    })
+                }) || item.unary_operator.is_some_and(|operator| {
+                    example.source.contains(match operator {
+                        StandardUnaryOperator::Not => "!",
+                        StandardUnaryOperator::Negate => "-",
                     })
                 });
                 if !example.source.contains(&example_call) && !demonstrates_operator {

@@ -6,7 +6,7 @@ use wasm_encoder::{AbstractHeapType, BlockType, Function, HeapType, Instruction,
 
 use crate::{
     abi::AbiImportId,
-    ast::{ActionKind, BinaryOp, EnumDecl, ExprId, RecordDecl, ResultTypeId, UnaryOp, ValueId},
+    ast::{ActionKind, BinaryOp, EnumDecl, ExprId, RecordDecl, ResultTypeId, ValueId},
     intrinsic_registry::RuntimeHelperId,
     memory::MemoryLayouts,
     semantic::{
@@ -1609,33 +1609,9 @@ fn compile_expr_unconverted(
             let element = array_element_type(array_id, context.semantics);
             emit_array_get(function, context.gc.index(Type::Array(array_id)), element);
         }
-        wasm_ir::ExpressionKind::Unary { op, operand } => match op {
-            UnaryOp::Not => {
-                compile_expr(function, *operand, context);
-                function.instruction(&Instruction::I32Eqz);
-            }
-            UnaryOp::Neg => match ty {
-                Type::I8 | Type::I16 | Type::I32 => {
-                    function.instruction(&Instruction::I32Const(0));
-                    compile_expr(function, *operand, context);
-                    function.instruction(&Instruction::I32Sub);
-                }
-                Type::I64 => {
-                    function.instruction(&Instruction::I64Const(0));
-                    compile_expr(function, *operand, context);
-                    function.instruction(&Instruction::I64Sub);
-                }
-                Type::F32 => {
-                    compile_expr(function, *operand, context);
-                    function.instruction(&Instruction::F32Neg);
-                }
-                Type::F64 => {
-                    compile_expr(function, *operand, context);
-                    function.instruction(&Instruction::F64Neg);
-                }
-                _ => unreachable!(),
-            },
-        },
+        wasm_ir::ExpressionKind::Unary { .. } => {
+            unreachable!("checked unary operators lower through catalog calls")
+        }
         wasm_ir::ExpressionKind::Cast { value } => emit_cast(function, *value, ty, context),
         wasm_ir::ExpressionKind::Binary { op, left, right } => {
             emit_binary(function, *op, *left, *right, context)
@@ -2770,6 +2746,34 @@ fn compile_expr_unconverted(
                     builtin == IntrinsicId::EquatableEquals,
                     context,
                 );
+            }
+            IntrinsicId::BoolNot => {
+                compile_receiver(function, target, context);
+                function.instruction(&Instruction::I32Eqz);
+            }
+            IntrinsicId::SignedNegate => {
+                let receiver = compile_receiver(function, target, context);
+                match receiver {
+                    Type::I8 | Type::I16 | Type::I32 => {
+                        // The receiver is already on the stack, so multiply by
+                        // negative one rather than reversing subtraction order.
+                        function
+                            .instruction(&Instruction::I32Const(-1))
+                            .instruction(&Instruction::I32Mul);
+                    }
+                    Type::I64 => {
+                        function
+                            .instruction(&Instruction::I64Const(-1))
+                            .instruction(&Instruction::I64Mul);
+                    }
+                    Type::F32 => {
+                        function.instruction(&Instruction::F32Neg);
+                    }
+                    Type::F64 => {
+                        function.instruction(&Instruction::F64Neg);
+                    }
+                    _ => unreachable!("signed negation requires a signed numeric receiver"),
+                }
             }
             IntrinsicId::NumericAdd
             | IntrinsicId::NumericSubtract

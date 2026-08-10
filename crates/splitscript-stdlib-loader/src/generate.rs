@@ -462,28 +462,39 @@ impl<'a> CatalogGenerator<'a> {
             .map(|reason| format!("Some({})", quote(reason)))
             .unwrap_or_else(|| "None".to_owned());
         let binary_operator = optional_attribute_name(&function.attributes, "operator")
-            .map(|operator| match operator {
-                "add" => "Some(StandardBinaryOperator::Add)",
-                "subtract" => "Some(StandardBinaryOperator::Subtract)",
-                "multiply" => "Some(StandardBinaryOperator::Multiply)",
-                "divide" => "Some(StandardBinaryOperator::Divide)",
-                "remainder" => "Some(StandardBinaryOperator::Remainder)",
-                "bitOr" => "Some(StandardBinaryOperator::BitOr)",
-                "bitXor" => "Some(StandardBinaryOperator::BitXor)",
-                "bitAnd" => "Some(StandardBinaryOperator::BitAnd)",
-                "shiftLeft" => "Some(StandardBinaryOperator::ShiftLeft)",
-                "shiftRight" => "Some(StandardBinaryOperator::ShiftRight)",
-                "equal" => "Some(StandardBinaryOperator::Equal)",
-                "notEqual" => "Some(StandardBinaryOperator::NotEqual)",
-                "lessThan" => "Some(StandardBinaryOperator::LessThan)",
-                "lessThanOrEqual" => "Some(StandardBinaryOperator::LessThanOrEqual)",
-                "greaterThan" => "Some(StandardBinaryOperator::GreaterThan)",
-                "greaterThanOrEqual" => "Some(StandardBinaryOperator::GreaterThanOrEqual)",
+            .and_then(|operator| match operator {
+                "add" => Some("Some(StandardBinaryOperator::Add)"),
+                "subtract" => Some("Some(StandardBinaryOperator::Subtract)"),
+                "multiply" => Some("Some(StandardBinaryOperator::Multiply)"),
+                "divide" => Some("Some(StandardBinaryOperator::Divide)"),
+                "remainder" => Some("Some(StandardBinaryOperator::Remainder)"),
+                "bitOr" => Some("Some(StandardBinaryOperator::BitOr)"),
+                "bitXor" => Some("Some(StandardBinaryOperator::BitXor)"),
+                "bitAnd" => Some("Some(StandardBinaryOperator::BitAnd)"),
+                "shiftLeft" => Some("Some(StandardBinaryOperator::ShiftLeft)"),
+                "shiftRight" => Some("Some(StandardBinaryOperator::ShiftRight)"),
+                "equal" => Some("Some(StandardBinaryOperator::Equal)"),
+                "notEqual" => Some("Some(StandardBinaryOperator::NotEqual)"),
+                "lessThan" => Some("Some(StandardBinaryOperator::LessThan)"),
+                "lessThanOrEqual" => Some("Some(StandardBinaryOperator::LessThanOrEqual)"),
+                "greaterThan" => Some("Some(StandardBinaryOperator::GreaterThan)"),
+                "greaterThanOrEqual" => Some("Some(StandardBinaryOperator::GreaterThanOrEqual)"),
+                "not" | "negate" => None,
+                _ => unreachable!("validated operator binding"),
+            })
+            .unwrap_or("None");
+        let unary_operator = optional_attribute_name(&function.attributes, "operator")
+            .and_then(|operator| match operator {
+                "not" => Some("Some(StandardUnaryOperator::Not)"),
+                "negate" => Some("Some(StandardUnaryOperator::Negate)"),
+                "add" | "subtract" | "multiply" | "divide" | "remainder" | "bitOr" | "bitXor"
+                | "bitAnd" | "shiftLeft" | "shiftRight" | "equal" | "notEqual" | "lessThan"
+                | "lessThanOrEqual" | "greaterThan" | "greaterThanOrEqual" => None,
                 _ => unreachable!("validated operator binding"),
             })
             .unwrap_or("None");
         output.push_str(&format!(
-                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, validation_fixture(StdlibItemId::{id}))], related: &[] }}, implementation: {implementation} }},\n",
+                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, unary_operator: {unary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, validation_fixture(StdlibItemId::{id}))], related: &[] }}, implementation: {implementation} }},\n",
                 quote(&function.name),
                 quote(&qualified_name),
                 self.type_parameters(type_parameters, owner),

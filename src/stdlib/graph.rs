@@ -159,10 +159,7 @@ impl StandardLibraryGraph {
                 | StandardBinaryOperator::GreaterThan
                 | StandardBinaryOperator::GreaterThanOrEqual => TypeRef::Core(CoreTypeId::Bool),
             };
-            if item.signature.parameters.len() != 1
-                || item.signature.parameters[0].ty != receiver
-                || item.signature.result != expected_result
-            {
+            if item.signature.parameters.len() != 1 || item.signature.result != expected_result {
                 errors.push(format!(
                     "operator implementation `{}` has an invalid binary signature",
                     item.qualified_name

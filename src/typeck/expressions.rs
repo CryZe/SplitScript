@@ -1016,26 +1016,31 @@ impl Checker {
             }
             _ => {
                 let left_ty = self.expr(left, operand_hint)?;
-                let right_ty = self.expr(right, operand_hint)?;
+                // A catalog-defined operator may accept a different right-hand
+                // type, such as `Instant + Duration`. The expected result can
+                // guide the receiver; the operator declaration guides this
+                // expression once a candidate has been selected.
+                let right_ty = self.expr(right, None)?;
                 (left_ty, right_ty)
             }
         };
-        let operand_ty = self.unify(left_ty, right_ty, span)?;
 
-        if self.is_error_type(operand_ty) {
+        if self.is_error_type(left_ty) || self.is_error_type(right_ty) {
             let result = if result_is_bool {
                 self.core_type(crate::stdlib::CoreTypeId::Bool)
             } else {
-                operand_ty
+                self.error_type()
             };
             return self.expect_expression(expression, result, expected, span);
         }
 
         if let Some(result) =
-            self.resolve_binary_operator(op, operand_ty, expression, left.id, span)
+            self.resolve_binary_operator(op, left_ty, right_ty, expression, left.id, span)
         {
             return self.expect_expression(expression, result, expected, span);
         }
+
+        let operand_ty = self.unify(left_ty, right_ty, span)?;
 
         self.require_binary_operand(op, operand_ty, span)?;
 

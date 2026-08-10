@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-10: heterogeneous operators and monotonic deadlines
+
+- Generalized catalog-defined binary operators so the right operand may differ
+  from the receiver while arithmetic results still preserve the receiver type.
+  Ordinary numeric and Duration operators retain their same-type declarations.
+- Added source-defined `Instant + Duration` and matching compound assignment for
+  concise monotonic deadlines. The exact nanosecond calculation clamps below
+  the clock origin and above the largest representable instant rather than
+  wrapping.
+- Covered inferred and explicit result types, source-defined lowering, compound
+  assignment, negative underflow, positive overflow, and the real monotonic
+  clock import in compiler and deterministic Wasm runtime tests.
+
 ## 2026-08-10: Unicode-scalar string padding
 
 - Added immutable `String.padStart(width, fill)` and

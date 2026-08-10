@@ -24,6 +24,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::DurationGreaterThan,
         StdlibItemId::DurationGreaterThanOrEqual,
         StdlibItemId::DurationZero,
+        StdlibItemId::InstantAdd,
         StdlibItemId::InstantDurationSince,
         StdlibItemId::InstantElapsed,
         StdlibItemId::InstantHasElapsed,
@@ -222,6 +223,10 @@ fn instant_uses_one_monotonic_host_boundary_and_source_defined_arithmetic() {
         "Instant.now() -> Instant"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::InstantAdd),
+        "Instant.add(duration: Duration) -> Instant"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::InstantDurationSince),
         "Instant.durationSince(earlier: Instant) -> Duration"
     );
@@ -230,6 +235,7 @@ fn instant_uses_one_monotonic_host_boundary_and_source_defined_arithmetic() {
         Implementation::Intrinsic(IntrinsicId::InstantNow)
     ));
     for item in [
+        StdlibItemId::InstantAdd,
         StdlibItemId::InstantDurationSince,
         StdlibItemId::InstantElapsed,
         StdlibItemId::InstantHasElapsed,
@@ -247,7 +253,9 @@ fn instant_uses_one_monotonic_host_boundary_and_source_defined_arithmetic() {
         state "game.exe" {}
         whileAttached {
             let startedAt = Instant.now()
-            if startedAt.hasElapsed(Duration.zero()) {
+            let deadline: Instant = startedAt
+            deadline += Duration.fromMilliseconds(250)
+            if startedAt.hasElapsed(Duration.zero()) && deadline != startedAt {
                 print("ready")
             }
         }
@@ -260,6 +268,10 @@ fn instant_uses_one_monotonic_host_boundary_and_source_defined_arithmetic() {
 #[test]
 fn binary_syntax_resolves_through_catalog_declared_methods() {
     let library = StandardLibrary::new();
+    assert_eq!(
+        library.item(StdlibItemId::InstantAdd).binary_operator,
+        Some(StandardBinaryOperator::Add)
+    );
     assert_eq!(
         library.item(StdlibItemId::DurationAdd).binary_operator,
         Some(StandardBinaryOperator::Add)

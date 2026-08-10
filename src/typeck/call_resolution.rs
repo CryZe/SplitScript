@@ -35,14 +35,16 @@ impl Checker {
     pub(super) fn resolve_binary_operator(
         &mut self,
         op: crate::ast::BinaryOp,
-        operand: Type,
+        left_type: Type,
+        right_type: Type,
         expression: ExprId,
         left: ExprId,
         span: Span,
     ) -> Option<Type> {
         let (result, call) = self.binary_operator_call(
             op,
-            operand,
+            left_type,
+            right_type,
             ResolvedReceiver::Expression {
                 expression: left,
                 members: Vec::new(),
@@ -57,13 +59,15 @@ impl Checker {
         &mut self,
         assignment: crate::ast::AssignmentId,
         op: crate::ast::BinaryOp,
-        operand: Type,
+        left_type: Type,
+        right_type: Type,
         target: crate::ast::ValueId,
         span: Span,
     ) -> Option<Type> {
         let (result, call) = self.binary_operator_call(
             op,
-            operand,
+            left_type,
+            right_type,
             ResolvedReceiver::Path {
                 root: ResolvedValue::Variable(target),
                 members: Vec::new(),
@@ -77,7 +81,8 @@ impl Checker {
     fn binary_operator_call(
         &mut self,
         op: crate::ast::BinaryOp,
-        operand: Type,
+        left_type: Type,
+        right_type: Type,
         receiver: ResolvedReceiver,
         span: Span,
     ) -> Option<(Type, PendingResolvedCall)> {
@@ -90,15 +95,15 @@ impl Checker {
             crate::ast::BinaryOp::Ge => StandardBinaryOperator::GreaterThanOrEqual,
             _ => return None,
         };
-        let inferred_operand = matches!(self.shallow_type(operand), Type::Variable(_));
+        let inferred_receiver = matches!(self.shallow_type(left_type), Type::Variable(_));
         let candidates = self
             .standard_library
             .binary_operator_candidates(operator)
             .into_iter()
             .filter(|candidate| {
-                (!inferred_operand
+                (!inferred_receiver
                     || matches!(candidate.receiver(), Some(CatalogTypeRef::Parameter(_))))
-                    && self.catalog_candidate_may_apply(candidate, operand)
+                    && self.catalog_candidate_may_apply(candidate, left_type)
             })
             .collect::<Vec<_>>();
         let [candidate] = candidates.as_slice() else {
@@ -138,12 +143,12 @@ impl Checker {
                 .expect("operator bindings are validated methods"),
             &variables,
         );
-        self.unify(operand, receiver_type, span)?;
+        self.unify(left_type, receiver_type, span)?;
         let [parameter] = item.signature.parameters else {
             unreachable!("operator bindings are validated binary methods")
         };
         let parameter_type = self.catalog_type(parameter.ty, &variables);
-        self.unify(operand, parameter_type, span)?;
+        self.unify(right_type, parameter_type, span)?;
         let result = self.catalog_type(item.signature.result, &variables);
         let type_arguments = item
             .signature

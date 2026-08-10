@@ -2458,6 +2458,57 @@ struct Instant {
     @intrinsic(InstantNow)
     static fn now() -> Instant;
 
+    /// Offsets this instant by a duration.
+    ///
+    /// This method implements `Instant + Duration`. Results before the
+    /// monotonic clock's zero point clamp to zero, and results beyond the
+    /// largest representable instant clamp to that maximum. The calculation
+    /// preserves nanosecond precision and does not wrap.
+    ///
+    /// # Example
+    ///
+    /// Calculate a deadline
+    ///
+    /// ```splitscript
+    /// let deadline = startedAt + Duration.fromMilliseconds(250)
+    /// ```
+    @mustUse("Instants are immutable; add returns the offset instant and does not modify its receiver.")
+    @operator(add)
+    fn add(
+        /// The signed duration by which to offset the instant.
+        duration: Duration,
+    ) -> Instant {
+        let currentSeconds = self.nanoseconds / 1_000_000_000
+        let currentNanoseconds = self.nanoseconds % 1_000_000_000
+        let durationSeconds = duration.wholeSeconds()
+
+        if durationSeconds < 0 - currentSeconds - 1 {
+            return Instant { nanoseconds: 0 }
+        }
+        if durationSeconds > 9_223_372_036 - currentSeconds {
+            return Instant { nanoseconds: 9_223_372_036_854_775_807 }
+        }
+
+        let combinedNanoseconds = currentNanoseconds
+            + duration.subsecondNanoseconds() as i64
+        let resultSeconds = currentSeconds + durationSeconds
+            + combinedNanoseconds / 1_000_000_000
+        let resultNanoseconds = combinedNanoseconds % 1_000_000_000
+
+        if resultSeconds < 0 {
+            return Instant { nanoseconds: 0 }
+        }
+        if resultSeconds > 9_223_372_036
+            || resultSeconds == 9_223_372_036
+                && resultNanoseconds > 854_775_807
+        {
+            return Instant { nanoseconds: 9_223_372_036_854_775_807 }
+        }
+        return Instant {
+            nanoseconds: resultSeconds * 1_000_000_000 + resultNanoseconds,
+        }
+    }
+
     /// Returns the elapsed duration since an earlier instant.
     ///
     /// The result is zero when `earlier` is later than the receiver, matching

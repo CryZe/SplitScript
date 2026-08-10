@@ -6,7 +6,12 @@ if (!wasmPath) {
 }
 
 const decoder = new TextDecoder();
-const readings = [1_000_000_000n, 1_250_000_000n, 1_500_000_000n];
+const readings = [
+    1_000_000_000n,
+    1_250_000_000n,
+    9_223_372_036_854_775_707n,
+    1_500_000_000n,
+];
 let instance;
 let helperStatus;
 let clockCalls = 0;

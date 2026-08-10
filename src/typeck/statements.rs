@@ -72,19 +72,23 @@ impl Checker {
                         if let Some(target) = binding.id {
                             self.semantics.resolve_assignment(*id, target);
                         }
-                        if self.expr(value, Some(binding.ty)).is_some()
-                            && let Some(op) = op
-                        {
-                            let resolved = binding.id.and_then(|target| {
-                                self.resolve_assignment_operator(
-                                    *id, *op, binding.ty, target, *span,
-                                )
-                            });
-                            if let Some(result) = resolved {
-                                self.unify(result, binding.ty, *span);
-                            } else {
-                                self.require_binary_operand(*op, binding.ty, *span);
+                        if let Some(op) = op {
+                            if let Some(right_type) = self.expr(value, None) {
+                                let resolved = binding.id.and_then(|target| {
+                                    self.resolve_assignment_operator(
+                                        *id, *op, binding.ty, right_type, target, *span,
+                                    )
+                                });
+                                if let Some(result) = resolved {
+                                    self.unify(result, binding.ty, *span);
+                                } else if let Some(operand_type) =
+                                    self.unify(binding.ty, right_type, *span)
+                                {
+                                    self.require_binary_operand(*op, operand_type, *span);
+                                }
                             }
+                        } else {
+                            self.expr(value, Some(binding.ty));
                         }
                     }
                     None => self.error(format!("unknown variable `{name}`"), *span),

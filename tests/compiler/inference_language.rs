@@ -1505,7 +1505,7 @@ fn compound_indexed_assignment_preserves_the_future_single_evaluation_boundary()
 }
 
 #[test]
-fn growable_arrays_support_push_and_clear_but_fixed_arrays_reject_them() {
+fn growable_arrays_support_push_extend_and_clear_but_fixed_arrays_reject_them() {
     let source = r#"
         state "game.exe" {}
 
@@ -1514,9 +1514,15 @@ fn growable_arrays_support_push_and_clear_but_fixed_arrays_reject_them() {
             let alias = values
             values.push(3)
             alias.push(4)
+            let more: [u32; 2] = [5, 6]
+            values.extend(more)
+            alias.extend(alias)
             values.clear()
-            alias.push(5)
+            alias.push(7)
+            let inferred = []
+            inferred.extend([8u8, 9])
             print(values[0])
+            print(inferred[1])
         }
     "#;
     let wasm = splitscript::compile(source).expect("growable array mutation should compile");
@@ -1539,6 +1545,22 @@ fn growable_arrays_support_push_and_clear_but_fixed_arrays_reject_them() {
             .message
             .contains("cannot change the length of fixed array")
             && error.message.contains("only available on growable `[T]`")
+    }));
+
+    let errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let fixed: [u8; 2] = [1, 2]
+                fixed.extend([3, 4])
+            }
+        "#,
+    )
+    .expect_err("fixed arrays must reject extend");
+    assert!(errors.iter().any(|error| {
+        error.message.contains("fixed array")
+            && error.message.contains("`extend`")
+            && error.message.contains("growable `[T]`")
     }));
 
     let errors = splitscript::compile(

@@ -182,6 +182,7 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         StdlibItemId::ArrayLength
         | StdlibItemId::ArraySet
         | StdlibItemId::ArrayPush
+        | StdlibItemId::ArrayExtend
         | StdlibItemId::ArrayClear => ARRAY_EXAMPLE,
         StdlibItemId::AddressOffset | StdlibItemId::AddressAdd => ADDRESS_EXAMPLE,
         StdlibItemId::ProcessModule

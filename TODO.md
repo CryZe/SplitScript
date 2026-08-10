@@ -135,8 +135,9 @@ or behavioral parity.
   storage, logical length, amortized `push`, and capacity-preserving `clear`
   now preserve aliases across growth and reset; clearing releases live GC
   references without reallocating. `[T; N]` remains fixed-length and does not
-  advertise or accept size-changing methods. Next design bulk extension,
-  indexed insertion/removal, value removal, and `pop` from corpus evidence,
+  advertise or accept size-changing methods. Source-defined `extend` appends a
+  typed array and safely handles self-extension. Next design indexed
+  insertion/removal, value removal, and `pop` from corpus evidence,
   with explicit bounds/failure and must-use behavior. Both array forms retain indexing,
   iteration, search, length, and `values[index] = value` replacement. Plain
   indexed assignment is non-structural and preserves aliases; add compound

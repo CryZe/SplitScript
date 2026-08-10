@@ -1702,6 +1702,7 @@ fn unknown_calls_suggest_canonical_names_across_naming_styles() {
             "incrementBy",
             "incrementBy",
         ),
+        ("values.AddRange([2, 3])", "AddRange", "extend", "extend"),
         ("add_one(value)", "add_one", "addOne", "addOne"),
     ];
 
@@ -1720,6 +1721,7 @@ fn unknown_calls_suggest_canonical_names_across_naming_styles() {
 
                 whileAttached {{
                     let value: u32 = 5
+                    let values = [1, 2]
                     {call}
                 }}
             "#

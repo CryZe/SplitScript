@@ -37,6 +37,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::ArrayIsEmpty,
         StdlibItemId::ArrayContains,
         StdlibItemId::ArrayIndexOf,
+        StdlibItemId::ArrayExtend,
         StdlibItemId::ResultToOption,
         StdlibItemId::AddressOffset,
         StdlibItemId::UnityIl2Cpp,

@@ -37,5 +37,10 @@ whileAttached {
         for _value in values {
             alias.clear()
         }
+    } else if tick == 5 {
+        let values: [u32] = [1]
+        for _value in values {
+            values.extend([2, 3])
+        }
     }
 }

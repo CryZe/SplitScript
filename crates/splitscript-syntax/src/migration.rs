@@ -1014,6 +1014,15 @@ const STRING_ASCII_UPPER_SPELLINGS: &[ForeignSpelling] = &[type_spelling!(
     "replace this culture-sensitive C# method name"
 )];
 
+const ARRAY_EXTEND_SPELLINGS: &[ForeignSpelling] = &[type_spelling!(
+    SourceLanguage::CSharp,
+    ForeignSpellingContext::Method,
+    "AddRange",
+    "extend",
+    "SplitScript uses `extend` to append one typed array to another",
+    "replace this C# collection method name"
+)];
+
 const STRICT_EQUALITY_SPELLINGS: &[ForeignSpelling] = &[
     type_spelling!(
         SourceLanguage::JavaScript,
@@ -1357,6 +1366,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         targets: &[MigrationTarget::StandardLibraryItem("Array.length")],
         cookbook_anchor: Some("collection-search-and-run-scoped-sets"),
         spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("array.extend"),
+        name: "Bulk array extension",
+        sources: CSHARP,
+        support: MigrationSupport::Direct,
+        summary: "Call `values.extend(moreValues)` to append a typed array in order; extending an array with itself duplicates its original contents once.",
+        targets: &[MigrationTarget::StandardLibraryItem("Array.extend")],
+        cookbook_anchor: Some("collection-search-and-run-scoped-sets"),
+        spellings: ARRAY_EXTEND_SPELLINGS,
     },
     MigrationConcept {
         id: MigrationConceptId::new("collection.count"),

@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-10: source-defined bulk array extension
+
+- Added `[T].extend(values)` as ordinary standard-library source composed from
+  indexed reads and `push`, without introducing another backend intrinsic.
+- Captured the source length before mutation so aliases remain stable and
+  self-extension duplicates the original sequence exactly once.
+- Added fixed-array filtering and diagnostics, bidirectional empty-array
+  inference, C# `AddRange` migration guidance, and runtime coverage for growth,
+  reference elements, aliases, and fail-fast iteration.
+
 ## 2026-08-10: capacity-preserving growable-array clear
 
 - Added source-declared `[T].clear()` while keeping `[T; N]` exact and free of

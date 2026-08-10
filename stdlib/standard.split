@@ -1588,6 +1588,34 @@ typeConstructor Array<T> {
         value: T,
     ) -> None;
 
+    /// Appends every element from another array.
+    ///
+    /// The source length is captured before appending, so extending an array
+    /// with itself duplicates its original elements exactly once. The receiver
+    /// keeps its identity and grows with the same amortized behavior as
+    /// `push`. Exact `[T; N]` arrays cannot change length and do not support
+    /// `extend`. Extending through any alias invalidates active iteration of
+    /// the receiver.
+    ///
+    /// # Example
+    ///
+    /// Append discovered checkpoints in bulk
+    ///
+    /// ```splitscript
+    /// checkpoints.extend([4, 7, 9])
+    /// ```
+    fn extend(
+        /// The elements to append, in order.
+        values: [T],
+    ) -> None {
+        let count = values.length()
+        let index = 0
+        while index < count {
+            self.push(values[index])
+            index += 1
+        }
+    }
+
     /// Removes every element from a growable array.
     ///
     /// The array keeps its identity and capacity, so aliases observe the empty

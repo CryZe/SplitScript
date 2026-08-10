@@ -984,14 +984,17 @@ impl Checker {
                 &variables,
             );
             self.unify(receiver.ty, declared_receiver, span)?;
-            if matches!(item.id, StdlibItemId::ArrayPush | StdlibItemId::ArrayClear)
-                && let Type::Array(array) = self.shallow_type(receiver.ty)
+            if matches!(
+                item.id,
+                StdlibItemId::ArrayPush | StdlibItemId::ArrayExtend | StdlibItemId::ArrayClear
+            ) && let Type::Array(array) = self.shallow_type(receiver.ty)
                 && let Some(length) = self.inference.array_length(array)
             {
-                let method = if item.id == StdlibItemId::ArrayPush {
-                    "push"
-                } else {
-                    "clear"
+                let method = match item.id {
+                    StdlibItemId::ArrayPush => "push",
+                    StdlibItemId::ArrayExtend => "extend",
+                    StdlibItemId::ArrayClear => "clear",
+                    _ => unreachable!(),
                 };
                 self.error(
                     format!(

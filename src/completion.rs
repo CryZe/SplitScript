@@ -1250,14 +1250,16 @@ fn add_inferred_methods(
         .methods_for_type(receiver)
         .into_iter()
         .filter(|item| {
-            !(matches!(item.id, StdlibItemId::ArrayPush | StdlibItemId::ArrayClear)
-                && matches!(
-                    receiver,
-                    TypeKind::Array {
-                        length: Some(_),
-                        ..
-                    }
-                ))
+            !(matches!(
+                item.id,
+                StdlibItemId::ArrayPush | StdlibItemId::ArrayExtend | StdlibItemId::ArrayClear
+            ) && matches!(
+                receiver,
+                TypeKind::Array {
+                    length: Some(_),
+                    ..
+                }
+            ))
         })
         .chain(
             matches!(receiver, TypeKind::GenericParameter { .. })
@@ -1722,6 +1724,7 @@ split {
         assert!(completions.contains(&"contains".to_owned()));
         assert!(completions.contains(&"indexOf".to_owned()));
         assert!(!completions.contains(&"push".to_owned()));
+        assert!(!completions.contains(&"extend".to_owned()));
         assert!(!completions.contains(&"clear".to_owned()));
 
         let growable = r#"
@@ -1735,6 +1738,7 @@ split {
         let mut database = CompilerDatabase::new(growable);
         let completions = labels(&mut database, "values.");
         assert!(completions.contains(&"push".to_owned()));
+        assert!(completions.contains(&"extend".to_owned()));
         assert!(completions.contains(&"clear".to_owned()));
     }
 

@@ -599,6 +599,75 @@ fn csharp_rounding_explains_overloads_and_receiver_width() {
 }
 
 #[test]
+fn csharp_directed_rounding_explains_direction_width_and_qualified_paths() {
+    for (method, canonical, direction, message) in [
+        (
+            "Floor",
+            "floor",
+            "negative infinity",
+            "C# floor is a type-preserving `floor` method in SplitScript",
+        ),
+        (
+            "Ceiling",
+            "ceil",
+            "positive infinity",
+            "C# ceiling is a type-preserving `ceil` method in SplitScript",
+        ),
+    ] {
+        for (owner, width) in [
+            ("Math", "f64"),
+            ("MathF", "f32"),
+            ("System.Math", "f64"),
+            ("System.MathF", "f32"),
+        ] {
+            let source = format!(
+                r#"
+                    state "game.exe" {{}}
+
+                    fn rounded(value: f64) {{
+                        return {owner}.{method}(value)
+                    }}
+                "#
+            );
+            let diagnostics = splitscript::compile(&source)
+                .expect_err("C# directed rounding should receive migration guidance");
+
+            assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+            let diagnostic = &diagnostics[0];
+            assert_eq!(diagnostic.message, message);
+            assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], method);
+            assert!(diagnostic.fixes.is_empty());
+            assert!(diagnostic.notes.iter().any(|note| {
+                note.contains(&format!("as {width}")) && note.contains(&format!(".{canonical}()"))
+            }));
+            assert!(
+                diagnostic
+                    .notes
+                    .iter()
+                    .any(|note| note.contains(direction) && note.contains("IEEE 754"))
+            );
+            assert!(
+                diagnostic
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("decimal inputs"))
+            );
+        }
+    }
+
+    splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn floorWide(value: f64) -> f64 { return value.floor() }
+            fn floorNarrow(value: f32) -> f32 { return value.floor() }
+            fn ceilWide(value: f64) -> f64 { return value.ceil() }
+            fn ceilNarrow(value: f32) -> f32 { return value.ceil() }
+        "#,
+    )
+    .expect("canonical directed-rounding forms should compile");
+}
+
+#[test]
 fn a_user_binding_named_int32_keeps_its_parse_method() {
     let source = r#"
         record Parser {}

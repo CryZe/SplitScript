@@ -203,6 +203,10 @@ pub const CSHARP_TRUNCATE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.truncate-call");
 pub const CSHARP_ROUND_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.round-call");
+pub const CSHARP_FLOOR_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.math.floor-call");
+pub const CSHARP_CEILING_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.math.ceiling-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.timespan.parse-call");
 pub const CSHARP_TIMESPAN_TICKS_DIAGNOSTIC: MigrationDiagnosticId =
@@ -507,6 +511,32 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_FLOOR_DIAGNOSTIC,
+        concept: MigrationConceptId::new("math.floor"),
+        message: "C# floor is a type-preserving `floor` method in SplitScript",
+        primary_label: "move this operation onto the floating-point value",
+        notes: &[
+            "rewrite `Math.Floor(value)` as `(value as f64).floor()` when C#'s binary64 result is required",
+            "rewrite `MathF.Floor(value)` as `(value as f32).floor()` when the source intentionally uses binary32",
+            "SplitScript `floor` preserves its receiver type and rounds toward negative infinity; signed zero, infinity, and NaN follow IEEE 754",
+            "C# decimal inputs are not equivalent to binary floating-point and need a semantic rewrite",
+            "there is no automatic rewrite because selecting f32 or f64 is part of the migrated program's memory and comparison semantics",
+        ],
+    },
+    MigrationDiagnostic {
+        id: CSHARP_CEILING_DIAGNOSTIC,
+        concept: MigrationConceptId::new("math.ceiling"),
+        message: "C# ceiling is a type-preserving `ceil` method in SplitScript",
+        primary_label: "move this operation onto the floating-point value",
+        notes: &[
+            "rewrite `Math.Ceiling(value)` as `(value as f64).ceil()` when C#'s binary64 result is required",
+            "rewrite `MathF.Ceiling(value)` as `(value as f32).ceil()` when the source intentionally uses binary32",
+            "SplitScript `ceil` preserves its receiver type and rounds toward positive infinity; signed zero, infinity, and NaN follow IEEE 754",
+            "C# decimal inputs are not equivalent to binary floating-point and need a semantic rewrite",
+            "there is no automatic rewrite because selecting f32 or f64 is part of the migrated program's memory and comparison semantics",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.numeric-parse"),
         message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
@@ -558,8 +588,14 @@ pub fn legacy_string_method_diagnostic(name: &str) -> Option<MigrationDiagnostic
 }
 
 pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnosticId> {
-    let [owner, method] = path else {
-        return None;
+    let (owner, method) = match path {
+        [owner, method] => (owner, method),
+        [system, owner, method]
+            if system == "System" && matches!(owner.as_str(), "Math" | "MathF") =>
+        {
+            (owner, method)
+        }
+        _ => return None,
     };
     if owner == "String" && method == "IsNullOrEmpty" {
         return Some(CSHARP_STRING_IS_NULL_OR_EMPTY_DIAGNOSTIC);
@@ -581,6 +617,12 @@ pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnos
     }
     if matches!(owner.as_str(), "Math" | "MathF") && method == "Round" {
         return Some(CSHARP_ROUND_DIAGNOSTIC);
+    }
+    if matches!(owner.as_str(), "Math" | "MathF") && method == "Floor" {
+        return Some(CSHARP_FLOOR_DIAGNOSTIC);
+    }
+    if matches!(owner.as_str(), "Math" | "MathF") && method == "Ceiling" {
+        return Some(CSHARP_CEILING_DIAGNOSTIC);
     }
     if method != "Parse" && method != "TryParse" {
         return None;
@@ -1083,6 +1125,26 @@ pub const CONCEPTS: &[MigrationConcept] = &[
             MigrationTarget::StandardLibraryItem("Float.round"),
             MigrationTarget::StandardLibraryItem("Float.roundTo"),
         ],
+        cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("math.floor"),
+        name: "Floating-point floor",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `value.floor()` with an explicit f32 or f64 boundary; review C# decimal inputs separately.",
+        targets: &[MigrationTarget::StandardLibraryItem("Float.floor")],
+        cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("math.ceiling"),
+        name: "Floating-point ceiling",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `value.ceil()` with an explicit f32 or f64 boundary; review C# decimal inputs separately.",
+        targets: &[MigrationTarget::StandardLibraryItem("Float.ceil")],
         cookbook_anchor: None,
         spellings: &[],
     },

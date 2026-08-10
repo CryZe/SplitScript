@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: directed-rounding migration guidance
+
+- Added focused `Math.Floor`/`MathF.Floor` and
+  `Math.Ceiling`/`MathF.Ceiling` diagnostics that route binary floating-point
+  values to the existing `floor()` and `ceil()` methods.
+- Made f32/f64 width, directed-rounding behavior, IEEE special values, and the
+  unsupported C# decimal overloads explicit rather than applying an unsafe
+  rewrite.
+- Recognized corpus-proven fully qualified `System.Math` and `System.MathF`
+  paths without broadening migration matching to arbitrary namespaces.
+
 ## 2026-08-10: overload-aware C# rounding guidance
 
 - Added focused migration diagnostics for `Math.Round` and `MathF.Round`,

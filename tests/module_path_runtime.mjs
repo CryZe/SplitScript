@@ -74,11 +74,15 @@ const env = {
             view.setUint32(destination, 0x300, true);
         } else if (address === moduleBase + 0x328n && size === 4) {
             view.setUint32(destination, 0xfeef04bd, true);
-        } else if (address === moduleBase + 0x330n && size === 8) {
+        } else if (address === moduleBase + 0x330n && size === 16) {
             view.setUint16(destination, 2, true);
             view.setUint16(destination + 2, 1, true);
             view.setUint16(destination + 4, 4, true);
             view.setUint16(destination + 6, 3, true);
+            view.setUint16(destination + 8, 6, true);
+            view.setUint16(destination + 10, 5, true);
+            view.setUint16(destination + 12, 8, true);
+            view.setUint16(destination + 14, 7, true);
         } else {
             throw new Error(`unexpected PE read ${address.toString(16)} (${size})`);
         }
@@ -124,6 +128,8 @@ instance.exports.update();
 if (variables.get("Executable Path") !== "/games/demo/game-demo.exe"
     || variables.get("Plugin Path") !== "Unavailable"
     || variables.get("File Version") !== "1.2.3.4"
+    || variables.get("Product Version") !== "5.6.7.8"
+    || variables.get("Version Pair") !== "1.2.3.4 / 5.6.7.8"
     || variables.get("Casted File Version") !== "1.2.3.4"
     || messages.join(",") !== "1.2.3.4") {
     throw new Error(`unexpected module paths: ${JSON.stringify(Object.fromEntries(variables))}`);

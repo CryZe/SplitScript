@@ -401,7 +401,11 @@ matched during attachment. It is not the executable path and does not perform
 another host lookup. Use it when multiple executable names genuinely select
 different behavior or layouts. When several builds share a name, discriminate
 with reliable evidence such as `process.mainModule().size`, `process.path()`,
-`Module.fileVersion()`, or a signature instead.
+`Module.fileVersion()`, `Module.productVersion()`, or a signature instead.
+The two version methods return typed four-part `FileVersion` values rather than
+the punctuation-dependent strings exposed by C# `FileVersionInfo`. Use
+`Module.versionInfo()` when both identities are needed, so the PE resource is
+only traversed once.
 
 The compiler recognizes the exact legacy path `game.ProcessName` and offers a
 machine-applicable `process.name()` rewrite where the native `process` value is

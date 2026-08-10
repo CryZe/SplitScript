@@ -1423,17 +1423,22 @@ let executable = await process.mainModule()
 let executablePath = executable.path() else "Unavailable"
 ```
 
-For Windows PE modules, `module.fileVersion()` parses the bounded numeric
-`VS_FIXEDFILEINFO` resource directly from process memory. It returns an
-equatable `FileVersion` record with `major`, `minor`, `build`, and
-`privatePart` fields. This keeps version selection typed instead of relying on
-legacy version strings with inconsistent separators.
+For Windows PE modules, `module.fileVersion()` and `module.productVersion()`
+parse the bounded numeric `VS_FIXEDFILEINFO` resource directly from process
+memory. They return equatable `FileVersion` records with `major`, `minor`,
+`build`, and `privatePart` fields. This keeps version selection typed instead
+of relying on legacy version strings with inconsistent separators. When both
+identities are needed, `module.versionInfo()` returns them from one resource
+lookup as the `file` and `product` fields of `ModuleVersionInfo`.
 
 ```text
 let version = executable.fileVersion() else return
 if version.major == 1 && version.minor == 2 {
     print("recognized executable version")
 }
+
+let product = executable.productVersion() else return
+print(`product {product}`)
 ```
 
 Generic calls put type arguments directly after the callable name:

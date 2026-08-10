@@ -6,7 +6,11 @@ onAttach {
     setVariable("Executable Path", executable.path() else "Unavailable")
     setVariable("Plugin Path", plugin.path() else "Unavailable")
     let version = executable.fileVersion() else return
+    let productVersion = executable.productVersion() else return
+    let versions = executable.versionInfo() else return
     setVariable("File Version", version)
+    setVariable("Product Version", productVersion)
+    setVariable("Version Pair", `{versions.file} / {versions.product}`)
     setVariable("Casted File Version", version as String)
     print(version)
 }

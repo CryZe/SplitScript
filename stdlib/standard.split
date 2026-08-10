@@ -3401,6 +3401,51 @@ struct FileVersion {
     }
 }
 
+/// The fixed numeric versions embedded in a Windows PE module.
+///
+/// Windows keeps separate file and product identities in `VS_FIXEDFILEINFO`.
+/// They are often equal, but launchers and repackaged executables can use a
+/// stable product version while changing the individual file version.
+///
+/// # Example
+///
+/// Compare file and product identities
+///
+/// ```splitscript
+/// let executable = await process.mainModule()
+/// let versions = executable.versionInfo() else return
+/// let sameRelease = versions.file == versions.product
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, localVariable)
+struct ModuleVersionInfo {
+    /// The version of this particular executable or library file.
+    ///
+    /// # Example
+    ///
+    /// Read the file identity
+    ///
+    /// ```splitscript
+    /// let executable = await process.mainModule()
+    /// let versions = executable.versionInfo() else return
+    /// let fileVersion = versions.file
+    /// ```
+    file: FileVersion,
+
+    /// The version of the product to which the module belongs.
+    ///
+    /// # Example
+    ///
+    /// Read the product identity
+    ///
+    /// ```splitscript
+    /// let executable = await process.mainModule()
+    /// let versions = executable.versionInfo() else return
+    /// let productVersion = versions.product
+    /// ```
+    product: FileVersion,
+}
+
 /// Describes a module loaded in the attached process.
 ///
 /// A module exposes its base address and mapped size for bounded memory discovery.
@@ -3459,24 +3504,24 @@ struct Module {
     @intrinsic(ModulePath)
     fn path() -> String!;
 
-    /// Reads the numeric version from a Windows PE version resource.
+    /// Reads both fixed numeric versions from a Windows PE version resource.
     ///
     /// The parser validates the DOS and PE headers, follows the bounded
     /// resource-directory hierarchy, and verifies `VS_FIXEDFILEINFO` before
-    /// returning its four numeric components. Missing resources, malformed
-    /// images, and failed memory reads are ordinary errors.
+    /// returning the file and product components. Missing resources, malformed
+    /// images, and failed memory reads are ordinary errors. Use this method
+    /// when both identities are needed so the resource is traversed only once.
     ///
     /// # Example
     ///
-    /// Select a known executable version
+    /// Inspect both identities
     ///
     /// ```splitscript
-    /// let version = executable.fileVersion() else return
-    /// if version == v"1.2.3.4" {
-    ///     print("recognized version 1.2.3.4")
-    /// }
+    /// let versions = executable.versionInfo() else return
+    /// print(`file {versions.file}, product {versions.product}`)
     /// ```
-    fn fileVersion() -> FileVersion! {
+    @mustUse("use the returned version information")
+    fn versionInfo() -> ModuleVersionInfo! {
         if process.read<u16>(self.address)? != 0x5a4d {
             throw "module does not have a DOS header"
         }
@@ -3562,13 +3607,63 @@ struct Module {
         if process.read<u32>(fixedInfo)? != 0xfeef_04bd {
             throw "module has invalid fixed file information"
         }
-        let parts = process.read<[u16; 4]>(fixedInfo.add(8))?
-        return FileVersion.fromParts(
-            parts[1],
-            parts[0],
-            parts[3],
-            parts[2]
-        )
+        let parts = process.read<[u16; 8]>(fixedInfo.add(8))?
+        return ModuleVersionInfo {
+            file: FileVersion.fromParts(
+                parts[1],
+                parts[0],
+                parts[3],
+                parts[2]
+            ),
+            product: FileVersion.fromParts(
+                parts[5],
+                parts[4],
+                parts[7],
+                parts[6]
+            ),
+        }
+    }
+
+    /// Reads the file identity from a Windows PE version resource.
+    ///
+    /// This is the version of the individual executable or library. Use
+    /// `productVersion()` when a game identifies releases by product version.
+    /// Missing resources, malformed images, and failed reads are errors.
+    ///
+    /// # Example
+    ///
+    /// Select a known executable file version
+    ///
+    /// ```splitscript
+    /// let version = executable.fileVersion() else return
+    /// if version == v"1.2.3.4" {
+    ///     print("recognized file version 1.2.3.4")
+    /// }
+    /// ```
+    @mustUse("use the returned file version")
+    fn fileVersion() -> FileVersion! {
+        return self.versionInfo()?.file
+    }
+
+    /// Reads the product identity from a Windows PE version resource.
+    ///
+    /// Product versions can remain stable across modules whose individual file
+    /// versions differ. Missing resources, malformed images, and failed reads
+    /// are errors.
+    ///
+    /// # Example
+    ///
+    /// Select a known product version
+    ///
+    /// ```splitscript
+    /// let version = executable.productVersion() else return
+    /// if version == v"2.0.0.0" {
+    ///     print("recognized product version 2.0.0.0")
+    /// }
+    /// ```
+    @mustUse("use the returned product version")
+    fn productVersion() -> FileVersion! {
+        return self.versionInfo()?.product
     }
 
     /// Determines the pointer width of a Windows PE module.

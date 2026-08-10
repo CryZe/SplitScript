@@ -54,8 +54,10 @@ or behavioral parity.
   campaign used a different compiler.
 - [ ] Continue refreshing the ASL migration catalog and cookbook for
   non-lifecycle misunderstandings found by the campaign. The next concrete
-  audit is table-shaped or nested static settings that the existing numeric
-  families cannot express cleanly. Host-backed current game
+  audit found that A Hat in Time's irregular nested tree would require
+  recursive compile-time templates, not a useful extension of numeric setting
+  families. Keep it explicit until another maintained port demonstrates a
+  small shared abstraction. Host-backed current game
   time, run/segment metadata, run offset, and timing-method paths now receive
   distinct behavior-limited diagnostics and cookbook guidance while their
   typed runtime contract remains in R5. String/array length, collection count,
@@ -99,10 +101,11 @@ or behavioral parity.
 - [ ] Add layout sharing or overrides only if a maintained port proves that
   repeated pointer paths across many versions are materially unmaintainable.
   Keep the selected physical layout auditable.
-- [ ] Complete safe process/module version probes as ports require them:
-  module enumeration/search, product-version identity, and a deterministic
-  executable fingerprint. Prefer host metadata over unrestricted filesystem
-  access or hashing an entire module inside Wasm.
+- [ ] Complete the remaining safe process/module identity probes as ports
+  require them: module enumeration/search and a deterministic executable
+  fingerprint. Numeric PE file and product versions are available through one
+  shared source-defined `VS_FIXEDFILEINFO` traversal. Prefer host metadata over
+  unrestricted filesystem access or hashing an entire module inside Wasm.
 - [ ] Finish the remaining official host ABI as typed language facilities,
   preserving semantics without exposing owned numeric handles or manual
   `free` calls. Timer segment history, skip/undo, executable path, host OS, and
@@ -464,9 +467,10 @@ remaining work is product hardening and distribution.
    improve the documentation, completion, and diagnostics that failed to reveal
    existing features. Defer process-name warnings until the host's
    cross-platform matching contract is settled.
-2. Add table-shaped or nested static settings only after a maintained port
-   demonstrates what the existing numeric families cannot express; otherwise
-   select the next concrete provider or host-contract fixture.
+2. Keep irregular nested static settings explicit until another maintained
+   port demonstrates a small reusable table abstraction; select the next
+   concrete provider or host-contract fixture instead of inventing a settings
+   metaprogramming language.
 3. In parallel with stable language semantics, establish the Wasmtime/DWARF
    compatibility fixture and land debug names plus source-line stepping.
 4. Harden and publish the bundled VSIX and native releases, then evaluate the

@@ -62,12 +62,16 @@ function writePeValue(address, destination, size) {
         view.setUint32(destination, 0x300, true);
     } else if (address === moduleBase + 0x328n && size === 4) {
         view.setUint32(destination, 0xfeef04bd, true);
-    } else if (address === moduleBase + 0x330n && size === 8) {
+    } else if (address === moduleBase + 0x330n && size === 16) {
         const [major, minor, build, privatePart] = version;
         view.setUint16(destination, minor, true);
         view.setUint16(destination + 2, major, true);
         view.setUint16(destination + 4, privatePart, true);
         view.setUint16(destination + 6, build, true);
+        view.setUint16(destination + 8, minor, true);
+        view.setUint16(destination + 10, major, true);
+        view.setUint16(destination + 12, privatePart, true);
+        view.setUint16(destination + 14, build, true);
     } else {
         return false;
     }

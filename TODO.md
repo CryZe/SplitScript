@@ -367,12 +367,6 @@ remaining work is product hardening and distribution.
   such as Rust compiler-builtins' MIT-licensed libm `pow`/`powf`, including its
   scaling helpers, rather than introducing an ad-hoc approximation or a host
   import. Keep `squared()` as the simple exact-intent API for exponent two.
-- [ ] Add deterministic integer radix formatting for the Fallout 3/New Vegas
-  `Convert.ToString(cellId, 16)` pattern. Keep ordinary `as String` tied to
-  decimal Display; design the radix API around an explicit supported base,
-  signed-value semantics, invalid-base failure, and case selection (or compose
-  lowercase hexadecimal with `toAsciiUpperCase`) before implementing it in the
-  source-defined standard-library model.
 - [ ] Generalize first-class indexing beyond arrays only when another real type
   needs it. Design an operator protocol with inferred index and output types
   (the current single-receiver capability graph has no associated types), then

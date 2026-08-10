@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-10: deterministic integer radix formatting
+
+- Added catalog-declared `Integer.toString(radix) -> String!` for bases 2
+  through 36 across every fixed-width integer and `address`.
+- Defined lowercase digits, sign-magnitude output for negative values and
+  signed minima, explicit invalid-radix errors, and uppercase composition
+  through `String.toAsciiUpperCase`.
+- Generalized the existing allocation helper without changing decimal Display,
+  and added runtime, must-use, completion, hover, and C# migration coverage.
+
 ## 2026-08-10: exactly-once compound indexed assignment
 
 - Added arithmetic, remainder, bitwise, and shift compound assignments for

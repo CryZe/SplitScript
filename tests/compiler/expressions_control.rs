@@ -13,6 +13,7 @@ fn discarded_must_use_values_warn_without_failing_compilation() {
 
         whileAttached {
             "abc".replaceAll("a", "b")
+            255u8.toString(16)
             maybeValue()
             timer.state()
 
@@ -27,7 +28,7 @@ fn discarded_must_use_values_warn_without_failing_compilation() {
     "#;
     let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
         .expect("warnings must not reject a valid program");
-    assert_eq!(checked.diagnostics().len(), 3);
+    assert_eq!(checked.diagnostics().len(), 4);
     assert!(checked.diagnostics().iter().all(|diagnostic| {
         diagnostic.severity == splitscript::DiagnosticSeverity::Warning
             && diagnostic.code == splitscript::DiagnosticCode::MustUse
@@ -39,6 +40,13 @@ fn discarded_must_use_values_warn_without_failing_compilation() {
                 .notes
                 .iter()
                 .any(|note| note.contains("immutable"))
+    }));
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.message.contains("Integer.toString")
+            && diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("does not modify its receiver"))
     }));
     assert!(checked.diagnostics().iter().any(|diagnostic| {
         diagnostic.message.contains("Option")

@@ -1191,6 +1191,10 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "T.squared() -> T where T: Numeric"
     );
     assert_eq!(
+        library.render_signature(StdlibItemId::IntegerToString),
+        "T.toString(radix: u32) -> String! where T: Integer"
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::FloatSqrt),
         "T.sqrt() -> T where T: Float"
     );

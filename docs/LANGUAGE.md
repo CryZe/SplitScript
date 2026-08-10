@@ -264,6 +264,16 @@ assignment uses exactly the same operand typing and runtime operation as its
 ordinary binary operator while resolving the destination only once. These
 forms also work on indexed array elements.
 
+Every integer type, including `address`, can be formatted in bases 2 through 36
+with `value.toString(radix)`. The operation returns `String!` because a dynamic
+radix may be outside that range. Alphabetic digits are lowercase; compose
+`toAsciiUpperCase()` when uppercase output is desired. Signed values use a
+leading minus sign and their mathematical magnitude, including signed minima.
+
+```splitscript
+let hexadecimal = addressValue.toString(16) else ""
+```
+
 Unread parameters, local variables, loop elements, match payloads, and
 `await`/`retry` bindings produce non-fatal warnings. The analysis follows
 resolved value identities, so shadowed names and method receivers are handled

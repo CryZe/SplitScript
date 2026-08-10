@@ -262,6 +262,8 @@ numbered-settings case in [`docs/DDS_PORT.md`](docs/DDS_PORT.md).
   iterable, suspension-safe `await`/`retry` bodies in `onAttach`, and fail-fast
   detection of structural mutation through any alias.
 - Strict width checking: a `u16` is never silently treated as a `u32`.
+- Deterministic integer formatting in bases 2 through 36, with typed
+  invalid-radix errors.
 - Module-relative and absolute 64-bit pointer paths.
 - Ordered fallback process attachment with one or more executable names.
 - Suspension-safe `await` and `retry` bindings, including retrying arbitrary

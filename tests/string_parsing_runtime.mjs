@@ -9,9 +9,15 @@ const decoder = new TextDecoder();
 let instance;
 let observed;
 let dynamicObserved;
+let radixObserved;
+let dynamicRadixObserved;
 let dynamicText = "0";
 let dynamicExpected = 0;
 let dynamicValid = true;
+let dynamicRadixUnsigned = 0n;
+let dynamicRadixSigned = 0n;
+let dynamicRadix = 10;
+let dynamicRadixUsesSigned = false;
 
 const text = (pointer, length) => decoder.decode(
     new Uint8Array(instance.exports.memory.buffer, pointer, length),
@@ -38,6 +44,22 @@ const env = {
             view.setUint8(destination, dynamicValid ? 1 : 0);
             return 1;
         }
+        if (address === 0x510n && size === 8) {
+            view.setBigUint64(destination, dynamicRadixUnsigned, true);
+            return 1;
+        }
+        if (address === 0x518n && size === 8) {
+            view.setBigInt64(destination, dynamicRadixSigned, true);
+            return 1;
+        }
+        if (address === 0x520n && size === 4) {
+            view.setUint32(destination, dynamicRadix, true);
+            return 1;
+        }
+        if (address === 0x524n && size === 1) {
+            view.setUint8(destination, dynamicRadixUsesSigned ? 1 : 0);
+            return 1;
+        }
         throw new Error(`unexpected process read: ${address.toString(16)} (${size} bytes)`);
     },
     timer_set_variable(keyPointer, keyLength, valuePointer, valueLength) {
@@ -45,6 +67,10 @@ const env = {
             observed = text(valuePointer, valueLength);
         } else if (text(keyPointer, keyLength) === "String Parsing Dynamic") {
             dynamicObserved = text(valuePointer, valueLength);
+        } else if (text(keyPointer, keyLength) === "Integer Radix") {
+            radixObserved = text(valuePointer, valueLength);
+        } else if (text(keyPointer, keyLength) === "Integer Radix Dynamic") {
+            dynamicRadixObserved = text(valuePointer, valueLength);
         }
     },
 };
@@ -57,6 +83,11 @@ instance.exports.update();
 const expected = "255";
 if (observed !== expected) {
     throw new Error(`unexpected string-parsing output: ${JSON.stringify({ expected, observed })}`);
+}
+
+const expectedRadix = "0,11111111,ff,-80,-8000000000000000,3w5e11264sgsf,1234,ABCDEF,42,true";
+if (radixObserved !== expectedRadix) {
+    throw new Error(`unexpected integer-radix output: ${JSON.stringify({ expectedRadix, radixObserved })}`);
 }
 
 
@@ -114,4 +145,49 @@ for (const source of invalid) {
     }
 }
 
-console.log(JSON.stringify({ observed, decimalCases: valid.length, invalidCases: invalid.length }));
+for (const radix of [0, 1, 37, 0xffff_ffff]) {
+    dynamicRadix = radix;
+    dynamicRadixUsesSigned = false;
+    instance.exports.update();
+    if (dynamicRadixObserved !== "error") {
+        throw new Error(`invalid integer radix was accepted: ${JSON.stringify({ radix, dynamicRadixObserved })}`);
+    }
+}
+
+const unsignedRadixCases = [0n, 1n, 0xffff_ffffn, 0xffff_ffff_ffff_ffffn];
+for (let index = 0; index < 16; index += 1) {
+    unsignedRadixCases.push((BigInt(random()) << 32n) | BigInt(random()));
+}
+const signedRadixCases = [
+    -0x8000_0000_0000_0000n,
+    -1n,
+    0n,
+    1n,
+    0x7fff_ffff_ffff_ffffn,
+    ...unsignedRadixCases.map((value) => BigInt.asIntN(64, value)),
+];
+
+for (let radix = 2; radix <= 36; radix += 1) {
+    dynamicRadix = radix;
+    dynamicRadixUsesSigned = false;
+    for (const value of unsignedRadixCases) {
+        dynamicRadixUnsigned = value;
+        instance.exports.update();
+        const expectedValue = value.toString(radix);
+        if (dynamicRadixObserved !== expectedValue) {
+            throw new Error(`unsigned integer radix mismatch: ${JSON.stringify({ radix, value: value.toString(), expectedValue, dynamicRadixObserved })}`);
+        }
+    }
+
+    dynamicRadixUsesSigned = true;
+    for (const value of signedRadixCases) {
+        dynamicRadixSigned = value;
+        instance.exports.update();
+        const expectedValue = value.toString(radix);
+        if (dynamicRadixObserved !== expectedValue) {
+            throw new Error(`signed integer radix mismatch: ${JSON.stringify({ radix, value: value.toString(), expectedValue, dynamicRadixObserved })}`);
+        }
+    }
+}
+
+console.log(JSON.stringify({ observed, radixObserved, decimalCases: valid.length, invalidCases: invalid.length }));

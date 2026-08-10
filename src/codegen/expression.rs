@@ -2207,6 +2207,24 @@ fn compile_expr_unconverted(
                         .function(RuntimeHelperId::PrintString),
                 ));
             }
+            IntrinsicId::IntegerToStringRadix => {
+                let receiver_type = compile_receiver(function, target, context);
+                emit_integer_to_i64(function, receiver_type);
+                compile_expr(function, args[0], context);
+                function
+                    .instruction(&Instruction::I32Const(receiver_type.is_signed() as i32))
+                    .instruction(&Instruction::Call(
+                        context.runtime_helpers.function(RuntimeHelperId::FormatI64),
+                    ));
+                emit_sentinel_result(
+                    function,
+                    expression,
+                    Type::Standard(StdlibTypeId::String),
+                    Instruction::RefIsNull,
+                    "integer radix must be between 2 and 36",
+                    context,
+                );
+            }
             IntrinsicId::StringLength => {
                 compile_receiver(function, target, context);
                 function
@@ -3309,14 +3327,9 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
             function.instruction(&Instruction::Call(context.functions[&display].call));
             return;
         }
+        emit_integer_to_i64(function, source);
         function
-            .instruction(&if matches!(source, Type::I8 | Type::I16 | Type::I32) {
-                Instruction::I64ExtendI32S
-            } else if matches!(source, Type::U8 | Type::U16 | Type::U32) {
-                Instruction::I64ExtendI32U
-            } else {
-                Instruction::Nop
-            })
+            .instruction(&Instruction::I32Const(10))
             .instruction(&Instruction::I32Const(source.is_signed() as i32))
             .instruction(&Instruction::Call(
                 context.runtime_helpers.function(RuntimeHelperId::FormatI64),
@@ -3387,6 +3400,16 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
         function.instruction(&Instruction::F32DemoteF64);
     } else if source != target {
         unreachable!("type checking rejected unsupported cast `{source:?} as {target:?}`");
+    }
+}
+
+fn emit_integer_to_i64(function: &mut Function, source: Type) {
+    if matches!(source, Type::I8 | Type::I16 | Type::I32) {
+        function.instruction(&Instruction::I64ExtendI32S);
+    } else if matches!(source, Type::U8 | Type::U16 | Type::U32) {
+        function.instruction(&Instruction::I64ExtendI32U);
+    } else {
+        debug_assert!(matches!(source, Type::I64 | Type::U64 | Type::Address));
     }
 }
 

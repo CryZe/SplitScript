@@ -324,10 +324,20 @@ setVariable("Value", value)
 ```
 
 Interpolation, `print`, and `setVariable` already accept Display values, so
-they do not need an intermediate string cast. Radix and culture/provider
-overloads are separate formatting operations. In particular,
-`Convert.ToString(integer, 16)` has no canonical SplitScript replacement yet;
-do not silently turn it into decimal Display.
+they do not need an intermediate string cast. The integer-radix overload maps
+to the fallible `Integer.toString` method:
+
+```splitscript
+let hexadecimal = cellId.toString(16) else ""
+let uppercase = hexadecimal.toAsciiUpperCase()
+```
+
+Radices from 2 through 36 use `0` through `9` and lowercase `a` through `z`.
+Negative values retain a leading minus sign, including signed minima. This
+differs from C#'s two's-complement rendering of negative values in base 2, 8,
+or 16, so review any negative-source call rather than translating it blindly.
+An out-of-range radix returns an error. Culture/provider, null, and object
+overloads remain separate policies and are not ordinary Display conversions.
 
 ## Version-labelled ASL states
 

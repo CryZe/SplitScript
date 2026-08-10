@@ -2,6 +2,10 @@ state "game.exe" {
     dynamicText at 0x100 as utf8(1024);
     dynamicExpected: f64 at 0x500;
     dynamicValid: bool at 0x508;
+    dynamicRadixUnsigned: u64 at 0x510;
+    dynamicRadixSigned: i64 at 0x518;
+    dynamicRadix: u32 at 0x520;
+    dynamicRadixUsesSigned: bool at 0x524;
 }
 
 fn failed(value) {
@@ -124,6 +128,45 @@ whileAttached {
         Err(_) => !current.dynamicValid,
     }
     setVariable("String Parsing Dynamic", dynamicMatches)
+
+    let dynamicRadixResult = if current.dynamicRadixUsesSigned {
+        current.dynamicRadixSigned.toString(current.dynamicRadix)
+    } else {
+        current.dynamicRadixUnsigned.toString(current.dynamicRadix)
+    }
+    let dynamicRadixText = match dynamicRadixResult {
+        Ok(value) => value,
+        Err(_) => "error",
+    }
+    setVariable("Integer Radix Dynamic", dynamicRadixText)
+
+    let radixZero = 0u8.toString(2) else "error"
+    let radixBinary = 255u8.toString(2) else "error"
+    let radixHex = 255u16.toString(16) else "error"
+    let radixNegative = (-128i16 as i8).toString(16) else "error"
+    let radixMinimum = (-9223372036854775807i64 - 1i64).toString(16) else "error"
+    let radixMaximum = 18446744073709551615u64.toString(36) else "error"
+    let radixAddress = (0x1234 as address).toString(16) else "error"
+    let radixUppercase = (0xabcdefu32.toString(16) else "error").toAsciiUpperCase()
+    let radixErrors = failed(1u32.toString(1)) && failed(1u32.toString(37))
+    setVariable(
+        "Integer Radix",
+        String.join(
+            [
+                radixZero,
+                radixBinary,
+                radixHex,
+                radixNegative,
+                radixMinimum,
+                radixMaximum,
+                radixAddress,
+                radixUppercase,
+                42 as String,
+                radixErrors as String,
+            ],
+            ",",
+        ),
+    )
 
     setVariable("String Parsing", matches)
 }

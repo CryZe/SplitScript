@@ -931,6 +931,29 @@ capability Numeric<T: Equatable> {
 /// ```
 @behavior(declared)
 capability Integer<T: Numeric + Display> {
+    /// Formats this integer using a positional numeral system.
+    ///
+    /// Radices from 2 through 36 are supported. Digits above nine use
+    /// lowercase ASCII letters. Signed values keep a leading minus sign and
+    /// format their mathematical magnitude, including the minimum value of a
+    /// signed integer type. Use `toAsciiUpperCase` on the result when uppercase
+    /// digits are desired. An unsupported radix returns an error.
+    ///
+    /// # Example
+    ///
+    /// Format a hexadecimal identifier
+    ///
+    /// ```splitscript
+    /// let cellId = 0x00abcdefu32
+    /// let hexadecimal = cellId.toString(16) else ""
+    /// ```
+    @mustUse("Integer radix formatting returns a new string and does not modify its receiver.")
+    @intrinsic(IntegerToStringRadix)
+    fn toString(
+        /// The numeral-system radix, from 2 through 36 inclusive.
+        radix: u32,
+    ) -> String!;
+
     /// Returns the width-preserving bitwise complement of this integer.
     ///
     /// This method is also the integer implementation of the `!` operator.

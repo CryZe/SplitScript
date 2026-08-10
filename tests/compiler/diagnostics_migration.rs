@@ -708,7 +708,7 @@ fn csharp_convert_calls_explain_source_specific_split_script_forms() {
         let diagnostic = &diagnostics[0];
         assert_eq!(
             diagnostic.message,
-            "C# `Convert.ToString` maps to Display only for its ordinary one-value form"
+            "C# `Convert.ToString` needs a Display or integer-radix rewrite"
         );
         assert_eq!(
             &string_source[diagnostic.span.start..diagnostic.span.end],
@@ -721,12 +721,12 @@ fn csharp_convert_calls_explain_source_specific_split_script_forms() {
                 .iter()
                 .any(|note| { note.contains("value as String") && note.contains("setVariable") })
         );
-        assert!(
-            diagnostic
-                .notes
-                .iter()
-                .any(|note| { note.contains("integer, radix") && note.contains("no canonical") })
-        );
+        assert!(diagnostic.notes.iter().any(|note| {
+            note.contains("integer.toString(radix)") && note.contains("2 through 36")
+        }));
+        assert!(diagnostic.notes.iter().any(|note| {
+            note.contains("leading minus sign") && note.contains("two's-complement")
+        }));
     }
 
     splitscript::compile(

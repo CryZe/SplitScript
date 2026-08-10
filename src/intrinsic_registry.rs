@@ -320,6 +320,7 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::StringReplaceAll
         | IntrinsicId::StringSplit
         | IntrinsicId::StringParse
+        | IntrinsicId::IntegerToStringRadix
         | IntrinsicId::StringByteAt
         | IntrinsicId::StringCharAt
         | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
@@ -344,6 +345,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
             Helper(Runtime::FormatI64),
             Helper(Runtime::FormatChar),
         ],
+        IntrinsicId::IntegerToStringRadix => &[Helper(Runtime::FormatI64)],
         IntrinsicId::RuntimeSetTickRate => &[HostImport(Host::RuntimeSetTickRate)],
         IntrinsicId::SettingsEnabled => &[Helper(Runtime::SettingsEnabled)],
         IntrinsicId::InstantNow => &[HostImport(Host::WasiClockTimeGet)],
@@ -706,6 +708,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(INTEGER_T, Some(T), params![], T),
             PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::IntegerToStringRadix => contract!(
+            IntegerToStringRadix,
+            Method,
+            signature(INTEGER_T, Some(T), params![value(U32)], STRING_RESULT),
+            ALLOCATES,
             Everywhere,
             RepresentationPrimitive
         ),

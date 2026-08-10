@@ -1586,6 +1586,23 @@ whileAttached {
     }
 
     #[test]
+    fn integer_radix_hover_comes_from_the_capability_catalog() {
+        let source = r#"
+state "game.exe" {}
+whileAttached {
+    let hexadecimal = 255u8.toString(16) else ""
+    print(hexadecimal)
+}
+"#;
+        let offset = source.find("toString(").unwrap();
+        let mut database = CompilerDatabase::new(source);
+        let hover = database.hover(offset).unwrap().expect("method hover");
+        assert!(hover.markdown.contains("toString(radix: u32) -> String!"));
+        assert!(hover.markdown.contains("Radices from 2 through 36"));
+        assert!(hover.markdown.contains("**Effects:** allocates"));
+    }
+
+    #[test]
     fn source_function_hover_renders_propagated_effects_after_semantic_validation_errors() {
         let source = r#"
 fn readValue() -> f32! {

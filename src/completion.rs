@@ -1875,6 +1875,7 @@ fn smaller(value, other) {
         assert!(completions.contains(&"min".to_owned()));
         assert!(completions.contains(&"max".to_owned()));
         assert!(completions.contains(&"clamp".to_owned()));
+        assert!(!completions.contains(&"toString".to_owned()));
         assert!(!completions.contains(&"length".to_owned()));
     }
 
@@ -1893,6 +1894,7 @@ fn masked(value) {
         assert!(completions.contains(&"min".to_owned()));
         assert!(completions.contains(&"max".to_owned()));
         assert!(completions.contains(&"clamp".to_owned()));
+        assert!(completions.contains(&"toString".to_owned()));
     }
 
     #[test]

@@ -185,18 +185,34 @@ fn emit_gc_string_copy_to_memory(
 pub(in crate::codegen::runtime_helpers) fn compile_format_i64(gc: &GcLayout) -> Function {
     let mut function = Function::new([
         (2, ValType::I64),
-        (3, ValType::I32),
+        (4, ValType::I32),
         (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
     ]);
     let input = 0;
-    let signed = 1;
-    let magnitude = 2;
-    let remaining = 3;
-    let digits = 4;
-    let index = 5;
-    let negative = 6;
-    let output = 7;
+    let radix = 1;
+    let signed = 2;
+    let magnitude = 3;
+    let remaining = 4;
+    let digits = 5;
+    let index = 6;
+    let negative = 7;
+    let digit = 8;
+    let output = 9;
     function
+        .instruction(&Instruction::LocalGet(radix))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::LocalGet(radix))
+        .instruction(&Instruction::I32Const(36))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::I32Or)
+        .instruction(&Instruction::If(BlockType::Result(
+            gc.val_type(Type::Standard(StdlibTypeId::String)),
+        )))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.standard_index(StdlibTypeId::String),
+        )))
+        .instruction(&Instruction::Else)
         .instruction(&Instruction::LocalGet(signed))
         .instruction(&Instruction::LocalGet(input))
         .instruction(&Instruction::I64Const(0))
@@ -218,12 +234,14 @@ pub(in crate::codegen::runtime_helpers) fn compile_format_i64(gc: &GcLayout) -> 
         .instruction(&Instruction::Block(BlockType::Empty))
         .instruction(&Instruction::Loop(BlockType::Empty))
         .instruction(&Instruction::LocalGet(remaining))
-        .instruction(&Instruction::I64Const(10))
+        .instruction(&Instruction::LocalGet(radix))
+        .instruction(&Instruction::I64ExtendI32U)
         .instruction(&Instruction::I64GeU)
         .instruction(&Instruction::I32Eqz)
         .instruction(&Instruction::BrIf(1))
         .instruction(&Instruction::LocalGet(remaining))
-        .instruction(&Instruction::I64Const(10))
+        .instruction(&Instruction::LocalGet(radix))
+        .instruction(&Instruction::I64ExtendI32U)
         .instruction(&Instruction::I64DivU)
         .instruction(&Instruction::LocalSet(remaining))
         .instruction(&Instruction::LocalGet(digits))
@@ -260,16 +278,28 @@ pub(in crate::codegen::runtime_helpers) fn compile_format_i64(gc: &GcLayout) -> 
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::LocalGet(remaining))
-        .instruction(&Instruction::I64Const(10))
+        .instruction(&Instruction::LocalGet(radix))
+        .instruction(&Instruction::I64ExtendI32U)
         .instruction(&Instruction::I64RemU)
         .instruction(&Instruction::I32WrapI64)
+        .instruction(&Instruction::LocalTee(digit))
+        .instruction(&Instruction::I32Const(10))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::LocalGet(digit))
         .instruction(&Instruction::I32Const(b'0' as i32))
         .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(digit))
+        .instruction(&Instruction::I32Const((b'a' - 10) as i32))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::End)
         .instruction(&Instruction::ArraySet(
             gc.standard_index(StdlibTypeId::String),
         ))
         .instruction(&Instruction::LocalGet(remaining))
-        .instruction(&Instruction::I64Const(10))
+        .instruction(&Instruction::LocalGet(radix))
+        .instruction(&Instruction::I64ExtendI32U)
         .instruction(&Instruction::I64DivU)
         .instruction(&Instruction::LocalSet(remaining))
         .instruction(&Instruction::Br(0))
@@ -286,6 +316,7 @@ pub(in crate::codegen::runtime_helpers) fn compile_format_i64(gc: &GcLayout) -> 
         ))
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::End)
         .instruction(&Instruction::End);
     function
 }

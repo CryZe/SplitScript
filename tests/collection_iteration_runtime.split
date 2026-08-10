@@ -42,5 +42,13 @@ whileAttached {
         for _value in values {
             values.extend([2, 3])
         }
+    } else if tick == 6 {
+        let values: [u32] = [1, 2]
+        for _value in values {
+            values.removeAt(0)
+        }
+    } else if tick == 7 {
+        let values: [u32] = [1]
+        values.removeAt(1)
     }
 }

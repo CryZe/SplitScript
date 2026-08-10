@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-10: in-place indexed array removal
+
+- Added growable `[T].removeAt(index)` with logical-length bounds checks,
+  overlap-safe in-place shifting, stable aliases, and retained capacity.
+- Released the vacated trailing reference slot for WebAssembly garbage
+  collection and treated successful removal as a structural mutation that
+  invalidates active iteration.
+- Kept exact arrays free of length-changing methods and added completion,
+  inference, diagnostics, primitive/reference runtime, bounds, and migration
+  documentation coverage. This primitive can support a future source-defined
+  optional `pop` without another backend implementation.
+
 ## 2026-08-10: source-defined bulk array extension
 
 - Added `[T].extend(values)` as ordinary standard-library source composed from

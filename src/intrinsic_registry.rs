@@ -441,6 +441,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::ArrayLength
         | IntrinsicId::ArraySet
         | IntrinsicId::ArrayPush
+        | IntrinsicId::ArrayRemoveAt
         | IntrinsicId::ArrayClear
         | IntrinsicId::SetNew
         | IntrinsicId::SetLength
@@ -918,6 +919,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(UNCONSTRAINED_T, Some(T_ARRAY), params![value(T)], NONE),
             MUTATES_ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::ArrayRemoveAt => contract!(
+            ArrayRemoveAt,
+            Method,
+            signature(UNCONSTRAINED_T, Some(T_ARRAY), params![value(U32)], NONE),
+            MUTATES,
             Everywhere,
             RepresentationPrimitive
         ),

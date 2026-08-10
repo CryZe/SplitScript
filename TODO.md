@@ -137,7 +137,8 @@ or behavioral parity.
   references without reallocating. `[T; N]` remains fixed-length and does not
   advertise or accept size-changing methods. Source-defined `extend` appends a
   typed array and safely handles self-extension. Next design indexed
-  insertion/removal, value removal, and `pop` from corpus evidence,
+  insertion, value removal, and `pop` from corpus evidence; indexed
+  `removeAt` now shifts in place while preserving aliases and capacity,
   with explicit bounds/failure and must-use behavior. Both array forms retain indexing,
   iteration, search, length, and `values[index] = value` replacement. Plain
   indexed assignment is non-structural and preserves aliases; add compound

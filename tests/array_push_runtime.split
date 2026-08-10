@@ -17,14 +17,18 @@ whileAttached {
         alias.push(70)
         values.extend([80, 90])
         alias.extend(alias)
+        alias.removeAt(1)
+        values.removeAt(3)
+        alias.push(100)
         let names = ["old", "stale"]
         let namesAlias = names
         names.clear()
         namesAlias.push("fresh")
         names.extend(["new", "more"])
+        namesAlias.removeAt(1)
         setVariable(
             "Array Push",
-            `{values.length()},{alias.length()},{alias[3]},{values[5]},{names.length()},{namesAlias[2]}`,
+            `{values.length()},{alias.length()},{alias[1]},{values[3]},{values[4]},{names.length()},{namesAlias[1]}`,
         )
     }
 }

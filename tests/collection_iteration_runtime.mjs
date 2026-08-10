@@ -27,7 +27,7 @@ const env = {
 instance.exports._start();
 
 let traps = 0;
-for (let update = 0; update < 6; update += 1) {
+for (let update = 0; update < 8; update += 1) {
     try {
         instance.exports.update();
     } catch (error) {
@@ -43,7 +43,7 @@ const observed = {
     value: variables.get("Collection Iteration"),
 };
 const expected = {
-    traps: 4,
+    traps: 6,
     value: "1,2",
 };
 if (JSON.stringify(observed) !== JSON.stringify(expected)) {

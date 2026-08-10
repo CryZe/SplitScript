@@ -161,7 +161,9 @@ pub(super) fn encode<'a>(
 
     let mut array_functions = ArrayFunctions::default();
     for array in arrays.iter().filter(|array| {
-        reachability.requires_array_push(array.id) || reachability.requires_array_clear(array.id)
+        reachability.requires_array_push(array.id)
+            || reachability.requires_array_remove_at(array.id)
+            || reachability.requires_array_clear(array.id)
     }) {
         debug_assert!(array.length.is_none());
         let array_type = gc.val_type(Type::Array(array.id));
@@ -171,6 +173,10 @@ pub(super) fn encode<'a>(
                     .expect("reachable arrays have lowerable element types"),
             );
             array_functions.insert_push(array.id, declare(vec![array_type, element_type], vec![]));
+        }
+        if reachability.requires_array_remove_at(array.id) {
+            array_functions
+                .insert_remove_at(array.id, declare(vec![array_type, ValType::I32], vec![]));
         }
         if reachability.requires_array_clear(array.id) {
             array_functions.insert_clear(array.id, declare(vec![array_type], vec![]));

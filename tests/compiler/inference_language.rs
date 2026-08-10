@@ -1505,7 +1505,7 @@ fn compound_indexed_assignment_preserves_the_future_single_evaluation_boundary()
 }
 
 #[test]
-fn growable_arrays_support_push_extend_and_clear_but_fixed_arrays_reject_them() {
+fn growable_arrays_support_length_mutation_but_fixed_arrays_reject_it() {
     let source = r#"
         state "game.exe" {}
 
@@ -1519,6 +1519,9 @@ fn growable_arrays_support_push_extend_and_clear_but_fixed_arrays_reject_them() 
             alias.extend(alias)
             values.clear()
             alias.push(7)
+            let removalIndex = 0
+            values.removeAt(removalIndex)
+            alias.push(8)
             let inferred = []
             inferred.extend([8u8, 9])
             print(values[0])
@@ -1545,6 +1548,22 @@ fn growable_arrays_support_push_extend_and_clear_but_fixed_arrays_reject_them() 
             .message
             .contains("cannot change the length of fixed array")
             && error.message.contains("only available on growable `[T]`")
+    }));
+
+    let errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let fixed: [u8; 2] = [1, 2]
+                fixed.removeAt(0)
+            }
+        "#,
+    )
+    .expect_err("fixed arrays must reject removeAt");
+    assert!(errors.iter().any(|error| {
+        error.message.contains("fixed array")
+            && error.message.contains("`removeAt`")
+            && error.message.contains("growable `[T]`")
     }));
 
     let errors = splitscript::compile(

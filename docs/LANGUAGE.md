@@ -882,13 +882,15 @@ ordinary source-defined library loops rather than dedicated compiler
 operations. Arrays can contain records, enums, strings, and other arrays, and
 can themselves be stored in records or continuation frames.
 
-Only growable `[T]` arrays provide `push(value)`, `extend(values)`, and
-`clear()`. Extension appends a typed array in order and captures its source
-length first, so `values.extend(values)` duplicates the original elements once.
+Only growable `[T]` arrays provide `push(value)`, `extend(values)`,
+`removeAt(index)`, and `clear()`. Extension appends a typed array in order and
+captures its source length first, so `values.extend(values)` duplicates the
+original elements once. `removeAt` shifts later elements left and traps when
+the index is outside the logical length, consistently with indexed access.
 Clearing keeps the array object and its backing capacity, so aliases still
-observe the same array and a later push can reuse its storage. Reference
-elements are released when cleared rather than being retained in unused
-capacity. All three operations are structural mutations and invalidate an
+observe the same array and later growth can reuse its storage. Removed and
+cleared reference elements are released rather than retained in unused
+capacity. All four operations are structural mutations and invalidate an
 active traversal; exact `[T; N]` arrays provide none of them because their
 length is part of their type.
 

@@ -2958,6 +2958,18 @@ fn compile_expr_unconverted(
                 };
                 function.instruction(&Instruction::Call(context.array_functions.clear(array_id)));
             }
+            IntrinsicId::ArrayRemoveAt => {
+                let receiver_type = compile_receiver(function, target, context);
+                let Type::Array(array_id) = receiver_type else {
+                    unreachable!("Array.removeAt has an array receiver");
+                };
+                for argument in args {
+                    compile_expr(function, *argument, context);
+                }
+                function.instruction(&Instruction::Call(
+                    context.array_functions.remove_at(array_id),
+                ));
+            }
             IntrinsicId::ArrayLength | IntrinsicId::ArraySet => {
                 let receiver_type = compile_receiver(function, target, context);
                 let Type::Array(array_id) = receiver_type else {

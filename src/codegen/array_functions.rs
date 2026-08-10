@@ -11,6 +11,7 @@ use super::{GcLayout, Type, array_value};
 #[derive(Debug, Default)]
 pub(super) struct ArrayFunctions {
     pushes: HashMap<ArrayTypeId, u32>,
+    removals: HashMap<ArrayTypeId, u32>,
     clears: HashMap<ArrayTypeId, u32>,
 }
 
@@ -21,6 +22,14 @@ impl ArrayFunctions {
 
     pub(super) fn push(&self, array: ArrayTypeId) -> u32 {
         self.pushes[&array]
+    }
+
+    pub(super) fn insert_remove_at(&mut self, array: ArrayTypeId, function: u32) {
+        self.removals.insert(array, function);
+    }
+
+    pub(super) fn remove_at(&self, array: ArrayTypeId) -> u32 {
+        self.removals[&array]
     }
 
     pub(super) fn insert_clear(&mut self, array: ArrayTypeId, function: u32) {
@@ -42,6 +51,9 @@ pub(super) fn compile(
     for array in arrays {
         if plans.pushes.contains_key(&array.id) {
             functions.push(compile_push(array, arrays, semantics, gc));
+        }
+        if plans.removals.contains_key(&array.id) {
+            functions.push(compile_remove_at(array, arrays, semantics, gc));
         }
         if plans.clears.contains_key(&array.id) {
             functions.push(compile_clear(array, arrays, semantics, gc));
@@ -132,6 +144,91 @@ fn compile_push(
         .instruction(&Instruction::LocalGet(length))
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: array_type,
+            field_index: array_value::LENGTH_FIELD,
+        });
+    array_value::emit_increment_version(&mut function, gc, array.id);
+    function.instruction(&Instruction::End);
+    function
+}
+
+fn compile_remove_at(
+    array: &ResolvedArrayType,
+    arrays: &[ResolvedArrayType],
+    semantics: &crate::semantic::SemanticModel,
+    gc: &GcLayout,
+) -> Function {
+    debug_assert!(array.length.is_none());
+    let storage = array_value::storage_id(array.id, arrays, semantics);
+    let storage_ref = gc.val_type(Type::ArrayStorage(storage));
+    let storage_type = gc.index(Type::ArrayStorage(storage));
+    let array_type = gc.index(Type::Array(array.id));
+    let element = super::try_array_element_type(array.id, semantics)
+        .expect("reachable arrays have lowerable element types");
+
+    // Parameters: array, index. Locals: backing, previous length.
+    let mut function = Function::new([(1, storage_ref), (1, ValType::I32)]);
+    let backing = 2;
+    let length = 3;
+    function
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: array_type,
+            field_index: array_value::BACKING_FIELD,
+        })
+        .instruction(&Instruction::LocalSet(backing))
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: array_type,
+            field_index: array_value::LENGTH_FIELD,
+        })
+        .instruction(&Instruction::LocalSet(length))
+        .instruction(&Instruction::LocalGet(1))
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::Unreachable)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(backing))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(1))
+        .instruction(&Instruction::LocalGet(backing))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(1))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::LocalGet(1))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::ArrayCopy {
+            array_type_index_dst: storage_type,
+            array_type_index_src: storage_type,
+        });
+
+    // Array copying leaves the final logical slot duplicated. Release a
+    // reference there so the removed value is not retained by spare capacity.
+    if let StorageType::Val(ValType::Ref(reference)) = gc.storage_type(element) {
+        function
+            .instruction(&Instruction::LocalGet(backing))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::LocalGet(length))
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::I32Sub)
+            .instruction(&Instruction::RefNull(reference.heap_type))
+            .instruction(&Instruction::ArraySet(storage_type));
+    }
+
+    function
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Sub)
         .instruction(&Instruction::StructSet {
             struct_type_index: array_type,
             field_index: array_value::LENGTH_FIELD,

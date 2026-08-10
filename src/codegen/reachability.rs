@@ -29,6 +29,7 @@ pub(super) struct Reachability {
     gc_arrays: BTreeSet<ArrayTypeId>,
     gc_array_storage: BTreeSet<ArrayTypeId>,
     array_pushes: BTreeSet<ArrayTypeId>,
+    array_removals: BTreeSet<ArrayTypeId>,
     array_clears: BTreeSet<ArrayTypeId>,
     gc_options: BTreeSet<OptionTypeId>,
     gc_results: BTreeSet<ResultTypeId>,
@@ -143,6 +144,22 @@ impl Reachability {
                     };
                     debug_assert!(length.is_none());
                     reachable.array_pushes.insert(*layout);
+                }
+                if let wasm_ir::CallTarget::Intrinsic {
+                    intrinsic: IntrinsicId::ArrayRemoveAt,
+                    receiver_type: Some(receiver),
+                    ..
+                } = target
+                {
+                    let receiver = owner.as_ref().map_or(*receiver, |owner| {
+                        semantics.specialize_type(owner, *receiver)
+                    });
+                    let TypeKind::Array { layout, length, .. } = semantics.types().kind(receiver)
+                    else {
+                        unreachable!("checked array removeAt calls have array receivers")
+                    };
+                    debug_assert!(length.is_none());
+                    reachable.array_removals.insert(*layout);
                 }
                 if let wasm_ir::CallTarget::Intrinsic {
                     intrinsic: IntrinsicId::ArrayClear,
@@ -478,6 +495,10 @@ impl Reachability {
 
     pub fn requires_array_clear(&self, array: ArrayTypeId) -> bool {
         self.array_clears.contains(&array)
+    }
+
+    pub fn requires_array_remove_at(&self, array: ArrayTypeId) -> bool {
+        self.array_removals.contains(&array)
     }
 
     pub fn contains_option_type(&self, option: OptionTypeId) -> bool {

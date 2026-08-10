@@ -1252,7 +1252,10 @@ fn add_inferred_methods(
         .filter(|item| {
             !(matches!(
                 item.id,
-                StdlibItemId::ArrayPush | StdlibItemId::ArrayExtend | StdlibItemId::ArrayClear
+                StdlibItemId::ArrayPush
+                    | StdlibItemId::ArrayExtend
+                    | StdlibItemId::ArrayRemoveAt
+                    | StdlibItemId::ArrayClear
             ) && matches!(
                 receiver,
                 TypeKind::Array {
@@ -1725,6 +1728,7 @@ split {
         assert!(completions.contains(&"indexOf".to_owned()));
         assert!(!completions.contains(&"push".to_owned()));
         assert!(!completions.contains(&"extend".to_owned()));
+        assert!(!completions.contains(&"removeAt".to_owned()));
         assert!(!completions.contains(&"clear".to_owned()));
 
         let growable = r#"
@@ -1739,6 +1743,7 @@ split {
         let completions = labels(&mut database, "values.");
         assert!(completions.contains(&"push".to_owned()));
         assert!(completions.contains(&"extend".to_owned()));
+        assert!(completions.contains(&"removeAt".to_owned()));
         assert!(completions.contains(&"clear".to_owned()));
     }
 

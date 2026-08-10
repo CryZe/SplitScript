@@ -1616,6 +1616,27 @@ typeConstructor Array<T> {
         }
     }
 
+    /// Removes the element at an index and shifts later elements left.
+    ///
+    /// The array keeps its identity and capacity, so aliases observe the
+    /// removal. An index greater than or equal to `length()` traps, matching
+    /// indexed access. Stored references in the vacated final slot are
+    /// released for garbage collection. Exact `[T; N]` arrays cannot change
+    /// length and do not support `removeAt`.
+    ///
+    /// # Example
+    ///
+    /// Consume the first pending checkpoint
+    ///
+    /// ```splitscript
+    /// checkpoints.removeAt(0)
+    /// ```
+    @intrinsic(ArrayRemoveAt)
+    fn removeAt(
+        /// The zero-based index to remove.
+        index: u32,
+    ) -> None;
+
     /// Removes every element from a growable array.
     ///
     /// The array keeps its identity and capacity, so aliases observe the empty

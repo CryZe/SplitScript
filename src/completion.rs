@@ -1255,6 +1255,7 @@ fn add_inferred_methods(
                 StdlibItemId::ArrayPush
                     | StdlibItemId::ArrayExtend
                     | StdlibItemId::ArrayRemoveAt
+                    | StdlibItemId::ArrayPop
                     | StdlibItemId::ArrayClear
             ) && matches!(
                 receiver,
@@ -1729,6 +1730,7 @@ split {
         assert!(!completions.contains(&"push".to_owned()));
         assert!(!completions.contains(&"extend".to_owned()));
         assert!(!completions.contains(&"removeAt".to_owned()));
+        assert!(!completions.contains(&"pop".to_owned()));
         assert!(!completions.contains(&"clear".to_owned()));
 
         let growable = r#"
@@ -1744,6 +1746,7 @@ split {
         assert!(completions.contains(&"push".to_owned()));
         assert!(completions.contains(&"extend".to_owned()));
         assert!(completions.contains(&"removeAt".to_owned()));
+        assert!(completions.contains(&"pop".to_owned()));
         assert!(completions.contains(&"clear".to_owned()));
     }
 

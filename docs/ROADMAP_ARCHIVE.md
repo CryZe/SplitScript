@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: source-defined optional array pop
+
+- Added growable `[T].pop() -> T?` as a standard-library body composed from
+  indexed access and `removeAt`, without adding a backend intrinsic.
+- Kept an empty pop non-structural, preserved aliases and capacity, released
+  removed reference elements, and invalidated active iteration only when an
+  element was removed.
+- Made `None`/value conditional inference independent of branch order and
+  covered fixed-array diagnostics, completion, runtime aliases, reuse, and
+  iteration behavior.
+
 ## 2026-08-10: in-place indexed array removal
 
 - Added growable `[T].removeAt(index)` with logical-length bounds checks,

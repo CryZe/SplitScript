@@ -227,6 +227,27 @@ fn none_values_flow_through_locals_into_options() {
 }
 
 #[test]
+fn conditional_option_inference_does_not_depend_on_branch_order() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let noneFirst = if true { None } else { Some(1u32) }
+            let valueFirst = if true { Some(2u32) } else { None }
+            let first: u32? = noneFirst
+            let second: u32? = valueFirst
+            if first != None && second != None { print("present") }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("either conditional branch order should infer the same optional type");
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("branch-order-independent optional inference should produce valid Wasm GC");
+}
+
+#[test]
 fn state_snapshots_flow_through_locals_parameters_and_returns() {
     let source = r#"
         state "game.exe" {
@@ -1522,6 +1543,9 @@ fn growable_arrays_support_length_mutation_but_fixed_arrays_reject_it() {
             let removalIndex = 0
             values.removeAt(removalIndex)
             alias.push(8)
+            let _popped: u32? = values.pop()
+            let empty: [u32] = []
+            let _missing: u32? = empty.pop()
             let inferred = []
             inferred.extend([8u8, 9])
             print(values[0])
@@ -1548,6 +1572,22 @@ fn growable_arrays_support_length_mutation_but_fixed_arrays_reject_it() {
             .message
             .contains("cannot change the length of fixed array")
             && error.message.contains("only available on growable `[T]`")
+    }));
+
+    let errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let fixed: [u8; 2] = [1, 2]
+                let _value = fixed.pop()
+            }
+        "#,
+    )
+    .expect_err("fixed arrays must reject pop");
+    assert!(errors.iter().any(|error| {
+        error.message.contains("fixed array")
+            && error.message.contains("`pop`")
+            && error.message.contains("growable `[T]`")
     }));
 
     let errors = splitscript::compile(

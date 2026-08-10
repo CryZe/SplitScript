@@ -1637,6 +1637,33 @@ typeConstructor Array<T> {
         index: u32,
     ) -> None;
 
+    /// Removes and returns the final element when one exists.
+    ///
+    /// An empty array returns `None` without changing its structural version.
+    /// Otherwise the array keeps its identity and capacity, aliases observe
+    /// the shorter length, and active iteration is invalidated. Exact `[T; N]`
+    /// arrays cannot change length and do not support `pop`.
+    ///
+    /// # Example
+    ///
+    /// Consume the most recently discovered checkpoint
+    ///
+    /// ```splitscript
+    /// let checkpoint = checkpoints.pop() else return
+    /// ```
+    fn pop() -> T? {
+        let length = self.length()
+        let value = if length == 0 {
+            None
+        } else {
+            Some(self[length - 1])
+        }
+        if length != 0 {
+            self.removeAt(length - 1)
+        }
+        return value
+    }
+
     /// Removes every element from a growable array.
     ///
     /// The array keeps its identity and capacity, so aliases observe the empty

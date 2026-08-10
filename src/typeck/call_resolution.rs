@@ -989,6 +989,7 @@ impl Checker {
                 StdlibItemId::ArrayPush
                     | StdlibItemId::ArrayExtend
                     | StdlibItemId::ArrayRemoveAt
+                    | StdlibItemId::ArrayPop
                     | StdlibItemId::ArrayClear
             ) && let Type::Array(array) = self.shallow_type(receiver.ty)
                 && let Some(length) = self.inference.array_length(array)
@@ -997,6 +998,7 @@ impl Checker {
                     StdlibItemId::ArrayPush => "push",
                     StdlibItemId::ArrayExtend => "extend",
                     StdlibItemId::ArrayRemoveAt => "removeAt",
+                    StdlibItemId::ArrayPop => "pop",
                     StdlibItemId::ArrayClear => "clear",
                     _ => unreachable!(),
                 };

@@ -606,8 +606,21 @@ impl Checker {
                 );
                 let result_type =
                     expected.unwrap_or_else(|| self.fresh_inference(Requirements::none(), None));
-                self.expr(then_expr, Some(result_type));
-                self.expr(else_expr, Some(result_type));
+                // `None` can either remain the zero-sized unit value or lift into
+                // any optional type. When the conditional has no surrounding
+                // expected type, let the value-bearing branch establish the
+                // result before checking a bare `None`. This keeps inference
+                // independent of which branch happens to be written first.
+                if expected.is_none()
+                    && matches!(then_expr.kind, ExprKind::None)
+                    && !matches!(else_expr.kind, ExprKind::None)
+                {
+                    self.expr(else_expr, Some(result_type));
+                    self.expr(then_expr, Some(result_type));
+                } else {
+                    self.expr(then_expr, Some(result_type));
+                    self.expr(else_expr, Some(result_type));
+                }
                 self.expect_expression(expr.id, result_type, expected, expr.span)?
             }
             ExprKind::Fallback { value, fallback } => {

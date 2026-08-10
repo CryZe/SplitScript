@@ -252,9 +252,9 @@ numbered-settings case in [`docs/DDS_PORT.md`](docs/DDS_PORT.md).
 - Demand-monomorphized generic function bodies and GC arrays, including the
   general `[T]` and exact-length `[T; N]` forms, inferred literals, and typed
   `array[index]` access and `array[index] = value` mutation plus growable
-  `push`, source-defined bulk `extend`, in-place indexed `removeAt`, and
-  capacity-preserving `clear`. Fixed arrays of readable elements support one
-  transactional typed process-memory read.
+  `push`, source-defined bulk `extend`, in-place indexed `removeAt`, optional
+  `pop`, and capacity-preserving `clear`. Fixed arrays of readable elements
+  support one transactional typed process-memory read.
 - Run-scoped `Set<T>` values with source-declared `Equatable` constraints,
   persistent mutation, containment, insertion/removal, clearing, and length.
 - Inferred `for value in collection` loops over `[T]`, `[T; N]`, and `Set<T>`,

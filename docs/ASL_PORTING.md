@@ -662,13 +662,16 @@ route[currentIndex] = nextLevel
 Plain indexed assignment evaluates the collection and index once. Compound
 forms such as `route[nextIndex()] += 1` are deliberately not accepted yet;
 their eventual lowering must not call `nextIndex()` twice. Growable `[T]`
-supports `push`, `extend`, indexed `removeAt`, and capacity-preserving `clear`;
-value removal and `pop` remain specific behavior gaps. C#
+supports `push`, `extend`, indexed `removeAt`, optional `pop`, and
+capacity-preserving `clear`; value-based removal remains a specific behavior
+gap. C#
 `list.AddRange(values)` becomes
 `list.extend(values)` once both collections are represented as typed arrays;
-self-extension duplicates the original elements once. All three structural
+self-extension duplicates the original elements once. Successful structural
 operations invalidate active iteration. C# `RemoveAt(index)` maps directly to
 `removeAt(index)`; an out-of-range `u32` index traps just like array indexing.
+Use `let last = values.pop() else ...` where C# removes a final list or stack
+element: SplitScript returns `None` for an empty array instead of throwing.
 `[T; N]` remains fixed-length and supports none of these operations.
 
 Use `Set<T>` when values are discovered while the run progresses and only

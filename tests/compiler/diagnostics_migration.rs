@@ -729,6 +729,57 @@ fn csharp_minimum_and_maximum_explain_type_preservation_and_float_edges() {
 }
 
 #[test]
+fn csharp_absolute_value_explains_signed_minimum_and_receiver_type() {
+    for owner in ["Math", "MathF", "System.Math", "System.MathF"] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+
+                fn magnitude(value: i32) {{
+                    return {owner}.Abs(value)
+                }}
+            "#
+        );
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("C# absolute value should receive migration guidance");
+
+        assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(
+            diagnostic.message,
+            "C# absolute value is a receiver-based `abs` method in SplitScript"
+        );
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "Abs");
+        assert!(diagnostic.fixes.is_empty());
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("value.abs()") && note.contains("signed"))
+        );
+        assert!(diagnostic.notes.iter().any(|note| {
+            note.contains("minimum value") && note.contains("C#") && note.contains("throws")
+        }));
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("unsigned inputs") && note.contains("decimal"))
+        );
+    }
+
+    splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn integer(value: i32) -> i32 { return value.abs() }
+            fn narrow(value: f32) -> f32 { return value.abs() }
+            fn wide(value: f64) -> f64 { return value.abs() }
+        "#,
+    )
+    .expect("canonical signed absolute-value forms should compile");
+}
+
+#[test]
 fn a_user_binding_named_int32_keeps_its_parse_method() {
     let source = r#"
         record Parser {}

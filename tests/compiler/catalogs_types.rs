@@ -32,6 +32,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::FloatIsNaN,
         StdlibItemId::FloatIsFinite,
         StdlibItemId::NumericClamp,
+        StdlibItemId::SignedAbs,
         StdlibItemId::ArrayIsEmpty,
         StdlibItemId::ArrayContains,
         StdlibItemId::ArrayIndexOf,
@@ -1170,8 +1171,8 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         "String.slice(start: u32, end: u32) -> String!"
     );
     assert_eq!(
-        library.render_signature(StdlibItemId::FloatAbs),
-        "T.abs() -> T where T: Float"
+        library.render_signature(StdlibItemId::SignedAbs),
+        "T.abs() -> T where T: Signed"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::FloatSqrt),

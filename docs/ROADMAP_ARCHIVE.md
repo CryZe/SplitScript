@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-10: source-defined signed absolute value
+
+- Moved `abs()` from the floating-point-only capability to `Signed` and
+  implemented it in canonical SplitScript source from `max` and unary
+  negation, making it available to signed integers and floats without a
+  dedicated compiler intrinsic.
+- Documented and runtime-tested floating negative zero and NaN together with
+  the language's wrapping signed-minimum behavior.
+- Added focused `Math.Abs`/`MathF.Abs` migration guidance that contrasts C#'s
+  signed-minimum exception and calls out unsigned conversions and decimal
+  overloads instead of applying an unsafe rewrite.
+
 ## 2026-08-10: typed minimum and maximum migration guidance
 
 - Added focused `Math.Min`/`MathF.Min` and `Math.Max`/`MathF.Max`

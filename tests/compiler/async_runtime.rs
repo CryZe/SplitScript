@@ -1061,6 +1061,32 @@ fn numeric_minimum_and_maximum_preserve_types_and_ieee_edges() {
 }
 
 #[test]
+fn signed_absolute_value_preserves_width_and_wrapping_semantics() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let byte: i8 = (-7i8).abs()
+            let minimumByte: i8 = (-127i8 - 1).abs()
+            let word: i16 = (-300i16).abs()
+            let negativeZero = (-0.0 as f32).abs().toBits() == 0u32
+            let infinity = f64.fromBits(0xfff0000000000000u64).abs().toBits()
+                == 0x7ff0000000000000u64
+            let nan = f32.fromBits(0xffc00000u32).abs().isNaN()
+            print(`{byte}:{minimumByte}:{word}:{negativeZero}:{infinity}:{nan}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["7:-128:300:true:true:true"]);
+}
+
+#[test]
 fn async_none_completion_is_status_only_but_remains_typed() {
     let source = r#"
         state "game.exe" {}

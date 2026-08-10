@@ -429,7 +429,6 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::SignedNegate
         | IntrinsicId::NumericMin
         | IntrinsicId::NumericMax
-        | IntrinsicId::FloatAbs
         | IntrinsicId::FloatSqrt
         | IntrinsicId::FloatTruncate
         | IntrinsicId::FloatFloor
@@ -814,14 +813,6 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             NumericMax,
             Method,
             signature(NUMERIC_T, Some(T), params![value(T)], T),
-            PURE,
-            Everywhere,
-            RepresentationPrimitive
-        ),
-        IntrinsicId::FloatAbs => contract!(
-            FloatAbs,
-            Method,
-            signature(FLOAT_T, Some(T), params![], T),
             PURE,
             Everywhere,
             RepresentationPrimitive

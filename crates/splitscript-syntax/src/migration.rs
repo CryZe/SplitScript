@@ -211,6 +211,8 @@ pub const CSHARP_MIN_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.min-call");
 pub const CSHARP_MAX_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.max-call");
+pub const CSHARP_ABS_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.math.abs-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.timespan.parse-call");
 pub const CSHARP_TIMESPAN_TICKS_DIAGNOSTIC: MigrationDiagnosticId =
@@ -565,6 +567,19 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_ABS_DIAGNOSTIC,
+        concept: MigrationConceptId::new("math.absolute-value"),
+        message: "C# absolute value is a receiver-based `abs` method in SplitScript",
+        primary_label: "move this operation onto a signed numeric value",
+        notes: &[
+            "rewrite `Math.Abs(value)` or `MathF.Abs(value)` as `value.abs()` after establishing the intended signed integer or floating-point type",
+            "SplitScript floating-point `abs` preserves the receiver width, changes negative zero to positive zero, and leaves NaN as NaN",
+            "SplitScript signed-integer arithmetic wraps, so `abs` leaves the minimum value of each integer type unchanged; C# `Math.Abs` throws for a signed minimum value",
+            "unsigned inputs, C# implicit numeric conversions, and decimal overloads need an explicit semantic rewrite",
+            "there is no automatic rewrite because the static call alone does not prove the selected C# overload or the intended overflow policy",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.numeric-parse"),
         message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
@@ -657,6 +672,9 @@ pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnos
     }
     if matches!(owner.as_str(), "Math" | "MathF") && method == "Max" {
         return Some(CSHARP_MAX_DIAGNOSTIC);
+    }
+    if matches!(owner.as_str(), "Math" | "MathF") && method == "Abs" {
+        return Some(CSHARP_ABS_DIAGNOSTIC);
     }
     if method != "Parse" && method != "TryParse" {
         return None;
@@ -1199,6 +1217,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Use `left.max(right)` after establishing one intended numeric type; review C# implicit conversions and decimal overloads.",
         targets: &[MigrationTarget::StandardLibraryItem("Numeric.max")],
+        cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("math.absolute-value"),
+        name: "Signed absolute value",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `value.abs()` after establishing a signed numeric type; review C# signed-minimum overflow, unsigned conversions, and decimal inputs.",
+        targets: &[MigrationTarget::StandardLibraryItem("Signed.abs")],
         cookbook_anchor: None,
         spellings: &[],
     },

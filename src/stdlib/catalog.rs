@@ -162,11 +162,11 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::EquatableEquals
         | StdlibItemId::EquatableNotEquals
         | StdlibItemId::SignedNegate
+        | StdlibItemId::SignedAbs
         | StdlibItemId::NumericMin
         | StdlibItemId::NumericMax
         | StdlibItemId::NumericClamp => NUMERIC_EXAMPLE,
-        StdlibItemId::FloatAbs
-        | StdlibItemId::FloatSqrt
+        StdlibItemId::FloatSqrt
         | StdlibItemId::FloatTruncate
         | StdlibItemId::FloatFloor
         | StdlibItemId::FloatCeil

@@ -31,7 +31,6 @@ macro_rules! trusted_intrinsics {
             SignedNegate,
             NumericMin,
             NumericMax,
-            FloatAbs,
             FloatSqrt,
             FloatTruncate,
             FloatFloor,

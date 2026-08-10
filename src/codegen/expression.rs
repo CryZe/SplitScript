@@ -2814,21 +2814,18 @@ fn compile_expr_unconverted(
                 );
                 emit_narrow_integer_result(function, receiver);
             }
-            IntrinsicId::FloatAbs
-            | IntrinsicId::FloatSqrt
+            IntrinsicId::FloatSqrt
             | IntrinsicId::FloatTruncate
             | IntrinsicId::FloatFloor
             | IntrinsicId::FloatCeil
             | IntrinsicId::FloatRound => {
                 let receiver = compile_receiver(function, target, context);
                 function.instruction(&match (receiver, builtin) {
-                    (Type::F32, IntrinsicId::FloatAbs) => Instruction::F32Abs,
                     (Type::F32, IntrinsicId::FloatSqrt) => Instruction::F32Sqrt,
                     (Type::F32, IntrinsicId::FloatTruncate) => Instruction::F32Trunc,
                     (Type::F32, IntrinsicId::FloatFloor) => Instruction::F32Floor,
                     (Type::F32, IntrinsicId::FloatCeil) => Instruction::F32Ceil,
                     (Type::F32, IntrinsicId::FloatRound) => Instruction::F32Nearest,
-                    (Type::F64, IntrinsicId::FloatAbs) => Instruction::F64Abs,
                     (Type::F64, IntrinsicId::FloatSqrt) => Instruction::F64Sqrt,
                     (Type::F64, IntrinsicId::FloatTruncate) => Instruction::F64Trunc,
                     (Type::F64, IntrinsicId::FloatFloor) => Instruction::F64Floor,

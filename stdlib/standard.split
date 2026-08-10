@@ -1078,6 +1078,24 @@ capability Signed<T: Numeric> {
     @intrinsic(SignedNegate)
     @operator(negate)
     fn negate() -> T;
+
+    /// Returns this value without a negative sign.
+    ///
+    /// Floating-point negative zero becomes positive zero and NaN remains NaN.
+    /// Signed-integer arithmetic follows the language's wrapping rule, so the
+    /// minimum value of an integer type remains itself because its positive
+    /// counterpart is not representable in that type.
+    ///
+    /// # Example
+    ///
+    /// Measure the magnitude of a signed delta
+    ///
+    /// ```splitscript
+    /// let distance = delta.abs()
+    /// ```
+    fn abs() -> T {
+        return self.max(-self)
+    }
 }
 
 /// Identifies floating-point types.
@@ -1094,20 +1112,6 @@ capability Signed<T: Numeric> {
 /// ```
 @behavior(declared)
 capability Float<T: Signed> {
-    /// Returns the magnitude of a floating-point value.
-    ///
-    /// Negative zero becomes positive zero. NaN remains NaN.
-    ///
-    /// # Example
-    ///
-    /// Measure a signed delta
-    ///
-    /// ```splitscript
-    /// let distance = delta.abs()
-    /// ```
-    @intrinsic(FloatAbs)
-    fn abs() -> T;
-
     /// Returns the principal square root of this value.
     ///
     /// Positive finite values produce a non-negative result. Positive infinity

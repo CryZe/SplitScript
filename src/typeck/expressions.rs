@@ -789,11 +789,11 @@ impl Checker {
             }
             ExprKind::Unary { op, expr: inner } => match op {
                 UnaryOp::Not => {
-                    let bool_type = self.core_type(crate::stdlib::CoreTypeId::Bool);
-                    let inner_ty = self.expr(inner, Some(bool_type))?;
+                    let operand_hint = expected.map(|ty| self.expected_value_type(ty));
+                    let inner_ty = self.expr(inner, operand_hint)?;
                     let result = self
                         .resolve_unary_operator(*op, inner_ty, expr.id, inner.id, expr.span)
-                        .unwrap_or(bool_type);
+                        .unwrap_or_else(|| self.error_type());
                     self.expect_expression(expr.id, result, expected, expr.span)?
                 }
                 UnaryOp::Neg => {

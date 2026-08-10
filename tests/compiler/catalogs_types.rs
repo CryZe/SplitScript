@@ -411,12 +411,20 @@ fn unary_syntax_resolves_through_catalog_declared_methods() {
         Some(StandardUnaryOperator::Negate)
     );
     assert_eq!(
+        library.item(StdlibItemId::IntegerBitNot).unary_operator,
+        Some(StandardUnaryOperator::Not)
+    );
+    assert_eq!(
         library.render_signature(StdlibItemId::BoolNot),
         "bool.not() -> bool"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::SignedNegate),
         "T.negate() -> T where T: Signed"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::IntegerBitNot),
+        "T.bitNot() -> T where T: Integer"
     );
 
     let source = r#"
@@ -426,7 +434,11 @@ fn unary_syntax_resolves_through_catalog_declared_methods() {
             let reverse = offset.negate()
             let ready = !false
             let disabled = ready.not()
-            print(`{offset}:{reverse}:{ready}:{disabled}`)
+            let byte: u8 = !1
+            let original = byte.bitNot()
+            let full: u32 = !0u32
+            let inferred = !1
+            print(`{offset}:{reverse}:{ready}:{disabled}:{byte}:{original}:{full}:{inferred}`)
         }
     "#;
     let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
@@ -452,6 +464,13 @@ fn unary_syntax_resolves_through_catalog_declared_methods() {
             .filter(|item| **item == StdlibItemId::BoolNot)
             .count(),
         2
+    );
+    assert_eq!(
+        resolved_items
+            .iter()
+            .filter(|item| **item == StdlibItemId::IntegerBitNot)
+            .count(),
+        4
     );
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))

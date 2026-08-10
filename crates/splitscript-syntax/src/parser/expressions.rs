@@ -278,6 +278,24 @@ impl Parser<'_> {
                 span,
             ));
         }
+        if self.at(&TokenKind::Tilde) {
+            let start = self.current().span;
+            self.record_foreign_spelling_diagnostic(
+                start,
+                "~",
+                crate::migration::ForeignSpellingContext::Operator,
+            );
+            self.bump();
+            let expr = self.required_expression(11)?;
+            let span = start.join(expr.span);
+            return Ok(self.new_expr(
+                ExprKind::Unary {
+                    op: UnaryOp::Not,
+                    expr: Box::new(expr),
+                },
+                span,
+            ));
+        }
         if self.eat(&TokenKind::LParen).is_some() {
             let start = self.previous().span;
             let target_depth = self.delimiter_depth_before(self.cursor.position());

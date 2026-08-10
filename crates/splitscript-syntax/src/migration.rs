@@ -732,6 +732,15 @@ const STRICT_EQUALITY_SPELLINGS: &[ForeignSpelling] = &[
     ),
 ];
 
+const BITWISE_COMPLEMENT_SPELLINGS: &[ForeignSpelling] = &[type_spelling!(
+    SourceLanguage::CSharp,
+    ForeignSpellingContext::Operator,
+    "~",
+    "!",
+    "SplitScript overloads `!` for integer bitwise complement instead of using `~`",
+    "replace this familiar bitwise-complement operator"
+)];
+
 const DURATION_SPELLINGS: &[ForeignSpelling] = &[
     type_spelling!(
         SourceLanguage::CSharp,
@@ -896,6 +905,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         ],
         cookbook_anchor: None,
         spellings: STRICT_EQUALITY_SPELLINGS,
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("operator.bitwise-complement"),
+        name: "Bitwise complement",
+        sources: CSHARP_JAVASCRIPT,
+        support: MigrationSupport::Direct,
+        summary: "Use type-directed `!`: it is logical negation for booleans and width-preserving bitwise complement for integers.",
+        targets: &[MigrationTarget::StandardLibraryItem("Integer.bitNot")],
+        cookbook_anchor: None,
+        spellings: BITWISE_COMPLEMENT_SPELLINGS,
     },
     MigrationConcept {
         id: MigrationConceptId::new("string.substring"),

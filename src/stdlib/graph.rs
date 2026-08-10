@@ -203,10 +203,7 @@ impl StandardLibraryGraph {
                 ));
                 continue;
             };
-            let expected_result = match operator {
-                StandardUnaryOperator::Not => TypeRef::Core(CoreTypeId::Bool),
-                StandardUnaryOperator::Negate => receiver,
-            };
+            let expected_result = receiver;
             if !item.signature.parameters.is_empty() || item.signature.result != expected_result {
                 errors.push(format!(
                     "operator implementation `{}` has an invalid unary signature",

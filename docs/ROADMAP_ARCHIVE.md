@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-10: type-directed integer complement and narrow arithmetic
+
+- Added `Integer.bitNot()` and overloaded unary `!` by type: booleans use
+  logical negation, while integers use width-preserving bitwise complement.
+  The foreign `~` spelling receives a machine-applicable migration fix.
+- Centralized post-operation normalization for `i8`, `u8`, `i16`, and `u16`
+  across arithmetic, bitwise and shift operations, compound assignments, and
+  unary operators so physical WebAssembly `i32` storage cannot leak past the
+  source type's width.
+- Covered catalog identities, migration recovery, global constants, direct
+  methods, ordinary and compound arithmetic, signed extension, and real
+  Wasmtime execution.
+
 ## 2026-08-10: catalog-owned unary operators
 
 - Added `bool.not()` and `Signed.negate()` to the canonical source-defined

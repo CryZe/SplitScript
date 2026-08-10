@@ -750,7 +750,8 @@ namespace Unity {
 /// Supports ordered numeric operations.
 ///
 /// Numeric values provide minimum, maximum, clamping, ordered comparisons, and
-/// equality while preserving their inferred type.
+/// equality while preserving their inferred type. Integer arithmetic results
+/// wrap to the declared integer width.
 ///
 /// # Example
 ///
@@ -763,7 +764,8 @@ namespace Unity {
 capability Numeric<T: Equatable> {
     /// Adds another value of the same numeric type.
     ///
-    /// This method is also the implementation of the `+` operator.
+    /// This method is also the implementation of the `+` operator. Integer
+    /// overflow wraps modulo the receiver's declared bit width.
     ///
     /// # Example
     ///
@@ -781,7 +783,8 @@ capability Numeric<T: Equatable> {
 
     /// Subtracts another value of the same numeric type.
     ///
-    /// This method is also the implementation of the `-` operator.
+    /// This method is also the implementation of the `-` operator. Integer
+    /// overflow wraps modulo the receiver's declared bit width.
     ///
     /// # Example
     ///
@@ -799,7 +802,8 @@ capability Numeric<T: Equatable> {
 
     /// Multiplies by another value of the same numeric type.
     ///
-    /// This method is also the implementation of the `*` operator.
+    /// This method is also the implementation of the `*` operator. Integer
+    /// overflow wraps modulo the receiver's declared bit width.
     ///
     /// # Example
     ///
@@ -906,6 +910,24 @@ capability Numeric<T: Equatable> {
 /// ```
 @behavior(declared)
 capability Integer<T: Numeric + Display> {
+    /// Returns the width-preserving bitwise complement of this integer.
+    ///
+    /// This method is also the integer implementation of the `!` operator.
+    /// Every bit in the receiver's declared integer representation is flipped;
+    /// for example, complementing a `u8` never affects bits outside that byte.
+    /// Boolean `!` remains logical negation and is selected by type.
+    ///
+    /// # Example
+    ///
+    /// Invert an eight-bit mask
+    ///
+    /// ```splitscript
+    /// let inverse: u8 = !0x0fu8
+    /// ```
+    @intrinsic(IntegerBitNot)
+    @operator(not)
+    fn bitNot() -> T;
+
     /// Returns the remainder after integer division.
     ///
     /// This method is also the implementation of the `%` operator. The result

@@ -882,6 +882,7 @@ fn compile_assignment_value(
             emit_current(function);
             compile_expr(function, value, context);
             emit_binary_instruction(function, *op, ty);
+            emit_narrow_integer_result(function, ty);
         }
         Some(wasm_ir::AssignmentOperation::Call(target)) => {
             compile_assignment_call(function, target, value, context)
@@ -916,6 +917,7 @@ fn compile_assignment_call(
                 intrinsic_binary_op(*intrinsic).expect("guarded primitive binary intrinsic"),
                 receiver,
             );
+            emit_narrow_integer_result(function, receiver);
         }
         _ => unreachable!("validated compound assignments use binary method call targets"),
     }
@@ -2751,6 +2753,23 @@ fn compile_expr_unconverted(
                 compile_receiver(function, target, context);
                 function.instruction(&Instruction::I32Eqz);
             }
+            IntrinsicId::IntegerBitNot => {
+                let receiver = compile_receiver(function, target, context);
+                match receiver {
+                    Type::I8 | Type::U8 | Type::I16 | Type::U16 | Type::I32 | Type::U32 => {
+                        function
+                            .instruction(&Instruction::I32Const(-1))
+                            .instruction(&Instruction::I32Xor);
+                    }
+                    Type::I64 | Type::U64 | Type::Address => {
+                        function
+                            .instruction(&Instruction::I64Const(-1))
+                            .instruction(&Instruction::I64Xor);
+                    }
+                    _ => unreachable!("bitwise complement requires an integer receiver"),
+                }
+                emit_narrow_integer_result(function, receiver);
+            }
             IntrinsicId::SignedNegate => {
                 let receiver = compile_receiver(function, target, context);
                 match receiver {
@@ -2760,6 +2779,7 @@ fn compile_expr_unconverted(
                         function
                             .instruction(&Instruction::I32Const(-1))
                             .instruction(&Instruction::I32Mul);
+                        emit_narrow_integer_result(function, receiver);
                     }
                     Type::I64 => {
                         function
@@ -2792,6 +2812,7 @@ fn compile_expr_unconverted(
                     intrinsic_binary_op(builtin).expect("matched primitive binary intrinsic"),
                     receiver,
                 );
+                emit_narrow_integer_result(function, receiver);
             }
             IntrinsicId::FloatAbs
             | IntrinsicId::FloatFloor
@@ -3235,6 +3256,12 @@ fn emit_narrow_i32(function: &mut Function, target: Type) {
     }
 }
 
+fn emit_narrow_integer_result(function: &mut Function, ty: Type) {
+    if matches!(ty, Type::I8 | Type::U8 | Type::I16 | Type::U16) {
+        emit_narrow_i32(function, ty);
+    }
+}
+
 fn emit_binary(
     function: &mut Function,
     op: BinaryOp,
@@ -3268,6 +3295,7 @@ fn emit_binary(
     compile_expr(function, left, context);
     compile_expr(function, right, context);
     emit_binary_instruction(function, op, operand_type);
+    emit_narrow_integer_result(function, operand_type);
 }
 
 fn compile_intrinsic_equality(

@@ -947,13 +947,28 @@ fn catalog_declared_unary_operators_execute_for_globals_and_methods() {
     let source = r#"
         let negative: i32 = -7
         let ready = !false
+        let invertedByte: u8 = !1
+        let invertedWord: u16 = !1
+        let invertedSigned: i8 = !1
+        let inferredComplement = !1
 
         state "game.exe" {}
 
         whileAttached {
             let reverse = negative.negate()
             let disabled = ready.not()
-            print(`{negative}:{reverse}:{ready}:{disabled}`)
+            let sum: u8 = 250
+            sum += 10
+            let product: u16 = 40_000
+            product *= 2
+            let directSum: u8 = 250 + 10
+            let directProduct: u16 = 40_000 * 2
+            let negativeByte: i8 = -127
+            negativeByte -= 1
+            let wrappedNegation = -negativeByte
+            let shifted: u8 = 128
+            shifted <<= 1
+            print(`{negative}:{reverse}:{ready}:{disabled}:{invertedByte}:{invertedWord}:{invertedSigned}:{inferredComplement}:{sum}:{product}:{directSum}:{directProduct}:{wrappedNegation}:{shifted}`)
         }
     "#;
     let (mut store, instance) = execute_with_mock_host(source);
@@ -963,7 +978,10 @@ fn catalog_declared_unary_operators_execute_for_globals_and_methods() {
 
     update.call(&mut store, ()).unwrap();
     update.call(&mut store, ()).unwrap();
-    assert_eq!(store.data().messages, ["-7:7:true:false"]);
+    assert_eq!(
+        store.data().messages,
+        ["-7:7:true:false:254:65534:-2:-2:4:14464:4:14464:-128:0"]
+    );
 }
 
 #[test]

@@ -37,6 +37,39 @@ fn javascript_strict_equality_recovers_with_machine_applicable_fixes() {
 }
 
 #[test]
+fn familiar_bitwise_complement_recovers_as_overloaded_not() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state "game.exe" {}
+
+        fn complement(value: u8) -> u8 {
+            return ~value
+        }
+    "#;
+    let recovered = splitscript::parse_recovering(source)
+        .expect("bitwise complement should retain a recoverable syntax tree");
+    assert_eq!(recovered.diagnostics().len(), 1);
+    let diagnostic = &recovered.diagnostics()[0];
+    assert_eq!(
+        diagnostic.message,
+        "SplitScript overloads `!` for integer bitwise complement instead of using `~`"
+    );
+    assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "~");
+    let [fix] = diagnostic.fixes.as_slice() else {
+        panic!("the migration should provide one fix");
+    };
+    assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+    let [edit] = fix.edits.as_slice() else {
+        panic!("the migration fix should contain one edit");
+    };
+    assert_eq!(edit.replacement, "!");
+
+    let fixed = source.replacen('~', "!", 1);
+    splitscript::compile(&fixed).expect("the canonical integer complement should compile");
+}
+
+#[test]
 fn rust_let_mut_recovers_by_removing_the_redundant_modifier() {
     use splitscript::FixApplicability;
 

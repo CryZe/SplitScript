@@ -862,7 +862,10 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
         wasm_ir::ExpressionKind::Call {
             target:
                 wasm_ir::CallTarget::Intrinsic {
-                    intrinsic: intrinsic @ (IntrinsicId::SignedNegate | IntrinsicId::BoolNot),
+                    intrinsic:
+                        intrinsic @ (IntrinsicId::SignedNegate
+                        | IntrinsicId::BoolNot
+                        | IntrinsicId::IntegerBitNot),
                     receiver:
                         Some(ResolvedReceiver::Expression {
                             expression: inner,
@@ -881,6 +884,7 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
     };
     let negative = operator == Some(IntrinsicId::SignedNegate);
     let inverted = operator == Some(IntrinsicId::BoolNot);
+    let complemented = operator == Some(IntrinsicId::IntegerBitNot);
     match &inner.kind {
         wasm_ir::ExpressionKind::None => ConstExpr::ref_null(HeapType::Abstract {
             shared: false,
@@ -907,17 +911,28 @@ fn constant(expression: ExprId, wasm_ir: &wasm_ir::Program, ty: Type) -> ConstEx
         wasm_ir::ExpressionKind::Int(value)
             if matches!(ty, Type::I64 | Type::U64 | Type::Address) =>
         {
-            ConstExpr::i64_const(if negative {
+            ConstExpr::i64_const(if complemented {
+                !(*value as i64)
+            } else if negative {
                 -(*value as i64)
             } else {
                 *value as i64
             })
         }
-        wasm_ir::ExpressionKind::Int(value) => ConstExpr::i32_const(if negative {
-            -(*value as i32)
-        } else {
-            *value as i32
-        }),
+        wasm_ir::ExpressionKind::Int(value) => {
+            let value = *value as i32;
+            ConstExpr::i32_const(if complemented {
+                match ty {
+                    Type::U8 => !value & 0xff,
+                    Type::U16 => !value & 0xffff,
+                    _ => !value,
+                }
+            } else if negative {
+                -value
+            } else {
+                value
+            })
+        }
         wasm_ir::ExpressionKind::Float(literal) if ty == Type::F32 => {
             let value = literal
                 .normalized

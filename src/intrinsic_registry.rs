@@ -413,6 +413,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::UnityClassStaticTable => &[HostImport(Host::ProcessRead)],
         IntrinsicId::NextTick
         | IntrinsicId::BoolNot
+        | IntrinsicId::IntegerBitNot
         | IntrinsicId::NumericAdd
         | IntrinsicId::NumericSubtract
         | IntrinsicId::NumericMultiply
@@ -691,6 +692,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             BoolNot,
             Method,
             signature(NO_TYPE_PARAMETERS, Some(BOOL), params![], BOOL),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::IntegerBitNot => contract!(
+            IntegerBitNot,
+            Method,
+            signature(INTEGER_T, Some(T), params![], T),
             PURE,
             Everywhere,
             RepresentationPrimitive

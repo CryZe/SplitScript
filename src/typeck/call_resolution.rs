@@ -47,7 +47,8 @@ impl Checker {
             .unary_operator_candidates(operator)
             .into_iter()
             .collect();
-        let (result, call) = self.operator_call(
+        let error_count = self.errors.len();
+        let resolved = self.operator_call(
             candidates,
             operand_type,
             None,
@@ -56,7 +57,22 @@ impl Checker {
                 members: Vec::new(),
             },
             span,
-        )?;
+            false,
+        );
+        let Some((result, call)) = resolved else {
+            if self.errors.len() == error_count {
+                let operand = self.type_name(operand_type);
+                let requirement = match op {
+                    crate::ast::UnaryOp::Not => "`bool` or an integer",
+                    crate::ast::UnaryOp::Neg => "a signed number",
+                };
+                self.error(
+                    format!("operator cannot be applied to `{operand}`; expected {requirement}"),
+                    span,
+                );
+            }
+            return None;
+        };
         self.semantics.resolve_call(expression, call);
         Some(result)
     }
@@ -142,7 +158,14 @@ impl Checker {
             .binary_operator_candidates(operator)
             .into_iter()
             .collect();
-        self.operator_call(candidates, left_type, Some(right_type), receiver, span)
+        self.operator_call(
+            candidates,
+            left_type,
+            Some(right_type),
+            receiver,
+            span,
+            true,
+        )
     }
 
     fn operator_call(
@@ -152,13 +175,16 @@ impl Checker {
         argument_operand: Option<Type>,
         receiver: ResolvedReceiver,
         span: Span,
+        generic_only_when_inferred: bool,
     ) -> Option<(Type, PendingResolvedCall)> {
         let inferred_receiver = matches!(self.shallow_type(receiver_operand), Type::Variable(_));
         let candidates = candidates
             .into_iter()
             .filter(|candidate| {
-                (!inferred_receiver
+                (!generic_only_when_inferred
+                    || !inferred_receiver
                     || matches!(candidate.receiver(), Some(CatalogTypeRef::Parameter(_))))
+                    && self.inferred_receiver_may_select(candidate, receiver_operand)
                     && self.catalog_candidate_may_apply(candidate, receiver_operand)
             })
             .collect::<Vec<_>>();
@@ -228,6 +254,30 @@ impl Checker {
                 receiver_type: Some(receiver_type),
             },
         ))
+    }
+
+    fn inferred_receiver_may_select(&mut self, candidate: &CallCandidate, receiver: Type) -> bool {
+        let Type::Variable(variable) = self.shallow_type(receiver) else {
+            return true;
+        };
+        let requirements = self.inference.variable_requirements(variable);
+        let concrete = match candidate.receiver() {
+            Some(CatalogTypeRef::Core(core)) => {
+                Some(self.declared_type(DeclaredTypeRef::Core(core)))
+            }
+            Some(CatalogTypeRef::Standard(standard)) => Some(self.standard_type(standard)),
+            _ => None,
+        };
+        concrete.is_none_or(|concrete| {
+            requirements.as_slice().iter().all(|capability| {
+                type_may_have_capability(
+                    &self.standard_library,
+                    self.inference.type_store(),
+                    concrete,
+                    *capability,
+                )
+            })
+        })
     }
 
     pub(super) fn call(

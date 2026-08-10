@@ -341,6 +341,13 @@ The usual arithmetic, comparison, logical, bitwise, and shift operators are
 supported. Because values are statically typed, `==` and `!=` are unambiguous;
 there are no coercing versus strict comparison variants.
 
+Unary `!` is type-directed: it performs logical negation on `bool` and a
+width-preserving bitwise complement on every integer type. The familiar `~`
+spelling is diagnosed with a machine-applicable replacement. Integer
+arithmetic, unary negation, bitwise operations, and shifts normalize their
+results to the declared width, so `255u8 + 1u8` wraps to `0u8` even while the
+backend represents the value in a WebAssembly `i32`.
+
 Operators use Rust's relative precedence. From tightest to loosest, the
 currently supported operators are unary operators, `as`, `*`/`/`/`%`, `+`/`-`,
 `<<`/`>>`, `&`, `^`, `|`, comparisons, `&&`, and `||`. In particular, bitwise

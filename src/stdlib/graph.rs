@@ -163,7 +163,9 @@ impl StandardLibraryGraph {
                 | StandardBinaryOperator::BitAnd
                 | StandardBinaryOperator::ShiftLeft
                 | StandardBinaryOperator::ShiftRight => receiver,
-                StandardBinaryOperator::LessThan
+                StandardBinaryOperator::Equal
+                | StandardBinaryOperator::NotEqual
+                | StandardBinaryOperator::LessThan
                 | StandardBinaryOperator::LessThanOrEqual
                 | StandardBinaryOperator::GreaterThan
                 | StandardBinaryOperator::GreaterThanOrEqual => TypeRef::Core(CoreTypeId::Bool),

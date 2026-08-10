@@ -321,6 +321,16 @@ fn binary_syntax_resolves_through_catalog_declared_methods() {
     ] {
         assert_eq!(library.item(item).binary_operator, Some(operator));
     }
+    assert_eq!(
+        library.item(StdlibItemId::EquatableEquals).binary_operator,
+        Some(StandardBinaryOperator::Equal)
+    );
+    assert_eq!(
+        library
+            .item(StdlibItemId::EquatableNotEquals)
+            .binary_operator,
+        Some(StandardBinaryOperator::NotEqual)
+    );
 
     let source = r#"
         state "game.exe" {}
@@ -333,6 +343,9 @@ fn binary_syntax_resolves_through_catalog_declared_methods() {
             let bits = ((0x10 | 0x04) ^ 0x01) & 0x1f
             let shifted = bits << 2 >> 1
             let directBits = 1u32.shiftLeft(5).bitOr(3).shiftRight(1).bitXor(2).bitAnd(0xff)
+            let same = number.equals(42)
+            let different = number.notEquals(41)
+            let unitEqual = None.equals(None)
             let duration = Duration.fromSeconds(1.5) + Duration.fromSeconds(0.5)
             let difference = duration - Duration.fromWholeSeconds(1)
             let ordered = difference < duration && duration >= difference
@@ -341,6 +354,8 @@ fn binary_syntax_resolves_through_catalog_declared_methods() {
             print(direct)
             print(shifted)
             print(directBits)
+            print(same && different)
+            print(unitEqual)
             print(difference.wholeSeconds())
             if ordered {
                 print("ordered")
@@ -367,6 +382,8 @@ fn binary_syntax_resolves_through_catalog_declared_methods() {
         StdlibItemId::IntegerBitAnd,
         StdlibItemId::IntegerShiftLeft,
         StdlibItemId::IntegerShiftRight,
+        StdlibItemId::EquatableEquals,
+        StdlibItemId::EquatableNotEquals,
         StdlibItemId::DurationAdd,
         StdlibItemId::DurationSubtract,
         StdlibItemId::DurationLessThan,

@@ -24,6 +24,8 @@ macro_rules! trusted_intrinsics {
             IntegerBitAnd,
             IntegerShiftLeft,
             IntegerShiftRight,
+            EquatableEquals,
+            EquatableNotEquals,
             NumericMin,
             NumericMax,
             FloatAbs,

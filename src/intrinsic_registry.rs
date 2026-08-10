@@ -422,6 +422,8 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::IntegerBitAnd
         | IntrinsicId::IntegerShiftLeft
         | IntrinsicId::IntegerShiftRight
+        | IntrinsicId::EquatableEquals
+        | IntrinsicId::EquatableNotEquals
         | IntrinsicId::NumericMin
         | IntrinsicId::NumericMax
         | IntrinsicId::FloatAbs
@@ -758,6 +760,22 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             IntegerShiftRight,
             Method,
             signature(INTEGER_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::EquatableEquals => contract!(
+            EquatableEquals,
+            Method,
+            signature(EQUATABLE_T, Some(T), params![value(T)], BOOL),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::EquatableNotEquals => contract!(
+            EquatableNotEquals,
+            Method,
+            signature(EQUATABLE_T, Some(T), params![value(T)], BOOL),
             PURE,
             Everywhere,
             RepresentationPrimitive

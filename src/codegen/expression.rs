@@ -2762,6 +2762,15 @@ fn compile_expr_unconverted(
             IntrinsicId::NumericMin | IntrinsicId::NumericMax => {
                 unreachable!("numeric intrinsics are lowered before ordinary calls")
             }
+            IntrinsicId::EquatableEquals | IntrinsicId::EquatableNotEquals => {
+                compile_intrinsic_equality(
+                    function,
+                    target,
+                    args[0],
+                    builtin == IntrinsicId::EquatableEquals,
+                    context,
+                );
+            }
             IntrinsicId::NumericAdd
             | IntrinsicId::NumericSubtract
             | IntrinsicId::NumericMultiply
@@ -3230,49 +3239,8 @@ fn emit_binary(
     context: &ExprContext<'_>,
 ) {
     let operand_type = context.expression_type(left);
-    if matches!(op, BinaryOp::Eq | BinaryOp::Ne) && operand_type == Type::None {
-        let operand_context = context.erasing_none();
-        compile_expr(function, left, &operand_context);
-        compile_expr(function, right, &operand_context);
-        function.instruction(&Instruction::I32Const(i32::from(op == BinaryOp::Eq)));
-        return;
-    }
-    if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
-        && matches!(operand_type, Type::Standard(_))
-        && operand_type.is_enum(context.standard_library)
-    {
-        for expression in [left, right] {
-            compile_expr(function, expression, context);
-            function.instruction(&Instruction::RefAsNonNull);
-            emit_typed_struct_get(function, context.gc.index(operand_type), 0, Type::I32);
-        }
-        function.instruction(&Instruction::I32Eq);
-        if op == BinaryOp::Ne {
-            function.instruction(&Instruction::I32Eqz);
-        }
-        return;
-    }
-    if matches!(op, BinaryOp::Eq | BinaryOp::Ne)
-        && matches!(
-            operand_type,
-            Type::Standard(_) | Type::Record(_) | Type::Enum(_) | Type::Option(_) | Type::Result(_)
-        )
-    {
-        compile_expr(function, left, context);
-        compile_expr(function, right, context);
-        emit_value_equality(
-            function,
-            operand_type,
-            context.equality_functions,
-            context
-                .runtime_helpers
-                .optional_function(RuntimeHelperId::StringEquality)
-                .unwrap_or(0),
-        );
-        if op == BinaryOp::Ne {
-            function.instruction(&Instruction::I32Eqz);
-        }
-        return;
+    if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+        unreachable!("checked equality lowers through the Equatable catalog intrinsic")
     }
     if matches!(op, BinaryOp::Or | BinaryOp::And) {
         compile_expr(function, left, context);
@@ -3296,6 +3264,56 @@ fn emit_binary(
     compile_expr(function, left, context);
     compile_expr(function, right, context);
     emit_binary_instruction(function, op, operand_type);
+}
+
+fn compile_intrinsic_equality(
+    function: &mut Function,
+    target: &wasm_ir::CallTarget,
+    other: ExprId,
+    equal: bool,
+    context: &ExprContext<'_>,
+) {
+    let (_, operand_type) = resolved_receiver(target, context);
+    if operand_type == Type::None {
+        let operand_context = context.erasing_none();
+        compile_receiver(function, target, &operand_context);
+        compile_expr(function, other, &operand_context);
+        function.instruction(&Instruction::I32Const(i32::from(equal)));
+        return;
+    }
+
+    if matches!(operand_type, Type::Standard(_)) && operand_type.is_enum(context.standard_library) {
+        compile_receiver(function, target, context);
+        function.instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(function, context.gc.index(operand_type), 0, Type::I32);
+        compile_expr(function, other, context);
+        function.instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(function, context.gc.index(operand_type), 0, Type::I32);
+        function.instruction(&Instruction::I32Eq);
+    } else if matches!(
+        operand_type,
+        Type::Standard(_) | Type::Record(_) | Type::Enum(_) | Type::Option(_) | Type::Result(_)
+    ) {
+        compile_receiver(function, target, context);
+        compile_expr(function, other, context);
+        emit_value_equality(
+            function,
+            operand_type,
+            context.equality_functions,
+            context
+                .runtime_helpers
+                .optional_function(RuntimeHelperId::StringEquality)
+                .unwrap_or(0),
+        );
+    } else {
+        compile_receiver(function, target, context);
+        compile_expr(function, other, context);
+        emit_binary_instruction(function, BinaryOp::Eq, operand_type);
+    }
+
+    if !equal {
+        function.instruction(&Instruction::I32Eqz);
+    }
 }
 
 fn emit_binary_instruction(function: &mut Function, op: BinaryOp, ty: Type) {

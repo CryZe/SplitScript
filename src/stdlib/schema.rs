@@ -279,6 +279,8 @@ pub enum StandardBinaryOperator {
     BitAnd,
     ShiftLeft,
     ShiftRight,
+    Equal,
+    NotEqual,
     LessThan,
     LessThanOrEqual,
     GreaterThan,

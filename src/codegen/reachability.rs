@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, BinaryOp, EnumDecl, EnumId, ExprId, OptionTypeId, Program,
-        RecordId, ResultTypeId, TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, EnumDecl, EnumId, ExprId, OptionTypeId, Program, RecordId,
+        ResultTypeId, TypeApplicationId,
     },
     semantic::{FunctionInstance, SemanticModel},
     stdlib::{
@@ -107,22 +107,24 @@ impl Reachability {
             wasm_ir::visit_expression_children(&expression.kind, |child| {
                 pending.push((owner.clone(), child))
             });
-            if let wasm_ir::ExpressionKind::Binary {
-                op: BinaryOp::Eq | BinaryOp::Ne,
-                left,
-                ..
-            } = expression.kind
-            {
-                let ty = wasm_ir
-                    .expression(left)
-                    .expect("binary operands belong to Wasm IR")
-                    .ty;
-                let ty = owner
-                    .as_ref()
-                    .map_or(ty, |owner| semantics.specialize_type(owner, ty));
-                reachable.require_equality(ty, program, enums, semantics, standard_library);
-            }
             if let wasm_ir::ExpressionKind::Call { target, .. } = &expression.kind {
+                if let wasm_ir::CallTarget::Intrinsic {
+                    intrinsic: IntrinsicId::EquatableEquals | IntrinsicId::EquatableNotEquals,
+                    receiver_type: Some(receiver),
+                    ..
+                } = target
+                {
+                    let receiver = owner.as_ref().map_or(*receiver, |owner| {
+                        semantics.specialize_type(owner, *receiver)
+                    });
+                    reachable.require_equality(
+                        receiver,
+                        program,
+                        enums,
+                        semantics,
+                        standard_library,
+                    );
+                }
                 if let wasm_ir::CallTarget::Intrinsic {
                     intrinsic:
                         IntrinsicId::SetContains | IntrinsicId::SetInsert | IntrinsicId::SetRemove,

@@ -1028,6 +1028,8 @@ impl StandardLibrary {
                         StandardBinaryOperator::BitAnd => " & ",
                         StandardBinaryOperator::ShiftLeft => " << ",
                         StandardBinaryOperator::ShiftRight => " >> ",
+                        StandardBinaryOperator::Equal => " == ",
+                        StandardBinaryOperator::NotEqual => " != ",
                         StandardBinaryOperator::LessThan => " < ",
                         StandardBinaryOperator::LessThanOrEqual => " <= ",
                         StandardBinaryOperator::GreaterThan => " > ",

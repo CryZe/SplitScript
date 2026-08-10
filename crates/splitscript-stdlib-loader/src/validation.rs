@@ -479,6 +479,8 @@ impl<'a> Validator<'a> {
                     | "bitAnd"
                     | "shiftLeft"
                     | "shiftRight"
+                    | "equal"
+                    | "notEqual"
                     | "lessThan"
                     | "lessThanOrEqual"
                     | "greaterThan"

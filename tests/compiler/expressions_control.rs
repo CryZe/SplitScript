@@ -390,12 +390,20 @@ fn structural_equality_observes_complete_record_and_enum_shapes() {
             return left == right
         }
 
+        fn recordsDiffer(left: Pair, right: Pair) -> bool {
+            return left.notEquals(right)
+        }
+
         whileAttached {
             if recordsEqual(
                 Pair { left: 1, right: 2 },
                 Pair { left: 1, right: 2 }
             ) {}
             if modesEqual(Mode.First, Mode.First) {}
+            if recordsDiffer(
+                Pair { left: 1, right: 2 },
+                Pair { left: 1, right: 3 }
+            ) {}
         }
     "#;
     let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
@@ -409,6 +417,19 @@ fn structural_equality_observes_complete_record_and_enum_shapes() {
         })
         .collect::<Vec<_>>();
     assert!(member_warnings.is_empty(), "{member_warnings:#?}");
+    let resolved_items = checked
+        .semantics()
+        .calls()
+        .filter_map(|(_, call)| match call {
+            ResolvedCall::StandardLibrary { item, .. } => Some(*item),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(resolved_items.contains(&StdlibItemId::EquatableEquals));
+    assert!(resolved_items.contains(&StdlibItemId::EquatableNotEquals));
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("catalog-resolved structural equality should produce valid Wasm");
 }
 
 #[test]

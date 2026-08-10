@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-10: catalog-owned structural equality
+
+- Added `equals` and `notEquals` to the source-defined `Equatable` capability
+  and bound `==` and `!=` to those declarations, completing catalog ownership
+  for non-logical binary operators.
+- Preserved specialized semantics for strings, standard enums, records, payload
+  enums, options, results, scalar values, IEEE 754 floats, and zero-sized
+  `None`, including demand-driven structural equality functions.
+- Taught reachability and code generation to plan equality from intrinsic call
+  identities, and covered both operator syntax and direct method calls through
+  semantic resolution and valid Wasm GC output.
+
 ## 2026-08-10: source-declared integer bit operations
 
 - Declared bitwise OR, XOR, AND, left shift, and right shift on the `Integer`

@@ -473,6 +473,8 @@ impl<'a> CatalogGenerator<'a> {
                 "bitAnd" => "Some(StandardBinaryOperator::BitAnd)",
                 "shiftLeft" => "Some(StandardBinaryOperator::ShiftLeft)",
                 "shiftRight" => "Some(StandardBinaryOperator::ShiftRight)",
+                "equal" => "Some(StandardBinaryOperator::Equal)",
+                "notEqual" => "Some(StandardBinaryOperator::NotEqual)",
                 "lessThan" => "Some(StandardBinaryOperator::LessThan)",
                 "lessThanOrEqual" => "Some(StandardBinaryOperator::LessThanOrEqual)",
                 "greaterThan" => "Some(StandardBinaryOperator::GreaterThan)",

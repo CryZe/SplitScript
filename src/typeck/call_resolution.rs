@@ -97,6 +97,8 @@ impl Checker {
             crate::ast::BinaryOp::BitAnd => StandardBinaryOperator::BitAnd,
             crate::ast::BinaryOp::Shl => StandardBinaryOperator::ShiftLeft,
             crate::ast::BinaryOp::Shr => StandardBinaryOperator::ShiftRight,
+            crate::ast::BinaryOp::Eq => StandardBinaryOperator::Equal,
+            crate::ast::BinaryOp::Ne => StandardBinaryOperator::NotEqual,
             crate::ast::BinaryOp::Lt => StandardBinaryOperator::LessThan,
             crate::ast::BinaryOp::Le => StandardBinaryOperator::LessThanOrEqual,
             crate::ast::BinaryOp::Gt => StandardBinaryOperator::GreaterThan,

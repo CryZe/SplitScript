@@ -1266,7 +1266,47 @@ extend f64 {
 /// let sameRoom = 4 == 4
 /// ```
 @behavior(structuralEquality)
-capability Equatable<T> {}
+capability Equatable<T> {
+    /// Reports whether this value and another value are equal.
+    ///
+    /// This method is also the implementation of the `==` operator. Records,
+    /// enums, options, and results compare their complete structure; strings
+    /// compare UTF-8 contents. Floating-point equality follows IEEE 754, so
+    /// NaN is not equal to itself.
+    ///
+    /// # Example
+    ///
+    /// Compare two state values
+    ///
+    /// ```splitscript
+    /// let unchanged = oldRoom == currentRoom
+    /// ```
+    @intrinsic(EquatableEquals)
+    @operator(equal)
+    fn equals(
+        /// The other value of the same type.
+        other: T,
+    ) -> bool;
+
+    /// Reports whether this value and another value differ.
+    ///
+    /// This method is also the implementation of the `!=` operator and is the
+    /// logical inverse of `equals` for every Equatable type.
+    ///
+    /// # Example
+    ///
+    /// Detect a state transition
+    ///
+    /// ```splitscript
+    /// let changed = oldRoom != currentRoom
+    /// ```
+    @intrinsic(EquatableNotEquals)
+    @operator(notEqual)
+    fn notEquals(
+        /// The other value of the same type.
+        other: T,
+    ) -> bool;
+}
 
 /// Supports conversion to a user-facing textual representation.
 ///

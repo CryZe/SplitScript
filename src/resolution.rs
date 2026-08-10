@@ -314,10 +314,11 @@ impl EnumResolver<'_> {
     ) -> Option<EnumTypeId> {
         let EnumReference { name, span } = reference;
         let Some(enumeration) = self.enums.get(name).copied() else {
-            self.diagnostics.push(Diagnostic::type_error(
-                format!("unknown enum `{name}`"),
-                *span,
-            ));
+            self.diagnostics.push(
+                legacy_type_migration_diagnostic(name, *span).unwrap_or_else(|| {
+                    Diagnostic::type_error(format!("unknown enum `{name}`"), *span)
+                }),
+            );
             return None;
         };
         if source_only && matches!(enumeration, EnumTypeId::Standard(_)) {

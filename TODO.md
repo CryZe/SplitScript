@@ -54,12 +54,12 @@ or behavioral parity.
   campaign used a different compiler.
 - [ ] Continue refreshing the ASL migration catalog and cookbook for
   non-lifecycle misunderstandings found by the campaign. The next concrete
-  audit queue is remaining timer/run metadata paths and collection mutations
+  audit queue is host-backed timer/run metadata paths and collection mutations
   whose ordering or duplicate semantics are not already covered by arrays and
-  sets. String/array length, collection count, and `Convert.To*` now have
-  canonical guidance; consult the roadmap archive before re-planning any
-  completed string, numeric, or finite-settings slice. Do not add compatibility
-  aliases.
+  sets. String/array length, collection count, `Convert.To*`, and the existing
+  timer-phase API now have canonical guidance; consult the roadmap archive
+  before re-planning any completed string, numeric, timer-state, or
+  finite-settings slice. Do not add compatibility aliases.
 - [ ] Use those maintained ports to decide each next implementation slice.
   Prefer recurring static settings, signed offsets, or focused string gaps over
   callbacks, reflection, UI prompts, or unrestricted filesystem access. Move a

@@ -2101,6 +2101,119 @@ fn user_defined_timer_split_index_member_keeps_its_meaning() {
 }
 
 #[test]
+fn legacy_timer_phase_maps_to_the_exhaustive_timer_state() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state "game.exe" {}
+
+        split {
+            return timer.CurrentPhase == TimerPhase.Running
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("legacy timer phase paths should use the typed timer state");
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "ASL `timer.CurrentPhase` is `timer.state()` in SplitScript"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "timer.CurrentPhase"
+    );
+    let [fix] = diagnostic.fixes.as_slice() else {
+        panic!("the current phase path should have one direct fix: {diagnostic:#?}");
+    };
+    assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+    let [edit] = fix.edits.as_slice() else {
+        panic!("the current phase fix should contain one edit: {fix:#?}");
+    };
+    let mut fixed = source.to_owned();
+    fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+
+    let diagnostics = splitscript::compile(&fixed)
+        .expect_err("the legacy enum variant should be diagnosed after fixing the receiver");
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "ASL `TimerPhase.Running` is `TimerState.Running` in SplitScript"
+    );
+    assert_eq!(
+        &fixed[diagnostic.span.start..diagnostic.span.end],
+        "TimerPhase.Running"
+    );
+    let [fix] = diagnostic.fixes.as_slice() else {
+        panic!("the legacy enum variant should have one direct fix: {diagnostic:#?}");
+    };
+    assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+    let [edit] = fix.edits.as_slice() else {
+        panic!("the enum-variant fix should contain one edit: {fix:#?}");
+    };
+    fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    splitscript::compile(&fixed)
+        .expect("the canonical typed timer-state comparison should compile");
+}
+
+#[test]
+fn legacy_timer_phase_type_in_match_patterns_gets_focused_guidance() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn isRunning(state: TimerState) -> bool {
+            return match state {
+                TimerPhase.Running => true,
+                _ => false,
+            }
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("an unknown legacy enum in a match should get timer-state guidance");
+    assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+    let diagnostic = &diagnostics[0];
+    assert_eq!(
+        diagnostic.message,
+        "ASL `TimerPhase` is `TimerState` in SplitScript"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "TimerPhase"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("TimerState.Unknown"))
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("numeric comparisons"))
+    );
+}
+
+#[test]
+fn user_defined_timer_phase_paths_keep_their_meaning() {
+    let source = r#"
+        state "game.exe" {}
+
+        enum TimerPhase {
+            Running,
+        }
+
+        fn isRunning(state: TimerPhase) -> bool {
+            return state == TimerPhase.Running
+        }
+    "#;
+    splitscript::compile(source)
+        .expect("a source-defined TimerPhase enum must not trigger ASL migration guidance");
+}
+
+#[test]
 fn legacy_wall_clock_delay_paths_point_to_monotonic_instants() {
     let source = r#"
         state "game.exe" {}

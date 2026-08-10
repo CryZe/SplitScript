@@ -398,6 +398,30 @@ machine-applicable `process.name()` rewrite where the native `process` value is
 in scope. Ordinary functions do not implicitly capture an attachment; pass the
 name as a parameter when helper logic needs it.
 
+## Timer state
+
+ASL's `timer.CurrentPhase` maps directly to `timer.state()`. Compare the
+resulting exhaustive enum by name:
+
+```splitscript
+reset {
+    return timer.state() == TimerState.NotRunning && current.inMenu
+}
+```
+
+The familiar variants retain their meanings as `TimerState.NotRunning`,
+`Running`, `Paused`, and `Ended`. SplitScript additionally exposes
+`TimerState.Unknown`; the runtime maps an unrecognized future host value there
+instead of fabricating a known state. Use an explicit wildcard or `Unknown`
+arm when matching according to the behavior the script needs.
+
+Do not preserve integer comparisons such as `timer.CurrentPhase > 0`.
+`TimerState` is an enum, not an ordered number. Compare or match the named
+states that made the original condition true. The compiler offers
+machine-applicable rewrites for `timer.CurrentPhase` and the four legacy
+`TimerPhase` variants. A legacy enum name in a type or match pattern receives
+focused guidance without reserving `TimerPhase` as a source identifier.
+
 ## Timer split index
 
 ASL exposes `timer.CurrentSplitIndex` as a signed integer. SplitScript uses

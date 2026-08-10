@@ -165,6 +165,8 @@ pub const ASL_SHUTDOWN_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.lifecycle.shutdown-block");
 pub const ASL_TIMER_EVENT_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.lifecycle.timer-event-block");
+pub const ASL_TIMER_PHASE_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.timer.phase-type");
 pub const ASL_CURRENT_SPLIT_INDEX_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.timer.current-split-index-path");
 pub const ASL_MONOTONIC_TIME_DIAGNOSTIC: MigrationDiagnosticId =
@@ -316,6 +318,17 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         notes: &[
             "simple run-start state can be reconstructed from `timer.state()` in `whileAttached`",
             "exact `onStart`, `onSplit`, and `onReset` delivery needs the planned ordered host event contract",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_TIMER_PHASE_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.timer.state"),
+        message: "ASL `TimerPhase` is `TimerState` in SplitScript",
+        primary_label: "use the typed timer state and its named variants",
+        notes: &[
+            "read the current value with `timer.state()` and compare it with `TimerState.NotRunning`, `Running`, `Paused`, or `Ended`",
+            "SplitScript also exposes `TimerState.Unknown` so an unrecognized future host value does not masquerade as a known state",
+            "do not preserve numeric comparisons or ordering on the legacy enum; match the states whose behavior the script actually needs",
         ],
     },
     MigrationDiagnostic {
@@ -877,6 +890,7 @@ pub fn legacy_value_path_diagnostic(path: &str) -> Option<MigrationDiagnosticId>
 pub fn legacy_type_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
     match name {
         "List" => Some(ASL_LIST_TYPE_DIAGNOSTIC),
+        "TimerPhase" => Some(ASL_TIMER_PHASE_DIAGNOSTIC),
         _ => None,
     }
 }
@@ -1096,6 +1110,49 @@ const ASL_PROCESS_IDENTITY_SPELLINGS: &[ForeignSpelling] = &[ForeignSpelling {
     primary_label: "read the exact process candidate that matched during attachment",
     fix_title: "replace `game.ProcessName` with `process.name()`",
 }];
+
+const ASL_TIMER_STATE_SPELLINGS: &[ForeignSpelling] = &[
+    type_spelling!(
+        SourceLanguage::Asl,
+        ForeignSpellingContext::ValuePath,
+        "timer.CurrentPhase",
+        "timer.state()",
+        "ASL `timer.CurrentPhase` is `timer.state()` in SplitScript",
+        "read the typed current timer state"
+    ),
+    type_spelling!(
+        SourceLanguage::Asl,
+        ForeignSpellingContext::ValuePath,
+        "TimerPhase.NotRunning",
+        "TimerState.NotRunning",
+        "ASL `TimerPhase.NotRunning` is `TimerState.NotRunning` in SplitScript",
+        "use the SplitScript timer-state variant"
+    ),
+    type_spelling!(
+        SourceLanguage::Asl,
+        ForeignSpellingContext::ValuePath,
+        "TimerPhase.Running",
+        "TimerState.Running",
+        "ASL `TimerPhase.Running` is `TimerState.Running` in SplitScript",
+        "use the SplitScript timer-state variant"
+    ),
+    type_spelling!(
+        SourceLanguage::Asl,
+        ForeignSpellingContext::ValuePath,
+        "TimerPhase.Paused",
+        "TimerState.Paused",
+        "ASL `TimerPhase.Paused` is `TimerState.Paused` in SplitScript",
+        "use the SplitScript timer-state variant"
+    ),
+    type_spelling!(
+        SourceLanguage::Asl,
+        ForeignSpellingContext::ValuePath,
+        "TimerPhase.Ended",
+        "TimerState.Ended",
+        "ASL `TimerPhase.Ended` is `TimerState.Ended` in SplitScript",
+        "use the SplitScript timer-state variant"
+    ),
+];
 
 pub const CONCEPTS: &[MigrationConcept] = &[
     MigrationConcept {
@@ -1677,6 +1734,19 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         targets: &[],
         cookbook_anchor: Some("legacy-asl-lifecycle-blocks"),
         spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.timer.state"),
+        name: "Current timer state",
+        sources: ASL,
+        support: MigrationSupport::Direct,
+        summary: "Replace `timer.CurrentPhase` with `timer.state()` and compare the exhaustive `TimerState` enum instead of relying on legacy numeric phase values.",
+        targets: &[
+            MigrationTarget::StandardLibraryItem("timer.state"),
+            MigrationTarget::StandardLibraryType("TimerState"),
+        ],
+        cookbook_anchor: Some("timer-state"),
+        spellings: ASL_TIMER_STATE_SPELLINGS,
     },
     MigrationConcept {
         id: MigrationConceptId::new("asl.timer.current-split-index"),

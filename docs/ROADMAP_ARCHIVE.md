@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-10: typed ASL timer-phase migration
+
+- Mapped the recurring `timer.CurrentPhase` and `TimerPhase` variant patterns
+  to the existing `timer.state()` and exhaustive `TimerState` API.
+- Added machine-applicable path rewrites while keeping a source-defined enum
+  named `TimerPhase` legal and untouched.
+- Documented `TimerState.Unknown` and rejected migration by numeric enum order;
+  timer time, split metadata, timing method, and run offset remain distinct
+  host-contract work.
+
 ## 2026-08-10: source-specific C# `Convert` migration
 
 - Classified the observed integer, floating-point, boolean, and string

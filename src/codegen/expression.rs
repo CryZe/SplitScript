@@ -1194,12 +1194,12 @@ pub(super) fn compile_for_has_next(
 ) {
     compile_value_get(function, index_value, context);
     compile_value_get(function, iterable_value, context);
-    function.instruction(&Instruction::RefAsNonNull);
     match for_collection_type(iterable_value, context).0 {
-        ForCollection::Array(_) => {
-            function.instruction(&Instruction::ArrayLen);
+        ForCollection::Array(array) => {
+            super::array_value::emit_length(function, context.gc, array);
         }
         ForCollection::Set { set, .. } => {
+            function.instruction(&Instruction::RefAsNonNull);
             function.instruction(&Instruction::StructGet {
                 struct_type_index: context.gc.index(Type::Set(set)),
                 field_index: 1,
@@ -1221,10 +1221,13 @@ pub(super) fn compile_for_bind_and_advance(
     let (collection, element) = for_collection_type(iterable_value, context);
     compile_value_set(function, binding, context, |function| {
         compile_value_get(function, iterable_value, context);
-        function.instruction(&Instruction::RefAsNonNull);
         let array = match collection {
-            ForCollection::Array(array) => array,
+            ForCollection::Array(array) => {
+                super::array_value::emit_backing(function, context.gc, array);
+                array
+            }
             ForCollection::Set { set, backing } => {
+                function.instruction(&Instruction::RefAsNonNull);
                 function.instruction(&Instruction::StructGet {
                     struct_type_index: context.gc.index(Type::Set(set)),
                     field_index: 0,
@@ -1235,7 +1238,11 @@ pub(super) fn compile_for_bind_and_advance(
         };
         compile_value_get(function, index_value, context);
         let backing_type = match collection {
-            ForCollection::Array(_) => Type::Array(array),
+            ForCollection::Array(_) => Type::ArrayStorage(super::array_value::storage_id(
+                array,
+                context.arrays,
+                context.semantics,
+            )),
             ForCollection::Set { .. } => Type::ArrayStorage(array),
         };
         emit_array_get(function, context.gc.index(backing_type), element);
@@ -1489,10 +1496,12 @@ fn compile_expr_unconverted(
                         == Some(Type::Standard(StdlibTypeId::String))
                 })
                 .expect("interpolation creates its String array type");
-            function.instruction(&Instruction::ArrayNewFixed {
-                array_type_index: context.gc.index(Type::Array(strings.id)),
-                array_size: parts.len() as u32,
-            });
+            super::array_value::emit_new_fixed(
+                function,
+                context.gc,
+                strings.id,
+                parts.len() as u32,
+            );
             function
                 .instruction(&Instruction::RefNull(HeapType::Concrete(
                     context.gc.standard_index(StdlibTypeId::String),
@@ -1515,10 +1524,12 @@ fn compile_expr_unconverted(
             for element in elements {
                 compile_expr(function, *element, context);
             }
-            function.instruction(&Instruction::ArrayNewFixed {
-                array_type_index: context.gc.index(Type::Array(array_id)),
-                array_size: elements.len() as u32,
-            });
+            super::array_value::emit_new_fixed(
+                function,
+                context.gc,
+                array_id,
+                elements.len() as u32,
+            );
         }
         wasm_ir::ExpressionKind::Record { record, fields } => match record {
             ResolvedRecordId::Source(record) => {
@@ -1610,10 +1621,20 @@ fn compile_expr_unconverted(
             let Type::Array(array_id) = context.expression_type(*receiver) else {
                 unreachable!("checked index receivers are arrays")
             };
-            function.instruction(&Instruction::RefAsNonNull);
+            super::array_value::emit_backing(function, context.gc, array_id);
             compile_expr(function, *index, context);
             let element = array_element_type(array_id, context.semantics);
-            emit_array_get(function, context.gc.index(Type::Array(array_id)), element);
+            emit_array_get(
+                function,
+                context
+                    .gc
+                    .index(Type::ArrayStorage(super::array_value::storage_id(
+                        array_id,
+                        context.arrays,
+                        context.semantics,
+                    ))),
+                element,
+            );
         }
         wasm_ir::ExpressionKind::Unary { .. } => {
             unreachable!("checked unary operators lower through catalog calls")
@@ -2864,18 +2885,22 @@ fn compile_expr_unconverted(
                 let Type::Array(array_id) = receiver_type else {
                     unreachable!();
                 };
-                function.instruction(&Instruction::RefAsNonNull);
-                for argument in args {
-                    compile_expr(function, *argument, context);
-                }
                 match builtin {
                     IntrinsicId::ArrayLength => {
-                        function.instruction(&Instruction::ArrayLen);
+                        super::array_value::emit_length(function, context.gc, array_id);
                     }
                     IntrinsicId::ArraySet => {
-                        function.instruction(&Instruction::ArraySet(
-                            context.gc.index(Type::Array(array_id)),
-                        ));
+                        super::array_value::emit_backing(function, context.gc, array_id);
+                        for argument in args {
+                            compile_expr(function, *argument, context);
+                        }
+                        function.instruction(&Instruction::ArraySet(context.gc.index(
+                            Type::ArrayStorage(super::array_value::storage_id(
+                                array_id,
+                                context.arrays,
+                                context.semantics,
+                            )),
+                        )));
                     }
                     _ => unreachable!(),
                 }

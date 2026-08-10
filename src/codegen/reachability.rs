@@ -368,12 +368,14 @@ impl Reachability {
         arrays: &[ResolvedArrayType],
         semantics: &SemanticModel,
     ) {
-        self.gc_arrays
-            .extend(super::runtime_helper_registry::required_array_layouts(
-                dependencies.helpers(),
-                arrays,
-                semantics,
-            ));
+        let required = super::runtime_helper_registry::required_array_layouts(
+            dependencies.helpers(),
+            arrays,
+            semantics,
+        )
+        .collect::<Vec<_>>();
+        self.gc_arrays.extend(required.iter().copied());
+        self.gc_array_storage.extend(required);
     }
 
     pub fn functions(&self) -> impl Iterator<Item = &FunctionInstance> {
@@ -535,6 +537,7 @@ impl Reachability {
                     layout, element, ..
                 } => {
                     self.gc_arrays.insert(*layout);
+                    self.gc_array_storage.insert(*layout);
                     pending.push(*element);
                 }
                 TypeKind::Option { layout, value } => {

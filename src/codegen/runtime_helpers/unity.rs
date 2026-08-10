@@ -1,6 +1,6 @@
 //! Unity/IL2CPP type and field discovery runtime helpers.
 
-use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
+use wasm_encoder::{BlockType, Function, HeapType, Instruction, RefType, ValType};
 
 use crate::{
     abi::AbiImportId,
@@ -840,31 +840,53 @@ pub(super) fn compile_unity_get_field_offset(
 pub(super) fn compile_unity_get_field_any(
     unity_get_field_offset: u32,
     names_array: u32,
+    names_storage: u32,
     gc: &GcLayout,
 ) -> Function {
-    let mut function = Function::new([(1, ValType::I32), (1, ValType::I64)]);
+    let mut function = Function::new([
+        (1, ValType::I32),
+        (1, ValType::I64),
+        (
+            1,
+            ValType::Ref(RefType {
+                nullable: true,
+                heap_type: HeapType::Concrete(names_storage),
+            }),
+        ),
+    ]);
     let process = 0;
     let class_value = 1;
     let names = 2;
     let index = 3;
     let encoded = 4;
+    let names_backing = 5;
     function
+        .instruction(&Instruction::LocalGet(names))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: names_array,
+            field_index: super::super::array_value::BACKING_FIELD,
+        })
+        .instruction(&Instruction::LocalSet(names_backing))
         .instruction(&Instruction::Block(BlockType::Empty))
         .instruction(&Instruction::Loop(BlockType::Empty))
         .instruction(&Instruction::LocalGet(index))
         .instruction(&Instruction::LocalGet(names))
         .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: names_array,
+            field_index: super::super::array_value::LENGTH_FIELD,
+        })
         .instruction(&Instruction::I32GeU)
         .instruction(&Instruction::BrIf(1))
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(class_value))
-        .instruction(&Instruction::LocalGet(names))
+        .instruction(&Instruction::LocalGet(names_backing))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(index));
     emit_array_get(
         &mut function,
-        names_array,
+        names_storage,
         Type::Standard(StdlibTypeId::String),
     );
     function

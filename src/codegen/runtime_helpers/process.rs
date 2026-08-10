@@ -1,6 +1,6 @@
 //! Process-memory, signature-scanning, and managed-string runtime helpers.
 
-use wasm_encoder::{BlockType, Function, HeapType, Instruction, ValType};
+use wasm_encoder::{BlockType, Function, HeapType, Instruction, RefType, ValType};
 
 use crate::{abi::AbiImportId, intrinsic_registry::MAX_NATIVE_STRING_BYTES, stdlib::StdlibTypeId};
 
@@ -169,23 +169,45 @@ pub(super) fn compile_scan_process_range(abi: &Abi, scan: ScratchRegion) -> Func
 pub(super) fn compile_follow_address(
     abi: &Abi,
     offsets_array: u32,
+    offsets_storage: u32,
     abi_read: AbiReadScratch,
 ) -> Function {
-    let mut function = Function::new([(2, ValType::I32), (1, ValType::I64)]);
+    let mut function = Function::new([
+        (2, ValType::I32),
+        (1, ValType::I64),
+        (
+            1,
+            ValType::Ref(RefType {
+                nullable: true,
+                heap_type: HeapType::Concrete(offsets_storage),
+            }),
+        ),
+    ]);
     let process = 0;
     let base = 1;
     let offsets = 2;
     let index = 3;
     let len = 4;
     let current = 5;
+    let offsets_backing = 6;
 
     function
         .instruction(&Instruction::LocalGet(base))
         .instruction(&Instruction::LocalSet(current))
         .instruction(&Instruction::LocalGet(offsets))
         .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: offsets_array,
+            field_index: super::super::array_value::LENGTH_FIELD,
+        })
         .instruction(&Instruction::LocalSet(len))
+        .instruction(&Instruction::LocalGet(offsets))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: offsets_array,
+            field_index: super::super::array_value::BACKING_FIELD,
+        })
+        .instruction(&Instruction::LocalSet(offsets_backing))
         .instruction(&Instruction::Block(BlockType::Empty))
         .instruction(&Instruction::Loop(BlockType::Empty))
         .instruction(&Instruction::LocalGet(index))
@@ -194,10 +216,10 @@ pub(super) fn compile_follow_address(
         .instruction(&Instruction::BrIf(1))
         .instruction(&Instruction::LocalGet(process))
         .instruction(&Instruction::LocalGet(current))
-        .instruction(&Instruction::LocalGet(offsets))
+        .instruction(&Instruction::LocalGet(offsets_backing))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(index))
-        .instruction(&Instruction::ArrayGet(offsets_array))
+        .instruction(&Instruction::ArrayGet(offsets_storage))
         .instruction(&Instruction::I64Add)
         .instruction(&Instruction::I32Const(abi_read.destination(8)))
         .instruction(&Instruction::I32Const(8))

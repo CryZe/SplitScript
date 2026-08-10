@@ -49,15 +49,18 @@ pub(super) fn compile_runtime(
         .collect()
 }
 
-fn array_layout(inputs: &RuntimeHelperInputs<'_>, element: Type) -> u32 {
-    inputs.gc.index(Type::Array(
-        inputs
-            .arrays
-            .iter()
-            .find(|array| try_array_element_type(array.id, inputs.semantics) == Some(element))
-            .expect("runtime helper has its required reachable array layout")
-            .id,
-    ))
+fn array_layouts(inputs: &RuntimeHelperInputs<'_>, element: Type) -> (u32, u32) {
+    let array = inputs
+        .arrays
+        .iter()
+        .find(|array| try_array_element_type(array.id, inputs.semantics) == Some(element))
+        .expect("runtime helper has its required reachable array layout")
+        .id;
+    let storage = super::array_value::storage_id(array, inputs.arrays, inputs.semantics);
+    (
+        inputs.gc.index(Type::Array(array)),
+        inputs.gc.index(Type::ArrayStorage(storage)),
+    )
 }
 
 pub(super) fn build_print_string(inputs: &RuntimeHelperInputs<'_>) -> Function {
@@ -104,9 +107,11 @@ pub(super) fn build_string_replace_all(inputs: &RuntimeHelperInputs<'_>) -> Func
 }
 
 pub(super) fn build_string_split(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    let (array, storage) = array_layouts(inputs, Type::Standard(StdlibTypeId::String));
     strings::compile_string_split(
         inputs.plan.function(RuntimeHelperId::StringFind),
-        array_layout(inputs, Type::Standard(StdlibTypeId::String)),
+        array,
+        storage,
         inputs.gc,
     )
 }
@@ -278,9 +283,11 @@ pub(super) fn build_unity_get_field_offset(inputs: &RuntimeHelperInputs<'_>) -> 
 }
 
 pub(super) fn build_unity_get_field_any(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    let (array, storage) = array_layouts(inputs, Type::Standard(StdlibTypeId::String));
     unity::compile_unity_get_field_any(
         inputs.plan.function(RuntimeHelperId::UnityGetFieldOffset),
-        array_layout(inputs, Type::Standard(StdlibTypeId::String)),
+        array,
+        storage,
         inputs.gc,
     )
 }
@@ -295,18 +302,13 @@ pub(super) fn build_unity_get_static_instance(inputs: &RuntimeHelperInputs<'_>) 
 }
 
 pub(super) fn build_join_strings(inputs: &RuntimeHelperInputs<'_>) -> Function {
-    strings::compile_join_strings(
-        array_layout(inputs, Type::Standard(StdlibTypeId::String)),
-        inputs.gc,
-    )
+    let (array, storage) = array_layouts(inputs, Type::Standard(StdlibTypeId::String));
+    strings::compile_join_strings(array, storage, inputs.gc)
 }
 
 pub(super) fn build_follow_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
-    process::compile_follow_address(
-        inputs.abi,
-        array_layout(inputs, Type::I64),
-        inputs.memory.scratch().abi_read,
-    )
+    let (array, storage) = array_layouts(inputs, Type::I64);
+    process::compile_follow_address(inputs.abi, array, storage, inputs.memory.scratch().abi_read)
 }
 
 pub(super) fn build_gba_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {

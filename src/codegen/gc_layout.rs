@@ -41,6 +41,7 @@ pub(super) struct Inputs<'a> {
     pub standard_library: StandardLibrary,
     pub program: &'a Program,
     pub enums: &'a [EnumDecl],
+    pub semantics: &'a crate::semantic::SemanticModel,
     pub arrays: &'a [ResolvedArrayType],
     pub options: &'a [ResolvedOptionType],
     pub results: &'a [ResolvedResultType],
@@ -56,6 +57,7 @@ impl GcLayout {
             standard_library,
             program,
             enums,
+            semantics,
             arrays,
             options,
             results,
@@ -116,34 +118,56 @@ impl GcLayout {
             ordered.push(Type::Enum(enumeration.id));
             next += 1;
         }
-        let mut reachable_arrays = arrays
+        let reachable_arrays = arrays
             .iter()
             .filter(|array| reachability.contains_array_type(array.id))
             .collect::<Vec<_>>();
-        let sized_elements = reachable_arrays
-            .iter()
-            .filter(|array| array.length.is_some())
-            .map(|array| array.element)
-            .collect::<Vec<_>>();
-        let reachable_ids = reachable_arrays
-            .iter()
-            .map(|array| array.id)
-            .collect::<Vec<_>>();
-        let supertypes = arrays
-            .iter()
-            .filter(|array| {
+        let mut canonical_arrays = Vec::new();
+        for reachable in &reachable_arrays {
+            let element = super::try_array_element_type(reachable.id, semantics)
+                .expect("reachable arrays have backend-representable element types");
+            let general = arrays.iter().find(|array| {
                 array.length.is_none()
-                    && sized_elements.contains(&array.element)
-                    && !reachable_ids.contains(&array.id)
-            })
-            .collect::<Vec<_>>();
-        reachable_arrays.extend(supertypes);
-        reachable_arrays.sort_by_key(|array| (array.length.is_some(), array.id.index()));
-        for array in reachable_arrays {
+                    && super::try_array_element_type(array.id, semantics) == Some(element)
+            });
+            let representation_length = general.is_none().then_some(reachable.length);
+            if canonical_arrays.iter().any(|array: &&ResolvedArrayType| {
+                let candidate_general = arrays.iter().any(|candidate| {
+                    candidate.length.is_none()
+                        && super::try_array_element_type(candidate.id, semantics) == Some(element)
+                });
+                super::try_array_element_type(array.id, semantics) == Some(element)
+                    && (!candidate_general).then_some(array.length) == representation_length
+            }) {
+                continue;
+            }
+            let canonical = general.unwrap_or(reachable);
+            canonical_arrays.push(canonical);
+        }
+        canonical_arrays.sort_by_key(|array| array.id.index());
+        for array in &canonical_arrays {
             let ty = Type::Array(array.id);
             dynamic.insert(ty, next);
             ordered.push(ty);
             next += 1;
+        }
+        for array in reachable_arrays {
+            let element = super::try_array_element_type(array.id, semantics)
+                .expect("reachable arrays have backend-representable element types");
+            let has_general = arrays.iter().any(|candidate| {
+                candidate.length.is_none()
+                    && super::try_array_element_type(candidate.id, semantics) == Some(element)
+            });
+            let representation_length = (!has_general).then_some(array.length);
+            let canonical = canonical_arrays
+                .iter()
+                .find(|candidate| {
+                    super::try_array_element_type(candidate.id, semantics) == Some(element)
+                        && (!has_general).then_some(candidate.length) == representation_length
+                })
+                .expect("every reachable array element has a canonical wrapper layout");
+            let index = dynamic[&Type::Array(canonical.id)];
+            dynamic.insert(Type::Array(array.id), index);
         }
 
         let mut reachable_storage = arrays
@@ -153,7 +177,7 @@ impl GcLayout {
         let storage_sized_elements = reachable_storage
             .iter()
             .filter(|array| array.length.is_some())
-            .map(|array| array.element)
+            .filter_map(|array| super::try_array_element_type(array.id, semantics))
             .collect::<Vec<_>>();
         let reachable_storage_ids = reachable_storage
             .iter()
@@ -161,15 +185,41 @@ impl GcLayout {
             .collect::<Vec<_>>();
         reachable_storage.extend(arrays.iter().filter(|array| {
             array.length.is_none()
-                && storage_sized_elements.contains(&array.element)
+                && super::try_array_element_type(array.id, semantics)
+                    .is_some_and(|element| storage_sized_elements.contains(&element))
                 && !reachable_storage_ids.contains(&array.id)
         }));
-        reachable_storage.sort_by_key(|array| (array.length.is_some(), array.id.index()));
-        for array in reachable_storage {
+        let mut canonical_storage = Vec::new();
+        for reachable in &reachable_storage {
+            let element = super::try_array_element_type(reachable.id, semantics)
+                .expect("reachable array storage has a backend-representable element type");
+            if canonical_storage.iter().any(|array: &&ResolvedArrayType| {
+                array.length == reachable.length
+                    && super::try_array_element_type(array.id, semantics) == Some(element)
+            }) {
+                continue;
+            }
+            canonical_storage.push(*reachable);
+        }
+        canonical_storage.sort_by_key(|array| (array.length.is_some(), array.id.index()));
+        for array in &canonical_storage {
             let ty = Type::ArrayStorage(array.id);
             dynamic.insert(ty, next);
             ordered.push(ty);
             next += 1;
+        }
+        for array in reachable_storage {
+            let element = super::try_array_element_type(array.id, semantics)
+                .expect("reachable array storage has a backend-representable element type");
+            let canonical = canonical_storage
+                .iter()
+                .find(|candidate| {
+                    candidate.length == array.length
+                        && super::try_array_element_type(candidate.id, semantics) == Some(element)
+                })
+                .expect("every raw array shape has canonical storage");
+            let index = dynamic[&Type::ArrayStorage(canonical.id)];
+            dynamic.insert(Type::ArrayStorage(array.id), index);
         }
 
         for set in sets

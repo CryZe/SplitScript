@@ -1043,6 +1043,7 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_replace_all(
 pub(in crate::codegen::runtime_helpers) fn compile_string_split(
     string_find: u32,
     strings_array: u32,
+    strings_storage: u32,
     gc: &GcLayout,
 ) -> Function {
     let string_type = gc.standard_index(StdlibTypeId::String);
@@ -1052,7 +1053,7 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_split(
             1,
             ValType::Ref(RefType {
                 nullable: true,
-                heap_type: HeapType::Concrete(strings_array),
+                heap_type: HeapType::Concrete(strings_storage),
             }),
         ),
         (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
@@ -1114,7 +1115,7 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_split(
         .instruction(&Instruction::End)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(segment_count))
-        .instruction(&Instruction::ArrayNewDefault(strings_array))
+        .instruction(&Instruction::ArrayNewDefault(strings_storage))
         .instruction(&Instruction::LocalSet(output))
         // Materialize each segment, including zero-length edge segments.
         .instruction(&Instruction::Loop(BlockType::Empty))
@@ -1139,10 +1140,12 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_split(
         output_index,
         segment,
         string_type,
-        strings_array,
+        strings_storage,
     );
     function
         .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::LocalGet(segment_count))
+        .instruction(&Instruction::StructNew(strings_array))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::LocalGet(match_index))
@@ -1158,7 +1161,7 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_split(
         output_index,
         segment,
         string_type,
-        strings_array,
+        strings_storage,
     );
     function
         .instruction(&Instruction::LocalGet(output_index))
@@ -2034,12 +2037,20 @@ fn emit_null_string(function: &mut Function, string_type: u32) {
 
 pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
     strings_array: u32,
+    strings_storage: u32,
     gc: &GcLayout,
 ) -> Function {
     let mut function = Function::new([
         (6, ValType::I32),
         (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
         (1, gc.val_type(Type::Standard(StdlibTypeId::String))),
+        (
+            1,
+            ValType::Ref(RefType {
+                nullable: true,
+                heap_type: HeapType::Concrete(strings_storage),
+            }),
+        ),
     ]);
     let strings = 0;
     let separator = 1;
@@ -2051,11 +2062,22 @@ pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
     let string_count = 7;
     let current = 8;
     let output = 9;
+    let strings_backing = 10;
     function
         .instruction(&Instruction::LocalGet(strings))
         .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: strings_array,
+            field_index: super::super::array_value::LENGTH_FIELD,
+        })
         .instruction(&Instruction::LocalSet(string_count))
+        .instruction(&Instruction::LocalGet(strings))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: strings_array,
+            field_index: super::super::array_value::BACKING_FIELD,
+        })
+        .instruction(&Instruction::LocalSet(strings_backing))
         .instruction(&Instruction::LocalGet(separator))
         .instruction(&Instruction::RefIsNull)
         .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
@@ -2069,17 +2091,15 @@ pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
         .instruction(&Instruction::Block(BlockType::Empty))
         .instruction(&Instruction::Loop(BlockType::Empty))
         .instruction(&Instruction::LocalGet(string_index))
-        .instruction(&Instruction::LocalGet(strings))
-        .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalGet(string_count))
         .instruction(&Instruction::I32GeU)
         .instruction(&Instruction::BrIf(1))
-        .instruction(&Instruction::LocalGet(strings))
+        .instruction(&Instruction::LocalGet(strings_backing))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(string_index));
     emit_array_get(
         &mut function,
-        strings_array,
+        strings_storage,
         Type::Standard(StdlibTypeId::String),
     );
     function
@@ -2118,9 +2138,7 @@ pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
         .instruction(&Instruction::Block(BlockType::Empty))
         .instruction(&Instruction::Loop(BlockType::Empty))
         .instruction(&Instruction::LocalGet(string_index))
-        .instruction(&Instruction::LocalGet(strings))
-        .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalGet(string_count))
         .instruction(&Instruction::I32GeU)
         .instruction(&Instruction::BrIf(1))
         .instruction(&Instruction::LocalGet(string_index))
@@ -2147,12 +2165,12 @@ pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
         .instruction(&Instruction::I32Add)
         .instruction(&Instruction::LocalSet(output_index))
         .instruction(&Instruction::End)
-        .instruction(&Instruction::LocalGet(strings))
+        .instruction(&Instruction::LocalGet(strings_backing))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(string_index));
     emit_array_get(
         &mut function,
-        strings_array,
+        strings_storage,
         Type::Standard(StdlibTypeId::String),
     );
     function

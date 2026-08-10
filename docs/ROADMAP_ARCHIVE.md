@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-10: stable source-array values
+
+- Replaced the public array value's raw Wasm GC array representation with a
+  stable wrapper containing replaceable backing storage and a logical length.
+- Preserved `[T; N]` as the exact memory-readable source type while sharing the
+  same wrapper ABI with `[T]`; exact raw storage remains available underneath.
+- Adapted literals, memory reads, indexing, iteration, length, replacement,
+  async signature scanning, and runtime helpers to distinguish the wrapper
+  from its backing and to observe logical length rather than future capacity.
+- Canonicalized wrapper and raw-storage layouts by physical backend element
+  type so independently specialized generic arrays share valid Wasm GC types.
+
 ## 2026-08-10: compiler-internal array storage identity
 
 - Separated raw capacity-backed Wasm GC arrays from source-level `[T]` in the

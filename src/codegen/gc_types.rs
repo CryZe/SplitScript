@@ -62,6 +62,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         standard_library: standard_library.clone(),
         program,
         enums,
+        semantics,
         arrays: array_types,
         options: option_types,
         results: result_types,
@@ -217,21 +218,30 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                     .iter()
                     .find(|array| array.id == id)
                     .expect("reachable arrays have resolved declarations");
-                let supertype_idx = declaration.length.and_then(|_| {
-                    array_types
-                        .iter()
-                        .find(|array| {
-                            array.length.is_none() && array.element == declaration.element
-                        })
-                        .map(|array| layout.index(Type::Array(array.id)))
-                });
+                let backing = array_types
+                    .iter()
+                    .find(|array| {
+                        array.length.is_none()
+                            && super::try_array_element_type(array.id, semantics)
+                                == super::try_array_element_type(declaration.id, semantics)
+                    })
+                    .unwrap_or(declaration);
                 (
-                    CompositeInnerType::Array(ArrayType(FieldType {
-                        element_type: layout.storage_type(array_element_type(id, semantics)),
-                        mutable: true,
-                    })),
-                    declaration.length.is_some(),
-                    supertype_idx,
+                    CompositeInnerType::Struct(StructType {
+                        fields: vec![
+                            FieldType {
+                                element_type: layout.storage_type(Type::ArrayStorage(backing.id)),
+                                mutable: true,
+                            },
+                            FieldType {
+                                element_type: StorageType::Val(ValType::I32),
+                                mutable: true,
+                            },
+                        ]
+                        .into(),
+                    }),
+                    true,
+                    None,
                 )
             }
             Type::ArrayStorage(id) => {
@@ -243,7 +253,9 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                     array_types
                         .iter()
                         .find(|array| {
-                            array.length.is_none() && array.element == declaration.element
+                            array.length.is_none()
+                                && super::try_array_element_type(array.id, semantics)
+                                    == super::try_array_element_type(declaration.id, semantics)
                         })
                         .map(|array| layout.index(Type::ArrayStorage(array.id)))
                 });

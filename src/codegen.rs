@@ -17,6 +17,7 @@ use crate::stdlib::{
 use crate::types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, TypeId, TypeKind};
 use crate::wasm_ir::{self, BodyOwner};
 
+mod array_value;
 mod async_frame;
 mod async_state;
 mod backend_type;
@@ -751,10 +752,10 @@ fn emit_memory_value(
                     gc,
                 );
             }
-            function.instruction(&Instruction::ArrayNewFixed {
-                array_type_index: gc.index(semantic_type(layout.ty, semantics)),
-                array_size: layout.length,
-            });
+            let Type::Array(array) = semantic_type(layout.ty, semantics) else {
+                unreachable!("fixed memory array layouts have array types")
+            };
+            array_value::emit_new_fixed(function, gc, array, layout.length);
         }
     }
 }

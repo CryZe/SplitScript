@@ -827,10 +827,11 @@ fn emit_signature_array_length(
     context: &ExprContext<'_>,
 ) {
     compile_expr(function, signatures_expression, context);
-    function
-        .instruction(&Instruction::RefAsNonNull)
-        .instruction(&Instruction::ArrayLen)
-        .instruction(&Instruction::I64ExtendI32U);
+    let Type::Array(array) = context.expression_type(signatures_expression) else {
+        unreachable!("signature candidates are arrays")
+    };
+    super::array_value::emit_length(function, context.gc, array);
+    function.instruction(&Instruction::I64ExtendI32U);
 }
 
 fn emit_cooperative_module_scan_any(
@@ -861,12 +862,14 @@ fn emit_cooperative_module_scan_any(
     emit_intrinsic_state_get(function, context, 1);
     function.instruction(&Instruction::LocalSet(signature_index));
     compile_expr(function, signatures_expression, context);
+    super::array_value::emit_backing(function, context.gc, signature_array);
+    let signature_storage =
+        super::array_value::storage_id(signature_array, context.arrays, context.semantics);
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(signature_index))
         .instruction(&Instruction::I32WrapI64)
         .instruction(&Instruction::ArrayGet(
-            context.gc.index(Type::Array(signature_array)),
+            context.gc.index(Type::ArrayStorage(signature_storage)),
         ))
         .instruction(&Instruction::LocalSet(signature));
 
@@ -1174,7 +1177,7 @@ fn emit_cooperative_process_scan_any(
     function: &mut Function,
     target: &wasm_ir::CallTarget,
     signatures_expression: ExprId,
-    signature_array: u32,
+    signature_array: crate::ast::ArrayTypeId,
     scratch: &[u32],
     abi: &Abi,
     context: &ExprContext<'_>,
@@ -1212,11 +1215,15 @@ fn emit_cooperative_process_scan_any(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
     compile_expr(function, signatures_expression, context);
+    super::array_value::emit_backing(function, context.gc, signature_array);
+    let signature_storage =
+        super::array_value::storage_id(signature_array, context.arrays, context.semantics);
     function
-        .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::LocalGet(signature_index))
         .instruction(&Instruction::I32WrapI64)
-        .instruction(&Instruction::ArrayGet(signature_array))
+        .instruction(&Instruction::ArrayGet(
+            context.gc.index(Type::ArrayStorage(signature_storage)),
+        ))
         .instruction(&Instruction::LocalSet(signature));
 
     compile_receiver(function, target, context);
@@ -1644,7 +1651,6 @@ fn compile_suspension_poll(
             let Type::Array(signature_array) = context.expression_type(args[0]) else {
                 unreachable!("scanMemoryAny accepts a signature array")
             };
-            let signature_array = context.gc.index(Type::Array(signature_array));
             emit_cooperative_process_scan_any(
                 function,
                 target,

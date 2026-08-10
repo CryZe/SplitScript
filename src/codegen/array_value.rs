@@ -1,0 +1,80 @@
+//! Physical operations for source-level array values.
+//!
+//! A source array is a stable wrapper around replaceable raw Wasm GC array
+//! storage. This keeps aliases valid when a growable `[T]` needs a larger
+//! capacity while allowing `[T; N]` to retain its exact semantic length.
+
+use wasm_encoder::{Function, Instruction};
+
+use crate::ast::ArrayTypeId;
+use crate::semantic::SemanticModel;
+use crate::types::ResolvedArrayType;
+
+use super::{GcLayout, Type, try_array_element_type};
+
+pub(super) const BACKING_FIELD: u32 = 0;
+pub(super) const LENGTH_FIELD: u32 = 1;
+
+/// Returns the general raw storage used by a source wrapper when one exists.
+pub(super) fn storage_id(
+    array: ArrayTypeId,
+    arrays: &[ResolvedArrayType],
+    semantics: &SemanticModel,
+) -> ArrayTypeId {
+    let declaration = arrays
+        .iter()
+        .find(|candidate| candidate.id == array)
+        .expect("array values have resolved layouts");
+    let element = try_array_element_type(array, semantics)
+        .expect("array values have lowerable element types");
+    arrays
+        .iter()
+        .find(|candidate| {
+            candidate.length.is_none()
+                && try_array_element_type(candidate.id, semantics) == Some(element)
+        })
+        .unwrap_or(declaration)
+        .id
+}
+
+/// Wraps the raw array storage currently on the operand stack.
+pub(super) fn emit_wrap(function: &mut Function, gc: &GcLayout, array: ArrayTypeId, length: u32) {
+    function
+        .instruction(&Instruction::I32Const(length as i32))
+        .instruction(&Instruction::StructNew(gc.index(Type::Array(array))));
+}
+
+/// Creates exact raw storage from the values on the operand stack and wraps it.
+pub(super) fn emit_new_fixed(
+    function: &mut Function,
+    gc: &GcLayout,
+    array: ArrayTypeId,
+    length: u32,
+) {
+    function.instruction(&Instruction::ArrayNewFixed {
+        array_type_index: gc.index(Type::ArrayStorage(array)),
+        array_size: length,
+    });
+    emit_wrap(function, gc, array, length);
+}
+
+/// Replaces a source array on the operand stack with its non-null raw backing.
+pub(super) fn emit_backing(function: &mut Function, gc: &GcLayout, array: ArrayTypeId) {
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: gc.index(Type::Array(array)),
+            field_index: BACKING_FIELD,
+        })
+        .instruction(&Instruction::RefAsNonNull);
+}
+
+/// Replaces a source array on the operand stack with its logical length.
+pub(super) fn emit_length(function: &mut Function, gc: &GcLayout, array: ArrayTypeId) {
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: gc.index(Type::Array(array)),
+            field_index: LENGTH_FIELD,
+        });
+}

@@ -25,6 +25,9 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
         (HashMap::new(), HashMap::new())
     };
     if checker.errors.is_empty() {
+        checker.diagnose_ambiguous_empty_collections();
+    }
+    if checker.errors.is_empty() {
         checker.default_inference_variables(program);
     }
     if !checker.errors.is_empty() {
@@ -255,6 +258,21 @@ fn bind_function_generics(
 }
 
 impl Checker {
+    pub(super) fn diagnose_ambiguous_empty_collections(&mut self) {
+        let collections = self.inferred_empty_collections.clone();
+        for (element, span, collection) in collections {
+            if self.inference.is_unbound_without_default(element) {
+                self.error(
+                    format!(
+                        "cannot infer the element type of this empty {collection}; use it where the element type is known or add an explicit type annotation"
+                    ),
+                    span,
+                );
+                self.inference.recover_unbound_type(element);
+            }
+        }
+    }
+
     pub(super) fn default_inference_variables(&mut self, program: &Program) {
         for field in program
             .state

@@ -1329,6 +1329,59 @@ fn generic_gc_arrays_infer_elements_and_support_core_methods() {
 }
 
 #[test]
+fn empty_arrays_infer_element_types_from_later_uses() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn consumeBytes(values: [u8]) -> u8 {
+            return values[0]
+        }
+
+        fn makeBytes() -> [u8] {
+            return []
+        }
+
+        whileAttached {
+            let pushed = []
+            pushed.push(7u16)
+            let pushedValue: u16 = pushed[0]
+
+            let indexed = []
+            let indexedValue: i64 = indexed[0]
+
+            let passed = []
+            let passedValue = consumeBytes(passed)
+            let returned = makeBytes()
+            print(`{pushedValue} {indexedValue} {passedValue} {returned.length()}`)
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("later pushes, indexing, arguments, and returns should infer empty arrays");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("usage-inferred empty arrays should produce valid Wasm GC");
+}
+
+#[test]
+fn genuinely_unconstrained_empty_arrays_have_a_focused_diagnostic() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let values = []
+            }
+        "#,
+    )
+    .expect_err("an unused empty array has no element constraint");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("cannot infer the element type of this empty array")
+            && diagnostic.span.start > 0
+    }));
+}
+
+#[test]
 fn array_indexing_is_first_class_bidirectional_and_array_only() {
     let source = r#"
         state "game.exe" {}

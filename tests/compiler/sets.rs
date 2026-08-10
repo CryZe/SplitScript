@@ -31,6 +31,44 @@ fn compiles_run_scoped_sets_and_iteration() {
 }
 
 #[test]
+fn empty_sets_infer_element_types_from_later_uses() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let visited = Set.new()
+            visited.insert("Atrium")
+            let found: bool = visited.contains("Atrium")
+            print(found)
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("insert and contains should infer an empty set's element type");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("usage-inferred sets should produce valid Wasm GC");
+}
+
+#[test]
+fn genuinely_unconstrained_empty_sets_have_a_focused_diagnostic() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let visited = Set.new()
+            }
+        "#,
+    )
+    .expect_err("an unused empty set has no element constraint");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("cannot infer the element type of this empty set")
+            && diagnostic.span.start > 0
+    }));
+}
+
+#[test]
 fn set_types_render_in_semantic_queries() {
     let checked = splitscript::check(splitscript::parse(SETS).unwrap()).unwrap();
     let visited = checked

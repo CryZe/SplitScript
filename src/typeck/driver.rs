@@ -140,6 +140,7 @@ fn initialize_checker(
         loops: LoopContext::default(),
         failure: FailureContext::None,
         inferred_process_reads: Vec::new(),
+        inferred_empty_collections: Vec::new(),
         deferred_member_paths: Vec::new(),
         none_policy: NonePolicy::OptionalOnly,
         semantics: SemanticBuilder::with_state_provider(resolutions.state_provider()),

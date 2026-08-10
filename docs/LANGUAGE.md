@@ -846,14 +846,18 @@ narrowed to a particular length without proof. Each element type is
 monomorphized into a concrete GC array representation.
 
 Non-empty literals infer their element type. An expected `[T; N]` also checks
-the literal's exact element count, while empty literals need an annotation or
-another expected type.
+the literal's exact element count. An empty literal keeps an unresolved element
+type that later uses can constrain: `push`, indexing, assignment, return types,
+and function arguments all participate. Add an annotation only when the empty
+array remains genuinely unconstrained.
 
 ```text
 let bytes: [u8] = [0x48, 0x00, 0x01]
 let header: [u8; 3] = [0x48, 0x00, 0x01]
 let inferred = [1, 2, 3] // [i32]
 let empty: [u16] = []
+let discovered = []
+discovered.push(0x8bu8) // discovered is [u8]
 
 bytes.set(1, 0x8b)
 let opcode = bytes[1]
@@ -894,18 +898,21 @@ array and `[T!; N]` is a sized array of fallible values.
 
 `Set<T>` is a growable collection of unique values. `T` must implement
 `Equatable`; this constraint is declared by the standard library and applies
-both to inferred construction and explicit `Set<T>` annotations. Construct a
-set with an explicit element type because an empty set has no values from which
-to infer it:
+both to inferred construction and explicit `Set<T>` annotations. `Set.new()`
+keeps its element type unresolved until a later insertion, lookup, assignment,
+return, or argument constrains it. An explicit type remains useful when there
+is no such use:
 
 ```text
-let visited = Set.new<String>()
+let visited = Set.new()
 
 whileAttached {
     if visited.insert(current.roomName) {
         print(`First visit to {current.roomName}`)
     }
 }
+
+let pending: Set<String> = Set.new()
 ```
 
 A global set is constructed once for the loaded script instance and retains its

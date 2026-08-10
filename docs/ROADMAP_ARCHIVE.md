@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: usage-driven empty-collection inference
+
+- Allowed `[]` and `Set.new()` to retain an unresolved element variable across
+  local bindings instead of rejecting them at their construction site.
+- Let later push/insert operations, indexing, assignments, returns, and
+  function arguments constrain that same variable through ordinary
+  bidirectional inference.
+- Added source-local ambiguity diagnostics only for collections that remain
+  genuinely unconstrained after function generic generalization and numeric
+  defaulting, plus inferred inlay-hint coverage.
+
 ## 2026-08-10: fail-fast structural collection iteration
 
 - Added a structural version to stable array and set wrappers and captured it

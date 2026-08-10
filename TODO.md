@@ -140,14 +140,6 @@ or behavioral parity.
   iteration, search, length, and element replacement. Structural mutation now
   invalidates active iteration without allocating snapshots; preserve that
   rule for every future collection mutator.
-- [ ] Strengthen usage-driven collection inference. `let values = []` should
-  retain one unresolved element type that later `push`, indexing context,
-  assignment, return type, or function arguments can constrain; do not require
-  an annotation merely because the literal itself is empty. Audit the same
-  behavior for `Set.new()` followed by `insert`/`contains`, and preserve a
-  focused ambiguity diagnostic only when the collection remains genuinely
-  unconstrained. Cover backward constraints across locals and functions,
-  completion/inlay hints after resolution, and avoid field-name-based guesses.
 - [ ] Design indexed mutation together with collection mutability rather than
   adding an isolated array-assignment special case. Specify aliasing, fixed
   array versus growable collection behavior, bounds failure, and interaction

@@ -156,6 +156,7 @@ struct Checker {
     loops: LoopContext,
     failure: FailureContext,
     inferred_process_reads: Vec<(Type, Span)>,
+    inferred_empty_collections: Vec<(Type, Span, &'static str)>,
     deferred_member_paths: Vec<DeferredMemberPath>,
     none_policy: NonePolicy,
     semantics: SemanticBuilder,

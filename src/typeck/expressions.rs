@@ -136,14 +136,15 @@ impl Checker {
                 });
                 let (id, element_type) = if let Some((id, element)) = hinted {
                     (id, element)
-                } else if !elements.is_empty() {
+                } else {
                     let element = self.fresh_inference(Requirements::none(), None);
                     let id = self.array_type_id(element);
                     (id, element)
-                } else {
-                    self.error("an empty array needs a `[T]` type annotation", expr.span);
-                    return None;
                 };
+                if elements.is_empty() {
+                    self.inferred_empty_collections
+                        .push((element_type, expr.span, "array"));
+                }
                 if let Some(expected_length) = self.inference.array_length(id)
                     && elements.len() != expected_length as usize
                 {

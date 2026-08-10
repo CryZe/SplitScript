@@ -971,6 +971,10 @@ impl Checker {
         if item.id == StdlibItemId::ProcessRead && explicit_type_arguments.is_empty() {
             self.inferred_process_reads.push((variables["T"], span));
         }
+        if item.id == StdlibItemId::SetNew && explicit_type_arguments.is_empty() {
+            self.inferred_empty_collections
+                .push((variables["U"], span, "set"));
+        }
         let mut concrete_signature = Vec::new();
         if let Some(receiver) = &receiver {
             let declared_receiver = self.catalog_type(

@@ -182,6 +182,28 @@ whileAttached {
     }
 
     #[test]
+    fn reports_collection_types_inferred_from_later_uses() {
+        let source = r#"state "game.exe" {}
+whileAttached {
+    let values = []
+    values.push(7u16)
+    let visited = Set.new()
+    visited.insert("Atrium")
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let snapshot = database.semantic_snapshot().unwrap();
+        let hints = inferred_type_hints(
+            &snapshot,
+            Span {
+                start: 0,
+                end: source.len(),
+            },
+        );
+        assert!(hints.iter().any(|hint| hint.label == ": [u16]"));
+        assert!(hints.iter().any(|hint| hint.label == ": Set<String>"));
+    }
+
+    #[test]
     fn distinguishes_future_values_from_awaited_completion_values() {
         let source = r#"state "game.exe" {}
 fn discover() {

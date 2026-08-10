@@ -985,6 +985,31 @@ fn catalog_declared_unary_operators_execute_for_globals_and_methods() {
 }
 
 #[test]
+fn floating_point_square_root_preserves_width_and_ieee_edges() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let narrow = (9.0 as f32).sqrt() == (3.0 as f32)
+            let wide = (2.25 as f64).sqrt() == 1.5
+            let negative = (-1.0 as f64).sqrt().isNaN()
+            let negativeZero = (-0.0 as f32).sqrt().toBits() == 0x80000000u32
+            let infinity = f64.fromBits(0x7ff0000000000000u64).sqrt().toBits()
+                == 0x7ff0000000000000u64
+            print(`{narrow}:{wide}:{negative}:{negativeZero}:{infinity}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["true:true:true:true:true"]);
+}
+
+#[test]
 fn async_none_completion_is_status_only_but_remains_typed() {
     let source = r#"
         state "game.exe" {}

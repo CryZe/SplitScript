@@ -1,5 +1,14 @@
 # SplitScript roadmap
 
+## 2026-08-10: source-declared floating-point square root
+
+- Added `Float.sqrt()` to the canonical standard-library source with an exact
+  trusted contract and direct `f32.sqrt`/`f64.sqrt` WebAssembly lowering.
+- Documented and tested positive values, negative inputs, signed zero,
+  infinity, NaN, and preservation of the receiver's f32 or f64 width.
+- Added focused `Math.Sqrt`/`MathF.Sqrt` migration guidance that makes the C#
+  result-width distinction explicit rather than applying an unsafe rewrite.
+
 ## 2026-08-10: type-directed integer complement and narrow arithmetic
 
 - Added `Integer.bitNot()` and overloaded unary `!` by type: booleans use

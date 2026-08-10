@@ -166,6 +166,7 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::NumericMax
         | StdlibItemId::NumericClamp => NUMERIC_EXAMPLE,
         StdlibItemId::FloatAbs
+        | StdlibItemId::FloatSqrt
         | StdlibItemId::FloatFloor
         | StdlibItemId::FloatCeil
         | StdlibItemId::FloatRound

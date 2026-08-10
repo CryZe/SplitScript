@@ -1104,6 +1104,22 @@ capability Float<T: Signed> {
     @intrinsic(FloatAbs)
     fn abs() -> T;
 
+    /// Returns the principal square root of this value.
+    ///
+    /// Positive finite values produce a non-negative result. Positive infinity
+    /// remains infinity, signed zero preserves its sign, and a negative value
+    /// other than negative zero produces NaN. Existing NaN values remain NaN.
+    ///
+    /// # Example
+    ///
+    /// Measure a two-dimensional distance
+    ///
+    /// ```splitscript
+    /// let distance = (x * x + y * y).sqrt()
+    /// ```
+    @intrinsic(FloatSqrt)
+    fn sqrt() -> T;
+
     /// Rounds down to the nearest integral value.
     ///
     /// Finite fractional values move toward negative infinity. Infinity and

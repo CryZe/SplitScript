@@ -453,6 +453,53 @@ fn csharp_static_numeric_parse_explains_result_based_string_parsing() {
 }
 
 #[test]
+fn csharp_square_root_explains_receiver_width() {
+    for (owner, width) in [("Math", "f64"), ("MathF", "f32")] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+
+                fn length(value: f64) {{
+                    return {owner}.Sqrt(value)
+                }}
+            "#
+        );
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("C# square root should receive receiver-width migration guidance");
+
+        assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(
+            diagnostic.message,
+            "C# square root is a type-preserving `sqrt` method in SplitScript"
+        );
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "Sqrt");
+        assert!(diagnostic.fixes.is_empty());
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| { note.contains(&format!("as {width}")) && note.contains(".sqrt()") })
+        );
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("signed zero") && note.contains("IEEE 754"))
+        );
+    }
+
+    splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn wide(value: f64) -> f64 { return value.sqrt() }
+            fn narrow(value: f32) -> f32 { return value.sqrt() }
+        "#,
+    )
+    .expect("both canonical receiver widths should compile");
+}
+
+#[test]
 fn a_user_binding_named_int32_keeps_its_parse_method() {
     let source = r#"
         record Parser {}

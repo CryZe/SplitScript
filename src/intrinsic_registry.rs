@@ -414,6 +414,9 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::NextTick
         | IntrinsicId::NumericAdd
         | IntrinsicId::NumericSubtract
+        | IntrinsicId::NumericMultiply
+        | IntrinsicId::NumericDivide
+        | IntrinsicId::IntegerRemainder
         | IntrinsicId::NumericMin
         | IntrinsicId::NumericMax
         | IntrinsicId::FloatAbs
@@ -549,6 +552,7 @@ const STRING_ARRAY_RESULT: ContractTypeRef = ContractTypeRef::Application {
 const NO_TYPE_PARAMETERS: Option<&[StdlibCapabilityId]> = None;
 const UNCONSTRAINED_T: Option<&[StdlibCapabilityId]> = Some(&[]);
 const NUMERIC_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Numeric]);
+const INTEGER_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Integer]);
 const FLOAT_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Float]);
 const EQUATABLE_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::Equatable]);
 const MEMORY_T: Option<&[StdlibCapabilityId]> = Some(&[StdlibCapabilityId::MemoryReadable]);
@@ -685,6 +689,30 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             NumericSubtract,
             Method,
             signature(NUMERIC_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::NumericMultiply => contract!(
+            NumericMultiply,
+            Method,
+            signature(NUMERIC_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::NumericDivide => contract!(
+            NumericDivide,
+            Method,
+            signature(NUMERIC_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::IntegerRemainder => contract!(
+            IntegerRemainder,
+            Method,
+            signature(INTEGER_T, Some(T), params![value(T)], T),
             PURE,
             Everywhere,
             RepresentationPrimitive

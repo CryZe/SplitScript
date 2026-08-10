@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-10: source-declared multiplicative operators
+
+- Declared multiplication and division on the `Numeric` capability and
+  remainder on `Integer`, including focused documentation of integer traps,
+  truncation, remainder signs, and floating-point division.
+- Extended the backend-neutral operator schema and trusted intrinsic contracts
+  so `*`, `/`, `%`, and their compound assignments resolve through those source
+  declarations rather than a parallel checker-only rule.
+- Unified ordinary-call and compound-assignment lowering through one mapping
+  from numeric intrinsic identities to WebAssembly arithmetic operations, with
+  catalog-resolution and code-generation coverage for every operator.
+
 ## 2026-08-10: heterogeneous operators and monotonic deadlines
 
 - Generalized catalog-defined binary operators so the right operand may differ

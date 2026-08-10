@@ -342,9 +342,9 @@ remaining work is product hardening and distribution.
   complexity; do not import C# delegates, reflection, or event subscription as
   compatibility concepts by default.
 - [ ] Complete remaining ordinary library gaps when a port needs them:
-  multiplication/division/remainder operator roles, immutable String operations
-  beyond the corpus-proven P0 slice, and additional typed time operations proven
-  useful by maintained ports.
+  immutable String operations beyond the corpus-proven P0 slice, additional
+  numeric operations, and typed time operations proven useful by maintained
+  ports.
 - [ ] Generalize first-class indexing beyond arrays only when another real type
   needs it. Design an operator protocol with inferred index and output types
   (the current single-receiver capability graph has no associated types), then

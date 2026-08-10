@@ -271,6 +271,9 @@ pub struct Deprecation {
 pub enum StandardBinaryOperator {
     Add,
     Subtract,
+    Multiply,
+    Divide,
+    Remainder,
     LessThan,
     LessThanOrEqual,
     GreaterThan,

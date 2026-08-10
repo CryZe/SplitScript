@@ -153,7 +153,11 @@ impl StandardLibraryGraph {
                 continue;
             };
             let expected_result = match operator {
-                StandardBinaryOperator::Add | StandardBinaryOperator::Subtract => receiver,
+                StandardBinaryOperator::Add
+                | StandardBinaryOperator::Subtract
+                | StandardBinaryOperator::Multiply
+                | StandardBinaryOperator::Divide
+                | StandardBinaryOperator::Remainder => receiver,
                 StandardBinaryOperator::LessThan
                 | StandardBinaryOperator::LessThanOrEqual
                 | StandardBinaryOperator::GreaterThan

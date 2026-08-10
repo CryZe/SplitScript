@@ -465,6 +465,9 @@ impl<'a> CatalogGenerator<'a> {
             .map(|operator| match operator {
                 "add" => "Some(StandardBinaryOperator::Add)",
                 "subtract" => "Some(StandardBinaryOperator::Subtract)",
+                "multiply" => "Some(StandardBinaryOperator::Multiply)",
+                "divide" => "Some(StandardBinaryOperator::Divide)",
+                "remainder" => "Some(StandardBinaryOperator::Remainder)",
                 "lessThan" => "Some(StandardBinaryOperator::LessThan)",
                 "lessThanOrEqual" => "Some(StandardBinaryOperator::LessThanOrEqual)",
                 "greaterThan" => "Some(StandardBinaryOperator::GreaterThan)",

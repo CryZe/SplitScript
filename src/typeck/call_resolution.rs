@@ -89,6 +89,9 @@ impl Checker {
         let operator = match op {
             crate::ast::BinaryOp::Add => StandardBinaryOperator::Add,
             crate::ast::BinaryOp::Sub => StandardBinaryOperator::Subtract,
+            crate::ast::BinaryOp::Mul => StandardBinaryOperator::Multiply,
+            crate::ast::BinaryOp::Div => StandardBinaryOperator::Divide,
+            crate::ast::BinaryOp::Rem => StandardBinaryOperator::Remainder,
             crate::ast::BinaryOp::Lt => StandardBinaryOperator::LessThan,
             crate::ast::BinaryOp::Le => StandardBinaryOperator::LessThanOrEqual,
             crate::ast::BinaryOp::Gt => StandardBinaryOperator::GreaterThan,

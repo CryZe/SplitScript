@@ -776,14 +776,14 @@ fn compound_assignments_reuse_binary_typing_and_lowering() {
                             CallTarget::Intrinsic { intrinsic, .. },
                         )),
                     ..
-                } if *intrinsic == IntrinsicId::NumericAdd => Some(BinaryOp::Add),
-                Statement::Store {
-                    operation:
-                        Some(splitscript::compiler::wasm_ir::AssignmentOperation::Call(
-                            CallTarget::Intrinsic { intrinsic, .. },
-                        )),
-                    ..
-                } if *intrinsic == IntrinsicId::NumericSubtract => Some(BinaryOp::Sub),
+                } => match intrinsic {
+                    IntrinsicId::NumericAdd => Some(BinaryOp::Add),
+                    IntrinsicId::NumericSubtract => Some(BinaryOp::Sub),
+                    IntrinsicId::NumericMultiply => Some(BinaryOp::Mul),
+                    IntrinsicId::NumericDivide => Some(BinaryOp::Div),
+                    IntrinsicId::IntegerRemainder => Some(BinaryOp::Rem),
+                    _ => None,
+                },
                 _ => None,
             })
             .collect::<Vec<_>>(),

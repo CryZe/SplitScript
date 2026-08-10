@@ -1020,6 +1020,9 @@ impl StandardLibrary {
                     example.source.contains(match operator {
                         StandardBinaryOperator::Add => " + ",
                         StandardBinaryOperator::Subtract => " - ",
+                        StandardBinaryOperator::Multiply => " * ",
+                        StandardBinaryOperator::Divide => " / ",
+                        StandardBinaryOperator::Remainder => " % ",
                         StandardBinaryOperator::LessThan => " < ",
                         StandardBinaryOperator::LessThanOrEqual => " <= ",
                         StandardBinaryOperator::GreaterThan => " > ",

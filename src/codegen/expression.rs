@@ -907,20 +907,13 @@ fn compile_assignment_call(
             function.instruction(&Instruction::Call(context.functions[&target_function].call));
         }
         wasm_ir::CallTarget::Intrinsic { intrinsic, .. }
-            if matches!(
-                intrinsic,
-                IntrinsicId::NumericAdd | IntrinsicId::NumericSubtract
-            ) =>
+            if numeric_intrinsic_binary_op(*intrinsic).is_some() =>
         {
             let receiver = compile_receiver(function, target, context);
             compile_expr(function, argument, context);
             emit_binary_instruction(
                 function,
-                if *intrinsic == IntrinsicId::NumericAdd {
-                    BinaryOp::Add
-                } else {
-                    BinaryOp::Sub
-                },
+                numeric_intrinsic_binary_op(*intrinsic).expect("guarded numeric binary intrinsic"),
                 receiver,
             );
         }
@@ -2769,16 +2762,16 @@ fn compile_expr_unconverted(
             IntrinsicId::NumericMin | IntrinsicId::NumericMax => {
                 unreachable!("numeric intrinsics are lowered before ordinary calls")
             }
-            IntrinsicId::NumericAdd | IntrinsicId::NumericSubtract => {
+            IntrinsicId::NumericAdd
+            | IntrinsicId::NumericSubtract
+            | IntrinsicId::NumericMultiply
+            | IntrinsicId::NumericDivide
+            | IntrinsicId::IntegerRemainder => {
                 let receiver = compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
                 emit_binary_instruction(
                     function,
-                    if builtin == IntrinsicId::NumericAdd {
-                        BinaryOp::Add
-                    } else {
-                        BinaryOp::Sub
-                    },
+                    numeric_intrinsic_binary_op(builtin).expect("matched numeric binary intrinsic"),
                     receiver,
                 );
             }
@@ -3390,6 +3383,17 @@ fn emit_binary_instruction(function: &mut Function, op: BinaryOp, ty: Type) {
         BinaryOp::Or | BinaryOp::And => unreachable!(),
     };
     function.instruction(&instruction);
+}
+
+fn numeric_intrinsic_binary_op(intrinsic: IntrinsicId) -> Option<BinaryOp> {
+    Some(match intrinsic {
+        IntrinsicId::NumericAdd => BinaryOp::Add,
+        IntrinsicId::NumericSubtract => BinaryOp::Sub,
+        IntrinsicId::NumericMultiply => BinaryOp::Mul,
+        IntrinsicId::NumericDivide => BinaryOp::Div,
+        IntrinsicId::IntegerRemainder => BinaryOp::Rem,
+        _ => return None,
+    })
 }
 
 enum Compare {

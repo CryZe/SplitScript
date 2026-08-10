@@ -471,6 +471,9 @@ impl<'a> Validator<'a> {
                 name.as_str(),
                 "add"
                     | "subtract"
+                    | "multiply"
+                    | "divide"
+                    | "remainder"
                     | "lessThan"
                     | "lessThanOrEqual"
                     | "greaterThan"

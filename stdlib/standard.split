@@ -797,6 +797,45 @@ capability Numeric<T: Equatable> {
         other: T,
     ) -> T;
 
+    /// Multiplies by another value of the same numeric type.
+    ///
+    /// This method is also the implementation of the `*` operator.
+    ///
+    /// # Example
+    ///
+    /// Convert a page count to bytes
+    ///
+    /// ```splitscript
+    /// let byteCount = pageCount * 4096
+    /// ```
+    @intrinsic(NumericMultiply)
+    @operator(multiply)
+    fn multiply(
+        /// The value to multiply by.
+        other: T,
+    ) -> T;
+
+    /// Divides by another value of the same numeric type.
+    ///
+    /// This method is also the implementation of the `/` operator. Integer
+    /// division truncates toward zero. Integer division by zero and the signed
+    /// minimum divided by negative one trap, matching WebAssembly arithmetic;
+    /// floating-point division follows IEEE 754.
+    ///
+    /// # Example
+    ///
+    /// Convert milliseconds to seconds
+    ///
+    /// ```splitscript
+    /// let elapsedSeconds = elapsedMilliseconds / 1_000
+    /// ```
+    @intrinsic(NumericDivide)
+    @operator(divide)
+    fn divide(
+        /// The divisor.
+        other: T,
+    ) -> T;
+
     /// Returns the smaller of two numeric values.
     ///
     /// Both values have the same inferred numeric type and are evaluated once.
@@ -866,7 +905,27 @@ capability Numeric<T: Equatable> {
 /// let inventoryMask: u8 = 1 << 2
 /// ```
 @behavior(declared)
-capability Integer<T: Numeric + Display> {}
+capability Integer<T: Numeric + Display> {
+    /// Returns the remainder after integer division.
+    ///
+    /// This method is also the implementation of the `%` operator. The result
+    /// has the same sign as the receiver. A zero divisor traps, matching
+    /// WebAssembly integer arithmetic.
+    ///
+    /// # Example
+    ///
+    /// Test a frame interval
+    ///
+    /// ```splitscript
+    /// let isInterval = frameCount % 60 == 0
+    /// ```
+    @intrinsic(IntegerRemainder)
+    @operator(remainder)
+    fn remainder(
+        /// The divisor.
+        other: T,
+    ) -> T;
+}
 
 /// Identifies signed numeric types.
 ///

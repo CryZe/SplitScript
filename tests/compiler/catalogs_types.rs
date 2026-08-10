@@ -294,15 +294,33 @@ fn binary_syntax_resolves_through_catalog_declared_methods() {
         library.item(StdlibItemId::NumericAdd).binary_operator,
         Some(StandardBinaryOperator::Add)
     );
+    assert_eq!(
+        library.item(StdlibItemId::NumericMultiply).binary_operator,
+        Some(StandardBinaryOperator::Multiply)
+    );
+    assert_eq!(
+        library.item(StdlibItemId::NumericDivide).binary_operator,
+        Some(StandardBinaryOperator::Divide)
+    );
+    assert_eq!(
+        library.item(StdlibItemId::IntegerRemainder).binary_operator,
+        Some(StandardBinaryOperator::Remainder)
+    );
 
     let source = r#"
         state "game.exe" {}
         whileAttached {
             let number = 20 + 22
+            let product = number * 2
+            let quotient = product / 3
+            let remainder = quotient % 5
+            let direct = 6.multiply(7).divide(3).remainder(5)
             let duration = Duration.fromSeconds(1.5) + Duration.fromSeconds(0.5)
             let difference = duration - Duration.fromWholeSeconds(1)
             let ordered = difference < duration && duration >= difference
             print(number)
+            print(remainder)
+            print(direct)
             print(difference.wholeSeconds())
             if ordered {
                 print("ordered")
@@ -321,6 +339,9 @@ fn binary_syntax_resolves_through_catalog_declared_methods() {
         .collect::<Vec<_>>();
     for expected in [
         StdlibItemId::NumericAdd,
+        StdlibItemId::NumericMultiply,
+        StdlibItemId::NumericDivide,
+        StdlibItemId::IntegerRemainder,
         StdlibItemId::DurationAdd,
         StdlibItemId::DurationSubtract,
         StdlibItemId::DurationLessThan,

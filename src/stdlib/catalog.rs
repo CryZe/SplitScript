@@ -150,6 +150,9 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         StdlibItemId::SettingsViewEnabled => SETTINGS_EXAMPLE,
         StdlibItemId::NumericAdd
         | StdlibItemId::NumericSubtract
+        | StdlibItemId::NumericMultiply
+        | StdlibItemId::NumericDivide
+        | StdlibItemId::IntegerRemainder
         | StdlibItemId::NumericMin
         | StdlibItemId::NumericMax
         | StdlibItemId::NumericClamp => NUMERIC_EXAMPLE,

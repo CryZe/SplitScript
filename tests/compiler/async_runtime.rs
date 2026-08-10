@@ -1087,6 +1087,32 @@ fn signed_absolute_value_preserves_width_and_wrapping_semantics() {
 }
 
 #[test]
+fn numeric_squared_preserves_width_and_ieee_semantics() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let byte: i8 = 12i8.squared()
+            let word: u16 = 300u16.squared()
+            let narrow = (1.5 as f32).squared() == (2.25 as f32)
+            let negativeZero = (-0.0 as f64).squared().toBits() == 0u64
+            let infinity = f32.fromBits(0xff800000u32).squared().toBits()
+                == 0x7f800000u32
+            let nan = f64.fromBits(0x7ff8000000000000u64).squared().isNaN()
+            print(`{byte}:{word}:{narrow}:{negativeZero}:{infinity}:{nan}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["-112:24464:true:true:true:true"]);
+}
+
+#[test]
 fn async_none_completion_is_status_only_but_remains_typed() {
     let source = r#"
         state "game.exe" {}

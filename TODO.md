@@ -345,6 +345,11 @@ remaining work is product hardening and distribution.
   immutable String operations beyond the corpus-proven P0 slice, additional
   numeric operations, and typed time operations proven useful by maintained
   ports.
+- [ ] Add general floating-point power only when a maintained port needs a
+  negative or non-integral exponent. Port and attribute a vetted implementation
+  such as Rust compiler-builtins' MIT-licensed libm `pow`/`powf`, including its
+  scaling helpers, rather than introducing an ad-hoc approximation or a host
+  import. Keep `squared()` as the simple exact-intent API for exponent two.
 - [ ] Generalize first-class indexing beyond arrays only when another real type
   needs it. Design an operator protocol with inferred index and output types
   (the current single-receiver capability graph has no associated types), then

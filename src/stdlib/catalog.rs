@@ -152,6 +152,7 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::NumericSubtract
         | StdlibItemId::NumericMultiply
         | StdlibItemId::NumericDivide
+        | StdlibItemId::NumericSquared
         | StdlibItemId::IntegerBitNot
         | StdlibItemId::IntegerRemainder
         | StdlibItemId::IntegerBitOr

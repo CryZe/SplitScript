@@ -780,6 +780,60 @@ fn csharp_absolute_value_explains_signed_minimum_and_receiver_type() {
 }
 
 #[test]
+fn csharp_power_guides_squares_and_typed_masks_without_claiming_general_pow() {
+    for owner in ["Math", "MathF", "System.Math", "System.MathF"] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+
+                fn power(value: f64, exponent: f64) {{
+                    return {owner}.Pow(value, exponent)
+                }}
+            "#
+        );
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("C# power should receive exponent-specific migration guidance");
+
+        assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(
+            diagnostic.message,
+            "C# power needs an exponent-specific rewrite in SplitScript"
+        );
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "Pow");
+        assert!(diagnostic.fixes.is_empty());
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("value.squared()") && note.contains("f64 or f32"))
+        );
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("1u64 << exponent") && note.contains("shift range"))
+        );
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("fractional") && note.contains("do not yet"))
+        );
+    }
+
+    splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn integer(value: i32) -> i32 { return value.squared() }
+            fn narrow(value: f32) -> f32 { return value.squared() }
+            fn wide(value: f64) -> f64 { return value.squared() }
+        "#,
+    )
+    .expect("canonical squaring forms should compile");
+}
+
+#[test]
 fn a_user_binding_named_int32_keeps_its_parse_method() {
     let source = r#"
         record Parser {}

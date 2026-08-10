@@ -840,6 +840,23 @@ capability Numeric<T: Equatable> {
         other: T,
     ) -> T;
 
+    /// Multiplies this value by itself.
+    ///
+    /// Integer multiplication wraps to the receiver's declared width.
+    /// Floating-point multiplication rounds at the receiver's f32 or f64
+    /// width and follows IEEE 754 for zero, infinity, and NaN.
+    ///
+    /// # Example
+    ///
+    /// Square a coordinate delta
+    ///
+    /// ```splitscript
+    /// let squaredDistance = delta.squared()
+    /// ```
+    fn squared() -> T {
+        return self * self
+    }
+
     /// Returns the smaller of two numeric values.
     ///
     /// Both values have the same inferred numeric type and are evaluated once.

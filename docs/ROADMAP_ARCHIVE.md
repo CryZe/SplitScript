@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: source-defined numeric squaring
+
+- Added `Numeric.squared()` as a canonical source-defined method implemented
+  by one multiplication, preserving receiver width, integer wrapping, and IEEE
+  floating-point behavior without another compiler intrinsic.
+- Added focused `Math.Pow`/`MathF.Pow` guidance for the corpus-proven cases:
+  `value.squared()` for exponent two and an explicit width-checked shift for
+  power-of-two masks.
+- Deliberately left general floating powers out of the public API until a
+  maintained port needs them and can justify carrying a vetted libm algorithm.
+
 ## 2026-08-10: source-defined signed absolute value
 
 - Moved `abs()` from the floating-point-only capability to `Signed` and

@@ -32,6 +32,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::FloatIsNaN,
         StdlibItemId::FloatIsFinite,
         StdlibItemId::NumericClamp,
+        StdlibItemId::NumericSquared,
         StdlibItemId::SignedAbs,
         StdlibItemId::ArrayIsEmpty,
         StdlibItemId::ArrayContains,
@@ -1173,6 +1174,10 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     assert_eq!(
         library.render_signature(StdlibItemId::SignedAbs),
         "T.abs() -> T where T: Signed"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::NumericSquared),
+        "T.squared() -> T where T: Numeric"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::FloatSqrt),

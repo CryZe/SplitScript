@@ -213,6 +213,8 @@ pub const CSHARP_MAX_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.max-call");
 pub const CSHARP_ABS_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.abs-call");
+pub const CSHARP_POWER_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.math.power-call");
 pub const CSHARP_TIMESPAN_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.timespan.parse-call");
 pub const CSHARP_TIMESPAN_TICKS_DIAGNOSTIC: MigrationDiagnosticId =
@@ -580,6 +582,19 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_POWER_DIAGNOSTIC,
+        concept: MigrationConceptId::new("math.power"),
+        message: "C# power needs an exponent-specific rewrite in SplitScript",
+        primary_label: "choose the operation that expresses this exponent's intent",
+        notes: &[
+            "rewrite `Math.Pow(value, 2)` or `MathF.Pow(value, 2)` as `value.squared()` after establishing the intended f64 or f32 receiver width",
+            "rewrite a mask-shaped `Math.Pow(2, exponent)` as an explicit shift such as `1u64 << exponent`, choosing a width that can represent the highest required bit and validating the shift range",
+            "SplitScript `squared` preserves the receiver type; integer overflow wraps to that type while floating-point multiplication follows IEEE 754",
+            "general negative, fractional, infinite, and NaN exponents do not yet have a canonical SplitScript power operation",
+            "there is no automatic rewrite because the call syntax alone does not prove the exponent value, result width, or whether the operation constructs a mask",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_NUMERIC_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.numeric-parse"),
         message: "C# static numeric parsing becomes `String.parse<T>()` in SplitScript",
@@ -675,6 +690,9 @@ pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnos
     }
     if matches!(owner.as_str(), "Math" | "MathF") && method == "Abs" {
         return Some(CSHARP_ABS_DIAGNOSTIC);
+    }
+    if matches!(owner.as_str(), "Math" | "MathF") && method == "Pow" {
+        return Some(CSHARP_POWER_DIAGNOSTIC);
     }
     if method != "Parse" && method != "TryParse" {
         return None;
@@ -1227,6 +1245,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Use `value.abs()` after establishing a signed numeric type; review C# signed-minimum overflow, unsigned conversions, and decimal inputs.",
         targets: &[MigrationTarget::StandardLibraryItem("Signed.abs")],
+        cookbook_anchor: None,
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("math.power"),
+        name: "Numeric powers",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `value.squared()` for the corpus-proven exponent two and an explicit typed shift for power-of-two masks; general floating powers remain planned.",
+        targets: &[MigrationTarget::StandardLibraryItem("Numeric.squared")],
         cookbook_anchor: None,
         spellings: &[],
     },

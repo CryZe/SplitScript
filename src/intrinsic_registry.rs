@@ -417,6 +417,11 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::NumericMultiply
         | IntrinsicId::NumericDivide
         | IntrinsicId::IntegerRemainder
+        | IntrinsicId::IntegerBitOr
+        | IntrinsicId::IntegerBitXor
+        | IntrinsicId::IntegerBitAnd
+        | IntrinsicId::IntegerShiftLeft
+        | IntrinsicId::IntegerShiftRight
         | IntrinsicId::NumericMin
         | IntrinsicId::NumericMax
         | IntrinsicId::FloatAbs
@@ -711,6 +716,46 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::IntegerRemainder => contract!(
             IntegerRemainder,
+            Method,
+            signature(INTEGER_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::IntegerBitOr => contract!(
+            IntegerBitOr,
+            Method,
+            signature(INTEGER_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::IntegerBitXor => contract!(
+            IntegerBitXor,
+            Method,
+            signature(INTEGER_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::IntegerBitAnd => contract!(
+            IntegerBitAnd,
+            Method,
+            signature(INTEGER_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::IntegerShiftLeft => contract!(
+            IntegerShiftLeft,
+            Method,
+            signature(INTEGER_T, Some(T), params![value(T)], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::IntegerShiftRight => contract!(
+            IntegerShiftRight,
             Method,
             signature(INTEGER_T, Some(T), params![value(T)], T),
             PURE,

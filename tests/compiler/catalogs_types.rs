@@ -306,6 +306,21 @@ fn binary_syntax_resolves_through_catalog_declared_methods() {
         library.item(StdlibItemId::IntegerRemainder).binary_operator,
         Some(StandardBinaryOperator::Remainder)
     );
+    for (item, operator) in [
+        (StdlibItemId::IntegerBitOr, StandardBinaryOperator::BitOr),
+        (StdlibItemId::IntegerBitXor, StandardBinaryOperator::BitXor),
+        (StdlibItemId::IntegerBitAnd, StandardBinaryOperator::BitAnd),
+        (
+            StdlibItemId::IntegerShiftLeft,
+            StandardBinaryOperator::ShiftLeft,
+        ),
+        (
+            StdlibItemId::IntegerShiftRight,
+            StandardBinaryOperator::ShiftRight,
+        ),
+    ] {
+        assert_eq!(library.item(item).binary_operator, Some(operator));
+    }
 
     let source = r#"
         state "game.exe" {}
@@ -315,12 +330,17 @@ fn binary_syntax_resolves_through_catalog_declared_methods() {
             let quotient = product / 3
             let remainder = quotient % 5
             let direct = 6.multiply(7).divide(3).remainder(5)
+            let bits = ((0x10 | 0x04) ^ 0x01) & 0x1f
+            let shifted = bits << 2 >> 1
+            let directBits = 1u32.shiftLeft(5).bitOr(3).shiftRight(1).bitXor(2).bitAnd(0xff)
             let duration = Duration.fromSeconds(1.5) + Duration.fromSeconds(0.5)
             let difference = duration - Duration.fromWholeSeconds(1)
             let ordered = difference < duration && duration >= difference
             print(number)
             print(remainder)
             print(direct)
+            print(shifted)
+            print(directBits)
             print(difference.wholeSeconds())
             if ordered {
                 print("ordered")
@@ -342,6 +362,11 @@ fn binary_syntax_resolves_through_catalog_declared_methods() {
         StdlibItemId::NumericMultiply,
         StdlibItemId::NumericDivide,
         StdlibItemId::IntegerRemainder,
+        StdlibItemId::IntegerBitOr,
+        StdlibItemId::IntegerBitXor,
+        StdlibItemId::IntegerBitAnd,
+        StdlibItemId::IntegerShiftLeft,
+        StdlibItemId::IntegerShiftRight,
         StdlibItemId::DurationAdd,
         StdlibItemId::DurationSubtract,
         StdlibItemId::DurationLessThan,

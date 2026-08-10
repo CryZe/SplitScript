@@ -907,13 +907,13 @@ fn compile_assignment_call(
             function.instruction(&Instruction::Call(context.functions[&target_function].call));
         }
         wasm_ir::CallTarget::Intrinsic { intrinsic, .. }
-            if numeric_intrinsic_binary_op(*intrinsic).is_some() =>
+            if intrinsic_binary_op(*intrinsic).is_some() =>
         {
             let receiver = compile_receiver(function, target, context);
             compile_expr(function, argument, context);
             emit_binary_instruction(
                 function,
-                numeric_intrinsic_binary_op(*intrinsic).expect("guarded numeric binary intrinsic"),
+                intrinsic_binary_op(*intrinsic).expect("guarded primitive binary intrinsic"),
                 receiver,
             );
         }
@@ -2766,12 +2766,17 @@ fn compile_expr_unconverted(
             | IntrinsicId::NumericSubtract
             | IntrinsicId::NumericMultiply
             | IntrinsicId::NumericDivide
-            | IntrinsicId::IntegerRemainder => {
+            | IntrinsicId::IntegerRemainder
+            | IntrinsicId::IntegerBitOr
+            | IntrinsicId::IntegerBitXor
+            | IntrinsicId::IntegerBitAnd
+            | IntrinsicId::IntegerShiftLeft
+            | IntrinsicId::IntegerShiftRight => {
                 let receiver = compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
                 emit_binary_instruction(
                     function,
-                    numeric_intrinsic_binary_op(builtin).expect("matched numeric binary intrinsic"),
+                    intrinsic_binary_op(builtin).expect("matched primitive binary intrinsic"),
                     receiver,
                 );
             }
@@ -3385,13 +3390,18 @@ fn emit_binary_instruction(function: &mut Function, op: BinaryOp, ty: Type) {
     function.instruction(&instruction);
 }
 
-fn numeric_intrinsic_binary_op(intrinsic: IntrinsicId) -> Option<BinaryOp> {
+fn intrinsic_binary_op(intrinsic: IntrinsicId) -> Option<BinaryOp> {
     Some(match intrinsic {
         IntrinsicId::NumericAdd => BinaryOp::Add,
         IntrinsicId::NumericSubtract => BinaryOp::Sub,
         IntrinsicId::NumericMultiply => BinaryOp::Mul,
         IntrinsicId::NumericDivide => BinaryOp::Div,
         IntrinsicId::IntegerRemainder => BinaryOp::Rem,
+        IntrinsicId::IntegerBitOr => BinaryOp::BitOr,
+        IntrinsicId::IntegerBitXor => BinaryOp::BitXor,
+        IntrinsicId::IntegerBitAnd => BinaryOp::BitAnd,
+        IntrinsicId::IntegerShiftLeft => BinaryOp::Shl,
+        IntrinsicId::IntegerShiftRight => BinaryOp::Shr,
         _ => return None,
     })
 }

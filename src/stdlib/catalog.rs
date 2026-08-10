@@ -153,6 +153,11 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::NumericMultiply
         | StdlibItemId::NumericDivide
         | StdlibItemId::IntegerRemainder
+        | StdlibItemId::IntegerBitOr
+        | StdlibItemId::IntegerBitXor
+        | StdlibItemId::IntegerBitAnd
+        | StdlibItemId::IntegerShiftLeft
+        | StdlibItemId::IntegerShiftRight
         | StdlibItemId::NumericMin
         | StdlibItemId::NumericMax
         | StdlibItemId::NumericClamp => NUMERIC_EXAMPLE,

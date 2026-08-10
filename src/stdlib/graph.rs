@@ -157,7 +157,12 @@ impl StandardLibraryGraph {
                 | StandardBinaryOperator::Subtract
                 | StandardBinaryOperator::Multiply
                 | StandardBinaryOperator::Divide
-                | StandardBinaryOperator::Remainder => receiver,
+                | StandardBinaryOperator::Remainder
+                | StandardBinaryOperator::BitOr
+                | StandardBinaryOperator::BitXor
+                | StandardBinaryOperator::BitAnd
+                | StandardBinaryOperator::ShiftLeft
+                | StandardBinaryOperator::ShiftRight => receiver,
                 StandardBinaryOperator::LessThan
                 | StandardBinaryOperator::LessThanOrEqual
                 | StandardBinaryOperator::GreaterThan

@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-10: source-declared integer bit operations
+
+- Declared bitwise OR, XOR, AND, left shift, and right shift on the `Integer`
+  capability, with method forms and focused documentation for signed shifts,
+  discarded bits, and WebAssembly shift-count masking.
+- Extended the operator catalog and trusted intrinsic boundary so `|`, `^`,
+  `&`, `<<`, `>>`, and their compound assignments resolve through standard-
+  library declarations instead of checker-only capability branches.
+- Reused the common primitive binary lowering path and covered operator syntax,
+  direct method calls, semantic identities, compound assignment, and generated
+  documentation fixtures.
+
 ## 2026-08-10: source-declared multiplicative operators
 
 - Declared multiplication and division on the `Numeric` capability and

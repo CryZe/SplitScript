@@ -925,6 +925,101 @@ capability Integer<T: Numeric + Display> {
         /// The divisor.
         other: T,
     ) -> T;
+
+    /// Combines two integers with a bitwise OR.
+    ///
+    /// This method is also the implementation of the `|` operator.
+    ///
+    /// # Example
+    ///
+    /// Add a flag to a mask
+    ///
+    /// ```splitscript
+    /// let combined = flags | 0x20
+    /// ```
+    @intrinsic(IntegerBitOr)
+    @operator(bitOr)
+    fn bitOr(
+        /// The other integer.
+        other: T,
+    ) -> T;
+
+    /// Combines two integers with a bitwise exclusive OR.
+    ///
+    /// This method is also the implementation of the `^` operator.
+    ///
+    /// # Example
+    ///
+    /// Toggle a flag in a mask
+    ///
+    /// ```splitscript
+    /// let toggled = flags ^ 0x20
+    /// ```
+    @intrinsic(IntegerBitXor)
+    @operator(bitXor)
+    fn bitXor(
+        /// The other integer.
+        other: T,
+    ) -> T;
+
+    /// Combines two integers with a bitwise AND.
+    ///
+    /// This method is also the implementation of the `&` operator.
+    ///
+    /// # Example
+    ///
+    /// Isolate one flag from a mask
+    ///
+    /// ```splitscript
+    /// let selected = flags & 0x20
+    /// ```
+    @intrinsic(IntegerBitAnd)
+    @operator(bitAnd)
+    fn bitAnd(
+        /// The other integer.
+        other: T,
+    ) -> T;
+
+    /// Shifts bits to the left.
+    ///
+    /// This method is also the implementation of the `<<` operator. Only the
+    /// low five bits of the shift count are used for values represented as
+    /// i32, including 8- and 16-bit integers; i64, u64, and address values use
+    /// the low six bits. Bits shifted out of the representation are discarded.
+    ///
+    /// # Example
+    ///
+    /// Construct a bit mask
+    ///
+    /// ```splitscript
+    /// let mask = 1u32 << bitIndex
+    /// ```
+    @intrinsic(IntegerShiftLeft)
+    @operator(shiftLeft)
+    fn shiftLeft(
+        /// The shift count, inferred as the receiver's integer type.
+        count: T,
+    ) -> T;
+
+    /// Shifts bits to the right.
+    ///
+    /// This method is also the implementation of the `>>` operator. Signed
+    /// values copy the sign bit; unsigned and address values shift in zeroes.
+    /// Shift counts use the same low-five or low-six-bit rule as `shiftLeft`.
+    ///
+    /// # Example
+    ///
+    /// Extract a packed byte
+    ///
+    /// ```splitscript
+    /// let highByte = packed >> 8
+    /// ```
+    @intrinsic(IntegerShiftRight)
+    @operator(shiftRight)
+    fn shiftRight(
+        /// The shift count, inferred as the receiver's integer type.
+        count: T,
+    ) -> T;
 }
 
 /// Identifies signed numeric types.

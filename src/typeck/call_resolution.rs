@@ -8,7 +8,7 @@ use crate::{
     inference::{InferenceError, Requirements, Type, type_may_have_capability},
     migration::{
         ASL_SETTINGS_ADD_DIAGNOSTIC, ForeignSpellingContext, foreign_spelling,
-        legacy_array_field_diagnostic, legacy_static_call_diagnostic,
+        legacy_array_field_diagnostic, legacy_set_field_diagnostic, legacy_static_call_diagnostic,
         legacy_string_field_diagnostic, legacy_string_method_diagnostic,
         legacy_value_path_diagnostic, migration_diagnostic,
     },
@@ -1522,24 +1522,36 @@ impl Checker {
         if self.standard_type_id(ty) == Some(StdlibTypeId::String)
             && let Some(id) = legacy_string_field_diagnostic(field)
         {
-            let name_span = Span {
-                start: span.end.saturating_sub(field.len()),
-                end: span.end,
-            };
+            let name_span = member_name_span(span, field);
             self.migration_member_error(id, name_span, None);
             return None;
         }
         if matches!(ty, Type::Array(_))
             && let Some(id) = legacy_array_field_diagnostic(field)
         {
-            let name_span = Span {
-                start: span.end.saturating_sub(field.len()),
-                end: span.end,
-            };
+            let name_span = member_name_span(span, field);
             self.migration_member_error(
                 id,
                 name_span,
-                Some(("replace `Length` with `length()`", "length()")),
+                Some((
+                    if field == "Length" {
+                        "replace `Length` with `length()`"
+                    } else {
+                        "replace `Count` with `length()`"
+                    },
+                    "length()",
+                )),
+            );
+            return None;
+        }
+        if matches!(ty, Type::Set(_))
+            && let Some(id) = legacy_set_field_diagnostic(field)
+        {
+            let name_span = member_name_span(span, field);
+            self.migration_member_error(
+                id,
+                name_span,
+                Some(("replace `Count` with `length()`", "length()")),
             );
             return None;
         }
@@ -1908,5 +1920,12 @@ impl Checker {
                 format!("integer literal does not fit in `{}`", self.type_name(ty))
             }
         }
+    }
+}
+
+fn member_name_span(span: Span, name: &str) -> Span {
+    Span {
+        start: span.end.saturating_sub(name.len()),
+        end: span.end,
     }
 }

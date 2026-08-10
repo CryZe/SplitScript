@@ -562,6 +562,12 @@ returns the `u32` element count for both `[T]` and fixed `[T; N]` arrays. The
 compiler can apply this rename automatically, after which signed C# index
 arithmetic may still need an explicit width cast.
 
+After choosing a SplitScript collection shape, C# `.Count` also becomes
+`.length()`. For an array this is the element count; for `Set<T>` it is the
+number of unique stored values. This rewrite cannot decide whether a legacy
+`List<T>` should become an array or set—the source's ordering, growth, and
+duplicate behavior must make that decision first.
+
 Do not translate every C# `List<T>` into one compatibility collection. First
 identify whether the source needs a fixed ordered table, growable unique
 membership, or a genuinely ordered growable sequence with duplicates.

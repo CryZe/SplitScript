@@ -53,8 +53,13 @@ or behavioral parity.
   compiler revision for future campaigns as provenance, not because this
   campaign used a different compiler.
 - [ ] Continue refreshing the ASL migration catalog and cookbook for
-  non-lifecycle misunderstandings found by the campaign. Do not add
-  compatibility aliases.
+  non-lifecycle misunderstandings found by the campaign. The next concrete
+  audit queue is `Convert.To*`, remaining timer/run metadata paths, and
+  collection mutations whose ordering or duplicate semantics are not already
+  covered by arrays and sets. String/array length and collection count now have
+  canonical guidance; consult the roadmap archive before re-planning any
+  completed string, numeric, or finite-settings slice. Do not add compatibility
+  aliases.
 - [ ] Use those maintained ports to decide each next implementation slice.
   Prefer recurring static settings, signed offsets, or focused string gaps over
   callbacks, reflection, UI prompts, or unrestricted filesystem access. Move a

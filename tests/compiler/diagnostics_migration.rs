@@ -474,6 +474,70 @@ fn csharp_length_distinguishes_arrays_from_utf8_strings() {
 }
 
 #[test]
+fn csharp_collection_count_rewrites_only_resolved_arrays_and_sets() {
+    use splitscript::FixApplicability;
+
+    for (name, parameter) in [("array", "[u8]"), ("set", "Set<String>")] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+
+                fn count(values: {parameter}) -> u32 {{
+                    return values.Count
+                }}
+            "#
+        );
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("C# collection Count should receive a direct migration fix");
+
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "unexpected {name} cascade: {diagnostics:#?}"
+        );
+        let diagnostic = &diagnostics[0];
+        assert_eq!(
+            diagnostic.message,
+            "C# collection `Count` is `length()` in SplitScript"
+        );
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "Count");
+        assert!(diagnostic.notes.iter().any(|note| {
+            note.contains("arrays") && note.contains("Set<T>") && note.contains("u32")
+        }));
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| { note.contains("fixed order") && note.contains("unique membership") })
+        );
+        assert_eq!(diagnostic.fixes.len(), 1);
+        let fix = &diagnostic.fixes[0];
+        assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+        assert_eq!(fix.edits.len(), 1);
+        assert_eq!(fix.edits[0].span, diagnostic.span);
+        assert_eq!(fix.edits[0].replacement, "length()");
+
+        let mut fixed = source;
+        fixed.replace_range(
+            fix.edits[0].span.start..fix.edits[0].span.end,
+            &fix.edits[0].replacement,
+        );
+        splitscript::compile(&fixed).expect("the collection count fix should compile");
+    }
+
+    splitscript::compile(
+        r#"
+            record Counter {
+                Count: u32,
+            }
+            state "game.exe" {}
+            fn count(value: Counter) -> u32 { return value.Count }
+        "#,
+    )
+    .expect("a user record field named Count must keep its ordinary meaning");
+}
+
+#[test]
 fn csharp_string_join_explains_array_and_argument_order() {
     let source = r#"
         state "game.exe" {}

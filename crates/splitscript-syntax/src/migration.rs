@@ -197,6 +197,8 @@ pub const CSHARP_STRING_LENGTH_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.length-property");
 pub const CSHARP_ARRAY_LENGTH_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.array.length-property");
+pub const CSHARP_COLLECTION_COUNT_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.collection.count-property");
 pub const CSHARP_STRING_JOIN_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.join-call");
 pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
@@ -496,6 +498,17 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_COLLECTION_COUNT_DIAGNOSTIC,
+        concept: MigrationConceptId::new("collection.count"),
+        message: "C# collection `Count` is `length()` in SplitScript",
+        primary_label: "collection count is exposed as a method",
+        notes: &[
+            "`values.length()` returns a `u32` element count for arrays and a `u32` unique-value count for `Set<T>`",
+            "choose the SplitScript collection shape before applying this rewrite: arrays preserve fixed order, while sets preserve growable unique membership",
+            "review arithmetic copied from C# when it relied on the signed `i32` result of common collection `Count` properties",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_STRING_JOIN_DIAGNOSTIC,
         concept: MigrationConceptId::new("string.join"),
         message: "C# `String.Join` needs an explicit collection conversion",
@@ -676,7 +689,15 @@ pub fn legacy_string_field_diagnostic(name: &str) -> Option<MigrationDiagnosticI
 }
 
 pub fn legacy_array_field_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
-    (name == "Length").then_some(CSHARP_ARRAY_LENGTH_DIAGNOSTIC)
+    match name {
+        "Length" => Some(CSHARP_ARRAY_LENGTH_DIAGNOSTIC),
+        "Count" => Some(CSHARP_COLLECTION_COUNT_DIAGNOSTIC),
+        _ => None,
+    }
+}
+
+pub fn legacy_set_field_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
+    (name == "Count").then_some(CSHARP_COLLECTION_COUNT_DIAGNOSTIC)
 }
 
 pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnosticId> {
@@ -1209,6 +1230,19 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::Direct,
         summary: "Call `values.length()` for the `u32` element count of dynamic and fixed arrays.",
         targets: &[MigrationTarget::StandardLibraryItem("Array.length")],
+        cookbook_anchor: Some("collection-search-and-run-scoped-sets"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("collection.count"),
+        name: "Collection count",
+        sources: CSHARP,
+        support: MigrationSupport::Direct,
+        summary: "After choosing an array or set from the source's ordering and uniqueness requirements, call `values.length()` for its `u32` count.",
+        targets: &[
+            MigrationTarget::StandardLibraryItem("Array.length"),
+            MigrationTarget::StandardLibraryItem("Set.length"),
+        ],
         cookbook_anchor: Some("collection-search-and-run-scoped-sets"),
         spellings: &[],
     },

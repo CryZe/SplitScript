@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-10: type-aware C# collection count migration
+
+- Added a machine-applicable `.Count` to `.length()` rewrite after the receiver
+  has resolved to an array or `Set<T>`.
+- Kept collection selection separate: arrays count ordered elements, while sets
+  count unique values, so the existing `List<T>` migration diagnostic still
+  requires the author to choose from source behavior first.
+- Refined the active campaign-audit queue so completed length/count and numeric
+  guidance are not repeatedly planned as missing features.
+
 ## 2026-08-10: type-aware C# length migration
 
 - Added separate diagnostics for C# array and string `.Length` instead of

@@ -450,6 +450,30 @@ rewrite it automatically because the correct `None` behavior depends on the
 surrounding control flow. Use `else` for an early fallback or `match` when the
 absent state needs distinct behavior.
 
+## LiveSplit timer metadata and control
+
+Several legacy paths inspect host-owned timer data rather than the attached
+game. They do not currently have faithful SplitScript replacements:
+
+- `timer.CurrentTime.GameTime` reads LiveSplit's optional game-time clock. If
+  this autosplitter computes the value, keep that `Duration` in script-owned
+  state and also return it from `gameTime`; the host's possibly externally
+  changed value cannot yet be read back.
+- `timer.CurrentSplit.Name`, indexed `timer.Run[...]` segments,
+  `timer.Run.Count`, `CategoryName`, `GameName`, and `FilePath` require a typed
+  read-only run snapshot. Do not silently copy route metadata into the script
+  unless that fixed route is intentionally owned by the autosplitter.
+- `timer.Run.Offset` and timing-method access are user-visible configuration.
+  Reads and writes need defined ordering, persistence, reset/undo behavior,
+  precision, and conflict handling with LiveSplit's UI.
+
+The current Wasm host exposes none of those observations or mutations. The
+compiler emits focused diagnostics for each category instead of a generic
+unknown-name error or a misleading automatic rewrite. Mark a port as
+behavior-limited when it genuinely depends on one of them. The planned host
+contract will expose optional values from one coherent snapshot per update and
+will keep read-only metadata separate from controlled mutation authority.
+
 ## Monotonic delays and debouncing
 
 ASL scripts often use `DateTime.Now`, `DateTime.Now.TimeOfDay`, or a

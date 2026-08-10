@@ -3,8 +3,9 @@
 //! Statement grammar.
 
 use super::{
-    ASL_MUTABLE_CURRENT_DIAGNOSTIC, Block, Diagnostic, ExprKind, ForBinding, Parser, RecoveryNode,
-    RecoveryNodeKind, Span, Stmt, TokenKind, VariableDecl, assignment_operator, statement_span,
+    ASL_MUTABLE_CURRENT_DIAGNOSTIC, ASL_TIMER_CONTROL_DIAGNOSTIC, Block, Diagnostic, ExprKind,
+    ForBinding, Parser, RecoveryNode, RecoveryNodeKind, Span, Stmt, TokenKind, VariableDecl,
+    assignment_operator, statement_span,
 };
 
 impl Parser<'_> {
@@ -209,6 +210,27 @@ impl Parser<'_> {
         {
             let target = self.current().span.join(self.peek(2).span);
             return Err(self.migration_diagnostic(ASL_MUTABLE_CURRENT_DIAGNOSTIC, target));
+        }
+        if self.at_ident("timer")
+            && self.peek(1).kind == TokenKind::Dot
+            && matches!(&self.peek(2).kind, TokenKind::Ident(name) if name == "Run")
+            && self.peek(3).kind == TokenKind::Dot
+            && matches!(&self.peek(4).kind, TokenKind::Ident(name) if name == "Offset")
+            && assignment_operator(&self.peek(5).kind).is_some()
+        {
+            let target = self.current().span.join(self.peek(4).span);
+            return Err(self.migration_diagnostic(ASL_TIMER_CONTROL_DIAGNOSTIC, target));
+        }
+        if self.at_ident("timer")
+            && self.peek(1).kind == TokenKind::Dot
+            && matches!(
+                &self.peek(2).kind,
+                TokenKind::Ident(name) if name == "CurrentTimingMethod"
+            )
+            && assignment_operator(&self.peek(3).kind).is_some()
+        {
+            let target = self.current().span.join(self.peek(2).span);
+            return Err(self.migration_diagnostic(ASL_TIMER_CONTROL_DIAGNOSTIC, target));
         }
         if let TokenKind::Ident(name) = &self.current().kind
             && let Some(op) = assignment_operator(&self.peek(1).kind)

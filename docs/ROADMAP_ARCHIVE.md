@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: timer metadata migration boundaries
+
+- Audited recurring ASL timer paths against the actual LiveSplit Wasm host and
+  confirmed that current game time, run/segment metadata, run offset, and
+  timing-method access have no present imports.
+- Added distinct compiler diagnostics for script-owned versus host-owned game
+  time, read-only route metadata, and controlled user-visible timer mutation,
+  avoiding generic unknown-name errors and unsafe `Instant` substitutions.
+- Added migration-catalog entries and cookbook guidance tied to the typed,
+  coherent-snapshot runtime requirements already recorded in R5.
+
 ## 2026-08-10: source-defined first-match array removal
 
 - Added equality-constrained `[T].remove(value) -> bool` as standard-library

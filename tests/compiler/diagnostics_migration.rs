@@ -2301,6 +2301,132 @@ fn livesplit_run_real_time_is_not_silently_replaced_with_an_instant() {
 }
 
 #[test]
+fn livesplit_current_game_time_requires_a_host_snapshot() {
+    let source = r#"
+        state "game.exe" {}
+
+        split {
+            return timer.CurrentTime.GameTime.Value.TotalSeconds > 1.0
+        }
+    "#;
+    let errors = splitscript::compile(source)
+        .expect_err("LiveSplit game time is not readable through the current host contract");
+    assert_eq!(errors.len(), 1);
+    let diagnostic = &errors[0];
+    assert_eq!(
+        diagnostic.message,
+        "LiveSplit's current game time is not readable through the current host contract"
+    );
+    assert_eq!(
+        &source[diagnostic.span.start..diagnostic.span.end],
+        "timer.CurrentTime.GameTime.Value.TotalSeconds"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("coherent optional timer snapshot"))
+    );
+}
+
+#[test]
+fn livesplit_run_metadata_paths_require_a_host_snapshot() {
+    for path in ["timer.CurrentSplit.Name", "timer.Run.CategoryName"] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+
+                whileAttached {{
+                    print({path})
+                }}
+            "#
+        );
+        let errors = splitscript::compile(&source)
+            .expect_err("LiveSplit run metadata is not exposed by the current host contract");
+        assert_eq!(errors.len(), 1, "unexpected diagnostics for {path}");
+        let diagnostic = &errors[0];
+        assert_eq!(
+            diagnostic.message,
+            "LiveSplit run and segment metadata is not exposed by the current host contract"
+        );
+        assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], path);
+        assert!(diagnostic.fixes.is_empty());
+    }
+}
+
+#[test]
+fn livesplit_timer_configuration_reads_and_writes_require_a_host_contract() {
+    for path in ["timer.Run.Offset", "timer.CurrentTimingMethod"] {
+        let read_source = format!(
+            r#"
+                state "game.exe" {{}}
+
+                whileAttached {{
+                    print({path})
+                }}
+            "#
+        );
+        let errors = splitscript::compile(&read_source)
+            .expect_err("timer configuration reads need an explicit host contract");
+        assert_eq!(errors.len(), 1, "unexpected read diagnostics for {path}");
+        let diagnostic = &errors[0];
+        assert_eq!(
+            diagnostic.message,
+            "LiveSplit run offset and timing-method control needs an explicit host contract"
+        );
+        assert_eq!(
+            &read_source[diagnostic.span.start..diagnostic.span.end],
+            path
+        );
+        assert!(diagnostic.fixes.is_empty());
+
+        let write_source = format!(
+            r#"
+                state "game.exe" {{}}
+
+                whileAttached {{
+                    {path} = 0
+                }}
+            "#
+        );
+        let errors = splitscript::compile(&write_source)
+            .expect_err("timer configuration writes need an explicit host contract");
+        assert_eq!(errors.len(), 1, "unexpected write diagnostics for {path}");
+        let diagnostic = &errors[0];
+        assert_eq!(
+            diagnostic.message,
+            "LiveSplit run offset and timing-method control needs an explicit host contract"
+        );
+        assert_eq!(
+            &write_source[diagnostic.span.start..diagnostic.span.end],
+            path
+        );
+        assert!(diagnostic.fixes.is_empty());
+    }
+}
+
+#[test]
+fn user_defined_timer_members_keep_their_meaning() {
+    let source = r#"
+        state "game.exe" {}
+
+        record RunInfo {
+            CategoryName: String,
+        }
+
+        record TimerInfo {
+            Run: RunInfo,
+        }
+
+        fn category(timer: TimerInfo) {
+            return timer.Run.CategoryName
+        }
+    "#;
+    splitscript::compile(source).expect("user-defined timer members should not be migration paths");
+}
+
+#[test]
 fn user_defined_datetime_member_keeps_its_meaning() {
     let source = r#"
         state "game.exe" {}

@@ -173,6 +173,12 @@ pub const ASL_MONOTONIC_TIME_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.time.monotonic-path");
 pub const ASL_TIMER_REAL_TIME_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.timer.current-real-time-path");
+pub const ASL_TIMER_GAME_TIME_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.timer.current-game-time-path");
+pub const ASL_TIMER_RUN_METADATA_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.timer.run-metadata-path");
+pub const ASL_TIMER_CONTROL_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.timer.control-path");
 pub const ASL_MUTABLE_CURRENT_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.state.mutable-current-assignment");
 pub const ASL_LIST_TYPE_DIAGNOSTIC: MigrationDiagnosticId =
@@ -362,6 +368,39 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "for a delay anchored to a game event, store `Instant.now()` at that event and compare a `Duration`",
             "the exact LiveSplit `CurrentTime.RealTime` phase is not exposed by the current host contract",
             "do not silently replace run-relative time used for offsets or game-time calculations with elapsed process-independent time",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_TIMER_GAME_TIME_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.timer.current-game-time"),
+        message: "LiveSplit's current game time is not readable through the current host contract",
+        primary_label: "determine whether this is the value produced by this script or external timer state",
+        notes: &[
+            "when the script computes this value, keep the typed `Duration` in script-owned state and return it from `gameTime` instead of reading it back from LiveSplit",
+            "game time may be absent and may also be changed by the host or another component, so a future read API must return a coherent optional timer snapshot",
+            "do not substitute `Instant`: monotonic elapsed time does not pause for loads or represent LiveSplit's game-time clock",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_TIMER_RUN_METADATA_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.timer.run-metadata"),
+        message: "LiveSplit run and segment metadata is not exposed by the current host contract",
+        primary_label: "this value needs a typed read-only timer snapshot from the host",
+        notes: &[
+            "current segment names, route length, game/category names, and the splits-file path are host-owned metadata rather than process memory",
+            "do not duplicate a route name table in source unless the maintained autosplitter intentionally owns that fixed route",
+            "the runtime evolution plan requires optional current-segment data and one coherent snapshot per update before these paths can be supported faithfully",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_TIMER_CONTROL_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.timer.controlled-mutation"),
+        message: "LiveSplit run offset and timing-method control needs an explicit host contract",
+        primary_label: "this is user-visible timer configuration, not ordinary script state",
+        notes: &[
+            "the current host does not expose run-offset or timing-method reads or writes to WebAssembly autosplitters",
+            "a future API must define ordering with timer decisions, reset and undo behavior, persistence, precision, and how concurrent UI changes are resolved",
+            "do not silently drop this operation or replace it with `setVariable`; record the port as behavior-limited until the host contract exists",
         ],
     },
     MigrationDiagnostic {
@@ -884,6 +923,23 @@ pub fn legacy_value_path_diagnostic(path: &str) -> Option<MigrationDiagnosticId>
     }
     if path == "timer.CurrentTime.RealTime" || path.starts_with("timer.CurrentTime.RealTime.") {
         return Some(ASL_TIMER_REAL_TIME_DIAGNOSTIC);
+    }
+    if path == "timer.CurrentTime.GameTime" || path.starts_with("timer.CurrentTime.GameTime.") {
+        return Some(ASL_TIMER_GAME_TIME_DIAGNOSTIC);
+    }
+    if path == "timer.Run.Offset"
+        || path.starts_with("timer.Run.Offset.")
+        || path == "timer.CurrentTimingMethod"
+        || path.starts_with("timer.CurrentTimingMethod.")
+    {
+        return Some(ASL_TIMER_CONTROL_DIAGNOSTIC);
+    }
+    if path == "timer.Run"
+        || path.starts_with("timer.Run.")
+        || path == "timer.CurrentSplit"
+        || path.starts_with("timer.CurrentSplit.")
+    {
+        return Some(ASL_TIMER_RUN_METADATA_DIAGNOSTIC);
     }
     None
 }
@@ -1788,6 +1844,36 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         summary: "Use `Instant` only for independent elapsed-time checks; exact `timer.CurrentTime.RealTime` metadata requires additional host support.",
         targets: &[],
         cookbook_anchor: Some("monotonic-delays-and-debouncing"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.timer.current-game-time"),
+        name: "LiveSplit current game time",
+        sources: ASL,
+        support: MigrationSupport::Planned,
+        summary: "Keep script-computed game time as a typed `Duration`; reading the host's coherent optional game-time snapshot requires additional runtime support.",
+        targets: &[],
+        cookbook_anchor: Some("livesplit-timer-metadata-and-control"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.timer.run-metadata"),
+        name: "LiveSplit run and segment metadata",
+        sources: ASL,
+        support: MigrationSupport::Planned,
+        summary: "Current segment identity, route length, category/game names, and splits-file metadata require a typed read-only host snapshot.",
+        targets: &[],
+        cookbook_anchor: Some("livesplit-timer-metadata-and-control"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.timer.controlled-mutation"),
+        name: "LiveSplit timer configuration",
+        sources: ASL,
+        support: MigrationSupport::Planned,
+        summary: "Run-offset and timing-method access needs an ordered least-privilege host contract; ports must not silently omit these user-visible mutations.",
+        targets: &[],
+        cookbook_anchor: Some("livesplit-timer-metadata-and-control"),
         spellings: &[],
     },
     MigrationConcept {

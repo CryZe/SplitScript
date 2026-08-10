@@ -251,9 +251,9 @@ numbered-settings case in [`docs/DDS_PORT.md`](docs/DDS_PORT.md).
 - Type-directed methods with an implicit `self` and nested receiver calls.
 - Demand-monomorphized generic function bodies and GC arrays, including the
   general `[T]` and exact-length `[T; N]` forms, inferred literals, and typed
-  `array[index]` access and `array[index] = value` mutation plus collection
-  methods. Fixed arrays of readable elements support one transactional typed
-  process-memory read.
+  `array[index]` access and `array[index] = value` mutation plus growable
+  `push` and capacity-preserving `clear`. Fixed arrays of readable elements
+  support one transactional typed process-memory read.
 - Run-scoped `Set<T>` values with source-declared `Equatable` constraints,
   persistent mutation, containment, insertion/removal, clearing, and length.
 - Inferred `for value in collection` loops over `[T]`, `[T; N]`, and `Set<T>`,

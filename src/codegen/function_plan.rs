@@ -160,17 +160,21 @@ pub(super) fn encode<'a>(
     };
 
     let mut array_functions = ArrayFunctions::default();
-    for array in arrays
-        .iter()
-        .filter(|array| reachability.requires_array_push(array.id))
-    {
+    for array in arrays.iter().filter(|array| {
+        reachability.requires_array_push(array.id) || reachability.requires_array_clear(array.id)
+    }) {
         debug_assert!(array.length.is_none());
         let array_type = gc.val_type(Type::Array(array.id));
-        let element_type = gc.val_type(
-            super::try_array_element_type(array.id, semantics)
-                .expect("reachable arrays have lowerable element types"),
-        );
-        array_functions.insert_push(array.id, declare(vec![array_type, element_type], vec![]));
+        if reachability.requires_array_push(array.id) {
+            let element_type = gc.val_type(
+                super::try_array_element_type(array.id, semantics)
+                    .expect("reachable arrays have lowerable element types"),
+            );
+            array_functions.insert_push(array.id, declare(vec![array_type, element_type], vec![]));
+        }
+        if reachability.requires_array_clear(array.id) {
+            array_functions.insert_clear(array.id, declare(vec![array_type], vec![]));
+        }
     }
 
     let mut set_functions = SetFunctions::default();

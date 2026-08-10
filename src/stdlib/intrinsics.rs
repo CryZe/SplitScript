@@ -43,6 +43,7 @@ macro_rules! trusted_intrinsics {
             ArrayLength,
             ArraySet,
             ArrayPush,
+            ArrayClear,
             SetNew,
             SetLength,
             SetContains,

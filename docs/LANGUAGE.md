@@ -858,6 +858,7 @@ let inferred = [1, 2, 3] // [i32]
 let empty: [u16] = []
 let discovered = []
 discovered.push(0x8bu8) // discovered is [u8]
+discovered.clear()
 
 bytes[1] = 0x8b
 let opcode = bytes[1]
@@ -880,6 +881,13 @@ methods are available when the element type supports `Equatable`; they are
 ordinary source-defined library loops rather than dedicated compiler
 operations. Arrays can contain records, enums, strings, and other arrays, and
 can themselves be stored in records or continuation frames.
+
+Only growable `[T]` arrays provide `push(value)` and `clear()`. Clearing keeps
+the array object and its backing capacity, so aliases still observe the same
+array and a later push can reuse its storage. Reference elements are released
+when cleared rather than being retained in unused capacity. Both operations
+are structural mutations and invalidate an active traversal; exact `[T; N]`
+arrays provide neither because their length is part of their type.
 
 Arrays can be traversed directly without manually managing an index:
 

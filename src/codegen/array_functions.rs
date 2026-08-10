@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use wasm_encoder::{BlockType, Function, Instruction, ValType};
+use wasm_encoder::{BlockType, Function, Instruction, StorageType, ValType};
 
 use crate::{ast::ArrayTypeId, types::ResolvedArrayType};
 
@@ -11,6 +11,7 @@ use super::{GcLayout, Type, array_value};
 #[derive(Debug, Default)]
 pub(super) struct ArrayFunctions {
     pushes: HashMap<ArrayTypeId, u32>,
+    clears: HashMap<ArrayTypeId, u32>,
 }
 
 impl ArrayFunctions {
@@ -21,6 +22,14 @@ impl ArrayFunctions {
     pub(super) fn push(&self, array: ArrayTypeId) -> u32 {
         self.pushes[&array]
     }
+
+    pub(super) fn insert_clear(&mut self, array: ArrayTypeId, function: u32) {
+        self.clears.insert(array, function);
+    }
+
+    pub(super) fn clear(&self, array: ArrayTypeId) -> u32 {
+        self.clears[&array]
+    }
 }
 
 pub(super) fn compile(
@@ -29,11 +38,16 @@ pub(super) fn compile(
     semantics: &crate::semantic::SemanticModel,
     gc: &GcLayout,
 ) -> Vec<Function> {
-    arrays
-        .iter()
-        .filter(|array| plans.pushes.contains_key(&array.id))
-        .map(|array| compile_push(array, arrays, semantics, gc))
-        .collect()
+    let mut functions = Vec::new();
+    for array in arrays {
+        if plans.pushes.contains_key(&array.id) {
+            functions.push(compile_push(array, arrays, semantics, gc));
+        }
+        if plans.clears.contains_key(&array.id) {
+            functions.push(compile_clear(array, arrays, semantics, gc));
+        }
+    }
+    functions
 }
 
 fn compile_push(
@@ -118,6 +132,65 @@ fn compile_push(
         .instruction(&Instruction::LocalGet(length))
         .instruction(&Instruction::I32Const(1))
         .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: array_type,
+            field_index: array_value::LENGTH_FIELD,
+        });
+    array_value::emit_increment_version(&mut function, gc, array.id);
+    function.instruction(&Instruction::End);
+    function
+}
+
+fn compile_clear(
+    array: &ResolvedArrayType,
+    arrays: &[ResolvedArrayType],
+    semantics: &crate::semantic::SemanticModel,
+    gc: &GcLayout,
+) -> Function {
+    debug_assert!(array.length.is_none());
+    let storage = array_value::storage_id(array.id, arrays, semantics);
+    let storage_ref = gc.val_type(Type::ArrayStorage(storage));
+    let storage_type = gc.index(Type::ArrayStorage(storage));
+    let array_type = gc.index(Type::Array(array.id));
+    let element = super::try_array_element_type(array.id, semantics)
+        .expect("reachable arrays have lowerable element types");
+
+    // Parameter: array. Locals: backing, previous length.
+    let mut function = Function::new([(1, storage_ref), (1, ValType::I32)]);
+    let backing = 1;
+    let length = 2;
+    function
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: array_type,
+            field_index: array_value::BACKING_FIELD,
+        })
+        .instruction(&Instruction::LocalSet(backing))
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: array_type,
+            field_index: array_value::LENGTH_FIELD,
+        })
+        .instruction(&Instruction::LocalSet(length));
+
+    // Primitive slots do not keep GC objects alive. Null every live reference
+    // slot while retaining the backing allocation and its capacity.
+    if let StorageType::Val(ValType::Ref(reference)) = gc.storage_type(element) {
+        function
+            .instruction(&Instruction::LocalGet(backing))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::I32Const(0))
+            .instruction(&Instruction::RefNull(reference.heap_type))
+            .instruction(&Instruction::LocalGet(length))
+            .instruction(&Instruction::ArrayFill(storage_type));
+    }
+
+    function
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::StructSet {
             struct_type_index: array_type,
             field_index: array_value::LENGTH_FIELD,

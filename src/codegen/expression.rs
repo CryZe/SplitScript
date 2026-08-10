@@ -2951,6 +2951,13 @@ fn compile_expr_unconverted(
                 }
                 function.instruction(&Instruction::Call(context.array_functions.push(array_id)));
             }
+            IntrinsicId::ArrayClear => {
+                let receiver_type = compile_receiver(function, target, context);
+                let Type::Array(array_id) = receiver_type else {
+                    unreachable!("Array.clear has an array receiver");
+                };
+                function.instruction(&Instruction::Call(context.array_functions.clear(array_id)));
+            }
             IntrinsicId::ArrayLength | IntrinsicId::ArraySet => {
                 let receiver_type = compile_receiver(function, target, context);
                 let Type::Array(array_id) = receiver_type else {

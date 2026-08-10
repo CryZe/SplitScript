@@ -1587,6 +1587,24 @@ typeConstructor Array<T> {
         /// The element to append.
         value: T,
     ) -> None;
+
+    /// Removes every element from a growable array.
+    ///
+    /// The array keeps its identity and capacity, so aliases observe the empty
+    /// result and later appends can reuse its storage. Stored references are
+    /// released for garbage collection. Exact `[T; N]` arrays cannot change
+    /// length and do not support `clear`.
+    /// Clearing through any alias invalidates active iteration of this array.
+    ///
+    /// # Example
+    ///
+    /// Reset discovered checkpoints
+    ///
+    /// ```splitscript
+    /// checkpoints.clear()
+    /// ```
+    @intrinsic(ArrayClear)
+    fn clear() -> None;
 }
 
 /// Stores a growable collection of unique values for one script instance.

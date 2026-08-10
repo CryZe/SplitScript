@@ -132,11 +132,12 @@ or behavioral parity.
   does not provide.
 - [ ] Continue `[T]` as the growable ordered sequence instead of adding a
   separate `List<T>` type. Stable wrapper identity, replaceable capacity-backed
-  storage, logical length, and amortized `push` now preserve aliases across
-  growth; `[T; N]` remains fixed-length and does not advertise or accept
-  size-changing methods. Next design bulk extension, indexed insertion/removal,
-  value removal, `pop`, and `clear` from corpus evidence, with explicit
-  bounds/failure and must-use behavior. Both array forms retain indexing,
+  storage, logical length, amortized `push`, and capacity-preserving `clear`
+  now preserve aliases across growth and reset; clearing releases live GC
+  references without reallocating. `[T; N]` remains fixed-length and does not
+  advertise or accept size-changing methods. Next design bulk extension,
+  indexed insertion/removal, value removal, and `pop` from corpus evidence,
+  with explicit bounds/failure and must-use behavior. Both array forms retain indexing,
   iteration, search, length, and `values[index] = value` replacement. Plain
   indexed assignment is non-structural and preserves aliases; add compound
   indexed assignment only with temporaries that evaluate the collection and

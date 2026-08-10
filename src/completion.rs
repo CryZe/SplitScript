@@ -1250,7 +1250,7 @@ fn add_inferred_methods(
         .methods_for_type(receiver)
         .into_iter()
         .filter(|item| {
-            !(item.id == StdlibItemId::ArrayPush
+            !(matches!(item.id, StdlibItemId::ArrayPush | StdlibItemId::ArrayClear)
                 && matches!(
                     receiver,
                     TypeKind::Array {
@@ -1722,6 +1722,7 @@ split {
         assert!(completions.contains(&"contains".to_owned()));
         assert!(completions.contains(&"indexOf".to_owned()));
         assert!(!completions.contains(&"push".to_owned()));
+        assert!(!completions.contains(&"clear".to_owned()));
 
         let growable = r#"
 state "game.exe" {}
@@ -1734,6 +1735,7 @@ split {
         let mut database = CompilerDatabase::new(growable);
         let completions = labels(&mut database, "values.");
         assert!(completions.contains(&"push".to_owned()));
+        assert!(completions.contains(&"clear".to_owned()));
     }
 
     #[test]

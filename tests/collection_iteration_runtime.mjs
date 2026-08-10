@@ -43,7 +43,7 @@ const observed = {
     value: variables.get("Collection Iteration"),
 };
 const expected = {
-    traps: 2,
+    traps: 3,
     value: "1,2",
 };
 if (JSON.stringify(observed) !== JSON.stringify(expected)) {

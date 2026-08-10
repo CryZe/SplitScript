@@ -31,5 +31,11 @@ whileAttached {
             values[0] = value + 1
         }
         setVariable("Collection Iteration", `{visited.length()},{values[0]}`)
+    } else if tick == 4 {
+        let values: [u32] = [1]
+        let alias = values
+        for _value in values {
+            alias.clear()
+        }
     }
 }

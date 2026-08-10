@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: capacity-preserving growable-array clear
+
+- Added source-declared `[T].clear()` while keeping `[T; N]` exact and free of
+  length-changing methods.
+- Preserved wrapper identity and backing capacity across clearing, released
+  live reference slots for garbage collection, and invalidated active
+  iteration as a structural mutation.
+- Added inference, completion, fixed-array diagnostics, aliasing, GC-reference,
+  and fail-fast runtime coverage without emitting helpers for unused array
+  layouts.
+
 ## 2026-08-10: capability-backed indexed array assignment
 
 - Added `array[index] = value` for both growable and exact-length arrays by

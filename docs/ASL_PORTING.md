@@ -662,8 +662,9 @@ route[currentIndex] = nextLevel
 Plain indexed assignment evaluates the collection and index once. Compound
 forms such as `route[nextIndex()] += 1` are deliberately not accepted yet;
 their eventual lowering must not call `nextIndex()` twice. Growable `[T]`
-supports `push`, while insertion, removal, `pop`, and clearing remain specific
-behavior gaps. `[T; N]` remains fixed-length.
+supports `push` and capacity-preserving `clear`; insertion, removal, and `pop`
+remain specific behavior gaps. Both structural operations invalidate active
+iteration. `[T; N]` remains fixed-length and supports neither operation.
 
 Use `Set<T>` when values are discovered while the run progresses and only
 membership matters:

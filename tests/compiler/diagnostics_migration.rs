@@ -607,6 +607,144 @@ fn csharp_static_numeric_parse_explains_result_based_string_parsing() {
 }
 
 #[test]
+fn csharp_convert_calls_explain_source_specific_split_script_forms() {
+    let integer_methods = [
+        "ToSByte", "ToByte", "ToInt16", "ToUInt16", "ToInt32", "ToUInt32", "ToInt64", "ToUInt64",
+    ];
+    for owner in ["Convert", "System.Convert"] {
+        for method in integer_methods {
+            let source = format!(
+                r#"
+                    state "game.exe" {{}}
+                    fn convert(value: f64) {{ return {owner}.{method}(value) }}
+                "#
+            );
+            let diagnostics = splitscript::compile(&source)
+                .expect_err("C# integer conversion should need source-specific guidance");
+            assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+            let diagnostic = &diagnostics[0];
+            assert_eq!(
+                diagnostic.message,
+                "C# integer conversion needs a source-specific SplitScript rewrite"
+            );
+            assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], method);
+            assert!(diagnostic.fixes.is_empty());
+            assert!(diagnostic.notes.iter().any(|note| {
+                note.contains("value.round() as i32")
+                    && note.contains("saturates")
+                    && note.contains("NaN")
+            }));
+            assert!(diagnostic.notes.iter().any(|note| {
+                note.contains("if value { 1 } else { 0 }") && note.contains("text.parse()")
+            }));
+        }
+
+        for method in ["ToSingle", "ToDouble"] {
+            let source = format!(
+                r#"
+                    state "game.exe" {{}}
+                    fn convert(value: i32) {{ return {owner}.{method}(value) }}
+                "#
+            );
+            let diagnostics = splitscript::compile(&source)
+                .expect_err("C# floating conversion should need source-specific guidance");
+            assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+            let diagnostic = &diagnostics[0];
+            assert_eq!(
+                diagnostic.message,
+                "C# floating conversion needs a source-specific SplitScript rewrite"
+            );
+            assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], method);
+            assert!(diagnostic.fixes.is_empty());
+            assert!(
+                diagnostic
+                    .notes
+                    .iter()
+                    .any(|note| { note.contains("value as f32") && note.contains("value as f64") })
+            );
+            assert!(diagnostic.notes.iter().any(|note| {
+                note.contains("text.parse()") && note.contains("locale-independent")
+            }));
+        }
+
+        let boolean_source = format!(
+            r#"
+                state "game.exe" {{}}
+                fn convert(value: i32) {{ return {owner}.ToBoolean(value) }}
+            "#
+        );
+        let diagnostics = splitscript::compile(&boolean_source)
+            .expect_err("C# boolean conversion should need source-specific guidance");
+        assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(
+            diagnostic.message,
+            "C# boolean conversion needs a source-specific SplitScript expression"
+        );
+        assert_eq!(
+            &boolean_source[diagnostic.span.start..diagnostic.span.end],
+            "ToBoolean"
+        );
+        assert!(diagnostic.fixes.is_empty());
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("value != 0"))
+        );
+        assert!(diagnostic.notes.iter().any(|note| {
+            note.contains("equalsIgnoreAsciiCase") && note.contains("malformed text")
+        }));
+
+        let string_source = format!(
+            r#"
+                state "game.exe" {{}}
+                fn convert(value: i32) {{ return {owner}.ToString(value) }}
+            "#
+        );
+        let diagnostics = splitscript::compile(&string_source)
+            .expect_err("C# string conversion should separate display and formatting");
+        assert_eq!(diagnostics.len(), 1, "unexpected cascade: {diagnostics:#?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(
+            diagnostic.message,
+            "C# `Convert.ToString` maps to Display only for its ordinary one-value form"
+        );
+        assert_eq!(
+            &string_source[diagnostic.span.start..diagnostic.span.end],
+            "ToString"
+        );
+        assert!(diagnostic.fixes.is_empty());
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| { note.contains("value as String") && note.contains("setVariable") })
+        );
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| { note.contains("integer, radix") && note.contains("no canonical") })
+        );
+    }
+
+    splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn widen(value: u8) -> i32 { return value as i32 }
+            fn rounded(value: f64) -> i32 { return value.round() as i32 }
+            fn boolInteger(value: bool) -> i32 { return if value { 1 } else { 0 } }
+            fn parsed(text: String) -> i32! { return text.parse() }
+            fn floating(value: i32) -> f64 { return value as f64 }
+            fn boolNumeric(value: i32) -> bool { return value != 0 }
+            fn displayed(value: i32) -> String { return value as String }
+        "#,
+    )
+    .expect("canonical source-specific conversions should compile");
+}
+
+#[test]
 fn csharp_square_root_explains_receiver_width() {
     for (owner, width) in [("Math", "f64"), ("MathF", "f32")] {
         let source = format!(

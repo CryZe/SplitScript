@@ -288,6 +288,47 @@ infinity and underflow produces zero, while integer overflow remains an error.
 Float conversion is correctly rounded directly to `f32` or `f64` and does not
 inherit C# culture settings.
 
+## C# `Convert` operations
+
+C# `Convert.To*` calls do not all map to one SplitScript cast. Choose the
+operation from the source value and the behavior the script needs:
+
+```splitscript
+let widened: i32 = byteValue as i32
+let rounded: i32 = floatValue.round() as i32
+let enabled = numericFlag != 0
+let parsed: f64 = text.parse() else 0.0
+```
+
+Fixed-width integer `as` casts use SplitScript's numeric cast rules. In
+particular, narrowing integers retain their low bits, while C# `Convert` throws
+when a narrowing conversion is out of range. A floating-point `as` cast
+truncates toward zero, saturates at an integer boundary, and maps NaN to zero.
+For a finite, in-range value, `value.round() as i32` preserves the
+midpoint-to-even rounding of `Convert.ToInt32`; it still does not reproduce C#
+overflow and NaN exceptions.
+
+For strings, infer the intended fixed-width number from the receiving boundary
+and use fallible `parse()`. SplitScript parsing is strict, locale-independent
+ASCII decimal parsing, unlike C# conversions that may accept surrounding
+whitespace and current-culture formatting. A numeric `Convert.ToBoolean(value)`
+becomes `value != 0`. For text, trim and compare `true` and `false` explicitly
+with `equalsIgnoreAsciiCase`, choosing a Result or fallback for malformed text.
+
+The ordinary one-value `Convert.ToString(value)` maps to Display:
+
+```splitscript
+let text = value as String
+print(value)
+setVariable("Value", value)
+```
+
+Interpolation, `print`, and `setVariable` already accept Display values, so
+they do not need an intermediate string cast. Radix and culture/provider
+overloads are separate formatting operations. In particular,
+`Convert.ToString(integer, 16)` has no canonical SplitScript replacement yet;
+do not silently turn it into decimal Display.
+
 ## Version-labelled ASL states
 
 The second argument in `state("game.exe", "Steam")` is a layout label, not

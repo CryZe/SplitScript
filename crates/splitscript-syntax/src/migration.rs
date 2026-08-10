@@ -203,6 +203,14 @@ pub const CSHARP_STRING_JOIN_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.join-call");
 pub const CSHARP_NUMERIC_PARSE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.numeric.static-parse-call");
+pub const CSHARP_CONVERT_INTEGER_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.convert.integer-call");
+pub const CSHARP_CONVERT_FLOAT_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.convert.float-call");
+pub const CSHARP_CONVERT_BOOLEAN_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.convert.boolean-call");
+pub const CSHARP_CONVERT_STRING_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("csharp.convert.string-call");
 pub const CSHARP_SQUARE_ROOT_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.math.square-root-call");
 pub const CSHARP_TRUNCATE_DIAGNOSTIC: MigrationDiagnosticId =
@@ -646,6 +654,55 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         ],
     },
     MigrationDiagnostic {
+        id: CSHARP_CONVERT_INTEGER_DIAGNOSTIC,
+        concept: MigrationConceptId::new("conversion.integer"),
+        message: "C# integer conversion needs a source-specific SplitScript rewrite",
+        primary_label: "choose checked parsing, numeric casting, rounding, or boolean mapping",
+        notes: &[
+            "for an integer source, use `value as i32` (or the matching fixed-width target) only after reviewing narrowing: SplitScript retains low bits, while `Convert` throws on out-of-range narrowing",
+            "for an f32 or f64 source, `value.round() as i32` preserves midpoint-to-even rounding only for finite in-range values; SplitScript's final cast saturates and maps NaN to zero instead of throwing",
+            "for a boolean source, write `if value { 1 } else { 0 }`; for a string source, infer the fixed-width target from `text.parse()` and handle its Result",
+            "C# string conversion accepts current-culture formatting and surrounding whitespace, while SplitScript numeric parsing is strict locale-independent ASCII decimal text",
+            "there is no automatic rewrite because the static call does not identify the source type, overflow policy, or failure boundary",
+        ],
+    },
+    MigrationDiagnostic {
+        id: CSHARP_CONVERT_FLOAT_DIAGNOSTIC,
+        concept: MigrationConceptId::new("conversion.float"),
+        message: "C# floating conversion needs a source-specific SplitScript rewrite",
+        primary_label: "choose a numeric cast, strict string parse, or boolean mapping",
+        notes: &[
+            "for a numeric source, use `value as f32` or `value as f64` to make the intended floating width explicit",
+            "for a string source, write `let value: f64 = text.parse()?` (or handle it with `else`); SplitScript parses strict locale-independent ASCII rather than current-culture text",
+            "for a boolean source, write `if value { 1.0 } else { 0.0 }` with the receiving f32 or f64 type made explicit",
+            "there is no automatic rewrite because the static call does not identify the source type or parse-failure policy",
+        ],
+    },
+    MigrationDiagnostic {
+        id: CSHARP_CONVERT_BOOLEAN_DIAGNOSTIC,
+        concept: MigrationConceptId::new("conversion.boolean"),
+        message: "C# boolean conversion needs a source-specific SplitScript expression",
+        primary_label: "preserve numeric or textual truth semantics explicitly",
+        notes: &[
+            "for a numeric source, use `value != 0`; this preserves `Convert.ToBoolean`'s nonzero rule, including negative values",
+            "for an existing boolean, use the value directly rather than converting it",
+            "for a string source, trim and compare `true` or `false` explicitly with `equalsIgnoreAsciiCase`; decide how malformed text becomes a Result or fallback",
+            "there is no automatic rewrite because numeric, string, optional, and already-boolean inputs require different expressions",
+        ],
+    },
+    MigrationDiagnostic {
+        id: CSHARP_CONVERT_STRING_DIAGNOSTIC,
+        concept: MigrationConceptId::new("conversion.string"),
+        message: "C# `Convert.ToString` maps to Display only for its ordinary one-value form",
+        primary_label: "separate display conversion from radix or culture-sensitive formatting",
+        notes: &[
+            "for one non-null value implementing Display, use `value as String`; interpolation, `print`, and `setVariable` accept Display values directly without a cast",
+            "C# null and object overloads have different behavior and need an explicit Option or concrete-type policy",
+            "the `Convert.ToString(integer, radix)` overload is integer radix formatting, not ordinary Display, and has no canonical SplitScript operation yet",
+            "culture and format-provider overloads are intentionally not rewritten because SplitScript display is deterministic and locale-independent",
+        ],
+    },
+    MigrationDiagnostic {
         id: CSHARP_TIMESPAN_PARSE_DIAGNOSTIC,
         concept: MigrationConceptId::new("duration.parse"),
         message: "C# `TimeSpan.Parse` needs an explicit duration migration",
@@ -704,7 +761,7 @@ pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnos
     let (owner, method) = match path {
         [owner, method] => (owner, method),
         [system, owner, method]
-            if system == "System" && matches!(owner.as_str(), "Math" | "MathF") =>
+            if system == "System" && matches!(owner.as_str(), "Math" | "MathF" | "Convert") =>
         {
             (owner, method)
         }
@@ -721,6 +778,16 @@ pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnos
     }
     if owner == "Duration" && method == "FromTicks" {
         return Some(CSHARP_TIMESPAN_TICKS_DIAGNOSTIC);
+    }
+    if owner == "Convert" {
+        return match method.as_str() {
+            "ToSByte" | "ToByte" | "ToInt16" | "ToUInt16" | "ToInt32" | "ToUInt32" | "ToInt64"
+            | "ToUInt64" => Some(CSHARP_CONVERT_INTEGER_DIAGNOSTIC),
+            "ToSingle" | "ToDouble" => Some(CSHARP_CONVERT_FLOAT_DIAGNOSTIC),
+            "ToBoolean" => Some(CSHARP_CONVERT_BOOLEAN_DIAGNOSTIC),
+            "ToString" => Some(CSHARP_CONVERT_STRING_DIAGNOSTIC),
+            _ => None,
+        };
     }
     if matches!(owner.as_str(), "Math" | "MathF") && method == "Sqrt" {
         return Some(CSHARP_SQUARE_ROOT_DIAGNOSTIC);
@@ -1357,6 +1424,59 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         summary: "Replace static Parse/TryParse calls and output parameters with fallible `text.parse()` and ordinary Result handling.",
         targets: &[MigrationTarget::StandardLibraryItem("String.parse")],
         cookbook_anchor: Some("c-string-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("conversion.integer"),
+        name: "Integer conversion",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Choose fixed-width `as`, midpoint-to-even rounding, strict string parsing, or an explicit boolean mapping from the source type; C# checked overflow is not SplitScript cast behavior.",
+        targets: &[
+            MigrationTarget::Language("as"),
+            MigrationTarget::Language("if"),
+            MigrationTarget::StandardLibraryItem("String.parse"),
+            MigrationTarget::StandardLibraryItem("Float.round"),
+        ],
+        cookbook_anchor: Some("c-convert-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("conversion.float"),
+        name: "Floating-point conversion",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use an explicit f32/f64 `as` cast for numbers, `String.parse` for text, or an `if` expression for booleans.",
+        targets: &[
+            MigrationTarget::Language("as"),
+            MigrationTarget::Language("if"),
+            MigrationTarget::StandardLibraryItem("String.parse"),
+        ],
+        cookbook_anchor: Some("c-convert-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("conversion.boolean"),
+        name: "Boolean conversion",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `value != 0` for numbers, the value itself for bool, and explicit trimmed ASCII-insensitive true/false handling for strings.",
+        targets: &[
+            MigrationTarget::Language("if"),
+            MigrationTarget::StandardLibraryItem("String.trimAsciiWhitespace"),
+            MigrationTarget::StandardLibraryItem("String.equalsIgnoreAsciiCase"),
+        ],
+        cookbook_anchor: Some("c-convert-operations"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("conversion.string"),
+        name: "Display conversion",
+        sources: CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use `value as String` for ordinary Display conversion; radix, culture, null, and object overloads require separate policies.",
+        targets: &[MigrationTarget::Language("as")],
+        cookbook_anchor: Some("c-convert-operations"),
         spellings: &[],
     },
     MigrationConcept {

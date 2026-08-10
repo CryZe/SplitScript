@@ -54,9 +54,9 @@ or behavioral parity.
   campaign used a different compiler.
 - [ ] Continue refreshing the ASL migration catalog and cookbook for
   non-lifecycle misunderstandings found by the campaign. The next concrete
-  audit queue is `Convert.To*`, remaining timer/run metadata paths, and
-  collection mutations whose ordering or duplicate semantics are not already
-  covered by arrays and sets. String/array length and collection count now have
+  audit queue is remaining timer/run metadata paths and collection mutations
+  whose ordering or duplicate semantics are not already covered by arrays and
+  sets. String/array length, collection count, and `Convert.To*` now have
   canonical guidance; consult the roadmap archive before re-planning any
   completed string, numeric, or finite-settings slice. Do not add compatibility
   aliases.
@@ -355,6 +355,12 @@ remaining work is product hardening and distribution.
   such as Rust compiler-builtins' MIT-licensed libm `pow`/`powf`, including its
   scaling helpers, rather than introducing an ad-hoc approximation or a host
   import. Keep `squared()` as the simple exact-intent API for exponent two.
+- [ ] Add deterministic integer radix formatting for the Fallout 3/New Vegas
+  `Convert.ToString(cellId, 16)` pattern. Keep ordinary `as String` tied to
+  decimal Display; design the radix API around an explicit supported base,
+  signed-value semantics, invalid-base failure, and case selection (or compose
+  lowercase hexadecimal with `toAsciiUpperCase`) before implementing it in the
+  source-defined standard-library model.
 - [ ] Generalize first-class indexing beyond arrays only when another real type
   needs it. Design an operator protocol with inferred index and output types
   (the current single-receiver capability graph has no associated types), then

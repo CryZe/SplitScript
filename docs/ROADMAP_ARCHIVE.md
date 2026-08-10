@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-10: source-specific C# `Convert` migration
+
+- Classified the observed integer, floating-point, boolean, and string
+  `Convert.To*` families separately instead of suggesting one unsafe cast.
+- Kept migration rewrites deliberate where C# checked overflow,
+  midpoint-to-even conversion, current-culture parsing, null handling, or
+  formatting semantics differ from SplitScript.
+- Recorded integer radix formatting as a remaining standard-library gap and
+  removed the completed `Convert.To*` audit from the active campaign queue.
+
 ## 2026-08-10: type-aware C# collection count migration
 
 - Added a machine-applicable `.Count` to `.length()` rewrite after the receiver

@@ -1637,6 +1637,30 @@ typeConstructor Array<T> {
         index: u32,
     ) -> None;
 
+    /// Removes the first element equal to a value.
+    ///
+    /// Returns whether an element was removed. Elements are searched from the
+    /// beginning, duplicates after the first match remain in place, and an
+    /// absent value leaves the array unchanged. The receiver keeps its identity
+    /// and capacity. Exact `[T; N]` arrays cannot change length and do not
+    /// support `remove`.
+    ///
+    /// # Example
+    ///
+    /// Consume one completed checkpoint
+    ///
+    /// ```splitscript
+    /// let removed = pendingCheckpoints.remove("forest")
+    /// ```
+    fn remove(
+        /// The first equal element to remove.
+        value: T,
+    ) -> bool where T: Equatable {
+        let index = self.indexOf(value) else return false
+        self.removeAt(index)
+        return true
+    }
+
     /// Removes and returns the final element when one exists.
     ///
     /// An empty array returns `None` without changing its structural version.

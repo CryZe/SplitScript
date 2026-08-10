@@ -1255,6 +1255,7 @@ fn add_inferred_methods(
                 StdlibItemId::ArrayPush
                     | StdlibItemId::ArrayExtend
                     | StdlibItemId::ArrayRemoveAt
+                    | StdlibItemId::ArrayRemove
                     | StdlibItemId::ArrayPop
                     | StdlibItemId::ArrayClear
             ) && matches!(
@@ -1730,6 +1731,7 @@ split {
         assert!(!completions.contains(&"push".to_owned()));
         assert!(!completions.contains(&"extend".to_owned()));
         assert!(!completions.contains(&"removeAt".to_owned()));
+        assert!(!completions.contains(&"remove".to_owned()));
         assert!(!completions.contains(&"pop".to_owned()));
         assert!(!completions.contains(&"clear".to_owned()));
 
@@ -1746,6 +1748,7 @@ split {
         assert!(completions.contains(&"push".to_owned()));
         assert!(completions.contains(&"extend".to_owned()));
         assert!(completions.contains(&"removeAt".to_owned()));
+        assert!(completions.contains(&"remove".to_owned()));
         assert!(completions.contains(&"pop".to_owned()));
         assert!(completions.contains(&"clear".to_owned()));
     }

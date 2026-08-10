@@ -883,18 +883,20 @@ operations. Arrays can contain records, enums, strings, and other arrays, and
 can themselves be stored in records or continuation frames.
 
 Only growable `[T]` arrays provide `push(value)`, `extend(values)`,
-`removeAt(index)`, `pop()`, and `clear()`. Extension appends a typed array in
-order and captures its source length first, so `values.extend(values)`
-duplicates the original elements once. `removeAt` shifts later elements left
-and traps when the index is outside the logical length, consistently with
-indexed access. `pop` returns the final element as `T?`; an empty array returns
-`None` without mutating, while a present element is removed in place. Clearing
-keeps the array object and its backing capacity, so aliases still observe the
-same array and later growth can reuse its storage. Removed, popped, and cleared
-reference elements are released rather than retained in unused capacity.
-Successful length changes are structural mutations and invalidate an active
-traversal; exact `[T; N]` arrays provide none of these operations because their
-length is part of their type.
+`removeAt(index)`, `remove(value)`, `pop()`, and `clear()`. Extension appends a
+typed array in order and captures its source length first, so
+`values.extend(values)` duplicates the original elements once. `removeAt`
+shifts later elements left and traps when the index is outside the logical
+length, consistently with indexed access. Equality-constrained `remove`
+removes only the first equal element and reports whether one was found; an
+absent value leaves the array unchanged. `pop` returns the final element as
+`T?`; an empty array returns `None` without mutating, while a present element
+is removed in place. Clearing keeps the array object and its backing capacity,
+so aliases still observe the same array and later growth can reuse its storage.
+Removed, popped, and cleared reference elements are released rather than
+retained in unused capacity. Successful length changes are structural
+mutations and invalidate an active traversal; exact `[T; N]` arrays provide
+none of these operations because their length is part of their type.
 
 Arrays can be traversed directly without manually managing an index:
 

@@ -30,7 +30,7 @@ instance.exports.update();
 instance.exports.update();
 
 const observed = variables.get("Array Push");
-const expected = "5,5,100,110,1,more,true";
+const expected = "5,5,100,90,70,110,120,true,false,1,more,again,true,false,true";
 if (observed !== expected) {
     throw new Error(`unexpected array output: ${JSON.stringify({ expected, observed })}`);
 }

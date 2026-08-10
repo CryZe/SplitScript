@@ -1543,11 +1543,15 @@ fn growable_arrays_support_length_mutation_but_fixed_arrays_reject_it() {
             let removalIndex = 0
             values.removeAt(removalIndex)
             alias.push(8)
+            let _removed = values.remove(8)
+            let _absent = values.remove(99)
             let _popped: u32? = values.pop()
             let empty: [u32] = []
             let _missing: u32? = empty.pop()
             let inferred = []
             inferred.extend([8u8, 9])
+            let inferredRemoval = []
+            let _notPresent = inferredRemoval.remove(10u16)
             print(values[0])
             print(inferred[1])
         }
@@ -1603,6 +1607,22 @@ fn growable_arrays_support_length_mutation_but_fixed_arrays_reject_it() {
     assert!(errors.iter().any(|error| {
         error.message.contains("fixed array")
             && error.message.contains("`removeAt`")
+            && error.message.contains("growable `[T]`")
+    }));
+
+    let errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            whileAttached {
+                let fixed: [u8; 2] = [1, 2]
+                let _removed = fixed.remove(1)
+            }
+        "#,
+    )
+    .expect_err("fixed arrays must reject value removal");
+    assert!(errors.iter().any(|error| {
+        error.message.contains("fixed array")
+            && error.message.contains("`remove`")
             && error.message.contains("growable `[T]`")
     }));
 

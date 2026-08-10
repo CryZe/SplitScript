@@ -1703,6 +1703,7 @@ fn unknown_calls_suggest_canonical_names_across_naming_styles() {
             "incrementBy",
         ),
         ("values.AddRange([2, 3])", "AddRange", "extend", "extend"),
+        ("values.Remove(1)", "Remove", "remove", "remove"),
         ("add_one(value)", "add_one", "addOne", "addOne"),
     ];
 

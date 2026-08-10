@@ -22,6 +22,9 @@ whileAttached {
         alias.push(100)
         let last = values.pop() else 0
         alias.push(110)
+        let removedFirst = values.remove(70)
+        let removedMissing = alias.remove(999)
+        values.push(120)
         let names = ["old", "stale"]
         let namesAlias = names
         names.clear()
@@ -29,11 +32,14 @@ whileAttached {
         names.extend(["new", "more"])
         namesAlias.removeAt(1)
         let lastName = names.pop() else "missing"
+        let removedName = namesAlias.remove("fresh")
+        let removedMissingName = names.remove("missing")
+        namesAlias.push("again")
         let empty: [u32] = []
         let missing = empty.pop()
         setVariable(
             "Array Push",
-            `{values.length()},{alias.length()},{last},{values[4]},{names.length()},{lastName},{missing == None}`,
+            `{values.length()},{alias.length()},{last},{values[0]},{values[1]},{values[3]},{values[4]},{removedFirst},{removedMissing},{names.length()},{lastName},{names[0]},{removedName},{removedMissingName},{missing == None}`,
         )
     }
 }

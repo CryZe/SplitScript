@@ -38,6 +38,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::ArrayContains,
         StdlibItemId::ArrayIndexOf,
         StdlibItemId::ArrayExtend,
+        StdlibItemId::ArrayRemove,
         StdlibItemId::ArrayPop,
         StdlibItemId::ResultToOption,
         StdlibItemId::AddressOffset,
@@ -636,7 +637,15 @@ fn array_search_methods_are_source_defined_and_preserve_element_constraints() {
         library.render_signature(StdlibItemId::ArrayIndexOf),
         "[T].indexOf(value: T) -> u32? where T: Equatable"
     );
-    for item in [StdlibItemId::ArrayContains, StdlibItemId::ArrayIndexOf] {
+    assert_eq!(
+        library.render_signature(StdlibItemId::ArrayRemove),
+        "[T].remove(value: T) -> bool where T: Equatable"
+    );
+    for item in [
+        StdlibItemId::ArrayContains,
+        StdlibItemId::ArrayIndexOf,
+        StdlibItemId::ArrayRemove,
+    ] {
         assert!(matches!(
             library.item(item).implementation,
             Implementation::LibraryBody { .. }

@@ -58,5 +58,15 @@ whileAttached {
     } else if tick == 9 {
         let values: [u32] = []
         let _missing = values.pop()
+    } else if tick == 10 {
+        let values: [u32] = [1, 2]
+        for _value in values {
+            let _removed = values.remove(2)
+        }
+    } else if tick == 11 {
+        let values: [u32] = [1, 2]
+        for _value in values {
+            let _missing = values.remove(99)
+        }
     }
 }

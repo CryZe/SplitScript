@@ -184,6 +184,7 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::ArrayPush
         | StdlibItemId::ArrayExtend
         | StdlibItemId::ArrayRemoveAt
+        | StdlibItemId::ArrayRemove
         | StdlibItemId::ArrayPop
         | StdlibItemId::ArrayClear => ARRAY_EXAMPLE,
         StdlibItemId::AddressOffset | StdlibItemId::AddressAdd => ADDRESS_EXAMPLE,
@@ -383,14 +384,14 @@ mod tests {
                 }
                 Implementation::LibraryBody { .. } => {
                     let declaration = format!("fn {}", item.name);
-                    let position = source.find(&declaration).unwrap_or_else(|| {
-                        panic!("`{}` must have a source body", item.qualified_name)
-                    });
-                    assert!(
+                    let authored = source.match_indices(&declaration).any(|(position, _)| {
                         matches!(
                             source.as_bytes().get(position + declaration.len()),
                             Some(b'(' | b'<')
-                        ),
+                        )
+                    });
+                    assert!(
+                        authored,
                         "`{}` must have a source body",
                         item.qualified_name
                     );

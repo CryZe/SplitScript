@@ -138,10 +138,12 @@ or behavioral parity.
   advertise or accept size-changing methods. Source-defined `extend` appends a
   typed array and safely handles self-extension. Source-defined optional
   `pop` now composes indexed access with `removeAt`, returns `None` without a
-  structural mutation when empty, and retains capacity. Next design indexed
-  insertion and value removal from corpus evidence; indexed `removeAt` shifts
-  in place while preserving aliases and capacity, with explicit bounds
-  behavior. Both array forms retain indexing,
+  structural mutation when empty, and retains capacity. Equality-constrained
+  `remove(value)` now removes the first match and reports absence without a
+  structural mutation. Indexed `removeAt` shifts in place while preserving
+  aliases and capacity, with explicit bounds behavior. Corpus review found no
+  current indexed-insertion use, so defer that API until maintained-port
+  evidence establishes its semantics. Both array forms retain indexing,
   iteration, search, length, and `values[index] = value` replacement. Plain
   indexed assignment is non-structural and preserves aliases; add compound
   indexed assignment only with temporaries that evaluate the collection and

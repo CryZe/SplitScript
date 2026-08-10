@@ -662,9 +662,8 @@ route[currentIndex] = nextLevel
 Plain indexed assignment evaluates the collection and index once. Compound
 forms such as `route[nextIndex()] += 1` are deliberately not accepted yet;
 their eventual lowering must not call `nextIndex()` twice. Growable `[T]`
-supports `push`, `extend`, indexed `removeAt`, optional `pop`, and
-capacity-preserving `clear`; value-based removal remains a specific behavior
-gap. C#
+supports `push`, `extend`, indexed `removeAt`, optional `pop`, first-match
+`remove(value)`, and capacity-preserving `clear`. C#
 `list.AddRange(values)` becomes
 `list.extend(values)` once both collections are represented as typed arrays;
 self-extension duplicates the original elements once. Successful structural
@@ -672,6 +671,9 @@ operations invalidate active iteration. C# `RemoveAt(index)` maps directly to
 `removeAt(index)`; an out-of-range `u32` index traps just like array indexing.
 Use `let last = values.pop() else ...` where C# removes a final list or stack
 element: SplitScript returns `None` for an empty array instead of throwing.
+`List<T>.Remove(value)` maps to `remove(value)`, removes only the first equal
+element, and returns whether a match existed. Ignoring that boolean is valid
+when the source does not distinguish absence.
 `[T; N]` remains fixed-length and supports none of these operations.
 
 Use `Set<T>` when values are discovered while the run progresses and only
@@ -724,8 +726,9 @@ handler without a separate event API. The generated update loop runs
 
 Growable ordered storage, insertion order, and repeated equal values all belong
 to `[T]`. They do not justify another collection type. Record any still-missing
-specific operation—indexed insertion, removal, `pop`, or clearing—rather than
-describing `List<T>` itself as missing.
+specific operation rather than describing `List<T>` itself as missing. Indexed
+insertion remains deferred until a maintained port demonstrates that it is
+needed.
 
 ## Finite settings families
 

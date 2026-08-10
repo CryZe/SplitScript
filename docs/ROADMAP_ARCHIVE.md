@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-10: source-defined first-match array removal
+
+- Added equality-constrained `[T].remove(value) -> bool` as standard-library
+  source composed from `indexOf` and `removeAt`, matching ordered C# list
+  semantics without another backend intrinsic.
+- Removed only the first duplicate, reported absence without mutation, kept
+  aliases and capacity stable, released reference slots, and invalidated
+  iteration only when a match was removed.
+- Added reverse empty-array inference, fixed-array diagnostics and completion
+  filtering, runtime coverage, and `List<T>.Remove` migration guidance.
+
 ## 2026-08-10: source-defined optional array pop
 
 - Added growable `[T].pop() -> T?` as a standard-library body composed from

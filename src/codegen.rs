@@ -565,6 +565,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             &abi,
             &function_debug_names,
             recorder,
+            program,
             source_name,
             source,
         )

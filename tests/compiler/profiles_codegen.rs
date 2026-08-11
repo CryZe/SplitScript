@@ -199,6 +199,27 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
             "missing debug function name `{expected}`: {function_names:#?}"
         );
     }
+    let local_names = debug_local_names(&debug);
+    let identity = function_names
+        .iter()
+        .find(|(_, name)| name.starts_with("identity"))
+        .map(|(index, _)| *index)
+        .expect("the specialized identity function should be named");
+    let while_attached = function_names
+        .iter()
+        .find(|(_, name)| name == "whileAttached")
+        .map(|(index, _)| *index)
+        .expect("the lifecycle function should be named");
+    assert!(
+        local_names[&identity]
+            .iter()
+            .any(|(_, name)| name == "value")
+    );
+    assert!(
+        local_names[&while_attached]
+            .iter()
+            .any(|(_, name)| name == "visible")
+    );
     assert_eq!(
         function_names
             .iter()
@@ -287,25 +308,49 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
         source_name
     );
     let mut subprograms = Vec::new();
+    let mut parameters = Vec::new();
+    let mut variables = Vec::new();
+    let mut base_types = Vec::new();
+    let mut lexical_blocks = 0;
     while let Some(entry) = entries
         .next_dfs()
         .expect("generated DWARF entries should parse")
     {
-        if entry.tag() != gimli::DW_TAG_subprogram {
+        let Some(value) = entry.attr_value(gimli::DW_AT_name) else {
+            if entry.tag() == gimli::DW_TAG_lexical_block {
+                lexical_blocks += 1;
+                assert!(entry.attr_value(gimli::DW_AT_low_pc).is_some());
+                assert!(entry.attr_value(gimli::DW_AT_high_pc).is_some());
+            }
             continue;
-        }
-        let value = entry
-            .attr_value(gimli::DW_AT_name)
-            .expect("source-backed subprograms should have names");
+        };
         let name = dwarf
             .attr_string(&unit, value)
-            .expect("subprogram names should be strings")
+            .expect("debug names should be strings")
             .to_string_lossy()
             .into_owned();
-        subprograms.push(name);
+        match entry.tag() {
+            gimli::DW_TAG_subprogram => subprograms.push(name),
+            gimli::DW_TAG_formal_parameter => {
+                assert!(entry.attr_value(gimli::DW_AT_type).is_some());
+                assert_wasm_local_location(entry, unit.encoding());
+                parameters.push(name);
+            }
+            gimli::DW_TAG_variable => {
+                assert!(entry.attr_value(gimli::DW_AT_type).is_some());
+                assert_wasm_local_location(entry, unit.encoding());
+                variables.push(name);
+            }
+            gimli::DW_TAG_base_type => base_types.push(name),
+            _ => {}
+        }
     }
     assert!(subprograms.iter().any(|name| name.starts_with("identity")));
     assert!(subprograms.iter().any(|name| name == "whileAttached"));
+    assert!(parameters.iter().any(|name| name == "value"));
+    assert!(variables.iter().any(|name| name == "visible"));
+    assert!(base_types.iter().any(|name| name == "u16"));
+    assert!(lexical_blocks >= 1);
 
     assert!(Parser::new(0).parse_all(&release).all(|payload| {
         !matches!(
@@ -329,6 +374,29 @@ fn debug_dwarf(wasm: &[u8]) -> std::collections::HashMap<String, &[u8]> {
                 .then(|| (section.name().to_owned(), section.data()))
         })
         .collect()
+}
+
+fn assert_wasm_local_location<R: gimli::Reader>(
+    entry: &gimli::DebuggingInformationEntry<R>,
+    encoding: gimli::Encoding,
+) {
+    let gimli::AttributeValue::Exprloc(expression) = entry
+        .attr_value(gimli::DW_AT_location)
+        .expect("source variables should have locations")
+    else {
+        panic!("source variable location should be an expression")
+    };
+    let mut operations = expression.operations(encoding);
+    assert!(matches!(
+        operations.next().expect("location expression should parse"),
+        Some(gimli::Operation::WasmLocal { .. })
+    ));
+    assert!(
+        operations
+            .next()
+            .expect("location expression should parse")
+            .is_none()
+    );
 }
 
 fn wasm_instruction_boundaries(wasm: &[u8]) -> std::collections::BTreeSet<u64> {
@@ -384,6 +452,39 @@ fn debug_function_names(wasm: &[u8]) -> Option<(String, Vec<(u32, String)>)> {
         ));
     }
     None
+}
+
+fn debug_local_names(wasm: &[u8]) -> std::collections::BTreeMap<u32, Vec<(u32, String)>> {
+    let mut output = std::collections::BTreeMap::new();
+    for payload in Parser::new(0).parse_all(wasm) {
+        let Payload::CustomSection(section) = payload.expect("generated module should parse")
+        else {
+            continue;
+        };
+        let wasmparser::KnownCustom::Name(reader) = section.as_known() else {
+            continue;
+        };
+        for subsection in reader {
+            let wasmparser::Name::Local(functions) =
+                subsection.expect("generated name subsection should parse")
+            else {
+                continue;
+            };
+            for function in functions {
+                let function = function.expect("generated local names should parse");
+                let names = function
+                    .names
+                    .into_iter()
+                    .map(|name| {
+                        let name = name.expect("generated local name should parse");
+                        (name.index, name.name.to_owned())
+                    })
+                    .collect();
+                output.insert(function.index, names);
+            }
+        }
+    }
+    output
 }
 
 #[test]

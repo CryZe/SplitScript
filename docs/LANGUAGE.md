@@ -533,12 +533,17 @@ They also contain initial DWARF v5 compilation-unit, subprogram, and line-table
 metadata. Source-backed function bodies map emitted instruction boundaries to
 the original expression lines, including source expressions moved into async
 poll functions. Compiler-generated scaffolding deliberately has no source
-location. Source identity flows through every compiler stage: the CLI records
-an absolute `.split` path, the extension records VS Code's native file path,
-and non-file editor documents retain their URI. APIs that intentionally compile
-only an in-memory string use `input.split`. Describing lexical scopes and
-scalar variable locations remains future work. Release builds omit both the
-name section and every `.debug_*` section.
+location. Source parameters and primitive scalar locals in direct synchronous
+functions receive Wasm local names, DWARF base types, declaration metadata,
+lexical visibility ranges, and `DW_OP_WASM_location` expressions. Values moved
+into async GC frames are omitted until location changes across suspension can
+be represented honestly.
+
+Source identity flows through every compiler stage: the CLI records an
+absolute `.split` path, the extension records VS Code's native file path, and
+non-file editor documents retain their URI. APIs that intentionally compile
+only an in-memory string use `input.split`. Release builds omit both the name
+section and every `.debug_*` section.
 
 The statement form accepts bindings, expression statements, assignments, `if`,
 `while`, and `await` or `retry` statements. It rejects `return`, `throw`,

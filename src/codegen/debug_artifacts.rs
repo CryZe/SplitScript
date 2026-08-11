@@ -1,19 +1,28 @@
 //! Profile-aware debugger metadata assembled only after Wasm indices are final.
 
-use std::{cell::RefCell, collections::BTreeMap};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap, HashSet},
+};
 
 use gimli::{
     Encoding, Format, LineEncoding, LittleEndian,
-    write::{Address, AttributeValue, DwarfUnit, EndianVec, LineProgram, LineString, Sections},
+    write::{
+        Address, AttributeValue, DwarfUnit, EndianVec, Expression, LineProgram, LineString,
+        Sections, UnitEntryId,
+    },
 };
-use wasm_encoder::{Function, NameMap, NameSection};
+use wasm_encoder::{Function, IndirectNameMap, NameMap, NameSection};
 
-use super::imports::Abi;
+use super::{Type, imports::Abi};
 use crate::{
-    ast::{EnumDecl, Program, Span, TypeApplicationId},
+    ast::{
+        EnumDecl, FunctionDecl, MatchArm, MatchPattern, Program, Span, TypeApplicationId, ValueId,
+    },
     semantic::{FunctionInstance, SemanticModel},
     stdlib::StandardLibrary,
     types::{TypeId, TypeKind},
+    visit::{self, Visitor},
 };
 
 pub(super) struct DebugArtifactPlan {
@@ -39,6 +48,15 @@ struct BodyRange {
     raw_body_length: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct DebugVariable {
+    function: u32,
+    value: ValueId,
+    local: u32,
+    ty: Type,
+    parameter: bool,
+}
+
 /// Interior-mutability is intentionally confined to debug emission. Normal
 /// code generation stays unaware of line-table state and release compilation
 /// never constructs this recorder.
@@ -46,6 +64,7 @@ struct BodyRange {
 pub(super) struct DebugRecorder {
     markers: RefCell<Vec<BodyMarker>>,
     bodies: RefCell<BTreeMap<u32, BodyRange>>,
+    variables: RefCell<Vec<DebugVariable>>,
 }
 
 #[derive(Clone, Copy)]
@@ -98,6 +117,33 @@ impl DebugRecorder {
             previous.is_none(),
             "Wasm function bodies are registered once"
         );
+    }
+
+    pub fn register_variable(
+        &self,
+        function: u32,
+        value: ValueId,
+        local: u32,
+        ty: Type,
+        parameter: bool,
+    ) {
+        if ty == Type::None {
+            return;
+        }
+        let mut variables = self.variables.borrow_mut();
+        assert!(
+            !variables
+                .iter()
+                .any(|variable| variable.function == function && variable.value == value),
+            "source variables are registered once per Wasm function"
+        );
+        variables.push(DebugVariable {
+            function,
+            value,
+            local,
+            ty,
+            parameter,
+        });
     }
 }
 
@@ -164,11 +210,140 @@ fn type_name(
     }
 }
 
+#[derive(Debug, Clone)]
+struct SourceVariable {
+    name: String,
+    name_span: Span,
+    declaration_span: Span,
+    scope_span: Span,
+}
+
+fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
+    #[derive(Default)]
+    struct Collector {
+        variables: HashMap<ValueId, SourceVariable>,
+        scopes: Vec<Span>,
+    }
+
+    impl Collector {
+        fn insert(
+            &mut self,
+            id: ValueId,
+            name: &str,
+            name_span: Span,
+            declaration_span: Span,
+            scope_span: Span,
+        ) {
+            let previous = self.variables.insert(
+                id,
+                SourceVariable {
+                    name: name.to_owned(),
+                    name_span,
+                    declaration_span,
+                    scope_span,
+                },
+            );
+            debug_assert!(previous.is_none());
+        }
+    }
+
+    impl<'ast> Visitor<'ast> for Collector {
+        fn visit_function(&mut self, function: &'ast FunctionDecl) {
+            for parameter in &function.params {
+                self.insert(
+                    parameter.id,
+                    &parameter.name,
+                    parameter.name_span,
+                    parameter.span,
+                    function.body.span,
+                );
+            }
+            visit::walk_function(self, function);
+        }
+
+        fn visit_block(&mut self, block: &'ast crate::ast::Block) {
+            self.scopes.push(block.span);
+            visit::walk_block(self, block);
+            self.scopes.pop();
+        }
+
+        fn visit_variable(&mut self, variable: &'ast crate::ast::VariableDecl) {
+            if let Some(scope) = self.scopes.last().copied() {
+                self.insert(
+                    variable.id,
+                    &variable.name,
+                    variable.name_span,
+                    variable.span,
+                    scope,
+                );
+            }
+            visit::walk_variable(self, variable);
+        }
+
+        fn visit_suspension_binding(&mut self, binding: &'ast crate::ast::SuspensionBinding) {
+            if let Some(scope) = self.scopes.last().copied() {
+                self.insert(
+                    binding.id,
+                    &binding.name,
+                    binding.name_span,
+                    binding.span,
+                    scope,
+                );
+            }
+            if let Some(annotation) = &binding.annotation {
+                self.visit_type_ref(annotation);
+            }
+        }
+
+        fn visit_stmt(&mut self, statement: &'ast crate::ast::Stmt) {
+            if let crate::ast::Stmt::For { binding, body, .. } = statement {
+                self.insert(
+                    binding.id,
+                    &binding.name,
+                    binding.span,
+                    binding.span,
+                    body.span,
+                );
+            }
+            visit::walk_stmt(self, statement);
+        }
+
+        fn visit_match_arm(&mut self, arm: &'ast MatchArm) {
+            let binding = match &arm.pattern {
+                MatchPattern::Enum { binding, .. }
+                | MatchPattern::OptionSome(binding)
+                | MatchPattern::ResultSuccess(binding)
+                | MatchPattern::ResultError(binding) => binding.as_ref(),
+                MatchPattern::Bool(_)
+                | MatchPattern::Char(_)
+                | MatchPattern::Int { .. }
+                | MatchPattern::None
+                | MatchPattern::Wildcard => None,
+            };
+            if let Some(binding) = binding {
+                self.insert(
+                    binding.id,
+                    &binding.name,
+                    binding.name_span,
+                    binding.name_span,
+                    arm.span,
+                );
+            }
+            visit::walk_match_arm(self, arm);
+        }
+    }
+
+    let mut collector = Collector::default();
+    collector.visit_program(program);
+    collector.variables
+}
+
 impl DebugArtifactPlan {
     pub(super) fn new(
         abi: &Abi,
         defined_functions: &[(u32, String)],
         recorder: &DebugRecorder,
+        program: &Program,
         source_name: &str,
         source: &str,
     ) -> Self {
@@ -197,9 +372,40 @@ impl DebugArtifactPlan {
         let mut names = NameSection::new();
         names.module("SplitScript autosplitter");
         names.functions(&function_names);
+        let source_variables = source_variables(program);
+        let mut variables = recorder.variables.borrow().clone();
+        variables.sort_unstable_by_key(|variable| (variable.function, variable.local));
+        let mut local_names = IndirectNameMap::new();
+        for (function, variables) in variables
+            .iter()
+            .filter(|variable| source_variables.contains_key(&variable.value))
+            .fold(
+                BTreeMap::<u32, Vec<&DebugVariable>>::new(),
+                |mut functions, variable| {
+                    functions
+                        .entry(variable.function)
+                        .or_default()
+                        .push(variable);
+                    functions
+                },
+            )
+        {
+            let mut function_names = NameMap::new();
+            let mut indices = HashSet::new();
+            for variable in variables {
+                assert!(
+                    indices.insert(variable.local),
+                    "one source name is assigned to each Wasm local"
+                );
+                function_names.append(variable.local, &source_variables[&variable.value].name);
+            }
+            local_names.append(function, &function_names);
+        }
+        names.locals(&local_names);
         let dwarf = encode_dwarf(
             &entries_by_index(abi, defined_functions),
             recorder,
+            &source_variables,
             source_name,
             source,
         );
@@ -225,6 +431,7 @@ fn entries_by_index(abi: &Abi, defined_functions: &[(u32, String)]) -> BTreeMap<
 fn encode_dwarf(
     names: &BTreeMap<u32, String>,
     recorder: &DebugRecorder,
+    source_variables: &HashMap<ValueId, SourceVariable>,
     source_name: &str,
     source: &str,
 ) -> Vec<DebugSection> {
@@ -285,6 +492,8 @@ fn encode_dwarf(
         );
         root.set(gimli::DW_AT_stmt_list, AttributeValue::LineProgramRef);
     }
+    let debug_variables = recorder.variables.borrow();
+    let mut scalar_types = HashMap::new();
 
     for (function, mut function_markers) in functions {
         let body = bodies[&function];
@@ -308,32 +517,88 @@ fn encode_dwarf(
         line_program.end_sequence(u64::from(end_address - first_address));
 
         let (decl_line, decl_column) = source_position(source, function_markers[0].source.start);
-        let entry = dwarf.unit.add(root, gimli::DW_TAG_subprogram);
-        let entry = dwarf.unit.get_mut(entry);
-        entry.set(
-            gimli::DW_AT_name,
-            AttributeValue::String(
-                names
-                    .get(&function)
-                    .expect("source-backed functions have symbolic names")
-                    .as_bytes()
-                    .to_vec(),
-            ),
-        );
-        entry.set(
-            gimli::DW_AT_decl_file,
-            AttributeValue::FileIndex(Some(file)),
-        );
-        entry.set(gimli::DW_AT_decl_line, AttributeValue::Udata(decl_line));
-        entry.set(gimli::DW_AT_decl_column, AttributeValue::Udata(decl_column));
-        entry.set(
-            gimli::DW_AT_low_pc,
-            AttributeValue::Address(Address::Constant(u64::from(first_address))),
-        );
-        entry.set(
-            gimli::DW_AT_high_pc,
-            AttributeValue::Udata(u64::from(end_address - first_address)),
-        );
+        let subprogram = dwarf.unit.add(root, gimli::DW_TAG_subprogram);
+        {
+            let entry = dwarf.unit.get_mut(subprogram);
+            entry.set(
+                gimli::DW_AT_name,
+                AttributeValue::String(
+                    names
+                        .get(&function)
+                        .expect("source-backed functions have symbolic names")
+                        .as_bytes()
+                        .to_vec(),
+                ),
+            );
+            entry.set(
+                gimli::DW_AT_decl_file,
+                AttributeValue::FileIndex(Some(file)),
+            );
+            entry.set(gimli::DW_AT_decl_line, AttributeValue::Udata(decl_line));
+            entry.set(gimli::DW_AT_decl_column, AttributeValue::Udata(decl_column));
+            entry.set(
+                gimli::DW_AT_low_pc,
+                AttributeValue::Address(Address::Constant(u64::from(first_address))),
+            );
+            entry.set(
+                gimli::DW_AT_high_pc,
+                AttributeValue::Udata(u64::from(end_address - first_address)),
+            );
+        }
+
+        for variable in debug_variables
+            .iter()
+            .filter(|variable| variable.function == function)
+        {
+            let Some(source_variable) = source_variables.get(&variable.value) else {
+                continue;
+            };
+            let Some(ty) = scalar_type_entry(&mut dwarf, root, &mut scalar_types, variable.ty)
+            else {
+                continue;
+            };
+            let parent = if variable.parameter {
+                subprogram
+            } else {
+                let Some((start, end)) = variable_range(body, &function_markers, source_variable)
+                else {
+                    continue;
+                };
+                let scope = dwarf.unit.add(subprogram, gimli::DW_TAG_lexical_block);
+                let entry = dwarf.unit.get_mut(scope);
+                entry.set(
+                    gimli::DW_AT_low_pc,
+                    AttributeValue::Address(Address::Constant(u64::from(start))),
+                );
+                entry.set(
+                    gimli::DW_AT_high_pc,
+                    AttributeValue::Udata(u64::from(end - start)),
+                );
+                scope
+            };
+            let tag = if variable.parameter {
+                gimli::DW_TAG_formal_parameter
+            } else {
+                gimli::DW_TAG_variable
+            };
+            let variable_entry = dwarf.unit.add(parent, tag);
+            let (line, column) = source_position(source, source_variable.name_span.start);
+            let mut location = Expression::new();
+            location.op_wasm_local(variable.local);
+            let entry = dwarf.unit.get_mut(variable_entry);
+            entry.set(
+                gimli::DW_AT_name,
+                AttributeValue::String(source_variable.name.as_bytes().to_vec()),
+            );
+            entry.set(
+                gimli::DW_AT_decl_file,
+                AttributeValue::FileIndex(Some(file)),
+            );
+            entry.set(gimli::DW_AT_decl_line, AttributeValue::Udata(line));
+            entry.set(gimli::DW_AT_decl_column, AttributeValue::Udata(column));
+            entry.set(gimli::DW_AT_type, AttributeValue::UnitRef(ty));
+            entry.set(gimli::DW_AT_location, AttributeValue::Exprloc(location));
+        }
     }
     dwarf.unit.line_program = line_program;
 
@@ -362,4 +627,124 @@ fn source_position(source: &str, offset: usize) -> (u64, u64) {
     let line = before.bytes().filter(|byte| *byte == b'\n').count() as u64 + 1;
     let column = source[line_start..offset].chars().count() as u64 + 1;
     (line, column)
+}
+
+fn scalar_type_entry(
+    dwarf: &mut DwarfUnit,
+    root: UnitEntryId,
+    types: &mut HashMap<Type, UnitEntryId>,
+    ty: Type,
+) -> Option<UnitEntryId> {
+    if let Some(entry) = types.get(&ty) {
+        return Some(*entry);
+    }
+    let (name, byte_size, encoding) = match ty {
+        Type::Bool => ("bool", 1, gimli::DW_ATE_boolean),
+        Type::Char => ("char", 4, gimli::DW_ATE_UTF),
+        Type::I8 => ("i8", 1, gimli::DW_ATE_signed),
+        Type::U8 => ("u8", 1, gimli::DW_ATE_unsigned),
+        Type::I16 => ("i16", 2, gimli::DW_ATE_signed),
+        Type::U16 => ("u16", 2, gimli::DW_ATE_unsigned),
+        Type::I32 => ("i32", 4, gimli::DW_ATE_signed),
+        Type::U32 => ("u32", 4, gimli::DW_ATE_unsigned),
+        Type::I64 => ("i64", 8, gimli::DW_ATE_signed),
+        Type::U64 => ("u64", 8, gimli::DW_ATE_unsigned),
+        Type::Address => ("address", 8, gimli::DW_ATE_unsigned),
+        Type::F32 => ("f32", 4, gimli::DW_ATE_float),
+        Type::F64 => ("f64", 8, gimli::DW_ATE_float),
+        Type::None
+        | Type::Standard(_)
+        | Type::StateSnapshot
+        | Type::SettingsView
+        | Type::Record(_)
+        | Type::Enum(_)
+        | Type::ArrayStorage(_)
+        | Type::Array(_)
+        | Type::Option(_)
+        | Type::Result(_)
+        | Type::Async(_)
+        | Type::Set(_) => return None,
+    };
+    let entry = dwarf.unit.add(root, gimli::DW_TAG_base_type);
+    let base = dwarf.unit.get_mut(entry);
+    base.set(
+        gimli::DW_AT_name,
+        AttributeValue::String(name.as_bytes().to_vec()),
+    );
+    base.set(gimli::DW_AT_byte_size, AttributeValue::Udata(byte_size));
+    base.set(gimli::DW_AT_encoding, AttributeValue::Encoding(encoding));
+    types.insert(ty, entry);
+    Some(entry)
+}
+
+fn variable_range(
+    body: BodyRange,
+    markers: &[BodyMarker],
+    variable: &SourceVariable,
+) -> Option<(u32, u32)> {
+    let in_scope = |marker: &BodyMarker| {
+        variable.scope_span.start <= marker.source.start
+            && marker.source.end <= variable.scope_span.end
+    };
+    let start_index = markers.iter().position(|marker| {
+        in_scope(marker) && marker.source.end > variable.declaration_span.start
+    })?;
+    let last_index = markers
+        .iter()
+        .enumerate()
+        .skip(start_index)
+        .take_while(|(_, marker)| in_scope(marker))
+        .map(|(index, _)| index)
+        .last()?;
+    let start = body.raw_body_start + markers[start_index].body_offset;
+    let end_offset = markers
+        .iter()
+        .skip(last_index + 1)
+        .find(|marker| marker.body_offset > markers[last_index].body_offset)
+        .map_or(body.raw_body_length, |marker| marker.body_offset);
+    let end = body.raw_body_start + end_offset;
+    (start < end).then_some((start, end))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BodyMarker, BodyRange, SourceVariable, variable_range};
+    use crate::ast::Span;
+
+    #[test]
+    fn local_ranges_start_at_declaration_and_stop_when_the_source_scope_ends() {
+        let body = BodyRange {
+            raw_body_start: 100,
+            raw_body_length: 50,
+        };
+        let markers = [
+            BodyMarker {
+                function: 0,
+                body_offset: 2,
+                source: Span { start: 2, end: 4 },
+            },
+            BodyMarker {
+                function: 0,
+                body_offset: 10,
+                source: Span { start: 22, end: 28 },
+            },
+            BodyMarker {
+                function: 0,
+                body_offset: 18,
+                source: Span { start: 30, end: 35 },
+            },
+            BodyMarker {
+                function: 0,
+                body_offset: 26,
+                source: Span { start: 45, end: 48 },
+            },
+        ];
+        let variable = SourceVariable {
+            name: "inner".to_owned(),
+            name_span: Span { start: 20, end: 25 },
+            declaration_span: Span { start: 18, end: 29 },
+            scope_span: Span { start: 15, end: 40 },
+        };
+        assert_eq!(variable_range(body, &markers, &variable), Some((110, 126)));
+    }
 }

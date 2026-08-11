@@ -513,6 +513,21 @@ pub(super) fn compile_user_function(
             include_values: true,
         },
     );
+    if let Some(debug) = lowering.debug {
+        for parameter in &declaration.params {
+            let (local, ty) = locals[&parameter.id];
+            debug.register_variable(function_index, parameter.id, local, ty, true);
+        }
+        for (&value, &(local, ty)) in &locals {
+            if !declaration
+                .params
+                .iter()
+                .any(|parameter| parameter.id == value)
+            {
+                debug.register_variable(function_index, value, local, ty, false);
+            }
+        }
+    }
     let mut function = Function::new(
         local_types
             .into_iter()
@@ -601,6 +616,11 @@ pub(super) fn compile_action(
             include_values: true,
         },
     );
+    if let Some(debug) = lowering.debug {
+        for (&value, &(local, ty)) in &locals {
+            debug.register_variable(function_index, value, local, ty, false);
+        }
+    }
     let mut function = Function::new(
         local_types
             .into_iter()

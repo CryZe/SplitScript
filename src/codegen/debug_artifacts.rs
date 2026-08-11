@@ -705,6 +705,11 @@ fn encode_dwarf(
             let (line, column) = source_position(source, source_variable.name_span.start);
             let mut location = Expression::new();
             location.op_wasm_local(variable.local);
+            // `DW_OP_WASM_location` identifies the Wasm local, and the
+            // trailing stack-value operator tells Wasmtime that the local is
+            // the value itself rather than a linear-memory address to
+            // dereference.
+            location.op(gimli::DW_OP_stack_value);
             let entry = dwarf.unit.get_mut(variable_entry);
             entry.set(
                 gimli::DW_AT_name,

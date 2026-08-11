@@ -465,6 +465,10 @@ fn assert_wasm_local_location<R: gimli::Reader>(
         operations.next().expect("location expression should parse"),
         Some(gimli::Operation::WasmLocal { .. })
     ));
+    assert!(matches!(
+        operations.next().expect("location expression should parse"),
+        Some(gimli::Operation::StackValue)
+    ));
     assert!(
         operations
             .next()

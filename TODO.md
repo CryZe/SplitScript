@@ -232,7 +232,15 @@ Do not add JavaScript source maps.
 - [ ] Build a minimal fixture against the exact Wasmtime configuration used by
   LiveSplit. With `Config::debug_info(true)`, verify source breakpoints,
   stepping, stacks, scalar locals/globals, and GC references across supported
-  debugger/platform combinations.
+  debugger/platform combinations. Source stepping works in the Windows host;
+  direct scalar locals use Wasmtime's required trailing `DW_OP_stack_value` and
+  still need an end-to-end visibility check. Wasmtime 45 explicitly discards
+  `DW_OP_WASM_location` for globals and operand-stack values, so compiler tests
+  that merely decode those expressions are insufficient.
+- [ ] Design a debugger-visible representation for source globals. Prefer a
+  debug-only, runtime-independent shadow location in linear memory over
+  hard-coding Wasmtime's private VMContext layout; update the shadow on every
+  source-global write and prove scalar inspection before attempting GC values.
 - [ ] Record Wasm GC inspection as an experimental result. The DWARF-for-Wasm
   convention locates Wasm values but does not by itself define traversal of
   `structref`/`arrayref`. If standard consumers cannot inspect aggregates,

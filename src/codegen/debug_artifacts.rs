@@ -578,11 +578,30 @@ fn encode_dwarf(
             gimli::DW_AT_producer,
             AttributeValue::String(b"SplitScript compiler".to_vec()),
         );
+        // SplitScript does not have an assigned DWARF language code or an LLDB
+        // language plugin yet. `DW_LANG_lo_user` looks semantically tempting,
+        // but LLDB then treats the JIT image as an unsupported language: line
+        // stepping still works while function names and local variables stay
+        // hidden. Use C as the debugger compatibility language until a
+        // SplitScript plugin exists. This affects debugger presentation only;
+        // all source names, types, locations, and line mappings below remain
+        // SplitScript's own metadata.
         root.set(
             gimli::DW_AT_language,
-            AttributeValue::Language(gimli::DW_LANG_lo_user),
+            AttributeValue::Language(gimli::DW_LANG_C11),
         );
         root.set(gimli::DW_AT_stmt_list, AttributeValue::LineProgramRef);
+
+        // Deliberately do not put `DW_AT_low_pc`, `DW_AT_high_pc`, or
+        // `DW_AT_ranges` on the compilation unit. Wasmtime 45 special-cases a
+        // subprogram DIE and expands it to the complete native JIT function,
+        // but translates compilation-unit ranges with its generic source-range
+        // algorithm. For non-monotonic control flow that algorithm can omit
+        // native regions which are nevertheless present in the transformed
+        // line table. LLDB then cannot associate those PCs with this unit and
+        // reports anonymous frames with no variables. With no explicit unit
+        // range, LLDB correctly derives ownership from the complete child
+        // subprogram ranges.
     }
     let debug_variables = recorder.variables.borrow();
     let mut scalar_types = HashMap::new();

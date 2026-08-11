@@ -232,9 +232,18 @@ Do not add JavaScript source maps.
 - [ ] Build a minimal fixture against the exact Wasmtime configuration used by
   LiveSplit. With `Config::debug_info(true)`, verify source breakpoints,
   stepping, stacks, scalar locals/globals, and GC references across supported
-  debugger/platform combinations. Source stepping works in the Windows host;
-  direct scalar locals use Wasmtime's required trailing `DW_OP_stack_value` and
-  still need an end-to-end visibility check. Wasmtime 45 explicitly discards
+  debugger/platform combinations. Source stepping works in the Windows host.
+  Wasmtime's native-DWARF transform now preserves source subprogram names and
+  direct scalar local/parameter location lists: direct values use its required
+  trailing `DW_OP_stack_value`. A Windows CodeLLDB run against the real host now
+  resolves `setup`, `add`, and `whileAttached`, binds source breakpoints, and
+  displays a live scalar local. Emit the supported `DW_LANG_C11` compatibility
+  language until SplitScript has an LLDB plugin: `DW_LANG_lo_user` leaves names
+  and locals hidden. Deliberately omit compilation-unit PC ranges so LLDB derives
+  ownership from complete child subprogram ranges; Wasmtime 45's generic unit
+  range transform drops native regions for non-monotonic control flow. Continue
+  with parameter-liveness cases, globals, GC-backed values, and other debugger /
+  platform combinations. Wasmtime 45 explicitly discards
   `DW_OP_WASM_location` for globals and operand-stack values, so compiler tests
   that merely decode those expressions are insufficient.
 - [ ] Design a debugger-visible representation for source globals. Prefer a

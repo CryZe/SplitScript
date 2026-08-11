@@ -376,6 +376,17 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
             .to_string_lossy(),
         source_name
     );
+    assert_eq!(
+        root.attr_value(gimli::DW_AT_language),
+        Some(gimli::AttributeValue::Language(gimli::DW_LANG_C11)),
+        "native debuggers need a supported compatibility language to expose names and variables"
+    );
+    assert!(root.attr_value(gimli::DW_AT_low_pc).is_none());
+    assert!(root.attr_value(gimli::DW_AT_high_pc).is_none());
+    assert!(
+        root.attr_value(gimli::DW_AT_ranges).is_none(),
+        "LLDB must derive compilation-unit ownership from Wasmtime's complete subprogram ranges"
+    );
     let mut subprograms = Vec::new();
     let mut parameters = Vec::new();
     let mut variables = Vec::new();

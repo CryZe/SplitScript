@@ -15,7 +15,7 @@ pub use visit::{
 
 use crate::{
     ast::{
-        ActionKind, BinaryOp, ExprId, OptionTypeId, PatternId, ResultTypeId, SuspensionMode,
+        ActionKind, BinaryOp, ExprId, OptionTypeId, PatternId, ResultTypeId, Span, SuspensionMode,
         UnaryOp, ValueId,
     },
     effects::OperationAnalysis,
@@ -94,6 +94,10 @@ pub struct Expression {
     pub id: ExprId,
     pub ty: TypeId,
     pub kind: ExpressionKind,
+    /// User-source origin retained for debugger line tables. Expressions from
+    /// injected library bodies and purely generated scaffolding have no
+    /// source location in the autosplitter file.
+    pub source: Option<Span>,
     /// Type-checker-inserted wrapper lift on this expression edge.
     pub conversion: Option<ValueConversion>,
 }
@@ -669,6 +673,7 @@ impl Program {
         ty: TypeId,
         kind: ExpressionKind,
         conversion: Option<ValueConversion>,
+        source: Option<Span>,
     ) -> ExprId {
         let id = ExprId::from_index(self.next_generated_expression);
         self.next_generated_expression += 1;
@@ -676,6 +681,7 @@ impl Program {
             id,
             ty,
             kind,
+            source,
             conversion,
         });
         id
@@ -697,6 +703,7 @@ impl Program {
             expression_ty,
             ExpressionKind::Temporary(temporary),
             conversion,
+            None,
         );
         // The read expression may apply an edge conversion, while the local
         // itself stores the value produced before that conversion. Local
@@ -951,6 +958,8 @@ fn lower_expression(
         id: expression.id,
         ty: expression.ty,
         kind,
+        source: (expression.id.index() < typed_hir.visible_expression_count())
+            .then_some(expression.span),
         conversion: expression.conversion,
     }
 }
@@ -1674,6 +1683,7 @@ fn normalize_expression_suspensions_with(
             original.ty,
             ExpressionKind::Bool(op == BinaryOp::Or),
             None,
+            original.source,
         );
         let (then_expr, else_expr) = if op == BinaryOp::And {
             (right, short_circuit)
@@ -1736,9 +1746,12 @@ fn normalize_expression_suspensions_with(
             .next()
             .expect("every expression child has a normalized replacement")
     });
-    let value = context
-        .wasm_ir
-        .push_generated_expression(original.ty, kind, original.conversion);
+    let value = context.wasm_ir.push_generated_expression(
+        original.ty,
+        kind,
+        original.conversion,
+        original.source,
+    );
     NormalizedExpression { value, steps }
 }
 
@@ -1752,6 +1765,7 @@ fn capture_await_operand(
         .expression(operand)
         .expect("await operand belongs to Wasm IR")
         .clone();
+    let source = expression.source;
     let ExpressionKind::Call {
         mut target,
         mut arguments,
@@ -1789,6 +1803,7 @@ fn capture_await_operand(
                             members,
                         },
                         None,
+                        source,
                     )
                 };
                 let captured = capture_await_value(receiver_expression, steps, context);
@@ -1807,6 +1822,7 @@ fn capture_await_operand(
                         members,
                     },
                     None,
+                    source,
                 );
                 let captured = capture_await_value(receiver_expression, steps, context);
                 *receiver = ResolvedReceiver::Expression {
@@ -1824,6 +1840,7 @@ fn capture_await_operand(
         expression.ty,
         ExpressionKind::Call { target, arguments },
         expression.conversion,
+        source,
     )
 }
 
@@ -1872,10 +1889,12 @@ fn normalize_fallback_expression(
             value: input.value,
             fallback: FallbackBranch::Value(fallback.value),
         };
-        let value =
-            context
-                .wasm_ir
-                .push_generated_expression(original.ty, kind, original.conversion);
+        let value = context.wasm_ir.push_generated_expression(
+            original.ty,
+            kind,
+            original.conversion,
+            original.source,
+        );
         return NormalizedExpression {
             value,
             steps: input.steps,
@@ -1895,6 +1914,7 @@ fn normalize_fallback_expression(
             source: original.id,
         },
         None,
+        original.source,
     );
     let mut steps = input.steps;
     steps.push(AsyncExpressionStep::Fallback {
@@ -1947,10 +1967,12 @@ fn normalize_match_expression(
                 })
                 .collect(),
         };
-        let value =
-            context
-                .wasm_ir
-                .push_generated_expression(original.ty, kind, original.conversion);
+        let value = context.wasm_ir.push_generated_expression(
+            original.ty,
+            kind,
+            original.conversion,
+            original.source,
+        );
         return NormalizedExpression {
             value,
             steps: input.steps,
@@ -2007,10 +2029,12 @@ fn normalize_if_expression(
             then_expr: then_expression.value,
             else_expr: else_expression.value,
         };
-        let value =
-            context
-                .wasm_ir
-                .push_generated_expression(original.ty, kind, original.conversion);
+        let value = context.wasm_ir.push_generated_expression(
+            original.ty,
+            kind,
+            original.conversion,
+            original.source,
+        );
         let mut steps = condition.steps;
         steps.extend(then_expression.steps);
         steps.extend(else_expression.steps);
@@ -2437,6 +2461,7 @@ fn lower_async_statements(
                 let normalized_value =
                     normalize_expression_suspensions(*value, typed_hir, semantics, wasm_ir);
                 let target_type = wasm_ir.effective_expression_type(*target);
+                let target_source = wasm_ir.expression(*target).and_then(|target| target.source);
                 let lowered_target = wasm_ir.push_generated_expression(
                     target_type,
                     ExpressionKind::Index {
@@ -2444,6 +2469,7 @@ fn lower_async_statements(
                         index: index_read,
                     },
                     None,
+                    target_source,
                 );
 
                 result.statements.insert(
@@ -2985,6 +3011,7 @@ fn lower_statements(
                 let receiver_type = wasm_ir.effective_expression_type(*receiver);
                 let index_type = wasm_ir.effective_expression_type(*index);
                 let target_type = wasm_ir.effective_expression_type(*target);
+                let target_source = wasm_ir.expression(*target).and_then(|target| target.source);
                 let (receiver_temporary, receiver_read) = wasm_ir.temporary(receiver_type);
                 let (index_temporary, index_read) = wasm_ir.temporary(index_type);
                 let lowered_target = wasm_ir.push_generated_expression(
@@ -2994,6 +3021,7 @@ fn lower_statements(
                         index: index_read,
                     },
                     None,
+                    target_source,
                 );
                 block.statements.extend([
                     Statement::StoreTemporary {

@@ -1,6 +1,5 @@
 use wasm_encoder::{
-    AbstractHeapType, CodeSection, ConstExpr, Function, HeapType, Instruction, MemArg, RefType,
-    ValType,
+    AbstractHeapType, ConstExpr, Function, HeapType, Instruction, MemArg, RefType, ValType,
 };
 
 use crate::ast::{
@@ -22,6 +21,7 @@ mod array_value;
 mod async_frame;
 mod async_state;
 mod backend_type;
+mod code_bodies;
 mod context;
 mod data_plan;
 mod debug_artifacts;
@@ -145,6 +145,8 @@ pub struct BackendProgram<'a> {
     constructed_types: ConstructedTypes,
     memory_layouts: &'a MemoryLayouts,
     equality: &'a EqualityCapabilities,
+    source_name: &'a str,
+    source: &'a str,
 }
 
 impl<'a> BackendProgram<'a> {
@@ -175,6 +177,8 @@ impl<'a> BackendProgram<'a> {
             constructed_types,
             memory_layouts: checked.capabilities.memory(),
             equality: checked.capabilities.equality(),
+            source_name: checked.source_name(),
+            source: checked.document.source(),
         }
     }
 
@@ -212,6 +216,8 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         constructed_types,
         memory_layouts,
         equality,
+        source_name,
+        source,
     } = inputs;
     let ConstructedTypes {
         enums,
@@ -311,7 +317,6 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         provider_attachment.as_ref(),
     );
 
-    let mut codes = CodeSection::new();
     let function_plan::FunctionPlan {
         section: functions,
         runtime_helpers,
@@ -349,6 +354,13 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             async_frames: &async_frames,
         },
     );
+    let debug_recorder = (wasm_ir.profile() == crate::BuildProfile::Debug)
+        .then(debug_artifacts::DebugRecorder::default);
+    let mut codes = code_bodies::CodeBodies::new(
+        imported_functions,
+        function_debug_names.len(),
+        debug_recorder.as_ref(),
+    );
     let lowering = EmissionContext {
         standard_library: &standard_library,
         abi: &abi,
@@ -374,6 +386,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         wasm_ir,
         gc: &gc,
         async_frames: &async_frames,
+        debug: debug_recorder.as_ref(),
     };
     let runtime = AttachContext {
         abi: &abi,
@@ -454,17 +467,17 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         &gc,
     );
     for body in helper_bodies {
-        codes.function(&body);
+        codes.push(&body);
     }
     let refresh_settings = runtime_helpers.optional_function(RuntimeHelperId::RefreshSettings);
     for body in equality_bodies {
-        codes.function(&body);
+        codes.push(&body);
     }
     for body in array_bodies {
-        codes.function(&body);
+        codes.push(&body);
     }
     for body in set_bodies {
-        codes.function(&body);
+        codes.push(&body);
     }
     for instance in reachability.functions() {
         let function = program
@@ -473,35 +486,54 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             .find(|function| function.id == instance.function)
             .expect("reachable function instances have source declarations");
         if let Some(layout) = async_frames.function(instance) {
-            codes.function(&compile_async_function_init(
-                function, instance, layout, &lowering,
-            ));
-            codes.function(&compile_async_function_poll(instance, layout, &runtime));
+            let plan = user_functions
+                .get(instance)
+                .expect("reachable functions have final function plans");
+            let body = compile_async_function_init(function, instance, layout, &lowering);
+            codes.push(&body);
+            let body = compile_async_function_poll(
+                instance,
+                plan.poll.expect("async functions have poll entry points"),
+                layout,
+                &runtime,
+            );
+            codes.push(&body);
         } else {
-            codes.function(&compile_user_function(function, instance, &lowering));
+            let function_index = user_functions[instance].call;
+            let body = compile_user_function(function, instance, function_index, &lowering);
+            codes.push(&body);
         }
     }
     for (instance, layout) in async_frames.intrinsics() {
-        codes.function(&compile_intrinsic_future_poll(instance, layout, &runtime));
+        let function_index = intrinsic_futures[instance];
+        let body = compile_intrinsic_future_poll(instance, function_index, layout, &runtime);
+        codes.push(&body);
     }
-    for field in state.all_fields() {
-        codes.function(&compile_read(field, &abi, strings, &lowering));
+    for (field_index, field) in state.all_fields().enumerate() {
+        let body = compile_read(field, read_functions[field_index], &abi, strings, &lowering);
+        codes.push(&body);
         if field.transform.is_some() {
-            codes.function(&compile_state_transform(field, &lowering));
+            let function_index = transform_functions[field_index]
+                .expect("filtered state fields have transform functions");
+            let body = compile_state_transform(field, function_index, &lowering);
+            codes.push(&body);
         }
     }
     for action in &program.actions {
         if action.kind == ActionKind::OnAttach {
-            codes.function(&compile_async_attach(
+            let body = compile_async_attach(
                 action,
+                action_functions[&action.kind],
                 async_layout.unwrap(),
                 &runtime,
-            ));
+            );
+            codes.push(&body);
         } else {
-            codes.function(&compile_action(action, &lowering));
+            let body = compile_action(action, action_functions[&action.kind], &lowering);
+            codes.push(&body);
         }
     }
-    codes.function(&compile_start(
+    let body = compile_start(
         program,
         &settings_context,
         &lowering,
@@ -512,8 +544,9 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             setup: action_functions.get(&ActionKind::Setup).copied(),
         },
         async_layout.is_some(),
-    ));
-    codes.function(&compile_update(
+    );
+    codes.push(&body);
+    let body = compile_update(
         program,
         strings,
         StatePollFunctions {
@@ -524,10 +557,18 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         refresh_settings,
         cancellation_region,
         &update_context,
-    ));
+    );
+    codes.push(&body);
 
-    let debug_artifacts = (wasm_ir.profile() == crate::BuildProfile::Debug)
-        .then(|| debug_artifacts::DebugArtifactPlan::new(&abi, &function_debug_names));
+    let debug_artifacts = debug_recorder.as_ref().map(|recorder| {
+        debug_artifacts::DebugArtifactPlan::new(
+            &abi,
+            &function_debug_names,
+            recorder,
+            source_name,
+            source,
+        )
+    });
 
     module_assembly::finish(
         module_assembly::Sections {
@@ -535,12 +576,12 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             imports,
             functions,
             globals,
-            codes,
+            codes: codes.finish(),
         },
         &static_data,
         start_function,
         update_function,
-        debug_artifacts.as_ref().map(|artifacts| artifacts.names()),
+        debug_artifacts.as_ref(),
     )
 }
 

@@ -382,8 +382,11 @@ fn compile_source(
             return false;
         }
     };
-    let (wasm, diagnostics) = match splitscript::compile_with_context_and_options_diagnostics(
+    let source_path = std::path::absolute(input).unwrap_or_else(|_| input.to_path_buf());
+    let source_name = source_path.to_string_lossy();
+    let (wasm, diagnostics) = match splitscript::compile_named_with_context_and_options_diagnostics(
         splitscript::CompilerContext::default(),
+        source_name.as_ref(),
         source,
         options,
     ) {

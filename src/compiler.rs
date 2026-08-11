@@ -8,10 +8,11 @@ pub use crate::codegen::BackendProgram;
 pub use crate::{
     BuildProfile, CheckedProgram, CompilerContext, CompilerOptions, LoweredProgram, ParsedProgram,
     RecoveredCheck, RecoveredParse, WarningLevel, WarningPolicy, check, check_recovering, compile,
-    compile_with_context, compile_with_context_and_options,
-    compile_with_context_and_options_diagnostics, compile_with_options, lower, lower_wasm,
-    lower_wasm_with_options, parse, parse_recovering, parse_recovering_with_context,
-    parse_with_context,
+    compile_named_with_context_and_options_diagnostics, compile_with_context,
+    compile_with_context_and_options, compile_with_context_and_options_diagnostics,
+    compile_with_options, lower, lower_wasm, lower_wasm_with_options, parse, parse_named,
+    parse_named_with_context, parse_recovering, parse_recovering_named_with_context,
+    parse_recovering_with_context, parse_with_context,
 };
 
 /// Generates WebAssembly from a successfully checked program.

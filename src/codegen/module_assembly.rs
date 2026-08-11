@@ -2,10 +2,10 @@ use std::borrow::Cow;
 
 use wasm_encoder::{
     CodeSection, CustomSection, ExportKind, ExportSection, FunctionSection, GlobalSection,
-    ImportSection, MemorySection, MemoryType, Module, NameSection, TypeSection,
+    ImportSection, MemorySection, MemoryType, Module, TypeSection,
 };
 
-use super::data_plan::StaticData;
+use super::{data_plan::StaticData, debug_artifacts::DebugArtifactPlan};
 
 pub(super) struct Sections {
     pub types: TypeSection,
@@ -20,7 +20,7 @@ pub(super) fn finish(
     data: &StaticData,
     start_function: u32,
     update_function: u32,
-    debug_names: Option<&NameSection>,
+    debug: Option<&DebugArtifactPlan>,
 ) -> Vec<u8> {
     let Sections {
         types,
@@ -52,8 +52,14 @@ pub(super) fn finish(
     module.section(&exports);
     module.section(&codes);
     module.section(&data);
-    if let Some(debug_names) = debug_names {
-        module.section(debug_names);
+    if let Some(debug) = debug {
+        module.section(debug.names());
+        for section in debug.dwarf() {
+            module.section(&CustomSection {
+                name: Cow::Borrowed(section.name),
+                data: Cow::Borrowed(&section.data),
+            });
+        }
     }
     module.section(&CustomSection {
         name: Cow::Borrowed("splitscript"),

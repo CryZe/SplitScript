@@ -113,6 +113,7 @@ pub(super) struct ExprContext<'a> {
     pub gc: &'a GcLayout,
     pub async_frames: &'a super::async_frame::AsyncFrameLayouts,
     pub intrinsic_capture: Option<IntrinsicCapture<'a>>,
+    pub debug: Option<super::debug_artifacts::DebugEmission<'a>>,
     /// Concrete type arguments while emitting a generic function template.
     pub function_instance: Option<&'a FunctionInstance>,
     pub loop_control: Option<LoopControl>,
@@ -1441,6 +1442,13 @@ fn emit_path_fields(
 }
 
 pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context: &ExprContext<'_>) {
+    let expression_ir = context
+        .wasm_ir
+        .expression(expression)
+        .expect("compiled expression belongs to Wasm IR");
+    if let Some(debug) = context.debug {
+        debug.mark(function, expression_ir.source);
+    }
     if let Some(capture) = context.intrinsic_capture
         && let Some(&(field, ty)) = capture.layout.arguments.get(&expression)
     {
@@ -1450,10 +1458,6 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
         }
         return;
     }
-    let expression_ir = context
-        .wasm_ir
-        .expression(expression)
-        .expect("compiled expression belongs to Wasm IR");
     let ty = context.ty(expression_ir.ty);
     if let Some(conversion) = expression_ir.conversion {
         let source = context.ty(conversion.source);

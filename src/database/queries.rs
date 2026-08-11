@@ -41,6 +41,7 @@ impl SourceRevision {
 pub struct CompilerDatabase {
     pub(super) context: CompilerContext,
     warning_policy: WarningPolicy,
+    source_name: String,
     source: String,
     revision: SourceRevision,
     cache: QueryCache,
@@ -48,13 +49,30 @@ pub struct CompilerDatabase {
 
 impl CompilerDatabase {
     pub fn new(source: impl Into<String>) -> Self {
-        Self::with_context(CompilerContext::default(), source)
+        Self::with_context_and_source_name(
+            CompilerContext::default(),
+            crate::IN_MEMORY_SOURCE_NAME,
+            source,
+        )
     }
 
     pub fn with_context(context: CompilerContext, source: impl Into<String>) -> Self {
+        Self::with_context_and_source_name(context, crate::IN_MEMORY_SOURCE_NAME, source)
+    }
+
+    pub fn with_source_name(source_name: impl Into<String>, source: impl Into<String>) -> Self {
+        Self::with_context_and_source_name(CompilerContext::default(), source_name, source)
+    }
+
+    pub fn with_context_and_source_name(
+        context: CompilerContext,
+        source_name: impl Into<String>,
+        source: impl Into<String>,
+    ) -> Self {
         Self {
             context,
             warning_policy: WarningPolicy::default(),
+            source_name: source_name.into(),
             source: source.into(),
             revision: SourceRevision::default(),
             cache: QueryCache::default(),
@@ -63,6 +81,10 @@ impl CompilerDatabase {
 
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    pub fn source_name(&self) -> &str {
+        &self.source_name
     }
 
     pub fn context(&self) -> CompilerContext {
@@ -107,9 +129,13 @@ impl CompilerDatabase {
     pub fn recovering_parse(&mut self) -> QueryResult<RecoveredParse> {
         if self.cache.recovered.is_none() {
             self.cache.recovered = Some(
-                crate::parse_recovering_with_context(self.context.clone(), &self.source)
-                    .map(Arc::new)
-                    .map_err(Arc::from),
+                crate::parse_recovering_named_with_context(
+                    self.context.clone(),
+                    self.source_name.clone(),
+                    &self.source,
+                )
+                .map(Arc::new)
+                .map_err(Arc::from),
             );
         }
         self.cache.recovered.as_ref().unwrap().clone()
@@ -121,6 +147,7 @@ impl CompilerDatabase {
                 Ok(recovered) if recovered.diagnostics().is_empty() => {
                     Ok(Arc::new(ParsedProgram {
                         context: recovered.context(),
+                        source_name: recovered.source_name().to_owned(),
                         document: recovered.source_document().clone(),
                         syntax: recovered.syntax().clone(),
                         resolution_diagnostics: recovered.resolution_diagnostics().to_vec(),
@@ -190,6 +217,7 @@ impl CompilerDatabase {
                     ));
                     Ok(Arc::new(LoweredProgram {
                         context: recovered.context(),
+                        source_name: recovered.source_name().to_owned(),
                         document: recovered.source_document().clone(),
                         hir: crate::hir::DeclarationIndex::lower(&syntax),
                         compilation_syntax: syntax.clone(),

@@ -235,6 +235,7 @@ fn derive_standard_library_operation_metadata(
 #[derive(Debug, Clone)]
 pub struct ParsedProgram {
     context: CompilerContext,
+    source_name: String,
     document: syntax::SourceDocument,
     syntax: ast::Program,
     resolution_diagnostics: Vec<Diagnostic>,
@@ -246,6 +247,7 @@ pub struct ParsedProgram {
 #[derive(Debug, Clone)]
 pub struct RecoveredParse {
     context: CompilerContext,
+    source_name: String,
     document: syntax::SourceDocument,
     syntax: ast::Program,
     diagnostics: Vec<Diagnostic>,
@@ -260,6 +262,10 @@ impl RecoveredParse {
 
     pub fn source_document(&self) -> &syntax::SourceDocument {
         &self.document
+    }
+
+    pub fn source_name(&self) -> &str {
+        &self.source_name
     }
 
     pub fn syntax(&self) -> &ast::Program {
@@ -286,6 +292,7 @@ impl RecoveredParse {
 #[derive(Debug, Clone)]
 pub struct LoweredProgram {
     context: CompilerContext,
+    source_name: String,
     document: syntax::SourceDocument,
     syntax: ast::Program,
     /// User syntax plus compiler-owned standard-library bodies. Kept private
@@ -303,6 +310,10 @@ impl LoweredProgram {
 
     pub fn source_document(&self) -> &syntax::SourceDocument {
         &self.document
+    }
+
+    pub fn source_name(&self) -> &str {
+        &self.source_name
     }
 
     pub fn syntax(&self) -> &ast::Program {
@@ -333,6 +344,10 @@ impl ParsedProgram {
         &self.document
     }
 
+    pub fn source_name(&self) -> &str {
+        &self.source_name
+    }
+
     pub fn syntax(&self) -> &ast::Program {
         &self.syntax
     }
@@ -347,6 +362,7 @@ impl ParsedProgram {
 #[derive(Debug, Clone)]
 pub struct CheckedProgram {
     context: CompilerContext,
+    source_name: String,
     document: syntax::SourceDocument,
     syntax: ast::Program,
     compilation_syntax: ast::Program,
@@ -369,6 +385,7 @@ pub struct CheckedProgram {
 #[derive(Debug, Clone)]
 pub struct RecoveredCheck {
     context: CompilerContext,
+    source_name: String,
     document: syntax::SourceDocument,
     syntax: ast::Program,
     hir: hir::DeclarationIndex,
@@ -385,6 +402,10 @@ impl RecoveredCheck {
 
     pub fn source_document(&self) -> &syntax::SourceDocument {
         &self.document
+    }
+
+    pub fn source_name(&self) -> &str {
+        &self.source_name
     }
 
     pub fn syntax(&self) -> &ast::Program {
@@ -421,6 +442,10 @@ impl CheckedProgram {
 
     pub fn source_document(&self) -> &syntax::SourceDocument {
         &self.document
+    }
+
+    pub fn source_name(&self) -> &str {
+        &self.source_name
     }
 
     pub fn syntax(&self) -> &ast::Program {
@@ -467,21 +492,40 @@ impl CheckedProgram {
     }
 }
 
+const IN_MEMORY_SOURCE_NAME: &str = "input.split";
+
 /// Parses one SplitScript source file without running semantic analysis.
 pub fn parse(source: &str) -> Result<ParsedProgram, Vec<Diagnostic>> {
-    parse_with_context(CompilerContext::default(), source)
+    parse_named_with_context(CompilerContext::default(), IN_MEMORY_SOURCE_NAME, source)
 }
 
 pub fn parse_with_context(
     context: CompilerContext,
     source: &str,
 ) -> Result<ParsedProgram, Vec<Diagnostic>> {
-    let recovered = parse_recovering_with_context(context.clone(), source)?;
+    parse_named_with_context(context, IN_MEMORY_SOURCE_NAME, source)
+}
+
+/// Parses a source file while retaining its debugger-visible path or URI.
+pub fn parse_named(
+    source_name: impl Into<String>,
+    source: &str,
+) -> Result<ParsedProgram, Vec<Diagnostic>> {
+    parse_named_with_context(CompilerContext::default(), source_name, source)
+}
+
+pub fn parse_named_with_context(
+    context: CompilerContext,
+    source_name: impl Into<String>,
+    source: &str,
+) -> Result<ParsedProgram, Vec<Diagnostic>> {
+    let recovered = parse_recovering_named_with_context(context.clone(), source_name, source)?;
     if !recovered.diagnostics.is_empty() {
         return Err(recovered.diagnostics);
     }
     Ok(ParsedProgram {
         context,
+        source_name: recovered.source_name,
         document: recovered.document,
         syntax: recovered.syntax,
         resolution_diagnostics: recovered.resolution_diagnostics,
@@ -492,11 +536,19 @@ pub fn parse_with_context(
 /// remain fatal for now; recoverable parser errors and explicit recovery nodes
 /// are returned alongside the partial syntax tree.
 pub fn parse_recovering(source: &str) -> Result<RecoveredParse, Vec<Diagnostic>> {
-    parse_recovering_with_context(CompilerContext::default(), source)
+    parse_recovering_named_with_context(CompilerContext::default(), IN_MEMORY_SOURCE_NAME, source)
 }
 
 pub fn parse_recovering_with_context(
     context: CompilerContext,
+    source: &str,
+) -> Result<RecoveredParse, Vec<Diagnostic>> {
+    parse_recovering_named_with_context(context, IN_MEMORY_SOURCE_NAME, source)
+}
+
+pub fn parse_recovering_named_with_context(
+    context: CompilerContext,
+    source_name: impl Into<String>,
     source: &str,
 ) -> Result<RecoveredParse, Vec<Diagnostic>> {
     let lexed = lexer::lex_lossless(source).map_err(|error| vec![error])?;
@@ -506,6 +558,7 @@ pub fn parse_recovering_with_context(
         resolution::validate_declarations(&output.program, &context.standard_library());
     Ok(RecoveredParse {
         context,
+        source_name: source_name.into(),
         document: syntax::SourceDocument::from_lexed(source, lexed),
         syntax: output.program,
         diagnostics: output.diagnostics,
@@ -539,6 +592,7 @@ pub fn lower(parsed: ParsedProgram) -> LoweredProgram {
     let hir = hir::DeclarationIndex::lower(&syntax);
     LoweredProgram {
         context: parsed.context,
+        source_name: parsed.source_name,
         document: parsed.document,
         syntax,
         compilation_syntax,
@@ -552,6 +606,7 @@ pub fn lower(parsed: ParsedProgram) -> LoweredProgram {
 pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<Diagnostic>> {
     let LoweredProgram {
         context,
+        source_name,
         document,
         syntax,
         compilation_syntax,
@@ -595,6 +650,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
     let diagnostics = validation.diagnostics;
     Ok(CheckedProgram {
         context,
+        source_name,
         document,
         syntax,
         compilation_syntax,
@@ -617,6 +673,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
 pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
     let LoweredProgram {
         context,
+        source_name,
         document,
         syntax,
         compilation_syntax,
@@ -658,6 +715,7 @@ pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
     }
     RecoveredCheck {
         context,
+        source_name,
         document,
         syntax,
         hir,
@@ -737,7 +795,23 @@ pub fn compile_with_context_and_options_diagnostics(
     source: &str,
     options: CompilerOptions,
 ) -> Result<(Vec<u8>, Vec<Diagnostic>), Vec<Diagnostic>> {
-    let parsed = parse_with_context(context, source)?;
+    compile_named_with_context_and_options_diagnostics(
+        context,
+        IN_MEMORY_SOURCE_NAME,
+        source,
+        options,
+    )
+}
+
+/// Runs the complete compiler pipeline while retaining the source file's real
+/// path or URI for debugger metadata.
+pub fn compile_named_with_context_and_options_diagnostics(
+    context: CompilerContext,
+    source_name: impl Into<String>,
+    source: &str,
+    options: CompilerOptions,
+) -> Result<(Vec<u8>, Vec<Diagnostic>), Vec<Diagnostic>> {
+    let parsed = parse_named_with_context(context, source_name, source)?;
     let lowered = lower(parsed);
     let checked = check(lowered)?;
     let diagnostics = options

@@ -41,6 +41,7 @@ const SIGNATURE_SCAN_CANDIDATES_PER_POLL: i64 = 64 * 1024;
 
 pub(super) fn compile_async_attach(
     action: &Action,
+    function_index: u32,
     layout: &AsyncFrameLayout,
     runtime: &AttachContext<'_>,
 ) -> Function {
@@ -68,11 +69,13 @@ pub(super) fn compile_async_attach(
         None,
         BareReturn::AsyncAttach,
         result_global,
+        function_index,
     )
 }
 
 pub(super) fn compile_async_function_poll(
     instance: &FunctionInstance,
+    function_index: u32,
     layout: &AsyncFrameLayout,
     runtime: &AttachContext<'_>,
 ) -> Function {
@@ -96,11 +99,13 @@ pub(super) fn compile_async_function_poll(
             completion: layout.completion,
         },
         None,
+        function_index,
     )
 }
 
 pub(super) fn compile_intrinsic_future_poll(
     instance: &IntrinsicFutureInstance,
+    function_index: u32,
     layout: &IntrinsicFutureLayout,
     runtime: &AttachContext<'_>,
 ) -> Function {
@@ -169,6 +174,7 @@ pub(super) fn compile_intrinsic_future_poll(
         gc: runtime.lowering.gc,
         async_frames: runtime.lowering.async_frames,
         intrinsic_capture: Some(IntrinsicCapture { frame, layout }),
+        debug: runtime.lowering.debug_emission(function_index),
         function_instance: instance.owner.as_ref(),
         loop_control: None,
         bare_return: BareReturn::AsyncFuture {
@@ -241,6 +247,7 @@ fn compile_async_body(
     function_instance: Option<&FunctionInstance>,
     bare_return: BareReturn,
     result_global: Option<u32>,
+    function_index: u32,
 ) -> Function {
     let cancellation_region = wasm_body
         .cancellation_region
@@ -299,6 +306,7 @@ fn compile_async_body(
         gc: runtime.lowering.gc,
         async_frames: runtime.lowering.async_frames,
         intrinsic_capture: None,
+        debug: runtime.lowering.debug_emission(function_index),
         function_instance,
         loop_control: None,
         bare_return,

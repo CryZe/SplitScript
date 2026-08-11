@@ -15,6 +15,7 @@ use super::{
     ArrayFunctions, EqualityFunctions, GcLayout, RuntimeHelperPlan, SetFunctions, SettingStorage,
     Type,
     data_plan::{SignaturePool, StringPool},
+    debug_artifacts::DebugRecorder,
     global_plan::RuntimeGlobals,
     imports::Abi,
     memory_plan::AbiReadScratch,
@@ -50,6 +51,16 @@ pub(super) struct EmissionContext<'a> {
     pub wasm_ir: &'a wasm_ir::Program,
     pub gc: &'a GcLayout,
     pub async_frames: &'a super::async_frame::AsyncFrameLayouts,
+    pub debug: Option<&'a DebugRecorder>,
+}
+
+impl<'a> EmissionContext<'a> {
+    pub fn debug_emission(
+        &self,
+        function: u32,
+    ) -> Option<super::debug_artifacts::DebugEmission<'a>> {
+        self.debug.map(|recorder| recorder.emission(function))
+    }
 }
 
 /// Extra pools required only by the async attachment state machine.

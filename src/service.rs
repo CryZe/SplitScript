@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     BuildProfile, CompilerContext, CompilerIdentity, CompilerOptions, Diagnostic, DiagnosticFix,
     DiagnosticLabel, DiagnosticLabelStyle, DiagnosticSeverity, FixApplicability, TextEdit,
-    WarningPolicy, compile_with_context_and_options_diagnostics, compiler_identity,
+    WarningPolicy, compile_named_with_context_and_options_diagnostics, compiler_identity,
 };
 
 pub const COMPILER_SERVICE_PROTOCOL_VERSION: u32 = 1;
@@ -23,6 +23,10 @@ pub const MAX_COMPILER_SERVICE_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 pub struct CompileRequest {
     pub protocol_version: u32,
     pub uri: String,
+    /// Native filesystem path when the host has one. Browser-only or untitled
+    /// inputs may omit it and retain their URI as the DWARF source identity.
+    #[serde(default)]
+    pub source_path: Option<String>,
     pub revision: u64,
     pub source: String,
     pub profile: BuildProfile,
@@ -192,13 +196,16 @@ impl CompilerService {
         let CompileRequest {
             protocol_version,
             uri,
+            source_path,
             revision,
             source,
             profile,
             warnings,
         } = request;
-        let (diagnostics, artifact) = match compile_with_context_and_options_diagnostics(
+        let source_name = source_path.as_deref().unwrap_or(&uri);
+        let (diagnostics, artifact) = match compile_named_with_context_and_options_diagnostics(
             self.context.clone(),
+            source_name,
             &source,
             CompilerOptions { profile, warnings },
         ) {
@@ -315,6 +322,7 @@ mod tests {
         CompileRequest {
             protocol_version: COMPILER_SERVICE_PROTOCOL_VERSION,
             uri: "file:///example.split".to_owned(),
+            source_path: None,
             revision: 42,
             source: source.to_owned(),
             profile: BuildProfile::Release,
@@ -332,6 +340,26 @@ mod tests {
         assert_eq!(response.revision, 42);
         assert!(response.diagnostics.is_empty());
         assert!(response.artifact.unwrap().starts_with(b"\0asm"));
+    }
+
+    #[test]
+    fn embeds_the_host_source_path_in_debug_artifacts() {
+        let source_path = "P:/Games/Example/autosplitter.split";
+        let mut request = request(
+            "state \"game.exe\" {} fn value() { return 42 } whileAttached { print(value()) }",
+        );
+        request.profile = BuildProfile::Debug;
+        request.source_path = Some(source_path.to_owned());
+        let response = CompilerService::new()
+            .compile(request)
+            .expect("the compiler service request should succeed");
+        let artifact = response.artifact.expect("debug compilation should succeed");
+        assert!(
+            artifact
+                .windows(source_path.len())
+                .any(|window| window == source_path.as_bytes()),
+            "the native source path should be present in embedded DWARF"
+        );
     }
 
     #[test]

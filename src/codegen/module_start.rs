@@ -169,6 +169,7 @@ fn emit_aggregate_global_initializers(
         gc: lowering.gc,
         async_frames: lowering.async_frames,
         intrinsic_capture: None,
+        debug: None,
         function_instance: None,
         loop_control: None,
         bare_return: BareReturn::None,

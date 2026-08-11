@@ -305,6 +305,7 @@ export class CompilerTaskController implements vscode.Disposable {
         return compiler.compile({
             protocolVersion: compilerServiceProtocolVersion,
             uri: snapshot.key,
+            sourcePath: snapshot.uri.scheme === 'file' ? snapshot.uri.fsPath : undefined,
             revision: snapshot.revision,
             source: snapshot.source,
             profile,

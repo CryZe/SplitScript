@@ -524,13 +524,21 @@ Wasm lowering, before reachability, string collection, import selection, and
 helper discovery. Consequently, a release module does not retain debug-only
 messages or logging imports.
 
-Debug builds also contain a WebAssembly `name` section derived from final
-function indices. It names host imports, generated helpers, concrete generic
+Debug builds contain a WebAssembly `name` section derived from final function
+indices. It names host imports, generated helpers, concrete generic
 specializations, async initializer/poller pairs, state readers and transforms,
-lifecycle blocks, `_start`, and `update`. Release builds omit the section
-entirely. These symbolic stack names are the first layer of debugger metadata;
-source breakpoints and line stepping require the separately planned DWARF line
-tables.
+lifecycle blocks, `_start`, and `update`.
+
+They also contain initial DWARF v5 compilation-unit, subprogram, and line-table
+metadata. Source-backed function bodies map emitted instruction boundaries to
+the original expression lines, including source expressions moved into async
+poll functions. Compiler-generated scaffolding deliberately has no source
+location. Source identity flows through every compiler stage: the CLI records
+an absolute `.split` path, the extension records VS Code's native file path,
+and non-file editor documents retain their URI. APIs that intentionally compile
+only an in-memory string use `input.split`. Describing lexical scopes and
+scalar variable locations remains future work. Release builds omit both the
+name section and every `.debug_*` section.
 
 The statement form accepts bindings, expression statements, assignments, `if`,
 `while`, and `await` or `retry` statements. It rejects `return`, `throw`,

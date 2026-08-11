@@ -163,14 +163,18 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
             print(visible)
         }
     "#;
+    let source_name = "P:/debug/fixture.split";
     let compile = |profile| {
-        splitscript::compile_with_options(
+        splitscript::compile_named_with_context_and_options_diagnostics(
+            splitscript::CompilerContext::default(),
+            source_name,
             source,
             CompilerOptions {
                 profile,
                 ..CompilerOptions::default()
             },
         )
+        .map(|(artifact, _)| artifact)
         .expect("debug-name fixture should compile")
     };
     let debug = compile(BuildProfile::Debug);
@@ -204,6 +208,105 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
         "imports and definitions should all receive one deterministic name"
     );
     assert!(debug_function_names(&release).is_none());
+    let dwarf = debug_dwarf(&debug);
+    for required in [".debug_abbrev", ".debug_info", ".debug_line"] {
+        assert!(
+            dwarf
+                .get(required)
+                .is_some_and(|section| !section.is_empty()),
+            "debug modules should contain {required}"
+        );
+    }
+
+    let dwarf = gimli::Dwarf::load(|id| {
+        Ok::<_, gimli::Error>(gimli::EndianSlice::new(
+            dwarf.get(id.name()).copied().unwrap_or_default(),
+            gimli::LittleEndian,
+        ))
+    })
+    .expect("generated DWARF sections should load");
+    let header = dwarf
+        .units()
+        .next()
+        .expect("generated DWARF should be readable")
+        .expect("debug modules should contain a compilation unit");
+    let unit = dwarf
+        .unit(header)
+        .expect("generated DWARF compilation unit should parse");
+    let mut rows = unit
+        .line_program
+        .as_ref()
+        .expect("debug compilation units should contain a line program")
+        .clone()
+        .rows();
+    let instruction_boundaries = wasm_instruction_boundaries(&debug);
+    let mut source_lines = Vec::new();
+    while let Some((_, row)) = rows
+        .next_row()
+        .expect("generated DWARF line rows should parse")
+    {
+        if row.end_sequence() {
+            continue;
+        }
+        assert!(
+            instruction_boundaries.contains(&row.address()),
+            "DWARF address {:#x} is not a Wasm instruction boundary",
+            row.address()
+        );
+        source_lines.push(
+            row.line()
+                .expect("source-backed rows should have line numbers")
+                .get() as usize,
+        );
+    }
+    for snippet in ["return value", "let visible", "print(visible)"] {
+        let line = source
+            .lines()
+            .position(|candidate| candidate.contains(snippet))
+            .expect("fixture snippet should exist")
+            + 1;
+        assert!(
+            source_lines.contains(&line),
+            "missing line row for `{snippet}` on line {line}: {source_lines:?}"
+        );
+    }
+
+    let mut entries = unit.entries();
+    let root = entries
+        .next_dfs()
+        .expect("generated DWARF entries should parse")
+        .expect("debug compilation units should have a root entry");
+    let root_name = root
+        .attr_value(gimli::DW_AT_name)
+        .expect("debug compilation units should identify their source file");
+    assert_eq!(
+        dwarf
+            .attr_string(&unit, root_name)
+            .expect("the source identity should be a string")
+            .to_string_lossy(),
+        source_name
+    );
+    let mut subprograms = Vec::new();
+    while let Some(entry) = entries
+        .next_dfs()
+        .expect("generated DWARF entries should parse")
+    {
+        if entry.tag() != gimli::DW_TAG_subprogram {
+            continue;
+        }
+        let value = entry
+            .attr_value(gimli::DW_AT_name)
+            .expect("source-backed subprograms should have names");
+        let name = dwarf
+            .attr_string(&unit, value)
+            .expect("subprogram names should be strings")
+            .to_string_lossy()
+            .into_owned();
+        subprograms.push(name);
+    }
+    assert!(subprograms.iter().any(|name| name.starts_with("identity")));
+    assert!(subprograms.iter().any(|name| name == "whileAttached"));
+
     assert!(Parser::new(0).parse_all(&release).all(|payload| {
         !matches!(
             payload.expect("release module should parse"),
@@ -211,6 +314,45 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
                 if section.name() == "name" || section.name().starts_with(".debug_")
         )
     }));
+}
+
+fn debug_dwarf(wasm: &[u8]) -> std::collections::HashMap<String, &[u8]> {
+    Parser::new(0)
+        .parse_all(wasm)
+        .filter_map(|payload| {
+            let Payload::CustomSection(section) = payload.ok()? else {
+                return None;
+            };
+            section
+                .name()
+                .starts_with(".debug_")
+                .then(|| (section.name().to_owned(), section.data()))
+        })
+        .collect()
+}
+
+fn wasm_instruction_boundaries(wasm: &[u8]) -> std::collections::BTreeSet<u64> {
+    let mut code_start = None;
+    let mut boundaries = std::collections::BTreeSet::new();
+    for payload in Parser::new(0).parse_all(wasm) {
+        match payload.expect("generated module should parse") {
+            Payload::CodeSectionStart { range, .. } => code_start = Some(range.start),
+            Payload::CodeSectionEntry(body) => {
+                let code_start = code_start.expect("body entries follow a code section start");
+                let mut operators = body
+                    .get_operators_reader()
+                    .expect("generated function operators should parse");
+                while !operators.eof() {
+                    boundaries.insert((operators.original_position() - code_start) as u64);
+                    operators
+                        .read()
+                        .expect("generated function operators should parse");
+                }
+            }
+            _ => {}
+        }
+    }
+    boundaries
 }
 
 fn debug_function_names(wasm: &[u8]) -> Option<(String, Vec<(u32, String)>)> {

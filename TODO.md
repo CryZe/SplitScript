@@ -241,17 +241,22 @@ Do not add JavaScript source maps.
 
 ### Preserve provenance and emit metadata
 
-- [ ] Add one single-file source identity to compilation input, with a
-  deterministic synthetic filename for path-less callers and an explicit path
-  privacy policy. Do not introduce general `FileId` infrastructure before a
-  real multi-source feature.
-- [ ] Retain source origins for typed-HIR statements, expressions, control
-  flow, lexical scopes, and async suspend/resume boundaries. Generated runtime
-  scaffolding must have no source location.
+- [x] Carry one single-file source identity through parsing, lowering,
+  checking, and backend planning. CLI builds use the absolute input path,
+  extension builds use VS Code's native file path (or the URI for non-file
+  documents), and intentionally path-less APIs use deterministic `input.split`.
+  Do not introduce general `FileId` infrastructure before a real multi-source
+  feature.
+- [ ] Retain source origins for all typed-HIR constructs. Expression origins
+  now survive Wasm IR lowering and movement into async poll bodies, while
+  generated runtime scaffolding has no source location. Add statement and
+  control-flow boundaries, lexical scopes, global initializers, and explicit
+  async suspend/resume boundaries next.
 - [ ] Extend the profile-aware `DebugArtifactPlan` beyond its completed final
-  function-index map. Add global, local, GC-layout, and body-boundary plans;
-  record exact instruction boundaries during encoding and verify them with
-  `wasmparser`.
+  function-index and function-body maps. Expression instruction boundaries are
+  recorded during encoding, rebased to Code-section-relative DWARF addresses,
+  and verified against `wasmparser`. Add global, local, GC-layout, scope, and
+  async-location plans.
 - [x] Emit a deterministic WebAssembly `name` section for every imported and
   defined function in debug builds, including runtime helpers, generic source
   specializations, async init/poll functions, lifecycle/state readers, and the
@@ -259,10 +264,14 @@ Do not add JavaScript source maps.
   sections.
 - [ ] Extend the same `name` section with parameters, locals, globals, GC types,
   and fields after their final index plans expose stable source identities.
-- [ ] Emit DWARF incrementally with `gimli::write`: compilation unit,
-  subprograms and line table first; scalar types and variable locations next;
-  GC aggregates only to the level proven usable by the compatibility fixture.
-  Represent async variable locations honestly across suspension.
+- [x] Emit deterministic DWARF v5 compilation-unit, source-backed subprogram,
+  and expression line-table sections with `gimli::write`. Tests decode the
+  result and require every row to land on a real Wasm instruction boundary;
+  release output remains stripped.
+- [ ] Add scalar types and variable locations, lexical scopes, statement and
+  control-flow rows, and async locations that remain honest across suspension.
+  Add GC aggregates only to the level proven usable by the compatibility
+  fixture.
 
 ### Integrate the host and editor only after metadata works
 

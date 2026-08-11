@@ -15,6 +15,7 @@ export interface EmbeddedWarningPolicy {
 export interface EmbeddedCompileRequest {
     protocolVersion: number;
     uri: string;
+    sourcePath?: string;
     revision: number;
     source: string;
     profile: EmbeddedBuildProfile;

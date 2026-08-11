@@ -2,6 +2,7 @@
 /// perform host reads and expression-backed fields execute their Wasm-IR plan.
 pub(super) fn compile_read(
     field: &StateField,
+    function_index: u32,
     abi: &Abi,
     strings: &StringPool,
     lowering: &EmissionContext<'_>,
@@ -66,6 +67,7 @@ pub(super) fn compile_read(
             gc: lowering.gc,
             async_frames: lowering.async_frames,
             intrinsic_capture: None,
+            debug: lowering.debug_emission(function_index),
             function_instance: None,
             loop_control: None,
             bare_return: BareReturn::None,
@@ -257,6 +259,7 @@ pub(super) fn compile_read(
 /// read value and its result determines whether the field accepts that value.
 pub(super) fn compile_state_transform(
     field: &StateField,
+    function_index: u32,
     lowering: &EmissionContext<'_>,
 ) -> Function {
     let transform = field
@@ -321,6 +324,7 @@ pub(super) fn compile_state_transform(
         gc: lowering.gc,
         async_frames: lowering.async_frames,
         intrinsic_capture: None,
+        debug: lowering.debug_emission(function_index),
         function_instance: None,
         loop_control: None,
         bare_return: BareReturn::None,
@@ -466,6 +470,7 @@ fn emit_pointer_read_success(
 pub(super) fn compile_user_function(
     declaration: &FunctionDecl,
     instance: &crate::semantic::FunctionInstance,
+    function_index: u32,
     lowering: &EmissionContext<'_>,
 ) -> Function {
     let wasm_body = lowering
@@ -544,6 +549,7 @@ pub(super) fn compile_user_function(
         gc: lowering.gc,
         async_frames: lowering.async_frames,
         intrinsic_capture: None,
+        debug: lowering.debug_emission(function_index),
         function_instance: Some(instance),
         loop_control: None,
         bare_return: BareReturn::None,
@@ -567,7 +573,11 @@ pub(super) fn compile_user_function(
     function
 }
 
-pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) -> Function {
+pub(super) fn compile_action(
+    action: &Action,
+    function_index: u32,
+    lowering: &EmissionContext<'_>,
+) -> Function {
     let wasm_body = lowering
         .wasm_ir
         .body(BodyOwner::Action(action.kind))
@@ -627,6 +637,7 @@ pub(super) fn compile_action(action: &Action, lowering: &EmissionContext<'_>) ->
         gc: lowering.gc,
         async_frames: lowering.async_frames,
         intrinsic_capture: None,
+        debug: lowering.debug_emission(function_index),
         function_instance: None,
         loop_control: None,
         bare_return: BareReturn::Action(action.kind),

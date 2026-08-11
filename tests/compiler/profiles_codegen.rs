@@ -160,8 +160,19 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
             return value
         }
 
+        fn control(value: bool) {
+            while value {
+                if value {
+                    break
+                }
+                continue
+            }
+            return
+        }
+
         whileAttached {
             let visible: u16 = identity(current.level)
+            control(visible > 0)
             print(tracked)
             print(visible)
         }
@@ -297,6 +308,17 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
         assert!(
             source_lines.contains(&line),
             "missing line row for `{snippet}` on line {line}: {source_lines:?}"
+        );
+    }
+    for statement in ["break", "continue", "return"] {
+        let line = source
+            .lines()
+            .position(|candidate| candidate.trim() == statement)
+            .expect("control-flow fixture statement should exist")
+            + 1;
+        assert!(
+            source_lines.contains(&line),
+            "missing statement row for `{statement}` on line {line}: {source_lines:?}"
         );
     }
 

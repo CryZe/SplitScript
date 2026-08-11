@@ -531,14 +531,15 @@ lifecycle blocks, `_start`, and `update`.
 
 They also contain initial DWARF v5 compilation-unit, subprogram, and line-table
 metadata. Source-backed function bodies map emitted instruction boundaries to
-the original expression lines, including source expressions moved into async
-poll functions. Compiler-generated scaffolding deliberately has no source
-location. Source parameters and primitive scalar locals in direct synchronous
-functions receive Wasm local names, DWARF base types, declaration metadata,
-lexical visibility ranges, and `DW_OP_WASM_location` expressions. Values moved
-into async GC frames are omitted until location changes across suspension can
-be represented honestly. Reachable source globals receive WebAssembly global
-names and scalar globals receive `DW_OP_WASM_location` global locations.
+the original expression and statement lines, including bare control-flow
+statements and source statements moved into async poll continuations.
+Compiler-generated scaffolding deliberately has no source location. Source
+parameters and primitive scalar locals in direct synchronous functions receive
+Wasm local names, DWARF base types, declaration metadata, lexical visibility
+ranges, and `DW_OP_WASM_location` expressions. Values moved into async GC
+frames are omitted until location changes across suspension can be represented
+honestly. Reachable source globals receive WebAssembly global names and scalar
+globals receive `DW_OP_WASM_location` global locations.
 
 Source identity flows through every compiler stage: the CLI records an
 absolute `.split` path, the extension records VS Code's native file path, and

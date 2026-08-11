@@ -614,6 +614,10 @@ impl TypedProgram {
         self.visible_expression_count
     }
 
+    pub(crate) fn visible_function_count(&self) -> usize {
+        self.visible_function_count
+    }
+
     pub fn call(&self, id: ExprId) -> Option<&ResolvedCall> {
         match &self.expression(id)?.resolution {
             Some(ExpressionResolution::Call(call)) => Some(call),

@@ -247,11 +247,11 @@ Do not add JavaScript source maps.
   documents), and intentionally path-less APIs use deterministic `input.split`.
   Do not introduce general `FileId` infrastructure before a real multi-source
   feature.
-- [ ] Retain source origins for all typed-HIR constructs. Expression origins
-  now survive Wasm IR lowering and movement into async poll bodies, while
-  generated runtime scaffolding has no source location. Add statement and
-  control-flow boundaries, lexical scopes, global initializers, and explicit
-  async suspend/resume boundaries next.
+- [ ] Retain source origins for all typed-HIR constructs. Expression and
+  statement/control-flow origins now survive Wasm IR lowering and movement into
+  async poll bodies, while generated runtime scaffolding has no source
+  location. Add global initializers and explicit async suspend/resume boundaries
+  next.
 - [ ] Extend the profile-aware `DebugArtifactPlan` beyond its completed final
   function-index and function-body maps. Expression instruction boundaries are
   recorded during encoding, rebased to Code-section-relative DWARF addresses,
@@ -271,10 +271,10 @@ Do not add JavaScript source maps.
   result and require every row to land on a real Wasm instruction boundary;
   release output remains stripped.
 - [ ] Extend the completed primitive scalar types, source-global/direct-function
-  parameter locations, and declaration-to-scope local ranges with enums,
-  statement/control-flow rows, and async locations that remain honest across
-  suspension. Add GC aggregates only to the level proven usable by the
-  compatibility fixture.
+  parameter locations, declaration-to-scope local ranges, and statement/control
+  flow rows with enums and async locations that remain honest across suspension.
+  Add GC aggregates only to the level proven usable by the compatibility
+  fixture.
 
 ### Integrate the host and editor only after metadata works
 

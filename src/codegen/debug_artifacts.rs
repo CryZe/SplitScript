@@ -513,7 +513,7 @@ fn encode_dwarf(
         }
         functions.entry(marker.function).or_default().push(marker);
     }
-    if functions.is_empty() {
+    if functions.is_empty() && debug_globals.is_empty() {
         return Vec::new();
     }
 

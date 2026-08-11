@@ -39,6 +39,18 @@ pub enum BodyOwner {
     Action(ActionKind),
 }
 
+#[derive(Debug, Clone, Copy)]
+struct SourceProvenance {
+    profile: crate::BuildProfile,
+    visible: bool,
+}
+
+impl SourceProvenance {
+    const fn emits_debug_locations(self) -> bool {
+        self.visible && matches!(self.profile, crate::BuildProfile::Debug)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocalId(usize);
 
@@ -368,6 +380,9 @@ pub struct Block {
 
 #[derive(Debug, Clone)]
 pub enum Statement {
+    /// Source-level statement boundary retained solely for debugger line
+    /// tables. It emits no WebAssembly instruction by itself.
+    DebugLocation(Span),
     Store {
         target: ValueId,
         /// Whether this store introduces the body's local rather than assigning
@@ -561,7 +576,11 @@ impl Program {
                 typed_hir,
                 semantics,
                 effects,
-                profile,
+                SourceProvenance {
+                    profile,
+                    visible: function.function.function.index()
+                        < typed_hir.visible_function_count(),
+                },
                 &mut program,
             );
             program.bodies.push(body);
@@ -573,7 +592,10 @@ impl Program {
                 typed_hir,
                 semantics,
                 effects,
-                profile,
+                SourceProvenance {
+                    profile,
+                    visible: true,
+                },
                 &mut program,
             );
             program.bodies.push(body);
@@ -1076,7 +1098,7 @@ fn lower_body(
     typed_hir: &TypedProgram,
     semantics: &SemanticModel,
     effects: &OperationAnalysis,
-    profile: crate::BuildProfile,
+    source: SourceProvenance,
     wasm_ir: &mut Program,
 ) -> Body {
     let abi = match &owner {
@@ -1094,9 +1116,9 @@ fn lower_body(
         BodyOwner::Function(_) => BodyAbi::Direct,
     };
     let mut entry = if !matches!(abi, BodyAbi::Direct) {
-        lower_async_block(block, typed_hir, semantics, profile, wasm_ir)
+        lower_async_block(block, typed_hir, semantics, source, wasm_ir)
     } else {
-        lower_block(block, typed_hir, semantics, profile, wasm_ir)
+        lower_block(block, typed_hir, semantics, source, wasm_ir)
     };
     let mut next_async_state = 1;
     assign_async_states(&mut entry, &mut next_async_state);
@@ -1322,6 +1344,7 @@ fn analyze_statements_liveness(
 ) {
     for statement in statements.iter_mut().rev() {
         match statement {
+            Statement::DebugLocation(_) => {}
             Statement::Store {
                 target,
                 operation,
@@ -1517,17 +1540,17 @@ fn lower_block(
     block: &hir::TypedBlock,
     typed_hir: &TypedProgram,
     semantics: &SemanticModel,
-    profile: crate::BuildProfile,
+    source: SourceProvenance,
     wasm_ir: &mut Program,
 ) -> Block {
-    lower_statements(&block.statements, typed_hir, semantics, profile, wasm_ir)
+    lower_statements(&block.statements, typed_hir, semantics, source, wasm_ir)
 }
 
 fn lower_async_block(
     block: &hir::TypedBlock,
     typed_hir: &TypedProgram,
     semantics: &SemanticModel,
-    profile: crate::BuildProfile,
+    source: SourceProvenance,
     wasm_ir: &mut Program,
 ) -> Block {
     lower_async_statements(
@@ -1535,7 +1558,7 @@ fn lower_async_block(
         Block::default(),
         typed_hir,
         semantics,
-        profile,
+        source,
         wasm_ir,
     )
 }
@@ -2392,12 +2415,12 @@ fn lower_async_statements(
     tail: Block,
     typed_hir: &TypedProgram,
     semantics: &SemanticModel,
-    profile: crate::BuildProfile,
+    source: SourceProvenance,
     wasm_ir: &mut Program,
 ) -> Block {
     let mut result = tail;
     for statement in statements.iter().rev() {
-        if statement.debug_only && profile == crate::BuildProfile::Release {
+        if statement.debug_only && source.profile == crate::BuildProfile::Release {
             continue;
         }
         match &statement.kind {
@@ -2507,17 +2530,17 @@ fn lower_async_statements(
                 condition,
                 then_block,
                 else_block,
-            } if typed_block_contains_await(then_block, typed_hir, profile)
-                || else_block
-                    .as_ref()
-                    .is_some_and(|block| typed_block_contains_await(block, typed_hir, profile)) =>
+            } if typed_block_contains_await(then_block, typed_hir, source.profile)
+                || else_block.as_ref().is_some_and(|block| {
+                    typed_block_contains_await(block, typed_hir, source.profile)
+                }) =>
             {
                 let then_block = lower_async_statements(
                     &then_block.statements,
                     result.clone(),
                     typed_hir,
                     semantics,
-                    profile,
+                    source,
                     wasm_ir,
                 );
                 let else_block = else_block.as_ref().map_or_else(
@@ -2528,7 +2551,7 @@ fn lower_async_statements(
                             result.clone(),
                             typed_hir,
                             semantics,
-                            profile,
+                            source,
                             wasm_ir,
                         )
                     },
@@ -2556,9 +2579,9 @@ fn lower_async_statements(
                     0,
                     Statement::If {
                         condition: normalized.value,
-                        then_block: lower_block(then_block, typed_hir, semantics, profile, wasm_ir),
+                        then_block: lower_block(then_block, typed_hir, semantics, source, wasm_ir),
                         else_block: else_block.as_ref().map_or_else(Block::default, |block| {
-                            lower_block(block, typed_hir, semantics, profile, wasm_ir)
+                            lower_block(block, typed_hir, semantics, source, wasm_ir)
                         }),
                     },
                 );
@@ -2566,7 +2589,7 @@ fn lower_async_statements(
             }
             TypedStatementKind::While { condition, body } => {
                 if typed_expression_contains_suspension(*condition, typed_hir)
-                    || typed_block_contains_await(body, typed_hir, profile)
+                    || typed_block_contains_await(body, typed_hir, source.profile)
                 {
                     let normalized =
                         normalize_expression_suspensions(*condition, typed_hir, semantics, wasm_ir);
@@ -2578,7 +2601,7 @@ fn lower_async_statements(
                         },
                         typed_hir,
                         semantics,
-                        profile,
+                        source,
                         wasm_ir,
                     );
                     let header = wrap_async_expression_steps(
@@ -2602,13 +2625,18 @@ fn lower_async_statements(
                             exit_state: AsyncStateId::ENTRY,
                         },
                     };
+                    if source.emits_debug_locations() {
+                        result
+                            .statements
+                            .insert(0, Statement::DebugLocation(statement.span));
+                    }
                     continue;
                 }
                 result.statements.insert(
                     0,
                     Statement::While {
                         condition: *condition,
-                        body: lower_block(body, typed_hir, semantics, profile, wasm_ir),
+                        body: lower_block(body, typed_hir, semantics, source, wasm_ir),
                     },
                 );
             }
@@ -2620,7 +2648,7 @@ fn lower_async_statements(
                 iterable,
                 body,
             } => {
-                if typed_block_contains_await(body, typed_hir, profile) {
+                if typed_block_contains_await(body, typed_hir, source.profile) {
                     let normalized =
                         normalize_expression_suspensions(*iterable, typed_hir, semantics, wasm_ir);
                     let body = lower_async_statements(
@@ -2631,7 +2659,7 @@ fn lower_async_statements(
                         },
                         typed_hir,
                         semantics,
-                        profile,
+                        source,
                         wasm_ir,
                     );
                     result = Block {
@@ -2654,6 +2682,11 @@ fn lower_async_statements(
                         },
                     };
                     result = wrap_async_expression_steps(normalized.steps, result);
+                    if source.emits_debug_locations() {
+                        result
+                            .statements
+                            .insert(0, Statement::DebugLocation(statement.span));
+                    }
                     continue;
                 }
                 let normalized =
@@ -2666,7 +2699,7 @@ fn lower_async_statements(
                         index_value: *index_value,
                         version_value: *version_value,
                         iterable: normalized.value,
-                        body: lower_block(body, typed_hir, semantics, profile, wasm_ir),
+                        body: lower_block(body, typed_hir, semantics, source, wasm_ir),
                     },
                 );
                 result = wrap_async_expression_steps(normalized.steps, result);
@@ -2748,6 +2781,11 @@ fn lower_async_statements(
                 );
                 result = wrap_async_expression_steps(normalized.steps, result);
             }
+        }
+        if source.emits_debug_locations() {
+            result
+                .statements
+                .insert(0, Statement::DebugLocation(statement.span));
         }
     }
     result
@@ -2850,6 +2888,7 @@ fn assign_async_states(block: &mut Block, next: &mut u32) {
                 assign_async_states(body, next)
             }
             Statement::Store { .. }
+            | Statement::DebugLocation(_)
             | Statement::StoreTemporary { .. }
             | Statement::IndexStore { .. }
             | Statement::Evaluate { .. }
@@ -2934,6 +2973,7 @@ fn set_async_while_targets(
                 set_async_while_targets(body, header_state, exit_state);
             }
             Statement::Store { .. }
+            | Statement::DebugLocation(_)
             | Statement::StoreTemporary { .. }
             | Statement::IndexStore { .. }
             | Statement::Evaluate { .. }
@@ -2966,13 +3006,18 @@ fn lower_statements(
     statements: &[hir::TypedStatement],
     typed_hir: &TypedProgram,
     semantics: &SemanticModel,
-    profile: crate::BuildProfile,
+    source: SourceProvenance,
     wasm_ir: &mut Program,
 ) -> Block {
     let mut block = Block::default();
     for (index, statement) in statements.iter().enumerate() {
-        if statement.debug_only && profile == crate::BuildProfile::Release {
+        if statement.debug_only && source.profile == crate::BuildProfile::Release {
             continue;
+        }
+        if source.emits_debug_locations() {
+            block
+                .statements
+                .push(Statement::DebugLocation(statement.span));
         }
         match &statement.kind {
             TypedStatementKind::Variable { value, initializer } => {
@@ -3050,15 +3095,15 @@ fn lower_statements(
                 else_block,
             } => block.statements.push(Statement::If {
                 condition: *condition,
-                then_block: lower_block(then_block, typed_hir, semantics, profile, wasm_ir),
+                then_block: lower_block(then_block, typed_hir, semantics, source, wasm_ir),
                 else_block: else_block.as_ref().map_or_else(Block::default, |block| {
-                    lower_block(block, typed_hir, semantics, profile, wasm_ir)
+                    lower_block(block, typed_hir, semantics, source, wasm_ir)
                 }),
             }),
             TypedStatementKind::While { condition, body } => {
                 block.statements.push(Statement::While {
                     condition: *condition,
-                    body: lower_block(body, typed_hir, semantics, profile, wasm_ir),
+                    body: lower_block(body, typed_hir, semantics, source, wasm_ir),
                 });
             }
             TypedStatementKind::For {
@@ -3075,7 +3120,7 @@ fn lower_statements(
                     index_value: *index_value,
                     version_value: *version_value,
                     iterable: *iterable,
-                    body: lower_block(body, typed_hir, semantics, profile, wasm_ir),
+                    body: lower_block(body, typed_hir, semantics, source, wasm_ir),
                 });
             }
             TypedStatementKind::Break => {
@@ -3125,7 +3170,7 @@ fn lower_statements(
                             &statements[index + 1..],
                             typed_hir,
                             semantics,
-                            profile,
+                            source,
                             wasm_ir,
                         )
                     }),
@@ -3312,6 +3357,7 @@ impl Visitor for LocalPlanner<'_> {
                 self.value(*version_value);
             }
             Statement::Store { .. }
+            | Statement::DebugLocation(_)
             | Statement::IndexStore { .. }
             | Statement::Evaluate { .. }
             | Statement::If { .. }
@@ -3512,5 +3558,51 @@ onAttach {
         assert!(asynchronous.async_state_count > 1);
         assert_eq!(PollStatus::Pending.wasm_value(), 0);
         assert_eq!(PollStatus::Ready.wasm_value(), 1);
+
+        #[derive(Default)]
+        struct DebugLocations(Vec<Span>);
+
+        impl Visitor for DebugLocations {
+            fn visit_statement(&mut self, statement: &Statement, program: &Program) {
+                if let Statement::DebugLocation(span) = statement {
+                    self.0.push(*span);
+                }
+                walk_statement(self, statement, program);
+            }
+        }
+
+        let expected = checked
+            .hir
+            .function_body(function("loadModule"))
+            .unwrap()
+            .statements
+            .iter()
+            .map(|statement| statement.span)
+            .collect::<Vec<_>>();
+        let mut debug_locations = DebugLocations::default();
+        debug_locations.visit_block(&asynchronous.entry, backend.wasm_ir());
+        for span in expected {
+            assert!(
+                debug_locations.0.contains(&span),
+                "async normalization dropped statement location {span:?}"
+            );
+        }
+
+        let release = crate::lower_wasm_with_options(
+            &checked,
+            crate::CompilerOptions {
+                profile: crate::BuildProfile::Release,
+                ..crate::CompilerOptions::default()
+            },
+        );
+        let release_body = release
+            .wasm_ir()
+            .body(BodyOwner::Function(FunctionInstance::monomorphic(
+                function("loadModule"),
+            )))
+            .unwrap();
+        let mut release_locations = DebugLocations::default();
+        release_locations.visit_block(&release_body.entry, release.wasm_ir());
+        assert!(release_locations.0.is_empty());
     }
 }

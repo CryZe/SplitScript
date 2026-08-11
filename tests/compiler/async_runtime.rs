@@ -2,6 +2,17 @@
 
 use super::*;
 
+fn semantic_statements(
+    block: &splitscript::compiler::wasm_ir::Block,
+) -> impl Iterator<Item = &splitscript::compiler::wasm_ir::Statement> {
+    block.statements.iter().filter(|statement| {
+        !matches!(
+            statement,
+            splitscript::compiler::wasm_ir::Statement::DebugLocation(_)
+        )
+    })
+}
+
 #[derive(Default)]
 struct AsyncTestHost {
     process_open: bool,
@@ -485,7 +496,8 @@ fn operands_before_a_nested_await_are_spilled_before_suspension() {
         ))
         .expect("onAttach has a lowered body");
 
-    let Some(Statement::StoreTemporary { target, .. }) = body.entry.statements.first() else {
+    let Some(Statement::StoreTemporary { target, .. }) = semantic_statements(&body.entry).next()
+    else {
         panic!("the earlier call must be evaluated into a compiler temporary")
     };
     assert!(body.frame_temporaries.contains(target));
@@ -531,7 +543,7 @@ fn expression_branches_keep_suspensions_inside_the_selected_path() {
         then_block,
         else_block,
         ..
-    }) = body.entry.statements.first()
+    }) = semantic_statements(&body.entry).next()
     else {
         panic!("the expression if must remain branch-shaped in the continuation graph")
     };
@@ -610,7 +622,7 @@ fn match_arm_suspensions_are_selected_and_payloads_survive_resumption() {
             splitscript::compiler::ast::ActionKind::OnAttach,
         ))
         .expect("onAttach has a lowered body");
-    let Some(Statement::Match { arms, .. }) = body.entry.statements.first() else {
+    let Some(Statement::Match { arms, .. }) = semantic_statements(&body.entry).next() else {
         panic!("a suspending match must remain branch-shaped")
     };
     assert!(matches!(
@@ -651,20 +663,20 @@ fn suspending_match_guards_resume_into_the_next_arm_when_false() {
             splitscript::compiler::ast::ActionKind::OnAttach,
         ))
         .expect("onAttach has a lowered body");
-    let Some(Statement::StoreTemporary { .. }) = body.entry.statements.first() else {
+    let Some(Statement::StoreTemporary { .. }) = semantic_statements(&body.entry).next() else {
         panic!("the match input must survive a suspending guard")
     };
-    let Some(Statement::Match { arms, .. }) = body.entry.statements.get(1) else {
+    let Some(Statement::Match { arms, .. }) = semantic_statements(&body.entry).nth(1) else {
         panic!("the guarded match remains explicit control flow")
     };
     let Terminator::Suspend { continuation, .. } = &arms[0].block.terminator else {
         panic!("the first matching arm polls its guard")
     };
-    let Some(Statement::If { else_block, .. }) = continuation.statements.first() else {
+    let Some(Statement::If { else_block, .. }) = semantic_statements(continuation).next() else {
         panic!("guard readiness must branch on the guard result")
     };
     assert!(matches!(
-        else_block.statements.first(),
+        semantic_statements(else_block).next(),
         Some(Statement::Match { .. })
     ));
 
@@ -698,7 +710,7 @@ fn suspending_value_fallbacks_only_poll_on_the_failure_path() {
         fallback_block,
         success_block,
         ..
-    }) = body.entry.statements.get(1)
+    }) = semantic_statements(&body.entry).nth(1)
     else {
         panic!("fallback must remain explicit branch control flow")
     };
@@ -747,7 +759,7 @@ fn awaited_call_operands_are_captured_once_before_polling() {
         ))
         .expect("onAttach has a lowered body");
     assert!(matches!(
-        body.entry.statements.first(),
+        semantic_statements(&body.entry).next(),
         Some(Statement::StoreTemporary { .. })
     ));
     assert!(matches!(body.entry.terminator, Terminator::Suspend { .. }));

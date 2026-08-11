@@ -269,6 +269,11 @@ fn compile_block_with_loop(
     let context = &expression_context;
     for statement in &block.statements {
         match statement {
+            wasm_ir::Statement::DebugLocation(source) => {
+                if let Some(debug) = context.debug {
+                    debug.mark(function, Some(*source));
+                }
+            }
             wasm_ir::Statement::Store {
                 target,
                 operation,

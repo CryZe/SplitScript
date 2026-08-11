@@ -64,6 +64,7 @@ pub fn walk_statement(
     program: &Program,
 ) {
     match statement {
+        Statement::DebugLocation(_) => {}
         Statement::Store { value, .. }
         | Statement::StoreTemporary { value, .. }
         | Statement::Evaluate {

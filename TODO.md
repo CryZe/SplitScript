@@ -247,11 +247,13 @@ Do not add JavaScript source maps.
   documents), and intentionally path-less APIs use deterministic `input.split`.
   Do not introduce general `FileId` infrastructure before a real multi-source
   feature.
-- [ ] Retain source origins for all typed-HIR constructs. Expression and
+- [x] Retain source origins for all typed-HIR constructs. Expression and
   statement/control-flow origins now survive Wasm IR lowering and movement into
   async poll bodies, and explicit suspend/resume boundaries retain the original
   `await`/`retry` span while generated runtime scaffolding has no source
-  location. Add global initializers next.
+  location. Executable enum and aggregate global initializers map `_start` rows
+  to their declarations; primitive constant expressions correctly have no
+  executable breakpoint address.
 - [ ] Extend the profile-aware `DebugArtifactPlan` beyond its completed final
   function-index and function-body maps. Expression instruction boundaries are
   recorded during encoding, rebased to Code-section-relative DWARF addresses,

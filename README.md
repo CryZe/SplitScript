@@ -215,6 +215,9 @@ expressions.
 Direct synchronous functions also expose source parameter/local names,
 primitive scalar types, lexical visibility ranges, and Wasm-local locations.
 Reachable source globals expose their names and Wasm-global locations as well.
+Executable enum and aggregate global initialization in `_start` maps back to
+the declaration; primitive constant initializers remain non-executable Wasm
+global expressions and therefore do not fabricate breakpoint addresses.
 The CLI records the absolute `.split` path and the extension records VS Code's
 native file path; explicitly in-memory compiler calls use `input.split`.
 Release modules strip both the name section and all `.debug_*` sections

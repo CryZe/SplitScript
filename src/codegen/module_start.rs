@@ -16,6 +16,7 @@ use super::{
     GcLayout, STATE_TYPE, SettingStorage, Type,
     context::EmissionContext,
     data_plan::StringPool,
+    debug_artifacts::DebugEmission,
     emit_default,
     expression::{BareReturn, ExprContext, LocalStorage, MatchLayout, compile_expr},
     semantic_type,
@@ -24,6 +25,7 @@ use super::{
 };
 
 pub(super) struct StartFunctions {
+    pub(super) start: u32,
     pub(super) refresh_settings: Option<u32>,
     pub(super) setup: Option<u32>,
 }
@@ -39,8 +41,9 @@ pub(super) fn compile_start(
 ) -> Function {
     let semantics = settings_context.semantics;
     let mut function = Function::new([]);
-    emit_enum_global_initializers(&mut function, program, settings_context);
-    emit_aggregate_global_initializers(&mut function, program, emission);
+    let debug = emission.debug_emission(start_functions.start);
+    emit_enum_global_initializers(&mut function, program, settings_context, debug);
+    emit_aggregate_global_initializers(&mut function, program, emission, debug);
     emit_initial_state(&mut function, program, semantics, settings_context.gc);
     function.instruction(&Instruction::GlobalSet(
         settings_context.runtime_globals.current,
@@ -81,6 +84,7 @@ fn emit_enum_global_initializers(
     function: &mut Function,
     program: &Program,
     lowering: &SettingsContext<'_>,
+    debug: Option<DebugEmission<'_>>,
 ) {
     for variable in program
         .globals
@@ -99,6 +103,15 @@ fn emit_enum_global_initializers(
         else {
             unreachable!("checked enum globals use enum constructors")
         };
+        if let Some(debug) = debug {
+            debug.mark(
+                function,
+                lowering
+                    .wasm_ir
+                    .expression(variable.value.id)
+                    .and_then(|expression| expression.source),
+            );
+        }
         match (ty, variant) {
             (Type::Enum(enumeration), ResolvedEnumVariantId::Source(variant)) => {
                 emit_enum_variant(
@@ -135,6 +148,7 @@ fn emit_aggregate_global_initializers(
     function: &mut Function,
     program: &Program,
     lowering: &EmissionContext<'_>,
+    debug: Option<DebugEmission<'_>>,
 ) {
     let locals = HashMap::new();
     let matches = MatchLayout::default();
@@ -169,7 +183,7 @@ fn emit_aggregate_global_initializers(
         gc: lowering.gc,
         async_frames: lowering.async_frames,
         intrinsic_capture: None,
-        debug: None,
+        debug,
         function_instance: None,
         loop_control: None,
         bare_return: BareReturn::None,

@@ -154,7 +154,13 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
             level: u16 at 0x1234
         }
 
+        enum Phase {
+            Ready,
+        }
+
         let tracked: u32 = 7
+        let phase = Phase.Ready
+        let label = "ready"
 
         fn identity(value) {
             return value
@@ -181,6 +187,9 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
             control(visible > 0)
             print(tracked)
             print(visible)
+            if phase == Phase.Ready {
+                print(label)
+            }
         }
     "#;
     let source_name = "P:/debug/fixture.split";
@@ -310,7 +319,13 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
         .iter()
         .map(|(line, _)| *line)
         .collect::<Vec<_>>();
-    for snippet in ["return value", "let visible", "print(visible)"] {
+    for snippet in [
+        "let phase",
+        "let label",
+        "return value",
+        "let visible",
+        "print(visible)",
+    ] {
         let line = source
             .lines()
             .position(|candidate| candidate.contains(snippet))

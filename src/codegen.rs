@@ -540,6 +540,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         strings,
         &setting_indices,
         module_start::StartFunctions {
+            start: start_function,
             refresh_settings,
             setup: action_functions.get(&ActionKind::Setup).copied(),
         },

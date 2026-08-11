@@ -537,7 +537,8 @@ location. Source parameters and primitive scalar locals in direct synchronous
 functions receive Wasm local names, DWARF base types, declaration metadata,
 lexical visibility ranges, and `DW_OP_WASM_location` expressions. Values moved
 into async GC frames are omitted until location changes across suspension can
-be represented honestly.
+be represented honestly. Reachable source globals receive WebAssembly global
+names and scalar globals receive `DW_OP_WASM_location` global locations.
 
 Source identity flows through every compiler stage: the CLI records an
 absolute `.split` path, the extension records VS Code's native file path, and

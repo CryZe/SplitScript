@@ -208,12 +208,13 @@ release semantic lowering before backend reachability analysis, so their
 storage, strings, and imports are omitted. Debug modules include symbolic names
 for every imported and generated WebAssembly function. They also embed initial
 DWARF v5 metadata for source-backed functions and expression-level line
-stepping. Direct synchronous functions also expose source parameter/local names,
-primitive scalar types, lexical visibility ranges, and Wasm-local locations.
-The CLI records the absolute `.split` path and the extension records VS Code's
-native file path; explicitly in-memory compiler calls use `input.split`.
-Release modules strip both the name section and all `.debug_*` sections
-entirely.
+stepping. Direct synchronous functions also expose source parameter/local
+names, primitive scalar types, lexical visibility ranges, and Wasm-local
+locations. Reachable source globals expose their names and Wasm-global
+locations as well. The CLI records the absolute `.split` path and the extension
+records VS Code's native file path; explicitly in-memory compiler calls use
+`input.split`. Release modules strip both the name section and all `.debug_*`
+sections entirely.
 
 The full example is in [`examples/lunistice.split`](examples/lunistice.split).
 See [`docs/LANGUAGE.md`](docs/LANGUAGE.md) for the language,

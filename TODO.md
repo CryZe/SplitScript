@@ -262,16 +262,16 @@ Do not add JavaScript source maps.
   specializations, async init/poll functions, lifecycle/state readers, and the
   exported entry points. Release modules contain no `name` or `.debug_*`
   sections.
-- [ ] Extend the same `name` section beyond the completed source-owned
-  parameters and direct-function locals. Add globals, GC types, fields, and
-  honest names for values moved into async frames after their final index plans
-  expose stable source identities.
+- [ ] Extend the same `name` section beyond the completed source-owned globals,
+  parameters, and direct-function locals. Add GC types, fields, settings
+  storage, and honest names for values moved into async frames after their final
+  index plans expose stable source identities.
 - [x] Emit deterministic DWARF v5 compilation-unit, source-backed subprogram,
   and expression line-table sections with `gimli::write`. Tests decode the
   result and require every row to land on a real Wasm instruction boundary;
   release output remains stripped.
-- [ ] Extend the completed primitive scalar types, direct-function parameter
-  locations, and declaration-to-scope local ranges with globals, enums,
+- [ ] Extend the completed primitive scalar types, source-global/direct-function
+  parameter locations, and declaration-to-scope local ranges with enums,
   statement/control-flow rows, and async locations that remain honest across
   suspension. Add GC aggregates only to the level proven usable by the
   compatibility fixture.

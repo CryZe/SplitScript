@@ -30,6 +30,17 @@ pub(super) struct DebugArtifactPlan {
     dwarf: Vec<DebugSection>,
 }
 
+pub(super) struct DebugArtifactInputs<'a> {
+    pub abi: &'a Abi,
+    pub defined_functions: &'a [(u32, String)],
+    pub recorder: &'a DebugRecorder,
+    pub global_indices: &'a HashMap<ValueId, u32>,
+    pub global_types: &'a HashMap<ValueId, Type>,
+    pub program: &'a Program,
+    pub source_name: &'a str,
+    pub source: &'a str,
+}
+
 pub(super) struct DebugSection {
     pub name: &'static str,
     pub data: Vec<u8>,
@@ -55,6 +66,13 @@ struct DebugVariable {
     local: u32,
     ty: Type,
     parameter: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DebugGlobal {
+    value: ValueId,
+    index: u32,
+    ty: Type,
 }
 
 /// Interior-mutability is intentionally confined to debug emission. Normal
@@ -338,15 +356,36 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
     collector.variables
 }
 
+fn source_globals(program: &Program) -> HashMap<ValueId, SourceVariable> {
+    program
+        .globals
+        .iter()
+        .map(|global| {
+            (
+                global.id,
+                SourceVariable {
+                    name: global.name.clone(),
+                    name_span: global.name_span,
+                    declaration_span: global.span,
+                    scope_span: global.span,
+                },
+            )
+        })
+        .collect()
+}
+
 impl DebugArtifactPlan {
-    pub(super) fn new(
-        abi: &Abi,
-        defined_functions: &[(u32, String)],
-        recorder: &DebugRecorder,
-        program: &Program,
-        source_name: &str,
-        source: &str,
-    ) -> Self {
+    pub(super) fn new(inputs: DebugArtifactInputs<'_>) -> Self {
+        let DebugArtifactInputs {
+            abi,
+            defined_functions,
+            recorder,
+            global_indices,
+            global_types,
+            program,
+            source_name,
+            source,
+        } = inputs;
         let mut entries = abi
             .debug_names()
             .map(|(index, name)| (index, format!("env::{name}")))
@@ -373,6 +412,7 @@ impl DebugArtifactPlan {
         names.module("SplitScript autosplitter");
         names.functions(&function_names);
         let source_variables = source_variables(program);
+        let source_globals = source_globals(program);
         let mut variables = recorder.variables.borrow().clone();
         variables.sort_unstable_by_key(|variable| (variable.function, variable.local));
         let mut local_names = IndirectNameMap::new();
@@ -402,10 +442,29 @@ impl DebugArtifactPlan {
             local_names.append(function, &function_names);
         }
         names.locals(&local_names);
+        let mut debug_globals = global_indices
+            .iter()
+            .filter_map(|(&value, &index)| {
+                source_globals.contains_key(&value).then_some(DebugGlobal {
+                    value,
+                    index,
+                    ty: global_types[&value],
+                })
+            })
+            .filter(|global| global.index != u32::MAX && global.ty != Type::None)
+            .collect::<Vec<_>>();
+        debug_globals.sort_unstable_by_key(|global| global.index);
+        let mut global_names = NameMap::new();
+        for global in &debug_globals {
+            global_names.append(global.index, &source_globals[&global.value].name);
+        }
+        names.globals(&global_names);
         let dwarf = encode_dwarf(
             &entries_by_index(abi, defined_functions),
             recorder,
             &source_variables,
+            &debug_globals,
+            &source_globals,
             source_name,
             source,
         );
@@ -432,6 +491,8 @@ fn encode_dwarf(
     names: &BTreeMap<u32, String>,
     recorder: &DebugRecorder,
     source_variables: &HashMap<ValueId, SourceVariable>,
+    debug_globals: &[DebugGlobal],
+    source_globals: &HashMap<ValueId, SourceVariable>,
     source_name: &str,
     source: &str,
 ) -> Vec<DebugSection> {
@@ -494,6 +555,33 @@ fn encode_dwarf(
     }
     let debug_variables = recorder.variables.borrow();
     let mut scalar_types = HashMap::new();
+
+    for global in debug_globals {
+        let Some(source_global) = source_globals.get(&global.value) else {
+            continue;
+        };
+        let Some(ty) = scalar_type_entry(&mut dwarf, root, &mut scalar_types, global.ty) else {
+            continue;
+        };
+        let variable = dwarf.unit.add(root, gimli::DW_TAG_variable);
+        let (line, column) = source_position(source, source_global.name_span.start);
+        let mut location = Expression::new();
+        location.op_wasm_global(global.index);
+        let entry = dwarf.unit.get_mut(variable);
+        entry.set(
+            gimli::DW_AT_name,
+            AttributeValue::String(source_global.name.as_bytes().to_vec()),
+        );
+        entry.set(
+            gimli::DW_AT_decl_file,
+            AttributeValue::FileIndex(Some(file)),
+        );
+        entry.set(gimli::DW_AT_decl_line, AttributeValue::Udata(line));
+        entry.set(gimli::DW_AT_decl_column, AttributeValue::Udata(column));
+        entry.set(gimli::DW_AT_type, AttributeValue::UnitRef(ty));
+        entry.set(gimli::DW_AT_external, AttributeValue::Flag(true));
+        entry.set(gimli::DW_AT_location, AttributeValue::Exprloc(location));
+    }
 
     for (function, mut function_markers) in functions {
         let body = bodies[&function];

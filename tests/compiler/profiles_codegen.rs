@@ -154,12 +154,15 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
             level: u16 at 0x1234
         }
 
+        let tracked: u32 = 7
+
         fn identity(value) {
             return value
         }
 
         whileAttached {
             let visible: u16 = identity(current.level)
+            print(tracked)
             print(visible)
         }
     "#;
@@ -219,6 +222,11 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
         local_names[&while_attached]
             .iter()
             .any(|(_, name)| name == "visible")
+    );
+    assert!(
+        debug_global_names(&debug)
+            .iter()
+            .any(|(_, name)| name == "tracked")
     );
     assert_eq!(
         function_names
@@ -338,7 +346,11 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
             }
             gimli::DW_TAG_variable => {
                 assert!(entry.attr_value(gimli::DW_AT_type).is_some());
-                assert_wasm_local_location(entry, unit.encoding());
+                if name == "tracked" {
+                    assert_wasm_global_location(entry, unit.encoding());
+                } else {
+                    assert_wasm_local_location(entry, unit.encoding());
+                }
                 variables.push(name);
             }
             gimli::DW_TAG_base_type => base_types.push(name),
@@ -349,6 +361,7 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
     assert!(subprograms.iter().any(|name| name == "whileAttached"));
     assert!(parameters.iter().any(|name| name == "value"));
     assert!(variables.iter().any(|name| name == "visible"));
+    assert!(variables.iter().any(|name| name == "tracked"));
     assert!(base_types.iter().any(|name| name == "u16"));
     assert!(lexical_blocks >= 1);
 
@@ -390,6 +403,29 @@ fn assert_wasm_local_location<R: gimli::Reader>(
     assert!(matches!(
         operations.next().expect("location expression should parse"),
         Some(gimli::Operation::WasmLocal { .. })
+    ));
+    assert!(
+        operations
+            .next()
+            .expect("location expression should parse")
+            .is_none()
+    );
+}
+
+fn assert_wasm_global_location<R: gimli::Reader>(
+    entry: &gimli::DebuggingInformationEntry<R>,
+    encoding: gimli::Encoding,
+) {
+    let gimli::AttributeValue::Exprloc(expression) = entry
+        .attr_value(gimli::DW_AT_location)
+        .expect("source globals should have locations")
+    else {
+        panic!("source global location should be an expression")
+    };
+    let mut operations = expression.operations(encoding);
+    assert!(matches!(
+        operations.next().expect("location expression should parse"),
+        Some(gimli::Operation::WasmGlobal { .. })
     ));
     assert!(
         operations
@@ -485,6 +521,33 @@ fn debug_local_names(wasm: &[u8]) -> std::collections::BTreeMap<u32, Vec<(u32, S
         }
     }
     output
+}
+
+fn debug_global_names(wasm: &[u8]) -> Vec<(u32, String)> {
+    for payload in Parser::new(0).parse_all(wasm) {
+        let Payload::CustomSection(section) = payload.expect("generated module should parse")
+        else {
+            continue;
+        };
+        let wasmparser::KnownCustom::Name(reader) = section.as_known() else {
+            continue;
+        };
+        for subsection in reader {
+            let wasmparser::Name::Global(names) =
+                subsection.expect("generated name subsection should parse")
+            else {
+                continue;
+            };
+            return names
+                .into_iter()
+                .map(|name| {
+                    let name = name.expect("generated global name should parse");
+                    (name.index, name.name.to_owned())
+                })
+                .collect();
+        }
+    }
+    Vec::new()
 }
 
 #[test]

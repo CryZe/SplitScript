@@ -561,14 +561,16 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     codes.push(&body);
 
     let debug_artifacts = debug_recorder.as_ref().map(|recorder| {
-        debug_artifacts::DebugArtifactPlan::new(
-            &abi,
-            &function_debug_names,
+        debug_artifacts::DebugArtifactPlan::new(debug_artifacts::DebugArtifactInputs {
+            abi: &abi,
+            defined_functions: &function_debug_names,
             recorder,
+            global_indices: &global_indices,
+            global_types: &global_types,
             program,
             source_name,
             source,
-        )
+        })
     });
 
     module_assembly::finish(

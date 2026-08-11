@@ -249,14 +249,14 @@ Do not add JavaScript source maps.
   feature.
 - [ ] Retain source origins for all typed-HIR constructs. Expression and
   statement/control-flow origins now survive Wasm IR lowering and movement into
-  async poll bodies, while generated runtime scaffolding has no source
-  location. Add global initializers and explicit async suspend/resume boundaries
-  next.
+  async poll bodies, and explicit suspend/resume boundaries retain the original
+  `await`/`retry` span while generated runtime scaffolding has no source
+  location. Add global initializers next.
 - [ ] Extend the profile-aware `DebugArtifactPlan` beyond its completed final
   function-index and function-body maps. Expression instruction boundaries are
   recorded during encoding, rebased to Code-section-relative DWARF addresses,
-  and verified against `wasmparser`. Add global, local, GC-layout, scope, and
-  async-location plans.
+  and verified against `wasmparser`; async suspend/resume boundaries use
+  distinct line discriminators. Add GC-layout and async-frame-location plans.
 - [x] Emit a deterministic WebAssembly `name` section for every imported and
   defined function in debug builds, including runtime helpers, generic source
   specializations, async init/poll functions, lifecycle/state readers, and the
@@ -272,9 +272,9 @@ Do not add JavaScript source maps.
   release output remains stripped.
 - [ ] Extend the completed primitive scalar types, source-global/direct-function
   parameter locations, declaration-to-scope local ranges, and statement/control
-  flow rows with enums and async locations that remain honest across suspension.
-  Add GC aggregates only to the level proven usable by the compatibility
-  fixture.
+  flow rows with enums and honest async-frame variable locations. Suspension
+  and resumption already have distinct rows at the source `await`/`retry` span.
+  Add GC aggregates only to the level proven usable by the compatibility fixture.
 
 ### Integrate the host and editor only after metadata works
 

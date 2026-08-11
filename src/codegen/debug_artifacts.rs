@@ -51,6 +51,24 @@ struct BodyMarker {
     function: u32,
     body_offset: u32,
     source: Span,
+    kind: BodyMarkerKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BodyMarkerKind {
+    Source,
+    Suspend,
+    Resume,
+}
+
+impl BodyMarkerKind {
+    const fn discriminator(self) -> u64 {
+        match self {
+            Self::Source => 0,
+            Self::Suspend => 1,
+            Self::Resume => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -93,6 +111,18 @@ pub(super) struct DebugEmission<'a> {
 
 impl DebugEmission<'_> {
     pub fn mark(self, function: &Function, source: Option<Span>) {
+        self.mark_kind(function, source, BodyMarkerKind::Source);
+    }
+
+    pub fn mark_suspend(self, function: &Function, source: Option<Span>) {
+        self.mark_kind(function, source, BodyMarkerKind::Suspend);
+    }
+
+    pub fn mark_resume(self, function: &Function, source: Option<Span>) {
+        self.mark_kind(function, source, BodyMarkerKind::Resume);
+    }
+
+    fn mark_kind(self, function: &Function, source: Option<Span>, kind: BodyMarkerKind) {
         let Some(source) = source else {
             return;
         };
@@ -111,6 +141,7 @@ impl DebugEmission<'_> {
             function: self.function,
             body_offset,
             source,
+            kind,
         });
     }
 }
@@ -598,6 +629,7 @@ fn encode_dwarf(
             row.file = file;
             row.line = line;
             row.column = column;
+            row.discriminator = marker.kind.discriminator();
             row.is_statement = true;
             row.prologue_end = index == 0;
             line_program.generate_row();
@@ -796,7 +828,7 @@ fn variable_range(
 
 #[cfg(test)]
 mod tests {
-    use super::{BodyMarker, BodyRange, SourceVariable, variable_range};
+    use super::{BodyMarker, BodyMarkerKind, BodyRange, SourceVariable, variable_range};
     use crate::ast::Span;
 
     #[test]
@@ -810,21 +842,25 @@ mod tests {
                 function: 0,
                 body_offset: 2,
                 source: Span { start: 2, end: 4 },
+                kind: BodyMarkerKind::Source,
             },
             BodyMarker {
                 function: 0,
                 body_offset: 10,
                 source: Span { start: 22, end: 28 },
+                kind: BodyMarkerKind::Source,
             },
             BodyMarker {
                 function: 0,
                 body_offset: 18,
                 source: Span { start: 30, end: 35 },
+                kind: BodyMarkerKind::Source,
             },
             BodyMarker {
                 function: 0,
                 body_offset: 26,
                 source: Span { start: 45, end: 48 },
+                kind: BodyMarkerKind::Source,
             },
         ];
         let variable = SourceVariable {

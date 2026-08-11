@@ -170,6 +170,12 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
             return
         }
 
+        onAttach {
+            let module = await process.mainModule()
+            print(module.address)
+            await nextTick()
+        }
+
         whileAttached {
             let visible: u16 = identity(current.level)
             control(visible > 0)
@@ -280,7 +286,7 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
         .clone()
         .rows();
     let instruction_boundaries = wasm_instruction_boundaries(&debug);
-    let mut source_lines = Vec::new();
+    let mut source_rows = Vec::new();
     while let Some((_, row)) = rows
         .next_row()
         .expect("generated DWARF line rows should parse")
@@ -293,12 +299,17 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
             "DWARF address {:#x} is not a Wasm instruction boundary",
             row.address()
         );
-        source_lines.push(
+        source_rows.push((
             row.line()
                 .expect("source-backed rows should have line numbers")
                 .get() as usize,
-        );
+            row.discriminator(),
+        ));
     }
+    let source_lines = source_rows
+        .iter()
+        .map(|(line, _)| *line)
+        .collect::<Vec<_>>();
     for snippet in ["return value", "let visible", "print(visible)"] {
         let line = source
             .lines()
@@ -320,6 +331,19 @@ fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
             source_lines.contains(&line),
             "missing statement row for `{statement}` on line {line}: {source_lines:?}"
         );
+    }
+    for await_snippet in ["await process.mainModule()", "await nextTick()"] {
+        let line = source
+            .lines()
+            .position(|candidate| candidate.contains(await_snippet))
+            .expect("async fixture statement should exist")
+            + 1;
+        for (discriminator, boundary) in [(1, "suspend"), (2, "resume")] {
+            assert!(
+                source_rows.contains(&(line, discriminator)),
+                "missing {boundary} row for `{await_snippet}` on line {line}: {source_rows:?}"
+            );
+        }
     }
 
     let mut entries = unit.entries();

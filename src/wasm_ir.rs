@@ -493,6 +493,9 @@ pub enum Terminator {
         mode: SuspensionMode,
         destination: SuspensionDestination,
         value: ExprId,
+        /// User-source origin of the suspension. Generated library/runtime
+        /// suspensions deliberately remain locationless.
+        source: Option<Span>,
         /// State retried while the awaited operation remains pending.
         poll_state: AsyncStateId,
         /// State entered after the awaited operation succeeds.
@@ -1574,6 +1577,7 @@ enum AsyncExpressionStep {
         destination: SuspensionDestination,
         value: ExprId,
         cancellation: Option<CancellationRegion>,
+        source: Option<Span>,
     },
     If {
         condition: ExprId,
@@ -1686,6 +1690,7 @@ fn normalize_expression_suspensions_with(
             destination: SuspensionDestination::Temporary(temporary),
             value: operand_value,
             cancellation,
+            source: original.source,
         });
         return NormalizedExpression { value, steps };
     }
@@ -2296,6 +2301,7 @@ fn wrap_async_expression_steps(steps: Vec<AsyncExpressionStep>, mut continuation
                 destination,
                 value,
                 cancellation,
+                source,
             } => {
                 continuation = Block {
                     statements: Vec::new(),
@@ -2303,6 +2309,7 @@ fn wrap_async_expression_steps(steps: Vec<AsyncExpressionStep>, mut continuation
                         mode,
                         destination,
                         value,
+                        source,
                         poll_state: AsyncStateId::ENTRY,
                         resume_state: AsyncStateId::ENTRY,
                         cancellation,
@@ -2761,6 +2768,7 @@ fn lower_async_statements(
                             )
                         },
                         value: *value,
+                        source: source.emits_debug_locations().then_some(statement.span),
                         poll_state: AsyncStateId::ENTRY,
                         resume_state: AsyncStateId::ENTRY,
                         cancellation: suspension_cancellation(*mode, *value, typed_hir),
@@ -3159,6 +3167,7 @@ fn lower_statements(
                         )
                     },
                     value: *value,
+                    source: source.emits_debug_locations().then_some(statement.span),
                     poll_state: AsyncStateId::ENTRY,
                     resume_state: AsyncStateId::ENTRY,
                     cancellation: suspension_cancellation(*mode, *value, typed_hir),

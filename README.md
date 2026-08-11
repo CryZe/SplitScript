@@ -209,6 +209,9 @@ storage, strings, and imports are omitted. Debug modules include symbolic names
 for every imported and generated WebAssembly function. They also embed initial
 DWARF v5 metadata for source-backed functions and expression-level line
 stepping, including explicit rows for statement and control-flow boundaries.
+Async bodies additionally distinguish suspension and resumption at the
+original `await`/`retry` source span, including suspensions nested in larger
+expressions.
 Direct synchronous functions also expose source parameter/local names,
 primitive scalar types, lexical visibility ranges, and Wasm-local locations.
 Reachable source globals expose their names and Wasm-global locations as well.

@@ -319,12 +319,14 @@ fn compile_async_body(
     states[wasm_ir::AsyncStateId::ENTRY.index() as usize] = Some(AsyncState::Block {
         block: &wasm_body.entry,
         loop_targets: None,
+        resume_source: None,
     });
     collect_async_states(&wasm_body.entry, &mut states, None);
     debug_assert!(states.iter().all(Option::is_some));
 
     function.instruction(&Instruction::Loop(BlockType::Empty));
     for (pc, state) in states.into_iter().enumerate() {
+        let state = state.expect("every async state is assigned during lowering");
         frame.emit(&mut function);
         function
             .instruction(&Instruction::StructGet {
@@ -332,13 +334,26 @@ fn compile_async_body(
                 field_index: 0,
             })
             .instruction(&Instruction::I32Const(pc as i32))
-            .instruction(&Instruction::I32Eq)
-            .instruction(&Instruction::If(BlockType::Empty));
+            .instruction(&Instruction::I32Eq);
 
-        match state.expect("every async state is assigned during lowering") {
+        function.instruction(&Instruction::If(BlockType::Empty));
+        if let Some(debug) = context.debug {
+            match state {
+                AsyncState::Block { resume_source, .. } => {
+                    debug.mark_resume(&function, resume_source);
+                }
+                AsyncState::Poll { source, .. } => {
+                    debug.mark_suspend(&function, source);
+                }
+                AsyncState::ForHeader { .. } => {}
+            }
+        }
+
+        match state {
             AsyncState::Block {
                 block,
                 loop_targets,
+                ..
             } => compile_async_flow(
                 &mut function,
                 block,
@@ -403,6 +418,7 @@ fn compile_async_body(
                 value,
                 resume_state,
                 cancellation,
+                ..
             } => {
                 if call_target(context.wasm_ir, value)
                     .and_then(resolved_intrinsic)
@@ -2298,6 +2314,7 @@ enum AsyncState<'a> {
     Block {
         block: &'a wasm_ir::Block,
         loop_targets: Option<AsyncLoopTargets>,
+        resume_source: Option<crate::ast::Span>,
     },
     ForHeader {
         binding: ValueId,
@@ -2314,6 +2331,7 @@ enum AsyncState<'a> {
         value: ExprId,
         resume_state: wasm_ir::AsyncStateId,
         cancellation: Option<wasm_ir::CancellationRegion>,
+        source: Option<crate::ast::Span>,
     },
 }
 
@@ -2383,6 +2401,7 @@ fn collect_async_states<'a>(
             poll_state,
             resume_state,
             cancellation,
+            source,
             continuation,
             ..
         } => {
@@ -2392,10 +2411,12 @@ fn collect_async_states<'a>(
                 value: *value,
                 resume_state: *resume_state,
                 cancellation: *cancellation,
+                source: *source,
             });
             states[resume_state.index() as usize] = Some(AsyncState::Block {
                 block: continuation,
                 loop_targets,
+                resume_source: *source,
             });
             collect_async_states(continuation, states, loop_targets);
         }
@@ -2412,10 +2433,12 @@ fn collect_async_states<'a>(
             states[header_state.index() as usize] = Some(AsyncState::Block {
                 block: header,
                 loop_targets: Some(inner_targets),
+                resume_source: None,
             });
             states[exit_state.index() as usize] = Some(AsyncState::Block {
                 block: continuation,
                 loop_targets,
+                resume_source: None,
             });
             collect_async_states(header, states, Some(inner_targets));
             collect_async_states(continuation, states, loop_targets);
@@ -2449,6 +2472,7 @@ fn collect_async_states<'a>(
             states[exit_state.index() as usize] = Some(AsyncState::Block {
                 block: continuation,
                 loop_targets,
+                resume_source: None,
             });
             collect_async_states(body, states, Some(inner_targets));
             collect_async_states(continuation, states, loop_targets);
@@ -2830,6 +2854,7 @@ fn compile_async_flow(
             poll_state,
             resume_state,
             cancellation,
+            source,
             ..
         } => {
             if call_target(context.wasm_ir, *value)
@@ -2841,6 +2866,9 @@ fn compile_async_flow(
                     Some(cancellation_region),
                     "awaited standard-library operation must participate in its body's cancellation region"
                 );
+            }
+            if let Some(debug) = context.debug {
+                debug.mark_suspend(function, *source);
             }
             set_async_state(function, *poll_state, context.locals.frame());
             if *mode == SuspensionMode::Await

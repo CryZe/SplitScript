@@ -301,6 +301,7 @@ const fn async_state(id: IntrinsicId) -> Option<ScratchPolicy> {
 
 const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
     match id {
+        IntrinsicId::ProcessMemoryRanges => scratch(ScratchType::Expression, 1),
         IntrinsicId::NumericMin | IntrinsicId::NumericMax => scratch(ScratchType::Expression, 2),
         IntrinsicId::TimerState => scratch(ScratchType::Core(CoreTypeId::U32), 1),
         IntrinsicId::TimerCurrentSplitIndex => scratch(ScratchType::Core(CoreTypeId::I64), 1),
@@ -360,7 +361,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
             HostImport(Host::ProcessGetModuleAddress),
             HostImport(Host::ProcessGetModuleSize),
         ],
-        IntrinsicId::ProcessFindMemoryRange => &[
+        IntrinsicId::ProcessFindMemoryRange | IntrinsicId::ProcessMemoryRanges => &[
             HostImport(Host::ProcessGetMemoryRangeCount),
             HostImport(Host::ProcessGetMemoryRangeAddress),
             HostImport(Host::ProcessGetMemoryRangeSize),
@@ -535,6 +536,10 @@ const BOOL_OPTION: ContractTypeRef = ContractTypeRef::Application {
 };
 const MEMORY_RANGE_OPTION: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Option,
+    arguments: &[MEMORY_RANGE],
+};
+const MEMORY_RANGE_ARRAY: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Array,
     arguments: &[MEMORY_RANGE],
 };
 const SIGNATURE_ARRAY: ContractTypeRef = ContractTypeRef::Application {
@@ -1071,6 +1076,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             PROCESS_SUSPEND.with(Effect::Allocates),
             OnAttach,
             Suspension
+        ),
+        IntrinsicId::ProcessMemoryRanges => contract!(
+            ProcessMemoryRanges,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(PROCESS_TYPE),
+                params![],
+                MEMORY_RANGE_ARRAY,
+            ),
+            PROCESS.with(Effect::Allocates),
+            Everywhere,
+            HostBoundary
         ),
         IntrinsicId::ProcessRead => contract!(
             ProcessRead,

@@ -616,6 +616,22 @@ outside known modules. `scanAny` and `scanMemoryAny` accept an array of
 signatures and return both the address and selected index, which keeps fallback
 layout selection in one cooperative pass.
 
+When a port needs the mapping metadata itself, take a typed snapshot rather
+than reproducing the host's numeric count/index ABI:
+
+```splitscript
+let ranges = process.memoryRanges()
+for range in ranges {
+    if range.readable && range.executable {
+        debug print(`executable mapping at {range.address}`)
+    }
+}
+```
+
+`memoryRanges` is synchronous because it only copies cheap host metadata.
+Searching the contents of those ranges should still use the suspending scan
+APIs so large reads yield between bounded windows.
+
 An awaited scan remains pending when no signature is present; it does not
 produce a temporary zero address. This matches attach-time discovery that
 should wait for a module or runtime allocation to become ready. If an absent

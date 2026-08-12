@@ -158,8 +158,10 @@ cases. Candidate host-owned facilities are:
 - product/file version metadata;
 - a deterministic executable or module fingerprint that does not require
   hashing an entire image inside one guest update;
-- typed, bounded iteration over mapped memory ranges, including readable,
-  writable, executable, and path-backed flags.
+- path/name metadata for mapped memory ranges. SplitScript now snapshots the
+  existing count/index ABI synchronously into GC-owned `MemoryRange` values
+  with readable, writable, and executable flags; enumerating this cheap host
+  metadata does not need the cooperative scheduling required by memory scans.
 
 Before expanding discovery, settle and document the attachment-name contract:
 whether matching uses the full executable filename, how case is handled, and
@@ -171,7 +173,8 @@ literal names. Whichever policy is chosen needs stable attachment fixtures on
 all three hosts rather than accidental platform behavior.
 
 Any collection-shaped result should use the GC-managed resource direction from
-R1 or a bounded visitor/polling contract. It should not introduce another
+R1 or, when the operation itself is expensive, a bounded visitor/polling
+contract. It should not introduce another
 integer handle plus manual `free` family. Long-running discovery must cooperate
 with the runtime's hanging-autosplitter threshold and process cancellation.
 

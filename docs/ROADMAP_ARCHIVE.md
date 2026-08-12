@@ -3247,3 +3247,12 @@ language catalog document the refinement rule.
   memory-readable values and cannot change length.
 - Added compiler, editor, validation, and host-runtime coverage that crosses
   multiple growth boundaries and observes mutations through an alias.
+
+# 2026-08-12: typed mapped-memory snapshots
+
+- Added synchronous `process.memoryRanges() -> [MemoryRange]`, copying the
+  existing host count/index metadata into a stable WebAssembly GC-owned array.
+- Preserved host order and decoded ABI permission bits into typed readable,
+  writable, and executable fields without exposing handles or manual frees.
+- Kept content scanning async and cooperative while avoiding needless
+  update-by-update latency for cheap mapping metadata enumeration.

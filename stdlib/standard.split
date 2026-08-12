@@ -322,6 +322,27 @@ intrinsic type Process {
         access: MemoryRangeAccess,
     ) -> MemoryRange?;
 
+    /// Collects a snapshot of the process's mapped memory ranges.
+    ///
+    /// The returned GC-owned snapshot is ordered by the host's range index and
+    /// remains usable after later host mapping changes.
+    ///
+    /// # Example
+    ///
+    /// Inspect readable executable mappings
+    ///
+    /// ```splitscript
+    /// let ranges = process.memoryRanges()
+    /// for range in ranges {
+    ///     if range.readable && range.executable {
+    ///         debug print(`executable mapping at {range.address}`)
+    ///     }
+    /// }
+    /// ```
+    @mustUse("the collected memory-range snapshot is otherwise discarded")
+    @intrinsic(ProcessMemoryRanges)
+    fn memoryRanges() -> [MemoryRange];
+
     /// Reads a fixed-layout value from process memory.
     ///
     /// The expected MemoryReadable type selects a fixed-size primitive or record layout. A synchronous read returns T!; retry polls until a value is available and yields T. Use an explicit type argument such as process.read<i32> when context cannot determine the type.

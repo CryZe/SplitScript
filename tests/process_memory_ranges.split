@@ -1,0 +1,9 @@
+state "game.exe" {}
+
+onAttach {
+    let ranges = process.memoryRanges()
+    for range in ranges {
+        print(`{range.address}|{range.size}|{range.readable}|{range.writable}|{range.executable}`)
+    }
+    await process.closed()
+}

@@ -59,6 +59,7 @@ macro_rules! trusted_intrinsics {
             ProcessClosed,
             ProcessModule,
             ProcessFindMemoryRange,
+            ProcessMemoryRanges,
             ProcessRead,
             ProcessFollow,
             ProcessScan,

@@ -493,6 +493,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/process_memory_ranges.split",
+        output: "process_memory_ranges.wasm",
+        profile: "release",
+        harness: "tests/process_memory_ranges_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/postfix_calls.split",
         output: "postfix_calls.wasm",
         profile: "release",

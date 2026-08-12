@@ -2681,6 +2681,9 @@ fn compile_expr_unconverted(
                     function.instruction(&Instruction::End);
                 }
             }
+            IntrinsicId::ProcessMemoryRanges => {
+                emit_process_memory_ranges(function, expression, target, context);
+            }
             IntrinsicId::NextTick
             | IntrinsicId::ProcessClosed
             | IntrinsicId::ProcessMainModule
@@ -3207,6 +3210,151 @@ fn emit_numeric_method(
         .instruction(&Instruction::Else)
         .instruction(&Instruction::LocalGet(temps[1]))
         .instruction(&Instruction::End);
+}
+
+/// Copies the host's mapped-range metadata into a stable GC-owned array.
+///
+/// The array wrapper is not observable until this expression completes, so
+/// its version and length metadata double as the loop cursor and current flag
+/// word. Both fields are restored to their ordinary array meanings before the
+/// value is returned. This keeps synchronous intrinsic scratch strongly typed
+/// without adding a special heterogeneous-local policy for one operation.
+fn emit_process_memory_ranges(
+    function: &mut Function,
+    expression: ExprId,
+    target: &wasm_ir::CallTarget,
+    context: &ExprContext<'_>,
+) {
+    let Type::Array(array) = context.expression_type(expression) else {
+        unreachable!("process.memoryRanges returns its declared array type")
+    };
+    let output = context.matches.intrinsic_temps[&expression][0];
+    let storage = super::array_value::storage_id(array, context.arrays, context.semantics);
+    let storage_type = context.gc.index(Type::ArrayStorage(storage));
+    let wrapper_type = context.gc.index(Type::Array(array));
+
+    compile_receiver(function, target, context);
+    function
+        .instruction(&Instruction::Call(
+            context
+                .abi
+                .function(AbiImportId::ProcessGetMemoryRangeCount),
+        ))
+        .instruction(&Instruction::I32WrapI64)
+        .instruction(&Instruction::ArrayNewDefault(storage_type))
+        .instruction(&Instruction::I32Const(0));
+    super::array_value::emit_wrap_loaded(function, wrapper_type);
+    function
+        .instruction(&Instruction::LocalSet(output))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(output));
+    super::array_value::emit_version(function, context.gc, array);
+    function.instruction(&Instruction::LocalGet(output));
+    super::array_value::emit_backing(function, context.gc, array);
+    function
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1));
+
+    // Preserve the current host flag word in the otherwise hidden logical
+    // length field while the range record is assembled.
+    function
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull);
+    compile_receiver(function, target, context);
+    function.instruction(&Instruction::LocalGet(output));
+    super::array_value::emit_version(function, context.gc, array);
+    function
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::Call(
+            context
+                .abi
+                .function(AbiImportId::ProcessGetMemoryRangeFlags),
+        ))
+        .instruction(&Instruction::I32WrapI64)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: wrapper_type,
+            field_index: super::array_value::LENGTH_FIELD,
+        });
+
+    function.instruction(&Instruction::LocalGet(output));
+    super::array_value::emit_backing(function, context.gc, array);
+    function.instruction(&Instruction::LocalGet(output));
+    super::array_value::emit_version(function, context.gc, array);
+
+    compile_receiver(function, target, context);
+    function.instruction(&Instruction::LocalGet(output));
+    super::array_value::emit_version(function, context.gc, array);
+    function
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::Call(
+            context
+                .abi
+                .function(AbiImportId::ProcessGetMemoryRangeAddress),
+        ));
+    compile_receiver(function, target, context);
+    function.instruction(&Instruction::LocalGet(output));
+    super::array_value::emit_version(function, context.gc, array);
+    function
+        .instruction(&Instruction::I64ExtendI32U)
+        .instruction(&Instruction::Call(
+            context.abi.function(AbiImportId::ProcessGetMemoryRangeSize),
+        ));
+    for mask in [2, 4, 8] {
+        function
+            .instruction(&Instruction::LocalGet(output))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::StructGet {
+                struct_type_index: wrapper_type,
+                field_index: super::array_value::LENGTH_FIELD,
+            })
+            .instruction(&Instruction::I32Const(mask))
+            .instruction(&Instruction::I32And)
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::I32Eqz);
+    }
+    function
+        .instruction(&Instruction::StructNew(
+            context.gc.standard_index(StdlibTypeId::MemoryRange),
+        ))
+        .instruction(&Instruction::ArraySet(storage_type))
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(output));
+    super::array_value::emit_version(function, context.gc, array);
+    function
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: wrapper_type,
+            field_index: super::array_value::VERSION_FIELD,
+        })
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+
+    // Publish the actual logical length and reset the structural version that
+    // was temporarily used as the cursor.
+    function
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(output));
+    super::array_value::emit_backing(function, context.gc, array);
+    function
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::StructSet {
+            struct_type_index: wrapper_type,
+            field_index: super::array_value::LENGTH_FIELD,
+        })
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::StructSet {
+            struct_type_index: wrapper_type,
+            field_index: super::array_value::VERSION_FIELD,
+        })
+        .instruction(&Instruction::LocalGet(output));
 }
 
 fn emit_process_read_from_stack(

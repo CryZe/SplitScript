@@ -95,9 +95,10 @@ or behavioral parity.
   preserving semantics without exposing owned numeric handles or manual
   `free` calls. Timer segment history, skip/undo, executable path, host OS, and
   host architecture are available now. Design PID discovery/attachment around
-  the language's single process-lifetime boundary; expose mapped ranges through
-  bounded cooperative iteration and a `MemoryRange` record with typed flags;
-  and represent recursive settings maps/lists/values as GC-owned collections
+  the language's single process-lifetime boundary. Mapped ranges are now
+  exposed as a synchronous GC-owned `[MemoryRange]` snapshot with typed
+  readable, writable, and executable flags; represent recursive settings
+  maps/lists/values as GC-owned collections
   and a typed value enum. Preserve atomic `storeIfUnchanged` behavior when
   mutable settings data is eventually exposed. The settings declaration DSL
   remains the normal registration API, and `start`/`split`/`reset` blocks remain

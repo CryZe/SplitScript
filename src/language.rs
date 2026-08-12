@@ -1211,8 +1211,8 @@ define_language_catalog! {
         WhileAttached,
         "whileAttached",
         "Runs on every initialized attached update.",
-        "State and settings data has already refreshed when this action runs. The initialization poll is deliberately skipped.",
-        "whileAttached {\n    setVariable(\"Level\", current.level as String)\n}"
+        "State and settings data has already refreshed when this action runs. The initialization poll is deliberately skipped. Falling through or returning true continues to the timer-decision actions; returning false skips all of them for this update.",
+        "whileAttached {\n    if !dataReady {\n        return false\n    }\n}"
     ),
     action_item!(
         Start,

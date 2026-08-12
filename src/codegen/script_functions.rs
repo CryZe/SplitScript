@@ -674,6 +674,9 @@ pub(super) fn emit_action_default(function: &mut Function, action: ActionKind, g
         ActionKind::Start | ActionKind::Split | ActionKind::Reset => {
             function.instruction(&Instruction::I32Const(0));
         }
+        ActionKind::WhileAttached => {
+            function.instruction(&Instruction::I32Const(1));
+        }
         ActionKind::IsLoading => {
             function.instruction(&Instruction::I32Const(-1));
         }
@@ -685,8 +688,7 @@ pub(super) fn emit_action_default(function: &mut Function, action: ActionKind, g
         ActionKind::Setup
         | ActionKind::OnDetached
         | ActionKind::OnAttach
-        | ActionKind::OnStateReady
-        | ActionKind::WhileAttached => {}
+        | ActionKind::OnStateReady => {}
     }
 }
 

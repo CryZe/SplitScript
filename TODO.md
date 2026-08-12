@@ -75,12 +75,6 @@ or behavioral parity.
 
 ### Lifecycle semantics exposed by legacy ASL
 
-- [ ] Design a clear way for `whileAttached` to suppress the remaining timer
-  actions for the current update when a maintained port requires ASL
-  `update { return false; }` exactly. State-field rejection is not equivalent:
-  it retains one candidate, whereas ASL refreshes the whole snapshot and then
-  skips `isLoading`, `gameTime`, `reset`, `split`, and `start`. Avoid a
-  `shouldEvaluate`-style concept or unexplained boolean return.
 - [ ] Consider an exact process-exit-only action implemented by the generated
   update lifecycle. It would differ from `onDetached`, which intentionally also
   runs on initial entry into the detached state, and would remove the common

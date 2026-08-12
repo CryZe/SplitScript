@@ -1186,8 +1186,11 @@ and `reset`; those blocks are simply boolean and default to `false`.
 `Duration.fromMilliseconds`, `fromSeconds`, `fromMinutes`, `fromHours`, and
 `fromDays` accept either floating-point type. A day is always exactly 86,400
 seconds; these are elapsed durations, not calendar values. `setup`,
-`onDetached`, `onStateReady`, and `whileAttached` return nothing.
-`whileAttached` runs before timer actions on every attached tick.
+`onDetached`, and `onStateReady` return nothing.
+`whileAttached` runs before timer actions on every initialized attached tick.
+It may explicitly return a boolean control result: `false` skips all timer
+decisions for the current update, while `true`, a bare `return`, and fallthrough
+continue normally. State has already refreshed and is not rolled back.
 
 ## Discovered state and watchers
 

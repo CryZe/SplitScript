@@ -141,6 +141,12 @@ copy that field from `current`; unrelated fields can therefore advance
 independently. Detachment clears the ready flag, so a later attachment repeats
 this initialization boundary.
 
+The internal `whileAttached` function returns an `i32` continuation flag. Its
+fallthrough default is one. An explicit source `false` returns zero, causing the
+generated update export to return before reading timer state or invoking any
+timer-decision action. The committed state and settings snapshots remain
+advanced.
+
 The module includes a `splitscript` custom section containing UTF-8 JSON with
 the compiler package version, optional full Git revision, GC target, and host
 ABI. The same compiler identity is reported by native frontends and the

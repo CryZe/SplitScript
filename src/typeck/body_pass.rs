@@ -507,10 +507,9 @@ fn layout_selection_is_terminal(checker: &Checker, block: &crate::ast::Block) ->
 
 fn action_return_type(checker: &Checker, program: &Program, action: ActionKind) -> Type {
     match action {
-        ActionKind::Setup
-        | ActionKind::OnDetached
-        | ActionKind::OnStateReady
-        | ActionKind::WhileAttached => checker.core_type(CoreTypeId::None),
+        ActionKind::Setup | ActionKind::OnDetached | ActionKind::OnStateReady => {
+            checker.core_type(CoreTypeId::None)
+        }
         ActionKind::OnAttach => program
             .state
             .as_ref()
@@ -519,9 +518,11 @@ fn action_return_type(checker: &Checker, program: &Program, action: ActionKind) 
                 || checker.core_type(CoreTypeId::None),
                 |enumeration| checker.enum_type(crate::types::EnumTypeId::Source(enumeration.id)),
             ),
-        ActionKind::Start | ActionKind::Split | ActionKind::Reset | ActionKind::IsLoading => {
-            checker.core_type(CoreTypeId::Bool)
-        }
+        ActionKind::WhileAttached
+        | ActionKind::Start
+        | ActionKind::Split
+        | ActionKind::Reset
+        | ActionKind::IsLoading => checker.core_type(CoreTypeId::Bool),
         ActionKind::GameTime => checker.standard_type(StdlibTypeId::Duration),
     }
 }

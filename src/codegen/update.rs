@@ -335,7 +335,12 @@ pub(super) fn compile_update(
 
     if let Some(update) = actions.get(&ActionKind::WhileAttached) {
         emit_action_args(&mut function, globals);
-        function.instruction(&Instruction::Call(*update));
+        function
+            .instruction(&Instruction::Call(*update))
+            .instruction(&Instruction::I32Eqz)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End);
     }
     function
         .instruction(&Instruction::Call(abi.function(AbiImportId::TimerGetState)))

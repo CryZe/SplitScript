@@ -401,6 +401,7 @@ impl Checker {
                         self.callable.action(),
                         Some(
                             ActionKind::Start
+                                | ActionKind::WhileAttached
                                 | ActionKind::Split
                                 | ActionKind::Reset
                                 | ActionKind::IsLoading

@@ -293,7 +293,7 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         primary_label: "review the block's boolean control result before moving it",
         notes: &[
             "`whileAttached` runs after a successful state refresh and before timer-decision blocks",
-            "ASL `return false` skips all remaining decisions for that tick; SplitScript does not yet have an exact equivalent",
+            "an explicit `return false` skips all remaining timer decisions for that update; fallthrough, bare return, and true continue normally",
         ],
     },
     MigrationDiagnostic {
@@ -1797,7 +1797,7 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "update lifecycle block",
         sources: ASL,
         support: MigrationSupport::TypedPattern,
-        summary: "Use `whileAttached` for ordinary post-refresh work; ASL's false control result has no exact equivalent yet.",
+        summary: "Use `whileAttached`; returning false skips the remaining timer decisions for that update.",
         targets: &[MigrationTarget::Language("whileAttached")],
         cookbook_anchor: Some("legacy-asl-lifecycle-blocks"),
         spellings: &[],

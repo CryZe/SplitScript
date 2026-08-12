@@ -304,6 +304,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/while_attached_control.split",
+        output: "while_attached_control.wasm",
+        profile: "release",
+        harness: "tests/while_attached_control_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/timer_split_index.split",
         output: "timer_split_index.wasm",
         profile: "release",

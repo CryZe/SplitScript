@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-12: attached-update timer-decision control
+
+- Made `whileAttached` fall through as true and accept an explicit boolean
+  result, with false returning from the generated update before every timer
+  decision while retaining the refreshed state snapshot.
+- Matched legacy ASL `update { return false; }` directly instead of adding a
+  separate `shouldEvaluate` concept or a rollback-like state-field mechanism.
+- Confirmed the pattern in 220 of 968 extracted ASL update blocks and added
+  runtime coverage for both not-running and running timer phases.
+
 ## 2026-08-12: post-snapshot attachment initialization
 
 - Added synchronous `onStateReady`, which runs once per attachment after the

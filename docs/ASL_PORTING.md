@@ -840,7 +840,7 @@ LiveSplit component invokes them at different boundaries:
 | --- | --- | --- |
 | `startup` | Once when the script is loaded, before process attachment | Put settings in `settings`, constant data in global initializers, and remaining process-independent statements in `setup`. |
 | `init` | Once for each found process, after one legacy state refresh; a failure retries attachment initialization | Put suspending discovery and layout selection in `onAttach`. Put synchronous work that consumes the first complete snapshot in `onStateReady`. |
-| `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put ordinary per-tick work in `whileAttached`. There is not yet an exact equivalent for the `false` control result. |
+| `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put ordinary per-tick work in `whileAttached`. An explicit `return false` preserves the legacy control result exactly. |
 | `exit` | When the attached process exits | Use guarded `onDetached` cleanup as shown below. `onDetached` also runs once before the first attachment. |
 | `shutdown` | When the script is disabled, reloaded, dropped, or LiveSplit exits | No exact host callback exists yet; do not approximate it with `onDetached`. |
 | `timer.OnStart`, `timer.OnSplit`, `timer.OnReset` | LiveSplit timer events, which may be raised independently of this script's decision blocks | Reconstruct only simple observable transitions in `whileAttached`. Exact lossless events require the planned host contract. |
@@ -878,6 +878,24 @@ onStateReady {
 snapshot was read and accepted. `old` and `current` are both that snapshot, so
 initialization cannot look like a transition from default values. It cannot
 suspend. `whileAttached` and timer-decision actions begin on the next update.
+
+Legacy `update { return false; }` maps directly to `whileAttached`. The state
+snapshot has already refreshed, but the remaining timer decisions are skipped
+for that update:
+
+```splitscript
+whileAttached {
+    if !helperLoaded {
+        return false
+    }
+
+    // Per-update bookkeeping.
+}
+```
+
+Falling through, a bare `return`, or `return true` continues to `start`,
+`isLoading`, `gameTime`, `reset`, and `split` as applicable. This control result
+does not reject or roll back the refreshed snapshot.
 
 ASL `refreshRate` is a frequency, so migrate `refreshRate = 60` to
 `setTickRate(60)`. The host converts it to the wait interval `1 / hz` after the

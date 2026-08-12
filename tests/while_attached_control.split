@@ -1,0 +1,31 @@
+state "game.exe" {}
+
+let updates = 0
+
+whileAttached {
+    updates += 1
+    print(updates)
+    if updates == 1 || updates == 3 {
+        return false
+    }
+}
+
+start {
+    return true
+}
+
+isLoading {
+    return true
+}
+
+gameTime {
+    return Duration.fromSeconds(12.5)
+}
+
+reset {
+    return true
+}
+
+split {
+    return true
+}

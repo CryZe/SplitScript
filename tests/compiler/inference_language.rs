@@ -712,6 +712,12 @@ fn action_fallthroughs_use_domain_defaults_and_null_is_scoped() {
     let source = r#"
         state "game.exe" {}
 
+        whileAttached {
+            if (false) {
+                return false
+            }
+            return
+        }
         start {}
         split { return }
         reset {
@@ -738,6 +744,21 @@ fn action_fallthroughs_use_domain_defaults_and_null_is_scoped() {
             && diagnostic.message.contains("None")
             && diagnostic.message.contains("bool")
     }));
+
+    let invalid_update = r#"
+        state "game.exe" {}
+        whileAttached { return 1 }
+    "#;
+    let diagnostics = splitscript::compile(invalid_update)
+        .expect_err("whileAttached control flow must use a boolean result");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("bool")
+                && (diagnostic.message.contains("types do not match")
+                    || diagnostic.message.contains("does not satisfy"))
+        }),
+        "{diagnostics:#?}"
+    );
 }
 
 #[test]

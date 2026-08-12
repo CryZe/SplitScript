@@ -1,5 +1,14 @@
 # SplitScript roadmap
 
+## 2026-08-12: post-snapshot attachment initialization
+
+- Added synchronous `onStateReady`, which runs once per attachment after the
+  first complete state poll commits with equal `old` and `current` snapshots.
+- Kept suspending discovery and layout selection in `onAttach`, and delayed
+  `whileAttached` plus timer decisions until the following update.
+- Matched the useful post-refresh half of legacy ASL `init` without exposing
+  default-initialized state or adding a host ABI, allocation, or hidden guard.
+
 ## 2026-08-12: contextual state snapshots in helper functions
 
 - Allowed ordinary helpers to read `old` and `current` directly and propagated

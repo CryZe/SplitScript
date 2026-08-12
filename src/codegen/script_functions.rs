@@ -685,6 +685,7 @@ pub(super) fn emit_action_default(function: &mut Function, action: ActionKind, g
         ActionKind::Setup
         | ActionKind::OnDetached
         | ActionKind::OnAttach
+        | ActionKind::OnStateReady
         | ActionKind::WhileAttached => {}
     }
 }

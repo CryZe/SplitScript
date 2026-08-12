@@ -73,6 +73,7 @@ pub const fn action_has_attached_process(action: ActionKind) -> bool {
     match action {
         ActionKind::Setup | ActionKind::OnDetached => false,
         ActionKind::OnAttach
+        | ActionKind::OnStateReady
         | ActionKind::WhileAttached
         | ActionKind::Start
         | ActionKind::Split
@@ -88,7 +89,8 @@ pub const fn action_has_attached_process(action: ActionKind) -> bool {
 pub const fn action_has_state_snapshots(action: ActionKind) -> bool {
     matches!(
         action,
-        ActionKind::WhileAttached
+        ActionKind::OnStateReady
+            | ActionKind::WhileAttached
             | ActionKind::Start
             | ActionKind::Split
             | ActionKind::Reset

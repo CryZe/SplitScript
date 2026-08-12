@@ -677,10 +677,11 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
     use splitscript::compiler::ast::ActionKind;
 
     let source = r#"
-        state "game.exe" {}
+        state "game.exe" { level: u32 at 0x100 }
         setup { setTickRate(30.0) }
         onDetached { setTickRate(1.0) }
         onAttach { setTickRate(120.0) }
+        onStateReady { print(current.level) }
         whileAttached { print("tick") }
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
@@ -695,6 +696,7 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
             ActionKind::Setup,
             ActionKind::OnDetached,
             ActionKind::OnAttach,
+            ActionKind::OnStateReady,
             ActionKind::WhileAttached,
         ]
     );

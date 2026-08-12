@@ -441,6 +441,16 @@ mod tests {
     }
 
     #[test]
+    fn parses_on_state_ready_as_a_lifecycle_block() {
+        let source = r#"
+            state "game.exe" { level: u32 at 0x100 }
+            onStateReady { print(current.level) }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        assert_eq!(program.actions[0].kind, ActionKind::OnStateReady);
+    }
+
+    #[test]
     fn parses_named_state_layouts_and_their_generated_enum() {
         let source = r#"
             state "game.exe" {

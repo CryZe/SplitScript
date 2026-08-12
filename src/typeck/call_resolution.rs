@@ -1436,6 +1436,7 @@ impl Checker {
                                 CallableContext::LibraryFunction(_)
                                     | CallableContext::Action(
                                         ActionKind::OnAttach
+                                            | ActionKind::OnStateReady
                                             | ActionKind::WhileAttached
                                             | ActionKind::Start
                                             | ActionKind::Split

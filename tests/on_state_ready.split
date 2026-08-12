@@ -1,0 +1,14 @@
+state "game.exe" {
+    level: u32 at 0x100;
+}
+
+let readyCount = 0
+
+onStateReady {
+    readyCount += 1
+    print(`ready {readyCount}: {old.level} -> {current.level}`)
+}
+
+whileAttached {
+    print(`tick: {old.level} -> {current.level}`)
+}

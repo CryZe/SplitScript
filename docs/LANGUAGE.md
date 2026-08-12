@@ -1132,6 +1132,20 @@ not restore either the host's 120 Hz initial rate or a script-defined baseline
 automatically. Set the baseline in `onDetached`, which already runs once before
 the first attachment, and let `onAttach` override it only while attached.
 
+`onStateReady` runs synchronously once per attachment, immediately after the
+first complete state snapshot is committed:
+
+```text
+onStateReady {
+    print(`Initial level: {current.level}`)
+}
+```
+
+Both `old` and `current` are available and equal in this block. This prevents
+the initial read from looking like a transition from zero/default storage.
+The attached process is also available, but `await` and `retry` are not.
+`whileAttached` and the timer-decision actions begin on the following update.
+
 ```text
 start {
     return current.level == 1;
@@ -1172,7 +1186,7 @@ and `reset`; those blocks are simply boolean and default to `false`.
 `Duration.fromMilliseconds`, `fromSeconds`, `fromMinutes`, `fromHours`, and
 `fromDays` accept either floating-point type. A day is always exactly 86,400
 seconds; these are elapsed durations, not calendar values. `setup`,
-`whileAttached`, and `onDetached` return nothing.
+`onDetached`, `onStateReady`, and `whileAttached` return nothing.
 `whileAttached` runs before timer actions on every attached tick.
 
 ## Discovered state and watchers
@@ -1616,8 +1630,9 @@ The generated loop follows this order:
 
 1. Attach to the configured process, or return and retry next tick.
 2. Detect a closed process, detach, and return.
-3. Rotate and refresh state.
-4. Run `whileAttached`.
+3. Commit the first complete state as equal `old` and `current` snapshots, run
+   `onStateReady`, and return; or rotate and refresh an initialized snapshot.
+4. On initialized updates after that first snapshot, run `whileAttached`.
 5. If the timer has not started, evaluate `start`.
 6. If it is running or paused, apply `isLoading`, then `gameTime`, then `reset`;
    evaluate `split` only when reset did not trigger.

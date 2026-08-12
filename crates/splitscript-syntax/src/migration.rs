@@ -283,7 +283,7 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         primary_label: "choose the destination from the state this block needs",
         notes: &[
             "use `onAttach` for suspending process discovery and layout selection before SplitScript starts polling",
-            "legacy ASL runs `init` after an initial state refresh; code that truly needs that first snapshot needs an explicit guarded first `whileAttached` tick for now",
+            "use synchronous `onStateReady` for initialization that consumes the first complete snapshot; `old` and `current` are equal there",
         ],
     },
     MigrationDiagnostic {
@@ -1784,8 +1784,11 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "init lifecycle block",
         sources: ASL,
         support: MigrationSupport::TypedPattern,
-        summary: "Use `onAttach` for pre-poll process discovery; legacy post-refresh snapshot work needs a guarded first attached tick.",
-        targets: &[MigrationTarget::Language("onAttach")],
+        summary: "Use `onAttach` for pre-poll process discovery and `onStateReady` for post-refresh snapshot initialization.",
+        targets: &[
+            MigrationTarget::Language("onAttach"),
+            MigrationTarget::Language("onStateReady"),
+        ],
         cookbook_anchor: Some("legacy-asl-lifecycle-blocks"),
         spellings: &[],
     },

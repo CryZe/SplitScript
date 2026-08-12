@@ -1199,6 +1199,14 @@ define_language_catalog! {
         "onAttach {\n    let module = await process.module(\"GameAssembly.dll\")\n}"
     ),
     action_item!(
+        OnStateReady,
+        OnStateReady,
+        "onStateReady",
+        "Initializes one committed state snapshot.",
+        "Runs synchronously once per attachment, immediately after the first complete state poll. Both `old` and `current` are available and equal. The attached process is available, but suspension is not. `whileAttached` and timer-decision actions begin on the following update.",
+        "onStateReady {\n    print(`Initial level: {current.level}`)\n}"
+    ),
+    action_item!(
         WhileAttached,
         WhileAttached,
         "whileAttached",
@@ -1362,6 +1370,7 @@ impl LanguageCatalog {
             ActionKind::Setup,
             ActionKind::OnDetached,
             ActionKind::OnAttach,
+            ActionKind::OnStateReady,
             ActionKind::WhileAttached,
             ActionKind::Start,
             ActionKind::Split,

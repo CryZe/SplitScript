@@ -418,10 +418,13 @@ pub(super) fn encode<'a>(
             ActionKind::OnAttach => (vec![ValType::I64], vec![ValType::I32]),
             action => (
                 vec![state_ref, state_ref],
-                (!matches!(action, ActionKind::OnDetached | ActionKind::WhileAttached))
-                    .then(|| action_result_val_type(action, gc))
-                    .into_iter()
-                    .collect(),
+                (!matches!(
+                    action,
+                    ActionKind::OnDetached | ActionKind::OnStateReady | ActionKind::WhileAttached
+                ))
+                .then(|| action_result_val_type(action, gc))
+                .into_iter()
+                .collect(),
             ),
         };
         actions.insert(

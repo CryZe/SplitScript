@@ -75,11 +75,6 @@ or behavioral parity.
 
 ### Lifecycle semantics exposed by legacy ASL
 
-- [ ] Determine whether a post-initial-snapshot attachment hook is needed for
-  ASL `init` bodies that genuinely consume `current`/`old`. `onAttach` remains
-  the suspending pre-snapshot discovery and layout-selection phase. Add a new
-  block only if passing explicit reads or a guarded first `whileAttached` tick
-  makes a maintained port materially less clear.
 - [ ] Design a clear way for `whileAttached` to suppress the remaining timer
   actions for the current update when a maintained port requires ASL
   `update { return false; }` exactly. State-field rejection is not equivalent:

@@ -1176,6 +1176,32 @@ fn setup_is_process_independent_and_cannot_suspend_or_read_snapshots() {
 }
 
 #[test]
+fn on_state_ready_has_the_attached_process_and_committed_snapshots_but_cannot_suspend() {
+    splitscript::compile(
+        r#"
+            state "game.exe" { level: u32 at 0x100 }
+            onStateReady {
+                print(process.name())
+                print(old.level)
+                print(current.level)
+            }
+        "#,
+    )
+    .expect("post-snapshot initialization should expose process and state values");
+
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            onStateReady { await nextTick() }
+        "#,
+    )
+    .expect_err("post-snapshot initialization must complete synchronously");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message == "`await` is not available in this synchronous body"
+    }));
+}
+
+#[test]
 fn call_result_fields_parse_before_detached_effects_are_checked() {
     let source = r#"
         state "game.exe" {}

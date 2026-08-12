@@ -320,7 +320,12 @@ pub(super) fn compile_update(
         .instruction(&Instruction::LocalGet(candidate_state))
         .instruction(&Instruction::GlobalSet(globals.old))
         .instruction(&Instruction::I32Const(1))
-        .instruction(&Instruction::GlobalSet(globals.state_ready))
+        .instruction(&Instruction::GlobalSet(globals.state_ready));
+    if let Some(on_state_ready) = actions.get(&ActionKind::OnStateReady) {
+        emit_action_args(&mut function, globals);
+        function.instruction(&Instruction::Call(*on_state_ready));
+    }
+    function
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
         .instruction(&Instruction::GlobalGet(globals.current))

@@ -839,7 +839,7 @@ LiveSplit component invokes them at different boundaries:
 | ASL construct | Exact legacy timing | SplitScript direction |
 | --- | --- | --- |
 | `startup` | Once when the script is loaded, before process attachment | Put settings in `settings`, constant data in global initializers, and remaining process-independent statements in `setup`. |
-| `init` | Once for each found process, after one legacy state refresh; a failure retries attachment initialization | Put suspending discovery and layout selection in `onAttach`. Code that truly requires the first `current`/`old` snapshot has no exact direct block yet. |
+| `init` | Once for each found process, after one legacy state refresh; a failure retries attachment initialization | Put suspending discovery and layout selection in `onAttach`. Put synchronous work that consumes the first complete snapshot in `onStateReady`. |
 | `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put ordinary per-tick work in `whileAttached`. There is not yet an exact equivalent for the `false` control result. |
 | `exit` | When the attached process exits | Use guarded `onDetached` cleanup as shown below. `onDetached` also runs once before the first attachment. |
 | `shutdown` | When the script is disabled, reloaded, dropped, or LiveSplit exits | No exact host callback exists yet; do not approximate it with `onDetached`. |
@@ -858,6 +858,26 @@ setup {
 after settings are available, but cannot use `process`, `gba`, `current`,
 `old`, `await`, or `retry`. A debug-watch replacement loads a new module and
 therefore runs it again on that module's first update.
+
+Legacy `init` combines two boundaries that SplitScript keeps explicit. Use
+`onAttach` for discovery that may suspend and for layout selection. Use
+`onStateReady` for synchronous initialization that needs polled state:
+
+```splitscript
+onAttach {
+    let image = await Unity.i12cpp()
+    gameManager = await image.class("GameManager").staticInstance("Instance")
+}
+
+onStateReady {
+    print(`Initial level: {current.level}`)
+}
+```
+
+`onStateReady` runs once per attachment only after every field in the first
+snapshot was read and accepted. `old` and `current` are both that snapshot, so
+initialization cannot look like a transition from default values. It cannot
+suspend. `whileAttached` and timer-decision actions begin on the next update.
 
 ASL `refreshRate` is a frequency, so migrate `refreshRate = 60` to
 `setTickRate(60)`. The host converts it to the wait interval `1 / hz` after the

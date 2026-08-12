@@ -132,11 +132,14 @@ hold the deterministic union of values live across individual suspension
 points. Replacing this frame on process exit cancels the old continuation and
 clears its state.
 
-State initialization requires one poll in which every required field succeeds;
-the resulting GC object initializes both `old` and `current`, and lifecycle
-actions are skipped for that poll. Later refreshes populate a new GC state
-object field by field. Successful results advance, while failed results copy
-that field from `current`; unrelated fields can therefore advance independently.
+State initialization requires one poll in which every required field succeeds.
+The resulting GC object initializes both `old` and `current`, then the compiler
+invokes synchronous `onStateReady` once and returns without running
+`whileAttached` or timer-decision actions. Later refreshes populate a new GC
+state object field by field. Successful results advance, while failed results
+copy that field from `current`; unrelated fields can therefore advance
+independently. Detachment clears the ready flag, so a later attachment repeats
+this initialization boundary.
 
 The module includes a `splitscript` custom section containing UTF-8 JSON with
 the compiler package version, optional full Git revision, GC target, and host

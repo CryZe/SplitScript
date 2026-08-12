@@ -1409,6 +1409,7 @@ fn language_catalog_is_valid_documented_and_compilable() {
         splitscript::compiler::ast::ActionKind::Setup,
         splitscript::compiler::ast::ActionKind::OnDetached,
         splitscript::compiler::ast::ActionKind::OnAttach,
+        splitscript::compiler::ast::ActionKind::OnStateReady,
         splitscript::compiler::ast::ActionKind::WhileAttached,
         splitscript::compiler::ast::ActionKind::Start,
         splitscript::compiler::ast::ActionKind::Split,
@@ -1487,6 +1488,10 @@ fn compiler_database_resolves_language_catalog_syntax() {
         onAttach {
             let module = await process.module("GameAssembly.dll")
             print(module.address as String)
+        }
+
+        onStateReady {
+            print(current.level)
         }
 
         whileAttached {
@@ -1650,6 +1655,7 @@ fn compiler_database_resolves_language_catalog_syntax() {
         ("key \"selected-mode\"", LanguageItemId::StableSettingKey),
         ("in [firstByte]", LanguageItemId::For),
         ("setup", LanguageItemId::Setup),
+        ("onStateReady", LanguageItemId::OnStateReady),
         ("whileAttached", LanguageItemId::WhileAttached),
     ] {
         let offset = source.find(spelling).unwrap();

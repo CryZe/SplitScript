@@ -1124,6 +1124,21 @@ onDetached {
 }
 ```
 
+`onProcessExit` is the process-closure event rather than a detached-state
+entry hook. It runs once for each previously attached process that closes and
+does not run initially:
+
+```text
+onProcessExit {
+    timer.pauseGameTime()
+}
+```
+
+The closed handle, provider state, and pending continuations are cleared before
+the block runs; `onDetached` runs afterward. `process`, `gba`, `current`, and
+`old` are unavailable because closure may happen before initialization or the
+first snapshot completes.
+
 `setTickRate(hz)` uses updates per second. The LiveSplit runner reads the
 resulting interval after the current `update` returns, so a call affects the
 wait before the following update rather than the invocation already in
@@ -1186,7 +1201,7 @@ and `reset`; those blocks are simply boolean and default to `false`.
 `Duration.fromMilliseconds`, `fromSeconds`, `fromMinutes`, `fromHours`, and
 `fromDays` accept either floating-point type. A day is always exactly 86,400
 seconds; these are elapsed durations, not calendar values. `setup`,
-`onDetached`, and `onStateReady` return nothing.
+`onDetached`, `onProcessExit`, and `onStateReady` return nothing.
 `whileAttached` runs before timer actions on every initialized attached tick.
 It may explicitly return a boolean control result: `false` skips all timer
 decisions for the current update, while `true`, a bare `return`, and fallthrough

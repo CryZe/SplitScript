@@ -180,6 +180,9 @@ pub(super) fn compile_update(
     if let Some(region) = cancellation_region {
         emit_cancel_region(&mut function, region, lowering.gc, globals);
     }
+    if let Some(process_exit) = actions.get(&ActionKind::OnProcessExit) {
+        function.instruction(&Instruction::Call(*process_exit));
+    }
     if let Some(detached) = actions.get(&ActionKind::OnDetached) {
         emit_action_args(&mut function, globals);
         function

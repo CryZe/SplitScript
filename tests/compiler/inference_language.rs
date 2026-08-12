@@ -680,6 +680,7 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
         state "game.exe" { level: u32 at 0x100 }
         setup { setTickRate(30.0) }
         onDetached { setTickRate(1.0) }
+        onProcessExit { timer.pauseGameTime() }
         onAttach { setTickRate(120.0) }
         onStateReady { print(current.level) }
         whileAttached { print("tick") }
@@ -695,6 +696,7 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
         [
             ActionKind::Setup,
             ActionKind::OnDetached,
+            ActionKind::OnProcessExit,
             ActionKind::OnAttach,
             ActionKind::OnStateReady,
             ActionKind::WhileAttached,

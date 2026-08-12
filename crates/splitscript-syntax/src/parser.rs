@@ -451,6 +451,16 @@ mod tests {
     }
 
     #[test]
+    fn parses_on_process_exit_as_a_lifecycle_block() {
+        let source = r#"
+            state "game.exe" {}
+            onProcessExit { timer.pauseGameTime() }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        assert_eq!(program.actions[0].kind, ActionKind::OnProcessExit);
+    }
+
+    #[test]
     fn parses_named_state_layouts_and_their_generated_enum() {
         let source = r#"
             state "game.exe" {

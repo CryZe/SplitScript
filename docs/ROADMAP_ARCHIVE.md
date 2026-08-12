@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-12: exact process-exit lifecycle
+
+- Added synchronous `onProcessExit`, which runs exactly once after a previously
+  attached process closes, never during initial detached startup, and before
+  `onDetached` restores detached-state policy.
+- Cleared the unusable handle, provider state, selected layout, and pending
+  continuations before invoking source cleanup, while withholding snapshots
+  because closure can precede their initialization.
+- Replaced the migration cookbook's `attachedOnce` guard after finding 409
+  legacy ASL `exit` blocks, including widespread game-time pause cleanup.
+
 ## 2026-08-12: attached-update timer-decision control
 
 - Made `whileAttached` fall through as true and accept an explicit boolean

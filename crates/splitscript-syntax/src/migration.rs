@@ -299,11 +299,11 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
         id: ASL_EXIT_DIAGNOSTIC,
         concept: MigrationConceptId::new("asl.lifecycle.exit"),
-        message: "ASL `exit` is not exactly the same as `onDetached`",
-        primary_label: "guard process-exit-only cleanup when using `onDetached`",
+        message: "ASL `exit` is named `onProcessExit`",
+        primary_label: "use the process-closure lifecycle boundary",
         notes: &[
-            "ASL `exit` runs after an attached process exits",
-            "SplitScript `onDetached` also runs once before the first attachment, so process-exit-only work needs an attached-once guard",
+            "`onProcessExit` runs exactly once after a previously attached process closes and never at initial detached startup",
+            "the closed process and state snapshots are unavailable; `onDetached` runs afterward for detached-state policy",
         ],
     },
     MigrationDiagnostic {
@@ -1807,8 +1807,8 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "exit lifecycle block",
         sources: ASL,
         support: MigrationSupport::TypedPattern,
-        summary: "Use guarded `onDetached` cleanup because it also runs before the first attachment.",
-        targets: &[MigrationTarget::Language("onDetached")],
+        summary: "Use `onProcessExit` for cleanup that runs exactly once after an attached process closes.",
+        targets: &[MigrationTarget::Language("onProcessExit")],
         cookbook_anchor: Some("legacy-asl-lifecycle-blocks"),
         spellings: &[],
     },

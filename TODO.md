@@ -75,10 +75,6 @@ or behavioral parity.
 
 ### Lifecycle semantics exposed by legacy ASL
 
-- [ ] Consider an exact process-exit-only action implemented by the generated
-  update lifecycle. It would differ from `onDetached`, which intentionally also
-  runs on initial entry into the detached state, and would remove the common
-  `attachedOnce` guard. Settle its name and ordering before adding it.
 - [ ] Keep ASL `shutdown` and exact `onStart`/`onSplit`/`onReset` events as host
   requirements rather than approximating them. Shutdown requires the host to
   invoke a teardown export before disabling, reloading, or dropping a module;

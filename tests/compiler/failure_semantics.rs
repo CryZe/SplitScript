@@ -1136,6 +1136,34 @@ fn process_operations_reject_detached_lifecycle_use() {
 }
 
 #[test]
+fn process_exit_does_not_expose_a_closed_process_or_uninitialized_snapshots() {
+    let process_errors = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            onProcessExit { process.read<i32>(0x1000) }
+        "#,
+    )
+    .expect_err("a closed process handle must not remain usable");
+    assert!(process_errors.iter().any(|diagnostic| {
+        diagnostic.message
+            == "`Process.read` requires an attached process and is unavailable in `onProcessExit`"
+    }));
+
+    let snapshot_errors = splitscript::compile(
+        r#"
+            state "game.exe" { level: u32 at 0x100 }
+            onProcessExit { print(current.level) }
+        "#,
+    )
+    .expect_err("a process can close before its first snapshot commits");
+    assert!(snapshot_errors.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("state snapshots are not guaranteed to exist in `onProcessExit`")
+    }));
+}
+
+#[test]
 fn setup_is_process_independent_and_cannot_suspend_or_read_snapshots() {
     let process_errors = splitscript::compile(
         r#"

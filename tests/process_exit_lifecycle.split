@@ -1,0 +1,15 @@
+state "game.exe" {}
+
+onDetached {
+    print("detached")
+}
+
+onProcessExit {
+    print("exit")
+    timer.pauseGameTime()
+}
+
+onAttach {
+    print("attach")
+    await process.module("ready.dll")
+}

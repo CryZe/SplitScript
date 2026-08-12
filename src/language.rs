@@ -1191,6 +1191,14 @@ define_language_catalog! {
         "onDetached {\n    setTickRate(1.0)\n}"
     ),
     action_item!(
+        OnProcessExit,
+        OnProcessExit,
+        "onProcessExit",
+        "Handles closure of a previously attached process.",
+        "Runs synchronously once when an attached process closes, after its unusable handle, provider state, and pending continuations are cleared, but before `onDetached`. It never runs for the initial detached state. Process and state snapshots are unavailable because closure may happen before initialization finishes.",
+        "onProcessExit {\n    timer.pauseGameTime()\n}"
+    ),
+    action_item!(
         OnAttach,
         OnAttach,
         "onAttach",
@@ -1369,6 +1377,7 @@ impl LanguageCatalog {
         for action in [
             ActionKind::Setup,
             ActionKind::OnDetached,
+            ActionKind::OnProcessExit,
             ActionKind::OnAttach,
             ActionKind::OnStateReady,
             ActionKind::WhileAttached,

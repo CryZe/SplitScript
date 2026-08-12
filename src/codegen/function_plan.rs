@@ -414,14 +414,17 @@ pub(super) fn encode<'a>(
     let mut actions = HashMap::new();
     for action in &program.actions {
         let (params, results) = match action.kind {
-            ActionKind::Setup => (vec![], vec![]),
+            ActionKind::Setup | ActionKind::OnProcessExit => (vec![], vec![]),
             ActionKind::OnAttach => (vec![ValType::I64], vec![ValType::I32]),
             action => (
                 vec![state_ref, state_ref],
-                (!matches!(action, ActionKind::OnDetached | ActionKind::OnStateReady))
-                    .then(|| action_result_val_type(action, gc))
-                    .into_iter()
-                    .collect(),
+                (!matches!(
+                    action,
+                    ActionKind::OnDetached | ActionKind::OnProcessExit | ActionKind::OnStateReady
+                ))
+                .then(|| action_result_val_type(action, gc))
+                .into_iter()
+                .collect(),
             ),
         };
         actions.insert(

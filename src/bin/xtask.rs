@@ -311,6 +311,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/process_exit_lifecycle.split",
+        output: "process_exit_lifecycle.wasm",
+        profile: "release",
+        harness: "tests/process_exit_lifecycle_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/timer_split_index.split",
         output: "timer_split_index.wasm",
         profile: "release",

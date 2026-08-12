@@ -606,7 +606,8 @@ pub(super) fn compile_action(
         &mut matches,
         &mut local_types,
         LocalPlanOptions {
-            parameter_count: if action.kind == ActionKind::Setup {
+            parameter_count: if matches!(action.kind, ActionKind::Setup | ActionKind::OnProcessExit)
+            {
                 0
             } else {
                 2
@@ -687,6 +688,7 @@ pub(super) fn emit_action_default(function: &mut Function, action: ActionKind, g
         }
         ActionKind::Setup
         | ActionKind::OnDetached
+        | ActionKind::OnProcessExit
         | ActionKind::OnAttach
         | ActionKind::OnStateReady => {}
     }

@@ -1511,6 +1511,9 @@ impl Checker {
                 ActionKind::OnDetached => {
                     "state snapshots are not guaranteed to exist in `onDetached`"
                 }
+                ActionKind::OnProcessExit => {
+                    "state snapshots are not guaranteed to exist in `onProcessExit`"
+                }
                 _ => unreachable!("the remaining actions have committed snapshots"),
             };
             self.error(message, span);

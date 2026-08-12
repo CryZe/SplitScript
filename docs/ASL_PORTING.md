@@ -841,7 +841,7 @@ LiveSplit component invokes them at different boundaries:
 | `startup` | Once when the script is loaded, before process attachment | Put settings in `settings`, constant data in global initializers, and remaining process-independent statements in `setup`. |
 | `init` | Once for each found process, after one legacy state refresh; a failure retries attachment initialization | Put suspending discovery and layout selection in `onAttach`. Put synchronous work that consumes the first complete snapshot in `onStateReady`. |
 | `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put ordinary per-tick work in `whileAttached`. An explicit `return false` preserves the legacy control result exactly. |
-| `exit` | When the attached process exits | Use guarded `onDetached` cleanup as shown below. `onDetached` also runs once before the first attachment. |
+| `exit` | When the attached process exits | Use `onProcessExit`. It runs exactly once for a real process closure and never at initial detached startup. |
 | `shutdown` | When the script is disabled, reloaded, dropped, or LiveSplit exits | No exact host callback exists yet; do not approximate it with `onDetached`. |
 | `timer.OnStart`, `timer.OnSplit`, `timer.OnReset` | LiveSplit timer events, which may be raised independently of this script's decision blocks | Reconstruct only simple observable transitions in `whileAttached`. Exact lossless events require the planned host contract. |
 
@@ -918,25 +918,21 @@ onAttach {
 
 ## Process-exit game-time cleanup
 
-ASL commonly pauses game time in `exit`. SplitScript's `onDetached` also runs
-once at initial detached startup, so guard cleanup that should happen only
-after a real attachment:
+ASL commonly pauses game time in `exit`. Map that cleanup directly to
+`onProcessExit`:
 
 ```splitscript
-let attachedOnce = false
-
-onAttach {
-    attachedOnce = true
-    // Perform discovery and return a layout when applicable.
-}
-
-onDetached {
-    if attachedOnce {
-        timer.pauseGameTime()
-        attachedOnce = false
-    }
+onProcessExit {
+    timer.pauseGameTime()
 }
 ```
+
+The compiler invokes this block once after clearing the closed handle, provider
+state, selected layout, and pending process-lifetime continuations. It then
+runs `onDetached`, if present, to establish detached policy such as the baseline
+tick rate. Neither `process` nor state snapshots are available in
+`onProcessExit`: a process may close before attachment initialization or the
+first state poll completes.
 
 Use `isLoading` for ordinary load removal. `timer.pauseGameTime()` and
 `timer.resumeGameTime()` are explicit lifecycle tools, not a replacement for

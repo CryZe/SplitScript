@@ -10,19 +10,19 @@ const gameProcess = host.addProcess("game.exe");
 host.start();
 
 host.updateUntil(() => host.messages.includes("attach"), "the process did not attach");
-if (host.messages.join() !== "detached,attach" || host.timerCalls.pauses !== 0) {
-    throw new Error(`process exit ran during initial detachment: ${host.json(host.summary())}`);
+if (host.messages.join() !== "attach" || host.timerCalls.pauses !== 0) {
+    throw new Error(`detach ran during initial startup: ${host.json(host.summary())}`);
 }
 
 host.setProcessOpen("game.exe", false);
 host.update();
-if (host.messages.join() !== "detached,attach,exit,detached" || host.timerCalls.pauses !== 1) {
-    throw new Error(`first exit ordering was incorrect: ${host.json(host.summary())}`);
+if (host.messages.join() !== "attach,detach" || host.timerCalls.pauses !== 1) {
+    throw new Error(`first detach was incorrect: ${host.json(host.summary())}`);
 }
 
 host.update(2);
-if (host.messages.join() !== "detached,attach,exit,detached" || host.timerCalls.pauses !== 1) {
-    throw new Error(`exit repeated while detached: ${host.json(host.summary())}`);
+if (host.messages.join() !== "attach,detach" || host.timerCalls.pauses !== 1) {
+    throw new Error(`detach repeated without another attachment: ${host.json(host.summary())}`);
 }
 
 gameProcess.modules.set("ready.dll", {
@@ -39,13 +39,13 @@ host.update();
 host.setProcessOpen("game.exe", false);
 host.update();
 if (
-    host.messages.join() !== "detached,attach,exit,detached,attach,exit,detached"
+    host.messages.join() !== "attach,detach,attach,detach"
     || host.timerCalls.pauses !== 2
 ) {
-    throw new Error(`second exit was not exactly once: ${host.json(host.summary())}`);
+    throw new Error(`second detach was not exactly once: ${host.json(host.summary())}`);
 }
 
 console.log(JSON.stringify({
     messages: host.messages,
-    exits: host.timerCalls.pauses,
+    detachEvents: host.timerCalls.pauses,
 }));

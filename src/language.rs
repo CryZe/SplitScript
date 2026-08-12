@@ -262,7 +262,7 @@ onAttach {
 const LIFECYCLE_SOURCE: &str = r#"state "game.exe" {}
 
 setup {}
-onDetached {}
+onDetach {}
 onAttach {}
 whileAttached {}
 start {}
@@ -1183,20 +1183,12 @@ define_language_catalog! {
         "setup {\n    print(\"Autosplitter loaded\")\n}"
     ),
     action_item!(
-        OnDetached,
-        OnDetached,
-        "onDetached",
-        "Establishes the detached state initially and after process closure.",
-        "Runs once before the first attachment attempt, then once immediately each time an attached process closes. It does not run on every detached tick. Use it to establish and restore detached policy such as the baseline tick rate. Process-dependent operations are rejected directly and through user-function call graphs.",
-        "onDetached {\n    setTickRate(1.0)\n}"
-    ),
-    action_item!(
-        OnProcessExit,
-        OnProcessExit,
-        "onProcessExit",
+        OnDetach,
+        OnDetach,
+        "onDetach",
         "Handles closure of a previously attached process.",
-        "Runs synchronously once when an attached process closes, after its unusable handle, provider state, and pending continuations are cleared, but before `onDetached`. It never runs for the initial detached state. Process and state snapshots are unavailable because closure may happen before initialization finishes.",
-        "onProcessExit {\n    timer.pauseGameTime()\n}"
+        "Runs synchronously once when an attached process closes, after its unusable handle, provider state, selected layout, and pending continuations are cleared. It never runs for the initial detached state; use `setup` for one-time script initialization. Process and state snapshots are unavailable because closure may happen before initialization finishes.",
+        "onDetach {\n    timer.pauseGameTime()\n}"
     ),
     action_item!(
         OnAttach,
@@ -1376,8 +1368,7 @@ impl LanguageCatalog {
         }
         for action in [
             ActionKind::Setup,
-            ActionKind::OnDetached,
-            ActionKind::OnProcessExit,
+            ActionKind::OnDetach,
             ActionKind::OnAttach,
             ActionKind::OnStateReady,
             ActionKind::WhileAttached,

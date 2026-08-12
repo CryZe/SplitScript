@@ -58,7 +58,7 @@ isLoading {
     return current.loading == 43
 }
 
-onDetached {
+onDetach {
     if attachedOnce {
         timer.pauseGameTime()
         attachedOnce = false

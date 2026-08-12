@@ -20,7 +20,7 @@ The authoritative source for this port is
 | Adjacent minutes, seconds, and hundredths reads | One naturally laid-out `LevelTimeParts` record read and local GC deserialization |
 | DLC managed scene name | Bounded UTF-16 `process.readManagedString` with surrogate-pair decoding |
 | Points, resets, level time, level/scene, character runtime variables | GC string formatting plus `setVariable` |
-| 1 Hz detached polling and 120 Hz attached polling | `setTickRate` calls in `onDetached` and `onAttach`; process close returns to 1 Hz immediately |
+| 1 Hz detached polling and 120 Hz attached polling | `setTickRate` calls in `setup`, `onDetach`, and `onAttach`; process close returns to 1 Hz immediately |
 | Auto-start when the in-game timer begins in the first level | `timerStopped` transition plus base level / DLC Shrine checks |
 | Runner-started timer reset of accumulated state | `timer.state()` transition tracking in `whileAttached` |
 | Game-time accumulation across level-clock rollovers | `runTimeSeconds` plus `Duration.fromSeconds` |

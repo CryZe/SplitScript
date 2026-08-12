@@ -377,7 +377,7 @@ remaining work is product hardening and distribution.
   evidence ledger; coordinate the host side through R5 in
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
 - [ ] Document and test existing lifecycle mappings before adding host APIs:
-  `isLoading`, `onDetached`, `timer.state()`, and `setTickRate` already replace
+  `isLoading`, `onDetach`, `timer.state()`, and `setTickRate` already replace
   common ASL patterns.
 - [ ] Add structured async discovery combinators only as ports require them:
   timeout, race/select, bounded concurrent scans, and cancellation scopes. Do

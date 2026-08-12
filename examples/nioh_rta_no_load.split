@@ -38,7 +38,11 @@ onAttach {
     await process.closed()
 }
 
-onDetached {
+setup {
+    setTickRate(1)
+}
+
+onDetach {
     setTickRate(1)
 }
 

@@ -185,7 +185,7 @@ Resolved user functions and methods inherit the attached-process requirement
 through a fixed-point call-graph analysis. This includes recursive call graphs;
 no source annotation is required. The inferred result is available through the
 checked compiler product and prevents a process-dependent helper from hiding an
-invalid `onDetached` operation.
+invalid `onDetach` operation.
 
 Catalog signatures no longer depend on parser AST types: built-in catalog
 types use `BuiltinType`, and a checked call exposes its inferred generic
@@ -492,8 +492,8 @@ removal API; explicit pause/resume is for lifecycle transitions such as process
 exit cleanup. `setTickRate(hz)` is measured in updates per second, affects the
 next host wait after the current update, and persists until another call. It is
 not reset automatically when the process closes; scripts that raise the rate
-in `onAttach` should establish and restore their baseline in `onDetached`,
-which also runs once initially.
+in `onAttach` should establish their initial baseline in `setup` and restore it
+in `onDetach`.
 `timer.state()` returns the exhaustive `TimerState` enum with
 `NotRunning`, `Running`, `Paused`, `Ended`, and `Unknown`; raw host integers are
 normalized only at the ABI boundary. `Duration.fromSeconds` converts Unity's

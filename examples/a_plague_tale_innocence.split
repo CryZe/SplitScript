@@ -251,7 +251,7 @@ whileAttached {
     debug print(current.cutsceneState)
 }
 
-onDetached {
+onDetach {
     if attachedOnce {
         timer.pauseGameTime()
         attachedOnce = false

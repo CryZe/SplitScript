@@ -1,5 +1,19 @@
 # SplitScript roadmap
 
+## 2026-08-12: one exact process-detach lifecycle action
+
+- Replaced the overlapping `onDetached` and `onProcessExit` actions with
+  `onDetach`, which runs exactly once after a real attached process closes and
+  never during initial detached startup.
+- Made `onDetach` parameterless and unavailable to process providers or state
+  snapshots, because closure can occur before attachment discovery or the
+  first snapshot completes.
+- Removed the detached-entry runtime flag and moved initial detached policy to
+  the existing `setup` boundary; scripts that change persistent tick rates now
+  establish them in `setup` and restore them in `onDetach`.
+- Updated ASL `exit` migration guidance to target `onDetach`; exact ASL
+  `shutdown` remains a separate host-runtime requirement.
+
 ## 2026-08-12: exact process-exit lifecycle
 
 - Added synchronous `onProcessExit`, which runs exactly once after a previously

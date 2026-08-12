@@ -263,8 +263,8 @@ and host shutdown. It must also state whether teardown has a bounded execution
 budget and whether it may suspend; prompt resource cleanup should normally be
 compiler/runtime-owned rather than left to user code.
 
-Do not map ASL `shutdown` to `onDetached`: the latter also runs initially and
-after each process closes, while shutdown may run once with no current process
+Do not map ASL `shutdown` to `onDetach`: the latter runs after each process
+closes, while shutdown may run once with no current process
 and may observe only partially available historical process state.
 
 ## R7: affine resource values and transitive deterministic drop
@@ -357,8 +357,8 @@ and scheduler bounds need a host fix.
 `runtime_set_tick_rate` receives updates per second and stores its reciprocal
 as the wait duration used after the current update. The selected interval is
 persistent, including across process detachments. SplitScript therefore owns
-its policy explicitly through the initial and subsequent `onDetached` calls
-plus `onAttach`; the host must not invent a process-lifecycle reset.
+its policy explicitly through `setup`, `onDetach`, and `onAttach`; the host must
+not invent a process-lifecycle reset.
 
 The current host rejects non-positive finite inputs but does not reject every
 non-finite value. `NaN` can reach the stored interval and fail later when it is

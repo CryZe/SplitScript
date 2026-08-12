@@ -679,8 +679,7 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
     let source = r#"
         state "game.exe" { level: u32 at 0x100 }
         setup { setTickRate(30.0) }
-        onDetached { setTickRate(1.0) }
-        onProcessExit { timer.pauseGameTime() }
+        onDetach { timer.pauseGameTime() }
         onAttach { setTickRate(120.0) }
         onStateReady { print(current.level) }
         whileAttached { print("tick") }
@@ -695,8 +694,7 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
             .collect::<Vec<_>>(),
         [
             ActionKind::Setup,
-            ActionKind::OnDetached,
-            ActionKind::OnProcessExit,
+            ActionKind::OnDetach,
             ActionKind::OnAttach,
             ActionKind::OnStateReady,
             ActionKind::WhileAttached,
@@ -704,6 +702,8 @@ fn lifecycle_blocks_use_event_and_polling_names_without_prototype_aliases() {
     );
     assert_eq!(ActionKind::parse("update"), None);
     assert_eq!(ActionKind::parse("detached"), None);
+    assert_eq!(ActionKind::parse("onDetached"), None);
+    assert_eq!(ActionKind::parse("onProcessExit"), None);
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
         .expect("canonical lifecycle blocks should produce valid Wasm");

@@ -83,8 +83,7 @@ impl BackendDependencies {
                 }
                 ActionKind::Setup
                 | ActionKind::OnAttach
-                | ActionKind::OnDetached
-                | ActionKind::OnProcessExit
+                | ActionKind::OnDetach
                 | ActionKind::OnStateReady
                 | ActionKind::WhileAttached => {}
             }

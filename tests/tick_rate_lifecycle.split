@@ -1,6 +1,10 @@
 state ["hundred.exe", "hundred-twenty.exe"] {}
 
-onDetached {
+setup {
+    setTickRate(60)
+}
+
+onDetach {
     setTickRate(60)
 }
 

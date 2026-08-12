@@ -1114,28 +1114,17 @@ again on that instance's first update.
 This is deliberately distinct from `onAttach`, which runs once for every
 selected process and may suspend while performing discovery.
 
-`onDetached` runs once when the runtime enters the detached state: once initially,
-then once immediately each time an attached process closes. Attachment retries
-do not rerun it. This makes detached-state policy explicit in the script:
+`onDetach` runs exactly once when a real attached process closes. It does not
+run during initial detached startup or repeat on detached ticks:
 
 ```text
-onDetached {
-    setTickRate(1.0)
-}
-```
-
-`onProcessExit` is the process-closure event rather than a detached-state
-entry hook. It runs once for each previously attached process that closes and
-does not run initially:
-
-```text
-onProcessExit {
+onDetach {
     timer.pauseGameTime()
 }
 ```
 
 The closed handle, provider state, and pending continuations are cleared before
-the block runs; `onDetached` runs afterward. `process`, `gba`, `current`, and
+the block runs. `process`, `gba`, `current`, and
 `old` are unavailable because closure may happen before initialization or the
 first snapshot completes.
 
@@ -1144,8 +1133,8 @@ resulting interval after the current `update` returns, so a call affects the
 wait before the following update rather than the invocation already in
 progress. The selected rate persists until another call; process closure does
 not restore either the host's 120 Hz initial rate or a script-defined baseline
-automatically. Set the baseline in `onDetached`, which already runs once before
-the first attachment, and let `onAttach` override it only while attached.
+automatically. Set the initial baseline in `setup`, restore it in `onDetach`,
+and let `onAttach` override it only while attached.
 
 `onStateReady` runs synchronously once per attachment, immediately after the
 first complete state snapshot is committed:
@@ -1201,7 +1190,7 @@ and `reset`; those blocks are simply boolean and default to `false`.
 `Duration.fromMilliseconds`, `fromSeconds`, `fromMinutes`, `fromHours`, and
 `fromDays` accept either floating-point type. A day is always exactly 86,400
 seconds; these are elapsed durations, not calendar values. `setup`,
-`onDetached`, `onProcessExit`, and `onStateReady` return nothing.
+`onDetach` and `onStateReady` return nothing.
 `whileAttached` runs before timer actions on every initialized attached tick.
 It may explicitly return a boolean control result: `false` skips all timer
 decisions for the current update, while `true`, a bare `return`, and fallthrough

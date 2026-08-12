@@ -1118,11 +1118,11 @@ fn process_closed_is_only_available_while_attaching() {
 }
 
 #[test]
-fn process_operations_reject_detached_lifecycle_use() {
+fn process_operations_reject_detach_lifecycle_use() {
     let errors = splitscript::compile(
         r#"
             state "game.exe" {}
-            onDetached {
+            onDetach {
                 let value = process.read<i32>(0x1000) else 0
                 print(value as String)
             }
@@ -1131,35 +1131,35 @@ fn process_operations_reject_detached_lifecycle_use() {
     .expect_err("process access should not be available before attachment");
     assert!(errors.iter().any(|error| {
         error.message
-            == "`Process.read` requires an attached process and is unavailable in `onDetached`"
+            == "`Process.read` requires an attached process and is unavailable in `onDetach`"
     }));
 }
 
 #[test]
-fn process_exit_does_not_expose_a_closed_process_or_uninitialized_snapshots() {
+fn detach_does_not_expose_a_closed_process_or_uninitialized_snapshots() {
     let process_errors = splitscript::compile(
         r#"
             state "game.exe" {}
-            onProcessExit { process.read<i32>(0x1000) }
+            onDetach { process.read<i32>(0x1000) }
         "#,
     )
     .expect_err("a closed process handle must not remain usable");
     assert!(process_errors.iter().any(|diagnostic| {
         diagnostic.message
-            == "`Process.read` requires an attached process and is unavailable in `onProcessExit`"
+            == "`Process.read` requires an attached process and is unavailable in `onDetach`"
     }));
 
     let snapshot_errors = splitscript::compile(
         r#"
             state "game.exe" { level: u32 at 0x100 }
-            onProcessExit { print(current.level) }
+            onDetach { print(current.level) }
         "#,
     )
     .expect_err("a process can close before its first snapshot commits");
     assert!(snapshot_errors.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("state snapshots are not guaranteed to exist in `onProcessExit`")
+            .contains("state snapshots are not guaranteed to exist in `onDetach`")
     }));
 }
 
@@ -1248,13 +1248,13 @@ fn call_result_fields_parse_before_detached_effects_are_checked() {
             }
         }
 
-        onDetached {
+        onDetach {
             let minutes = baz().minutes
         }
     "#;
 
     splitscript::parse(source).expect("a field on a call result should parse");
-    let attached = source.replace("onDetached", "whileAttached");
+    let attached = source.replace("onDetach", "whileAttached");
     let wasm = splitscript::compile(&attached)
         .expect("a call-result field should type-check and lower while attached");
     Validator::new_with_features(WasmFeatures::all())
@@ -1265,7 +1265,7 @@ fn call_result_fields_parse_before_detached_effects_are_checked() {
     assert!(
         diagnostics.iter().any(|diagnostic| {
             diagnostic.message
-                == "`baz` requires an attached process and is unavailable in `onDetached`"
+                == "`baz` requires an attached process and is unavailable in `onDetach`"
         }),
         "{diagnostics:#?}"
     );
@@ -1353,12 +1353,12 @@ fn attached_process_requirements_propagate_through_function_call_graphs() {
         assert!(effects.contains(&Effect::RequiresAttachedProcess));
     }
 
-    let detached_source = safe_source.replace("whileAttached", "onDetached");
+    let detached_source = safe_source.replace("whileAttached", "onDetach");
     let errors = splitscript::compile(&detached_source)
         .expect_err("a transitive process dependency should be rejected while detached");
     assert!(errors.iter().any(|error| {
         error.message
-            == "`recursiveRelay` requires an attached process and is unavailable in `onDetached`"
+            == "`recursiveRelay` requires an attached process and is unavailable in `onDetach`"
     }));
 }
 
@@ -1412,7 +1412,7 @@ fn snapshot_dependent_helpers_are_rejected_without_committed_snapshots() {
             return old.level != current.level
         }
     "#;
-    for action in ["setup", "onAttach", "onDetached"] {
+    for action in ["setup", "onAttach", "onDetach"] {
         let source = format!("{declarations}\n{action} {{ print(changed()) }}");
         let diagnostics = splitscript::compile(&source)
             .expect_err("a snapshot-dependent helper needs committed snapshots");

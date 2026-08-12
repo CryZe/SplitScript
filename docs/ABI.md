@@ -89,16 +89,16 @@ The LiveSplit runtime retains this export during instantiation and calls it at
 the beginning of the first controlled `update`, when its interrupt handle is
 already available. `setup` is compiled as a synchronous `() -> ()` internal
 function and cannot observe a process provider or state snapshot. Every
-exported `update` call loads a settings map before running `onDetached` or
-attached user code, decodes it into typed GC/global values,
+exported `update` call loads a settings map before running lifecycle or attached
+user code, decodes it into typed GC/global values,
 and frees all temporary host handles. Choice strings become payloadless enum
 variants and selected paths become GC strings. The preceding tick remains
 available as `oldSettings`.
 
 When process liveness fails, `update` detaches and clears the process handle,
 provider-specific state, selected layout, ready flags, and process-lifetime
-continuations. It then invokes `onProcessExit` exactly once, followed by
-`onDetached`, and returns. The process-exit action is compiler-generated
+continuations. It then invokes `onDetach` exactly once and returns. The detach
+action is compiler-generated
 lifecycle behavior and requires no additional host callback or ABI import.
 
 These explicit frees are an implementation detail of the current C-shaped

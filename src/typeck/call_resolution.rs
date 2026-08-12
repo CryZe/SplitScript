@@ -1508,12 +1508,7 @@ impl Checker {
                 ActionKind::OnAttach => {
                     "state snapshots are not available until `onAttach` completes"
                 }
-                ActionKind::OnDetached => {
-                    "state snapshots are not guaranteed to exist in `onDetached`"
-                }
-                ActionKind::OnProcessExit => {
-                    "state snapshots are not guaranteed to exist in `onProcessExit`"
-                }
+                ActionKind::OnDetach => "state snapshots are not guaranteed to exist in `onDetach`",
                 _ => unreachable!("the remaining actions have committed snapshots"),
             };
             self.error(message, span);

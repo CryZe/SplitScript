@@ -124,7 +124,11 @@ fn characterName(character, dlcDemo) {
     }
 }
 
-onDetached {
+setup {
+    setTickRate(1)
+}
+
+onDetach {
     setTickRate(1)
 }
 

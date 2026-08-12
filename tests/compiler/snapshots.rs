@@ -102,7 +102,7 @@ fn diagnostics_expose_stable_stage_codes_and_severity() {
     let semantic = splitscript::compile(
         r#"
             state "game.exe" {}
-            onDetached { process.read<i32>(0x1000) }
+            onDetach { process.read<i32>(0x1000) }
         "#,
     )
     .expect_err("process access requires an attachment");

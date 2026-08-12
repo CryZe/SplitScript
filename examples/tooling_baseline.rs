@@ -131,7 +131,7 @@ fn large_source(functions: usize) -> String {
         ));
     }
     source.push_str(&format!(
-        "onDetached {{\n    let selected = helper{}(1)\n    print(selected as String)\n}}\n",
+        "onDetach {{\n    let selected = helper{}(1)\n    print(selected as String)\n}}\n",
         functions - 1
     ));
     source

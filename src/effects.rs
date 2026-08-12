@@ -71,7 +71,7 @@ pub struct StateSnapshotViolation {
 /// and editor candidate filtering as new lifecycle contexts are introduced.
 pub const fn action_has_attached_process(action: ActionKind) -> bool {
     match action {
-        ActionKind::Setup | ActionKind::OnDetached | ActionKind::OnProcessExit => false,
+        ActionKind::Setup | ActionKind::OnDetach => false,
         ActionKind::OnAttach
         | ActionKind::OnStateReady
         | ActionKind::WhileAttached
@@ -84,8 +84,8 @@ pub const fn action_has_attached_process(action: ActionKind) -> bool {
 }
 
 /// Whether a lifecycle action runs after the first complete state snapshot has
-/// been committed. `onDetached` also runs once before the first attachment, so
-/// stale or default-initialized storage cannot be exposed there as real state.
+/// been committed. A process can close before its first snapshot, so
+/// `onDetach` cannot expose stale or default-initialized storage as real state.
 pub const fn action_has_state_snapshots(action: ActionKind) -> bool {
     matches!(
         action,

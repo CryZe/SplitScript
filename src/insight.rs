@@ -554,8 +554,7 @@ fn source_function_description(
             description.push_str("; available only in `onAttach`");
         }
         if operation.requires_attached_process {
-            description
-                .push_str("; requires an attached process and is unavailable in `onDetached`");
+            description.push_str("; requires an attached process and is unavailable in `onDetach`");
         }
         if operation.requires_state_snapshots {
             description.push_str("; requires committed `old` and `current` state snapshots");
@@ -985,7 +984,7 @@ whileAttached {
     fn hover_reflows_wrapped_doc_comments_within_one_paragraph() {
         let source = r#"
 state "game.exe" {}
-onDetached {
+onDetach {
     timer.pauseGameTime()
 }
 "#;
@@ -1314,30 +1313,34 @@ split { return layout == StateLayout.Steam }
                         .markdown
                         .contains("let module = await process.module(\"GameAssembly.dll\")")
                 );
-                assert!(!hover.markdown.contains("onDetached {}"));
+                assert!(!hover.markdown.contains("onDetach {}"));
             }
         }
     }
 
     #[test]
-    fn detached_lifecycle_hover_makes_the_initial_invocation_explicit() {
-        let source = "state \"game.exe\" {}\nonDetached { setTickRate(1) }";
+    fn detach_lifecycle_hover_describes_the_exact_event() {
+        let source = "state \"game.exe\" {}\nonDetach { setTickRate(1) }";
         let mut database = CompilerDatabase::new(source);
         let hover = database
-            .hover(source.find("onDetached").unwrap() + 1)
+            .hover(source.find("onDetach").unwrap() + 1)
             .unwrap()
-            .expect("onDetached hover");
+            .expect("onDetach hover");
         assert!(
             hover
                 .markdown
-                .contains("before the first attachment attempt")
+                .contains("once when an attached process closes")
         );
         assert!(
             hover
                 .markdown
-                .contains("does not run on every detached tick")
+                .contains("never runs for the initial detached state")
         );
-        assert!(hover.markdown.contains("baseline tick rate"));
+        assert!(
+            hover
+                .markdown
+                .contains("use `setup` for one-time script initialization")
+        );
     }
 
     #[test]
@@ -1647,7 +1650,7 @@ fn bar() -> f32! {
     return readValue()
 }
 state "game.exe" {}
-onDetached {
+onDetach {
     let value = bar()
 }
 "#;
@@ -1664,7 +1667,7 @@ onDetached {
                 .contains("**Effects:** reads process memory, requires an attached process")
         );
         assert!(hover.markdown.contains(
-            "**Runtime behavior:** synchronous; requires an attached process and is unavailable in `onDetached`"
+            "**Runtime behavior:** synchronous; requires an attached process and is unavailable in `onDetach`"
         ));
     }
 

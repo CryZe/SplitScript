@@ -81,7 +81,7 @@ fn legacy_lifecycle_blocks_get_semantic_migration_guidance() {
         "ASL `startup` is not a SplitScript lifecycle block",
         "ASL `init` has no blind one-to-one lifecycle rename",
         "ASL `update` is named `whileAttached` for ordinary per-tick work",
-        "ASL `exit` is named `onProcessExit`",
+        "ASL `exit` is named `onDetach`",
         "ASL `shutdown` has no SplitScript equivalent yet",
     ] {
         assert!(

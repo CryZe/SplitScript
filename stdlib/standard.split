@@ -87,8 +87,8 @@ root {
     ///
     /// The value is a frequency in updates per second. It takes effect for the
     /// wait after the current update and remains active until another call;
-    /// detaching from a process does not reset it. Establish and restore the
-    /// detached baseline in `onDetached`, which also runs once initially.
+    /// detaching from a process does not reset it. Establish the initial
+    /// baseline in `setup` and restore it after process closure in `onDetach`.
     ///
     /// # Example
     ///
@@ -626,7 +626,7 @@ namespace timer {
     /// Pause game time after detaching
     ///
     /// ```splitscript
-    /// onDetached {
+    /// onDetach {
     ///     timer.pauseGameTime()
     /// }
     /// ```

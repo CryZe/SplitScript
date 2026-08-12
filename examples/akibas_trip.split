@@ -273,45 +273,8 @@ let chapter3ShionPoints: [MissionPoint; 6] = [
     },
 ]
 
-enum MissionEnum {
-    /// Hi
-    ///
-    /// This is
-    /// a variant
-    C,
-    B,
-}
-
-fn noneFn() {
-    let x = None
-    let y: i32? = x
-    return x
-}
-
-fn bar() {
-    let foo = readPos()
-    return await foo
-}
-
-fn readPos() -> async [f32; 3] {
-    return retry process.read(0x100)
-}
-
-fn bar_baz(x: MissionEnum, y) {
-    debug let _ok = process.readUtf8(0x100, 4) else "sdf"
-    let value = MissionEnum.C
-    if value == y {
-        return y
-    }
-    return value
-}
-
-onDetached {
-}
-
 /// Checks one mission endpoint against the player's rounded position.
 fn atMissionPoint(point: MissionPoint, y: f64, z: f64, x: f64) -> bool {
-    bar_baz(MissionEnum.C, MissionEnum.B)
     return y == (point.y as f64).roundTo(3)
         && z == (point.z as f64).roundTo(3)
         && x == (point.x as f64).roundTo(3)

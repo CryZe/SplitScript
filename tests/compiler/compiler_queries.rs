@@ -341,19 +341,19 @@ fn strict_and_recovering_checks_share_post_type_validation() {
             return process.read<f32>(0)
         }
         state "game.exe" {}
-        onDetached {
+        onDetach {
             let value = readValue()
         }
     "#;
     let mut database = CompilerDatabase::new(source);
     let strict = database.check().unwrap_err();
     assert!(strict.iter().any(|error| {
-        error.code == DiagnosticCode::Semantic && error.message.contains("onDetached")
+        error.code == DiagnosticCode::Semantic && error.message.contains("onDetach")
     }));
 
     let recovered = database.recovering_check().unwrap();
     assert!(recovered.diagnostics().iter().any(|error| {
-        error.code == DiagnosticCode::Semantic && error.message.contains("onDetached")
+        error.code == DiagnosticCode::Semantic && error.message.contains("onDetach")
     }));
     assert!(
         recovered.effects().is_some(),

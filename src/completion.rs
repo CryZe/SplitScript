@@ -1980,7 +1980,7 @@ fn masked(value) {
             ("state \"game.exe\" {}", "pro", "process"),
             ("state GBA {}", "gb", "gba"),
         ] {
-            for action in ["setup", "onDetached"] {
+            for action in ["setup", "onDetach"] {
                 let detached = format!("{state}\n{action} {{ {prefix} }}");
                 let mut database = CompilerDatabase::new(detached);
                 assert!(
@@ -2018,15 +2018,15 @@ fn safe() {
 }
 "#;
 
-        let detached_relay = format!("{declarations}\nonDetached {{ rel }}");
+        let detached_relay = format!("{declarations}\nonDetach {{ rel }}");
         let mut database = CompilerDatabase::new(detached_relay);
         assert!(!labels(&mut database, "{ rel").contains(&"relay".to_owned()));
 
-        let detached_direct = format!("{declarations}\nonDetached {{ rea }}");
+        let detached_direct = format!("{declarations}\nonDetach {{ rea }}");
         let mut database = CompilerDatabase::new(detached_direct);
         assert!(!labels(&mut database, "{ rea").contains(&"readsProcess".to_owned()));
 
-        let detached_safe = format!("{declarations}\nonDetached {{ sa }}");
+        let detached_safe = format!("{declarations}\nonDetach {{ sa }}");
         let mut database = CompilerDatabase::new(detached_safe);
         assert!(labels(&mut database, "{ sa").contains(&"safe".to_owned()));
 
@@ -2052,7 +2052,7 @@ fn relay() {
     return changed()
 }
 "#;
-        for action in ["setup", "onAttach", "onDetached"] {
+        for action in ["setup", "onAttach", "onDetach"] {
             let source = format!("{declarations}\n{action} {{ cur }}");
             let mut database = CompilerDatabase::new(source);
             assert!(!labels(&mut database, "{ cur").contains(&"current".to_owned()));

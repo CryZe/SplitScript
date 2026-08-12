@@ -1,11 +1,7 @@
 state "game.exe" {}
 
-onDetached {
-    print("detached")
-}
-
-onProcessExit {
-    print("exit")
+onDetach {
+    print("detach")
     timer.pauseGameTime()
 }
 

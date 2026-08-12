@@ -299,11 +299,11 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
     MigrationDiagnostic {
         id: ASL_EXIT_DIAGNOSTIC,
         concept: MigrationConceptId::new("asl.lifecycle.exit"),
-        message: "ASL `exit` is named `onProcessExit`",
+        message: "ASL `exit` is named `onDetach`",
         primary_label: "use the process-closure lifecycle boundary",
         notes: &[
-            "`onProcessExit` runs exactly once after a previously attached process closes and never at initial detached startup",
-            "the closed process and state snapshots are unavailable; `onDetached` runs afterward for detached-state policy",
+            "`onDetach` runs exactly once after a previously attached process closes and never at initial detached startup",
+            "the closed process and state snapshots are unavailable; use `setup` for initial process-independent policy",
         ],
     },
     MigrationDiagnostic {
@@ -312,7 +312,7 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         message: "ASL `shutdown` has no SplitScript equivalent yet",
         primary_label: "script teardown requires a host lifecycle callback",
         notes: &[
-            "do not use `onDetached`: it runs for process transitions rather than only when the script is disabled, reloaded, or dropped",
+            "do not use `onDetach`: it runs for process transitions rather than when the script is disabled, reloaded, or dropped",
             "the runtime evolution plan records the required teardown export and ordering contract",
         ],
     },
@@ -1807,8 +1807,8 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "exit lifecycle block",
         sources: ASL,
         support: MigrationSupport::TypedPattern,
-        summary: "Use `onProcessExit` for cleanup that runs exactly once after an attached process closes.",
-        targets: &[MigrationTarget::Language("onProcessExit")],
+        summary: "Use `onDetach` for cleanup that runs exactly once after an attached process closes.",
+        targets: &[MigrationTarget::Language("onDetach")],
         cookbook_anchor: Some("legacy-asl-lifecycle-blocks"),
         spellings: &[],
     },
@@ -1817,7 +1817,7 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "shutdown lifecycle block",
         sources: ASL,
         support: MigrationSupport::Planned,
-        summary: "Exact script teardown needs the planned host shutdown notification; `onDetached` is not equivalent.",
+        summary: "Exact script teardown needs the planned host shutdown notification; `onDetach` is not equivalent.",
         targets: &[],
         cookbook_anchor: Some("legacy-asl-lifecycle-blocks"),
         spellings: &[],

@@ -823,7 +823,7 @@ split {
 The compiler derives a state-snapshot requirement from the helper body and
 propagates it through every calling helper. Such functions are offered only in
 contexts where a complete pair of snapshots exists: `whileAttached` and the
-timer-decision actions. Calling one from `setup`, `onAttach`, `onDetached`, a
+timer-decision actions. Calling one from `setup`, `onAttach`, `onDetach`, a
 state source, or a state filter produces a focused diagnostic. This keeps the
 concise ASL helper shape without exposing default-initialized or stale state.
 
@@ -841,8 +841,8 @@ LiveSplit component invokes them at different boundaries:
 | `startup` | Once when the script is loaded, before process attachment | Put settings in `settings`, constant data in global initializers, and remaining process-independent statements in `setup`. |
 | `init` | Once for each found process, after one legacy state refresh; a failure retries attachment initialization | Put suspending discovery and layout selection in `onAttach`. Put synchronous work that consumes the first complete snapshot in `onStateReady`. |
 | `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put ordinary per-tick work in `whileAttached`. An explicit `return false` preserves the legacy control result exactly. |
-| `exit` | When the attached process exits | Use `onProcessExit`. It runs exactly once for a real process closure and never at initial detached startup. |
-| `shutdown` | When the script is disabled, reloaded, dropped, or LiveSplit exits | No exact host callback exists yet; do not approximate it with `onDetached`. |
+| `exit` | When the attached process exits | Use `onDetach`. It runs exactly once for a real process closure and never at initial detached startup. |
+| `shutdown` | When the script is disabled, reloaded, dropped, or LiveSplit exits | No exact host callback exists yet; do not approximate it with `onDetach`. |
 | `timer.OnStart`, `timer.OnSplit`, `timer.OnReset` | LiveSplit timer events, which may be raised independently of this script's decision blocks | Reconstruct only simple observable transitions in `whileAttached`. Exact lossless events require the planned host contract. |
 
 For example, process-independent ASL startup statements belong in `setup`, not
@@ -904,7 +904,11 @@ not reset by attachment management. If `onAttach` increases the rate, restore
 the script's baseline explicitly:
 
 ```splitscript
-onDetached {
+setup {
+    setTickRate(60)
+}
+
+onDetach {
     setTickRate(60)
 }
 
@@ -913,25 +917,24 @@ onAttach {
 }
 ```
 
-`onDetached` already runs once before the first attachment, so a duplicate
-`setup` call is unnecessary.
+The two calls represent different boundaries: `setup` establishes the initial
+policy, while `onDetach` restores it after each real process closure.
 
 ## Process-exit game-time cleanup
 
 ASL commonly pauses game time in `exit`. Map that cleanup directly to
-`onProcessExit`:
+`onDetach`:
 
 ```splitscript
-onProcessExit {
+onDetach {
     timer.pauseGameTime()
 }
 ```
 
 The compiler invokes this block once after clearing the closed handle, provider
-state, selected layout, and pending process-lifetime continuations. It then
-runs `onDetached`, if present, to establish detached policy such as the baseline
-tick rate. Neither `process` nor state snapshots are available in
-`onProcessExit`: a process may close before attachment initialization or the
+state, selected layout, and pending process-lifetime continuations. Neither
+`process` nor state snapshots are available in `onDetach`: a process may close
+before attachment initialization or the
 first state poll completes.
 
 Use `isLoading` for ordinary load removal. `timer.pauseGameTime()` and

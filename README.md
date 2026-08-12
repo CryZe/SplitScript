@@ -313,7 +313,7 @@ numbered-settings case in [`docs/DDS_PORT.md`](docs/DDS_PORT.md).
   file selectors with glob/MIME filters, and automatic `settings`/`oldSettings`
   tick snapshots.
 - `whileAttached`, `start`, `split`, `reset`, `isLoading`, and `gameTime`
-  actions, plus one-shot `onAttach` and `onDetached` lifecycle blocks.
+  actions, plus one-shot `onAttach` and `onDetach` lifecycle blocks.
 - LiveSplit timer-state ordering matching the ASL v2 prototype.
 - Source spans and concise diagnostics.
 - Tooling-facing standard-library and language catalogs with stable IDs,

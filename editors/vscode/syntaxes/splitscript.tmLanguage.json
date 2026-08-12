@@ -144,7 +144,7 @@
         },
         {
           "name": "keyword.other.lifecycle.splitscript",
-          "match": "\\b(onDetached|onAttach|whileAttached|start|split|reset|isLoading|gameTime)\\b"
+          "match": "\\b(onDetach|onAttach|whileAttached|start|split|reset|isLoading|gameTime)\\b"
         },
         {
           "name": "storage.type.splitscript",

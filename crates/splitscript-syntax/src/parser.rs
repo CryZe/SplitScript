@@ -451,13 +451,13 @@ mod tests {
     }
 
     #[test]
-    fn parses_on_process_exit_as_a_lifecycle_block() {
+    fn parses_on_detach_as_a_lifecycle_block() {
         let source = r#"
             state "game.exe" {}
-            onProcessExit { timer.pauseGameTime() }
+            onDetach { timer.pauseGameTime() }
         "#;
         let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
-        assert_eq!(program.actions[0].kind, ActionKind::OnProcessExit);
+        assert_eq!(program.actions[0].kind, ActionKind::OnDetach);
     }
 
     #[test]

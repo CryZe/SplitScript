@@ -1518,7 +1518,7 @@ fn inferred_generic_process_helpers_preserve_constraints_and_effects() {
         .validate_all(&splitscript::codegen(&checked))
         .expect("each concrete read helper should validate");
 
-    let detached = attached.replace("whileAttached", "onDetached");
+    let detached = attached.replace("whileAttached", "onDetach");
     let diagnostics = splitscript::compile(&detached)
         .expect_err("the generic helper should retain its attached-process effect");
     assert!(

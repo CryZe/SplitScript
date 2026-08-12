@@ -96,18 +96,6 @@ pub(super) fn compile_update(
         .instruction(&Instruction::GlobalGet(globals.process))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty));
-    if let Some(detached) = actions.get(&ActionKind::OnDetached) {
-        function
-            .instruction(&Instruction::GlobalGet(globals.detached_entered))
-            .instruction(&Instruction::I32Eqz)
-            .instruction(&Instruction::If(BlockType::Empty));
-        emit_action_args(&mut function, globals);
-        function
-            .instruction(&Instruction::Call(*detached))
-            .instruction(&Instruction::I32Const(1))
-            .instruction(&Instruction::GlobalSet(globals.detached_entered))
-            .instruction(&Instruction::End);
-    }
     for (process_index, process) in lowering.process_names.iter().enumerate() {
         let (process_ptr, process_len) = strings.get(process);
         function
@@ -134,8 +122,6 @@ pub(super) fn compile_update(
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End)
-        .instruction(&Instruction::I32Const(0))
-        .instruction(&Instruction::GlobalSet(globals.detached_entered))
         .instruction(&Instruction::GlobalGet(globals.process))
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessIsOpen)))
         .instruction(&Instruction::I32Eqz)
@@ -180,15 +166,8 @@ pub(super) fn compile_update(
     if let Some(region) = cancellation_region {
         emit_cancel_region(&mut function, region, lowering.gc, globals);
     }
-    if let Some(process_exit) = actions.get(&ActionKind::OnProcessExit) {
-        function.instruction(&Instruction::Call(*process_exit));
-    }
-    if let Some(detached) = actions.get(&ActionKind::OnDetached) {
-        emit_action_args(&mut function, globals);
-        function
-            .instruction(&Instruction::Call(*detached))
-            .instruction(&Instruction::I32Const(1))
-            .instruction(&Instruction::GlobalSet(globals.detached_entered));
+    if let Some(detach) = actions.get(&ActionKind::OnDetach) {
+        function.instruction(&Instruction::Call(*detach));
     }
     function
         .instruction(&Instruction::Return)

@@ -744,7 +744,7 @@ process or Unity intrinsic.
 
 The checker consumes that same normalized catalog query to decide whether an
 operation is awaitable and whether it is valid in the current lifecycle. For
-example, a process read in `onDetached` is rejected because the catalog requires
+example, a process read in `onDetach` is rejected because the catalog requires
 an attached process. After typed HIR is built, `OperationAnalysis` computes a
 fixed point over resolved user-function and method calls. The process
 requirement therefore propagates through forward calls, methods, and recursive
@@ -1087,7 +1087,7 @@ User-function and method hover additionally consumes the interprocedural
 `OperationAnalysis`, exposing transitive catalog effects, attachment
 constraints, synchronous behavior, and debug-only build availability. Recovery
 retains this analysis when type inference succeeds but a later semantic rule,
-such as calling an attached-process helper from `onDetached`, rejects the
+such as calling an attached-process helper from `onDetach`, rejects the
 program.
 For a resolved generic call, semantic `TypeId` arguments are rendered back to
 source-level names and substituted into the catalog signature. The resulting

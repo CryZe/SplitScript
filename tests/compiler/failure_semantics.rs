@@ -1309,6 +1309,89 @@ fn attached_process_requirements_propagate_through_function_call_graphs() {
 }
 
 #[test]
+fn state_snapshot_requirements_propagate_through_function_call_graphs() {
+    let source = r#"
+        state "game.exe" {
+            level: u32 at 0x100
+        }
+
+        fn enteredLevel(level) {
+            return old.level != level && current.level == level
+        }
+
+        fn relay(level) {
+            return enteredLevel(level)
+        }
+
+        split {
+            return relay(7u32)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("snapshot-dependent helpers should be callable from timer actions");
+    for name in ["enteredLevel", "relay"] {
+        let function = checked
+            .syntax()
+            .functions
+            .iter()
+            .find(|function| function.name == name)
+            .expect("test helper should exist");
+        let operation = checked.effects().function(function.id);
+        assert!(operation.requires_state_snapshots, "{name}");
+        assert!(operation.effects.contains(&Effect::RequiresStateSnapshots));
+    }
+
+    let wasm = splitscript::compile(source).expect("snapshot helpers should lower to Wasm");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("snapshot helpers should produce valid Wasm GC");
+}
+
+#[test]
+fn snapshot_dependent_helpers_are_rejected_without_committed_snapshots() {
+    let declarations = r#"
+        state "game.exe" {
+            level: u32 at 0x100
+        }
+
+        fn changed() {
+            return old.level != current.level
+        }
+    "#;
+    for action in ["setup", "onAttach", "onDetached"] {
+        let source = format!("{declarations}\n{action} {{ print(changed()) }}");
+        let diagnostics = splitscript::compile(&source)
+            .expect_err("a snapshot-dependent helper needs committed snapshots");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.message
+                    == format!(
+                        "`changed` requires state snapshots and is unavailable in `{action}`"
+                    )
+            }),
+            "{action}: {diagnostics:#?}"
+        );
+    }
+
+    let state_source = r#"
+        state "game.exe" {
+            level: u32 at 0x100;
+            changed = didChange()
+        }
+
+        fn didChange() {
+            return old.level != current.level
+        }
+    "#;
+    let diagnostics = splitscript::compile(state_source)
+        .expect_err("state polling must not call snapshot-dependent helpers");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message
+            == "`didChange` requires state snapshots and is unavailable in a state field expression"
+    }), "{diagnostics:#?}");
+}
+
+#[test]
 fn explicit_generic_calls_accept_named_and_constructed_types() {
     let source = r#"
         state "game.exe" {}

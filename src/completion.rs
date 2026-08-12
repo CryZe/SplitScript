@@ -10,7 +10,7 @@ use crate::{
     catalog::Documentation,
     database::{CompilerDatabase, SemanticQueryResult},
     documentation::StandardLibraryDocumentation,
-    effects::{OperationAnalysis, action_has_attached_process},
+    effects::{OperationAnalysis, action_has_attached_process, action_has_state_snapshots},
     hir::ExpressionResolution,
     language::{LanguageCatalog, LanguageItem, LanguageItemId, LanguageItemKind},
     lexer::{self, TokenKind},
@@ -57,6 +57,12 @@ pub struct CompletionList {
     pub items: Vec<CompletionItem>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ContextAvailability {
+    attached_process: bool,
+    state_snapshots: bool,
+}
+
 pub(crate) fn complete(
     database: &mut CompilerDatabase,
     offset: usize,
@@ -80,9 +86,16 @@ pub(crate) fn complete(
             .iter()
             .find(|action| contains_offset(action.body.span, offset))
             .map(|action| action.kind);
+        let inside_function = syntax
+            .functions
+            .iter()
+            .any(|function| contains_offset(function.body.span, offset));
         let top_level = action.is_none() && is_top_level_offset(&syntax, offset);
         let has_attached_process = action.is_none_or(action_has_attached_process);
-        let effects = (!has_attached_process)
+        let has_state_snapshots = action
+            .map(action_has_state_snapshots)
+            .unwrap_or(inside_function);
+        let effects = (!has_attached_process || !has_state_snapshots)
             .then(|| {
                 completion_operation_analysis(
                     database,
@@ -97,7 +110,10 @@ pub(crate) fn complete(
             &syntax,
             offset,
             standard_library,
-            has_attached_process,
+            ContextAvailability {
+                attached_process: has_attached_process,
+                state_snapshots: has_state_snapshots,
+            },
             effects.as_ref(),
             top_level,
         ))
@@ -288,7 +304,7 @@ fn complete_root(
     syntax: &Program,
     offset: usize,
     standard_library: StandardLibrary,
-    has_attached_process: bool,
+    availability: ContextAvailability,
     effects: Option<&OperationAnalysis>,
     top_level: bool,
 ) -> CompletionList {
@@ -297,6 +313,14 @@ fn complete_root(
     let mut builder = CompletionBuilder::new(prefix, replacement);
 
     for item in LanguageCatalog::new().items() {
+        if !availability.state_snapshots
+            && matches!(
+                item.id,
+                LanguageItemId::CurrentSnapshot | LanguageItemId::OldSnapshot
+            )
+        {
+            continue;
+        }
         if let Some(completion) = language_completion(item) {
             builder.add(completion);
         }
@@ -314,8 +338,14 @@ fn complete_root(
         builder.add_scoped(layout_selector_completion(state));
     }
     let provider = selected_provider(syntax, &standard_library);
-    add_root_standard_library(&mut builder, &standard_library, has_attached_process);
-    if has_attached_process && let Some(provider) = provider {
+    add_root_standard_library(
+        &mut builder,
+        &standard_library,
+        availability.attached_process,
+    );
+    if availability.attached_process
+        && let Some(provider) = provider
+    {
         let ty = standard_library.type_decl(provider.process_type);
         builder.add(CompletionItem {
             label: provider.value_name.to_owned(),
@@ -326,7 +356,13 @@ fn complete_root(
             is_snippet: false,
         });
     }
-    add_source_declarations(&mut builder, syntax, has_attached_process, effects);
+    add_source_declarations(
+        &mut builder,
+        syntax,
+        availability.attached_process,
+        availability.state_snapshots,
+        effects,
+    );
     add_visible_bindings(&mut builder, syntax, offset);
     builder.finish()
 }
@@ -403,7 +439,7 @@ fn complete_member(
         .collect::<Vec<_>>();
 
     match path.as_slice() {
-        ["current"] | ["old"] => {
+        ["current"] | ["old"] if snapshot_context_available(syntax, context.dot) => {
             if let Some(state) = &syntax.state {
                 for field in state.common_fields() {
                     builder.add(simple_completion(
@@ -717,6 +753,7 @@ fn add_source_declarations(
     builder: &mut CompletionBuilder,
     syntax: &Program,
     has_attached_process: bool,
+    has_state_snapshots: bool,
     effects: Option<&OperationAnalysis>,
 ) {
     if syntax
@@ -743,6 +780,11 @@ fn add_source_declarations(
         }
         if !has_attached_process
             && effects.is_none_or(|effects| effects.function(function.id).requires_attached_process)
+        {
+            continue;
+        }
+        if !has_state_snapshots
+            && effects.is_none_or(|effects| effects.function(function.id).requires_state_snapshots)
         {
             continue;
         }
@@ -776,6 +818,21 @@ fn add_source_declarations(
             "enum type",
         ));
     }
+}
+
+fn snapshot_context_available(syntax: &Program, offset: usize) -> bool {
+    if syntax
+        .functions
+        .iter()
+        .any(|function| contains_offset(function.body.span, offset))
+    {
+        return true;
+    }
+    syntax
+        .actions
+        .iter()
+        .find(|action| contains_offset(action.body.span, offset))
+        .is_some_and(|action| action_has_state_snapshots(action.kind))
 }
 
 fn add_visible_bindings(builder: &mut CompletionBuilder, syntax: &Program, offset: usize) {
@@ -1980,6 +2037,42 @@ fn safe() {
         let attached = format!("{declarations}\nonAttach {{ rel }}");
         let mut database = CompilerDatabase::new(attached);
         assert!(labels(&mut database, "{ rel").contains(&"relay".to_owned()));
+    }
+
+    #[test]
+    fn completion_scopes_snapshot_roots_and_snapshot_dependent_functions() {
+        let declarations = r#"
+state "game.exe" { level: u32 at 0x100 }
+
+fn changed() {
+    return old.level != current.level
+}
+
+fn relay() {
+    return changed()
+}
+"#;
+        for action in ["setup", "onAttach", "onDetached"] {
+            let source = format!("{declarations}\n{action} {{ cur }}");
+            let mut database = CompilerDatabase::new(source);
+            assert!(!labels(&mut database, "{ cur").contains(&"current".to_owned()));
+
+            let source = format!("{declarations}\n{action} {{ rel }}");
+            let mut database = CompilerDatabase::new(source);
+            assert!(!labels(&mut database, "{ rel").contains(&"relay".to_owned()));
+        }
+
+        let source = format!("{declarations}\nsplit {{ cur }}");
+        let mut database = CompilerDatabase::new(source);
+        assert!(labels(&mut database, "{ cur").contains(&"current".to_owned()));
+
+        let source = format!("{declarations}\nsplit {{ rel }}");
+        let mut database = CompilerDatabase::new(source);
+        assert!(labels(&mut database, "{ rel").contains(&"relay".to_owned()));
+
+        let function = format!("{declarations}\nfn another() {{ cur }}");
+        let mut database = CompilerDatabase::new(function);
+        assert!(labels(&mut database, "{ cur").contains(&"current".to_owned()));
     }
 
     #[test]

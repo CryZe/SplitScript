@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-12: contextual state snapshots in helper functions
+
+- Allowed ordinary helpers to read `old` and `current` directly and propagated
+  the resulting snapshot requirement through recursive source call graphs.
+- Rejected direct and transitive use from `setup`, `onAttach`, `onDetached`,
+  state reads, and state filters, while filtering invalid completions and
+  exposing the requirement in function hovers.
+- Reused the already double-buffered GC snapshot globals in code generation,
+  preserving first-snapshot seeding without hidden parameters or per-tick
+  allocations, and documented the canonical ASL migration pattern.
+
 ## 2026-08-10: deterministic integer radix formatting
 
 - Added catalog-declared `Integer.toString(radix) -> String!` for bases 2

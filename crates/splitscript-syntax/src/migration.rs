@@ -1707,6 +1707,20 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: &[],
     },
     MigrationConcept {
+        id: MigrationConceptId::new("asl.state.helper-snapshots"),
+        name: "State snapshots in helper functions",
+        sources: ASL,
+        support: MigrationSupport::Direct,
+        summary: "Helpers may read `old` and `current` directly. The compiler propagates the snapshot requirement and rejects calls before committed snapshots exist.",
+        targets: &[
+            MigrationTarget::Language("fn"),
+            MigrationTarget::Language("old"),
+            MigrationTarget::Language("current"),
+        ],
+        cookbook_anchor: Some("snapshot-dependent-helper-functions"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("asl.memory.deep-pointer"),
         name: "DeepPointer",
         sources: ASL,

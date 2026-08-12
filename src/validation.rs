@@ -11,7 +11,7 @@ use crate::{
     Diagnostic, DiagnosticCode, DiagnosticFix, FixApplicability, TextEdit,
     ast::{self, EnumDecl, Program, StateSource},
     capabilities::CapabilityAnalysis,
-    effects::OperationAnalysis,
+    effects::{OperationAnalysis, StateSnapshotContext},
     hir::{
         self, ExpressionResolution, TypedBlock, TypedExpression, TypedExpressionKind,
         TypedMatchArm, TypedProgram, TypedStatementKind, TypedVisitor,
@@ -122,6 +122,30 @@ pub(crate) fn validate(
                 name.unwrap_or_else(|| "function".to_owned()),
                 violation.action.name(),
             ),
+            violation.expression_span,
+        ));
+    }
+
+    for violation in effects.state_snapshot_violations(hir) {
+        let name = violation
+            .standard_library_name
+            .map(str::to_owned)
+            .or_else(|| {
+                let function = violation.function?;
+                syntax
+                    .functions
+                    .iter()
+                    .find(|declaration| declaration.id == function)
+                    .map(|declaration| declaration.name.clone())
+            })
+            .unwrap_or_else(|| "function".to_owned());
+        let context = match violation.context {
+            StateSnapshotContext::Action(action) => format!("`{}`", action.name()),
+            StateSnapshotContext::StateSource => "a state field expression".to_owned(),
+            StateSnapshotContext::StateTransform => "a state field filter".to_owned(),
+        };
+        diagnostics.push(Diagnostic::semantic(
+            format!("`{name}` requires state snapshots and is unavailable in {context}"),
             violation.expression_span,
         ));
     }

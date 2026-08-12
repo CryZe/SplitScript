@@ -193,8 +193,10 @@ or behavioral parity.
   detach-cleanup recipes are complete; add module fields, signatures and
   relative pointers, discovered addresses, records/fixed arrays, settings,
   game time, state filtering, cancellation, mixed-width pointers, numeric/index
-  casts, monotonic delays, exact process-name matching, and helpers that take
-  `old`/`current` snapshots explicitly. Add a concise source-to-target
+  casts, monotonic delays, exact process-name matching, and reusable helpers
+  that accept arbitrary snapshots explicitly. Snapshot-dependent helpers that
+  use the contextual `old`/`current` values directly are now documented and
+  compiler-checked. Add a concise source-to-target
   capability table that links to complete standard-library symbols instead of
   making authors search the language reference. Compile the owning maintained
   examples in `cargo xtask check`.
@@ -229,6 +231,12 @@ Do not add JavaScript source maps.
 
 ### Prove the Wasmtime/debugger boundary
 
+- [ ] Before extending native DWARF further, evaluate the JavaScript debugger's
+  WebAssembly support against the real Wasmtime host, especially GC objects.
+  If it still cannot provide a coherent SplitScript-level experience, compare
+  a language-native debugger that interprets typed IR with continuing to adapt
+  native debuggers. Do not commit to a custom DAP until this experiment shows
+  which boundary actually preserves source values and control flow.
 - [ ] Build a minimal fixture against the exact Wasmtime configuration used by
   LiveSplit. With `Config::debug_info(true)`, verify source breakpoints,
   stepping, stacks, scalar locals/globals, and GC references across supported

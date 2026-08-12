@@ -1489,12 +1489,8 @@ impl Checker {
             );
             return None;
         }
-        if self.callable.is_function() {
-            self.error(
-                "functions are independent of action snapshots; pass the value as a parameter",
-                span,
-            );
-            return None;
+        if matches!(self.callable, CallableContext::Function) {
+            return Some(());
         }
         if !matches!(self.callable, CallableContext::Action(_)) {
             self.error(
@@ -1503,15 +1499,18 @@ impl Checker {
             );
             return None;
         }
-        if let CallableContext::Action(action @ (ActionKind::Setup | ActionKind::OnAttach)) =
-            self.callable
+        if let CallableContext::Action(action) = self.callable
+            && !crate::effects::action_has_state_snapshots(action)
         {
             let message = match action {
                 ActionKind::Setup => "state snapshots are not available during `setup`",
                 ActionKind::OnAttach => {
                     "state snapshots are not available until `onAttach` completes"
                 }
-                _ => unreachable!(),
+                ActionKind::OnDetached => {
+                    "state snapshots are not guaranteed to exist in `onDetached`"
+                }
+                _ => unreachable!("the remaining actions have committed snapshots"),
             };
             self.error(message, span);
             return None;

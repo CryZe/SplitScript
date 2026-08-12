@@ -1070,8 +1070,15 @@ fn compile_resolved_path(
             Type::Standard(declaration.process_type)
         }
         ResolvedValue::CurrentSnapshot | ResolvedValue::OldSnapshot => {
-            let snapshot = u32::from(matches!(value, ResolvedValue::OldSnapshot));
-            function.instruction(&Instruction::LocalGet(snapshot));
+            function
+                .instruction(&Instruction::GlobalGet(
+                    if matches!(value, ResolvedValue::OldSnapshot) {
+                        context.runtime_globals.old
+                    } else {
+                        context.runtime_globals.current
+                    },
+                ))
+                .instruction(&Instruction::RefAsNonNull);
             Type::StateSnapshot
         }
         ResolvedValue::SettingsView | ResolvedValue::OldSettingsView => {
@@ -1082,8 +1089,15 @@ fn compile_resolved_path(
             Type::SettingsView
         }
         ResolvedValue::CurrentState(field) | ResolvedValue::OldState(field) => {
-            let snapshot = u32::from(matches!(value, ResolvedValue::OldState(_)));
-            function.instruction(&Instruction::LocalGet(snapshot));
+            function
+                .instruction(&Instruction::GlobalGet(
+                    if matches!(value, ResolvedValue::OldState(_)) {
+                        context.runtime_globals.old
+                    } else {
+                        context.runtime_globals.current
+                    },
+                ))
+                .instruction(&Instruction::RefAsNonNull);
             let (index, storage) = state_storage_index(field, context.semantics);
             let field_type = value_type(storage, context.semantics);
             emit_struct_get(function, index, field_type);

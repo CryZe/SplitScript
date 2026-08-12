@@ -557,6 +557,9 @@ fn source_function_description(
             description
                 .push_str("; requires an attached process and is unavailable in `onDetached`");
         }
+        if operation.requires_state_snapshots {
+            description.push_str("; requires committed `old` and `current` state snapshots");
+        }
         if operation.cancellation == crate::stdlib::CancellationKind::ProcessClose {
             description.push_str("; cancels when the process closes");
         }
@@ -1060,6 +1063,38 @@ whileAttached {
                 .markdown
                 .contains("**Runtime behavior:** available everywhere; synchronous")
         );
+    }
+
+    #[test]
+    fn hover_shows_transitive_state_snapshot_requirements() {
+        let source = r#"
+state "game.exe" { level: u32 at 0x100 }
+
+fn changed() {
+    return old.level != current.level
+}
+
+fn relay() {
+    return changed()
+}
+
+split {
+    return relay()
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(source.rfind("relay").unwrap() + 2)
+            .unwrap()
+            .expect("relay hover");
+        assert!(
+            hover
+                .markdown
+                .contains("**Effects:** requires state snapshots")
+        );
+        assert!(hover.markdown.contains(
+            "**Runtime behavior:** synchronous; requires committed `old` and `current` state snapshots"
+        ));
     }
 
     #[test]

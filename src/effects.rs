@@ -14,6 +14,7 @@ use crate::{
 pub struct FunctionOperationSemantics {
     pub effects: Vec<Effect>,
     pub requires_attached_process: bool,
+    pub requires_state_snapshots: bool,
     pub availability: Availability,
     pub suspension: SuspensionKind,
     pub cancellation: CancellationKind,
@@ -50,6 +51,21 @@ pub struct AttachedProcessViolation {
     pub standard_library_name: Option<&'static str>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateSnapshotContext {
+    Action(ActionKind),
+    StateSource,
+    StateTransform,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateSnapshotViolation {
+    pub context: StateSnapshotContext,
+    pub expression_span: Span,
+    pub function: Option<FunctionId>,
+    pub standard_library_name: Option<&'static str>,
+}
+
 /// Whether code in this lifecycle action executes with a selected process
 /// provider. Keep this as the shared source of truth for semantic validation
 /// and editor candidate filtering as new lifecycle contexts are introduced.
@@ -64,6 +80,21 @@ pub const fn action_has_attached_process(action: ActionKind) -> bool {
         | ActionKind::IsLoading
         | ActionKind::GameTime => true,
     }
+}
+
+/// Whether a lifecycle action runs after the first complete state snapshot has
+/// been committed. `onDetached` also runs once before the first attachment, so
+/// stale or default-initialized storage cannot be exposed there as real state.
+pub const fn action_has_state_snapshots(action: ActionKind) -> bool {
+    matches!(
+        action,
+        ActionKind::WhileAttached
+            | ActionKind::Start
+            | ActionKind::Split
+            | ActionKind::Reset
+            | ActionKind::IsLoading
+            | ActionKind::GameTime
+    )
 }
 
 struct CallFacts {
@@ -129,6 +160,18 @@ fn collect_call_facts(
 
 impl TypedVisitor for CallCollector<'_> {
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
+        if let Some((
+            Some(
+                crate::semantic::ResolvedValue::CurrentSnapshot
+                | crate::semantic::ResolvedValue::OldSnapshot
+                | crate::semantic::ResolvedValue::CurrentState(_)
+                | crate::semantic::ResolvedValue::OldState(_),
+            ),
+            _,
+        )) = program.value_path(expression.id)
+        {
+            self.facts.effects.push(Effect::RequiresStateSnapshots);
+        }
         if let hir::TypedExpressionKind::Suspend { value, .. } = expression.kind {
             self.facts
                 .effects
@@ -326,6 +369,111 @@ impl OperationAnalysis {
         }
         violations
     }
+
+    pub fn state_snapshot_violations(&self, program: &TypedProgram) -> Vec<StateSnapshotViolation> {
+        struct Validator<'a> {
+            analysis: &'a OperationAnalysis,
+            context: StateSnapshotContext,
+            violations: Vec<StateSnapshotViolation>,
+        }
+        impl Validator<'_> {
+            fn violation(
+                &self,
+                call: &ResolvedCall,
+                span: Span,
+                program: &TypedProgram,
+            ) -> Option<StateSnapshotViolation> {
+                let (requires_state_snapshots, function, standard_library_name) = match call {
+                    ResolvedCall::StandardLibrary { item, .. } => {
+                        let item = program.standard_library().item(*item);
+                        let requires = program.library_function(item.id).is_some_and(|function| {
+                            self.analysis.function(function).requires_state_snapshots
+                        });
+                        (requires, None, Some(item.qualified_name))
+                    }
+                    ResolvedCall::UserFunction { function, .. }
+                    | ResolvedCall::UserMethod { function, .. } => (
+                        self.analysis.function(*function).requires_state_snapshots,
+                        Some(*function),
+                        None,
+                    ),
+                    ResolvedCall::ResultError { .. }
+                    | ResolvedCall::OptionSome { .. }
+                    | ResolvedCall::ResultSuccess { .. } => (false, None, None),
+                };
+                requires_state_snapshots.then_some(StateSnapshotViolation {
+                    context: self.context,
+                    expression_span: span,
+                    function,
+                    standard_library_name,
+                })
+            }
+        }
+        impl TypedVisitor for Validator<'_> {
+            fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
+                if let Some(violation) = program
+                    .call(expression.id)
+                    .and_then(|call| self.violation(call, expression.span, program))
+                {
+                    self.violations.push(violation);
+                }
+                hir::walk_typed_expression(self, expression, program);
+            }
+
+            fn visit_statement(&mut self, statement: &hir::TypedStatement, program: &TypedProgram) {
+                if let hir::TypedStatementKind::Assign { assignment, .. } = &statement.kind
+                    && let Some(call) = &assignment.operator
+                    && let Some(violation) = self.violation(call, assignment.span, program)
+                {
+                    self.violations.push(violation);
+                }
+                if let hir::TypedStatementKind::IndexAssign { assignment, .. } = &statement.kind
+                    && let Some(violation) =
+                        self.violation(&assignment.operator, assignment.span, program)
+                {
+                    self.violations.push(violation);
+                }
+                hir::walk_typed_statement(self, statement, program);
+            }
+        }
+
+        let mut violations = Vec::new();
+        for action in program
+            .action_bodies()
+            .filter(|action| !action_has_state_snapshots(action.action))
+        {
+            let mut validator = Validator {
+                analysis: self,
+                context: StateSnapshotContext::Action(action.action),
+                violations: Vec::new(),
+            };
+            validator.visit_block(&action.body, program);
+            violations.extend(validator.violations);
+        }
+        for (_, expression) in program.state_sources() {
+            let mut validator = Validator {
+                analysis: self,
+                context: StateSnapshotContext::StateSource,
+                violations: Vec::new(),
+            };
+            if let Some(expression) = program.expression(expression) {
+                validator.visit_expression(expression, program);
+            }
+            violations.extend(validator.violations);
+        }
+        for transform in program.state_transforms() {
+            let mut validator = Validator {
+                analysis: self,
+                context: StateSnapshotContext::StateTransform,
+                violations: Vec::new(),
+            };
+            if let Some(expression) = program.expression(transform.expression) {
+                validator.visit_expression(expression, program);
+            }
+            violations.extend(validator.violations);
+        }
+        violations
+    }
 }
 
 fn function_semantics(
@@ -350,6 +498,7 @@ fn function_semantics(
     FunctionOperationSemantics {
         effects,
         requires_attached_process: operation.requires_attached_process,
+        requires_state_snapshots: operation.requires_state_snapshots,
         availability,
         suspension: operation.suspension,
         cancellation: operation.cancellation,
@@ -373,11 +522,12 @@ const fn effect_order(effect: Effect) -> u8 {
         Effect::ReadsRuntime => 4,
         Effect::ReadsProcess => 5,
         Effect::RequiresAttachedProcess => 6,
-        Effect::Retryable => 7,
-        Effect::Suspends => 8,
-        Effect::CancelsOnProcessClose => 9,
-        Effect::WritesTimer => 10,
-        Effect::WritesRuntime => 11,
+        Effect::RequiresStateSnapshots => 7,
+        Effect::Retryable => 8,
+        Effect::Suspends => 9,
+        Effect::CancelsOnProcessClose => 10,
+        Effect::WritesTimer => 11,
+        Effect::WritesRuntime => 12,
     }
 }
 

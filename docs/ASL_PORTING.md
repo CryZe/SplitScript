@@ -801,6 +801,36 @@ templates may interpolate only the range binding, and a documentation comment
 on the family becomes every generated tooltip. See the maintained Drug Dealer
 Simulator port for registration and runtime evidence.
 
+## Snapshot-dependent helper functions
+
+Ordinary helper functions may refer to `old` and `current` directly, just as a
+process-dependent helper may refer to `process`:
+
+```splitscript
+state "game.exe" {
+    level: u32 at 0x1000
+}
+
+fn enteredLevel(level) {
+    return old.level != level && current.level == level
+}
+
+split {
+    return enteredLevel(7u32)
+}
+```
+
+The compiler derives a state-snapshot requirement from the helper body and
+propagates it through every calling helper. Such functions are offered only in
+contexts where a complete pair of snapshots exists: `whileAttached` and the
+timer-decision actions. Calling one from `setup`, `onAttach`, `onDetached`, a
+state source, or a state filter produces a focused diagnostic. This keeps the
+concise ASL helper shape without exposing default-initialized or stale state.
+
+Explicit snapshot parameters remain useful when a helper should operate on an
+arbitrary snapshot supplied by its caller, but they are not required merely to
+move a lifecycle condition into a named function.
+
 ## Legacy ASL lifecycle blocks
 
 The similarly shaped block names are not interchangeable. The original

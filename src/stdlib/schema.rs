@@ -36,6 +36,7 @@ pub enum Effect {
     ReadsRuntime,
     ReadsProcess,
     RequiresAttachedProcess,
+    RequiresStateSnapshots,
     Retryable,
     Suspends,
     CancelsOnProcessClose,
@@ -44,7 +45,7 @@ pub enum Effect {
 }
 
 impl Effect {
-    const ALL: [Self; 12] = [
+    const ALL: [Self; 13] = [
         Self::Pure,
         Self::Allocates,
         Self::MutatesValue,
@@ -52,6 +53,7 @@ impl Effect {
         Self::ReadsRuntime,
         Self::ReadsProcess,
         Self::RequiresAttachedProcess,
+        Self::RequiresStateSnapshots,
         Self::Retryable,
         Self::Suspends,
         Self::CancelsOnProcessClose,
@@ -72,6 +74,7 @@ impl Effect {
             Self::ReadsRuntime => "reads runtime state",
             Self::ReadsProcess => "reads process memory",
             Self::RequiresAttachedProcess => "requires an attached process",
+            Self::RequiresStateSnapshots => "requires state snapshots",
             Self::Retryable => "retryable",
             Self::Suspends => "suspends",
             Self::CancelsOnProcessClose => "cancels when the process closes",
@@ -200,6 +203,7 @@ pub struct OperationSemantics {
     pub availability: Availability,
     pub suspension: SuspensionKind,
     pub requires_attached_process: bool,
+    pub requires_state_snapshots: bool,
     pub cancellation: CancellationKind,
 }
 
@@ -247,6 +251,7 @@ impl OperationMetadata {
             availability: self.availability,
             suspension,
             requires_attached_process: self.effects.contains(&Effect::RequiresAttachedProcess),
+            requires_state_snapshots: self.effects.contains(&Effect::RequiresStateSnapshots),
             cancellation: if self.effects.contains(&Effect::CancelsOnProcessClose) {
                 CancellationKind::ProcessClose
             } else {

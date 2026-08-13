@@ -59,6 +59,10 @@ fn advertises_full_sync_diagnostics_formatting_and_semantic_tokens() {
         true
     );
     assert_eq!(
+        response[0]["result"]["capabilities"]["selectionRangeProvider"],
+        true
+    );
+    assert_eq!(
         response[0]["result"]["capabilities"]["definitionProvider"],
         true
     );
@@ -579,6 +583,79 @@ fn hover_and_signature_help_preserve_resolved_catalog_information() {
         signature[0]["result"]["signatures"][0]["parameters"][1]["label"],
         "maximum"
     );
+}
+
+#[test]
+fn selection_ranges_follow_recovered_syntax_and_preserve_utf16_positions() {
+    let source = concat!(
+        "// 🦊\n",
+        "state \"game.exe\" {}\n",
+        "fn calculate(value: i32) -> i32 {\n",
+        "    let result = value * (1 + 2)\n",
+        "    return result\n",
+        "}\n"
+    );
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": "file:///selection.split",
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+
+    let offset = source.find("1 + 2").unwrap();
+    let second_offset = source.rfind("result").unwrap();
+    let (line, character) = position_parts(source, offset);
+    let (second_line, second_character) = position_parts(source, second_offset);
+    let response = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 92,
+        "method": "textDocument/selectionRange",
+        "params": {
+            "textDocument": { "uri": "file:///selection.split" },
+            "positions": [
+                { "line": line, "character": character },
+                { "line": second_line, "character": second_character }
+            ]
+        }
+    }));
+
+    assert_eq!(response[0]["result"].as_array().unwrap().len(), 2);
+    let mut node = &response[0]["result"][0];
+    let mut ranges = Vec::new();
+    while !node.is_null() {
+        ranges.push(node["range"].clone());
+        node = &node["parent"];
+    }
+    let expected = |start: usize, end: usize| {
+        json!({
+            "start": position(source, start),
+            "end": position(source, end)
+        })
+    };
+    let range_of = |text: &str| {
+        let start = source.find(text).unwrap();
+        expected(start, start + text.len())
+    };
+
+    assert_eq!(ranges.first(), Some(&expected(offset, offset)));
+    for range in [
+        range_of("1"),
+        range_of("(1 + 2)"),
+        range_of("value * (1 + 2)"),
+        range_of("let result = value * (1 + 2)"),
+        range_of(
+            "fn calculate(value: i32) -> i32 {\n    let result = value * (1 + 2)\n    return result\n}",
+        ),
+        expected(0, source.len()),
+    ] {
+        assert!(ranges.contains(&range), "missing selection range {range}");
+    }
 }
 
 #[test]

@@ -203,6 +203,15 @@ impl CompilerDatabase {
         self.cache.document_symbols.as_ref().unwrap().clone()
     }
 
+    pub fn selection_ranges(&mut self, offset: usize) -> SemanticQueryResult<Vec<Span>> {
+        let parsed = self.recovering_parse()?;
+        Ok(crate::selection_ranges::selection_ranges(
+            parsed.source_document(),
+            parsed.syntax(),
+            offset,
+        ))
+    }
+
     pub fn recovering_lower(&mut self) -> QueryResult<LoweredProgram> {
         if self.cache.recovering_lowered.is_none() {
             self.cache.recovering_lowered = Some(match self.recovering_parse() {

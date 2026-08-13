@@ -853,7 +853,12 @@ fn semantic_queries_use_exact_tokens_before_end_of_word_fallbacks() {
     let adjacent = source.find("inspect(1)").unwrap();
     let adjacent_boundary = adjacent + "inspect".len();
 
-    assert!(database.hover(adjacent_boundary).unwrap().is_none());
+    let hover = database
+        .hover(adjacent_boundary)
+        .unwrap()
+        .expect("call punctuation should expose the enclosing expression type");
+    assert_eq!(hover.markdown, "```splitscript\nNone\n```");
+    assert_eq!(&source[hover.span.start..hover.span.end], "inspect(1)");
     assert!(matches!(
         database.definition_at(adjacent_boundary).unwrap(),
         Some(DefinitionTarget::Source(definition)) if definition.span.start == declaration
@@ -891,7 +896,12 @@ fn semantic_queries_use_exact_tokens_before_end_of_word_fallbacks() {
     assert!(database.rename_target_at(gap_boundary).unwrap().is_some());
 
     let opening_parenthesis = gap_boundary + 1;
-    assert!(database.hover(opening_parenthesis).unwrap().is_none());
+    let hover = database
+        .hover(opening_parenthesis)
+        .unwrap()
+        .expect("separated call punctuation should expose the expression type");
+    assert_eq!(hover.markdown, "```splitscript\nNone\n```");
+    assert_eq!(&source[hover.span.start..hover.span.end], "inspect (2)");
     assert!(
         database
             .definition_at(opening_parenthesis)

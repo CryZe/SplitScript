@@ -88,6 +88,23 @@ pub(super) fn location_json(uri: &str, source: &str, span: Span) -> Value {
     })
 }
 
+pub(super) fn selection_range_json(source: &str, spans: &[Span]) -> Value {
+    let mut parent = Value::Null;
+    for span in spans.iter().rev() {
+        let mut selection = json!({
+            "range": {
+                "start": position(source, span.start),
+                "end": position(source, span.end)
+            }
+        });
+        if !parent.is_null() {
+            selection["parent"] = parent;
+        }
+        parent = selection;
+    }
+    parent
+}
+
 pub(super) fn document_symbol_json(source: &str, symbol: &DocumentSymbol) -> Value {
     let mut value = json!({
         "name": symbol.name,

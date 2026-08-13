@@ -12,12 +12,14 @@ mod protocol;
 
 use conversion::{
     completion_list_json, diagnostic_json, document_symbol_json, hover_json, inlay_hint_json,
-    location_json, offset_at_position, position, semantic_token_data, signature_help_json,
+    location_json, offset_at_position, position, selection_range_json, semantic_token_data,
+    signature_help_json,
 };
 use documents::{Document, DocumentStore};
 use protocol::{
     CodeActionParams, DidChangeParams, DidOpenParams, IncomingMessage, InlayHintParams,
-    ReferenceParams, RenameParams, TextDocumentParams, TextDocumentPositionParams, decode,
+    ReferenceParams, RenameParams, SelectionRangeParams, TextDocumentParams,
+    TextDocumentPositionParams, decode,
 };
 
 use crate::{
@@ -85,6 +87,7 @@ impl LanguageServer {
                                 },
                                 "hoverProvider": true,
                                 "inlayHintProvider": true,
+                                "selectionRangeProvider": true,
                                 "definitionProvider": true,
                                 "referencesProvider": true,
                                 "renameProvider": {
@@ -146,6 +149,9 @@ impl LanguageServer {
             "textDocument/inlayHint" => {
                 id.map_or_else(Vec::new, |id| vec![self.inlay_hint_response(id, params)])
             }
+            "textDocument/selectionRange" => id.map_or_else(Vec::new, |id| {
+                vec![self.selection_range_response(id, params)]
+            }),
             "textDocument/definition" => {
                 id.map_or_else(Vec::new, |id| vec![self.definition_response(id, params)])
             }
@@ -514,6 +520,30 @@ impl LanguageServer {
                     .collect(),
             ),
         )
+    }
+
+    fn selection_range_response(&mut self, id: Value, params: Value) -> Value {
+        let params = match decode_request::<SelectionRangeParams>(&id, params) {
+            Ok(params) => params,
+            Err(response) => return response,
+        };
+        let Some(document) = self.documents.get_mut(&params.text_document.uri) else {
+            return error_response(id, -32602, "text document is not open");
+        };
+        let source = document.database.source().to_owned();
+        let mut selections = Vec::with_capacity(params.positions.len());
+        for position_value in params.positions {
+            let Some(offset) =
+                offset_at_position(&source, position_value.line, position_value.character)
+            else {
+                return error_response(id, -32602, "selection position is outside the document");
+            };
+            let Ok(ranges) = document.database.selection_ranges(offset) else {
+                return response(id, Value::Null);
+            };
+            selections.push(selection_range_json(&source, &ranges));
+        }
+        response(id, Value::Array(selections))
     }
 
     fn definition_response(&mut self, id: Value, params: Value) -> Value {

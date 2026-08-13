@@ -31,6 +31,7 @@ pub mod migration;
 use splitscript_syntax::parser;
 mod refactor;
 mod resolution;
+mod selection_ranges;
 mod semantic;
 mod service;
 mod signature;

@@ -43,6 +43,13 @@ pub(super) struct TextDocumentParams {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct SelectionRangeParams {
+    pub text_document: TextDocumentIdentifier,
+    pub positions: Vec<Position>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct TextDocumentItem {
     pub uri: String,
     pub version: Option<i64>,

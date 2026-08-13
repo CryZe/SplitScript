@@ -663,6 +663,15 @@ impl HighlightCollector<'_> {
 
 impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     fn visit_program(&mut self, program: &'ast Program) {
+        if let Some(policy) = program.tick_rate {
+            self.insert(policy.keyword_span, SemanticTokenKind::Keyword, 0);
+            if let Some(rate) = policy.attached {
+                self.insert(rate.keyword_span, SemanticTokenKind::Keyword, 0);
+            }
+            if let Some(rate) = policy.detached {
+                self.insert(rate.keyword_span, SemanticTokenKind::Keyword, 0);
+            }
+        }
         if let Some(provider) = program
             .state
             .as_ref()
@@ -1002,6 +1011,7 @@ fn is_keyword(name: &str) -> bool {
     matches!(
         name,
         "state"
+            | "tickRate"
             | "layout"
             | "settings"
             | "record"
@@ -1138,6 +1148,11 @@ state "game.exe" {
     value: i32 at 0x100;
 }
 
+tickRate {
+    attached: 60,
+    detached: 2,
+}
+
 settings {
     "Flag" => flag key "stable-flag": true,
     "Mode" => mode: choice {
@@ -1148,15 +1163,15 @@ settings {
     },
 }
 
-fn names(at: i32, key: i32, choice: i32, default: i32, file: i32, mime: i32, in: i32) -> i32 {
-    return at + key + choice + default + file + mime + in
+fn names(at: i32, key: i32, choice: i32, default: i32, file: i32, mime: i32, in: i32, attached: i32, detached: i32) -> i32 {
+    return at + key + choice + default + file + mime + in + attached + detached
 }
 
 whileAttached {
     for item in [1] {
         print(item)
     }
-    print(names(1, 2, 3, 4, 5, 6, 7))
+    print(names(1, 2, 3, 4, 5, 6, 7, 8, 9))
 }
 "#;
         let mut database = CompilerDatabase::new(source);
@@ -1171,6 +1186,8 @@ whileAttached {
             "file {",
             "mime =>",
             "in [1]",
+            "attached: 60",
+            "detached: 2",
         ] {
             let offset = source.find(spelling).unwrap();
             assert_eq!(
@@ -1180,7 +1197,9 @@ whileAttached {
             );
         }
 
-        for name in ["at", "key", "choice", "default", "file", "mime", "in"] {
+        for name in [
+            "at", "key", "choice", "default", "file", "mime", "in", "attached", "detached",
+        ] {
             let offset = source.find(&format!("{name}: i32")).unwrap();
             assert_eq!(
                 kind_at(&highlights, offset),

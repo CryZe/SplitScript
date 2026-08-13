@@ -16,6 +16,7 @@ const text = (pointer, length) => decoder.decode(
 
 const env = {
     timer_get_state: () => 1,
+    runtime_set_tick_rate() {},
     timer_set_game_time(seconds, nanoseconds) {
         gameTimes.push([Number(seconds), nanoseconds]);
     },

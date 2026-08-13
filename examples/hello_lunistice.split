@@ -54,7 +54,6 @@ onAttach {
     let gameManagerInstance = await gameManager.staticInstance(["Instance", "_instance"])
     let managedScene = retry process.readManagedString(0x2800, 16)
     let formatted = `{-42}:{7.9 as u32}`
-    setTickRate(120.0)
     setVariable("Probe", formatted)
     setVariable("Process", executable)
 

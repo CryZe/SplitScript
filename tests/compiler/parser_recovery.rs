@@ -28,7 +28,7 @@ fn recovering_parse_reports_multiple_errors_and_keeps_later_declarations() {
     assert!(recovered.diagnostics().iter().any(|diagnostic| {
         diagnostic
             .message
-            .starts_with("expected `state`, `settings`")
+            .starts_with("expected `state`, `tickRate`, `settings`")
     }));
     assert!(
         recovered

@@ -124,14 +124,6 @@ fn characterName(character, dlcDemo) {
     }
 }
 
-setup {
-    setTickRate(1)
-}
-
-onDetach {
-    setTickRate(1)
-}
-
 onAttach {
     let unity = await Unity.il2cpp(2020)
     debug print("Found IL2CPP")
@@ -173,8 +165,6 @@ onAttach {
     characterOffset = foundCharacterOffset
 
     debug print("Found Timer")
-
-    setTickRate(120)
 }
 
 whileAttached {

@@ -210,6 +210,7 @@ const text = (pointer, length) => decoder.decode(
 
 const env = {
     timer_get_state: () => liveSplitTimerState,
+    runtime_set_tick_rate() {},
     timer_current_split_index: () => currentSplitIndex,
     timer_start() {
         starts += 1;

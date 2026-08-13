@@ -214,7 +214,7 @@ if (JSON.stringify(variables) !== JSON.stringify([
     throw new Error(`unexpected runtime variables: ${JSON.stringify(variables)}`);
 }
 
-if (tickRates.length !== 1 || tickRates[0] !== 120) {
+if (JSON.stringify(tickRates) !== JSON.stringify([1, 120])) {
     throw new Error(`unexpected tick rates: ${JSON.stringify(tickRates)}`);
 }
 

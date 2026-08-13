@@ -37,6 +37,7 @@ function writeString(destination, size, value) {
 
 const env = {
     timer_get_state: () => timerState,
+    runtime_set_tick_rate() {},
     timer_start() {
         starts += 1;
         timerState = 1;

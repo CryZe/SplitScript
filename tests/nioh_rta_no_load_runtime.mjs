@@ -117,13 +117,13 @@ if (processNames.join(",") !== "Nioh.exe") {
 }
 
 if (unknown) {
-    if (reads.length !== 0 || tickRates.join(",") !== "1"
+    if (reads.length !== 0 || tickRates.join(",") !== "1,29"
         || messages.join(",") !== "unsupported Nioh module size 1") {
         throw new Error(`unsupported build was not inert: ${JSON.stringify({ reads, tickRates, messages })}`);
     }
     processOpen = false;
     instance.exports.update();
-    if (detaches !== 1 || tickRates.join(",") !== "1,1") {
+    if (detaches !== 1 || tickRates.join(",") !== "1,29,1") {
         throw new Error(`unsupported detach differed: ${JSON.stringify({ detaches, tickRates })}`);
     }
 } else {

@@ -7,7 +7,8 @@ use super::{
     FunctionId, Parameter, Parser, PointerPath, PointerPathBase, RecordDecl, RecordField, RecordId,
     SettingChoiceOption, SettingDecl, SettingExternalKey, SettingFamilyDecl, SettingFileFilter,
     SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl,
-    StateMemoryDecoder, StateProviderRef, StateSource, StateTransform, TokenKind, TypeRef,
+    StateMemoryDecoder, StateProviderRef, StateSource, StateTransform, TickRateDecl, TickRateValue,
+    TokenKind, TypeRef,
 };
 use crate::{
     diagnostic::{DiagnosticFix, FixApplicability, TextEdit},
@@ -16,6 +17,99 @@ use crate::{
 };
 
 impl Parser<'_> {
+    pub(super) fn tick_rate_decl(&mut self) -> Result<TickRateDecl, Diagnostic> {
+        let keyword_span = self.expect_ident("tickRate")?;
+        self.expect(TokenKind::LBrace, "expected `{` after `tickRate`")?;
+        let body_depth = self.brace_depth_before(self.cursor.position());
+        let mut attached = None;
+        let mut detached = None;
+
+        while !self.at(&TokenKind::RBrace) {
+            if self.at(&TokenKind::Eof) {
+                self.record_missing_closing("unterminated tick-rate declaration");
+                break;
+            }
+            let item_start = self.cursor.position();
+            let parsed = (|| {
+                let (name, name_span) =
+                    self.expect_any_ident("expected `attached` or `detached`")?;
+                self.expect(TokenKind::Colon, "expected `:` after the tick-rate name")?;
+                let rate = self.tick_rate_value(name_span)?;
+                let value = TickRateValue {
+                    keyword_span: name_span,
+                    value: rate.0,
+                    span: name_span.join(rate.1),
+                };
+                let slot = match name.as_str() {
+                    "attached" => &mut attached,
+                    "detached" => &mut detached,
+                    _ => {
+                        return Err(Diagnostic::new(
+                            "expected `attached` or `detached`",
+                            name_span,
+                        ));
+                    }
+                };
+                if slot.is_some() {
+                    return Err(Diagnostic::new(
+                        format!("`{name}` is already declared in this tick-rate policy"),
+                        name_span,
+                    ));
+                }
+                *slot = Some(value);
+                self.require_comma_between("tick rates");
+                Ok(())
+            })();
+            self.recover_delimited_item(parsed, item_start, body_depth);
+        }
+        let closing = self
+            .eat(&TokenKind::RBrace)
+            .unwrap_or_else(|| self.current().span);
+        Ok(TickRateDecl {
+            keyword_span,
+            attached,
+            detached,
+            span: keyword_span.join(closing),
+        })
+    }
+
+    fn tick_rate_value(&mut self, name_span: Span) -> Result<(f64, Span), Diagnostic> {
+        let minus = self.eat(&TokenKind::Minus);
+        let token = self.current().clone();
+        let magnitude = match &token.kind {
+            TokenKind::Int(text) => {
+                let (value, suffix) =
+                    parse_integer(text).map_err(|message| Diagnostic::new(message, token.span))?;
+                if suffix.is_some() {
+                    return Err(Diagnostic::new(
+                        "tick rates do not need numeric suffixes",
+                        token.span,
+                    ));
+                }
+                value as f64
+            }
+            TokenKind::Float(text) => text
+                .replace('_', "")
+                .parse::<f64>()
+                .map_err(|_| Diagnostic::new("expected a finite tick rate", token.span))?,
+            _ => return Err(Diagnostic::new("expected a numeric tick rate", token.span)),
+        };
+        let span = minus.map_or(token.span, |minus| minus.join(token.span));
+        let value = if minus.is_some() {
+            -magnitude
+        } else {
+            magnitude
+        };
+        if !value.is_finite() || value <= 0.0 {
+            return Err(
+                Diagnostic::new("a tick rate must be finite and greater than zero", span)
+                    .with_secondary_label(name_span, "this lifecycle rate is invalid"),
+            );
+        }
+        self.bump();
+        Ok((value, span))
+    }
+
     pub(super) fn enum_decl(&mut self) -> Result<EnumDecl, Diagnostic> {
         let start = self.expect_ident("enum")?.start;
         let (name, name_span) = self.expect_any_ident("expected an enum name")?;

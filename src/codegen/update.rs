@@ -54,7 +54,7 @@ pub(super) fn compile_update(
     let globals = lowering.runtime_globals;
     let semantics = lowering.semantics;
     let has_game_time = actions.contains_key(&ActionKind::GameTime);
-    let mut locals = vec![(2, ValType::I32)];
+    let mut locals = vec![(3, ValType::I32)];
     if has_game_time {
         locals.push((
             1,
@@ -85,8 +85,9 @@ pub(super) fn compile_update(
     let mut function = Function::new(locals);
     let timer_state = 0;
     let nullable_bool = 1;
-    let duration_local = 2;
-    let candidate_state = if has_game_time { 3 } else { 2 };
+    let newly_attached = 2;
+    let duration_local = 3;
+    let candidate_state = if has_game_time { 4 } else { 3 };
     let first_poll_result = candidate_state + 1;
 
     if let Some(refresh_settings) = refresh_settings {
@@ -112,6 +113,8 @@ pub(super) fn compile_update(
             .instruction(&Instruction::Else)
             .instruction(&Instruction::I32Const(process_index as i32))
             .instruction(&Instruction::GlobalSet(globals.process_name))
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::LocalSet(newly_attached))
             .instruction(&Instruction::End)
             .instruction(&Instruction::End);
     }
@@ -121,6 +124,13 @@ pub(super) fn compile_update(
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
         .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(newly_attached))
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::F64Const(program.attached_tick_rate().into()))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::RuntimeSetTickRate),
+        ))
         .instruction(&Instruction::End)
         .instruction(&Instruction::GlobalGet(globals.process))
         .instruction(&Instruction::Call(abi.function(AbiImportId::ProcessIsOpen)))
@@ -166,6 +176,11 @@ pub(super) fn compile_update(
     if let Some(region) = cancellation_region {
         emit_cancel_region(&mut function, region, lowering.gc, globals);
     }
+    function
+        .instruction(&Instruction::F64Const(program.detached_tick_rate().into()))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::RuntimeSetTickRate),
+        ));
     if let Some(detach) = actions.get(&ActionKind::OnDetach) {
         function.instruction(&Instruction::Call(*detach));
     }

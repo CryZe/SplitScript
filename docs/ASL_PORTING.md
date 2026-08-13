@@ -986,28 +986,22 @@ Falling through, a bare `return`, or `return true` continues to `start`,
 `isLoading`, `gameTime`, `reset`, and `split` as applicable. This control result
 does not reject or roll back the refreshed snapshot.
 
-ASL `refreshRate` is a frequency, so migrate `refreshRate = 60` to
-`setTickRate(60)`. The host converts it to the wait interval `1 / hz` after the
-current update returns. The chosen rate persists across process closure; it is
-not reset by attachment management. If `onAttach` increases the rate, restore
-the script's baseline explicitly:
+ASL `refreshRate` is a frequency. Migrate a stable attached cadence to the
+declarative lifecycle policy:
 
 ```splitscript
-setup {
-    setTickRate(60)
-}
-
-onDetach {
-    setTickRate(60)
-}
-
-onAttach {
-    setTickRate(120)
+tickRate {
+    attached: 60,
 }
 ```
 
-The two calls represent different boundaries: `setup` establishes the initial
-policy, while `onDetach` restores it after each real process closure.
+SplitScript defaults to 120 Hz while attached and 1 Hz while detached. It
+applies the attached rate before `onAttach` begins, which is important when
+module or signature discovery suspends across updates, and restores the
+detached rate before `onDetach`. Add `detached: value` only when the 1 Hz
+default is unsuitable. Use `setTickRate` only when the rate must change
+dynamically within one attachment; the next lifecycle transition reapplies the
+declaration.
 
 ## Process-exit game-time cleanup
 

@@ -7,7 +7,7 @@ const bytes = fs.readFileSync(wasmPath);
 const dlc = process.argv.includes("--dlc");
 const decoder = new TextDecoder();
 const base = 0x1000n;
-const memoryImage = new Uint8Array(0x10000);
+const memoryImage = new Uint8Array(0x400000);
 const view = new DataView(memoryImage.buffer);
 const messages = [];
 const variables = new Map();
@@ -22,6 +22,8 @@ let variableWrites = 0;
 let failReads = false;
 let processOpen = true;
 let detaches = 0;
+let scanReads = 0;
+let attachedRateScanReads = undefined;
 const levelOrSceneReadWidths = new Set();
 const levelTimeVectorReads = new Set();
 let instance;
@@ -34,16 +36,23 @@ const field = (table, index, nameAddress, offset) => {
     view.setUint32(table + index * 0x20 + 0x18, offset, true);
 };
 
-// IL2CPP registration signatures and assembly/image graph.
-memoryImage.set([0x75, 0x11, 0x48, 0x8b, 0x1d], 0x500);
-view.setInt32(0x505, 0x2f7, true);
-memoryImage.set([0x48, 0x3b, 0x1d], 0x509);
-string(0x600, "global-metadata.dat");
-memoryImage.set([0x48, 0x8d, 0x0d], 0x700);
-view.setInt32(0x703, -0x107, true);
-memoryImage.set([0x48, 0xc1, 0xe9], 0x720);
-memoryImage.set([0x48, 0x89, 0x05], 0x740);
-view.setInt32(0x743, 0x1b9, true);
+// Put each full-module IL2CPP discovery target deep into a realistically
+// sized image. This makes the fixture exercise many cooperative scan polls
+// instead of accidentally completing every scan in one update.
+const assembliesInstruction = 0x100500;
+const metadataAddress = 0x200600;
+const metadataReference = 0x300700;
+const shiftInstruction = 0x300720;
+const storeInstruction = 0x300740;
+memoryImage.set([0x75, 0x11, 0x48, 0x8b, 0x1d], assembliesInstruction);
+view.setInt32(assembliesInstruction + 5, 0x800 - (assembliesInstruction + 9), true);
+memoryImage.set([0x48, 0x3b, 0x1d], assembliesInstruction + 9);
+string(metadataAddress, "global-metadata.dat");
+memoryImage.set([0x48, 0x8d, 0x0d], metadataReference);
+view.setInt32(metadataReference + 3, metadataAddress - (metadataReference + 7), true);
+memoryImage.set([0x48, 0xc1, 0xe9], shiftInstruction);
+memoryImage.set([0x48, 0x89, 0x05], storeInstruction);
+view.setInt32(storeInstruction + 3, 0x900 - (storeInstruction + 7), true);
 pointer(0x800, 0x1810);
 pointer(0x808, 0x1818);
 pointer(0x810, 0x1a00);
@@ -139,7 +148,12 @@ const env = {
         variableWrites += 1;
         variables.set(text(keyPointer, keyLength), text(valuePointer, valueLength));
     },
-    runtime_set_tick_rate(rate) { tickRates.push(rate); },
+    runtime_set_tick_rate(rate) {
+        tickRates.push(rate);
+        if (rate === 120 && attachedRateScanReads === undefined) {
+            attachedRateScanReads = scanReads;
+        }
+    },
     process_attach(pointer, length) {
         const expected = dlc ? "Lunistice-Demo.exe" : "Lunistice.exe";
         return processOpen && text(pointer, length) === expected ? 1n : 0n;
@@ -147,6 +161,7 @@ const env = {
     process_detach() { detaches += 1; },
     process_is_open: () => processOpen ? 1 : 0,
     process_read(_process, address, pointer, length) {
+        if (length > 8) scanReads += 1;
         if (address === absolute(gameManager + 0x3c)) levelOrSceneReadWidths.add(length);
         if (address >= absolute(timer + 0x34) && address < absolute(timer + 0x40)) {
             levelTimeVectorReads.add(`${address - absolute(timer + 0x34)}:${length}`);
@@ -178,8 +193,11 @@ const env = {
 
 ({ instance } = await WebAssembly.instantiate(bytes, { env }));
 instance.exports._start();
-for (let tick = 0; tick < 40 && !messages.includes("Found Timer"); tick += 1) instance.exports.update();
+for (let tick = 0; tick < 180 && !messages.includes("Found Timer"); tick += 1) instance.exports.update();
 if (!messages.includes("Found Timer")) throw new Error(`attachment did not finish: ${JSON.stringify(messages)}`);
+if (attachedRateScanReads !== 0) {
+    throw new Error(`attached tick rate was applied after scanning began: ${attachedRateScanReads}`);
+}
 
 // Prime snapshots, transition timerStopped to false, enter results, then roll
 // the level clock over. The accumulated game time must become 10 + 1 seconds.

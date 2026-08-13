@@ -18,6 +18,7 @@ const text = (pointer, length) => decoder.decode(
 
 const env = {
     timer_get_state: () => 0,
+    runtime_set_tick_rate() {},
     process_attach: () => processOpen ? nextHandle++ : 0n,
     process_detach() {},
     process_is_open: () => processOpen ? 1 : 0,

@@ -540,11 +540,11 @@ source method; primitives retain their compact compiler implementation.
 `timer.state`, `timer.pauseGameTime`, `timer.resumeGameTime`, and `setTickRate`
 wrap their ASR host calls. `isLoading` remains the normal declarative load-
 removal API; explicit pause/resume is for lifecycle transitions such as process
-exit cleanup. `setTickRate(hz)` is measured in updates per second, affects the
-next host wait after the current update, and persists until another call. It is
-not reset automatically when the process closes; scripts that raise the rate
-in `onAttach` should establish their initial baseline in `setup` and restore it
-in `onDetach`.
+exit cleanup. The language-level `tickRate` policy defaults to 120 Hz attached
+and 1 Hz detached and reapplies those rates at lifecycle transitions.
+`setTickRate(hz)` is the dynamic escape hatch: it is measured in updates per
+second, affects the next host wait after the current update, and persists until
+another call or attachment-state transition.
 `timer.state()` returns the exhaustive `TimerState` enum with
 `NotRunning`, `Running`, `Paused`, `Ended`, and `Unknown`; raw host integers are
 normalized only at the ABI boundary. `Duration.fromSeconds` converts Unity's

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use wasm_encoder::{Function, Instruction};
 
 use crate::{
+    abi::AbiImportId,
     ast::{Program, RecordDecl, RecordId, ValueId},
     semantic::{ResolvedEnumVariantId, SemanticModel},
     stdlib::{StandardLibrary, StdlibTypeId},
@@ -73,6 +74,11 @@ pub(super) fn compile_start(
     if let Some(refresh_settings) = start_functions.refresh_settings {
         function.instruction(&Instruction::Call(refresh_settings));
     }
+    function
+        .instruction(&Instruction::F64Const(program.detached_tick_rate().into()))
+        .instruction(&Instruction::Call(
+            emission.abi.function(AbiImportId::RuntimeSetTickRate),
+        ));
     if let Some(setup) = start_functions.setup {
         function.instruction(&Instruction::Call(setup));
     }

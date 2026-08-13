@@ -33,6 +33,28 @@ the formatter adds it in multiline state blocks. Ordinary statements remain
 newline-terminated, with semicolons available when multiple statements share a
 line.
 
+## Polling-rate policy
+
+SplitScript owns the ordinary attachment polling policy. With no declaration,
+the generated module selects 1 Hz while detached and 120 Hz immediately after
+acquiring a process. The attached transition happens before provider discovery
+or `onAttach`, so cooperative scans do not accidentally inherit the slow
+detached cadence. Process closure restores 1 Hz before `onDetach` runs.
+
+Override either lifecycle rate declaratively when a game needs another cadence:
+
+```splitscript
+tickRate {
+    attached: 60,
+    detached: 2,
+}
+```
+
+An omitted field keeps its 120 Hz or 1 Hz default. `setTickRate(hz)` remains
+available for a temporary dynamic adjustment; the next attachment or detach
+transition reapplies this declaration. Rates must be finite and greater than
+zero.
+
 ## State and pointer paths
 
 ```text
@@ -1131,10 +1153,9 @@ first snapshot completes.
 `setTickRate(hz)` uses updates per second. The LiveSplit runner reads the
 resulting interval after the current `update` returns, so a call affects the
 wait before the following update rather than the invocation already in
-progress. The selected rate persists until another call; process closure does
-not restore either the host's 120 Hz initial rate or a script-defined baseline
-automatically. Set the initial baseline in `setup`, restore it in `onDetach`,
-and let `onAttach` override it only while attached.
+progress. It is the dynamic escape hatch from the top-level `tickRate` policy:
+the selected value persists until another call or until the next attachment
+state transition reapplies the declared/default lifecycle rate.
 
 `onStateReady` runs synchronously once per attachment, immediately after the
 first complete state snapshot is committed:

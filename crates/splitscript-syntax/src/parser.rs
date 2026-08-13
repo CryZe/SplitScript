@@ -18,8 +18,9 @@ use crate::{
         SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFamilyDecl,
         SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl,
         StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource,
-        StateTransform, Stmt, SuspensionMode, TypeApplicationDecl, TypeApplicationId,
-        TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
+        StateTransform, Stmt, SuspensionMode, TickRateDecl, TickRateValue, TypeApplicationDecl,
+        TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId,
+        VariableDecl,
     },
     diagnostic::Diagnostic,
     migration::{
@@ -216,6 +217,13 @@ impl Parser<'_> {
                     };
                     declaration.map(|declaration| program.state = Some(declaration))
                 }
+            } else if self.at_ident("tickRate") {
+                if program.tick_rate.is_some() {
+                    Err(self.error("only one `tickRate` declaration is allowed"))
+                } else {
+                    self.tick_rate_decl()
+                        .map(|declaration| program.tick_rate = Some(declaration))
+                }
             } else if self.at_ident("settings") {
                 if program.settings_span.is_some() {
                     Err(self.error("only one `settings` declaration is allowed"))
@@ -297,7 +305,7 @@ impl Parser<'_> {
                     .map(|action| program.actions.push(action))
             } else {
                 Err(self.error(
-                    "expected `state`, `settings`, `record`, `enum`, `fn`, a global `let`, or an action block",
+                    "expected `state`, `tickRate`, `settings`, `record`, `enum`, `fn`, a global `let`, or an action block",
                 ))
             };
 
@@ -438,6 +446,46 @@ mod tests {
         "#;
         let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
         assert_eq!(program.actions[0].kind, ActionKind::Setup);
+    }
+
+    #[test]
+    fn parses_declarative_tick_rate_overrides() {
+        let source = r#"
+            state "game.exe" {}
+            tickRate {
+                attached: 60,
+                detached: 2.5,
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let policy = program.tick_rate.expect("tick-rate policy");
+        assert_eq!(policy.attached.unwrap().value, 60.0);
+        assert_eq!(policy.detached.unwrap().value, 2.5);
+        assert_eq!(program.attached_tick_rate(), 60.0);
+        assert_eq!(program.detached_tick_rate(), 2.5);
+    }
+
+    #[test]
+    fn tick_rate_defaults_and_invalid_values_are_explicit() {
+        let source = r#"state "game.exe" {}"#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        assert_eq!(program.attached_tick_rate(), 120.0);
+        assert_eq!(program.detached_tick_rate(), 1.0);
+
+        for invalid in ["0", "-1", "1e309"] {
+            let source = format!(
+                r#"
+                    state "game.exe" {{}}
+                    tickRate {{ attached: {invalid} }}
+                "#
+            );
+            let diagnostic = parse(&source, lex(&source, SyntaxMode::Program).unwrap())
+                .expect_err("the invalid tick rate should be rejected");
+            assert_eq!(
+                diagnostic.message,
+                "a tick rate must be finite and greater than zero"
+            );
+        }
     }
 
     #[test]

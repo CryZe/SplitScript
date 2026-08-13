@@ -11,7 +11,7 @@ const host = await SplitScriptHost.instantiate(wasmPath, {
 host.addProcess("game.exe");
 host.start();
 
-if (host.messages.join() !== "true" || host.tickRates.join() !== "42") {
+if (host.messages.join() !== "true" || host.tickRates.join() !== "1,42") {
     throw new Error(`setup did not run exactly once: ${host.json(host.summary())}`);
 }
 
@@ -34,7 +34,7 @@ if (
 ) {
     throw new Error(`action fallthrough caused host calls: ${host.json(host.summary())}`);
 }
-if (host.messages.length !== 1 || host.tickRates.length !== 1) {
+if (host.messages.length !== 1 || host.tickRates.join() !== "1,42,120") {
     throw new Error(`setup ran again during update: ${host.json(host.summary())}`);
 }
 

@@ -86,9 +86,10 @@ root {
     /// Changes the autosplitter tick rate.
     ///
     /// The value is a frequency in updates per second. It takes effect for the
-    /// wait after the current update and remains active until another call;
-    /// detaching from a process does not reset it. Establish the initial
-    /// baseline in `setup` and restore it after process closure in `onDetach`.
+    /// wait after the current update and remains active until another call or
+    /// attachment-state transition. Prefer the top-level `tickRate` policy for
+    /// stable attached and detached rates; this function is for temporary
+    /// dynamic changes.
     ///
     /// # Example
     ///

@@ -18,32 +18,25 @@ state "Nioh.exe" {
     },
 }
 
+tickRate {
+    attached: 29,
+}
+
 onAttach {
     let executable = await process.mainModule()
     if executable.size == 63_766_528 {
         print(`Nioh 1.21.04 detected, module size {executable.size}`)
-        setTickRate(29)
         return StateLayout.V12104
     } else if executable.size == 63_827_968 {
         print(`Nioh 1.21.05 detected, module size {executable.size}`)
-        setTickRate(29)
         return StateLayout.V12105
     } else if executable.size == 63_848_448 {
         print(`Nioh 1.21.06 detected, module size {executable.size}`)
-        setTickRate(29)
         return StateLayout.V12106
     }
 
     print(`unsupported Nioh module size {executable.size}`)
     await process.closed()
-}
-
-setup {
-    setTickRate(1)
-}
-
-onDetach {
-    setTickRate(1)
 }
 
 isLoading {

@@ -21,6 +21,7 @@ const moduleName = (pointer, length) => {
 
 const env = {
     timer_get_state: () => 0,
+    runtime_set_tick_rate() {},
     process_attach: () => 1n,
     process_detach() {},
     process_is_open: () => 1,

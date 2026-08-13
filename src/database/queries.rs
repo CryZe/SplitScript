@@ -551,6 +551,17 @@ impl CompilerDatabase {
         };
         if let TokenKind::Ident(name) = &token.kind {
             let recovered = self.recovering_parse()?;
+            if let Some(policy) = recovered.syntax().tick_rate
+                && (policy.keyword_span == token.span
+                    || policy
+                        .attached
+                        .is_some_and(|rate| rate.keyword_span == token.span)
+                    || policy
+                        .detached
+                        .is_some_and(|rate| rate.keyword_span == token.span))
+            {
+                return Ok(Some(DefinitionTarget::Language(LanguageItemId::TickRate)));
+            }
             if let Some(item) = contextual_language_item_at(recovered.syntax(), token.span) {
                 return Ok(Some(DefinitionTarget::Language(item)));
             }

@@ -71,6 +71,14 @@ split {
     return current.score > old.score
 }"#;
 
+const TICK_RATE_SOURCE: &str = r#"state "game.exe" {}
+
+tickRate {
+    attached: 60,
+    detached: 2,
+}
+"#;
+
 const POINTER_STATE_SOURCE: &str = r#"state "game.exe" {
     score: i32 at 0x1000;
 }
@@ -695,6 +703,19 @@ define_language_catalog! {
         "Declares process attachment and persistent watched state.",
         "Every state expression produces a Result. Initialization requires all required fields to succeed in one poll and seeds old and current equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can convert their Result to an Option with `toOption()`.",
         STATE_DECL_EXAMPLE
+    ),
+    language_item!(
+        TickRate,
+        "tickRate",
+        LanguageItemKind::Declaration,
+        "tickRate { attached: 60, detached: 2 }",
+        "Overrides the lifecycle-owned polling rates.",
+        "SplitScript defaults to 120 Hz while a process is attached and 1 Hz while detached. The attached rate is applied immediately after acquiring a process, before onAttach and its cooperative discovery run. The detached rate is applied during module startup and immediately when a process closes. Either field may be omitted to retain its default; setTickRate remains available for temporary dynamic changes until the next lifecycle transition.",
+        &[Example::checked(
+            "Override lifecycle polling rates",
+            "tickRate {\n    attached: 60,\n    detached: 2,\n}",
+            TICK_RATE_SOURCE,
+        )]
     ),
     language_item!(
         StateLayout,

@@ -21,6 +21,7 @@ const text = (pointer, length) => decoder.decode(
 
 const env = {
     timer_get_state: () => 0,
+    runtime_set_tick_rate() {},
     timer_current_split_index() {
         const value = hostIndices[Math.min(index, hostIndices.length - 1)];
         index += 1;

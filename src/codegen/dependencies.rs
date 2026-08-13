@@ -31,6 +31,9 @@ impl BackendDependencies {
         dependencies.require_import(AbiImportId::ProcessAttach);
         dependencies.require_import(AbiImportId::ProcessDetach);
         dependencies.require_import(AbiImportId::ProcessIsOpen);
+        // Polling rates are lifecycle policy even when source never calls the
+        // dynamic setTickRate API directly.
+        dependencies.require_import(AbiImportId::RuntimeSetTickRate);
 
         if let Some(state) = &program.state {
             if let Some(provider) = semantics.state_provider() {

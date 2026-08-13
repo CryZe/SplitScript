@@ -17,8 +17,8 @@ host.updateUntil(
 
 host.setProcessOpen("hundred.exe", false);
 host.updateUntil(
-    () => host.tickRates.length >= 3 && host.tickRates.at(-1) === 60,
-    "detaching did not restore the authored 60 Hz baseline",
+    () => host.tickRates.length >= 4 && host.tickRates.at(-1) === 2,
+    "detaching did not restore the declared detached rate",
 );
 
 host.setProcessOpen("hundred-twenty.exe", true);
@@ -29,11 +29,11 @@ host.updateUntil(
 
 host.setProcessOpen("hundred-twenty.exe", false);
 host.updateUntil(
-    () => host.tickRates.length >= 5 && host.tickRates.at(-1) === 60,
-    "the second detach did not restore the authored baseline",
+    () => host.tickRates.length >= 7 && host.tickRates.at(-1) === 2,
+    "the second detach did not restore the declared detached rate",
 );
 
-const expectedRates = [60, 100, 60, 120, 60];
+const expectedRates = [2, 60, 100, 2, 60, 120, 2];
 if (JSON.stringify(host.tickRates) !== JSON.stringify(expectedRates)) {
     throw new Error(
         `unexpected tick-rate transitions: ${JSON.stringify({

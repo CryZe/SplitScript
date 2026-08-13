@@ -17,6 +17,7 @@ const text = (pointer, length) => decoder.decode(
 
 const env = {
     timer_get_state: () => 0,
+    runtime_set_tick_rate() {},
     process_attach(pointer, length) {
         return text(pointer, length) === "game.exe" ? 1n : 0n;
     },

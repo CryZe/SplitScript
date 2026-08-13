@@ -273,6 +273,8 @@ pub struct Program {
     pub type_name_spans: Vec<Span>,
     pub type_name_occurrences: Vec<Vec<Span>>,
     pub state: Option<StateDecl>,
+    /// Optional overrides for the lifecycle-owned polling-rate policy.
+    pub tick_rate: Option<TickRateDecl>,
     /// The complete `settings` declaration, including its keyword and body.
     pub settings_span: Option<Span>,
     /// Source-level compile-time families. Their concrete host settings are
@@ -293,6 +295,39 @@ pub struct Program {
     pub type_applications: Vec<TypeApplicationDecl>,
     pub functions: Vec<FunctionDecl>,
     pub actions: Vec<Action>,
+}
+
+/// Declarative polling rates applied by the generated attachment lifecycle.
+///
+/// Missing fields retain the language defaults rather than inheriting from
+/// whichever rate happened to be active before a lifecycle transition.
+#[derive(Debug, Clone, Copy)]
+pub struct TickRateDecl {
+    pub keyword_span: Span,
+    pub attached: Option<TickRateValue>,
+    pub detached: Option<TickRateValue>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TickRateValue {
+    pub keyword_span: Span,
+    pub value: f64,
+    pub span: Span,
+}
+
+impl Program {
+    pub fn attached_tick_rate(&self) -> f64 {
+        self.tick_rate
+            .and_then(|rate| rate.attached)
+            .map_or(120.0, |rate| rate.value)
+    }
+
+    pub fn detached_tick_rate(&self) -> f64 {
+        self.tick_rate
+            .and_then(|rate| rate.detached)
+            .map_or(1.0, |rate| rate.value)
+    }
 }
 
 impl Program {

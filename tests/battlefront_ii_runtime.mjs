@@ -52,6 +52,7 @@ function writeString(destination, size, value) {
 
 const env = {
     timer_get_state: () => 1,
+    runtime_set_tick_rate() {},
     timer_split() { splits += 1; },
     timer_pause_game_time() { pauses += 1; },
     timer_resume_game_time() { resumes += 1; },

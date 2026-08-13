@@ -1068,6 +1068,11 @@ impl<'ast> Visitor<'ast> for TrailingPunctuationCollector<'_> {
     }
 
     fn visit_program(&mut self, program: &'ast Program) {
+        if let Some(policy) = program.tick_rate
+            && (policy.attached.is_some() || policy.detached.is_some())
+        {
+            self.mark_comma(policy.span);
+        }
         if !program.settings.is_empty()
             && let Some(span) = program.settings_span
         {
@@ -2008,6 +2013,20 @@ settings {
                 .unwrap()
                 .contains("state [\"Lunistice.exe\"")
         );
+    }
+
+    #[test]
+    fn formats_declarative_tick_rates_as_a_trailing_comma_block() {
+        let source = "state \"game.exe\" {}\ntickRate {\nattached:60,\ndetached:2\n}";
+        let expected = r#"state "game.exe" {}
+tickRate {
+    attached: 60,
+    detached: 2,
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
 
     #[test]

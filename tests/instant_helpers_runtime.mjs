@@ -22,6 +22,7 @@ const text = (pointer, length) => decoder.decode(
 
 const env = {
     timer_get_state: () => 1,
+    runtime_set_tick_rate() {},
     timer_set_variable(keyPointer, keyLength, valuePointer, valueLength) {
         if (text(keyPointer, keyLength) === "Instant Helpers") {
             helperStatus = text(valuePointer, valueLength);

@@ -970,6 +970,7 @@ fn abi_catalog_drives_wasm_imports_and_the_internal_reference() {
     }
     let required = [
         AbiImportId::TimerGetState,
+        AbiImportId::RuntimeSetTickRate,
         AbiImportId::ProcessAttach,
         AbiImportId::ProcessDetach,
         AbiImportId::ProcessIsOpen,

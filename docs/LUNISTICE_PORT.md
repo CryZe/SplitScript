@@ -20,7 +20,7 @@ The authoritative source for this port is
 | Adjacent minutes, seconds, and hundredths reads | One naturally laid-out `LevelTimeParts` record read and local GC deserialization |
 | DLC managed scene name | Bounded UTF-16 `process.readManagedString` with surrogate-pair decoding |
 | Points, resets, level time, level/scene, character runtime variables | GC string formatting plus `setVariable` |
-| 1 Hz detached polling and 120 Hz attached polling | `setTickRate` calls in `setup`, `onDetach`, and `onAttach`; process close returns to 1 Hz immediately |
+| 1 Hz detached polling and 120 Hz attached polling | Language defaults apply 120 Hz before cooperative `onAttach` discovery and restore 1 Hz on process close |
 | Auto-start when the in-game timer begins in the first level | `timerStopped` transition plus base level / DLC Shrine checks |
 | Runner-started timer reset of accumulated state | `timer.state()` transition tracking in `whileAttached` |
 | Game-time accumulation across level-clock rollovers | `runTimeSeconds` plus `Duration.fromSeconds` |
@@ -34,7 +34,9 @@ The authoritative source for this port is
 
 `tests/lunistice_runtime.mjs` constructs synthetic but structurally accurate
 V2020 IL2CPP assembly, image, class, field, static-table, singleton, and managed
-string data. It executes the generated WebAssembly GC module in both base and
+string data. Its discovery signatures are separated across a 4 MiB module so
+the test requires many cooperative scan polls and proves the attached rate is
+selected before scanning starts. It executes the generated WebAssembly GC module in both base and
 DLC configurations and verifies:
 
 - class-layout and executable fallback selection;

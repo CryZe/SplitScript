@@ -3321,3 +3321,16 @@ language catalog document the refinement rule.
   metadata-memory contract instead of cloning a large synthetic graph.
 - Ported Himno and verified start, split, and reset behavior while replacing
   the `PlayerStats.script` singleton between every relevant snapshot.
+
+# 2026-08-13: lifecycle-owned polling rates
+
+- Bisected the real-game Lunістice attachment regression to the source-defined
+  cooperative Unity migration: its 64 KiB scan polls had inherited the
+  script's detached 1 Hz rate until discovery completed.
+- Made 120 Hz attached and 1 Hz detached language defaults, applied before
+  `onAttach` polling and before `onDetach` respectively, with an optional
+  top-level `tickRate` declaration for overrides.
+- Retained `setTickRate` for temporary dynamic changes and made lifecycle
+  transitions reassert the declarative policy.
+- Expanded the Lunістice fixture to spread IL2CPP discovery across a 4 MiB
+  module and verify that the attached cadence is selected before scanning.

@@ -1163,6 +1163,24 @@ whileAttached {
     }
 
     #[test]
+    fn tick_rate_policy_and_fields_share_lifecycle_documentation() {
+        let source = "state \"game.exe\" {}\ntickRate { attached: 60, detached: 2, }";
+        let mut database = CompilerDatabase::new(source);
+        for spelling in ["tickRate", "attached", "detached"] {
+            let hover = database
+                .hover(source.find(spelling).unwrap() + 1)
+                .unwrap()
+                .expect("tick-rate hover");
+            assert!(
+                hover
+                    .markdown
+                    .contains("tickRate { attached: 60, detached: 2 }")
+            );
+            assert!(hover.markdown.contains("defaults to 120 Hz"));
+        }
+    }
+
+    #[test]
     fn floating_point_literal_hover_shows_the_resolved_width_and_exact_bits() {
         let source = r#"state "game.exe" {}
 whileAttached {

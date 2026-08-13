@@ -1,11 +1,8 @@
 state ["hundred.exe", "hundred-twenty.exe"] {}
 
-setup {
-    setTickRate(60)
-}
-
-onDetach {
-    setTickRate(60)
+tickRate {
+    attached: 60,
+    detached: 2,
 }
 
 onAttach {

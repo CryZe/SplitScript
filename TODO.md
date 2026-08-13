@@ -78,8 +78,9 @@ or behavioral parity.
 
 ### Make compiler-owned documentation browsable inside the editor
 
-Treat the in-editor reference as the primary documentation product. Standalone
-HTML is a later renderer of the same model, not the next milestone.
+Treat the in-editor reference as the primary documentation product. Use VS
+Code's built-in Markdown preview rather than building a custom HTML webview.
+Standalone HTML is a later renderer of the same model, not the next milestone.
 
 - [ ] Turn the existing renderer-independent standard-library and language
   catalogs into one stable documentation graph. Give namespaces, types,
@@ -96,7 +97,7 @@ HTML is a later renderer of the same model, not the next milestone.
   where it fits, but allow a namespaced SplitScript request for the structured
   graph rather than flattening useful metadata merely to avoid an extension
   method.
-- [ ] Build a VS Code documentation browser over that query: an **Open
+- [ ] Build a VS Code documentation reference over that query: an **Open
   SplitScript Documentation** command, a searchable symbol/topic index, a
   navigable hierarchy, back/forward navigation, links among related symbols,
   and links between canonical APIs and ASL/C#/Rust/JavaScript porting guidance.
@@ -115,7 +116,7 @@ HTML is a later renderer of the same model, not the next milestone.
   SplitScript source only for a concrete source-navigation need. Keep URI and
   anchor identities stable so links, history, and future non-VS-Code clients
   agree.
-- [ ] Cover the documentation graph and browser contract with catalog
+- [ ] Cover the documentation graph and reference contract with catalog
   validation, link checking, deterministic snapshots, native/bundled-server
   parity, and VS Code desktop/web integration tests. Missing documentation or
   broken related-symbol and migration links should fail the repository check.
@@ -465,7 +466,7 @@ remaining work is product hardening and distribution.
 
 ## P2 — documentation and editor evolution
 
-- [ ] After the in-editor documentation browser has proven the documentation
+- [ ] After the in-editor documentation reference has proven the documentation
   graph and navigation model, add machine-readable export and rustdoc-like
   standalone HTML as additional renderers. Publishing HTML must not introduce
   a second hierarchy, link scheme, example store, or documentation source.
@@ -557,7 +558,7 @@ remaining work is product hardening and distribution.
 ## Recommended execution order
 
 1. Establish the compiler-owned documentation graph and the VS Code
-   documentation browser, then route standard-library symbols and migration
+   documentation reference, then route standard-library symbols and migration
    guidance into it. Use the resulting search and navigation paths while
    auditing the campaign's misunderstandings instead of treating standalone
    HTML as the immediate documentation target.

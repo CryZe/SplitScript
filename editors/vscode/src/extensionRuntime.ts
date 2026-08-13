@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 import { CompilerTaskController } from './compilerTasks';
+import { DocumentationReferenceController } from './documentationReference';
 
 export interface LanguageClientLifecycle extends vscode.Disposable {
     start(): Promise<void>;
     restart(): Promise<void>;
     stop(): Promise<void>;
+    sendRequest<TResult>(method: string, params?: unknown): Promise<TResult>;
 }
 
 /** Shared activation wiring for the Node and browser extension hosts. */
@@ -15,9 +17,11 @@ export class ExtensionRuntime {
     ) {}
 
     public async activate(context: vscode.ExtensionContext): Promise<void> {
+        const documentation = new DocumentationReferenceController(this.languageClient);
         context.subscriptions.push(
             this.compilerTasks,
             this.languageClient,
+            documentation,
             vscode.commands.registerCommand(
                 'splitscript.restartLanguageServer',
                 async () => this.languageClient.restart(),
@@ -37,6 +41,7 @@ export class ExtensionRuntime {
         );
         await this.compilerTasks.initialize();
         await this.languageClient.start();
+        documentation.register();
     }
 
     public async deactivate(): Promise<void> {

@@ -141,6 +141,12 @@
         "title": "SplitScript: Restart Language Server"
       },
       {
+        "command": "splitscript.openDocumentation",
+        "title": "SplitScript: Open Documentation",
+        "shortTitle": "Open Documentation",
+        "icon": "$(book)"
+      },
+      {
         "command": "splitscript.buildRelease",
         "title": "SplitScript: Build Release",
         "shortTitle": "Build Release",

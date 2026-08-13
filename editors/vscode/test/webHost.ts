@@ -24,6 +24,17 @@ export async function run(): Promise<void> {
     await vscode.commands.executeCommand('splitscript.restartLanguageServer');
     await hoverAt(script, hoverPosition);
 
+    const durationDocs = vscode.Uri.parse(
+        'splitscript-docs:/stdlib/types/Duration.md',
+    );
+    const documentation = await vscode.workspace.openTextDocument(durationDocs);
+    assert(documentation.languageId === 'markdown', 'virtual documentation is not Markdown');
+    assert(
+        documentation.getText().includes('# Duration')
+            && documentation.getText().includes('Duration.fromSeconds'),
+        'the bundled language server returned incomplete standard-library documentation',
+    );
+
     const output = script.with({ path: script.path.replace(/\.split$/, '.wasm') });
     await vscode.commands.executeCommand('splitscript.buildRelease');
     const release = await readWasm(output);

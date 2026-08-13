@@ -16,6 +16,47 @@ fn initialize(server: &mut LanguageServer) {
 }
 
 #[test]
+fn serves_compiler_owned_documentation_index_and_markdown_pages() {
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+
+    let index = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 40,
+        "method": "splitscript/documentation/index",
+        "params": {}
+    }));
+    let entries = index[0]["result"].as_array().unwrap();
+    assert!(entries.iter().any(|entry| {
+        entry["title"] == "Duration"
+            && entry["uri"] == "/stdlib/types/Duration.md"
+            && entry["kind"] == "record"
+    }));
+
+    let page = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 41,
+        "method": "splitscript/documentation/page",
+        "params": { "uri": "/stdlib/types/Duration.md" }
+    }));
+    assert_eq!(page[0]["result"]["title"], "Duration");
+    assert!(
+        page[0]["result"]["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("Duration.fromSeconds")
+    );
+
+    let missing = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 42,
+        "method": "splitscript/documentation/page",
+        "params": { "uri": "/missing.md" }
+    }));
+    assert_eq!(missing[0]["error"]["code"], -32602);
+}
+
+#[test]
 fn advertises_full_sync_diagnostics_formatting_and_semantic_tokens() {
     let mut server = LanguageServer::default();
     let response = server.handle(json!({

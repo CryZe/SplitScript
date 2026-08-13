@@ -55,6 +55,14 @@ export class LanguageClientController implements vscode.Disposable {
         await this.start();
     }
 
+    public async sendRequest<TResult>(method: string, params?: unknown): Promise<TResult> {
+        const client = this.client;
+        if (client === undefined) {
+            throw new Error('the SplitScript language server is not running');
+        }
+        return client.sendRequest<TResult>(method, params);
+    }
+
     public async stop(): Promise<void> {
         const running = this.client;
         this.client = undefined;

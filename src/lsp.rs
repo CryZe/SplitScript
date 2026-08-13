@@ -17,14 +17,15 @@ use conversion::{
 };
 use documents::{Document, DocumentStore};
 use protocol::{
-    CodeActionParams, DidChangeParams, DidOpenParams, IncomingMessage, InlayHintParams,
-    ReferenceParams, RenameParams, SelectionRangeParams, TextDocumentParams,
+    CodeActionParams, DidChangeParams, DidOpenParams, DocumentationPageParams, IncomingMessage,
+    InlayHintParams, ReferenceParams, RenameParams, SelectionRangeParams, TextDocumentParams,
     TextDocumentPositionParams, decode,
 };
 
 use crate::{
     DiagnosticCode, DiagnosticFix, FixApplicability, TextEdit,
     database::DefinitionTarget,
+    documentation::DocumentationReference,
     highlight::{SEMANTIC_TOKEN_MODIFIERS, SemanticTokenKind},
 };
 
@@ -32,6 +33,7 @@ use crate::{
 #[derive(Default)]
 pub struct LanguageServer {
     documents: DocumentStore,
+    documentation: DocumentationReference,
     initialized: bool,
     shutdown_requested: bool,
     should_exit: bool,
@@ -167,6 +169,12 @@ impl LanguageServer {
             "textDocument/signatureHelp" => id.map_or_else(Vec::new, |id| {
                 vec![self.signature_help_response(id, params)]
             }),
+            "splitscript/documentation/index" => id.map_or_else(Vec::new, |id| {
+                vec![response(id, json!(self.documentation.index()))]
+            }),
+            "splitscript/documentation/page" => id.map_or_else(Vec::new, |id| {
+                vec![self.documentation_page_response(id, params)]
+            }),
             _ if id.is_some() => vec![error_response(
                 id.unwrap(),
                 -32601,
@@ -178,6 +186,21 @@ impl LanguageServer {
 
     pub const fn should_exit(&self) -> bool {
         self.should_exit
+    }
+
+    fn documentation_page_response(&self, id: Value, params: Value) -> Value {
+        let params = match decode_request::<DocumentationPageParams>(&id, params) {
+            Ok(params) => params,
+            Err(response) => return response,
+        };
+        match self.documentation.page(&params.uri) {
+            Some(page) => response(id, json!(page)),
+            None => error_response(
+                id,
+                -32602,
+                format!("unknown SplitScript documentation page `{}`", params.uri),
+            ),
+        }
     }
 
     fn did_open(&mut self, params: Value) -> Vec<Value> {

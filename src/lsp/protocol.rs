@@ -49,6 +49,11 @@ pub(super) struct SelectionRangeParams {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct DocumentationPageParams {
+    pub uri: String,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct TextDocumentItem {
     pub uri: String,

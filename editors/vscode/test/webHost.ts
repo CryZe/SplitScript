@@ -43,6 +43,14 @@ export async function run(): Promise<void> {
         ),
         'the documentation index does not use virtual-document-relative Markdown links',
     );
+    const typeIndex = await vscode.workspace.openTextDocument(
+        vscode.Uri.parse('splitscript-docs:/stdlib/types/index.md'),
+    );
+    assert(
+        typeIndex.getText().includes('[Standard library](../../index.md) / Types')
+            && typeIndex.getText().includes('[Duration](Duration.md)'),
+        'the documentation category does not provide breadcrumb navigation',
+    );
 
     const output = script.with({ path: script.path.replace(/\.split$/, '.wasm') });
     await vscode.commands.executeCommand('splitscript.buildRelease');

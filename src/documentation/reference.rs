@@ -28,6 +28,47 @@ pub struct DocumentationPage {
     pub markdown: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DocumentationCategory {
+    path: &'static str,
+    title: &'static str,
+}
+
+const DOCUMENTATION_CATEGORIES: &[DocumentationCategory] = &[
+    DocumentationCategory {
+        path: "namespaces",
+        title: "Namespaces",
+    },
+    DocumentationCategory {
+        path: "state-providers",
+        title: "State providers",
+    },
+    DocumentationCategory {
+        path: "capabilities",
+        title: "Capabilities",
+    },
+    DocumentationCategory {
+        path: "type-constructors",
+        title: "Type constructors",
+    },
+    DocumentationCategory {
+        path: "types",
+        title: "Types",
+    },
+    DocumentationCategory {
+        path: "fields",
+        title: "Fields",
+    },
+    DocumentationCategory {
+        path: "variants",
+        title: "Enum variants",
+    },
+    DocumentationCategory {
+        path: "items",
+        title: "Functions and methods",
+    },
+];
+
 /// Compiler-owned documentation reference consumed by editor integrations.
 ///
 /// The reference deliberately returns Markdown rather than VS Code-specific
@@ -159,6 +200,12 @@ impl DocumentationReference {
     pub fn page(&self, uri: &str) -> Option<DocumentationPage> {
         if uri == "/index.md" {
             return Some(self.index_page());
+        }
+        if let Some(category) = DOCUMENTATION_CATEGORIES
+            .iter()
+            .find(|category| category_uri(**category) == uri)
+        {
+            return Some(self.category_page(*category));
         }
 
         self.library
@@ -325,7 +372,8 @@ impl DocumentationReference {
                             &[],
                         );
                         let mut markdown = format!(
-                            "# {}\n\n_{}_\n\n{}",
+                            "{}\n\n# {}\n\n_{}_\n\n{}",
+                            symbol_breadcrumb(uri, value.qualified_name),
                             value.qualified_name,
                             match value.kind {
                                 ItemKind::Function => "Function",
@@ -366,7 +414,10 @@ impl DocumentationReference {
         documentation: &Documentation<StdlibSymbolId>,
         mut members: Vec<StdlibSymbolId>,
     ) -> DocumentationPage {
-        let mut markdown = format!("# {title}\n\n_{kind}_");
+        let mut markdown = format!(
+            "{}\n\n# {title}\n\n_{kind}_",
+            symbol_breadcrumb(uri, &title)
+        );
         if let Some(signature) = signature {
             markdown.push_str(&format!("\n\n```splitscript\n{signature}\n```"));
         }
@@ -393,13 +444,20 @@ impl DocumentationReference {
             "# SplitScript standard library\n\n\
              This reference is generated from the same compiler-owned catalog used by type checking, completion, and hover.\n",
         );
-        let mut groups = std::collections::BTreeMap::<&str, Vec<&DocumentationIndexEntry>>::new();
-        for entry in &entries {
-            groups.entry(entry.kind).or_default().push(entry);
-        }
-        for (kind, entries) in groups {
-            markdown.push_str(&format!("\n## {}\n", plural_heading(kind)));
-            for entry in entries {
+        for category in DOCUMENTATION_CATEGORIES {
+            let category_entries = entries
+                .iter()
+                .filter(|entry| entry_category(&entry.uri) == Some(*category))
+                .collect::<Vec<_>>();
+            if category_entries.is_empty() {
+                continue;
+            }
+            markdown.push_str(&format!(
+                "\n## [{}]({})\n",
+                category.title,
+                relative_document_link("/index.md", &category_uri(*category))
+            ));
+            for entry in category_entries {
                 markdown.push_str(&format!(
                     "\n- [{}]({}) — {}",
                     entry.title,
@@ -411,6 +469,33 @@ impl DocumentationReference {
         DocumentationPage {
             uri: "/index.md".to_owned(),
             title: "SplitScript standard library".to_owned(),
+            markdown,
+        }
+    }
+
+    fn category_page(&self, category: DocumentationCategory) -> DocumentationPage {
+        let uri = category_uri(category);
+        let mut markdown = format!(
+            "[Standard library]({}) / {}\n\n# {}\n",
+            relative_document_link(&uri, "/index.md"),
+            category.title,
+            category.title
+        );
+        for entry in self
+            .index()
+            .iter()
+            .filter(|entry| entry_category(&entry.uri) == Some(category))
+        {
+            markdown.push_str(&format!(
+                "\n- [{}]({}) — {}",
+                entry.title,
+                relative_document_link(&uri, &entry.uri),
+                entry.summary
+            ));
+        }
+        DocumentationPage {
+            uri,
+            title: category.title.to_owned(),
             markdown,
         }
     }
@@ -525,6 +610,32 @@ fn relative_document_link(current_uri: &str, target_uri: &str) -> String {
     relative
 }
 
+fn category_uri(category: DocumentationCategory) -> String {
+    format!("/stdlib/{}/index.md", category.path)
+}
+
+fn entry_category(uri: &str) -> Option<DocumentationCategory> {
+    DOCUMENTATION_CATEGORIES.iter().copied().find(|category| {
+        uri.strip_prefix("/stdlib/")
+            .is_some_and(|path| path.starts_with(&format!("{}/", category.path)))
+    })
+}
+
+fn symbol_breadcrumb(uri: &str, title: &str) -> String {
+    let Some(category) = entry_category(uri) else {
+        return format!(
+            "[Standard library]({}) / {title}",
+            relative_document_link(uri, "/index.md")
+        );
+    };
+    format!(
+        "[Standard library]({}) / [{}]({}) / {title}",
+        relative_document_link(uri, "/index.md"),
+        category.title,
+        relative_document_link(uri, &category_uri(category))
+    )
+}
+
 fn symbol_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
     match symbol {
         StdlibSymbolId::StateProvider(id) => library.state_provider(id).name.to_owned(),
@@ -576,23 +687,6 @@ fn symbol_uri(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
     format!("/stdlib/{category}/{label}.md")
 }
 
-fn plural_heading(kind: &str) -> &str {
-    match kind {
-        "capability" => "Capabilities",
-        "enum" => "Enums",
-        "enum variant" => "Enum variants",
-        "field" => "Fields",
-        "function" => "Functions",
-        "method" => "Methods",
-        "namespace" => "Namespaces",
-        "record" => "Records",
-        "state provider" => "State providers",
-        "type" => "Types",
-        "type constructor" => "Type constructors",
-        _ => "Symbols",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -623,7 +717,11 @@ mod tests {
             .expect("Duration is indexed");
         assert_eq!(duration.uri, "/stdlib/types/Duration.md");
         let page = reference.page(&duration.uri).expect("Duration has a page");
-        assert!(page.markdown.starts_with("# Duration\n"));
+        assert!(page.markdown.contains("\n\n# Duration\n"));
+        assert!(
+            page.markdown
+                .starts_with("[Standard library](../../index.md) / [Types](index.md) / Duration")
+        );
         assert!(page.markdown.contains("Duration.fromSeconds"));
         assert!(page.markdown.contains("(../items/Duration.fromSeconds.md)"));
         assert!(!page.markdown.contains("splitscript-docs:"));
@@ -640,7 +738,25 @@ mod tests {
             page.markdown
                 .contains("(stdlib/items/Duration.fromSeconds.md)")
         );
+        assert!(
+            page.markdown
+                .contains("## [Functions and methods](stdlib/items/index.md)")
+        );
         assert!(reference.page("/missing.md").is_none());
+    }
+
+    #[test]
+    fn category_pages_form_the_middle_breadcrumb_level() {
+        let reference = DocumentationReference::default();
+        let page = reference
+            .page("/stdlib/types/index.md")
+            .expect("types category exists");
+        assert!(
+            page.markdown
+                .starts_with("[Standard library](../../index.md) / Types")
+        );
+        assert!(page.markdown.contains("# Types"));
+        assert!(page.markdown.contains("[Duration](Duration.md)"));
     }
 
     #[test]

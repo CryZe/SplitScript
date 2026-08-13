@@ -170,11 +170,12 @@ or behavioral parity.
 
 ### Engine and emulator providers
 
-- [ ] Extend Unity Mono from the maintained ARTIFICIAL static-field case only
-  when another representative port proves the next surface: instance/object
-  traversal, managed strings, V1 layouts, 32-bit PE, or ELF/Mach-O discovery.
-  Keep each target family explicit and source-defined; do not add
-  reflection-shaped compiler exceptions or silently guess offsets.
+- [ ] Extend Unity Mono beyond the maintained ARTIFICIAL static-field and Himno
+  static-singleton/object-path cases only when another representative port
+  proves the next surface: managed strings, typed cross-class object chains,
+  scene-manager access, V1 layouts, 32-bit PE, or ELF/Mach-O discovery. Keep
+  each target family explicit and source-defined; do not add reflection-shaped
+  compiler exceptions or silently guess offsets.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
 - [ ] Add the next emulator provider from a real port—such as Dolphin, PCSX2,

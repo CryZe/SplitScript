@@ -78,6 +78,14 @@ class metadata and static fields:
 cargo run --bin splitc -- examples/artificial.split -o target/artificial.wasm
 ```
 
+The maintained Himno port extends that coverage to a static managed singleton
+whose object may be replaced between state polls. Its composable memory path
+rereads the singleton before accessing each instance field:
+
+```console
+cargo run --bin splitc -- examples/himno.split -o target/himno.wasm
+```
+
 ## Build and use
 
 ```console

@@ -659,9 +659,20 @@ let runningAddress = await data.staticField("isRunning")
 the preceding modern layout. These are explicit target-memory contracts, not
 automatically detected marketing versions. The maintained
 [`ARTIFICIAL` port](ARTIFICIAL_PORT.md) demonstrates static-field discovery
-and runtime-verified state polling. Older V1, 32-bit, ELF, and Mach-O Mono
-targets remain future layout families rather than falling back to a guessed
-offset set.
+and runtime-verified state polling. When a static field holds a replaceable
+managed singleton, retain the slot as a path and append the instance field:
+
+```splitscript
+let singleton = await data.staticFieldPath("script")
+let valueOffset = await data.field("value")
+valuePath = singleton.dereference(valueOffset as i64)
+```
+
+This rereads the singleton pointer whenever the state field resolves the path.
+The maintained [`Himno` port](HIMNO_PORT.md) verifies that behavior rather than
+caching an attachment-time object address. Older V1, 32-bit, ELF, and Mach-O
+Mono targets remain future layout families rather than falling back to a
+guessed offset set.
 
 When a port needs the mapping metadata itself, take a typed snapshot rather
 than reproducing the host's numeric count/index ABI:

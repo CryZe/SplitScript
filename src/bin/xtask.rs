@@ -304,6 +304,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "examples/himno.split",
+        output: "himno.wasm",
+        profile: "release",
+        harness: "tests/himno_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/loaded_module.split",
         output: "loaded_module.wasm",
         profile: "release",

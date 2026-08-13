@@ -450,6 +450,23 @@ recognizes C# auto-property backing fields. The implementation and its target
 offsets live in `stdlib/standard.split`; Mono does not add compiler intrinsics
 or type-checker cases.
 
+Static managed singletons can remain dynamically resolved instead of caching
+the object address observed during attachment. `staticFieldPath` describes the
+static slot as a `MemoryPath`, and immutable `dereference` appends the instance
+field access:
+
+```splitscript
+let playerStats = await image.class("PlayerStats")
+let script = await playerStats.staticFieldPath("script")
+let districtOffset = await playerStats.field("currDistrict")
+let district = script.dereference(districtOffset as i64)
+```
+
+Resolving `district` during each state poll rereads the static slot, so a
+replacement singleton is observed without rerunning `onAttach`. The maintained
+[`Himno` port](HIMNO_PORT.md) verifies this behavior against three distinct
+managed objects.
+
 `fieldAny([names...])` returns a `UnityField { offset, index }`, making
 version-dependent layouts explicit without manual races. `staticInstance`
 combines alternative field lookup, static-table discovery, and a retrying

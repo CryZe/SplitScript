@@ -3311,3 +3311,13 @@ language catalog document the refinement rule.
 - Ported ARTIFICIAL and added a deterministic host fixture covering PE export
   resolution, RIP-relative assembly-list discovery, managed assembly/class/
   field traversal, static values, and start/split/reset/game-time behavior.
+
+# 2026-08-13: composable Mono singleton paths and Himno
+
+- Added source-defined immutable `MemoryPath.dereference` composition and
+  `MonoClass.staticFieldPath`, allowing a state poll to reread a replaceable
+  static singleton before applying an instance-field offset.
+- Extracted the PE64 Mono V2 fixture builder so maintained ports share one
+  metadata-memory contract instead of cloning a large synthetic graph.
+- Ported Himno and verified start, split, and reset behavior while replacing
+  the `PlayerStats.script` singleton between every relevant snapshot.

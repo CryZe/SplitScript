@@ -290,6 +290,13 @@ const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
         extra_arguments: &[],
     },
     RuntimeFixture {
+        source: "tests/pe_export.split",
+        output: "pe_export.wasm",
+        profile: "release",
+        harness: "tests/pe_export_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "tests/loaded_module.split",
         output: "loaded_module.wasm",
         profile: "release",

@@ -434,6 +434,14 @@ let layout = await gameManager.fieldAny(["currentLevel", "_currentScene"])
 let instance = await gameManager.staticInstance(["Instance", "_instance"])
 ```
 
+Loaded Windows modules expose `peExport(name) -> address!` as ordinary
+source-defined standard-library composition. It validates the mapped PE export
+directory, name/ordinal/function tables, and rejects forwarded exports rather
+than pretending their forwarder string is executable code. This is useful for
+runtime metadata discovery such as Mono's `mono_assembly_foreach`; it is not a
+cross-platform symbol API, and malformed or absent exports remain ordinary
+`Result` errors.
+
 An `address` supports generic `offset<T: Integer>` for displacements and
 `add(u64)` for unsigned full-width deltas. Signed arguments retain their sign;
 smaller integer widths are extended before addition. Both wrap modulo the 64-bit address space while

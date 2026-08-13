@@ -631,6 +631,19 @@ outside known modules. `scanAny` and `scanMemoryAny` accept an array of
 signatures and return both the address and selected index, which keeps fallback
 layout selection in one cooperative pass.
 
+When Windows-native discovery starts from an exported runtime entry point,
+resolve that exact symbol through the module instead of scanning the entire
+process:
+
+```splitscript
+let mono = await process.module("mono-2.0-bdwgc.dll")
+let assemblyForeach = mono.peExport("mono_assembly_foreach") else return
+```
+
+`peExport` validates PE table bounds and rejects forwarded exports. It is
+deliberately PE-specific; ELF and Mach-O symbols need their own proven parser or
+a future portable host contract rather than being mislabeled as PE exports.
+
 When a port needs the mapping metadata itself, take a typed snapshot rather
 than reproducing the host's numeric count/index ABI:
 

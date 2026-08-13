@@ -3727,6 +3727,105 @@ struct Module {
         return self.versionInfo()?.product
     }
 
+    /// Resolves a named function exported by a Windows PE module.
+    ///
+    /// The parser validates the DOS, PE, optional, export-directory, name,
+    /// ordinal, and function tables before returning the mapped function
+    /// address. Forwarded exports are rejected because they name another
+    /// module and function rather than code within this module.
+    ///
+    /// # Example
+    ///
+    /// Resolve a Mono runtime entry point
+    ///
+    /// ```splitscript
+    /// let mono = await process.module("mono-2.0-bdwgc.dll")
+    /// let assemblyForeach = mono.peExport("mono_assembly_foreach") else return
+    /// ```
+    @mustUse("use the resolved export address")
+    fn peExport(
+        /// Exact case-sensitive export name.
+        name: String,
+    ) -> address! {
+        if process.read<u16>(self.address)? != 0x5a4d {
+            throw "module does not have a DOS header"
+        }
+
+        let peOffset = process.read<u32>(self.address.add(0x3c))?
+        let peHeader = self.address.add(peOffset as u64)
+        if process.read<u32>(peHeader)? != 0x00004550 {
+            throw "module does not have a PE header"
+        }
+
+        let optionalHeader = peHeader.add(0x18)
+        let optionalMagic = process.read<u16>(optionalHeader)?
+        let exportDirectoryOffset: u64 = 0
+        if optionalMagic == 0x010b {
+            exportDirectoryOffset = 0x60
+        } else if optionalMagic == 0x020b {
+            exportDirectoryOffset = 0x70
+        } else {
+            throw "module has an unsupported PE optional header"
+        }
+        let exportDirectory = process.read<[u32; 2]>(
+            optionalHeader.add(exportDirectoryOffset),
+        )?
+        let exportRva = exportDirectory[0]
+        let exportSize = exportDirectory[1]
+        if exportRva == 0 || exportSize < 0x28 {
+            throw "module does not have an export directory"
+        }
+        if (exportRva as u64) + (exportSize as u64) > self.size {
+            throw "module export directory lies outside the mapped image"
+        }
+
+        let exports = self.address.add(exportRva as u64)
+        let functionCount = process.read<u32>(exports.add(0x14))?
+        let nameCount = process.read<u32>(exports.add(0x18))?
+        let functionsRva = process.read<u32>(exports.add(0x1c))?
+        let namesRva = process.read<u32>(exports.add(0x20))?
+        let ordinalsRva = process.read<u32>(exports.add(0x24))?
+        if functionCount == 0 || nameCount == 0 {
+            throw "module export directory has no named functions"
+        }
+        if (functionsRva as u64) + (functionCount as u64) * 4 > self.size
+            || (namesRva as u64) + (nameCount as u64) * 4 > self.size
+            || (ordinalsRva as u64) + (nameCount as u64) * 2 > self.size {
+            throw "module export table lies outside the mapped image"
+        }
+
+        let functions = self.address.add(functionsRva as u64)
+        let names = self.address.add(namesRva as u64)
+        let ordinals = self.address.add(ordinalsRva as u64)
+        let index: u32 = 0
+        while index < nameCount {
+            let nameRva = process.read<u32>(names.add((index as u64) * 4))?
+            if nameRva as u64 >= self.size {
+                throw "module export name lies outside the mapped image"
+            }
+            let candidate = process.readUtf8(self.address.add(nameRva as u64), 256)?
+            if candidate == name {
+                let ordinal = process.read<u16>(ordinals.add((index as u64) * 2))?
+                if ordinal as u32 >= functionCount {
+                    throw "module export ordinal is outside the function table"
+                }
+                let functionRva = process.read<u32>(
+                    functions.add((ordinal as u64) * 4),
+                )?
+                if functionRva as u64 >= self.size {
+                    throw "module export function lies outside the mapped image"
+                }
+                if functionRva >= exportRva
+                    && (functionRva as u64) < (exportRva as u64) + (exportSize as u64) {
+                    throw "forwarded PE exports are not supported"
+                }
+                return Ok(self.address.add(functionRva as u64))
+            }
+            index += 1
+        }
+        throw `module does not export {name}`
+    }
+
     /// Determines the pointer width of a Windows PE module.
     ///
     /// The DOS, PE, and optional-header signatures are validated before the

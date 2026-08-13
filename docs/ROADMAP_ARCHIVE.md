@@ -3289,3 +3289,13 @@ language catalog document the refinement rule.
 - Added a deterministic vanilla-Steam runtime fixture and a structured
   conformance record that separates verified behavior from variant coverage,
   conditional settings UI, exact timer events, and scan-deadline limitations.
+
+# 2026-08-13: source-defined PE export lookup
+
+- Added `Module.peExport(name) -> address!` as a source-defined standard-library
+  parser over validated DOS, PE, optional-header, export-directory,
+  name/ordinal, and function tables.
+- Kept forwarded exports and out-of-image metadata as ordinary errors instead
+  of treating forwarder strings or malformed RVAs as executable addresses.
+- Added deterministic runtime coverage for direct, absent, and forwarded
+  exports as the reusable native prerequisite for Unity Mono discovery.

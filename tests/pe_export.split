@@ -1,0 +1,19 @@
+state "game.exe" {}
+
+onAttach {
+    let runtime = await process.module("mono-2.0-bdwgc.dll")
+    let assemblyForeach = runtime.peExport("mono_assembly_foreach") else 0 as address
+    print(assemblyForeach)
+
+    let missing = match runtime.peExport("missing") {
+        Ok(_) => "found",
+        Err(_) => "missing",
+    }
+    print(missing)
+
+    let forwarded = match runtime.peExport("forwarded") {
+        Ok(_) => "accepted",
+        Err(_) => "rejected",
+    }
+    print(forwarded)
+}

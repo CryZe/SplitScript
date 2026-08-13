@@ -173,7 +173,10 @@ or behavioral parity.
 - [ ] Add Unity Mono discovery from representative ports, using the same typed
   provider/catalog model as native processes, GBA, and Unity IL2CPP. Include
   class/field/object discovery and managed strings without reflection-shaped
-  compiler exceptions.
+  compiler exceptions. The source-defined `Module.peExport` now provides the
+  PE symbol root needed for `mono_assembly_foreach`; keep Mono version/layout
+  selection and high-level traversal in the standard-library source, with only
+  genuinely irreducible target-memory operations behind trusted intrinsics.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
 - [ ] Add the next emulator provider from a real port—such as Dolphin, PCSX2,

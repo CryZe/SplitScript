@@ -83,7 +83,7 @@ pub(crate) fn hover(
         }));
     }
     let Some(target) = target else {
-        return Ok(None);
+        return expression_type_hover(database, offset);
     };
     let markdown = match target {
         DefinitionTarget::StandardLibrary(item) => {
@@ -138,6 +138,28 @@ pub(crate) fn hover(
     Ok(Some(HoverInfo {
         span: token.span,
         markdown,
+    }))
+}
+
+fn expression_type_hover(
+    database: &mut CompilerDatabase,
+    offset: usize,
+) -> SemanticQueryResult<Option<HoverInfo>> {
+    let Some(analysis) = database.analysis_at(offset)? else {
+        return Ok(None);
+    };
+    if matches!(analysis.type_kind, TypeKind::Error) {
+        return Ok(None);
+    }
+    let Some(context) = semantic_context(database) else {
+        return Ok(None);
+    };
+    Ok(Some(HoverInfo {
+        span: analysis.span,
+        markdown: format!(
+            "```splitscript\n{}\n```",
+            render_type(analysis.ty, &context)
+        ),
     }))
 }
 
@@ -1251,6 +1273,48 @@ whileAttached {
             .expect("default f64 hover");
         assert!(ordinary.markdown.contains("1.25: f64"));
         assert!(ordinary.markdown.contains("`0x3ff4000000000000`"));
+    }
+
+    #[test]
+    fn expression_hover_shows_inferred_types_for_operators_literals_and_calls() {
+        let source = r#"state "game.exe" {}
+fn add(left: u64, right: u64) -> u64 { return left + right }
+whileAttached {
+    let value: u64 = (1 + 2) * 3
+    let message = "ready"
+    let enabled = true
+    let sum = add(4, 5)
+}"#;
+        let mut database = CompilerDatabase::new(source);
+
+        let plus = source.find("1 + 2").unwrap() + 2;
+        let addition = database.hover(plus).unwrap().expect("addition hover");
+        assert_eq!(&source[addition.span.start..addition.span.end], "(1 + 2)");
+        assert_eq!(addition.markdown, "```splitscript\nu64\n```");
+
+        let integer = source.find("1 + 2").unwrap();
+        let integer = database
+            .hover(integer)
+            .unwrap()
+            .expect("integer literal hover");
+        assert_eq!(integer.markdown, "```splitscript\nu64\n```");
+
+        for (spelling, expected) in [("\"ready\"", "String"), ("true", "bool")] {
+            let hover = database
+                .hover(source.find(spelling).unwrap() + 1)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{spelling} literal hover"));
+            assert_eq!(hover.markdown, format!("```splitscript\n{expected}\n```"));
+        }
+
+        let call = source.find("add(4, 5)").unwrap();
+        let closing_parenthesis = call + "add(4, 5)".len() - 1;
+        let call = database
+            .hover(closing_parenthesis)
+            .unwrap()
+            .expect("call expression hover");
+        assert_eq!(&source[call.span.start..call.span.end], "add(4, 5)");
+        assert_eq!(call.markdown, "```splitscript\nu64\n```");
     }
 
     #[test]

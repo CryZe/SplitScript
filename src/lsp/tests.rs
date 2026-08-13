@@ -528,7 +528,8 @@ fn hover_and_signature_help_preserve_resolved_catalog_information() {
     );
 
     // The exact token at a boundary wins: the cursor after `number` is on the
-    // dot, so it must not also select the receiver.
+    // dot, so it reports the enclosing call expression rather than selecting
+    // the receiver variable.
     let dot_offset = source.rfind("number").unwrap() + "number".len();
     let (dot_line, dot_character) = position_parts(source, dot_offset);
     let dot_hover = server.handle(json!({
@@ -540,7 +541,21 @@ fn hover_and_signature_help_preserve_resolved_catalog_information() {
             "position": { "line": dot_line, "character": dot_character }
         }
     }));
-    assert!(dot_hover[0]["result"].is_null());
+    assert_eq!(
+        dot_hover[0]["result"]["contents"]["value"],
+        "```splitscript\ni32\n```"
+    );
+    assert_eq!(
+        dot_hover[0]["result"]["range"]["start"],
+        position(source, source.rfind("number").unwrap())
+    );
+    assert_eq!(
+        dot_hover[0]["result"]["range"]["end"],
+        position(
+            source,
+            source.find("clamp(0, 7)").unwrap() + "clamp(0, 7)".len()
+        )
+    );
 
     let parameter_offset = source.find(", 7").unwrap() + 2;
     let (parameter_line, parameter_character) = position_parts(source, parameter_offset);

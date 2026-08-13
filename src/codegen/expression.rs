@@ -2759,6 +2759,7 @@ fn compile_expr_unconverted(
                 );
             }
             IntrinsicId::ProcessScan
+            | IntrinsicId::ModuleScanRelative32Target
             | IntrinsicId::ProcessScanMemory
             | IntrinsicId::ProcessScanMemoryAny => {
                 unreachable!("process.scan is lowered as an await")

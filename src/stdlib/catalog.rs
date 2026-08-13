@@ -192,6 +192,7 @@ const fn validation_fixture(item: StdlibItemId) -> &'static str {
         | StdlibItemId::ProcessRead
         | StdlibItemId::ProcessFollow
         | StdlibItemId::ProcessScan
+        | StdlibItemId::ModuleScanRelative32Target
         | StdlibItemId::ProcessScanMemory
         | StdlibItemId::ProcessScanMemoryAny
         | StdlibItemId::ProcessReadRelative32

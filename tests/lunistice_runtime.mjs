@@ -7,7 +7,7 @@ const bytes = fs.readFileSync(wasmPath);
 const dlc = process.argv.includes("--dlc");
 const decoder = new TextDecoder();
 const base = 0x1000n;
-const memoryImage = new Uint8Array(0x400000);
+const memoryImage = new Uint8Array(0x2800000);
 const view = new DataView(memoryImage.buffer);
 const messages = [];
 const variables = new Map();
@@ -41,13 +41,20 @@ const field = (table, index, nameAddress, offset) => {
 // instead of accidentally completing every scan in one update.
 const assembliesInstruction = 0x100500;
 const metadataAddress = 0x200600;
-const metadataReference = 0x300700;
-const shiftInstruction = 0x300720;
-const storeInstruction = 0x300740;
+const metadataReference = 0x2400700;
+const shiftInstruction = 0x2400720;
+const storeInstruction = 0x2400740;
 memoryImage.set([0x75, 0x11, 0x48, 0x8b, 0x1d], assembliesInstruction);
 view.setInt32(assembliesInstruction + 5, 0x800 - (assembliesInstruction + 9), true);
 memoryImage.set([0x48, 0x3b, 0x1d], assembliesInstruction + 9);
 string(metadataAddress, "global-metadata.dat");
+// Real GameAssembly images contain thousands of unrelated LEA instructions.
+// Checking only one candidate per update made source-defined Unity discovery
+// take about a minute despite every individual byte-range scan being bounded.
+for (let decoy = 0x400000; decoy < 0x2400000; decoy += 0x1000) {
+    memoryImage.set([0x48, 0x8d, 0x0d], decoy);
+    view.setInt32(decoy + 3, metadataAddress + 1 - (decoy + 7), true);
+}
 memoryImage.set([0x48, 0x8d, 0x0d], metadataReference);
 view.setInt32(metadataReference + 3, metadataAddress - (metadataReference + 7), true);
 memoryImage.set([0x48, 0xc1, 0xe9], shiftInstruction);

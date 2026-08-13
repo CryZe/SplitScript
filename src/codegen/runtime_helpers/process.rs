@@ -166,6 +166,71 @@ pub(super) fn compile_scan_process_range(abi: &Abi, scan: ScratchRegion) -> Func
     function
 }
 
+/// Finds the first signature whose rel32 operand resolves to `target`.
+/// The caller bounds `size` to one cooperative poll's byte budget, while this
+/// helper checks every matching instruction inside that window synchronously.
+pub(super) fn compile_scan_relative32_target_range(
+    scan_process_range: u32,
+    read_relative32: u32,
+) -> Function {
+    let mut function = Function::new([(2, ValType::I64)]);
+    let process = 0;
+    let address = 1;
+    let size = 2;
+    let needle = 3;
+    let mask = 4;
+    let len = 5;
+    let displacement_offset = 6;
+    let target = 7;
+    let offset = 8;
+    let matched = 9;
+
+    function
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::LocalGet(size))
+        .instruction(&Instruction::I64GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalGet(size))
+        .instruction(&Instruction::LocalGet(offset))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::LocalGet(needle))
+        .instruction(&Instruction::LocalGet(mask))
+        .instruction(&Instruction::LocalGet(len))
+        .instruction(&Instruction::Call(scan_process_range))
+        .instruction(&Instruction::LocalTee(matched))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::LocalGet(matched))
+        .instruction(&Instruction::LocalGet(displacement_offset))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::Call(read_relative32))
+        .instruction(&Instruction::LocalGet(target))
+        .instruction(&Instruction::I64Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(matched))
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(matched))
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::I64Sub)
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Add)
+        .instruction(&Instruction::LocalSet(offset))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::I64Const(0))
+        .instruction(&Instruction::End);
+    function
+}
+
 pub(super) fn compile_follow_address(
     abi: &Abi,
     offsets_array: u32,

@@ -767,26 +767,8 @@ namespace Unity {
         let assemblies = retry process.readRelative32(assembliesInstruction.offset(5))
         let metadata = await gameAssembly.scan(sig"67 6C 6F 62 61 6C 2D 6D 65 74 61 64 61 74 61 2E 64 61 74 00")
 
-        let metadataReference: address = 0
-        let cursor = gameAssembly.address
-        let end = gameAssembly.address.add(gameAssembly.size)
-        while metadataReference == 0 {
-            let instruction = await process.scan(
-                cursor,
-                (end as u64) - (cursor as u64),
-                sig"48 8D 0D",
-            )
-            let displacement = instruction.offset(3)
-            let target = match process.readRelative32(displacement) {
-                Ok(address) => address,
-                Err(_) => 0 as address,
-            }
-            if target == metadata {
-                metadataReference = displacement
-            } else {
-                cursor = instruction.add(1)
-            }
-        }
+        let metadataInstruction = await gameAssembly.scanRelative32Target(sig"48 8D 0D", 3, metadata)
+        let metadataReference = metadataInstruction.offset(3)
 
         let shiftInstruction = await process.scan(
             metadataReference,
@@ -3930,6 +3912,35 @@ struct Module {
     fn scan(
         /// The compiled signature pattern.
         signature: Signature,
+    ) -> address;
+
+    /// Scans for a signature whose signed relative 32-bit operand resolves to
+    /// a particular address.
+    ///
+    /// All candidates in one bounded chunk are checked before the operation
+    /// yields. This is useful for executable metadata references where a short
+    /// instruction prefix may have many unrelated matches.
+    ///
+    /// # Example
+    ///
+    /// Find the instruction that references a known string
+    ///
+    /// ```splitscript
+    /// let instruction = await module.scanRelative32Target(
+    ///     sig"48 8D 0D",
+    ///     3,
+    ///     metadata,
+    /// )
+    /// ```
+    @mustUse("The matching instruction address is otherwise discarded.")
+    @intrinsic(ModuleScanRelative32Target)
+    fn scanRelative32Target(
+        /// The instruction signature.
+        signature: Signature,
+        /// Byte offset from the match to the relative operand.
+        displacementOffset: u64,
+        /// Address to which the operand must resolve.
+        target: address,
     ) -> address;
 
     /// Scans the module for the first of several signatures.

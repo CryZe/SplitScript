@@ -58,6 +58,7 @@ pub(crate) enum RuntimeHelperId {
     StringPad,
     ScanProcessRange,
     ReadRelative32,
+    ScanRelative32TargetRange,
     StringFromMemory,
     Utf16StringFromMemory,
     ReadUtf8String,
@@ -269,6 +270,7 @@ const fn async_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         }
         IntrinsicId::ProcessFindMemoryRange => scratch(ScratchType::Core(CoreTypeId::U64), 5),
         IntrinsicId::ProcessScan => scratch(ScratchType::Core(CoreTypeId::U64), 5),
+        IntrinsicId::ModuleScanRelative32Target => scratch(ScratchType::Core(CoreTypeId::U64), 7),
         IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 7),
         IntrinsicId::ProcessScanMemoryAny => scratch(ScratchType::Core(CoreTypeId::U64), 8),
         IntrinsicId::ModuleScan => scratch(ScratchType::Core(CoreTypeId::U64), 5),
@@ -291,9 +293,9 @@ const fn async_state(id: IntrinsicId) -> Option<ScratchPolicy> {
         // that found it. Besides making the operation observably async, the
         // extra result slots prevent chained scans from consuming several
         // windows during one host update.
-        IntrinsicId::ProcessScan | IntrinsicId::ModuleScan => {
-            scratch(ScratchType::Core(CoreTypeId::U64), 2)
-        }
+        IntrinsicId::ProcessScan
+        | IntrinsicId::ModuleScanRelative32Target
+        | IntrinsicId::ModuleScan => scratch(ScratchType::Core(CoreTypeId::U64), 2),
         IntrinsicId::ProcessScanMemory => scratch(ScratchType::Core(CoreTypeId::U64), 3),
         IntrinsicId::ProcessScanMemoryAny => scratch(ScratchType::Core(CoreTypeId::U64), 5),
         IntrinsicId::ModuleScanAny => scratch(ScratchType::Core(CoreTypeId::U64), 4),
@@ -378,6 +380,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::ProcessScan | IntrinsicId::ModuleScan | IntrinsicId::ModuleScanAny => {
             &[Helper(Runtime::ScanProcessRange)]
         }
+        IntrinsicId::ModuleScanRelative32Target => &[Helper(Runtime::ScanRelative32TargetRange)],
         IntrinsicId::ProcessScanMemory | IntrinsicId::ProcessScanMemoryAny => &[
             Helper(Runtime::ScanProcessRange),
             HostImport(Host::ProcessGetMemoryRangeCount),
@@ -1159,6 +1162,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
                 NO_TYPE_PARAMETERS,
                 Some(PROCESS_TYPE),
                 params![value(ADDRESS), value(U64), value(SIGNATURE),],
+                ADDRESS,
+            ),
+            PROCESS_SUSPEND,
+            OnAttach,
+            Suspension
+        ),
+        IntrinsicId::ModuleScanRelative32Target => contract!(
+            ModuleScanRelative32Target,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(MODULE),
+                params![value(SIGNATURE), value(U64), value(ADDRESS)],
                 ADDRESS,
             ),
             PROCESS_SUSPEND,

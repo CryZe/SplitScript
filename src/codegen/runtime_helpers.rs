@@ -170,6 +170,13 @@ pub(super) fn build_scan_process_range(inputs: &RuntimeHelperInputs<'_>) -> Func
     process::compile_scan_process_range(inputs.abi, inputs.memory.scratch().scan)
 }
 
+pub(super) fn build_scan_relative32_target_range(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_scan_relative32_target_range(
+        inputs.plan.function(RuntimeHelperId::ScanProcessRange),
+        inputs.plan.function(RuntimeHelperId::ReadRelative32),
+    )
+}
+
 pub(super) fn build_read_relative32(inputs: &RuntimeHelperInputs<'_>) -> Function {
     process::compile_read_relative32(inputs.abi, inputs.memory.scratch().abi_read)
 }

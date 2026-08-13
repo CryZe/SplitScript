@@ -9,7 +9,7 @@ const decoder = new TextDecoder();
 const ranges = [
     { address: 0x1000n, size: 0x100n, flags: 2n },
     { address: 0x2000n, size: 0x100n, flags: 0n },
-    { address: 0x100000n, size: 0x20000n, flags: 2n },
+    { address: 0x100000n, size: 0x100000n, flags: 2n },
 ];
 let instance;
 let reads = [];
@@ -64,7 +64,7 @@ for (let poll = 0; poll < 5; poll += 1) {
     bytesRead = 0;
     instance.exports.update();
     polls.push({ reads: reads.map(Number), bytesRead, messages: [...messages] });
-    if (bytesRead > 70 * 1024) {
+    if (bytesRead > 520 * 1024) {
         throw new Error(`scan poll exceeded its memory-read budget: ${bytesRead}`);
     }
 }
@@ -72,7 +72,7 @@ for (let poll = 0; poll < 5; poll += 1) {
 if (polls.slice(0, 4).some((poll) => poll.messages.length !== 0)) {
     throw new Error(`scan completed before visiting the lower range: ${JSON.stringify(polls)}`);
 }
-if (polls[0].reads[0] !== 0x100000 || polls[1].reads[0] !== 0x110000) {
+if (polls[0].reads[0] !== 0x100000 || polls[1].reads[0] !== 0x180000) {
     throw new Error(`large range cursor was not preserved: ${JSON.stringify(polls)}`);
 }
 if (polls[2].reads.length !== 0) {

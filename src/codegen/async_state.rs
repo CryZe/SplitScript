@@ -34,10 +34,12 @@ use super::{
     memarg, plan_wasm_locals, resolved_intrinsic, semantic_type, unity_layout,
 };
 
-/// Candidate start positions inspected by one signature-future poll. The
-/// range helper reads in smaller pages within this window, so control returns
-/// to the host after a bounded amount of work even for very large mappings.
-const SIGNATURE_SCAN_CANDIDATES_PER_POLL: i64 = 64 * 1024;
+/// Candidate start positions inspected by one signature-future poll. At the
+/// default attached rate of 120 Hz, 512 KiB provides roughly 60 MiB/s of scan
+/// throughput. The range helper reads smaller pages within this window, and
+/// control returns to the host between windows so large modules cannot
+/// monopolize the autosplitter runtime.
+const SIGNATURE_SCAN_CANDIDATES_PER_POLL: i64 = 512 * 1024;
 
 pub(super) fn compile_async_attach(
     action: &Action,
@@ -555,6 +557,7 @@ fn emit_cooperative_range_scan(
     target: &wasm_ir::CallTarget,
     scratch: &[u32],
     process_from_runtime: bool,
+    relative_target: Option<(u32, u32)>,
     context: &ExprContext<'_>,
 ) {
     let cursor = scratch[0];
@@ -618,12 +621,19 @@ fn emit_cooperative_range_scan(
     emit_signature_window_limit(function, signature);
     function.instruction(&Instruction::End);
     emit_signature_arguments(function, signature);
+    if let Some((displacement_offset, relative_target)) = relative_target {
+        function
+            .instruction(&Instruction::LocalGet(displacement_offset))
+            .instruction(&Instruction::LocalGet(relative_target));
+    }
     function
-        .instruction(&Instruction::Call(
-            context
-                .runtime_helpers
-                .function(RuntimeHelperId::ScanProcessRange),
-        ))
+        .instruction(&Instruction::Call(context.runtime_helpers.function(
+            if relative_target.is_some() {
+                RuntimeHelperId::ScanRelative32TargetRange
+            } else {
+                RuntimeHelperId::ScanProcessRange
+            },
+        )))
         .instruction(&Instruction::LocalTee(matched))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Empty))
@@ -1655,7 +1665,50 @@ fn compile_suspension_poll(
             function.instruction(&Instruction::LocalSet(scratch[2]));
             compile_expr(function, args[2], context);
             function.instruction(&Instruction::LocalSet(scratch[4]));
-            emit_cooperative_range_scan(function, target, scratch, false, context);
+            emit_cooperative_range_scan(function, target, scratch, false, None, context);
+            if let Some((field, _)) = layout.field(destination) {
+                context.locals.frame().emit(function);
+                function
+                    .instruction(&Instruction::LocalGet(scratch[3]))
+                    .instruction(&Instruction::StructSet {
+                        struct_type_index: context.locals.frame().struct_type,
+                        field_index: field,
+                    });
+            }
+        }
+        Some(IntrinsicId::ModuleScanRelative32Target) => {
+            compile_receiver(function, target, context);
+            function
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
+                    field_index: context
+                        .gc
+                        .standard_field_index(StdlibFieldId::ModuleAddress),
+                })
+                .instruction(&Instruction::LocalSet(scratch[1]));
+            compile_receiver(function, target, context);
+            function
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: context.gc.standard_index(StdlibTypeId::Module),
+                    field_index: context.gc.standard_field_index(StdlibFieldId::ModuleSize),
+                })
+                .instruction(&Instruction::LocalSet(scratch[2]));
+            compile_expr(function, args[0], context);
+            function.instruction(&Instruction::LocalSet(scratch[4]));
+            compile_expr(function, args[1], context);
+            function.instruction(&Instruction::LocalSet(scratch[5]));
+            compile_expr(function, args[2], context);
+            function.instruction(&Instruction::LocalSet(scratch[6]));
+            emit_cooperative_range_scan(
+                function,
+                target,
+                scratch,
+                true,
+                Some((scratch[5], scratch[6])),
+                context,
+            );
             if let Some((field, _)) = layout.field(destination) {
                 context.locals.frame().emit(function);
                 function
@@ -1951,7 +2004,7 @@ fn compile_suspension_poll(
                 .instruction(&Instruction::LocalSet(scratch[2]));
             compile_expr(function, args[0], context);
             function.instruction(&Instruction::LocalSet(scratch[4]));
-            emit_cooperative_range_scan(function, target, scratch, true, context);
+            emit_cooperative_range_scan(function, target, scratch, true, None, context);
             if let Some((field, _)) = layout.field(destination) {
                 context.locals.frame().emit(function);
                 function

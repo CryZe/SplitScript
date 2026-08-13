@@ -76,6 +76,50 @@ or behavioral parity.
   It also confirms that exact timer events and conditional settings hierarchy
   belong at the host boundary already tracked below, not in closure syntax.
 
+### Make compiler-owned documentation browsable inside the editor
+
+Treat the in-editor reference as the primary documentation product. Standalone
+HTML is a later renderer of the same model, not the next milestone.
+
+- [ ] Turn the existing renderer-independent standard-library and language
+  catalogs into one stable documentation graph. Give namespaces, types,
+  capabilities, functions, methods, fields, enum variants, keywords,
+  lifecycle blocks, settings constructs, migration concepts, and cookbook
+  recipes stable identities and explicit related-symbol links. Keep
+  signatures, effects, runtime behavior, focused compiler-checked examples,
+  and migration status compiler-owned; do not duplicate them in the VS Code
+  extension.
+- [ ] Add a compiler/language-server documentation query that works in both the
+  native and bundled WebAssembly servers. It should expose the searchable
+  index plus individual structured pages, and support direct lookup from a
+  resolved standard-library or language symbol. Use an LSP-standard transport
+  where it fits, but allow a namespaced SplitScript request for the structured
+  graph rather than flattening useful metadata merely to avoid an extension
+  method.
+- [ ] Build a VS Code documentation browser over that query: an **Open
+  SplitScript Documentation** command, a searchable symbol/topic index, a
+  navigable hierarchy, back/forward navigation, links among related symbols,
+  and links between canonical APIs and ASL/C#/Rust/JavaScript porting guidance.
+  Render compiler-provided Markdown in a VS Code-owned view or preview; the
+  extension may provide the presentation, but must not become the source of
+  documentation truth.
+- [ ] Link ordinary editor workflows into the browser. Hover and completion
+  details should offer **Open full documentation**; standard-library
+  definition navigation should reach the exact documented symbol, while a
+  separate source link may expose its privileged `standard.split` declaration
+  when that is useful. Preserve normal source definitions for user symbols.
+- [ ] Use read-only `splitscript-docs:` virtual documents as an interoperability
+  surface where plain textual documents are useful. A virtual document is
+  transport for text, not inherently HTML, Markdown, or fake source: prefer
+  generated Markdown for reference and porting pages, and generate synthetic
+  SplitScript source only for a concrete source-navigation need. Keep URI and
+  anchor identities stable so links, history, and future non-VS-Code clients
+  agree.
+- [ ] Cover the documentation graph and browser contract with catalog
+  validation, link checking, deterministic snapshots, native/bundled-server
+  parity, and VS Code desktop/web integration tests. Missing documentation or
+  broken related-symbol and migration links should fail the repository check.
+
 ## P0 — unblock the next representative native ports
 
 ### Lifecycle semantics exposed by legacy ASL
@@ -421,10 +465,19 @@ remaining work is product hardening and distribution.
 
 ## P2 — documentation and editor evolution
 
-- [ ] Generate rustdoc-like HTML and machine-readable standard-library
-  documentation from the canonical catalog and symbol identities. Signatures,
-  links, hover, completion, and generated pages must agree and use the same
-  focused compiler-checked examples.
+- [ ] After the in-editor documentation browser has proven the documentation
+  graph and navigation model, add machine-readable export and rustdoc-like
+  standalone HTML as additional renderers. Publishing HTML must not introduce
+  a second hierarchy, link scheme, example store, or documentation source.
+- [ ] Add document highlights for all occurrences of the symbol under the
+  cursor and type-definition navigation for inferred expressions. Add folding
+  ranges for declarations, blocks, multiline expressions, comments, and
+  settings trees once their recovered-syntax boundaries are stable.
+- [ ] Add call hierarchy after the compiler exposes one reusable call graph,
+  multi-range formatting when it materially improves editor workflows, and
+  debugger inline values together with the eventual debugging strategy. Do
+  not prioritize implementation hierarchy, linked editing, document colors,
+  or inline completion without a concrete SplitScript use case.
 - [ ] Add completion snippets for lifecycle blocks, match, records, and common
   standard-library patterns. Module scope plus state, settings, and tick-rate
   declarations are grammar-aware already. Keep candidates compiler-owned and
@@ -503,20 +556,25 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Audit the campaign's misunderstandings against the current compiler and
-   improve the documentation, completion, and diagnostics that failed to reveal
-   existing features. Defer process-name warnings until the host's
-   cross-platform matching contract is settled.
-2. Keep irregular nested static settings explicit until another maintained
+1. Establish the compiler-owned documentation graph and the VS Code
+   documentation browser, then route standard-library symbols and migration
+   guidance into it. Use the resulting search and navigation paths while
+   auditing the campaign's misunderstandings instead of treating standalone
+   HTML as the immediate documentation target.
+2. Continue the campaign audit and improve completion and contextual
+   diagnostics where documentation alone would not have revealed an existing
+   feature. Defer process-name warnings until the host's cross-platform
+   matching contract is settled.
+3. Keep irregular nested static settings explicit until another maintained
    port demonstrates a small reusable table abstraction; select the next
    concrete provider or host-contract fixture instead of inventing a settings
    metaprogramming language.
-3. In parallel with stable language semantics, establish the Wasmtime/DWARF
+4. In parallel with stable language semantics, establish the Wasmtime/DWARF
    compatibility fixture and land debug names plus source-line stepping.
-4. Harden and publish the bundled VSIX and native releases, then evaluate the
+5. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench.
-5. Add Unity Mono and the next emulator/engine provider from representative
+6. Add Unity Mono and the next emulator/engine provider from representative
    ports.
-6. Keep physical `None` aggregate specialization and sandbox-sensitive host
+7. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

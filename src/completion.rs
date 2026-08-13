@@ -2,6 +2,10 @@
 
 use std::collections::BTreeMap;
 
+mod settings;
+
+use settings::complete_settings_dsl;
+
 use crate::{
     ast::{
         Block, Expr, ExprKind, MatchPattern, Program, SettingKind, Span, Stmt,
@@ -73,6 +77,8 @@ pub(crate) fn complete(
     let offset = floor_char_boundary(&source, offset.min(source.len()));
     let syntax = database.recovering_parse()?.syntax().clone();
     if let Some(completions) = complete_tick_rate_field(&source, offset) {
+        Ok(completions)
+    } else if let Some(completions) = complete_settings_dsl(&source, offset) {
         Ok(completions)
     } else if let Some(completions) = complete_state_decoder(&source, offset) {
         Ok(completions)
@@ -1766,6 +1772,55 @@ mod tests {
                 .iter()
                 .all(|label| label != "attached")
         );
+    }
+
+    #[test]
+    fn settings_completion_offers_contextual_entry_and_kind_snippets() {
+        let mut entries = CompilerDatabase::new("state \"game.exe\" {}\nsettings {\n    \n}");
+        let labels = labels(&mut entries, "settings {");
+        for expected in [
+            "boolean setting",
+            "settings group",
+            "choice setting",
+            "file setting",
+            "for setting family",
+        ] {
+            assert!(
+                labels.contains(&expected.to_owned()),
+                "missing {expected}: {labels:#?}"
+            );
+        }
+
+        let source = "state \"game.exe\" {}\nsettings {\n    \"Mode\" => mode: ch\n}";
+        let mut kinds = CompilerDatabase::new(source);
+        let completion = kinds
+            .completions(source.find("ch\n").unwrap() + 2)
+            .expect("setting-kind completion should succeed");
+        assert_eq!(completion.items.len(), 1);
+        assert_eq!(completion.items[0].label, "choice");
+        assert!(completion.items[0].is_snippet);
+        assert!(completion.items[0].insert_text.starts_with("choice {"));
+    }
+
+    #[test]
+    fn settings_completion_understands_groups_choices_and_file_filters() {
+        let mut group = CompilerDatabase::new(
+            "state \"game.exe\" {}\nsettings {\n    \"General\" {\n        \n    },\n}",
+        );
+        assert!(labels(&mut group, "\"General\" {").contains(&"boolean setting".to_owned()));
+
+        let mut choice = CompilerDatabase::new(
+            "enum Mode { A }\nstate \"game.exe\" {}\nsettings {\n    \"Mode\" => mode: choice {\n        \n    },\n}",
+        );
+        assert_eq!(labels(&mut choice, "choice {"), vec!["choice option"]);
+
+        let mut file = CompilerDatabase::new(
+            "state \"game.exe\" {}\nsettings {\n    \"Input\" => input: file {\n        \n    },\n}",
+        );
+        let labels = labels(&mut file, "file {");
+        assert!(labels.contains(&"named filter".to_owned()));
+        assert!(labels.contains(&"fallback filter".to_owned()));
+        assert!(labels.contains(&"MIME filter".to_owned()));
     }
 
     #[test]

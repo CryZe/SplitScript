@@ -3299,3 +3299,15 @@ language catalog document the refinement rule.
   of treating forwarder strings or malformed RVAs as executable addresses.
 - Added deterministic runtime coverage for direct, absent, and forwarded
   exports as the reusable native prerequisite for Unity Mono discovery.
+
+# 2026-08-13: source-defined Unity Mono and ARTIFICIAL
+
+- Added typed `MonoModule`, `MonoImage`, and `MonoClass` traversal for explicit
+  modern 64-bit Windows V2/V3 layouts, entirely in standard-library
+  SplitScript on top of existing process reads, scanning, and PE export lookup.
+- Established trusted cross-type access for source-defined standard-library
+  bodies while keeping runtime-private fields invisible to user code and
+  editor tooling.
+- Ported ARTIFICIAL and added a deterministic host fixture covering PE export
+  resolution, RIP-relative assembly-list discovery, managed assembly/class/
+  field traversal, static values, and start/split/reset/game-time behavior.

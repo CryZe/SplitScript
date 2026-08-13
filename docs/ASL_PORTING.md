@@ -644,6 +644,25 @@ let assemblyForeach = mono.peExport("mono_assembly_foreach") else return
 deliberately PE-specific; ELF and Mach-O symbols need their own proven parser or
 a future portable host contract rather than being mislabeled as PE exports.
 
+For modern 64-bit Windows Unity games using Mono, prefer the typed metadata
+provider over copying `asl-help` callbacks or raw class-layout traversal into
+the script:
+
+```splitscript
+let mono = await Unity.mono(MonoVersion.V2)
+let image = await mono.image("Assembly-CSharp")
+let data = await image.class("AutoSplitterData")
+let runningAddress = await data.staticField("isRunning")
+```
+
+`MonoVersion.V3` selects the Unity 2021.2-and-newer PE64 layout; `V2` selects
+the preceding modern layout. These are explicit target-memory contracts, not
+automatically detected marketing versions. The maintained
+[`ARTIFICIAL` port](ARTIFICIAL_PORT.md) demonstrates static-field discovery
+and runtime-verified state polling. Older V1, 32-bit, ELF, and Mach-O Mono
+targets remain future layout families rather than falling back to a guessed
+offset set.
+
 When a port needs the mapping metadata itself, take a typed snapshot rather
 than reproducing the host's numeric count/index ABI:
 

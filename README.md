@@ -70,6 +70,14 @@ runtime-verified behavior from the remaining host lifecycle limitations:
 cargo run --bin splitc -- examples/axiom_verge.split -o target/axiom_verge.wasm
 ```
 
+The maintained ARTIFICIAL port exercises the source-defined 64-bit Windows
+Unity Mono provider, from PE export and assembly discovery through managed
+class metadata and static fields:
+
+```console
+cargo run --bin splitc -- examples/artificial.split -o target/artificial.wasm
+```
+
 ## Build and use
 
 ```console
@@ -301,8 +309,9 @@ numbered-settings case in [`docs/DDS_PORT.md`](docs/DDS_PORT.md).
 - Nominal `address` values, typed synchronous/retried primitive reads,
   RIP-relative 32-bit address decoding, arbitrary-range scans, and reusable
   64-bit pointer traversal.
-- Awaitable Unity IL2CPP module, image, class, inherited-field, C# backing-field,
-  and static-table discovery for 64-bit Unity layouts.
+- Awaitable Unity IL2CPP and 64-bit Windows Unity Mono module, image, class,
+  inherited-field, C# backing-field, and static-table discovery through
+  source-defined standard-library traversal.
 - GC structs for the state snapshots and `Duration` values.
 - First-class immutable GC `String` values with inference, content equality,
   UTF-16 managed-string decoding, backtick `{...}` interpolation,

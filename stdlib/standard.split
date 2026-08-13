@@ -806,6 +806,26 @@ namespace Unity {
             pointerSize: 8,
         }
     }
+
+    /// Discovers a 64-bit Windows Unity Mono runtime.
+    ///
+    /// The version selects the target-memory metadata layout explicitly. The
+    /// current implementation supports the modern `mono-2.0-bdwgc.dll` PE
+    /// family; older Mono and non-PE layouts remain separate future families.
+    ///
+    /// # Example
+    ///
+    /// Discover Mono metadata
+    ///
+    /// ```splitscript
+    /// let mono = await Unity.mono(MonoVersion.V2)
+    /// ```
+    fn mono(
+        /// Exact Mono metadata layout used by the target Unity release.
+        version: MonoVersion,
+    ) -> MonoModule {
+        return await MonoModule.discover(version)
+    }
 }
 
 /// Supports ordered numeric operations.
@@ -4270,6 +4290,697 @@ struct UnityField {
     /// let levelFieldIndex = field.index
     /// ```
     index: u32,
+}
+
+/// Identifies the supported Unity Mono metadata layouts.
+///
+/// These versions describe Mono's internal target-memory structures, not the
+/// marketing version printed by the Mono runtime.
+///
+/// # Example
+///
+/// Select a Mono metadata layout
+///
+/// ```splitscript
+/// let monoVersion = MonoVersion.V2
+/// ```
+@representation(enum, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+@capabilities(Equatable)
+enum MonoVersion {
+    /// Layout used by Unity releases before the V3 metadata change.
+    ///
+    /// # Example
+    ///
+    /// Discover a V2 runtime
+    ///
+    /// ```splitscript
+    /// let v2Runtime = await Unity.mono(MonoVersion.V2)
+    /// ```
+    V2,
+
+    /// Layout used by Unity 2021.2 and newer releases.
+    ///
+    /// # Example
+    ///
+    /// Discover a V3 runtime
+    ///
+    /// ```splitscript
+    /// let v3Runtime = await Unity.mono(MonoVersion.V3)
+    /// ```
+    V3,
+}
+
+/// Stores one validated Unity Mono target-memory layout.
+///
+/// The owning `MonoModule` keeps this descriptor private so every metadata
+/// operation consumes the same centralized layout facts.
+///
+/// # Example
+///
+/// Use the layout through a discovered runtime
+///
+/// ```splitscript
+/// let layoutBackedRuntime: MonoModule = await Unity.mono(MonoVersion.V2)
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, localVariable)
+struct MonoLayout {
+    /// Offset of the assembly-name pointer.
+    private assemblyName: u64,
+    /// Offset of the assembly-image pointer.
+    private assemblyImage: u64,
+    /// Offset of the image class-cache hash table.
+    private imageClassCache: u64,
+    /// Offset of the hash-table bucket count.
+    private hashSize: u64,
+    /// Offset of the hash-table bucket array pointer.
+    private hashTable: u64,
+    /// Offset of a class's parent pointer.
+    private classParent: u64,
+    /// Offset of a class's name pointer.
+    private className: u64,
+    /// Offset of a class's namespace pointer.
+    private classNamespace: u64,
+    /// Offset of a class's vtable-size value.
+    private classVtableSize: u64,
+    /// Offset of a class's field array pointer.
+    private classFields: u64,
+    /// Offset of a class's runtime-information pointer.
+    private classRuntimeInfo: u64,
+    /// Offset of a class's field count.
+    private classFieldCount: u64,
+    /// Offset of the next class in one cache bucket.
+    private classNextCache: u64,
+    /// Offset of a field metadata entry's name pointer.
+    private fieldName: u64,
+    /// Offset of a field metadata entry's value offset.
+    private fieldValue: u64,
+    /// Byte stride between field metadata entries.
+    private fieldStride: u64,
+    /// Offset of the static-data pointer within a Mono vtable.
+    private vtable: u64,
+
+    /// Selects the centralized PE64 layout for a Mono version.
+    ///
+    /// The selected descriptor is retained by `MonoModule`; scripts normally
+    /// choose it indirectly through `Unity.mono`.
+    ///
+    /// # Example
+    ///
+    /// Select the layout indirectly through discovery
+    ///
+    /// ```splitscript
+    /// let selectedLayout = MonoLayout.forVersion(MonoVersion.V3)
+    /// ```
+    @mustUse("A selected Mono layout has no effect unless it is retained.")
+    static fn forVersion(
+        /// Mono metadata generation whose target offsets should be selected.
+        version: MonoVersion,
+    ) -> MonoLayout {
+        return MonoLayout {
+            assemblyName: 0x10,
+            assemblyImage: 0x60,
+            imageClassCache: match version {
+                MonoVersion.V2 => 0x4c0,
+                MonoVersion.V3 => 0x4d0,
+            },
+            hashSize: 0x18,
+            hashTable: 0x20,
+            classParent: 0x30,
+            className: 0x48,
+            classNamespace: 0x50,
+            classVtableSize: 0x5c,
+            classFields: 0x98,
+            classRuntimeInfo: 0xd0,
+            classFieldCount: 0x100,
+            classNextCache: 0x108,
+            fieldName: 0x8,
+            fieldValue: 0x18,
+            fieldStride: 0x20,
+            vtable: match version {
+                MonoVersion.V2 => 0x40,
+                MonoVersion.V3 => 0x48,
+            },
+        }
+    }
+}
+
+/// Describes an attached Unity Mono runtime.
+///
+/// The runtime retains its assembly-list root, pointer width, version, and
+/// centralized metadata layout. Discovery and traversal yield between retries.
+///
+/// # Example
+///
+/// Discover a Mono runtime
+///
+/// ```splitscript
+/// let discoveredMonoModule = await Unity.mono(MonoVersion.V2)
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+struct MonoModule {
+    /// Address of Mono's global assembly-list pointer.
+    ///
+    /// # Example
+    ///
+    /// Inspect the discovered list root
+    ///
+    /// ```splitscript
+    /// let mono = await Unity.mono(MonoVersion.V2)
+    /// let assemblyList = mono.assemblies
+    /// ```
+    assemblies: address,
+
+    /// Exact target-memory layout version.
+    ///
+    /// # Example
+    ///
+    /// Inspect the selected Mono version
+    ///
+    /// ```splitscript
+    /// let mono = await Unity.mono(MonoVersion.V3)
+    /// let version = mono.version
+    /// ```
+    version: MonoVersion,
+
+    /// Native pointer width of the Mono runtime.
+    ///
+    /// # Example
+    ///
+    /// Inspect the target pointer width
+    ///
+    /// ```splitscript
+    /// let mono = await Unity.mono(MonoVersion.V2)
+    /// let width = mono.pointerSize
+    /// ```
+    pointerSize: PointerSize,
+
+    /// Centralized target-memory offsets for this runtime.
+    private layout: MonoLayout,
+
+    /// Discovers the Mono assembly list from its exported iteration function.
+    ///
+    /// Discovery waits for the modern 64-bit Windows Mono module and derives
+    /// the assembly-list root from `mono_assembly_foreach`.
+    ///
+    /// # Example
+    ///
+    /// Discover modern Windows Mono
+    ///
+    /// ```splitscript
+    /// let mono = await MonoModule.discover(MonoVersion.V2)
+    /// ```
+    @mustUse("Mono discovery returns the runtime used for all later metadata lookups.")
+    static fn discover(
+        /// Exact Mono metadata layout used by the target Unity release.
+        version: MonoVersion,
+    ) -> MonoModule {
+        let runtime = await process.module("mono-2.0-bdwgc.dll")
+        let pointerSize = retry runtime.pointerSize()
+        if pointerSize != PointerSize.Bit64 {
+            print("Unity Mono currently supports only 64-bit Windows runtimes")
+            await process.closed()
+        }
+
+        let assemblyForeach = retry runtime.peExport("mono_assembly_foreach")
+        let instruction = await process.scan(
+            assemblyForeach,
+            0x100,
+            sig"48 8B 0D",
+        )
+        let assemblies = retry process.readRelative32(instruction.offset(3))
+        return MonoModule {
+            assemblies: assemblies,
+            version: version,
+            pointerSize: pointerSize,
+            layout: MonoLayout.forVersion(version),
+        }
+    }
+
+    /// Reads one pointer using the runtime's native width.
+    ///
+    /// A null pointer and a failed read are ordinary errors.
+    ///
+    /// # Example
+    ///
+    /// Read a Mono metadata pointer
+    ///
+    /// ```splitscript
+    /// let pointerRuntime = await Unity.mono(MonoVersion.V2)
+    /// let firstAssembly = pointerRuntime.readPointer(pointerRuntime.assemblies) else return
+    /// ```
+    @mustUse("Reading a Mono pointer has no effect unless its result is used.")
+    fn readPointer(
+        /// Target address containing the native pointer.
+        address: address,
+    ) -> address! {
+        let pointer: address = match self.pointerSize {
+            PointerSize.Bit32 => process.read<u32>(address)? as address,
+            PointerSize.Bit64 => process.read<u64>(address)? as address,
+        }
+        if pointer == 0 {
+            throw "Mono metadata pointer is null"
+        }
+        return Ok(pointer)
+    }
+
+    /// Returns the runtime's pointer width in bytes.
+    ///
+    /// Metadata table traversal uses this value to advance between native
+    /// pointer entries without duplicating target-width logic.
+    ///
+    /// # Example
+    ///
+    /// Compute a pointer-table entry address
+    ///
+    /// ```splitscript
+    /// let widthRuntime = await Unity.mono(MonoVersion.V2)
+    /// let table: address = 0
+    /// let second = table.add(widthRuntime.pointerBytes())
+    /// ```
+    @mustUse("The pointer width is returned as a value and does not modify the runtime.")
+    fn pointerBytes() -> u64 {
+        return match self.pointerSize {
+            PointerSize.Bit32 => 4,
+            PointerSize.Bit64 => 8,
+        }
+    }
+
+    /// Finds a loaded managed assembly image.
+    ///
+    /// The lookup retries after yielding until Mono has registered an assembly
+    /// whose metadata name exactly matches the requested value.
+    ///
+    /// # Example
+    ///
+    /// Find the game's main managed image
+    ///
+    /// ```splitscript
+    /// let imageRuntime = await Unity.mono(MonoVersion.V2)
+    /// let managedImage = await imageRuntime.image("Assembly-CSharp")
+    /// ```
+    @mustUse("A discovered Mono image is required for subsequent class lookup.")
+    fn image(
+        /// Managed assembly name without a file extension.
+        name: String,
+    ) -> MonoImage {
+        while true {
+            let link = match self.readPointer(self.assemblies) {
+                Ok(address) => address,
+                Err(_) => 0 as address,
+            }
+            while link != 0 {
+                let assembly = retry self.readPointer(link)
+                let next = match self.readPointer(link.add(self.pointerBytes())) {
+                    Ok(address) => address,
+                    Err(_) => 0 as address,
+                }
+                let namePointer = retry self.readPointer(
+                    assembly.add(self.layout.assemblyName),
+                )
+                let candidate = retry process.readUtf8(namePointer, 256)
+                if candidate == name {
+                    let image = retry self.readPointer(
+                        assembly.add(self.layout.assemblyImage),
+                    )
+                    return MonoImage {
+                        address: image,
+                        module: self,
+                    }
+                }
+                link = next
+            }
+            await nextTick()
+        }
+        return MonoImage {
+            address: 0,
+            module: self,
+        }
+    }
+
+    /// Finds a managed class inside an image address.
+    ///
+    /// Most scripts should call `MonoImage.class`; this lower-level operation
+    /// keeps the shared traversal with its owning runtime.
+    ///
+    /// # Example
+    ///
+    /// Find a class from a retained image
+    ///
+    /// ```splitscript
+    /// let classRuntime = await Unity.mono(MonoVersion.V2)
+    /// let classImage = await classRuntime.image("Assembly-CSharp")
+    /// let gameClass = await classRuntime.classInImage(classImage.address, "GameManager")
+    /// ```
+    @mustUse("Class lookup returns metadata needed for field discovery.")
+    fn classInImage(
+        /// Address of the Mono image metadata to search.
+        image: address,
+        /// Simple class name or namespace-qualified managed class name.
+        name: String,
+    ) -> MonoClass {
+        let separator = name.lastIndexOf(".")
+        let expectedName = match separator {
+            Some(index) => name.slice(index + 1, name.byteLength()) else name,
+            None => name,
+        }
+        let expectedNamespace: String? = match separator {
+            Some(index) => name.slice(0, index) else "",
+            None => None,
+        }
+
+        while true {
+            let cache = image.add(self.layout.imageClassCache)
+            let bucketCount = match process.read<i32>(cache.add(self.layout.hashSize)) {
+                Ok(count) => count,
+                Err(_) => 0,
+            }
+            if bucketCount > 0 {
+                let table = retry self.readPointer(cache.add(self.layout.hashTable))
+                let bucket: i32 = 0
+                while bucket < bucketCount {
+                    let classAddress = match self.readPointer(
+                        table.add((bucket as u64) * self.pointerBytes()),
+                    ) {
+                        Ok(address) => address,
+                        Err(_) => 0 as address,
+                    }
+                    while classAddress != 0 {
+                        let namePointer = retry self.readPointer(
+                            classAddress.add(self.layout.className),
+                        )
+                        let candidateName = retry process.readUtf8(namePointer, 256)
+                        if candidateName == expectedName {
+                            let namespacePointer = retry self.readPointer(
+                                classAddress.add(self.layout.classNamespace),
+                            )
+                            let candidateNamespace = retry process.readUtf8(namespacePointer, 256)
+                            let namespaceMatches = match expectedNamespace {
+                                Some(namespace) => candidateNamespace == namespace,
+                                None => true,
+                            }
+                            if namespaceMatches {
+                                return MonoClass {
+                                    address: classAddress,
+                                    module: self,
+                                }
+                            }
+                        }
+                        classAddress = match self.readPointer(
+                            classAddress.add(self.layout.classNextCache),
+                        ) {
+                            Ok(address) => address,
+                            Err(_) => 0 as address,
+                        }
+                    }
+                    bucket += 1
+                }
+            }
+            await nextTick()
+        }
+        return MonoClass {
+            address: 0,
+            module: self,
+        }
+    }
+
+    /// Finds a field offset in a class hierarchy.
+    ///
+    /// Most scripts should call `MonoClass.field`; this operation owns the
+    /// shared target-layout traversal.
+    ///
+    /// # Example
+    ///
+    /// Find a field from a retained class
+    ///
+    /// ```splitscript
+    /// let fieldRuntime = await Unity.mono(MonoVersion.V2)
+    /// let fieldImage = await fieldRuntime.image("Assembly-CSharp")
+    /// let fieldClass = await fieldImage.class("GameManager")
+    /// let runningField = await fieldRuntime.fieldInClass(fieldClass.address, "isRunning")
+    /// ```
+    @mustUse("Field lookup returns an offset and does not modify class metadata.")
+    fn fieldInClass(
+        /// Address of the Mono class metadata whose hierarchy should be searched.
+        classAddress: address,
+        /// Managed field name or C# auto-property name.
+        name: String,
+    ) -> u32 {
+        while true {
+            let current = classAddress
+            while current != 0 {
+                let count = match process.read<i32>(
+                    current.add(self.layout.classFieldCount),
+                ) {
+                    Ok(value) => value,
+                    Err(_) => 0,
+                }
+                if count > 0 {
+                    let fields = retry self.readPointer(
+                        current.add(self.layout.classFields),
+                    )
+                    let index: i32 = 0
+                    while index < count {
+                        let field = fields.add((index as u64) * self.layout.fieldStride)
+                        let namePointer = retry self.readPointer(
+                            field.add(self.layout.fieldName),
+                        )
+                        let candidate = retry process.readUtf8(namePointer, 256)
+                        if candidate == name || candidate == `<{name}>k__BackingField` {
+                            return retry process.read<u32>(
+                                field.add(self.layout.fieldValue),
+                            )
+                        }
+                        index += 1
+                    }
+                }
+                current = match self.readPointer(current.add(self.layout.classParent)) {
+                    Ok(address) => address,
+                    Err(_) => 0 as address,
+                }
+            }
+            await nextTick()
+        }
+        return 0
+    }
+
+    /// Finds the static-field table for a class address.
+    ///
+    /// Most scripts should call `MonoClass.staticTable`; this operation keeps
+    /// version-specific vtable traversal in the owning runtime.
+    ///
+    /// # Example
+    ///
+    /// Find static storage from a retained class
+    ///
+    /// ```splitscript
+    /// let tableRuntime = await Unity.mono(MonoVersion.V2)
+    /// let tableImage = await tableRuntime.image("Assembly-CSharp")
+    /// let tableClass = await tableImage.class("GameManager")
+    /// let classTable = await tableRuntime.staticTableForClass(tableClass.address)
+    /// ```
+    @mustUse("Static-table discovery returns an address needed to read static fields.")
+    fn staticTableForClass(
+        /// Address of the Mono class metadata whose vtable should be traversed.
+        classAddress: address,
+    ) -> address {
+        while true {
+            let runtimeInfo = retry self.readPointer(
+                classAddress.add(self.layout.classRuntimeInfo),
+            )
+            let vtables = retry self.readPointer(runtimeInfo.add(self.pointerBytes()))
+            let vtableSize = retry process.read<u32>(
+                classAddress.add(self.layout.classVtableSize),
+            )
+            let tablePointer = vtables
+                .add(self.layout.vtable)
+                .add((vtableSize as u64) * self.pointerBytes())
+            let table = match self.readPointer(tablePointer) {
+                Ok(address) => address,
+                Err(_) => 0 as address,
+            }
+            if table != 0 {
+                return table
+            }
+            await nextTick()
+        }
+        return 0
+    }
+}
+
+/// Describes a managed image loaded by a Unity Mono runtime.
+///
+/// # Example
+///
+/// Discover the main game image
+///
+/// ```splitscript
+/// let monoForImage = await Unity.mono(MonoVersion.V2)
+/// let mainManagedImage: MonoImage = await monoForImage.image("Assembly-CSharp")
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+struct MonoImage {
+    /// Address of the target Mono image metadata.
+    ///
+    /// # Example
+    ///
+    /// Inspect an image address
+    ///
+    /// ```splitscript
+    /// let addressRuntime = await Unity.mono(MonoVersion.V2)
+    /// let addressImage = await addressRuntime.image("Assembly-CSharp")
+    /// let imageAddress = addressImage.address
+    /// ```
+    address: address,
+
+    /// Runtime that owns this image.
+    ///
+    /// # Example
+    ///
+    /// Inspect the image's Mono version
+    ///
+    /// ```splitscript
+    /// let owningRuntime = await Unity.mono(MonoVersion.V3)
+    /// let ownedImage = await owningRuntime.image("Assembly-CSharp")
+    /// let imageVersion = ownedImage.module.version
+    /// ```
+    module: MonoModule,
+
+    /// Finds a class by simple or namespace-qualified managed name.
+    ///
+    /// Namespace-qualified names split at the final dot; simple names match
+    /// regardless of the class namespace.
+    ///
+    /// # Example
+    ///
+    /// Find a managed game class
+    ///
+    /// ```splitscript
+    /// let namespaceRuntime = await Unity.mono(MonoVersion.V2)
+    /// let namespaceImage = await namespaceRuntime.image("Assembly-CSharp")
+    /// let namespacedClass = await namespaceImage.class("Example.GameManager")
+    /// ```
+    @mustUse("A discovered Mono class is required for subsequent field lookup.")
+    fn class(
+        /// Simple class name or namespace-qualified managed class name.
+        name: String,
+    ) -> MonoClass {
+        return await self.module.classInImage(self.address, name)
+    }
+}
+
+/// Describes a class discovered in Unity Mono metadata.
+///
+/// # Example
+///
+/// Discover a managed class
+///
+/// ```splitscript
+/// let monoForClass = await Unity.mono(MonoVersion.V2)
+/// let imageForClass = await monoForClass.image("Assembly-CSharp")
+/// let managedGameClass = await imageForClass.class("GameManager")
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+struct MonoClass {
+    /// Address of the target Mono class metadata.
+    ///
+    /// # Example
+    ///
+    /// Inspect a class address
+    ///
+    /// ```splitscript
+    /// let classAddressRuntime = await Unity.mono(MonoVersion.V2)
+    /// let classAddressImage = await classAddressRuntime.image("Assembly-CSharp")
+    /// let addressedClass = await classAddressImage.class("GameManager")
+    /// let classAddress = addressedClass.address
+    /// ```
+    address: address,
+
+    /// Runtime that owns this class.
+    ///
+    /// # Example
+    ///
+    /// Inspect the class's pointer width
+    ///
+    /// ```splitscript
+    /// let classWidthRuntime = await Unity.mono(MonoVersion.V2)
+    /// let classWidthImage = await classWidthRuntime.image("Assembly-CSharp")
+    /// let classWithWidth = await classWidthImage.class("GameManager")
+    /// let classPointerSize = classWithWidth.module.pointerSize
+    /// ```
+    module: MonoModule,
+
+    /// Finds a managed field, including C# auto-property backing fields.
+    ///
+    /// The search walks parent classes and accepts either the requested name or
+    /// its compiler-generated C# backing-field spelling.
+    ///
+    /// # Example
+    ///
+    /// Find a field offset
+    ///
+    /// ```splitscript
+    /// let offsetRuntime = await Unity.mono(MonoVersion.V2)
+    /// let offsetImage = await offsetRuntime.image("Assembly-CSharp")
+    /// let offsetClass = await offsetImage.class("GameManager")
+    /// let runningOffset = await offsetClass.field("isRunning")
+    /// ```
+    @mustUse("Field lookup returns an offset and does not modify the class.")
+    fn field(
+        /// Managed field name or C# auto-property name.
+        name: String,
+    ) -> u32 {
+        return await self.module.fieldInClass(self.address, name)
+    }
+
+    /// Finds the class's static-field storage table.
+    ///
+    /// The lookup waits until Mono has materialized the class vtable and its
+    /// static-data pointer.
+    ///
+    /// # Example
+    ///
+    /// Find static storage
+    ///
+    /// ```splitscript
+    /// let storageRuntime = await Unity.mono(MonoVersion.V2)
+    /// let storageImage = await storageRuntime.image("Assembly-CSharp")
+    /// let storageClass = await storageImage.class("GameManager")
+    /// let staticStorage = await storageClass.staticTable()
+    /// ```
+    @mustUse("Static-table discovery returns an address needed to read static fields.")
+    fn staticTable() -> address {
+        return await self.module.staticTableForClass(self.address)
+    }
+
+    /// Finds the address of one static field.
+    ///
+    /// The result combines the class's static storage table with the managed
+    /// field offset discovered from metadata.
+    ///
+    /// # Example
+    ///
+    /// Find a static field address
+    ///
+    /// ```splitscript
+    /// let staticRuntime = await Unity.mono(MonoVersion.V2)
+    /// let staticImage = await staticRuntime.image("Assembly-CSharp")
+    /// let staticClass = await staticImage.class("GameManager")
+    /// let runningAddress = await staticClass.staticField("isRunning")
+    /// ```
+    @mustUse("Static-field lookup returns an address and does not modify the class.")
+    fn staticField(
+        /// Managed static-field name or C# auto-property name.
+        name: String,
+    ) -> address {
+        let table = await self.staticTable()
+        let offset = await self.field(name)
+        return table.add(offset as u64)
+    }
 }
 
 /// Retains a discovered GBA emulator memory mapping.

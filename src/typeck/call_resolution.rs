@@ -16,8 +16,8 @@ use crate::{
     signature::parse_signature,
     stdlib::{
         Availability, DeclaredTypeRef, ItemKind, ParameterRule, StandardBinaryOperator,
-        StandardUnaryOperator, StdlibItem, StdlibItemId, StdlibOwner, StdlibTypeConstructorId,
-        StdlibTypeId, TypeRef as CatalogTypeRef,
+        StandardUnaryOperator, StdlibItem, StdlibItemId, StdlibTypeConstructorId, StdlibTypeId,
+        TypeRef as CatalogTypeRef,
     },
     stdlib_semantic::{CallCandidate, StandardLibrarySemanticExt},
     types::TypeKind,
@@ -1738,16 +1738,17 @@ impl Checker {
         name: &str,
     ) -> Option<&'static crate::stdlib::StdlibField> {
         self.standard_library.public_field(owner, name).or_else(|| {
-            let CallableContext::LibraryFunction(item) = self.callable else {
+            // Injected standard-library bodies form one trusted implementation
+            // unit. They may compose types through runtime-private fields even
+            // when the body belongs to a different catalog type. Ordinary user
+            // functions never enter this callable context, so private fields
+            // remain absent from user lookup, completion, and hover.
+            let CallableContext::LibraryFunction(_) = self.callable else {
                 return None;
             };
-            (self.standard_library.item(item).owner == StdlibOwner::Type(owner))
-                .then(|| {
-                    self.standard_library
-                        .fields_of(owner)
-                        .find(|field| field.name == name)
-                })
-                .flatten()
+            self.standard_library
+                .fields_of(owner)
+                .find(|field| field.name == name)
         })
     }
 

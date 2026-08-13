@@ -389,6 +389,8 @@ The reusable ASR surface is grouped by responsibility:
   race combinators remain planned on the same foundation.
 - Unity IL2CPP module/image/class/field/static-instance discovery, versioned
   layouts, generated typed bindings, and managed-string decoding.
+- Unity Mono assembly/image/class/inherited-field/static-table discovery for
+  modern 64-bit Windows V2 and V3 metadata layouts.
 - Watchers with current/old pairs and change predicates.
 - Timer state and controls, custom runtime variables, tick-rate control, and
   saturating duration conversion.
@@ -423,6 +425,30 @@ let instance = retry process.read<address>(staticTable.offset(instanceOffset))
 Each discovery operation retries across ticks. Field lookup walks parent
 classes and recognizes C# auto-property backing fields, so `field("Instance")`
 also matches `<Instance>k__BackingField`.
+
+## Unity Mono
+
+The initial Mono surface supports the 64-bit Windows
+`mono-2.0-bdwgc.dll` family with explicit `MonoVersion.V2` and
+`MonoVersion.V3` target layouts. V3 corresponds to Unity 2021.2 and newer;
+the enum names describe internal metadata layouts rather than Mono marketing
+versions. Older V1 layouts, 32-bit layouts, ELF, and Mach-O are not silently
+guessed.
+
+```splitscript
+let mono = await Unity.mono(MonoVersion.V2)
+let image = await mono.image("Assembly-CSharp")
+let autosplitter = await image.class("AutoSplitterData")
+let gameTime = await autosplitter.staticField("inGameTime")
+```
+
+Discovery resolves `mono_assembly_foreach` through the source-defined
+`Module.peExport`, finds Mono's assembly-list global from its RIP-relative
+load, and yields while assemblies or metadata are not ready. Class names may
+be simple or namespace-qualified. Field lookup walks parent classes and also
+recognizes C# auto-property backing fields. The implementation and its target
+offsets live in `stdlib/standard.split`; Mono does not add compiler intrinsics
+or type-checker cases.
 
 `fieldAny([names...])` returns a `UnityField { offset, index }`, making
 version-dependent layouts explicit without manual races. `staticInstance`

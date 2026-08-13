@@ -677,4 +677,23 @@ mod tests {
         )
         .unwrap();
     }
+
+    #[test]
+    fn user_code_cannot_access_standard_library_private_fields() {
+        let errors = check_source(
+            r#"
+            state "game" {}
+            whileAttached {
+                let seconds = Duration.zero().seconds
+            }
+            "#,
+        )
+        .unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("Duration has no field `seconds`")),
+            "{errors:#?}"
+        );
+    }
 }

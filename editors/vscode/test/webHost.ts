@@ -25,13 +25,15 @@ export async function run(): Promise<void> {
     await hoverAt(script, hoverPosition);
 
     const durationDocs = vscode.Uri.parse(
-        'splitscript-docs:/stdlib/types/Duration.md',
+        'splitscript-docs:/stdlib/types/Duration/index.md',
     );
     const documentation = await vscode.workspace.openTextDocument(durationDocs);
     assert(documentation.languageId === 'markdown', 'virtual documentation is not Markdown');
     assert(
         documentation.getText().includes('# Duration')
-            && documentation.getText().includes('Duration.fromSeconds'),
+            && documentation.getText().includes(
+                '[fromSeconds](methods/fromSeconds.md)',
+            ),
         'the bundled language server returned incomplete standard-library documentation',
     );
     const documentationIndex = await vscode.workspace.openTextDocument(
@@ -39,17 +41,24 @@ export async function run(): Promise<void> {
     );
     assert(
         documentationIndex.getText().includes(
-            '[Duration.fromSeconds](stdlib/items/Duration.fromSeconds.md)',
+            '[Duration](stdlib/types/Duration/index.md)',
         ),
         'the documentation index does not use virtual-document-relative Markdown links',
     );
-    const typeIndex = await vscode.workspace.openTextDocument(
-        vscode.Uri.parse('splitscript-docs:/stdlib/types/index.md'),
+    assert(
+        !documentationIndex.getText().includes('Duration.fromSeconds'),
+        'the documentation index includes members that belong on type pages',
+    );
+    const methodDocs = await vscode.workspace.openTextDocument(
+        vscode.Uri.parse(
+            'splitscript-docs:/stdlib/types/Duration/methods/fromSeconds.md',
+        ),
     );
     assert(
-        typeIndex.getText().includes('[Standard library](../../index.md) / Types')
-            && typeIndex.getText().includes('[Duration](Duration.md)'),
-        'the documentation category does not provide breadcrumb navigation',
+        methodDocs.getText().includes(
+            '[Standard library](../../../../index.md) / [Duration](../index.md) / fromSeconds',
+        ),
+        'the documentation method does not follow its logical owner hierarchy',
     );
 
     const output = script.with({ path: script.path.replace(/\.split$/, '.wasm') });

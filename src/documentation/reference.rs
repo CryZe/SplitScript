@@ -2,8 +2,10 @@
 
 use crate::{
     catalog::Documentation,
+    language::LanguageCatalog,
     stdlib::{
-        FieldVisibility, ItemKind, StandardLibrary, StdlibOwner, StdlibSymbolId, StdlibTypeKind,
+        CoreTypeId, FieldVisibility, ItemKind, StandardLibrary, StdlibOwner, StdlibSymbolId,
+        StdlibTypeKind,
     },
 };
 
@@ -12,7 +14,7 @@ use super::StandardLibraryDocumentation;
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentationIndexEntry {
-    /// Stable virtual-document path, such as `/stdlib/types/Duration.md`.
+    /// Stable virtual-document path, such as `/stdlib/types/Duration/index.md`.
     pub uri: String,
     pub title: String,
     pub kind: &'static str,
@@ -28,46 +30,10 @@ pub struct DocumentationPage {
     pub markdown: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct DocumentationCategory {
-    path: &'static str,
+struct DocumentationMemberGroup {
     title: &'static str,
+    members: Vec<StdlibSymbolId>,
 }
-
-const DOCUMENTATION_CATEGORIES: &[DocumentationCategory] = &[
-    DocumentationCategory {
-        path: "namespaces",
-        title: "Namespaces",
-    },
-    DocumentationCategory {
-        path: "state-providers",
-        title: "State providers",
-    },
-    DocumentationCategory {
-        path: "capabilities",
-        title: "Capabilities",
-    },
-    DocumentationCategory {
-        path: "type-constructors",
-        title: "Type constructors",
-    },
-    DocumentationCategory {
-        path: "types",
-        title: "Types",
-    },
-    DocumentationCategory {
-        path: "fields",
-        title: "Fields",
-    },
-    DocumentationCategory {
-        path: "variants",
-        title: "Enum variants",
-    },
-    DocumentationCategory {
-        path: "items",
-        title: "Functions and methods",
-    },
-];
 
 /// Compiler-owned documentation reference consumed by editor integrations.
 ///
@@ -95,6 +61,16 @@ impl DocumentationReference {
                     signature: None,
                 }),
         );
+        entries.extend(self.library.core_types().iter().filter_map(|ty| {
+            let language = LanguageCatalog::new().builtin_type(ty.id)?;
+            Some(DocumentationIndexEntry {
+                uri: core_type_uri(ty.id, &self.library),
+                title: ty.name.to_owned(),
+                kind: "built-in type",
+                summary: language.documentation.summary,
+                signature: Some(ty.name.to_owned()),
+            })
+        }));
         entries.extend(self.library.capabilities().iter().map(|capability| {
             DocumentationIndexEntry {
                 uri: symbol_uri(StdlibSymbolId::Capability(capability.id), &self.library),
@@ -201,11 +177,15 @@ impl DocumentationReference {
         if uri == "/index.md" {
             return Some(self.index_page());
         }
-        if let Some(category) = DOCUMENTATION_CATEGORIES
+
+        if let Some(ty) = self
+            .library
+            .core_types()
             .iter()
-            .find(|category| category_uri(**category) == uri)
+            .find(|ty| core_type_uri(ty.id, &self.library) == uri)
+            && let Some(language) = LanguageCatalog::new().builtin_type(ty.id)
         {
-            return Some(self.category_page(*category));
+            return Some(self.core_type_page(ty.id, &language.documentation));
         }
 
         self.library
@@ -214,12 +194,21 @@ impl DocumentationReference {
             .find(|value| symbol_uri(StdlibSymbolId::Namespace(value.id), &self.library) == uri)
             .map(|value| {
                 self.declaration_page(
-                    uri,
+                    StdlibSymbolId::Namespace(value.id),
                     value.path.join("."),
                     "namespace",
                     None,
                     &value.documentation,
-                    self.owned_items(StdlibOwner::Namespace(value.id)),
+                    vec![
+                        DocumentationMemberGroup {
+                            title: "Namespaces",
+                            members: self.child_namespaces(value.id),
+                        },
+                        DocumentationMemberGroup {
+                            title: "Functions",
+                            members: self.owned_items(StdlibOwner::Namespace(value.id)),
+                        },
+                    ],
                 )
             })
             .or_else(|| {
@@ -230,19 +219,26 @@ impl DocumentationReference {
                         symbol_uri(StdlibSymbolId::Capability(value.id), &self.library) == uri
                     })
                     .map(|value| {
-                        let mut members = value
-                            .super_capabilities
-                            .iter()
-                            .map(|id| StdlibSymbolId::Capability(*id))
-                            .collect::<Vec<_>>();
-                        members.extend(self.owned_items(StdlibOwner::Capability(value.id)));
                         self.declaration_page(
-                            uri,
+                            StdlibSymbolId::Capability(value.id),
                             value.name.to_owned(),
                             "capability",
                             Some(format!("capability {}", value.name)),
                             &value.documentation,
-                            members,
+                            vec![
+                                DocumentationMemberGroup {
+                                    title: "Requires",
+                                    members: value
+                                        .super_capabilities
+                                        .iter()
+                                        .map(|id| StdlibSymbolId::Capability(*id))
+                                        .collect(),
+                                },
+                                DocumentationMemberGroup {
+                                    title: "Methods",
+                                    members: self.owned_items(StdlibOwner::Capability(value.id)),
+                                },
+                            ],
                         )
                     })
             })
@@ -255,12 +251,15 @@ impl DocumentationReference {
                     })
                     .map(|value| {
                         self.declaration_page(
-                            uri,
+                            StdlibSymbolId::TypeConstructor(value.id),
                             value.name.to_owned(),
                             "type constructor",
                             Some(render_type_constructor(value, &self.library)),
                             &value.documentation,
-                            self.owned_items(StdlibOwner::TypeConstructor(value.id)),
+                            vec![DocumentationMemberGroup {
+                                title: "Methods",
+                                members: self.owned_items(StdlibOwner::TypeConstructor(value.id)),
+                            }],
                         )
                     })
             })
@@ -270,24 +269,8 @@ impl DocumentationReference {
                     .iter()
                     .find(|value| symbol_uri(StdlibSymbolId::Type(value.id), &self.library) == uri)
                     .map(|value| {
-                        let mut members = value
-                            .capabilities
-                            .iter()
-                            .map(|id| StdlibSymbolId::Capability(*id))
-                            .collect::<Vec<_>>();
-                        members.extend(
-                            self.library
-                                .public_fields(value.id)
-                                .map(|field| StdlibSymbolId::Field(field.id)),
-                        );
-                        members.extend(
-                            self.library
-                                .variants_of(value.id)
-                                .map(|variant| StdlibSymbolId::Variant(variant.id)),
-                        );
-                        members.extend(self.owned_items(StdlibOwner::Type(value.id)));
                         self.declaration_page(
-                            uri,
+                            StdlibSymbolId::Type(value.id),
                             value.name.to_owned(),
                             match value.kind {
                                 StdlibTypeKind::Intrinsic => "type",
@@ -296,7 +279,36 @@ impl DocumentationReference {
                             },
                             Some(render_type_declaration(value)),
                             &value.documentation,
-                            members,
+                            vec![
+                                DocumentationMemberGroup {
+                                    title: "Capabilities",
+                                    members: value
+                                        .capabilities
+                                        .iter()
+                                        .map(|id| StdlibSymbolId::Capability(*id))
+                                        .collect(),
+                                },
+                                DocumentationMemberGroup {
+                                    title: "Fields",
+                                    members: self
+                                        .library
+                                        .public_fields(value.id)
+                                        .map(|field| StdlibSymbolId::Field(field.id))
+                                        .collect(),
+                                },
+                                DocumentationMemberGroup {
+                                    title: "Variants",
+                                    members: self
+                                        .library
+                                        .variants_of(value.id)
+                                        .map(|variant| StdlibSymbolId::Variant(variant.id))
+                                        .collect(),
+                                },
+                                DocumentationMemberGroup {
+                                    title: "Methods",
+                                    members: self.owned_items(StdlibOwner::Type(value.id)),
+                                },
+                            ],
                         )
                     })
             })
@@ -309,7 +321,7 @@ impl DocumentationReference {
                     .map(|value| {
                         let owner = self.library.type_decl(value.owner);
                         self.declaration_page(
-                            uri,
+                            StdlibSymbolId::Field(value.id),
                             format!("{}.{}", owner.name, value.name),
                             "field",
                             Some(format!(
@@ -319,7 +331,7 @@ impl DocumentationReference {
                                 self.library.render_type(value.ty)
                             )),
                             &value.documentation,
-                            vec![StdlibSymbolId::Type(value.owner)],
+                            Vec::new(),
                         )
                     })
             })
@@ -333,12 +345,12 @@ impl DocumentationReference {
                     .map(|value| {
                         let owner = self.library.type_decl(value.owner);
                         self.declaration_page(
-                            uri,
+                            StdlibSymbolId::Variant(value.id),
                             format!("{}.{}", owner.name, value.name),
                             "enum variant",
                             Some(format!("{}.{}", owner.name, value.name)),
                             &value.documentation,
-                            vec![StdlibSymbolId::Type(value.owner)],
+                            Vec::new(),
                         )
                     })
             })
@@ -351,12 +363,15 @@ impl DocumentationReference {
                     })
                     .map(|value| {
                         self.declaration_page(
-                            uri,
+                            StdlibSymbolId::StateProvider(value.id),
                             value.name.to_owned(),
                             "state provider",
                             Some(format!("state {}", value.name)),
                             &value.documentation,
-                            vec![StdlibSymbolId::Type(value.process_type)],
+                            vec![DocumentationMemberGroup {
+                                title: "Value type",
+                                members: vec![StdlibSymbolId::Type(value.process_type)],
+                            }],
                         )
                     })
             })
@@ -373,7 +388,7 @@ impl DocumentationReference {
                         );
                         let mut markdown = format!(
                             "{}\n\n# {}\n\n_{}_\n\n{}",
-                            symbol_breadcrumb(uri, value.qualified_name),
+                            self.symbol_breadcrumb(StdlibSymbolId::Item(value.id), uri),
                             value.qualified_name,
                             match value.kind {
                                 ItemKind::Function => "Function",
@@ -405,36 +420,109 @@ impl DocumentationReference {
             .collect()
     }
 
+    fn child_namespaces(&self, parent: crate::stdlib::StdlibNamespaceId) -> Vec<StdlibSymbolId> {
+        let parent = self.library.namespace(parent);
+        self.library
+            .namespaces()
+            .iter()
+            .filter(|namespace| {
+                namespace.path.len() == parent.path.len() + 1
+                    && namespace.path.starts_with(parent.path)
+            })
+            .map(|namespace| StdlibSymbolId::Namespace(namespace.id))
+            .collect()
+    }
+
+    fn core_type_page<Id>(
+        &self,
+        ty: CoreTypeId,
+        documentation: &Documentation<Id>,
+    ) -> DocumentationPage {
+        let ty = self.library.core_type(ty);
+        let uri = core_type_uri(ty.id, &self.library);
+        let mut markdown = format!(
+            "{}\n\n# {}\n\n_Built-in type_\n\n```splitscript\n{}\n```",
+            breadcrumb(&uri, Vec::new(), ty.name),
+            ty.name,
+            ty.name
+        );
+        append_documentation(&mut markdown, documentation);
+        self.append_member_groups(
+            &mut markdown,
+            &uri,
+            vec![
+                DocumentationMemberGroup {
+                    title: "Capabilities",
+                    members: ty
+                        .capabilities
+                        .iter()
+                        .map(|id| StdlibSymbolId::Capability(*id))
+                        .collect(),
+                },
+                DocumentationMemberGroup {
+                    title: "Methods",
+                    members: self.owned_items(StdlibOwner::Core(ty.id)),
+                },
+            ],
+        );
+        DocumentationPage {
+            uri,
+            title: ty.name.to_owned(),
+            markdown,
+        }
+    }
+
     fn declaration_page(
         &self,
-        uri: &str,
+        symbol: StdlibSymbolId,
         title: String,
         kind: &str,
         signature: Option<String>,
         documentation: &Documentation<StdlibSymbolId>,
-        mut members: Vec<StdlibSymbolId>,
+        member_groups: Vec<DocumentationMemberGroup>,
     ) -> DocumentationPage {
+        let uri = symbol_uri(symbol, &self.library);
         let mut markdown = format!(
             "{}\n\n# {title}\n\n_{kind}_",
-            symbol_breadcrumb(uri, &title)
+            self.symbol_breadcrumb(symbol, &uri)
         );
         if let Some(signature) = signature {
             markdown.push_str(&format!("\n\n```splitscript\n{signature}\n```"));
         }
         append_documentation(&mut markdown, documentation);
-        members.sort_by_key(|symbol| symbol_label(*symbol, &self.library));
-        members.dedup();
-        if !members.is_empty() {
-            markdown.push_str("\n\n## Members\n");
-            for member in members {
-                append_symbol_link(&mut markdown, uri, member, &self.library);
-            }
-        }
-        append_related(&mut markdown, uri, &self.library, documentation.related);
+        self.append_member_groups(&mut markdown, &uri, member_groups);
+        append_related(&mut markdown, &uri, &self.library, documentation.related);
         DocumentationPage {
-            uri: uri.to_owned(),
+            uri,
             title,
             markdown,
+        }
+    }
+
+    fn append_member_groups(
+        &self,
+        markdown: &mut String,
+        uri: &str,
+        member_groups: Vec<DocumentationMemberGroup>,
+    ) {
+        for mut group in member_groups {
+            group
+                .members
+                .sort_by_key(|symbol| symbol_label(*symbol, &self.library));
+            group.members.dedup();
+            if group.members.is_empty() {
+                continue;
+            }
+            markdown.push_str(&format!("\n\n## {}\n", group.title));
+            for member in group.members {
+                append_symbol_link_with_label(
+                    markdown,
+                    uri,
+                    member,
+                    symbol_local_label(member, &self.library),
+                    &self.library,
+                );
+            }
         }
     }
 
@@ -444,20 +532,77 @@ impl DocumentationReference {
             "# SplitScript standard library\n\n\
              This reference is generated from the same compiler-owned catalog used by type checking, completion, and hover.\n",
         );
-        for category in DOCUMENTATION_CATEGORIES {
-            let category_entries = entries
+        let sections: [(&str, Vec<String>); 5] = [
+            (
+                "Namespaces",
+                self.library
+                    .namespaces()
+                    .iter()
+                    .filter(|namespace| namespace.path.len() == 1)
+                    .map(|namespace| {
+                        symbol_uri(StdlibSymbolId::Namespace(namespace.id), &self.library)
+                    })
+                    .collect(),
+            ),
+            (
+                "Types",
+                self.library
+                    .core_types()
+                    .iter()
+                    .map(|ty| core_type_uri(ty.id, &self.library))
+                    .chain(
+                        self.library
+                            .types()
+                            .iter()
+                            .map(|ty| symbol_uri(StdlibSymbolId::Type(ty.id), &self.library)),
+                    )
+                    .chain(self.library.type_constructors().iter().map(|constructor| {
+                        symbol_uri(
+                            StdlibSymbolId::TypeConstructor(constructor.id),
+                            &self.library,
+                        )
+                    }))
+                    .collect(),
+            ),
+            (
+                "Capabilities",
+                self.library
+                    .capabilities()
+                    .iter()
+                    .map(|capability| {
+                        symbol_uri(StdlibSymbolId::Capability(capability.id), &self.library)
+                    })
+                    .collect(),
+            ),
+            (
+                "State providers",
+                self.library
+                    .state_providers()
+                    .iter()
+                    .map(|provider| {
+                        symbol_uri(StdlibSymbolId::StateProvider(provider.id), &self.library)
+                    })
+                    .collect(),
+            ),
+            (
+                "Functions",
+                self.owned_items(StdlibOwner::Root)
+                    .into_iter()
+                    .map(|item| symbol_uri(item, &self.library))
+                    .collect(),
+            ),
+        ];
+        for (title, uris) in sections {
+            let mut section = uris
                 .iter()
-                .filter(|entry| entry_category(&entry.uri) == Some(*category))
+                .filter_map(|uri| entries.iter().find(|entry| entry.uri == *uri))
                 .collect::<Vec<_>>();
-            if category_entries.is_empty() {
+            section.sort_by_key(|entry| entry.title.to_ascii_lowercase());
+            if section.is_empty() {
                 continue;
             }
-            markdown.push_str(&format!(
-                "\n## [{}]({})\n",
-                category.title,
-                relative_document_link("/index.md", &category_uri(*category))
-            ));
-            for entry in category_entries {
+            markdown.push_str(&format!("\n## {title}\n"));
+            for entry in section {
                 markdown.push_str(&format!(
                     "\n- [{}]({}) — {}",
                     entry.title,
@@ -473,30 +618,109 @@ impl DocumentationReference {
         }
     }
 
-    fn category_page(&self, category: DocumentationCategory) -> DocumentationPage {
-        let uri = category_uri(category);
-        let mut markdown = format!(
-            "[Standard library]({}) / {}\n\n# {}\n",
-            relative_document_link(&uri, "/index.md"),
-            category.title,
-            category.title
-        );
-        for entry in self
-            .index()
-            .iter()
-            .filter(|entry| entry_category(&entry.uri) == Some(category))
-        {
-            markdown.push_str(&format!(
-                "\n- [{}]({}) — {}",
-                entry.title,
-                relative_document_link(&uri, &entry.uri),
-                entry.summary
-            ));
+    fn symbol_breadcrumb(&self, symbol: StdlibSymbolId, uri: &str) -> String {
+        match symbol {
+            StdlibSymbolId::Namespace(id) => {
+                let namespace = self.library.namespace(id);
+                let ancestors = namespace
+                    .path
+                    .iter()
+                    .enumerate()
+                    .take(namespace.path.len().saturating_sub(1))
+                    .filter_map(|(index, name)| {
+                        let path = &namespace.path[..=index];
+                        self.library
+                            .namespaces()
+                            .iter()
+                            .find(|candidate| candidate.path == path)
+                            .map(|ancestor| {
+                                (
+                                    (*name).to_owned(),
+                                    symbol_uri(
+                                        StdlibSymbolId::Namespace(ancestor.id),
+                                        &self.library,
+                                    ),
+                                )
+                            })
+                    })
+                    .collect();
+                breadcrumb(uri, ancestors, namespace.name)
+            }
+            StdlibSymbolId::Field(id) => {
+                let field = self.library.field(id);
+                let owner = self.library.type_decl(field.owner);
+                breadcrumb(
+                    uri,
+                    vec![(
+                        owner.name.to_owned(),
+                        symbol_uri(StdlibSymbolId::Type(owner.id), &self.library),
+                    )],
+                    field.name,
+                )
+            }
+            StdlibSymbolId::Variant(id) => {
+                let variant = self.library.variant(id);
+                let owner = self.library.type_decl(variant.owner);
+                breadcrumb(
+                    uri,
+                    vec![(
+                        owner.name.to_owned(),
+                        symbol_uri(StdlibSymbolId::Type(owner.id), &self.library),
+                    )],
+                    variant.name,
+                )
+            }
+            StdlibSymbolId::Item(id) => {
+                let item = self.library.item(id);
+                breadcrumb(uri, self.owner_breadcrumb(item.owner), item.name)
+            }
+            _ => breadcrumb(uri, Vec::new(), &symbol_local_label(symbol, &self.library)),
         }
-        DocumentationPage {
-            uri,
-            title: category.title.to_owned(),
-            markdown,
+    }
+
+    fn owner_breadcrumb(&self, owner: StdlibOwner) -> Vec<(String, String)> {
+        match owner {
+            StdlibOwner::Root => Vec::new(),
+            StdlibOwner::Namespace(id) => {
+                let namespace = self.library.namespace(id);
+                namespace
+                    .path
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, name)| {
+                        let path = &namespace.path[..=index];
+                        self.library
+                            .namespaces()
+                            .iter()
+                            .find(|candidate| candidate.path == path)
+                            .map(|ancestor| {
+                                (
+                                    (*name).to_owned(),
+                                    symbol_uri(
+                                        StdlibSymbolId::Namespace(ancestor.id),
+                                        &self.library,
+                                    ),
+                                )
+                            })
+                    })
+                    .collect()
+            }
+            StdlibOwner::Type(id) => vec![(
+                self.library.type_decl(id).name.to_owned(),
+                symbol_uri(StdlibSymbolId::Type(id), &self.library),
+            )],
+            StdlibOwner::Core(id) => vec![(
+                self.library.core_type(id).name.to_owned(),
+                core_type_uri(id, &self.library),
+            )],
+            StdlibOwner::Capability(id) => vec![(
+                self.library.capability(id).name.to_owned(),
+                symbol_uri(StdlibSymbolId::Capability(id), &self.library),
+            )],
+            StdlibOwner::TypeConstructor(id) => vec![(
+                self.library.type_constructor(id).name.to_owned(),
+                symbol_uri(StdlibSymbolId::TypeConstructor(id), &self.library),
+            )],
         }
     }
 }
@@ -577,10 +801,26 @@ fn append_symbol_link(
     symbol: StdlibSymbolId,
     library: &StandardLibrary,
 ) {
+    append_symbol_link_with_label(
+        markdown,
+        current_uri,
+        symbol,
+        symbol_label(symbol, library),
+        library,
+    );
+}
+
+fn append_symbol_link_with_label(
+    markdown: &mut String,
+    current_uri: &str,
+    symbol: StdlibSymbolId,
+    label: String,
+    library: &StandardLibrary,
+) {
     let target = symbol_uri(symbol, library);
     markdown.push_str(&format!(
         "\n- [{}]({})",
-        symbol_label(symbol, library),
+        label,
         relative_document_link(current_uri, &target)
     ));
 }
@@ -610,30 +850,19 @@ fn relative_document_link(current_uri: &str, target_uri: &str) -> String {
     relative
 }
 
-fn category_uri(category: DocumentationCategory) -> String {
-    format!("/stdlib/{}/index.md", category.path)
-}
-
-fn entry_category(uri: &str) -> Option<DocumentationCategory> {
-    DOCUMENTATION_CATEGORIES.iter().copied().find(|category| {
-        uri.strip_prefix("/stdlib/")
-            .is_some_and(|path| path.starts_with(&format!("{}/", category.path)))
-    })
-}
-
-fn symbol_breadcrumb(uri: &str, title: &str) -> String {
-    let Some(category) = entry_category(uri) else {
-        return format!(
-            "[Standard library]({}) / {title}",
-            relative_document_link(uri, "/index.md")
-        );
-    };
-    format!(
-        "[Standard library]({}) / [{}]({}) / {title}",
-        relative_document_link(uri, "/index.md"),
-        category.title,
-        relative_document_link(uri, &category_uri(category))
-    )
+fn breadcrumb(uri: &str, ancestors: Vec<(String, String)>, current: &str) -> String {
+    let mut markdown = format!(
+        "[Standard library]({})",
+        relative_document_link(uri, "/index.md")
+    );
+    for (label, target) in ancestors {
+        markdown.push_str(&format!(
+            " / [{label}]({})",
+            relative_document_link(uri, &target)
+        ));
+    }
+    markdown.push_str(&format!(" / {current}"));
+    markdown
 }
 
 fn symbol_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
@@ -655,36 +884,92 @@ fn symbol_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
     }
 }
 
+fn symbol_local_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
+    match symbol {
+        StdlibSymbolId::StateProvider(id) => library.state_provider(id).name.to_owned(),
+        StdlibSymbolId::Namespace(id) => library.namespace(id).name.to_owned(),
+        StdlibSymbolId::Capability(id) => library.capability(id).name.to_owned(),
+        StdlibSymbolId::TypeConstructor(id) => library.type_constructor(id).name.to_owned(),
+        StdlibSymbolId::Type(id) => library.type_decl(id).name.to_owned(),
+        StdlibSymbolId::Field(id) => library.field(id).name.to_owned(),
+        StdlibSymbolId::Variant(id) => library.variant(id).name.to_owned(),
+        StdlibSymbolId::Item(id) => library.item(id).name.to_owned(),
+    }
+}
+
+fn core_type_uri(id: CoreTypeId, library: &StandardLibrary) -> String {
+    format!("/stdlib/types/{}/index.md", library.core_type(id).name)
+}
+
 fn symbol_uri(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
-    let (category, label) = match symbol {
-        StdlibSymbolId::StateProvider(id) => (
-            "state-providers",
-            library.state_provider(id).name.to_owned(),
+    match symbol {
+        StdlibSymbolId::StateProvider(id) => format!(
+            "/stdlib/state-providers/{}.md",
+            library.state_provider(id).name
         ),
-        StdlibSymbolId::Namespace(id) => ("namespaces", library.namespace(id).path.join(".")),
-        StdlibSymbolId::Capability(id) => ("capabilities", library.capability(id).name.to_owned()),
-        StdlibSymbolId::TypeConstructor(id) => (
-            "type-constructors",
-            library.type_constructor(id).name.to_owned(),
+        StdlibSymbolId::Namespace(id) => format!(
+            "/stdlib/namespaces/{}/index.md",
+            library.namespace(id).path.join("/")
         ),
-        StdlibSymbolId::Type(id) => ("types", library.type_decl(id).name.to_owned()),
+        StdlibSymbolId::Capability(id) => format!(
+            "/stdlib/capabilities/{}/index.md",
+            library.capability(id).name
+        ),
+        StdlibSymbolId::TypeConstructor(id) => format!(
+            "/stdlib/generic-types/{}/index.md",
+            library.type_constructor(id).name
+        ),
+        StdlibSymbolId::Type(id) => {
+            format!("/stdlib/types/{}/index.md", library.type_decl(id).name)
+        }
         StdlibSymbolId::Field(id) => {
             let field = library.field(id);
-            (
-                "fields",
-                format!("{}.{}", library.type_decl(field.owner).name, field.name),
+            format!(
+                "/stdlib/types/{}/fields/{}.md",
+                library.type_decl(field.owner).name,
+                field.name
             )
         }
         StdlibSymbolId::Variant(id) => {
             let variant = library.variant(id);
-            (
-                "variants",
-                format!("{}.{}", library.type_decl(variant.owner).name, variant.name),
+            format!(
+                "/stdlib/types/{}/variants/{}.md",
+                library.type_decl(variant.owner).name,
+                variant.name
             )
         }
-        StdlibSymbolId::Item(id) => ("items", library.item(id).qualified_name.to_owned()),
-    };
-    format!("/stdlib/{category}/{label}.md")
+        StdlibSymbolId::Item(id) => {
+            let item = library.item(id);
+            match item.owner {
+                StdlibOwner::Root => format!("/stdlib/functions/{}.md", item.name),
+                StdlibOwner::Namespace(owner) => format!(
+                    "/stdlib/namespaces/{}/{}.md",
+                    library.namespace(owner).path.join("/"),
+                    item.name
+                ),
+                StdlibOwner::Type(owner) => format!(
+                    "/stdlib/types/{}/methods/{}.md",
+                    library.type_decl(owner).name,
+                    item.name
+                ),
+                StdlibOwner::Core(owner) => format!(
+                    "/stdlib/types/{}/methods/{}.md",
+                    library.core_type(owner).name,
+                    item.name
+                ),
+                StdlibOwner::Capability(owner) => format!(
+                    "/stdlib/capabilities/{}/methods/{}.md",
+                    library.capability(owner).name,
+                    item.name
+                ),
+                StdlibOwner::TypeConstructor(owner) => format!(
+                    "/stdlib/generic-types/{}/methods/{}.md",
+                    library.type_constructor(owner).name,
+                    item.name
+                ),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -697,6 +982,7 @@ mod tests {
         let index = reference.index();
         for kind in [
             "namespace",
+            "built-in type",
             "capability",
             "type constructor",
             "type",
@@ -715,69 +1001,81 @@ mod tests {
             .iter()
             .find(|entry| entry.title == "Duration")
             .expect("Duration is indexed");
-        assert_eq!(duration.uri, "/stdlib/types/Duration.md");
+        assert_eq!(duration.uri, "/stdlib/types/Duration/index.md");
         let page = reference.page(&duration.uri).expect("Duration has a page");
         assert!(page.markdown.contains("\n\n# Duration\n"));
         assert!(
             page.markdown
-                .starts_with("[Standard library](../../index.md) / [Types](index.md) / Duration")
+                .starts_with("[Standard library](../../../index.md) / Duration")
         );
-        assert!(page.markdown.contains("Duration.fromSeconds"));
-        assert!(page.markdown.contains("(../items/Duration.fromSeconds.md)"));
+        assert!(
+            page.markdown
+                .contains("[fromSeconds](methods/fromSeconds.md)")
+        );
         assert!(!page.markdown.contains("splitscript-docs:"));
     }
 
     #[test]
-    fn reference_root_is_generated_from_the_search_index() {
+    fn reference_root_only_contains_top_level_declarations() {
         let reference = DocumentationReference::default();
         let page = reference.page("/index.md").expect("root page exists");
         assert_eq!(page.title, "SplitScript standard library");
         assert!(page.markdown.contains("# SplitScript standard library"));
-        assert!(page.markdown.contains("Duration.fromSeconds"));
         assert!(
             page.markdown
-                .contains("(stdlib/items/Duration.fromSeconds.md)")
+                .contains("[Duration](stdlib/types/Duration/index.md)")
         );
-        assert!(
-            page.markdown
-                .contains("## [Functions and methods](stdlib/items/index.md)")
-        );
+        assert!(!page.markdown.contains("Duration.fromSeconds"));
+        assert!(!page.markdown.contains("FileVersion.major"));
+        assert!(!page.markdown.contains("TimerState.Running"));
         assert!(reference.page("/missing.md").is_none());
     }
 
     #[test]
-    fn category_pages_form_the_middle_breadcrumb_level() {
+    fn owned_symbols_are_nested_under_their_declaring_types() {
         let reference = DocumentationReference::default();
-        let page = reference
-            .page("/stdlib/types/index.md")
-            .expect("types category exists");
-        assert!(
-            page.markdown
-                .starts_with("[Standard library](../../index.md) / Types")
-        );
-        assert!(page.markdown.contains("# Types"));
-        assert!(page.markdown.contains("[Duration](Duration.md)"));
+
+        let method = reference
+            .page("/stdlib/types/Duration/methods/fromSeconds.md")
+            .expect("Duration.fromSeconds has a page");
+        assert!(method.markdown.starts_with(
+            "[Standard library](../../../../index.md) / [Duration](../index.md) / fromSeconds"
+        ));
+
+        let field = reference
+            .page("/stdlib/types/FileVersion/fields/major.md")
+            .expect("FileVersion.major has a page");
+        assert!(field.markdown.starts_with(
+            "[Standard library](../../../../index.md) / [FileVersion](../index.md) / major"
+        ));
+
+        let variant = reference
+            .page("/stdlib/types/TimerState/variants/Running.md")
+            .expect("TimerState.Running has a page");
+        assert!(variant.markdown.starts_with(
+            "[Standard library](../../../../index.md) / [TimerState](../index.md) / Running"
+        ));
     }
 
     #[test]
     fn documentation_links_are_relative_to_the_current_virtual_page() {
         assert_eq!(
-            relative_document_link("/index.md", "/stdlib/types/Duration.md"),
-            "stdlib/types/Duration.md"
+            relative_document_link("/index.md", "/stdlib/types/Duration/index.md"),
+            "stdlib/types/Duration/index.md"
         );
         assert_eq!(
             relative_document_link(
-                "/stdlib/types/Duration.md",
-                "/stdlib/items/Duration.fromSeconds.md"
+                "/stdlib/types/Duration/index.md",
+                "/stdlib/types/Duration/methods/fromSeconds.md"
             ),
-            "../items/Duration.fromSeconds.md"
+            "methods/fromSeconds.md"
         );
         assert_eq!(
             relative_document_link(
-                "/stdlib/items/Duration.fromSeconds.md",
-                "/stdlib/items/Duration.fromMinutes.md"
+                "/stdlib/types/Duration/methods/fromSeconds.md",
+                "/stdlib/types/Duration/methods/fromMinutes.md"
             ),
-            "Duration.fromMinutes.md"
+            "fromMinutes.md"
         );
     }
 }

@@ -29,7 +29,7 @@ fn serves_compiler_owned_documentation_index_and_markdown_pages() {
     let entries = index[0]["result"].as_array().unwrap();
     assert!(entries.iter().any(|entry| {
         entry["title"] == "Duration"
-            && entry["uri"] == "/stdlib/types/Duration.md"
+            && entry["uri"] == "/stdlib/types/Duration/index.md"
             && entry["kind"] == "record"
     }));
 
@@ -37,14 +37,14 @@ fn serves_compiler_owned_documentation_index_and_markdown_pages() {
         "jsonrpc": "2.0",
         "id": 41,
         "method": "splitscript/documentation/page",
-        "params": { "uri": "/stdlib/types/Duration.md" }
+        "params": { "uri": "/stdlib/types/Duration/index.md" }
     }));
     assert_eq!(page[0]["result"]["title"], "Duration");
     assert!(
         page[0]["result"]["markdown"]
             .as_str()
             .unwrap()
-            .contains("Duration.fromSeconds")
+            .contains("[fromSeconds](methods/fromSeconds.md)")
     );
 
     let missing = server.handle(json!({

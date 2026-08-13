@@ -79,6 +79,11 @@ whileAttached {
     )
     setVariable("Unknown Setting by Key", enabledName(currentSettings.enabled("missing")))
     setVariable("Choice Setting by Key", enabledName(currentSettings.enabled("captureMode")))
+    setVariable("Contains Boolean Key", currentSettings.contains("auto-splitting"))
+    setVariable("Contains Choice Key", currentSettings.contains("captureMode"))
+    setVariable("Contains File Key", currentSettings.contains("layoutFile"))
+    setVariable("Contains Heading Key", currentSettings.contains("_heading0"))
+    setVariable("Contains Unknown Key", currentSettings.contains("missing"))
     setVariable("Capture Source", captureModeName(currentSettings.captureMode))
     setVariable("Layout File", currentSettings.layoutFile)
 

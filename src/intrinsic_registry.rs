@@ -80,10 +80,11 @@ pub(crate) enum RuntimeHelperId {
     GbaTranslateAddress,
     RefreshSettings,
     SettingsEnabled,
+    SettingsContains,
 }
 
 impl RuntimeHelperId {
-    pub(crate) const COUNT: usize = Self::SettingsEnabled as usize + 1;
+    pub(crate) const COUNT: usize = Self::SettingsContains as usize + 1;
 
     pub(crate) const fn index(self) -> usize {
         self as usize
@@ -352,6 +353,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::IntegerToStringRadix => &[Helper(Runtime::FormatI64)],
         IntrinsicId::RuntimeSetTickRate => &[HostImport(Host::RuntimeSetTickRate)],
         IntrinsicId::SettingsEnabled => &[Helper(Runtime::SettingsEnabled)],
+        IntrinsicId::SettingsContains => &[Helper(Runtime::SettingsContains)],
         IntrinsicId::InstantNow => &[HostImport(Host::WasiClockTimeGet)],
         IntrinsicId::TimerState => &[HostImport(Host::TimerGetState)],
         IntrinsicId::TimerCurrentSplitIndex => &[HostImport(Host::TimerCurrentSplitIndex)],
@@ -671,6 +673,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         ),
         IntrinsicId::SettingsEnabled => contract!(
             SettingsEnabled,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(SETTINGS_VIEW),
+                params![value(STRING)],
+                BOOL,
+            ),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::SettingsContains => contract!(
+            SettingsContains,
             Method,
             signature(
                 NO_TYPE_PARAMETERS,

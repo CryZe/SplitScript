@@ -344,3 +344,7 @@ pub(super) fn build_refresh_settings(inputs: &RuntimeHelperInputs<'_>) -> Functi
 pub(super) fn build_settings_enabled(inputs: &RuntimeHelperInputs<'_>) -> Function {
     settings::compile_settings_enabled(inputs.program, inputs.settings_map, inputs.gc)
 }
+
+pub(super) fn build_settings_contains(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    settings::compile_settings_contains(inputs.program, inputs.gc)
+}

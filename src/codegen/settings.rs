@@ -95,26 +95,7 @@ pub(super) fn compile_settings_enabled(
         let storage = settings
             .get(&setting.id)
             .expect("boolean settings have current and previous storage");
-        let bytes = setting.runtime_key().as_bytes();
-
-        function
-            .instruction(&Instruction::LocalGet(key))
-            .instruction(&Instruction::RefAsNonNull)
-            .instruction(&Instruction::ArrayLen)
-            .instruction(&Instruction::I32Const(bytes.len() as i32))
-            .instruction(&Instruction::I32Eq)
-            .instruction(&Instruction::If(BlockType::Empty))
-            .instruction(&Instruction::I32Const(1));
-        for (index, byte) in bytes.iter().copied().enumerate() {
-            function
-                .instruction(&Instruction::LocalGet(key))
-                .instruction(&Instruction::RefAsNonNull)
-                .instruction(&Instruction::I32Const(index as i32))
-                .instruction(&Instruction::ArrayGetU(string_type))
-                .instruction(&Instruction::I32Const(i32::from(byte)))
-                .instruction(&Instruction::I32Eq)
-                .instruction(&Instruction::I32And);
-        }
+        emit_setting_key_match(&mut function, key, string_type, setting.runtime_key());
         function
             .instruction(&Instruction::If(BlockType::Empty))
             .instruction(&Instruction::LocalGet(view))
@@ -124,7 +105,6 @@ pub(super) fn compile_settings_enabled(
             .instruction(&Instruction::GlobalGet(storage.current))
             .instruction(&Instruction::End)
             .instruction(&Instruction::Return)
-            .instruction(&Instruction::End)
             .instruction(&Instruction::End);
     }
 
@@ -132,6 +112,58 @@ pub(super) fn compile_settings_enabled(
         .instruction(&Instruction::I32Const(0))
         .instruction(&Instruction::End);
     function
+}
+
+/// Builds declaration membership for dynamic setting keys. This intentionally
+/// ignores headings and host values: a disabled declared boolean must remain
+/// distinguishable from an unknown key.
+pub(super) fn compile_settings_contains(program: &Program, gc: &GcLayout) -> Function {
+    let mut function = Function::new([]);
+    let key = 1;
+    let string_type = gc.standard_index(StdlibTypeId::String);
+
+    for setting in &program.settings {
+        if matches!(setting.kind, SettingKind::Title { .. }) {
+            continue;
+        }
+        emit_setting_key_match(&mut function, key, string_type, setting.runtime_key());
+        function
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::Return)
+            .instruction(&Instruction::End);
+    }
+
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::End);
+    function
+}
+
+fn emit_setting_key_match(function: &mut Function, key: u32, string_type: u32, expected: &str) {
+    let bytes = expected.as_bytes();
+    function
+        .instruction(&Instruction::LocalGet(key))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::I32Const(bytes.len() as i32))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(1));
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        function
+            .instruction(&Instruction::LocalGet(key))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::I32Const(index as i32))
+            .instruction(&Instruction::ArrayGetU(string_type))
+            .instruction(&Instruction::I32Const(i32::from(byte)))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::I32And);
+    }
+    function
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::End);
 }
 
 pub(super) fn compile_refresh_settings(

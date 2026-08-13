@@ -808,6 +808,21 @@ settings. If the original settings have a boolean parent, gate the child result
 explicitly; a quoted SplitScript heading is visual only. The complete A Plague
 Tale example preserves its **All Chapters** parent semantics this way.
 
+When cursor advancement depends on declaration membership rather than whether
+the split is enabled, keep the two questions separate:
+
+```splitscript
+if settings.contains(checkpointKey) {
+    checkpointIndex += 1
+    return settings.enabled(checkpointKey)
+}
+```
+
+`contains` recognizes declared boolean, choice, and file keys, including
+explicit `key "..."` spellings. It returns false for visual headings and unknown
+keys. This matches legacy `Settings.ContainsKey` without exposing a dynamically
+typed host map.
+
 When legacy `startup` creates a bounded numbered family, declare it at compile
 time rather than expanding dozens of source members or mutating the settings
 map:

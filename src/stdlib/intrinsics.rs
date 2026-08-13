@@ -12,6 +12,7 @@ macro_rules! trusted_intrinsics {
             TimerSetVariable,
             RuntimeSetTickRate,
             SettingsEnabled,
+            SettingsContains,
             InstantNow,
             NextTick,
             BoolNot,

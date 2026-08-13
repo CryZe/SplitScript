@@ -3266,3 +3266,13 @@ language catalog document the refinement rule.
   scripts receive the existing typed GC-owned `Module` representation.
 - Added a host-executed regression proving present and absent lookup semantics
   without adding full module enumeration prematurely.
+
+# 2026-08-13: dynamic setting membership
+
+- Added allocation-free `SettingsView.contains(key)` over the compiler-known
+  value-setting declarations, distinguishing a disabled known boolean from an
+  unknown key without exposing a dynamically typed settings map.
+- Included boolean, choice, and file keys while deliberately excluding visual
+  headings, and shared the UTF-8 key comparison lowering with `enabled`.
+- Added host-runtime coverage for current and previous settings views, every
+  value-setting kind, headings, unknown keys, and disabled known values.

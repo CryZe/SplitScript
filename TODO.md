@@ -99,8 +99,9 @@ or behavioral parity.
   host architecture are available now. Design PID discovery/attachment around
   the language's single process-lifetime boundary. Mapped ranges are now
   exposed as a synchronous GC-owned `[MemoryRange]` snapshot with typed
-  readable, writable, and executable flags; represent recursive settings
-  maps/lists/values as GC-owned collections
+  readable, writable, and executable flags. Dynamic declaration membership is
+  available through `settings.contains(key)` without exposing host values;
+  represent recursive settings maps/lists/values as GC-owned collections
   and a typed value enum. Preserve atomic `storeIfUnchanged` behavior when
   mutable settings data is eventually exposed. The settings declaration DSL
   remains the normal registration API, and `start`/`split`/`reset` blocks remain

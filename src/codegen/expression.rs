@@ -2513,14 +2513,15 @@ fn compile_expr_unconverted(
                         .function(RuntimeHelperId::TimerSetVariable),
                 ));
             }
-            IntrinsicId::SettingsEnabled => {
+            IntrinsicId::SettingsEnabled | IntrinsicId::SettingsContains => {
                 compile_receiver(function, target, context);
                 compile_expr(function, args[0], context);
-                function.instruction(&Instruction::Call(
-                    context
-                        .runtime_helpers
-                        .function(RuntimeHelperId::SettingsEnabled),
-                ));
+                let helper = if intrinsic == Some(IntrinsicId::SettingsEnabled) {
+                    RuntimeHelperId::SettingsEnabled
+                } else {
+                    RuntimeHelperId::SettingsContains
+                };
+                function.instruction(&Instruction::Call(context.runtime_helpers.function(helper)));
             }
             IntrinsicId::TimerState => {
                 let host_state = context.matches.intrinsic_temps[&expression][0];

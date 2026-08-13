@@ -201,6 +201,26 @@ intrinsic type SettingsView {
         /// source identifier when it has no explicit key.
         key: String,
     ) -> bool;
+
+    /// Reports whether a value setting declares the stable host key.
+    ///
+    /// This distinguishes a known disabled boolean from an unknown key.
+    /// Headings are visual structure rather than values and are not included.
+    ///
+    /// # Example
+    ///
+    /// Advance a data cursor even when its known split is disabled
+    ///
+    /// ```splitscript
+    /// if settings.contains(checkpointKey) {
+    ///     checkpointIndex += 1
+    /// }
+    /// ```
+    @intrinsic(SettingsContains)
+    fn contains(
+        /// The exact stable host-map key.
+        key: String,
+    ) -> bool;
 }
 
 /// Accesses the attached game process.

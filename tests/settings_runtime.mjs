@@ -28,6 +28,11 @@ expectVariable("Auto Splitting by Key", "enabled");
 expectVariable("Previous Auto Splitting by Key", "enabled");
 expectVariable("Unknown Setting by Key", "disabled");
 expectVariable("Choice Setting by Key", "disabled");
+expectVariable("Contains Boolean Key", "true");
+expectVariable("Contains Choice Key", "true");
+expectVariable("Contains File Key", "true");
+expectVariable("Contains Heading Key", "false");
+expectVariable("Contains Unknown Key", "false");
 expectVariable("Capture Source", "Executable Name");
 expectVariable("Layout File", "");
 

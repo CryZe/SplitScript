@@ -24,6 +24,13 @@ const COMPILE_FIXTURES: &[CompileFixture] = &[];
 
 const RUNTIME_FIXTURES: &[RuntimeFixture] = &[
     RuntimeFixture {
+        source: "examples/axiom_verge.split",
+        output: "axiom_verge.wasm",
+        profile: "release",
+        harness: "tests/axiom_verge_runtime.mjs",
+        extra_arguments: &[],
+    },
+    RuntimeFixture {
         source: "examples/a_hat_in_time.split",
         output: "a_hat_in_time.wasm",
         profile: "release",

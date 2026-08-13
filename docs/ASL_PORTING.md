@@ -12,6 +12,9 @@ Epic, Xbox, and unsupported-build fixtures. The smaller
 example isolates bounded native strings, lifecycle transitions, and pause-menu
 load removal. [`examples/aquanox.split`](../examples/aquanox.split) demonstrates
 a nullable native-string watcher whose failed read is observable as `None`.
+The [maintained Axiom Verge port](AXIOM_VERGE_PORT.md) combines dynamic UTF-16
+event names with declared-setting membership, recursive legacy parent gating,
+and optional-module platform detection.
 
 ## Signed pointer offsets
 

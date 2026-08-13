@@ -125,6 +125,10 @@ The current runtime calls only the Wasm `update` export. Polling
 `timer_current_split_index` observes ordinary advancement, but it cannot
 distinguish an undo followed by another split between two updates. It also
 cannot provide exact `onStart`, `onSplit`, and `onReset` events while detached.
+The maintained Axiom Verge port can clear its event cursors after an attached
+`NotRunning` transition, but cannot reproduce the legacy `OnStart` callback
+when the timer starts before process attachment. Its diagnostic-only `OnSplit`
+callback is intentionally omitted rather than approximated.
 
 The runtime should eventually expose an ordered, lossless timer-event contract.
 This could be callback exports or a sequenced event queue consumed during
@@ -192,6 +196,10 @@ The existing host supports booleans, headings, choices, file selection,
 filters, tooltips, and a global settings map. Future ports may require
 conditional visibility or enablement and repeated/table-shaped settings. Those
 features need a frontend/runtime contract, not merely new SplitScript syntax.
+The maintained Axiom Verge port provides concrete semantics: its category
+checkboxes recursively gate child values in legacy ASL. SplitScript preserves
+that behavior explicitly in source, but the current host cannot present those
+checkboxes as the visual and interactive parents of nested controls.
 
 The bulk ASL campaign found finite loops that register 35, 50, or 110 boolean
 settings and then look them up by string key. A compile-time repeated/table

@@ -61,6 +61,15 @@ and exact structured-name parsing with the immutable `String.split` API:
 cargo run --bin splitc -- examples/operation_matriarchy.split -o target/operation_matriarchy.wasm
 ```
 
+The maintained Axiom Verge port combines cooperative process-wide scanning,
+optional-module detection, dynamic UTF-16 identifiers, and recursively gated
+legacy settings. Its [conformance record](docs/AXIOM_VERGE_PORT.md) separates
+runtime-verified behavior from the remaining host lifecycle limitations:
+
+```console
+cargo run --bin splitc -- examples/axiom_verge.split -o target/axiom_verge.wasm
+```
+
 ## Build and use
 
 ```console

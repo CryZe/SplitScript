@@ -1,0 +1,444 @@
+/// Describes the memory paths discovered for the active executable build.
+record AxiomVergeLayout {
+    /// The player's maximum-health value.
+    maxHealth: MemoryPath,
+    /// The game's sixty-hertz elapsed tick counter.
+    ticks: MemoryPath,
+    /// The number of checkpoint identifiers recorded by the game.
+    checkpointCount: MemoryPath,
+    /// The number of collected item identifiers recorded by the game.
+    itemCount: MemoryPath,
+    /// The number of key-point identifiers recorded by the game.
+    keyPointCount: MemoryPath,
+}
+
+state ["AxiomVerge.exe", "RandomAV.exe"] {
+    /// The player's current maximum health.
+    maxHealth: i32 = process.read(resolvePath(selectedLayout()?.maxHealth)?)?;
+    /// The game's elapsed time measured in sixty-hertz ticks.
+    ticks: f64 = process.read(resolvePath(selectedLayout()?.ticks)?)?;
+    /// The number of checkpoint identifiers currently stored by the game.
+    checkpointCount: i32 = process.read(resolvePath(selectedLayout()?.checkpointCount)?)?;
+    /// The number of collected item identifiers currently stored by the game.
+    itemCount: i32 = process.read(resolvePath(selectedLayout()?.itemCount)?)?;
+    /// The number of key-point identifiers currently stored by the game.
+    keyPointCount: i32 = process.read(resolvePath(selectedLayout()?.keyPointCount)?)?;
+}
+
+settings {
+    "General" {
+        /// Reset needs to be enabled in LiveSplit for this setting to take effect.
+        "Reset on death" => resetOnDeath key "reset_death": false,
+        "End" => ending key "DIALOGUE_Ending": true,
+    },
+    "Bosses" {
+        "Enable boss splits" => bosses key "bosses": true,
+        "Xedur (start)" => xedurStart key "DIALOGUE_SecurityWormMeet": true,
+        "Xedur (end)" => xedurEnd key "Xedur": true,
+        "Telal (start)" => telalStart key "DIALOGUE_SoldierBossMeet": true,
+        "Telal (end)" => telalEnd key "Telal": true,
+        "Uruku (start)" => urukuStart key "DIALOGUE_SlugBossMeet": true,
+        "Uruku (end)" => urukuEnd key "Uruku": true,
+        "Gir-Tab (start)" => girTabStart key "DIALOGUE_ScorpionBossMeet": false,
+        "Gir-Tab (end)" => girTabEnd key "Gir-Tab": false,
+        "Vision (start)" => visionStart key "DIALOGUE_MantaBossMeet": true,
+        "Vision (end)" => visionEnd key "Vision": true,
+        "Clone (start)" => cloneStart key "DIALOGUE_DeformedTraceReveal": false,
+        "Clone (end)" => cloneEnd key "Clone": false,
+        "Ukhu (start)" => ukhuStart key "DIALOGUE_SpitBugBossMeet": true,
+        "Ukhu (end)" => ukhuEnd key "Ukhu": true,
+        "Sentinel (end)" => sentinelEnd key "Sentinel": true,
+        "Xedur Hul (start)" => xedurHulStart key "DIALOGUE_SecurityWormAdvancedMeet": false,
+        "Xedur Hul (end)" => xedurHulEnd key "Xedur Hul": false,
+        "Athetos (start)" => athetosStart key "DIALOGUE_AthetosMeet": true,
+        "Athetos (end)" => athetosEnd key "Athetos": true,
+    },
+    "Weapons" {
+        "Enable weapon splits" => weapons key "weapons": true,
+        "Axiom Disruptor" => dataDisruptor key "DataDisruptor": true,
+        "Data Bomb" => dataGrenade key "DataGrenade": false,
+        "Distortion Field" => distortionField key "DistortionField": false,
+        "Fat Beam" => fatBeam key "FatBeam": false,
+        "Fire Wall" => fireWall key "FireWall": false,
+        "Flame Thrower" => flameThrower key "FlameThrower": false,
+        "Heat Seeker" => heatSeeker key "HeatSeeker": false,
+        "Hypo-Atomizer" => verticalSpread key "VerticalSpread": false,
+        "Inertial Pulse" => inertialPulse key "InertialPulse": false,
+        "Ion Beam" => ionBeam key "IonBeam": false,
+        "Kilver" => kilver key "Kilver": true,
+        "Lightning Gun" => lightningGun key "LightningGun": false,
+        "Multi Disruptor" => multiDisruptor key "MultiDisruptor": false,
+        "Nova" => nova key "Nova": true,
+        "Orbital Discharge" => wallTrace key "WallTrace": false,
+        "Quantum Variegator" => swim key "Swim": false,
+        "Reflector" => reflect key "Reflect": false,
+        "Reverse Slicer" => scythe key "Scythe": false,
+        "Scissor Beam" => webSlicer key "WebSlicer": false,
+        "Shards" => shards key "Shards": false,
+        "Tethered Charge" => tetheredCharge key "TetheredCharge": false,
+        "Turbine Pulse" => triCone key "TriCone": false,
+        "Voranj" => voranj key "Voranj": false,
+    },
+    "Tools" {
+        "Enable tool splits" => tools key "tools": true,
+        "Address Bomb" => glitchBomb key "GlitchBomb": false,
+        "Address Disruptor" => addressDisruptor1 key "AddressDisruptor1": true,
+        "Address Disruptor 2" => addressDisruptor2 key "AddressDisruptor2": true,
+        "Bioflux Accelerator 1" => tendrilsTop key "TendrilsTop": false,
+        "Bioflux Accelerator 2" => tendrilsBottom key "TendrilsBottom": false,
+        "Drone Teleport" => droneTeleport key "DroneTeleport": true,
+        "Extended Drone Launch" => enhancedLaunch key "EnhancedLaunch": true,
+        "Field Disruptor" => highJump key "HighJump": true,
+        "Grapple" => grapple key "Grapple": false,
+        "Laser Drill" => drill key "Drill": true,
+        "Modified Lab Coat" => glitchTeleport key "GlitchTeleport": true,
+        "Password Tool" => passwordTool key "PasswordTool": false,
+        "Red Coat" => redCoat key "RedCoat": true,
+        "Remote Drone" => droneGun key "DroneGun": true,
+        "Sudran Key" => breachSuppressor key "BreachSuppressor": true,
+        "Trenchcoat" => blackCoat key "BlackCoat": true,
+    },
+    "Health Nodes" {
+        "Enable health-node splits" => healthNodes key "healthnodes": true,
+        /// Area: Eribu. Location: Entering Absu.
+        "Health Node 1" => healthNode1 key "HealthNode1": true,
+        /// Area: Absu. Location: Middle of Lower Shaft.
+        "Health Node 2" => healthNode2 key "HealthNode2": true,
+        /// Area: Zi. Location: Boss Room.
+        "Health Node 3" => healthNode3 key "HealthNode3": false,
+        /// Area: Kur. Location: Lair Secret.
+        "Health Node 4" => healthNode4 key "HealthNode4": false,
+        /// Area: Ukkin-Na. Location: Right of Ophelia.
+        "Health Node 5" => healthNode5 key "HealthNode5": false,
+        /// Area: Edin. Location: Hangar Attic Second.
+        "Health Node 6" => healthNode6 key "HealthNode6": false,
+        /// Area: Edin. Location: West Tower West Secret.
+        "Health Node 7" => healthNode7 key "HealthNode7": false,
+        /// Area: Mar-Uru. Location: After Sentinel.
+        "Health Node 8" => healthNode8 key "HealthNode8": false,
+        /// Area: Eribu. Location: Reflector Room.
+        "Health Node 9" => healthNode9 key "HealthNode9": false,
+    },
+    "Power Nodes" {
+        "Enable power-node splits" => powerNodes key "powernodes": true,
+        /// Area: Eribu. Location: Drilled Under Xedur.
+        "Power Node 1" => powerNode1 key "PowerNode1": true,
+        /// Area: Absu. Location: Exit to Zi.
+        "Power Node 2" => powerNode2 key "PowerNode2": true,
+        /// Area: Kur. Location: Near Indi Exit.
+        "Power Node 3" => powerNode3 key "PowerNode3": true,
+        /// Area: Kur. Location: Crumbling Blocks.
+        "Power Node 4" => powerNode4 key "PowerNode4": false,
+        /// Area: Edin. Location: Hangar Attic.
+        "Power Node 5" => powerNode5 key "PowerNode5": false,
+        /// Area: E-Kur-Mah. Location: Behind Seal.
+        "Power Node 6" => powerNode6 key "PowerNode6": true,
+    },
+    "Size Nodes" {
+        "Enable size-node splits" => sizeNodes key "sizenodes": true,
+        /// Area: Eribu. Location: Red Stalagmites.
+        "Size Node 1" => sizeNode1 key "SizeNode1": true,
+        /// Area: Absu. Location: Purple Corrupted Diatom.
+        "Size Node 2" => sizeNode2 key "SizeNode2": true,
+        /// Area: Zi. Location: High Jump Access.
+        "Size Node 3" => sizeNode3 key "SizeNode3": true,
+        /// Area: Mar-Uru. Location: Hybrid Room.
+        "Size Node 4" => sizeNode4 key "SizeNode4": true,
+    },
+    "Range Nodes" {
+        "Enable range-node splits" => rangeNodes key "rangenodes": true,
+        /// Area: Absu. Location: Green Fungus Secret.
+        "Range Node 1" => rangeNode1 key "RangeNode1": true,
+        /// Area: Zi. Location: Center Steam Room.
+        "Range Node 2" => rangeNode2 key "RangeNode2": true,
+        /// Area: Edin. Location: Hidden Tunnel West.
+        "Range Node 3" => rangeNode3 key "RangeNode3": true,
+        /// Area: Absu. Location: Below Corruption.
+        "Range Node 4" => rangeNode4 key "RangeNode4": true,
+    },
+    "Notes" {
+        "Enable note splits" => notes key "notes": true,
+        for note in 1..=28 {
+            `Note {note}` key `Note{note}`: false,
+        },
+    },
+}
+
+let layout: AxiomVergeLayout? = None
+let gameRoot: address = 0x0
+let lastCheckpoint = 0
+let lastItem = 0
+let lastKeyPoint = 0
+let resetRequested = false
+let lastTimerState = TimerState.NotRunning
+let bossSettingKeys = [
+    "DIALOGUE_SecurityWormMeet",
+    "Xedur",
+    "DIALOGUE_SoldierBossMeet",
+    "Telal",
+    "DIALOGUE_SlugBossMeet",
+    "Uruku",
+    "DIALOGUE_ScorpionBossMeet",
+    "Gir-Tab",
+    "DIALOGUE_MantaBossMeet",
+    "Vision",
+    "DIALOGUE_DeformedTraceReveal",
+    "Clone",
+    "DIALOGUE_SpitBugBossMeet",
+    "Ukhu",
+    "Sentinel",
+    "DIALOGUE_SecurityWormAdvancedMeet",
+    "Xedur Hul",
+    "DIALOGUE_AthetosMeet",
+    "Athetos",
+]
+let weaponSettingKeys = [
+    "DataDisruptor",
+    "DataGrenade",
+    "DistortionField",
+    "FatBeam",
+    "FireWall",
+    "FlameThrower",
+    "HeatSeeker",
+    "VerticalSpread",
+    "InertialPulse",
+    "IonBeam",
+    "Kilver",
+    "LightningGun",
+    "MultiDisruptor",
+    "Nova",
+    "WallTrace",
+    "Swim",
+    "Reflect",
+    "Scythe",
+    "WebSlicer",
+    "Shards",
+    "TetheredCharge",
+    "TriCone",
+    "Voranj",
+]
+let toolSettingKeys = [
+    "GlitchBomb",
+    "AddressDisruptor1",
+    "AddressDisruptor2",
+    "TendrilsTop",
+    "TendrilsBottom",
+    "DroneTeleport",
+    "EnhancedLaunch",
+    "HighJump",
+    "Grapple",
+    "Drill",
+    "GlitchTeleport",
+    "PasswordTool",
+    "RedCoat",
+    "DroneGun",
+    "BreachSuppressor",
+    "BlackCoat",
+]
+
+/// Resolves a layout path after attachment has initialized it.
+fn resolvePath(path: MemoryPath) -> address! {
+    return path.resolve()
+}
+
+/// Returns the layout selected during attachment.
+fn selectedLayout() -> AxiomVergeLayout! {
+    let initialized = layout else return Err("Axiom Verge layout is not initialized")
+    return initialized
+}
+
+/// Applies the recursive parent-setting behavior used by legacy ASL.
+fn eventEnabled(key: String) -> bool {
+    if bossSettingKeys.contains(key) {
+        return settings.bosses && settings.enabled(key)
+    }
+    if weaponSettingKeys.contains(key) {
+        return settings.weapons && settings.enabled(key)
+    }
+    if toolSettingKeys.contains(key) {
+        return settings.tools && settings.enabled(key)
+    }
+    if key.startsWith("HealthNode") {
+        return settings.healthNodes && settings.enabled(key)
+    }
+    if key.startsWith("PowerNode") {
+        return settings.powerNodes && settings.enabled(key)
+    }
+    if key.startsWith("SizeNode") {
+        return settings.sizeNodes && settings.enabled(key)
+    }
+    if key.startsWith("RangeNode") {
+        return settings.rangeNodes && settings.enabled(key)
+    }
+    if key.startsWith("Note") {
+        return settings.notes && settings.enabled(key)
+    }
+    return settings.enabled(key)
+}
+
+/// Reads a UTF-16 checkpoint identifier by its zero-based index.
+fn readCheckpoint(index: i32) -> String! {
+    let indexOffset = (index * 4 + 8) as i64
+    let lengthPath = gameRoot.memoryPath(
+        [0xe0, 0x48, 0x4, indexOffset, 0xc],
+        0x4,
+        PointerSize.Bit32,
+    )
+    let length = process.read<i32>(lengthPath.resolve()?)?
+    if length < 0 {
+        return Err("checkpoint identifier has a negative length")
+    }
+    let textPath = gameRoot.memoryPath(
+        [0xe0, 0x48, 0x4, indexOffset, 0xc],
+        0x8,
+        PointerSize.Bit32,
+    )
+    return process.readUtf16Le(textPath.resolve()?, length as u32)
+}
+
+/// Reads a UTF-16 collected-item identifier by its zero-based index.
+fn readItem(index: i32) -> String! {
+    let indexOffset = (index * 4 + 8) as i64
+    let lengthPath = gameRoot.memoryPath(
+        [0xe0, 0x30, 0x4, indexOffset, 0x4],
+        0x4,
+        PointerSize.Bit32,
+    )
+    let length = process.read<i32>(lengthPath.resolve()?)?
+    if length < 0 {
+        return Err("item identifier has a negative length")
+    }
+    let textPath = gameRoot.memoryPath(
+        [0xe0, 0x30, 0x4, indexOffset, 0x4],
+        0x8,
+        PointerSize.Bit32,
+    )
+    return process.readUtf16Le(textPath.resolve()?, length as u32)
+}
+
+/// Reads a validated UTF-16 key-point identifier by its zero-based index.
+fn readKeyPoint(index: i32) -> String! {
+    let indexOffset = (index * 4 + 8) as i64
+    let lengthPath = gameRoot.memoryPath(
+        [0xe0, 0x34, 0x4, indexOffset],
+        0x4,
+        PointerSize.Bit32,
+    )
+    let length = process.read<i32>(lengthPath.resolve()?)?
+    if length < 4 || length > 50 {
+        return Err(`invalid key-point identifier length {length}`)
+    }
+    let textPath = gameRoot.memoryPath(
+        [0xe0, 0x34, 0x4, indexOffset],
+        0x8,
+        PointerSize.Bit32,
+    )
+    return process.readUtf16Le(textPath.resolve()?, length as u32)
+}
+
+onAttach {
+    print("Axiom Verge auto splitter 0.3")
+
+    let steam = match process.loadedModule("steam_api.dll") {
+        Some(_) => true,
+        None => false,
+    }
+    let distribution = if steam {
+        "Steam"
+    } else {
+        "Epic"
+    }
+    print(`{process.name()} ({distribution} version)`)
+
+    let axiomClass = (await process.scanMemory(
+        sig"?? ?? ?? ?? 04 00 00 00 00 00 00 00 00 00 00 00 ?? ?? ?? ?? F8 07 00 00"
+    )).offset(4)
+    print(`Found static Game members at {axiomClass}`)
+
+    let vanilla = process.name() == "AxiomVerge.exe"
+    let platformOffset = if vanilla {
+        if steam {
+            0x144
+        } else {
+            0xb0
+        }
+    } else if steam {
+        0x50
+    } else {
+        0x24
+    }
+    gameRoot = axiomClass.offset(platformOffset)
+    layout = AxiomVergeLayout {
+        maxHealth: gameRoot.memoryPath([0xe0], 0xb4, PointerSize.Bit32),
+        ticks: gameRoot.memoryPath([0xe0], 0xc, PointerSize.Bit32),
+        checkpointCount: gameRoot.memoryPath([0xe0, 0x48], 0xc, PointerSize.Bit32),
+        itemCount: gameRoot.memoryPath([0xe0, 0x30], 0xc, PointerSize.Bit32),
+        keyPointCount: gameRoot.memoryPath([0xe0, 0x34], 0xc, PointerSize.Bit32),
+    }
+}
+
+onDetach {
+    layout = None
+    gameRoot = 0x0
+    lastTimerState = TimerState.NotRunning
+}
+
+whileAttached {
+    let timerState = timer.state()
+    if lastTimerState == TimerState.NotRunning && timerState != TimerState.NotRunning {
+        print("--Start--")
+        lastCheckpoint = 0
+        lastItem = 0
+        lastKeyPoint = 0
+        resetRequested = false
+    }
+    lastTimerState = timerState
+}
+
+gameTime {
+    return Duration.fromSeconds(current.ticks / 60.0)
+}
+
+start {
+    return current.ticks < 60.0 && current.ticks > 1.0 && current.itemCount == 0
+}
+
+reset {
+    return resetRequested
+}
+
+split {
+    if current.checkpointCount > lastCheckpoint {
+        let checkpoint = readCheckpoint(lastCheckpoint) else ""
+        if !checkpoint.isEmpty() && settings.contains(checkpoint) {
+            print(`Checkpoint: {checkpoint}`)
+            lastCheckpoint += 1
+            return eventEnabled(checkpoint)
+        }
+    }
+
+    if current.itemCount > lastItem {
+        let item = readItem(lastItem) else ""
+        if !item.isEmpty() && settings.contains(item) {
+            print(`Item: {item}`)
+            lastItem += 1
+            return eventEnabled(item)
+        }
+    }
+
+    if current.keyPointCount > lastKeyPoint {
+        let keyPoint = readKeyPoint(lastKeyPoint) else ""
+        if !keyPoint.isEmpty() && keyPoint != "Sentinel" {
+            print(`Key point: {keyPoint}`)
+            lastKeyPoint += 1
+            if settings.contains(keyPoint) {
+                return eventEnabled(keyPoint)
+            }
+            if keyPoint == "FirstDeath" && settings.resetOnDeath {
+                resetRequested = true
+            }
+        }
+    }
+
+    return false
+}

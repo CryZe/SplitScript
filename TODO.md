@@ -69,7 +69,12 @@ or behavioral parity.
   Prefer a concrete, recurring game-independent gap over callbacks, reflection,
   UI prompts, or unrestricted filesystem access. Move a
   gap back down the roadmap when the current language can already express it
-  clearly and only documentation or diagnostics were missing.
+  clearly and only documentation or diagnostics were missing. The maintained
+  Axiom Verge audit showed that its C# delegates reduce cleanly to named typed
+  functions; its actual reusable prerequisites were synchronous optional-module
+  lookup and the distinction between a declared setting and an enabled one.
+  It also confirms that exact timer events and conditional settings hierarchy
+  belong at the host boundary already tracked below, not in closure syntax.
 
 ## P0 — unblock the next representative native ports
 

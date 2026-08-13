@@ -3276,3 +3276,16 @@ language catalog document the refinement rule.
   headings, and shared the UTF-8 key comparison lowering with `enabled`.
 - Added host-runtime coverage for current and previous settings views, every
   value-setting kind, headings, unknown keys, and disabled known values.
+
+# 2026-08-13: maintained Axiom Verge migration evidence
+
+- Ported the legacy Axiom Verge autosplitter with its full 119-key settings
+  catalog, four platform offsets, cooperative signature discovery, 32-bit
+  pointer paths, dynamic UTF-16 event identifiers, game time, starts, splits,
+  and reset-on-death behavior.
+- Replaced callback-shaped C# delegates with ordinary typed functions and
+  preserved recursive parent-setting gates explicitly; disabled but declared
+  identifiers still advance their event cursors without splitting.
+- Added a deterministic vanilla-Steam runtime fixture and a structured
+  conformance record that separates verified behavior from variant coverage,
+  conditional settings UI, exact timer events, and scan-deadline limitations.

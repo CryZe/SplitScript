@@ -3,8 +3,10 @@
 use std::collections::BTreeMap;
 
 mod settings;
+mod state;
 
 use settings::complete_settings_dsl;
+use state::complete_state_dsl;
 
 use crate::{
     ast::{
@@ -79,6 +81,10 @@ pub(crate) fn complete(
     if let Some(completions) = complete_tick_rate_field(&source, offset) {
         Ok(completions)
     } else if let Some(completions) = complete_settings_dsl(&source, offset) {
+        Ok(completions)
+    } else if let Some(completions) =
+        complete_state_dsl(&source, &syntax, offset, &standard_library)
+    {
         Ok(completions)
     } else if let Some(completions) = complete_state_decoder(&source, offset) {
         Ok(completions)
@@ -1821,6 +1827,71 @@ mod tests {
         assert!(labels.contains(&"named filter".to_owned()));
         assert!(labels.contains(&"fallback filter".to_owned()));
         assert!(labels.contains(&"MIME filter".to_owned()));
+    }
+
+    #[test]
+    fn state_completion_offers_fields_layouts_types_and_sources_contextually() {
+        let mut empty = CompilerDatabase::new("state \"game.exe\" {\n    \n}");
+        let candidates = labels(&mut empty, "state \"game.exe\" {");
+        for expected in [
+            "expression field",
+            "memory field",
+            "inferred memory field",
+            "module pointer field",
+            "UTF-8 string field",
+            "UTF-16LE string field",
+            "named layout",
+        ] {
+            assert!(
+                candidates.contains(&expected.to_owned()),
+                "missing {expected}: {candidates:#?}"
+            );
+        }
+
+        let source = "record Position { x: f32, }\nstate \"game.exe\" {\n    position: Pos\n}";
+        let mut typed = CompilerDatabase::new(source);
+        let candidates = labels(&mut typed, "position: Pos");
+        assert!(candidates.contains(&"Position".to_owned()));
+        assert!(!candidates.contains(&"print".to_owned()));
+
+        let source = "state \"game.exe\" {\n    position: i32 a\n}";
+        let mut source_kind = CompilerDatabase::new(source);
+        let candidates = labels(&mut source_kind, "i32 a");
+        assert_eq!(candidates, vec!["at"]);
+    }
+
+    #[test]
+    fn state_completion_respects_layout_and_specialized_provider_grammars() {
+        let mut gba = CompilerDatabase::new("state GBA {\n    \n}");
+        let candidates = labels(&mut gba, "state GBA {");
+        assert!(candidates.contains(&"memory field".to_owned()));
+        assert!(!candidates.contains(&"module pointer field".to_owned()));
+        assert!(!candidates.contains(&"UTF-8 string field".to_owned()));
+
+        let source = "state \"game.exe\" {\n    layout Steam {\n        \n    },\n    /// outer marker\n    \n}";
+        let mut layouts = CompilerDatabase::new(source);
+        let inside = labels(&mut layouts, "layout Steam {");
+        assert!(inside.contains(&"memory field".to_owned()));
+        assert!(!inside.contains(&"named layout".to_owned()));
+        assert_eq!(
+            labels(&mut layouts, "/// outer marker\n    "),
+            vec!["named layout"]
+        );
+    }
+
+    #[test]
+    fn state_completion_finishes_pointer_paths_without_hiding_expressions() {
+        let source = "state \"game.exe\" {\n    value: i32 at 0x1000 a\n}";
+        let mut pointer = CompilerDatabase::new(source);
+        assert_eq!(labels(&mut pointer, "0x1000 a"), vec!["as"]);
+
+        let source = "state GBA {\n    value: i32 at 0x1000 \n}";
+        let mut gba = CompilerDatabase::new(source);
+        assert_eq!(labels(&mut gba, "0x1000 "), vec!["if"]);
+
+        let source = "state \"game.exe\" { value = process.rea }";
+        let mut expression = CompilerDatabase::new(source);
+        assert!(labels(&mut expression, "process.rea").contains(&"read".to_owned()));
     }
 
     #[test]

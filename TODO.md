@@ -425,9 +425,10 @@ remaining work is product hardening and distribution.
   documentation from the canonical catalog and symbol identities. Signatures,
   links, hover, completion, and generated pages must agree and use the same
   focused compiler-checked examples.
-- [ ] Add completion snippets for state, settings, lifecycle blocks, match,
-  records, and common standard-library patterns. Keep candidates compiler-owned
-  and the VS Code client thin.
+- [ ] Add completion snippets for lifecycle blocks, match, records, and common
+  standard-library patterns. State, settings, and tick-rate declarations are
+  grammar-aware already. Keep candidates compiler-owned and the VS Code client
+  thin.
 - [ ] Continue adding focused labels, notes, and machine-applicable fixes for
   real confusing cases rather than growing a speculative diagnostic catalog.
 - [ ] Introduce file identities, modules, and imports only together with a real

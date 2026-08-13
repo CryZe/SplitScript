@@ -755,6 +755,7 @@ fn domain_roots_navigate_to_their_blocks_and_providers_hover() {
         "state GBA { room: u8 at 0x03000010 }\n",
         "settings { \"Enabled\" => enabled: true }\n",
         "whileAttached {\n",
+        "    let emulator = gba\n",
         "    let stateChanged = current.room != old.room\n",
         "    let settingChanged = settings.enabled != oldSettings.enabled\n",
         "}\n"
@@ -774,6 +775,7 @@ fn domain_roots_navigate_to_their_blocks_and_providers_hover() {
     ));
 
     for (root, declaration) in [
+        ("gba\n", source.find("state").unwrap()),
         ("current.room", source.find("state").unwrap()),
         ("old.room", source.find("state").unwrap()),
         ("settings.enabled", source.find("settings").unwrap()),
@@ -801,7 +803,7 @@ fn domain_roots_navigate_to_their_blocks_and_providers_hover() {
         );
     }
 
-    let provider = source.find("GBA").unwrap() + 1;
+    let provider = source.find("gba\n").unwrap() + 1;
     let (line, character) = position_parts(source, provider);
     let hover = server.handle(json!({
         "jsonrpc": "2.0",
@@ -817,6 +819,38 @@ fn domain_roots_navigate_to_their_blocks_and_providers_hover() {
         .expect("provider hover markdown");
     assert!(markdown.contains("state GBA { ... }"));
     assert!(markdown.contains("gba: GbaEmulator"));
+
+    let native_source = concat!(
+        "state \"game.exe\" {}\n",
+        "onAttach { let executable = process.name() }\n"
+    );
+    let native_uri = "file:///native-domain-navigation.split";
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": native_uri,
+                "version": 1,
+                "text": native_source
+            }
+        }),
+    ));
+    let process = native_source.rfind("process").unwrap();
+    let (line, character) = position_parts(native_source, process);
+    let definition = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 132,
+        "method": "textDocument/definition",
+        "params": {
+            "textDocument": { "uri": native_uri },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    assert_eq!(definition[0]["result"]["uri"], native_uri);
+    assert_eq!(
+        definition[0]["result"]["range"]["start"],
+        position(native_source, native_source.find("state").unwrap())
+    );
 }
 
 #[test]

@@ -112,6 +112,20 @@ pub(crate) fn hover(
             render_language_hover(LanguageCatalog::new().item(item))
         }
         DefinitionTarget::Source(definition) => {
+            if definition.id == SourceDefinitionId::State
+                && let Some(provider) = database
+                    .analysis_at(offset)?
+                    .as_ref()
+                    .and_then(provider_value_for_resolution)
+            {
+                return Ok(Some(HoverInfo {
+                    span: token.span,
+                    markdown: render_stdlib_symbol_hover(
+                        standard_library,
+                        StdlibSymbolId::StateProvider(provider),
+                    ),
+                }));
+            }
             let Some(context) = semantic_context(database) else {
                 return Ok(None);
             };
@@ -125,6 +139,30 @@ pub(crate) fn hover(
         span: token.span,
         markdown,
     }))
+}
+
+fn provider_value_for_resolution(
+    analysis: &crate::database::PositionAnalysis,
+) -> Option<crate::stdlib::StdlibStateProviderId> {
+    let root = match analysis.resolution.as_ref()? {
+        ExpressionResolution::ValuePath { root, .. } => *root,
+        ExpressionResolution::Call(call) => call.receiver()?.path().map(|(root, _)| root),
+        ExpressionResolution::Member { .. }
+        | ExpressionResolution::RecordLiteral { .. }
+        | ExpressionResolution::EnumConstructor { .. } => None,
+    }?;
+    match root {
+        crate::semantic::ResolvedValue::ProviderValue(provider) => Some(provider),
+        crate::semantic::ResolvedValue::Variable(_)
+        | crate::semantic::ResolvedValue::CurrentSnapshot
+        | crate::semantic::ResolvedValue::OldSnapshot
+        | crate::semantic::ResolvedValue::SettingsView
+        | crate::semantic::ResolvedValue::OldSettingsView
+        | crate::semantic::ResolvedValue::CurrentState(_)
+        | crate::semantic::ResolvedValue::OldState(_)
+        | crate::semantic::ResolvedValue::Setting(_)
+        | crate::semantic::ResolvedValue::OldSetting(_) => None,
+    }
 }
 
 fn float_literal_markdown(
@@ -487,8 +525,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
         }
         SourceDefinitionId::Enum(enumeration) => {
             let enumeration = syntax
-                .enums
-                .iter()
+                .enum_declarations()
                 .find(|candidate| candidate.id == enumeration)?;
             Some(source_markdown(
                 &format!("enum {}", enumeration.name),
@@ -1296,6 +1333,17 @@ onAttach { return StateLayout.Steam }
 split { return layout == StateLayout.Steam }
 "#;
         let mut database = CompilerDatabase::new(source);
+        let layout_type = database
+            .hover(source.find("StateLayout").unwrap() + 1)
+            .unwrap()
+            .expect("generated layout type hover");
+        assert!(layout_type.markdown.contains("enum StateLayout"));
+        assert!(
+            layout_type
+                .markdown
+                .contains("memory layout selected for the attached game build")
+        );
+
         let layout = database
             .hover(source.find("layout ==").unwrap() + 1)
             .unwrap()

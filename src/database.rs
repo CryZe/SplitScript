@@ -364,7 +364,7 @@ fn source_definition_for_value_path(
         };
     }
     let root_segment = match root {
-        ResolvedValue::ProviderValue(_) => return None,
+        ResolvedValue::ProviderValue(_) => 0,
         ResolvedValue::Variable(_) => 0,
         ResolvedValue::CurrentSnapshot
         | ResolvedValue::OldSnapshot
@@ -392,6 +392,9 @@ fn source_definition_for_value_path(
         };
     }
     if segment == root_segment {
+        if matches!(root, ResolvedValue::ProviderValue(_)) {
+            return Some(SourceDefinitionId::State);
+        }
         return root.source_value().map(SourceDefinitionId::Value);
     }
     let member = segment.checked_sub(root_segment + 1)?;
@@ -473,10 +476,11 @@ fn definition_for_value_path(
             .map(DefinitionTarget::Source);
     }
     if segment == root_segment {
-        if let ResolvedValue::ProviderValue(provider) = root {
-            return Some(DefinitionTarget::StandardLibrarySymbol(
-                StdlibSymbolId::StateProvider(provider),
-            ));
+        if matches!(root, ResolvedValue::ProviderValue(_)) {
+            return definitions
+                .get(SourceDefinitionId::State)
+                .cloned()
+                .map(DefinitionTarget::Source);
         }
         return definitions
             .get(SourceDefinitionId::Value(root.source_value()?))

@@ -1,0 +1,15 @@
+state "game.exe" {}
+
+onAttach {
+    let loaded = process.loadedModule("steam_api.dll")
+    let missing = process.loadedModule("missing.dll")
+    print(match loaded {
+        Some(module) => `{module.address}|{module.size}`,
+        None => "missing loaded module",
+    })
+    print(match missing {
+        Some(_) => "unexpected module",
+        None => "missing",
+    })
+    await process.closed()
+}

@@ -63,6 +63,7 @@ pub(crate) enum RuntimeHelperId {
     ReadUtf8String,
     ReadUtf16LeString,
     ReadManagedString,
+    LoadedModule,
     ModulePath,
     ProcessPath,
     RuntimeOperatingSystem,
@@ -98,6 +99,7 @@ pub(crate) enum DependencyRoot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScratchType {
     Core(CoreTypeId),
+    Standard(StdlibTypeId),
     Expression,
     ResultValue,
 }
@@ -301,6 +303,7 @@ const fn async_state(id: IntrinsicId) -> Option<ScratchPolicy> {
 
 const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
     match id {
+        IntrinsicId::ProcessLoadedModule => scratch(ScratchType::Standard(StdlibTypeId::Module), 1),
         IntrinsicId::ProcessMemoryRanges => scratch(ScratchType::Expression, 1),
         IntrinsicId::NumericMin | IntrinsicId::NumericMax => scratch(ScratchType::Expression, 2),
         IntrinsicId::TimerState => scratch(ScratchType::Core(CoreTypeId::U32), 1),
@@ -361,6 +364,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
             HostImport(Host::ProcessGetModuleAddress),
             HostImport(Host::ProcessGetModuleSize),
         ],
+        IntrinsicId::ProcessLoadedModule => &[Helper(Runtime::LoadedModule)],
         IntrinsicId::ProcessFindMemoryRange | IntrinsicId::ProcessMemoryRanges => &[
             HostImport(Host::ProcessGetMemoryRangeCount),
             HostImport(Host::ProcessGetMemoryRangeAddress),
@@ -495,6 +499,10 @@ const PROCESS_TYPE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Pr
 const SIGNATURE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Signature);
 const SIGNATURE_MATCH: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SignatureMatch);
 const MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Module);
+const MODULE_OPTION: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::Option,
+    arguments: &[MODULE],
+};
 const MEMORY_RANGE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::MemoryRange);
 const MEMORY_RANGE_ACCESS: ContractTypeRef =
     ContractTypeRef::Standard(StdlibTypeId::MemoryRangeAccess);
@@ -1063,6 +1071,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             PROCESS_SUSPEND,
             OnAttach,
             Suspension
+        ),
+        IntrinsicId::ProcessLoadedModule => contract!(
+            ProcessLoadedModule,
+            Method,
+            signature(
+                NO_TYPE_PARAMETERS,
+                Some(PROCESS_TYPE),
+                params![value(STRING)],
+                MODULE_OPTION,
+            ),
+            PROCESS.with(Effect::Allocates),
+            Everywhere,
+            HostBoundary
         ),
         IntrinsicId::ProcessFindMemoryRange => contract!(
             ProcessFindMemoryRange,

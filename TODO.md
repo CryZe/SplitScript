@@ -87,10 +87,12 @@ or behavioral parity.
   repeated pointer paths across many versions are materially unmaintainable.
   Keep the selected physical layout auditable.
 - [ ] Complete the remaining safe process/module identity probes as ports
-  require them: module enumeration/search and a deterministic executable
-  fingerprint. Numeric PE file and product versions are available through one
-  shared source-defined `VS_FIXEDFILEINFO` traversal. Prefer host metadata over
-  unrestricted filesystem access or hashing an entire module inside Wasm.
+  require them: full module enumeration and a deterministic executable
+  fingerprint. Waiting `process.module(name)` and synchronous optional
+  `process.loadedModule(name)` now cover known-name discovery. Numeric PE file
+  and product versions are available through one shared source-defined
+  `VS_FIXEDFILEINFO` traversal. Prefer host metadata over unrestricted
+  filesystem access or hashing an entire module inside Wasm.
 - [ ] Finish the remaining official host ABI as typed language facilities,
   preserving semantics without exposing owned numeric handles or manual
   `free` calls. Timer segment history, skip/undo, executable path, host OS, and

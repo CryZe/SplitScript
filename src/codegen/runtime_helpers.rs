@@ -217,6 +217,10 @@ pub(super) fn build_module_path(inputs: &RuntimeHelperInputs<'_>) -> Function {
     )
 }
 
+pub(super) fn build_loaded_module(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    process::compile_loaded_module(inputs.abi, inputs.gc, inputs.memory.scratch())
+}
+
 pub(super) fn build_process_path(inputs: &RuntimeHelperInputs<'_>) -> Function {
     process::compile_process_path(
         inputs.abi,

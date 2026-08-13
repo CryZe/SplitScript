@@ -421,6 +421,9 @@ impl AsyncFrameLayouts {
                     crate::intrinsic_registry::ScratchType::Core(core) => {
                         semantic_type(semantics.types().id_for_core(core), semantics)
                     }
+                    crate::intrinsic_registry::ScratchType::Standard(standard) => {
+                        semantic_type(semantics.types().id_for_standard(standard), semantics)
+                    }
                     crate::intrinsic_registry::ScratchType::Expression
                     | crate::intrinsic_registry::ScratchType::ResultValue => {
                         unreachable!("intrinsic future state currently uses concrete core types")

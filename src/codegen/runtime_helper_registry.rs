@@ -113,6 +113,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(ReadUtf8String, (I64, I64, I32) -> (StringValue), deps [StringFromMemory], imports [ProcessRead], build_read_utf8_string),
     helper!(ReadUtf16LeString, (I64, I64, I32) -> (StringValue), deps [Utf16StringFromMemory], imports [ProcessRead], build_read_utf16_le_string),
     helper!(ReadManagedString, (I64, I64, I32) -> (StringValue), deps [], imports [ProcessRead], build_read_managed_string),
+    helper!(LoadedModule, (I64, StringValue) -> (Standard(StdlibTypeId::Module)), deps [], imports [ProcessGetModuleAddress, ProcessGetModuleSize], build_loaded_module),
     helper!(ModulePath, (I64, StringValue) -> (StringValue), deps [StringFromMemory], imports [ProcessGetModulePath], build_module_path),
     helper!(ProcessPath, (I64) -> (StringValue), deps [StringFromMemory], imports [ProcessGetPath], build_process_path),
     helper!(RuntimeOperatingSystem, () -> (StringValue), deps [StringFromMemory], imports [RuntimeGetOs], build_runtime_operating_system),

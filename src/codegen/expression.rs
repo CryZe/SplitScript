@@ -2684,6 +2684,34 @@ fn compile_expr_unconverted(
             IntrinsicId::ProcessMemoryRanges => {
                 emit_process_memory_ranges(function, expression, target, context);
             }
+            IntrinsicId::ProcessLoadedModule => {
+                let Type::Option(option) = context.expression_type(expression) else {
+                    unreachable!("process.loadedModule returns its declared optional module")
+                };
+                let module = context.matches.intrinsic_temps[&expression][0];
+                compile_receiver(function, target, context);
+                compile_expr(function, args[0], context);
+                function
+                    .instruction(&Instruction::Call(
+                        context
+                            .runtime_helpers
+                            .function(RuntimeHelperId::LoadedModule),
+                    ))
+                    .instruction(&Instruction::LocalTee(module))
+                    .instruction(&Instruction::RefIsNull)
+                    .instruction(&Instruction::If(BlockType::Result(
+                        context.gc.val_type(Type::Option(option)),
+                    )))
+                    .instruction(&Instruction::RefNull(HeapType::Concrete(
+                        context.gc.index(Type::Option(option)),
+                    )))
+                    .instruction(&Instruction::Else)
+                    .instruction(&Instruction::LocalGet(module))
+                    .instruction(&Instruction::StructNew(
+                        context.gc.index(Type::Option(option)),
+                    ))
+                    .instruction(&Instruction::End);
+            }
             IntrinsicId::NextTick
             | IntrinsicId::ProcessClosed
             | IntrinsicId::ProcessMainModule

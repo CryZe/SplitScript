@@ -3256,3 +3256,13 @@ language catalog document the refinement rule.
   writable, and executable fields without exposing handles or manual frees.
 - Kept content scanning async and cooperative while avoiding needless
   update-by-update latency for cheap mapping metadata enumeration.
+
+# 2026-08-13: optional loaded-module probes
+
+- Added synchronous `process.loadedModule(name) -> Module?` for known optional
+  platform and mod-loader modules, while retaining `process.module(name)` as
+  the waiting attach-time operation for required modules.
+- Kept module-name transport and ABI handles inside a trusted runtime helper;
+  scripts receive the existing typed GC-owned `Module` representation.
+- Added a host-executed regression proving present and absent lookup semantics
+  without adding full module enumeration prematurely.

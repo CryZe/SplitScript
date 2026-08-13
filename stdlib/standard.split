@@ -301,6 +301,26 @@ intrinsic type Process {
         name: String,
     ) -> Module;
 
+    /// Returns a module only when it is already loaded.
+    ///
+    /// Unlike `module`, this probe is synchronous and does not wait for a
+    /// missing optional module to appear. It is useful for selecting layouts
+    /// that depend on optional platform or mod-loader modules.
+    ///
+    /// # Example
+    ///
+    /// Detect an optional Steam module
+    ///
+    /// ```splitscript
+    /// let steam = process.loadedModule("steam_api.dll") != None
+    /// ```
+    @mustUse("the optional loaded module is otherwise discarded")
+    @intrinsic(ProcessLoadedModule)
+    fn loadedModule(
+        /// The exact module name.
+        name: String,
+    ) -> Module?;
+
     /// Searches mapped memory ranges cooperatively.
     ///
     /// At most one host memory-range entry is inspected per update. The

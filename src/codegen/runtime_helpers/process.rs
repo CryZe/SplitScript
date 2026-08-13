@@ -888,6 +888,104 @@ pub(super) fn compile_read_managed_string(
     function
 }
 
+/// Queries one module without waiting. A null reference is the internal
+/// sentinel for an absent or not-yet-sized module; the source intrinsic wraps
+/// a present value in `Option` at the call site.
+pub(super) fn compile_loaded_module(
+    abi: &Abi,
+    gc: &GcLayout,
+    scratch: super::super::memory_plan::RuntimeScratch,
+) -> Function {
+    let host_strings = scratch.host_strings_start;
+    let module_type = gc.standard_index(StdlibTypeId::Module);
+    let module_ref = gc.val_type(Type::Standard(StdlibTypeId::Module));
+    let mut function = Function::new([(3, ValType::I32), (2, ValType::I64)]);
+    let process = 0;
+    let name = 1;
+    let name_length = 2;
+    let index = 3;
+    let required_pages = 4;
+    let address = 5;
+    let size = 6;
+
+    function
+        .instruction(&Instruction::LocalGet(name))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalSet(name_length));
+    function
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(name_length))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Const(65_535))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::I32Const(16))
+        .instruction(&Instruction::I32ShrU)
+        .instruction(&Instruction::LocalTee(required_pages))
+        .instruction(&Instruction::MemorySize(0))
+        .instruction(&Instruction::I32GtU)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(required_pages))
+        .instruction(&Instruction::MemorySize(0))
+        .instruction(&Instruction::I32Sub)
+        .instruction(&Instruction::MemoryGrow(0))
+        .instruction(&Instruction::Drop)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(name_length))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1))
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalGet(name))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::ArrayGetU(
+            gc.standard_index(StdlibTypeId::String),
+        ))
+        .instruction(&Instruction::I32Store8(memarg()))
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(index))
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(name_length))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetModuleAddress),
+        ))
+        .instruction(&Instruction::LocalTee(address))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Result(module_ref)))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(module_type)))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(process))
+        .instruction(&Instruction::I32Const(host_strings))
+        .instruction(&Instruction::LocalGet(name_length))
+        .instruction(&Instruction::Call(
+            abi.function(AbiImportId::ProcessGetModuleSize),
+        ))
+        .instruction(&Instruction::LocalTee(size))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Result(module_ref)))
+        .instruction(&Instruction::RefNull(HeapType::Concrete(module_type)))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::LocalGet(address))
+        .instruction(&Instruction::LocalGet(size))
+        .instruction(&Instruction::LocalGet(name))
+        .instruction(&Instruction::StructNew(module_type))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+    function
+}
+
 pub(super) fn compile_module_path(
     abi: &Abi,
     string_from_memory: u32,

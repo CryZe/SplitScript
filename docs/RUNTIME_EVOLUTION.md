@@ -154,7 +154,10 @@ Ports need more stable process identity than an executable name in several
 cases. Candidate host-owned facilities are:
 
 - bounded process enumeration with stable process IDs and start ordering;
-- module enumeration rather than repeated guessed-name probes;
+- module enumeration for scripts that genuinely inspect unknown names. Known
+  required names use the waiting `process.module(name)` API, while known
+  optional names now use synchronous `process.loadedModule(name)` over the
+  existing address/size imports;
 - product/file version metadata;
 - a deterministic executable or module fingerprint that does not require
   hashing an entire image inside one guest update;

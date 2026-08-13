@@ -3265,6 +3265,7 @@ impl<'a> LocalPlanner<'a> {
     ) {
         let ty = match policy.ty {
             ScratchType::Core(core) => self.semantics.types().id_for_core(core),
+            ScratchType::Standard(standard) => self.semantics.types().id_for_standard(standard),
             ScratchType::Expression => expression_ty,
             ScratchType::ResultValue => {
                 let TypeKind::Result { value, .. } = self.semantics.types().kind(expression_ty)

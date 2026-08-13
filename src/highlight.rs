@@ -1083,6 +1083,7 @@ fn is_operator(kind: &TokenKind) -> bool {
             | TokenKind::Ge
             | TokenKind::Shl
             | TokenKind::Shr
+            | TokenKind::Dot
             | TokenKind::DotDotEq
     )
 }
@@ -1112,6 +1113,38 @@ mod tests {
             .iter()
             .find(|highlight| highlight.span.start <= offset && offset < highlight.span.end)
             .map(|highlight| highlight.kind)
+    }
+
+    #[test]
+    fn highlights_member_access_dots_as_operators_without_splitting_float_literals() {
+        let source = r#"
+record Position {
+    x: f64,
+}
+
+state "game.exe" {}
+
+fn offset(position: Position) -> f64 {
+    return position.x + 1.5
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        database
+            .check()
+            .expect("member access highlighting fixture");
+        let highlights = database.semantic_highlights().unwrap();
+
+        let accessor = source.find("position.x").unwrap() + "position".len();
+        assert_eq!(
+            kind_at(&highlights, accessor),
+            Some(SemanticTokenKind::Operator)
+        );
+
+        let decimal_point = source.find("1.5").unwrap() + 1;
+        assert_eq!(
+            kind_at(&highlights, decimal_point),
+            Some(SemanticTokenKind::Number)
+        );
     }
 
     #[test]

@@ -175,6 +175,10 @@
     "operators": {
       "patterns": [
         {
+          "name": "punctuation.accessor.splitscript",
+          "match": "\\."
+        },
+        {
           "name": "keyword.operator.splitscript",
           "match": "\\?\\?|&&|\\|\\||==|!=|<=|>=|<<|>>|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=|=>|->|[+\\-*/%&|^!~<>=?]"
         }

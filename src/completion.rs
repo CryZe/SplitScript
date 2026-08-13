@@ -72,7 +72,9 @@ pub(crate) fn complete(
     let standard_library = compiler_context.standard_library();
     let offset = floor_char_boundary(&source, offset.min(source.len()));
     let syntax = database.recovering_parse()?.syntax().clone();
-    if let Some(completions) = complete_state_decoder(&source, offset) {
+    if let Some(completions) = complete_tick_rate_field(&source, offset) {
+        Ok(completions)
+    } else if let Some(completions) = complete_state_decoder(&source, offset) {
         Ok(completions)
     } else if let Some(completions) =
         complete_type_argument(&source, &syntax, offset, &standard_library)
@@ -118,6 +120,110 @@ pub(crate) fn complete(
             top_level,
         ))
     }
+}
+
+fn complete_tick_rate_field(source: &str, offset: usize) -> Option<CompletionList> {
+    let replacement = identifier_span(source, offset);
+    let lexed = lexer::lex_lossless(source).ok()?;
+    let tokens = lexed.tokens().collect::<Vec<_>>();
+
+    let (open, close) = tokens.iter().enumerate().find_map(|(index, token)| {
+        if !matches!(&token.kind, TokenKind::Ident(name) if name == "tickRate") {
+            return None;
+        }
+        let open = tokens[index + 1..]
+            .iter()
+            .position(|token| matches!(token.kind, TokenKind::LBrace))?
+            + index
+            + 1;
+        let close = matching_closing_brace(&tokens, open).unwrap_or(tokens.len());
+        let closing_start = tokens
+            .get(close)
+            .map_or(source.len(), |token| token.span.start);
+        (tokens[open].span.end <= offset && offset <= closing_start).then_some((open, close))
+    })?;
+
+    let mut depth = 1_u32;
+    let mut segment_has_colon = false;
+    for token in &tokens[open + 1..close] {
+        if token.span.start >= offset {
+            break;
+        }
+        match token.kind {
+            TokenKind::LBrace => depth += 1,
+            TokenKind::RBrace => depth = depth.saturating_sub(1),
+            TokenKind::Comma if depth == 1 => segment_has_colon = false,
+            TokenKind::Colon if depth == 1 => segment_has_colon = true,
+            _ => {}
+        }
+    }
+    if depth != 1 || segment_has_colon {
+        return None;
+    }
+
+    let mut declared = Vec::new();
+    depth = 1;
+    for (index, token) in tokens[open + 1..close].iter().enumerate() {
+        match token.kind {
+            TokenKind::LBrace => depth += 1,
+            TokenKind::RBrace => depth = depth.saturating_sub(1),
+            TokenKind::Ident(ref name)
+                if depth == 1
+                    && tokens
+                        .get(open + index + 2)
+                        .is_some_and(|next| matches!(next.kind, TokenKind::Colon))
+                    && token.span != replacement =>
+            {
+                declared.push(name.as_str());
+            }
+            _ => {}
+        }
+    }
+
+    let prefix = source[replacement.start..offset].to_owned();
+    let mut builder = CompletionBuilder::new(prefix, replacement);
+    if !declared.contains(&"attached") {
+        builder.add(CompletionItem {
+            label: "attached".to_owned(),
+            kind: CompletionKind::Property,
+            detail: Some("attached polling rate (Hz)".to_owned()),
+            documentation: Some(
+                "Polling rate used while a process is attached. Defaults to 120 Hz.".to_owned(),
+            ),
+            insert_text: "attached: ${1:120},".to_owned(),
+            is_snippet: true,
+        });
+    }
+    if !declared.contains(&"detached") {
+        builder.add(CompletionItem {
+            label: "detached".to_owned(),
+            kind: CompletionKind::Property,
+            detail: Some("detached polling rate (Hz)".to_owned()),
+            documentation: Some(
+                "Polling rate used while waiting for a process. Defaults to 1 Hz.".to_owned(),
+            ),
+            insert_text: "detached: ${1:1},".to_owned(),
+            is_snippet: true,
+        });
+    }
+    Some(builder.finish())
+}
+
+fn matching_closing_brace(tokens: &[&crate::lexer::Token], open: usize) -> Option<usize> {
+    let mut depth = 0_u32;
+    for (index, token) in tokens.iter().enumerate().skip(open) {
+        match token.kind {
+            TokenKind::LBrace => depth += 1,
+            TokenKind::RBrace => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn completion_operation_analysis(
@@ -1622,6 +1728,44 @@ mod tests {
             .into_iter()
             .map(|item| item.label)
             .collect()
+    }
+
+    #[test]
+    fn completes_only_missing_tick_rate_fields() {
+        let mut empty = CompilerDatabase::new("state \"game.exe\" {}\ntickRate {\n    \n}");
+        let completions = labels(&mut empty, "tickRate {");
+        assert!(completions.contains(&"attached".to_owned()));
+        assert!(completions.contains(&"detached".to_owned()));
+
+        let mut partial = CompilerDatabase::new(
+            "state \"game.exe\" {}\ntickRate {\n    attached: 60,\n    det\n}",
+        );
+        let completion = partial
+            .completions(partial.source().find("det\n").unwrap() + 3)
+            .expect("tick-rate completion should succeed");
+        assert_eq!(completion.items.len(), 1, "{completion:#?}");
+        assert_eq!(completion.items[0].label, "detached");
+        assert_eq!(completion.items[0].insert_text, "detached: ${1:1},");
+        assert!(completion.items[0].is_snippet);
+    }
+
+    #[test]
+    fn tick_rate_field_completion_is_not_offered_in_values_or_other_blocks() {
+        let mut value =
+            CompilerDatabase::new("state \"game.exe\" {}\ntickRate {\n    attached: det\n}");
+        assert!(
+            labels(&mut value, "attached: det")
+                .iter()
+                .all(|label| label != "detached")
+        );
+
+        let mut action =
+            CompilerDatabase::new("state \"game.exe\" {}\nwhileAttached {\n    att\n}");
+        assert!(
+            labels(&mut action, "    att")
+                .iter()
+                .all(|label| label != "attached")
+        );
     }
 
     #[test]

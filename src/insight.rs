@@ -2022,4 +2022,30 @@ whileAttached {
         assert!(help.signatures[0].label.starts_with("Process.read"));
         assert!(help.signatures[0].label.contains("-> u32!"));
     }
+
+    #[test]
+    fn hover_recovers_from_untyped_state_field_member_access() {
+        let source = r#"state GBA {
+    pos at 0x100,
+}
+
+fn bar() {
+    return current.pos.x > old.pos.y
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        for needle in ["GBA", "current", "old"] {
+            let offset = source.find(needle).unwrap() + needle.len() - 1;
+            assert!(
+                database.hover(offset).unwrap().is_some(),
+                "{needle} should retain hover despite the recoverable separator error"
+            );
+        }
+        assert!(
+            database
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.message == "expected `;` between state fields")
+        );
+    }
 }

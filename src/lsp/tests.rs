@@ -187,6 +187,51 @@ fn changes_reuse_the_document_database_and_formatting_ignores_type_errors() {
 }
 
 #[test]
+fn hover_survives_length_preserving_parser_repairs() {
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    let source = r#"state GBA {
+    pos at 0x100,
+}
+
+fn bar() {
+    return current.pos.x > old.pos.y
+}
+"#;
+    let diagnostics = server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": "file:///showcase.split",
+                "languageId": "splitscript",
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    assert_eq!(
+        diagnostics[0]["params"]["diagnostics"][0]["message"],
+        "expected `;` between state fields"
+    );
+
+    let hover = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 91,
+        "method": "textDocument/hover",
+        "params": {
+            "textDocument": { "uri": "file:///showcase.split" },
+            "position": { "line": 0, "character": 7 }
+        }
+    }));
+    assert!(
+        hover[0]["result"]["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("state GBA")
+    );
+}
+
+#[test]
 fn publishes_unused_binding_warnings_without_rejecting_the_document() {
     let mut server = LanguageServer::default();
     initialize(&mut server);

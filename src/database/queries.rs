@@ -280,11 +280,68 @@ impl CompilerDatabase {
             self.cache.semantic_snapshot = Some(match self.check() {
                 Ok(checked) => Ok(Arc::new(SemanticSnapshot::Checked(checked))),
                 Err(_) => self
-                    .recovering_check()
-                    .map(|checked| Arc::new(SemanticSnapshot::Recovered(checked))),
+                    .length_preserving_parse_repair_snapshot()
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        self.recovering_check()
+                            .map(|checked| Arc::new(SemanticSnapshot::Recovered(checked)))
+                    }),
             });
         }
         self.cache.semantic_snapshot.as_ref().unwrap().clone()
+    }
+
+    /// Rechecks a source with parser-supplied, machine-applicable repairs when
+    /// every edit preserves byte offsets. This lets semantic editor features
+    /// survive substitutions such as `,` to `;` without publishing semantic
+    /// spans that no longer line up with the user's buffer.
+    fn length_preserving_parse_repair_snapshot(&mut self) -> Option<Arc<SemanticSnapshot>> {
+        let recovered = self.recovering_parse().ok()?;
+        if recovered.diagnostics().is_empty() {
+            return None;
+        }
+
+        let mut edits = Vec::new();
+        for diagnostic in recovered.diagnostics() {
+            let fix = diagnostic.fixes.iter().find(|fix| {
+                fix.applicability == crate::FixApplicability::MachineApplicable
+                    && !fix.edits.is_empty()
+                    && fix.edits.iter().all(|edit| {
+                        edit.span.end.saturating_sub(edit.span.start) == edit.replacement.len()
+                    })
+            })?;
+            edits.extend(fix.edits.iter().cloned());
+        }
+        edits.sort_by_key(|edit| (edit.span.start, edit.span.end));
+        if edits
+            .windows(2)
+            .any(|pair| pair[0].span.end > pair[1].span.start)
+        {
+            return None;
+        }
+
+        let mut repaired = self.source.clone();
+        for edit in edits.into_iter().rev() {
+            if edit.span.end > repaired.len()
+                || !repaired.is_char_boundary(edit.span.start)
+                || !repaired.is_char_boundary(edit.span.end)
+            {
+                return None;
+            }
+            repaired.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+        }
+
+        let mut database = Self::with_context_and_source_name(
+            self.context.clone(),
+            self.source_name.clone(),
+            repaired,
+        );
+        Some(match database.check() {
+            Ok(checked) => Arc::new(SemanticSnapshot::Checked(checked)),
+            Err(_) => Arc::new(SemanticSnapshot::Recovered(
+                database.recovering_check().ok()?,
+            )),
+        })
     }
 
     pub fn declarations_named(&mut self, name: &str) -> SemanticQueryResult<Vec<Declaration>> {

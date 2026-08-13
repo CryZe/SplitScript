@@ -4,9 +4,11 @@ use std::collections::BTreeMap;
 
 mod settings;
 mod state;
+mod top_level;
 
 use settings::complete_settings_dsl;
 use state::complete_state_dsl;
+use top_level::{complete_state_header, complete_top_level};
 
 use crate::{
     ast::{
@@ -81,6 +83,8 @@ pub(crate) fn complete(
     if let Some(completions) = complete_tick_rate_field(&source, offset) {
         Ok(completions)
     } else if let Some(completions) = complete_settings_dsl(&source, offset) {
+        Ok(completions)
+    } else if let Some(completions) = complete_state_header(&source, offset, &standard_library) {
         Ok(completions)
     } else if let Some(completions) =
         complete_state_dsl(&source, &syntax, offset, &standard_library)
@@ -427,6 +431,9 @@ fn complete_root(
     top_level: bool,
 ) -> CompletionList {
     let replacement = identifier_span(source, offset);
+    if top_level {
+        return complete_top_level(source, syntax, offset);
+    }
     let prefix = source[replacement.start..offset].to_owned();
     let mut builder = CompletionBuilder::new(prefix, replacement);
 
@@ -442,18 +449,6 @@ fn complete_root(
         if let Some(completion) = language_completion(item) {
             builder.add(completion);
         }
-    }
-    if top_level
-        && let Some(state) = syntax
-            .state
-            .as_ref()
-            .filter(|state| state.provider.is_none() && !state.layouts.is_empty())
-        && !syntax
-            .actions
-            .iter()
-            .any(|action| action.kind == crate::ast::ActionKind::OnAttach)
-    {
-        builder.add_scoped(layout_selector_completion(state));
     }
     let provider = selected_provider(syntax, &standard_library);
     add_root_standard_library(
@@ -1892,6 +1887,67 @@ mod tests {
         let source = "state \"game.exe\" { value = process.rea }";
         let mut expression = CompilerDatabase::new(source);
         assert!(labels(&mut expression, "process.rea").contains(&"read".to_owned()));
+    }
+
+    #[test]
+    fn top_level_completion_contains_only_declarations_and_lifecycle_blocks() {
+        let source = "state \"game.exe\" {}\n\n";
+        let mut database = CompilerDatabase::new(source);
+        let candidates = labels(&mut database, source);
+        for expected in [
+            "fn",
+            "record",
+            "enum",
+            "let",
+            "settings",
+            "tickRate",
+            "setup",
+            "onAttach",
+            "whileAttached",
+            "split",
+        ] {
+            assert!(
+                candidates.contains(&expected.to_owned()),
+                "missing {expected}: {candidates:#?}"
+            );
+        }
+        for unavailable in [
+            "state", "print", "process", "timer", "i32", "if", "return", "current",
+        ] {
+            assert!(
+                !candidates.contains(&unavailable.to_owned()),
+                "unexpected {unavailable}: {candidates:#?}"
+            );
+        }
+
+        let source = "state \"game.exe\" {}\nsettings {}\ntickRate {}\nsplit {}\n\n";
+        let mut declared = CompilerDatabase::new(source);
+        let candidates = labels(&mut declared, source);
+        for duplicate in ["state", "settings", "tickRate", "split"] {
+            assert!(!candidates.contains(&duplicate.to_owned()));
+        }
+    }
+
+    #[test]
+    fn state_header_completion_guides_processes_lists_and_catalog_providers() {
+        let mut target = CompilerDatabase::new("state ");
+        let candidates = labels(&mut target, "state ");
+        assert!(candidates.contains(&"\"game.exe\"".to_owned()));
+        assert!(candidates.contains(&"[\"game.exe\", ...]".to_owned()));
+        assert!(candidates.contains(&"GBA".to_owned()));
+        assert!(!candidates.contains(&"Process".to_owned()));
+
+        let mut provider = CompilerDatabase::new("state G");
+        assert_eq!(labels(&mut provider, "state G"), vec!["GBA"]);
+
+        let mut provider_body = CompilerDatabase::new("state GBA ");
+        assert_eq!(labels(&mut provider_body, "state GBA "), vec!["{"]);
+
+        let mut process_body = CompilerDatabase::new("state [\"game.exe\", \"demo.exe\"] ");
+        assert_eq!(
+            labels(&mut process_body, "state [\"game.exe\", \"demo.exe\"] "),
+            vec!["{"]
+        );
     }
 
     #[test]

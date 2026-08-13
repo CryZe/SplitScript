@@ -34,6 +34,15 @@ export async function run(): Promise<void> {
             && documentation.getText().includes('Duration.fromSeconds'),
         'the bundled language server returned incomplete standard-library documentation',
     );
+    const documentationIndex = await vscode.workspace.openTextDocument(
+        vscode.Uri.parse('splitscript-docs:/index.md'),
+    );
+    assert(
+        documentationIndex.getText().includes(
+            '[Duration.fromSeconds](stdlib/items/Duration.fromSeconds.md)',
+        ),
+        'the documentation index does not use virtual-document-relative Markdown links',
+    );
 
     const output = script.with({ path: script.path.replace(/\.split$/, '.wasm') });
     await vscode.commands.executeCommand('splitscript.buildRelease');

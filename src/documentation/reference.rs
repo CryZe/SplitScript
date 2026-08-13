@@ -333,7 +333,12 @@ impl DocumentationReference {
                             },
                             documentation.hover_markdown()
                         );
-                        append_related(&mut markdown, &self.library, value.documentation.related);
+                        append_related(
+                            &mut markdown,
+                            uri,
+                            &self.library,
+                            value.documentation.related,
+                        );
                         DocumentationPage {
                             uri: uri.to_owned(),
                             title: value.qualified_name.to_owned(),
@@ -371,10 +376,10 @@ impl DocumentationReference {
         if !members.is_empty() {
             markdown.push_str("\n\n## Members\n");
             for member in members {
-                append_symbol_link(&mut markdown, member, &self.library);
+                append_symbol_link(&mut markdown, uri, member, &self.library);
             }
         }
-        append_related(&mut markdown, &self.library, documentation.related);
+        append_related(&mut markdown, uri, &self.library, documentation.related);
         DocumentationPage {
             uri: uri.to_owned(),
             title,
@@ -396,8 +401,10 @@ impl DocumentationReference {
             markdown.push_str(&format!("\n## {}\n", plural_heading(kind)));
             for entry in entries {
                 markdown.push_str(&format!(
-                    "\n- [{}](splitscript-docs:{}) — {}",
-                    entry.title, entry.uri, entry.summary
+                    "\n- [{}]({}) — {}",
+                    entry.title,
+                    relative_document_link("/index.md", &entry.uri),
+                    entry.summary
                 ));
             }
         }
@@ -464,22 +471,58 @@ fn append_documentation<Id>(markdown: &mut String, documentation: &Documentation
     }
 }
 
-fn append_related(markdown: &mut String, library: &StandardLibrary, related: &[StdlibSymbolId]) {
+fn append_related(
+    markdown: &mut String,
+    current_uri: &str,
+    library: &StandardLibrary,
+    related: &[StdlibSymbolId],
+) {
     if related.is_empty() {
         return;
     }
     markdown.push_str("\n\n## Related\n");
     for symbol in related {
-        append_symbol_link(markdown, *symbol, library);
+        append_symbol_link(markdown, current_uri, *symbol, library);
     }
 }
 
-fn append_symbol_link(markdown: &mut String, symbol: StdlibSymbolId, library: &StandardLibrary) {
+fn append_symbol_link(
+    markdown: &mut String,
+    current_uri: &str,
+    symbol: StdlibSymbolId,
+    library: &StandardLibrary,
+) {
+    let target = symbol_uri(symbol, library);
     markdown.push_str(&format!(
-        "\n- [{}](splitscript-docs:{})",
+        "\n- [{}]({})",
         symbol_label(symbol, library),
-        symbol_uri(symbol, library)
+        relative_document_link(current_uri, &target)
     ));
+}
+
+/// Produces an ordinary relative Markdown link so VS Code's Markdown preview
+/// keeps navigation inside the current virtual-document scheme. Absolute
+/// custom-scheme links are treated as external resources and are not routed
+/// back through `TextDocumentContentProvider`.
+fn relative_document_link(current_uri: &str, target_uri: &str) -> String {
+    let mut current = current_uri
+        .trim_start_matches('/')
+        .split('/')
+        .collect::<Vec<_>>();
+    current.pop();
+    let target = target_uri
+        .trim_start_matches('/')
+        .split('/')
+        .collect::<Vec<_>>();
+
+    let common = current
+        .iter()
+        .zip(&target)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut relative = "../".repeat(current.len() - common);
+    relative.push_str(&target[common..].join("/"));
+    relative
 }
 
 fn symbol_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
@@ -582,7 +625,8 @@ mod tests {
         let page = reference.page(&duration.uri).expect("Duration has a page");
         assert!(page.markdown.starts_with("# Duration\n"));
         assert!(page.markdown.contains("Duration.fromSeconds"));
-        assert!(page.markdown.contains("splitscript-docs:"));
+        assert!(page.markdown.contains("(../items/Duration.fromSeconds.md)"));
+        assert!(!page.markdown.contains("splitscript-docs:"));
     }
 
     #[test]
@@ -592,6 +636,32 @@ mod tests {
         assert_eq!(page.title, "SplitScript standard library");
         assert!(page.markdown.contains("# SplitScript standard library"));
         assert!(page.markdown.contains("Duration.fromSeconds"));
+        assert!(
+            page.markdown
+                .contains("(stdlib/items/Duration.fromSeconds.md)")
+        );
         assert!(reference.page("/missing.md").is_none());
+    }
+
+    #[test]
+    fn documentation_links_are_relative_to_the_current_virtual_page() {
+        assert_eq!(
+            relative_document_link("/index.md", "/stdlib/types/Duration.md"),
+            "stdlib/types/Duration.md"
+        );
+        assert_eq!(
+            relative_document_link(
+                "/stdlib/types/Duration.md",
+                "/stdlib/items/Duration.fromSeconds.md"
+            ),
+            "../items/Duration.fromSeconds.md"
+        );
+        assert_eq!(
+            relative_document_link(
+                "/stdlib/items/Duration.fromSeconds.md",
+                "/stdlib/items/Duration.fromMinutes.md"
+            ),
+            "Duration.fromMinutes.md"
+        );
     }
 }

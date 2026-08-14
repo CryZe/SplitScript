@@ -149,7 +149,63 @@ fn named_spellings_of_structural_type_forms_are_rejected() {
             }),
             "missing `{canonical}` guidance for `{legacy}`: {diagnostics:#?}"
         );
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains("is not SplitScript type syntax")
+            })
+            .expect("focused structural-type diagnostic");
+        let fix = diagnostic.fixes.first().expect("automatic syntax rewrite");
+        assert_eq!(
+            fix.applicability,
+            splitscript::FixApplicability::MachineApplicable
+        );
+        let mut rewritten = source.clone();
+        for edit in fix.edits.iter().rev() {
+            rewritten.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+        }
+        splitscript::compile(&rewritten).expect("the automatic rewrite must compile");
     }
+}
+
+#[test]
+fn structural_type_rewrites_preserve_nested_arguments_and_fix_every_occurrence() {
+    let source = r#"
+        state "game.exe" {}
+        record Legacy {
+            first: Option<Array<u16> >,
+            second: Option<Array<u16> >,
+        }
+    "#;
+    let diagnostics = splitscript::compile(source).expect_err("legacy forms must be rejected");
+    let mut fixes = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic
+                .message
+                .contains("is not SplitScript type syntax")
+        })
+        .flat_map(|diagnostic| diagnostic.fixes.iter())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        fixes.len(),
+        2,
+        "one fix should exist for each structural form: {diagnostics:#?}"
+    );
+    let mut edits = fixes
+        .drain(..)
+        .flat_map(|fix| fix.edits.iter())
+        .collect::<Vec<_>>();
+    edits.sort_by_key(|edit| edit.span.start);
+    let mut rewritten = source.to_owned();
+    for edit in edits.into_iter().rev() {
+        rewritten.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+    assert!(rewritten.contains("first: [u16] ?"), "{rewritten}");
+    assert!(rewritten.contains("second: [u16] ?"), "{rewritten}");
+    splitscript::compile(&rewritten).expect("nested automatic rewrites must compile");
 }
 
 #[test]

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    Diagnostic,
+    Diagnostic, DiagnosticFix, FixApplicability, TextEdit,
     ast::{
         EnumReference, ExprId, ExprKind, MatchPattern, PatternId, Program, SettingKind, Span,
         TypeApplicationId, TypeNameId, TypeRef, ValueId,
@@ -242,18 +242,42 @@ pub(crate) fn resolve_program(
     for application in &program.type_applications {
         let name = program.type_name(application.constructor);
         let Some(constructor) = standard_library.named_type_constructor_by_name(name) else {
-            if let Some(canonical) = match name {
-                "Array" => Some("[T]"),
-                "Option" => Some("T?"),
-                "Result" => Some("T!"),
+            if let Some((canonical, opening, closing)) = match name {
+                "Array" => Some(("[T]", "[", "]")),
+                "Option" => Some(("T?", "", "?")),
+                "Result" => Some(("T!", "", "!")),
                 _ => None,
             } {
+                let edits = application
+                    .occurrences
+                    .iter()
+                    .flat_map(|occurrence| {
+                        [
+                            TextEdit {
+                                span: Span {
+                                    start: occurrence.constructor.start,
+                                    end: occurrence.opening.end,
+                                },
+                                replacement: opening.to_owned(),
+                            },
+                            TextEdit {
+                                span: occurrence.closing,
+                                replacement: closing.to_owned(),
+                            },
+                        ]
+                    })
+                    .collect();
                 provider_diagnostics.push(
                     Diagnostic::type_error(
                         format!("`{name}<T>` is not SplitScript type syntax"),
                         program.type_name_span(application.constructor),
                     )
-                    .with_primary_label(format!("write `{canonical}` instead")),
+                    .with_primary_label(format!("write `{canonical}` instead"))
+                    .with_fix(DiagnosticFix {
+                        title: format!("rewrite using `{canonical}` syntax"),
+                        applicability: FixApplicability::MachineApplicable,
+                        edits,
+                    }),
                 );
                 continue;
             }

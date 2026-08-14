@@ -120,6 +120,15 @@ Standalone HTML is a later renderer of the same model, not the next milestone.
   validation, link checking, deterministic snapshots, native/bundled-server
   parity, and VS Code desktop/web integration tests. Missing documentation or
   broken related-symbol and migration links should fail the repository check.
+- [ ] Finish semantic code in generated reference pages. Signatures now use
+  catalog identities for syntax coloring and navigation, and examples can use
+  rustdoc-style hidden `# ` fixture lines so the compiler can map exact
+  semantic tokens and standard-library definitions back onto visible code.
+  Convert every remaining shared fixture-backed callable example to an exact
+  hidden-context fixture, then require that the visible snippet occurs in and
+  is type-checked as part of its validation program. Keep syntax highlighting
+  as the recovery presentation for incomplete examples, never as a substitute
+  for semantic identity when an example is valid.
 
 ## P0 — unblock the next representative native ports
 

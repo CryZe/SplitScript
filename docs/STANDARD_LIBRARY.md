@@ -323,9 +323,13 @@ semantic call resolutions without constructing the WebAssembly backend. All
 currently implemented functions and type-directed methods—including numeric,
 array, process, duration, address, and Unity APIs—are catalog-backed. Compiled
 catalog examples keep their user-facing snippets separate from complete
-validation programs. Each visible snippet demonstrates one symbol without
-lifecycle scaffolding or compiler-smoke setup, while the test suite still
-compiles its hidden validation program.
+validation programs. A line prefixed with `# ` inside a `splitscript` example
+fence participates in parsing, type checking, semantic highlighting, and
+definition resolution, but is omitted from rendered documentation. This is the
+standard way to supply lifecycle scaffolding and local declarations without
+distracting from the focused snippet. The generated reference maps semantic
+spans from the complete fixture back onto the visible lines, so links never
+depend on identifier text alone.
 
 Catalog entries can also declare a use obligation with
 `@mustUse("reason")`. A bare expression statement that discards such a return

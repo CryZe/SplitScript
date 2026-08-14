@@ -193,7 +193,14 @@ pub struct Documentation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Example {
     pub title: String,
+    /// The concise snippet rendered to users. Lines prefixed with `# ` inside
+    /// the source fence are omitted here, following rustdoc's hidden-line
+    /// convention.
     pub source: String,
+    /// A complete compiler fixture assembled from every fence line after
+    /// stripping the hidden-line marker. This is present only when the author
+    /// supplied hidden context explicitly.
+    pub validation_source: Option<String>,
     /// Optional state-provider name used only to compile-check the focused
     /// snippet. It is not part of rendered documentation.
     pub state_provider: Option<String>,

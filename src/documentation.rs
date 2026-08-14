@@ -1,5 +1,6 @@
 //! Canonical generated documentation views over compiler-owned catalogs.
 
+mod code;
 mod entry;
 mod reference;
 

@@ -393,7 +393,12 @@ intrinsic type Process {
     /// Read a typed value
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let player: address = 0x1000
     /// let health = process.read<i32>(player.offset(0x20)) else 0
+    /// # print(health)
+    /// # }
     /// ```
     @intrinsic(ProcessRead)
     fn read<T: MemoryReadable>(

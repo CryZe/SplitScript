@@ -677,9 +677,25 @@ fn parse_documentation(lines: &[String]) -> Result<Documentation, &'static str> 
         else {
             return Err("a documentation example has an unterminated code fence");
         };
+        let source_lines = &remaining[fence_start + 1..fence_start + 1 + relative_end];
+        let has_hidden_lines = source_lines.iter().any(|line| line.starts_with("# "));
+        let source = source_lines
+            .iter()
+            .filter(|line| !line.starts_with("# "))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
+        let validation_source = has_hidden_lines.then(|| {
+            source_lines
+                .iter()
+                .map(|line| line.strip_prefix("# ").unwrap_or(line).to_owned())
+                .collect::<Vec<_>>()
+                .join("\n")
+        });
         examples.push(Example {
             title,
-            source: remaining[fence_start + 1..fence_start + 1 + relative_end].join("\n"),
+            source,
+            validation_source,
             state_provider,
         });
     }
@@ -806,6 +822,39 @@ namespace gba {}
         assert_eq!(
             gba.documentation.examples[0].state_provider.as_deref(),
             Some("GBA")
+        );
+    }
+
+    #[test]
+    fn hidden_example_lines_only_participate_in_validation() {
+        let source = r#"
+/// Reads a value.
+///
+/// # Example
+///
+/// Read health
+///
+/// ```splitscript
+/// # state "game.exe" {}
+/// # onAttach {
+/// # let player: address = 0x1000
+/// let health = process.read<i32>(player)
+/// # print(health)
+/// # }
+/// ```
+namespace process {}
+"#;
+        let library = parse(source).expect("hidden example context should parse");
+        let Declaration::Namespace(process) = &library.declarations[0] else {
+            panic!("expected a namespace")
+        };
+        let example = &process.documentation.examples[0];
+        assert_eq!(example.source, "let health = process.read<i32>(player)");
+        assert_eq!(
+            example.validation_source.as_deref(),
+            Some(
+                "state \"game.exe\" {}\nonAttach {\nlet player: address = 0x1000\nlet health = process.read<i32>(player)\nprint(health)\n}"
+            )
         );
     }
 

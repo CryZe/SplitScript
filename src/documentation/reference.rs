@@ -9,7 +9,7 @@ use crate::{
     },
 };
 
-use super::StandardLibraryDocumentation;
+use super::{StandardLibraryDocumentation, code};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -437,7 +437,7 @@ impl DocumentationReference {
                             &[],
                         );
                         let mut markdown = format!(
-                            "{}\n\n# {}\n\n_{}_\n\n{}",
+                            "{}\n\n# {}\n\n_{}_\n\n{}\n\n{}",
                             self.symbol_breadcrumb(StdlibSymbolId::Item(value.id), uri),
                             title,
                             if is_operator(value) {
@@ -448,8 +448,15 @@ impl DocumentationReference {
                                     ItemKind::Method { .. } => "Method",
                                 }
                             },
-                            documentation.hover_markdown()
+                            code::signature(
+                                &documentation.signature,
+                                uri,
+                                Some(StdlibSymbolId::Item(value.id)),
+                                &self.library,
+                            ),
+                            documentation.details_markdown(),
                         );
+                        append_examples(&mut markdown, uri, &self.library, documentation.examples);
                         append_related(
                             &mut markdown,
                             uri,
@@ -549,12 +556,12 @@ impl DocumentationReference {
         let ty = self.library.core_type(ty);
         let uri = core_type_uri(ty.id, &self.library);
         let mut markdown = format!(
-            "{}\n\n# {}\n\n_Built-in type_\n\n```splitscript\n{}\n```",
+            "{}\n\n# {}\n\n_Built-in type_\n\n{}",
             breadcrumb(&uri, Vec::new(), ty.name),
             ty.name,
-            ty.name
+            code::signature(ty.name, &uri, None, &self.library),
         );
-        append_documentation(&mut markdown, documentation);
+        append_documentation(&mut markdown, &uri, &self.library, documentation);
         self.append_member_groups(
             &mut markdown,
             &uri,
@@ -605,9 +612,15 @@ impl DocumentationReference {
             self.symbol_breadcrumb(symbol, &uri)
         );
         if let Some(signature) = signature {
-            markdown.push_str(&format!("\n\n```splitscript\n{signature}\n```"));
+            markdown.push_str("\n\n");
+            markdown.push_str(&code::signature(
+                &signature,
+                &uri,
+                Some(symbol),
+                &self.library,
+            ));
         }
-        append_documentation(&mut markdown, documentation);
+        append_documentation(&mut markdown, &uri, &self.library, documentation);
         self.append_member_groups(&mut markdown, &uri, member_groups);
         append_related(&mut markdown, &uri, &self.library, documentation.related);
         DocumentationPage {
@@ -902,19 +915,32 @@ fn render_item_name(item: &crate::stdlib::StdlibItem, library: &StandardLibrary)
     }
 }
 
-fn append_documentation<Id>(markdown: &mut String, documentation: &Documentation<Id>) {
+fn append_documentation<Id>(
+    markdown: &mut String,
+    current_uri: &str,
+    library: &StandardLibrary,
+    documentation: &Documentation<Id>,
+) {
     markdown.push_str(&format!(
         "\n\n{}\n\n{}",
         documentation.summary, documentation.details
     ));
-    if !documentation.examples.is_empty() {
-        markdown.push_str("\n\n## Examples");
-        for example in documentation.examples {
-            markdown.push_str(&format!(
-                "\n\n_{}_\n\n```splitscript\n{}\n```",
-                example.title, example.source
-            ));
-        }
+    append_examples(markdown, current_uri, library, documentation.examples);
+}
+
+fn append_examples(
+    markdown: &mut String,
+    current_uri: &str,
+    library: &StandardLibrary,
+    examples: &[crate::catalog::Example],
+) {
+    if examples.is_empty() {
+        return;
+    }
+    markdown.push_str("\n\n## Examples");
+    for example in examples {
+        markdown.push_str(&format!("\n\n_{}_\n\n", example.title));
+        markdown.push_str(&code::example(*example, current_uri, library));
     }
 }
 
@@ -1040,7 +1066,7 @@ fn escape_markdown_table_cell(value: &str) -> String {
 /// keeps navigation inside the current virtual-document scheme. Absolute
 /// custom-scheme links are treated as external resources and are not routed
 /// back through `TextDocumentContentProvider`.
-fn relative_document_link(current_uri: &str, target_uri: &str) -> String {
+pub(super) fn relative_document_link(current_uri: &str, target_uri: &str) -> String {
     let mut current = current_uri
         .trim_start_matches('/')
         .split('/')
@@ -1132,11 +1158,11 @@ fn operator_symbol(item: &crate::stdlib::StdlibItem) -> Option<&'static str> {
         })
 }
 
-fn core_type_uri(id: CoreTypeId, library: &StandardLibrary) -> String {
+pub(super) fn core_type_uri(id: CoreTypeId, library: &StandardLibrary) -> String {
     format!("/stdlib/types/{}/index.md", library.core_type(id).name)
 }
 
-fn symbol_uri(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
+pub(super) fn symbol_uri(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
     match symbol {
         StdlibSymbolId::StateProvider(id) => format!(
             "/stdlib/state-providers/{}.md",
@@ -1315,6 +1341,29 @@ mod tests {
         assert!(variant.markdown.starts_with(
             "[Standard library](../../../../index.md) / [TimerState](../index.md) / Running"
         ));
+    }
+
+    #[test]
+    fn callable_pages_contain_semantic_code_and_navigable_examples() {
+        let reference = DocumentationReference::default();
+        let page = reference
+            .page("/stdlib/types/Process/methods/read.md")
+            .expect("Process.read has a page");
+
+        assert!(
+            page.markdown
+                .contains("<pre class=\"hljs splitscript-code\">")
+        );
+        assert!(
+            page.markdown
+                .contains("href=\"../../../capabilities/MemoryReadable/index.md\"")
+        );
+        assert!(
+            page.markdown
+                .contains("href=\"../../address/methods/offset.md\"")
+        );
+        assert!(!page.markdown.contains("# state \"game.exe\""));
+        assert!(!page.markdown.contains("# let player"));
     }
 
     #[test]

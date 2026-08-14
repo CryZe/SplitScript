@@ -202,6 +202,14 @@ impl<'a> CatalogGenerator<'a> {
             .examples
             .iter()
             .map(|example| {
+                if let Some(validation_source) = &example.validation_source {
+                    return format!(
+                        "Example::checked({}, {}, {})",
+                        quote(&example.title),
+                        quote(&example.source),
+                        quote(validation_source),
+                    );
+                }
                 example.state_provider.as_ref().map_or_else(
                     || {
                         format!(
@@ -503,8 +511,13 @@ impl<'a> CatalogGenerator<'a> {
                 _ => unreachable!("validated operator binding"),
             })
             .unwrap_or("None");
+        let example = &function.documentation.examples[0];
+        let validation = example.validation_source.as_ref().map_or_else(
+            || format!("validation_fixture(StdlibItemId::{id})"),
+            |source| quote(source),
+        );
         output.push_str(&format!(
-                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, unary_operator: {unary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, validation_fixture(StdlibItemId::{id}))], related: &[] }}, implementation: {implementation} }},\n",
+                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, unary_operator: {unary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, {validation})], related: &[] }}, implementation: {implementation} }},\n",
                 quote(&function.name),
                 quote(&qualified_name),
                 self.type_parameters(type_parameters, owner),
@@ -512,7 +525,7 @@ impl<'a> CatalogGenerator<'a> {
                 function.parameters.iter().map(|parameter| self.parameter(parameter, type_parameters)).collect::<Vec<_>>().join(","),
                 self.type_ref(&function.result, type_parameters),
                 quote(&function.documentation.summary), quote(&function.documentation.details),
-                quote(&function.documentation.examples[0].title), quote(&function.documentation.examples[0].source)
+                quote(&example.title), quote(&example.source)
             ));
     }
 

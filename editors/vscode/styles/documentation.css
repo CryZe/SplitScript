@@ -24,3 +24,33 @@
 .splitscript-reference-table + table td {
     padding: 0.2em 1.5em 0.2em 0;
 }
+
+/* Semantic code fragments are emitted by the compiler, while the preview
+   remains VS Code's native Markdown preview. Links deliberately inherit the
+   token color so navigation does not visually replace syntax highlighting. */
+.splitscript-code a,
+.splitscript-code a:visited {
+    color: inherit;
+    text-decoration: none;
+}
+
+.splitscript-code a:hover,
+.splitscript-code a:focus-visible {
+    text-decoration: underline;
+}
+
+.splitscript-code .hljs-title.function_ {
+    color: var(--vscode-symbolIcon-functionForeground, #dcdcaa);
+}
+
+.splitscript-code .hljs-variable {
+    color: var(--vscode-symbolIcon-variableForeground, #9cdcfe);
+}
+
+.splitscript-code .hljs-attr {
+    color: var(--vscode-symbolIcon-propertyForeground, #9cdcfe);
+}
+
+.splitscript-code .splitscript-token-operator {
+    color: var(--vscode-symbolIcon-operatorForeground, inherit);
+}

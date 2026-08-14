@@ -32,7 +32,25 @@ pub struct DocumentationPage {
 
 struct DocumentationMemberGroup {
     title: &'static str,
-    members: Vec<StdlibSymbolId>,
+    members: Vec<DocumentationMember>,
+}
+
+impl DocumentationMemberGroup {
+    fn symbols(title: &'static str, members: impl IntoIterator<Item = StdlibSymbolId>) -> Self {
+        Self {
+            title,
+            members: members
+                .into_iter()
+                .map(DocumentationMember::Symbol)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DocumentationMember {
+    Symbol(StdlibSymbolId),
+    CoreType(CoreTypeId),
 }
 
 /// Compiler-owned documentation reference consumed by editor integrations.
@@ -204,14 +222,14 @@ impl DocumentationReference {
                     None,
                     &value.documentation,
                     vec![
-                        DocumentationMemberGroup {
-                            title: "Namespaces",
-                            members: self.child_namespaces(value.id),
-                        },
-                        DocumentationMemberGroup {
-                            title: "Functions",
-                            members: self.owned_non_operators(StdlibOwner::Namespace(value.id)),
-                        },
+                        DocumentationMemberGroup::symbols(
+                            "Namespaces",
+                            self.child_namespaces(value.id),
+                        ),
+                        DocumentationMemberGroup::symbols(
+                            "Functions",
+                            self.owned_non_operators(StdlibOwner::Namespace(value.id)),
+                        ),
                     ],
                 )
             })
@@ -230,24 +248,25 @@ impl DocumentationReference {
                             Some(format!("capability {}", value.name)),
                             &value.documentation,
                             vec![
-                                DocumentationMemberGroup {
-                                    title: "Requires",
-                                    members: value
+                                DocumentationMemberGroup::symbols(
+                                    "Requires",
+                                    value
                                         .super_capabilities
                                         .iter()
-                                        .map(|id| StdlibSymbolId::Capability(*id))
-                                        .collect(),
-                                },
+                                        .map(|id| StdlibSymbolId::Capability(*id)),
+                                ),
                                 DocumentationMemberGroup {
-                                    title: "Operators",
-                                    members: self
-                                        .owned_operators(StdlibOwner::Capability(value.id)),
+                                    title: "Implemented by",
+                                    members: self.capability_types(value.id),
                                 },
-                                DocumentationMemberGroup {
-                                    title: "Methods",
-                                    members: self
-                                        .owned_non_operators(StdlibOwner::Capability(value.id)),
-                                },
+                                DocumentationMemberGroup::symbols(
+                                    "Operators",
+                                    self.owned_operators(StdlibOwner::Capability(value.id)),
+                                ),
+                                DocumentationMemberGroup::symbols(
+                                    "Methods",
+                                    self.owned_non_operators(StdlibOwner::Capability(value.id)),
+                                ),
                             ],
                         )
                     })
@@ -267,17 +286,16 @@ impl DocumentationReference {
                             Some(render_type_constructor(value, &self.library)),
                             &value.documentation,
                             vec![
-                                DocumentationMemberGroup {
-                                    title: "Operators",
-                                    members: self
-                                        .owned_operators(StdlibOwner::TypeConstructor(value.id)),
-                                },
-                                DocumentationMemberGroup {
-                                    title: "Methods",
-                                    members: self.owned_non_operators(
-                                        StdlibOwner::TypeConstructor(value.id),
-                                    ),
-                                },
+                                DocumentationMemberGroup::symbols(
+                                    "Operators",
+                                    self.owned_operators(StdlibOwner::TypeConstructor(value.id)),
+                                ),
+                                DocumentationMemberGroup::symbols(
+                                    "Methods",
+                                    self.owned_non_operators(StdlibOwner::TypeConstructor(
+                                        value.id,
+                                    )),
+                                ),
                             ],
                         )
                     })
@@ -299,38 +317,33 @@ impl DocumentationReference {
                             Some(render_type_declaration(value)),
                             &value.documentation,
                             vec![
-                                DocumentationMemberGroup {
-                                    title: "Capabilities",
-                                    members: value
+                                DocumentationMemberGroup::symbols(
+                                    "Capabilities",
+                                    value
                                         .capabilities
                                         .iter()
-                                        .map(|id| StdlibSymbolId::Capability(*id))
-                                        .collect(),
-                                },
-                                DocumentationMemberGroup {
-                                    title: "Fields",
-                                    members: self
-                                        .library
+                                        .map(|id| StdlibSymbolId::Capability(*id)),
+                                ),
+                                DocumentationMemberGroup::symbols(
+                                    "Fields",
+                                    self.library
                                         .public_fields(value.id)
-                                        .map(|field| StdlibSymbolId::Field(field.id))
-                                        .collect(),
-                                },
-                                DocumentationMemberGroup {
-                                    title: "Variants",
-                                    members: self
-                                        .library
+                                        .map(|field| StdlibSymbolId::Field(field.id)),
+                                ),
+                                DocumentationMemberGroup::symbols(
+                                    "Variants",
+                                    self.library
                                         .variants_of(value.id)
-                                        .map(|variant| StdlibSymbolId::Variant(variant.id))
-                                        .collect(),
-                                },
-                                DocumentationMemberGroup {
-                                    title: "Operators",
-                                    members: self.owned_operators(StdlibOwner::Type(value.id)),
-                                },
-                                DocumentationMemberGroup {
-                                    title: "Methods",
-                                    members: self.owned_non_operators(StdlibOwner::Type(value.id)),
-                                },
+                                        .map(|variant| StdlibSymbolId::Variant(variant.id)),
+                                ),
+                                DocumentationMemberGroup::symbols(
+                                    "Operators",
+                                    self.owned_operators(StdlibOwner::Type(value.id)),
+                                ),
+                                DocumentationMemberGroup::symbols(
+                                    "Methods",
+                                    self.owned_non_operators(StdlibOwner::Type(value.id)),
+                                ),
                             ],
                         )
                     })
@@ -391,10 +404,10 @@ impl DocumentationReference {
                             "state provider",
                             Some(format!("state {}", value.name)),
                             &value.documentation,
-                            vec![DocumentationMemberGroup {
-                                title: "Value type",
-                                members: vec![StdlibSymbolId::Type(value.process_type)],
-                            }],
+                            vec![DocumentationMemberGroup::symbols(
+                                "Value type",
+                                [StdlibSymbolId::Type(value.process_type)],
+                            )],
                         )
                     })
             })
@@ -456,6 +469,26 @@ impl DocumentationReference {
             .collect()
     }
 
+    fn capability_types(
+        &self,
+        capability: crate::stdlib::StdlibCapabilityId,
+    ) -> Vec<DocumentationMember> {
+        self.library
+            .core_types()
+            .iter()
+            .filter(|ty| {
+                self.library
+                    .capabilities_satisfy(ty.capabilities, capability)
+            })
+            .map(|ty| DocumentationMember::CoreType(ty.id))
+            .chain(self.library.types().iter().filter_map(|ty| {
+                self.library
+                    .capabilities_satisfy(ty.capabilities, capability)
+                    .then_some(DocumentationMember::Symbol(StdlibSymbolId::Type(ty.id)))
+            }))
+            .collect()
+    }
+
     fn child_namespaces(&self, parent: crate::stdlib::StdlibNamespaceId) -> Vec<StdlibSymbolId> {
         let parent = self.library.namespace(parent);
         self.library
@@ -487,22 +520,20 @@ impl DocumentationReference {
             &mut markdown,
             &uri,
             vec![
-                DocumentationMemberGroup {
-                    title: "Capabilities",
-                    members: ty
-                        .capabilities
+                DocumentationMemberGroup::symbols(
+                    "Capabilities",
+                    ty.capabilities
                         .iter()
-                        .map(|id| StdlibSymbolId::Capability(*id))
-                        .collect(),
-                },
-                DocumentationMemberGroup {
-                    title: "Operators",
-                    members: self.owned_operators(StdlibOwner::Core(ty.id)),
-                },
-                DocumentationMemberGroup {
-                    title: "Methods",
-                    members: self.owned_non_operators(StdlibOwner::Core(ty.id)),
-                },
+                        .map(|id| StdlibSymbolId::Capability(*id)),
+                ),
+                DocumentationMemberGroup::symbols(
+                    "Operators",
+                    self.owned_operators(StdlibOwner::Core(ty.id)),
+                ),
+                DocumentationMemberGroup::symbols(
+                    "Methods",
+                    self.owned_non_operators(StdlibOwner::Core(ty.id)),
+                ),
             ],
         );
         DocumentationPage {
@@ -548,20 +579,14 @@ impl DocumentationReference {
         for mut group in member_groups {
             group
                 .members
-                .sort_by_key(|symbol| symbol_label(*symbol, &self.library));
+                .sort_by_key(|member| member_label(*member, &self.library));
             group.members.dedup();
             if group.members.is_empty() {
                 continue;
             }
             markdown.push_str(&format!("\n\n## {}\n", group.title));
             for member in group.members {
-                append_symbol_link_with_label(
-                    markdown,
-                    uri,
-                    member,
-                    symbol_local_label(member, &self.library),
-                    &self.library,
-                );
+                append_member_link(markdown, uri, member, &self.library);
             }
         }
     }
@@ -865,6 +890,28 @@ fn append_symbol_link_with_label(
     ));
 }
 
+fn append_member_link(
+    markdown: &mut String,
+    current_uri: &str,
+    member: DocumentationMember,
+    library: &StandardLibrary,
+) {
+    let (label, target) = match member {
+        DocumentationMember::Symbol(symbol) => (
+            symbol_local_label(symbol, library),
+            symbol_uri(symbol, library),
+        ),
+        DocumentationMember::CoreType(ty) => (
+            library.core_type(ty).name.to_owned(),
+            core_type_uri(ty, library),
+        ),
+    };
+    markdown.push_str(&format!(
+        "\n- [{label}]({})",
+        relative_document_link(current_uri, &target)
+    ));
+}
+
 /// Produces an ordinary relative Markdown link so VS Code's Markdown preview
 /// keeps navigation inside the current virtual-document scheme. Absolute
 /// custom-scheme links are treated as external resources and are not routed
@@ -921,6 +968,13 @@ fn symbol_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
             format!("{}.{}", library.type_decl(variant.owner).name, variant.name)
         }
         StdlibSymbolId::Item(id) => library.item(id).qualified_name.to_owned(),
+    }
+}
+
+fn member_label(member: DocumentationMember, library: &StandardLibrary) -> String {
+    match member {
+        DocumentationMember::Symbol(symbol) => symbol_label(symbol, library),
+        DocumentationMember::CoreType(ty) => library.core_type(ty).name.to_owned(),
     }
 }
 
@@ -1170,6 +1224,13 @@ mod tests {
         let numeric = reference
             .page("/stdlib/capabilities/Numeric/index.md")
             .expect("Numeric has a page");
+        assert!(numeric.markdown.contains("## Implemented by"));
+        assert!(numeric.markdown.contains("[i32](../../types/i32/index.md)"));
+        assert!(
+            !numeric
+                .markdown
+                .contains("[bool](../../types/bool/index.md)")
+        );
         assert!(numeric.markdown.contains("## Operators"));
         assert!(numeric.markdown.contains("[+](operators/add.md)"));
         assert!(numeric.markdown.contains("## Methods"));
@@ -1180,5 +1241,14 @@ mod tests {
             "[Standard library](../../../../index.md) / [Numeric](../index.md) / add"
         ));
         assert!(operator.markdown.contains("\n\n_Operator_\n\n"));
+
+        let equatable = reference
+            .page("/stdlib/capabilities/Equatable/index.md")
+            .expect("Equatable has a page");
+        assert!(
+            equatable
+                .markdown
+                .contains("[FileVersion](../../types/FileVersion/index.md)")
+        );
     }
 }

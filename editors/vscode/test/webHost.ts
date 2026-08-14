@@ -24,6 +24,13 @@ export async function run(): Promise<void> {
     await vscode.commands.executeCommand('splitscript.restartLanguageServer');
     await hoverAt(script, hoverPosition);
 
+    await vscode.commands.executeCommand('splitscript.openDocumentation');
+    await waitFor(
+        async () => (vscode.window.tabGroups.all.length >= 2 ? true : undefined),
+        'standard-library documentation did not open beside the source editor',
+    );
+    await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
+
     const durationDocs = vscode.Uri.parse(
         'splitscript-docs:/stdlib/types/Duration/index.md',
     );

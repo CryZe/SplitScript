@@ -146,9 +146,15 @@
       },
       {
         "command": "splitscript.openDocumentation",
-        "title": "SplitScript: Open Documentation",
-        "shortTitle": "Open Documentation",
+        "title": "SplitScript: Open Standard Library Documentation",
+        "shortTitle": "Open Standard Library Documentation",
         "icon": "$(book)"
+      },
+      {
+        "command": "splitscript.searchDocumentation",
+        "title": "SplitScript: Search Standard Library Documentation",
+        "shortTitle": "Search Standard Library Documentation",
+        "icon": "$(search)"
       },
       {
         "command": "splitscript.buildRelease",
@@ -171,6 +177,11 @@
     ],
     "menus": {
       "editor/title": [
+        {
+          "command": "splitscript.openDocumentation",
+          "when": "resourceLangId == splitscript",
+          "group": "navigation@3"
+        },
         {
           "command": "splitscript.buildRelease",
           "when": "resourceLangId == splitscript",

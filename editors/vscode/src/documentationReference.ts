@@ -51,7 +51,11 @@ export class DocumentationReferenceController implements vscode.Disposable {
             ),
             vscode.commands.registerCommand(
                 'splitscript.openDocumentation',
-                async (uri?: string) => this.open(uri),
+                async () => this.openPage(INDEX_URI),
+            ),
+            vscode.commands.registerCommand(
+                'splitscript.searchDocumentation',
+                async () => this.search(),
             ),
         );
     }
@@ -62,12 +66,16 @@ export class DocumentationReferenceController implements vscode.Disposable {
         }
     }
 
-    private async open(requestedUri?: string): Promise<void> {
-        const uri = requestedUri ?? await this.pickPage();
+    private async search(): Promise<void> {
+        const uri = await this.pickPage();
         if (uri === undefined) {
             return;
         }
 
+        await this.openPage(uri);
+    }
+
+    private async openPage(uri: string): Promise<void> {
         const documentUri = vscode.Uri.from({
             scheme: DOCUMENTATION_SCHEME,
             path: normalizePageUri(uri),
@@ -76,7 +84,7 @@ export class DocumentationReferenceController implements vscode.Disposable {
         // produces a useful language-server error before opening an empty
         // preview if an identity ever becomes stale.
         await vscode.workspace.openTextDocument(documentUri);
-        await vscode.commands.executeCommand('markdown.showPreview', documentUri);
+        await vscode.commands.executeCommand('markdown.showPreviewToSide', documentUri);
     }
 
     private async pickPage(): Promise<string | undefined> {

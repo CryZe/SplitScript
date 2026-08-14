@@ -630,9 +630,7 @@ impl DocumentationReference {
                 continue;
             }
             markdown.push_str(&format!("\n\n## {}\n", group.title));
-            for member in group.members {
-                append_member_link(markdown, uri, member, &self.library);
-            }
+            append_member_table(markdown, uri, &group.members, &self.library);
         }
     }
 
@@ -712,12 +710,13 @@ impl DocumentationReference {
                 continue;
             }
             markdown.push_str(&format!("\n## {title}\n"));
+            append_reference_table_header(&mut markdown, &["Symbol", "Description"]);
             for entry in section {
                 markdown.push_str(&format!(
-                    "\n- [{}]({}) — {}",
-                    entry.title,
+                    "\n| [{}]({}) | {} |",
+                    escape_markdown_table_cell(&entry.title),
                     relative_document_link("/index.md", &entry.uri),
-                    entry.summary
+                    escape_markdown_table_cell(entry.summary)
                 ));
             }
         }
@@ -900,47 +899,38 @@ fn append_related(
         return;
     }
     markdown.push_str("\n\n## Related\n");
-    for symbol in related {
-        append_symbol_link(markdown, current_uri, *symbol, library);
+    let members = related
+        .iter()
+        .copied()
+        .map(DocumentationMember::Symbol)
+        .collect::<Vec<_>>();
+    append_member_table(markdown, current_uri, &members, library);
+}
+
+fn append_member_table(
+    markdown: &mut String,
+    current_uri: &str,
+    members: &[DocumentationMember],
+    library: &StandardLibrary,
+) {
+    append_reference_table_header(markdown, &["Member", "Description", "Available through"]);
+    for member in members {
+        let (member_link, description, available_through) =
+            member_markdown(current_uri, *member, library);
+        markdown.push_str(&format!(
+            "\n| {member_link} | {description} | {} |",
+            available_through
+                .map(|capability| format!("Available through {capability}"))
+                .unwrap_or_default()
+        ));
     }
 }
 
-fn append_symbol_link(
-    markdown: &mut String,
-    current_uri: &str,
-    symbol: StdlibSymbolId,
-    library: &StandardLibrary,
-) {
-    append_symbol_link_with_label(
-        markdown,
-        current_uri,
-        symbol,
-        symbol_label(symbol, library),
-        library,
-    );
-}
-
-fn append_symbol_link_with_label(
-    markdown: &mut String,
-    current_uri: &str,
-    symbol: StdlibSymbolId,
-    label: String,
-    library: &StandardLibrary,
-) {
-    let target = symbol_uri(symbol, library);
-    markdown.push_str(&format!(
-        "\n- [{}]({})",
-        label,
-        relative_document_link(current_uri, &target)
-    ));
-}
-
-fn append_member_link(
-    markdown: &mut String,
+fn member_markdown(
     current_uri: &str,
     member: DocumentationMember,
     library: &StandardLibrary,
-) {
+) -> (String, String, Option<String>) {
     let (label, target, available_through) = match member {
         DocumentationMember::Symbol(symbol) => (
             symbol_local_label(symbol, library),
@@ -958,18 +948,63 @@ fn append_member_link(
             None,
         ),
     };
-    markdown.push_str(&format!(
-        "\n- [{label}]({})",
+    let label = escape_markdown_table_cell(&label);
+    let member_link = format!(
+        "[{label}]({})",
         relative_document_link(current_uri, &target)
-    ));
-    if let Some(capability) = available_through {
+    );
+    let available_through = available_through.map(|capability| {
         let capability = StdlibSymbolId::Capability(capability);
-        markdown.push_str(&format!(
-            " — available through [{}]({})",
+        format!(
+            "[{}]({})",
             symbol_local_label(capability, library),
             relative_document_link(current_uri, &symbol_uri(capability, library))
-        ));
+        )
+    });
+    (
+        member_link,
+        escape_markdown_table_cell(member_summary(member, library)),
+        available_through,
+    )
+}
+
+fn member_summary(member: DocumentationMember, library: &StandardLibrary) -> &'static str {
+    let symbol = match member {
+        DocumentationMember::Symbol(symbol)
+        | DocumentationMember::CapabilitySymbol { symbol, .. } => symbol,
+        DocumentationMember::CoreType(ty) => {
+            return LanguageCatalog::new()
+                .builtin_type(ty)
+                .expect("every documented core type has a language-catalog entry")
+                .documentation
+                .summary;
+        }
+    };
+    match symbol {
+        StdlibSymbolId::StateProvider(id) => library.state_provider(id).documentation.summary,
+        StdlibSymbolId::Namespace(id) => library.namespace(id).documentation.summary,
+        StdlibSymbolId::Capability(id) => library.capability(id).documentation.summary,
+        StdlibSymbolId::TypeConstructor(id) => library.type_constructor(id).documentation.summary,
+        StdlibSymbolId::Type(id) => library.type_decl(id).documentation.summary,
+        StdlibSymbolId::Field(id) => library.field(id).documentation.summary,
+        StdlibSymbolId::Variant(id) => library.variant(id).documentation.summary,
+        StdlibSymbolId::Item(id) => library.item(id).documentation.summary,
     }
+}
+
+fn append_reference_table_header(markdown: &mut String, columns: &[&str]) {
+    markdown.push_str("\n<div class=\"splitscript-reference-table\"></div>\n\n|");
+    for column in columns {
+        markdown.push_str(&format!(" {column} |"));
+    }
+    markdown.push_str("\n|");
+    for _ in columns {
+        markdown.push_str(" --- |");
+    }
+}
+
+fn escape_markdown_table_cell(value: &str) -> String {
+    value.replace('|', "\\|")
 }
 
 /// Produces an ordinary relative Markdown link so VS Code's Markdown preview
@@ -1217,6 +1252,10 @@ mod tests {
             page.markdown
                 .contains("[Duration](stdlib/types/Duration/index.md)")
         );
+        assert!(page.markdown.contains(
+            "<div class=\"splitscript-reference-table\"></div>\n\n\
+             | Symbol | Description |"
+        ));
         assert!(!page.markdown.contains("Duration.fromSeconds"));
         assert!(!page.markdown.contains("FileVersion.major"));
         assert!(!page.markdown.contains("TimerState.Running"));
@@ -1321,17 +1360,30 @@ mod tests {
             .expect("i32 has a page");
 
         assert!(integer.markdown.contains(
-            "[+](../../capabilities/Numeric/operators/add.md) — available through \
-             [Numeric](../../capabilities/Numeric/index.md)"
+            "<div class=\"splitscript-reference-table\"></div>\n\n\
+             | Member | Description | Available through |"
         ));
         assert!(integer.markdown.contains(
-            "[%](../../capabilities/Integer/operators/remainder.md) — available through \
-             [Integer](../../capabilities/Integer/index.md)"
+            "| [+](../../capabilities/Numeric/operators/add.md) | \
+             Adds another value of the same numeric type. | \
+             Available through [Numeric](../../capabilities/Numeric/index.md) |"
         ));
         assert!(integer.markdown.contains(
-            "[abs](../../capabilities/Signed/methods/abs.md) — available through \
-             [Signed](../../capabilities/Signed/index.md)"
+            "| [%](../../capabilities/Integer/operators/remainder.md) | \
+             Returns the remainder after integer division. | \
+             Available through [Integer](../../capabilities/Integer/index.md) |"
         ));
+        assert!(integer.markdown.contains(
+            "| [\\|](../../capabilities/Integer/operators/bitOr.md) | \
+             Combines two integers with a bitwise OR. | \
+             Available through [Integer](../../capabilities/Integer/index.md) |"
+        ));
+        assert!(integer.markdown.contains(
+            "| [abs](../../capabilities/Signed/methods/abs.md) | \
+             Returns this value without a negative sign. | \
+             Available through [Signed](../../capabilities/Signed/index.md) |"
+        ));
+        assert!(!integer.markdown.contains('—'));
 
         let duration = reference
             .page("/stdlib/types/Duration/index.md")
@@ -1340,11 +1392,22 @@ mod tests {
             duration
                 .markdown
                 .lines()
-                .any(|line| line == "- [+](operators/add.md)")
+                .any(|line| {
+                    line == "| [+](operators/add.md) | Adds another duration and normalizes the result. |  |"
+                })
         );
         assert!(duration.markdown.contains(
-            "[==](../../capabilities/Equatable/operators/equals.md) — available through \
-             [Equatable](../../capabilities/Equatable/index.md)"
+            "| [==](../../capabilities/Equatable/operators/equals.md) | \
+             Reports whether this value and another value are equal. | \
+             Available through [Equatable](../../capabilities/Equatable/index.md) |"
         ));
+
+        let array = reference
+            .page("/stdlib/generic-types/Array/index.md")
+            .expect("Array has a page");
+        assert!(array.markdown.contains(
+            "| [clear](methods/clear.md) | Removes every element from a growable array. |  |"
+        ));
+        assert!(!array.markdown.contains("\n- [clear](methods/clear.md)"));
     }
 }

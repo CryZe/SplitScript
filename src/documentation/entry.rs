@@ -90,7 +90,7 @@ impl StandardLibraryDocumentation {
             markdown.push_str("\n\n**Parameters**\n");
             for parameter in &self.parameters {
                 markdown.push_str(&format!(
-                    "\n- `{}` — {}",
+                    "\n- `{}`: {}",
                     parameter.name, parameter.documentation
                 ));
             }

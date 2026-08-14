@@ -31,11 +31,15 @@
   },
   "files": [
     "dist/**",
+    "styles/**",
     "syntaxes/**",
     "language-configuration.json",
     "README.md"
   ],
   "contributes": {
+    "markdown.previewStyles": [
+      "./styles/documentation.css"
+    ],
     "languages": [
       {
         "id": "splitscript",

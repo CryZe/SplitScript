@@ -1,0 +1,26 @@
+/* SplitScript reference member tables use columns only for alignment. */
+.splitscript-reference-table {
+    display: none;
+}
+
+.splitscript-reference-table + table,
+.splitscript-reference-table + table thead,
+.splitscript-reference-table + table tbody,
+.splitscript-reference-table + table tr,
+.splitscript-reference-table + table th,
+.splitscript-reference-table + table td {
+    border: 0 !important;
+}
+
+.splitscript-reference-table + table tr {
+    background: transparent !important;
+}
+
+.splitscript-reference-table + table thead {
+    display: none;
+}
+
+.splitscript-reference-table + table th,
+.splitscript-reference-table + table td {
+    padding: 0.2em 1.5em 0.2em 0;
+}

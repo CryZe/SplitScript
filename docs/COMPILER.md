@@ -204,7 +204,7 @@ are checked callee-first. Calls inside one component remain monomorphic while
 it is solved, then declaration-local roots are generalized at the component
 boundary. Each external call instantiates fresh roots while preserving shared
 variables, numeric-literal constraints, capability requirements, and nested
-`Array`, `Option`, and `Result` shapes. Mutually recursive generic functions are
+`[T]`, `T?`, and `T!` shapes. Mutually recursive generic functions are
 supported; an occurs check rejects polymorphic recursion that would require an
 infinite type with a focused diagnostic.
 
@@ -222,7 +222,7 @@ the context of each concrete owner and specializes expression types, locals,
 conversions, nested calls, wrappers, matches, and intrinsic arguments without
 overwriting source facts. Before layout planning, a backend-private clone of
 the semantic and constructed-type arenas materializes any concrete
-`Array`/`Option`/`Result` layouts that occur only inside a generic body. Roots
+`[T]`/`T?`/`T!` layouts that occur only inside a generic body. Roots
 come from actions, states, globals, and their transitive concrete calls. The
 instance graph is structurally deduplicated and imposes deterministic generic
 expansion-depth and total-instance limits; ordinary monomorphic call chains do
@@ -371,7 +371,7 @@ source-to-catalog comparison implementation inside the compiler.
 Callable signatures use a backend-neutral declaration type expression. Core
 types, nominal library types, and type parameters are atomic references; every
 generic shape is the same recursive application node keyed by an open catalog
-constructor ID. Array, Option, Result, and Set are unary constructor declarations,
+constructor ID. `[T]`, `T?`, `T!`, and `Set<T>` are unary constructor declarations,
 so adding a future generic constructor does not add a parallel type-expression
 variant. Catalog validation resolves constructor IDs, checks arity and nested
 arguments, preserves constructor-parameter capability constraints, and rejects
@@ -440,7 +440,7 @@ retryable, and suspending lowering. Direct generated-helper and host-import
 roots live in the same contract, and the
 backend dependency planner interprets those roots instead of dispatching on
 `IntrinsicId`. Synchronous and suspension scratch policies also live in the
-contract as typed core/expression/Result-payload slots, so Wasm-IR local
+contract as typed core/expression/`T!`-payload slots, so Wasm-IR local
 planning no longer rematches every intrinsic. The runtime-helper registry
 recursively derives observable effects through helper and ABI roots and checks
 them against the trusted contract before Wasm emission, so public declarations
@@ -507,7 +507,7 @@ editor layers.
 
 [`src/codegen/expression.rs`](../src/codegen/expression.rs) owns structured
 block and assignment emission, resolved receiver/path access, every Wasm-IR
-expression variant, casts and comparisons, Result/Option control flow, match
+expression variant, casts and comparisons, `T!`/`T?` control flow, match
 lowering, and standard-library intrinsic dispatch. Its parent-facing surface is
 the expression context plus entry points for a block, assignment, expression,
 or receiver. Action, state-read, and async encoders can therefore reuse
@@ -678,7 +678,7 @@ recursive call cycles. Function planning/body emission and static-data/helper/
 import analysis all consume the same result. Dead functions therefore cannot
 retain their strings, signature literals, generated helpers, or host imports.
 Reachable equality operands additionally close over nested source or catalog
-record fields, enum payloads, and Option/Result values; Result errors retain
+record fields, enum payloads, and `T?`/`T!` values; `T!` errors retain
 String equality. Thus
 structural-equality signatures/bodies and the String equality helper are emitted
 only when a live comparison can call them. The same analysis
@@ -788,7 +788,7 @@ its complete nested continuation tree. Semantic validation prevents
 process-lifetime future references, including references nested in aggregates,
 from escaping into globals.
 
-Array `for` loops lower through compiler-owned iterable, `u32` index, and
+`[T]` `for` loops lower through compiler-owned iterable, `u32` index, and
 element-binding values. Ordinary bodies become structured Wasm block/loop
 control flow; the iterable is evaluated once and the index advances before the
 body so `continue` cannot repeat an element. A body containing suspension uses
@@ -805,16 +805,16 @@ process-lifetime region as process-backed futures.
 
 `retry expression` uses the same state machine but is not a catalog intrinsic.
 The checker requires the expression to have type `T!`, the Wasm IR records the
-`Retry` suspension mode and plans a typed Result scratch local, and polling
+`Retry` suspension mode and plans a typed `T!` scratch local, and polling
 re-evaluates the ordinary lowered expression. An error returns pending; a
-success extracts the Result payload into the continuation frame when the
-binding remains live. This makes user-defined Result-returning functions
+success extracts the `T!` payload into the continuation frame when the
+binding remains live. This makes user-defined `T!`-returning functions
 retryable without giving the backend special knowledge of those functions.
 Immediate process-memory APIs consistently expose this path: generic reads,
 pointer following, relative-address decoding, and managed-string decoding all
 return `T!`. Their low-level helpers may still use zero or null sentinels at the
 ABI boundary, but expression lowering converts those sentinels exactly once
-into the standard Result GC representation. Discovery APIs such as module,
+into the standard `T!` GC representation. Discovery APIs such as module,
 signature, and low-level Unity metadata lookup remain intrinsic suspensions:
 temporary absence means pending, while process closure cancels their region.
 Higher-level discovery such as `Unity.il2cpp` is an ordinary source-defined
@@ -822,7 +822,7 @@ async function composed from those bounded suspension points.
 
 The Wasm IR now owns a stable-ID expression plan alongside its control-flow and
 storage plans. Scalar literals, resolved value/member paths, unary and binary
-operations, explicit casts, result `TypeId`s, and implicit Option/Result lift
+operations, explicit casts, result `TypeId`s, and implicit `T?`/`T!` lift
 edges are copied into backend-owned nodes. Ordinary emission consumes those
 nodes without asking typed HIR which operation or path was selected. String
 literals and interpolation, compile-time signatures, arrays, and resolved
@@ -833,10 +833,10 @@ paths, standard-library item IDs, and inferred generic arguments are no longer
 recovered from typed HIR by ordinary or suspending emission. Expression-valued
 `if` uses a native branch node with typed result arms. `else` fallback nodes
 preserve value versus returning branches, while postfix `?` nodes carry the
-exact inferred Result boundary used for failure transfer. `match` uses
+exact inferred `T!` boundary used for failure transfer. `match` uses
 resolved Wasm-IR arms: enum patterns retain stable variant and payload
-binding IDs; `None`/`Some` patterns retain Option state plus the present-value
-binding; `Ok`/`Err` patterns retain Result state plus the corresponding
+binding IDs; `None`/`Some` patterns retain `T?` state plus the present-value
+binding; `Ok`/`Err` patterns retain `T!` state plus the corresponding
 value or error binding. Literal/wildcard patterns retain guards and result
 expressions. Binding extraction and guard evaluation are nested behind the
 pattern condition, so an inactive enum variant or wrapper state is never
@@ -863,9 +863,9 @@ and `Ok` constructors allocate provisional layouts when no expected wrapper is
 available. After inference resolves their payload types, equivalent provisional
 and declared layouts canonicalize to one stable nominal Wasm GC identity.
 Payload-free `None` and success-type-free `Err` still require expected-type
-context. Wrapper match patterns are resolved to stable semantic Option/Result
+context. Wrapper match patterns are resolved to stable semantic `T?`/`T!`
 layout IDs before lowering; the backend does not rediscover their meaning from
-source spelling. Result-aware control flow remains a separate semantic step;
+source spelling. Fallible control flow remains a separate semantic step;
 none of these physical layouts introduce a private failure protocol.
 
 ## Syntax traversal

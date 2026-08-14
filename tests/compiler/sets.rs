@@ -126,15 +126,30 @@ fn generic_set_types_require_an_element_argument() {
 }
 
 #[test]
-fn legacy_array_constructor_syntax_remains_rejected_by_resolution() {
-    let source = "state \"game.exe\" {} record Legacy { values: Array<i32> }";
-    let diagnostics = splitscript::compile(source).expect_err("arrays use [T] syntax");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("Array<...>")
-            || diagnostic
-                .message
-                .contains("does not have source type syntax")
-    }));
+fn named_spellings_of_structural_type_forms_are_rejected() {
+    for (legacy, canonical) in [
+        ("Array<i32>", "[T]"),
+        ("Option<i32>", "T?"),
+        ("Result<i32>", "T!"),
+    ] {
+        let source = format!("state \"game.exe\" {{}} record Legacy {{ values: {legacy} }}");
+        let diagnostics =
+            splitscript::compile(&source).expect_err("structural types use punctuation syntax");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message
+                    .contains("is not SplitScript type syntax")
+                    && diagnostic.labels.iter().any(|label| {
+                        label
+                            .message
+                            .as_deref()
+                            .is_some_and(|message| message.contains(canonical))
+                    })
+            }),
+            "missing `{canonical}` guidance for `{legacy}`: {diagnostics:#?}"
+        );
+    }
 }
 
 #[test]

@@ -676,8 +676,11 @@ fn render_stdlib_symbol_hover(library: StandardLibrary, symbol: StdlibSymbolId) 
         }
         StdlibSymbolId::TypeConstructor(id) => {
             let declaration = library.type_constructor(id);
-            let mut form = declaration.name.to_owned();
-            if !declaration.parameters.is_empty() {
+            let mut form = library.render_type_constructor(id);
+            if declaration.syntax == crate::stdlib::TypeConstructorSyntax::Named
+                && !declaration.parameters.is_empty()
+            {
+                form = declaration.name.to_owned();
                 form.push('<');
                 for (index, parameter) in declaration.parameters.iter().enumerate() {
                     if index != 0 {
@@ -1201,7 +1204,7 @@ whileAttached {
                 .markdown
                 .contains("let value = retry resultExpression")
         );
-        assert!(hover.markdown.contains("Retries a Result expression"));
+        assert!(hover.markdown.contains("Retries a `T!` expression"));
         assert!(
             hover
                 .markdown

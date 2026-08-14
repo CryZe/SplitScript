@@ -28,7 +28,8 @@ pub use declarations::{
     CapabilityBehavior, CoreType, CoreTypeId, DeclaredTypeRef, FieldVisibility,
     RuntimeRepresentation, ScalarMemoryLayout, StateProviderAttachment, StateProviderProcesses,
     StdlibCapability, StdlibField, StdlibNamespace, StdlibOwner, StdlibStateProvider,
-    StdlibSymbolId, StdlibType, StdlibTypeConstructor, StdlibTypeKind, StdlibVariant, ValueUsage,
+    StdlibSymbolId, StdlibType, StdlibTypeConstructor, StdlibTypeKind, StdlibVariant,
+    TypeConstructorSyntax, ValueUsage,
 };
 
 use catalog::{
@@ -65,18 +66,15 @@ impl TypeRef {
                     .iter()
                     .map(|argument| argument.render_with(library, substitutions))
                     .collect::<Vec<_>>();
-                if constructor == StdlibTypeConstructorId::Array && rendered.len() == 1 {
-                    format!("[{}]", rendered[0])
-                } else if constructor == StdlibTypeConstructorId::Option && rendered.len() == 1 {
-                    format!("{}?", rendered[0])
-                } else if constructor == StdlibTypeConstructorId::Result && rendered.len() == 1 {
-                    format!("{}!", rendered[0])
-                } else {
-                    format!(
-                        "{}<{}>",
-                        library.type_constructor(constructor).name,
-                        rendered.join(", ")
-                    )
+                let declaration = library.type_constructor(constructor);
+                let arguments = rendered.join(", ");
+                match declaration.syntax {
+                    TypeConstructorSyntax::Named => {
+                        format!("{}<{arguments}>", declaration.name)
+                    }
+                    TypeConstructorSyntax::Array => format!("[{arguments}]"),
+                    TypeConstructorSyntax::Optional => format!("{arguments}?"),
+                    TypeConstructorSyntax::Fallible => format!("{arguments}!"),
                 }
             }
             Self::FixedArray { element, length } => format!(
@@ -268,10 +266,32 @@ impl StandardLibrary {
             .expect("every standard-library type-constructor ID must have a declaration")
     }
 
-    pub fn type_constructor_by_name(&self, name: &str) -> Option<&'static StdlibTypeConstructor> {
-        self.type_constructors()
+    /// Looks up constructors that are actually written as source identifiers.
+    /// Structural forms such as `[T]`, `T?`, and `T!` deliberately have no
+    /// identifier lookup path.
+    pub fn named_type_constructor_by_name(
+        &self,
+        name: &str,
+    ) -> Option<&'static StdlibTypeConstructor> {
+        self.type_constructors().iter().find(|constructor| {
+            constructor.syntax == TypeConstructorSyntax::Named && constructor.name == name
+        })
+    }
+
+    pub fn render_type_constructor(&self, id: StdlibTypeConstructorId) -> String {
+        let constructor = self.type_constructor(id);
+        let parameters = constructor
+            .parameters
             .iter()
-            .find(|constructor| constructor.name == name)
+            .map(|parameter| parameter.name)
+            .collect::<Vec<_>>()
+            .join(", ");
+        match constructor.syntax {
+            TypeConstructorSyntax::Named => format!("{}<{parameters}>", constructor.name),
+            TypeConstructorSyntax::Array => format!("[{parameters}]"),
+            TypeConstructorSyntax::Optional => format!("{parameters}?"),
+            TypeConstructorSyntax::Fallible => format!("{parameters}!"),
+        }
     }
 
     pub fn namespaces(&self) -> &'static [StdlibNamespace] {

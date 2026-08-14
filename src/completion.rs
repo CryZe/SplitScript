@@ -803,7 +803,7 @@ fn add_standard_library_path_members(
 
     for item in library.items() {
         if let [type_name] = prefix
-            && let Some(constructor) = library.type_constructor_by_name(type_name)
+            && let Some(constructor) = library.named_type_constructor_by_name(type_name)
             && item.owner == crate::stdlib::StdlibOwner::TypeConstructor(constructor.id)
             && matches!(item.kind, crate::stdlib::ItemKind::Method { .. })
         {

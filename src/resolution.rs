@@ -129,9 +129,24 @@ pub(crate) fn validate_declarations(
         }
     }
 
+    let applied_constructor_occurrences = program
+        .type_applications
+        .iter()
+        .flat_map(|application| {
+            application
+                .occurrences
+                .iter()
+                .map(|occurrence| occurrence.constructor)
+        })
+        .collect::<std::collections::HashSet<_>>();
+
     for (name, span) in program.type_names.iter().zip(&program.type_name_spans) {
         if standard_library.type_by_name(name).is_none()
-            && standard_library.type_constructor_by_name(name).is_none()
+            && standard_library
+                .named_type_constructor_by_name(name)
+                .is_none()
+            && !(matches!(name.as_str(), "Array" | "Option" | "Result")
+                && applied_constructor_occurrences.contains(span))
             && !program.records.iter().any(|record| record.name == *name)
             && !program
                 .enums
@@ -149,18 +164,11 @@ pub(crate) fn validate_declarations(
         }
     }
 
-    let applied_constructor_occurrences = program
-        .type_applications
-        .iter()
-        .flat_map(|application| {
-            application
-                .occurrences
-                .iter()
-                .map(|occurrence| occurrence.constructor)
-        })
-        .collect::<std::collections::HashSet<_>>();
     for (id, name, _) in program.type_names() {
-        if standard_library.type_constructor_by_name(name).is_none() {
+        if standard_library
+            .named_type_constructor_by_name(name)
+            .is_none()
+        {
             continue;
         }
         for span in program.type_name_occurrences(id) {
@@ -233,7 +241,22 @@ pub(crate) fn resolve_program(
 
     for application in &program.type_applications {
         let name = program.type_name(application.constructor);
-        let Some(constructor) = standard_library.type_constructor_by_name(name) else {
+        let Some(constructor) = standard_library.named_type_constructor_by_name(name) else {
+            if let Some(canonical) = match name {
+                "Array" => Some("[T]"),
+                "Option" => Some("T?"),
+                "Result" => Some("T!"),
+                _ => None,
+            } {
+                provider_diagnostics.push(
+                    Diagnostic::type_error(
+                        format!("`{name}<T>` is not SplitScript type syntax"),
+                        program.type_name_span(application.constructor),
+                    )
+                    .with_primary_label(format!("write `{canonical}` instead")),
+                );
+                continue;
+            }
             let is_undeclared_legacy_type = legacy_type_diagnostic(name).is_some()
                 && !program.records.iter().any(|record| record.name == name)
                 && !program

@@ -40,7 +40,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::ArrayExtend,
         StdlibItemId::ArrayRemove,
         StdlibItemId::ArrayPop,
-        StdlibItemId::ResultToOption,
+        StdlibItemId::ResultDiscardError,
         StdlibItemId::AddressOffset,
         StdlibItemId::UnityIl2Cpp,
         StdlibItemId::GbaEmulatorDiscover,
@@ -69,20 +69,22 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
 }
 
 #[test]
-fn result_to_option_is_source_defined_and_preserves_generic_inference() {
+fn discarding_an_error_is_source_defined_and_preserves_generic_inference() {
     let library = StandardLibrary::new();
     assert_eq!(
-        library.render_signature(StdlibItemId::ResultToOption),
-        "T!.toOption() -> T?"
+        library.render_signature(StdlibItemId::ResultDiscardError),
+        "T!.discardError() -> T?"
     );
     assert!(matches!(
-        library.item(StdlibItemId::ResultToOption).implementation,
+        library
+            .item(StdlibItemId::ResultDiscardError)
+            .implementation,
         Implementation::LibraryBody { .. }
     ));
 
     let source = r#"
         state "game.exe" {
-            optional: i32? = process.read<i32>(0x1000).toOption()
+            optional: i32? = process.read<i32>(0x1000).discardError()
         }
 
         whileAttached {

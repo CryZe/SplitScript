@@ -428,7 +428,8 @@ mod tests {
             name: "T",
             constraints: &[],
         }];
-        let checked = checked("state \"game.exe\" {}\nfn wrap(value) { return value.toOption() }");
+        let checked =
+            checked("state \"game.exe\" {}\nfn wrap(value) { return value.discardError() }");
         let function = checked
             .syntax()
             .functions

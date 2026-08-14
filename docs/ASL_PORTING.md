@@ -163,7 +163,7 @@ let missingCheckpoint = match current.checkpoint {
 ```
 
 A failed process read is not automatically an empty or null string. Decide
-first whether that boundary should remain a `Result`, become a `String?`, or
+first whether that boundary should remain fallible (`T!`), become a `String?`, or
 retain the last accepted state value. The compiler therefore gives
 `String.IsNullOrEmpty` focused guidance without guessing an automatic rewrite.
 
@@ -235,7 +235,7 @@ C# permits a null replacement to mean deletion; pass `""` explicitly in
 SplitScript only when that was the source's intent. An empty search is an error,
 as is a result whose byte length cannot be represented. The compiler therefore
 explains `.Replace(...)` but does not offer a blind rename that would leave
-Result handling unresolved.
+`T!` handling unresolved.
 
 C# `left.Equals(right)` normally becomes `left == right`; SplitScript compares
 strings by exact UTF-8 text rather than GC reference identity. If the source
@@ -278,10 +278,10 @@ let percentage: f64 = current.percentageText.parse() else 0.0
 
 The compiler recognizes the C# static `Parse` and `TryParse` families and
 points to this pattern. It intentionally does not rewrite them: `TryParse`
-output parameters become ordinary `Result` control flow, and the receiving
+output parameters become ordinary `T!` control flow, and the receiving
 declaration or fallback determines the target type.
 
-Unlike an exception-catching `Parse` call, failure is an ordinary `Result`.
+Unlike an exception-catching `Parse` call, failure is an ordinary `T!` value.
 Use `else` for a fallback, `?` to propagate the error from a function or state
 field, or `match` when failure needs its own behavior. C# `TryParse` therefore
 does not need an output parameter. Parsing consumes the complete ASCII decimal
@@ -316,7 +316,7 @@ and use fallible `parse()`. SplitScript parsing is strict, locale-independent
 ASCII decimal parsing, unlike C# conversions that may accept surrounding
 whitespace and current-culture formatting. A numeric `Convert.ToBoolean(value)`
 becomes `value != 0`. For text, trim and compare `true` and `false` explicitly
-with `equalsIgnoreAsciiCase`, choosing a Result or fallback for malformed text.
+with `equalsIgnoreAsciiCase`, choosing a `T!` value or fallback for malformed text.
 
 The ordinary one-value `Convert.ToString(value)` maps to Display:
 
@@ -588,7 +588,7 @@ maintained Aquanox port uses `String? at ... as utf8(32)` because the original
 ASL watcher becoming `null` is itself the manual level-end signal.
 
 The same policy remains available to a discovered-address expression with
-`process.read<T>(address).toOption()`. Prefer direct `T? at` syntax when the
+`process.read<T>(address).discardError()`. Prefer direct `T? at` syntax when the
 path is static so the declaration shows both the memory layout and its absence
 semantics in one place.
 

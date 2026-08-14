@@ -1040,7 +1040,9 @@ fn is_keyword(name: &str) -> bool {
 fn is_builtin_type(standard_library: &StandardLibrary, name: &str) -> bool {
     TypeRef::parse(name).is_some()
         || standard_library.type_by_name(name).is_some()
-        || standard_library.type_constructor_by_name(name).is_some()
+        || standard_library
+            .named_type_constructor_by_name(name)
+            .is_some()
 }
 
 fn is_namespace(standard_library: &StandardLibrary, name: &str) -> bool {

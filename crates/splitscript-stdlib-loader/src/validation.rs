@@ -223,6 +223,7 @@ impl<'a> Validator<'a> {
         }
         let owner = CallableOwnerDeclaration {
             name: value.name.clone(),
+            type_constructor_syntax: None,
             type_parameters: Vec::new(),
             documentation: value.documentation.clone(),
             attributes: value.attributes.clone(),
@@ -918,7 +919,7 @@ mod tests {
     fn invalid_type_references_are_reported_before_generation() {
         let source = r#"
 /// Arrays.
-typeConstructor Array<T> {}
+typeConstructor [T] {}
 /// A value.
 @representation(gcStruct)
 @valueUsage(localVariable)
@@ -1048,7 +1049,7 @@ namespace second {}
         let malformed = r#"
 /// Optional values.
 @mustUse("")
-typeConstructor Option<T> {}
+typeConstructor T? {}
 "#;
         let errors = generate_catalog(&parse(malformed).unwrap()).unwrap_err();
         assert!(errors.iter().any(|error| {
@@ -1124,7 +1125,7 @@ root {
 /// ```splitscript
 /// let values: [u32] = []
 /// ```
-typeConstructor Array<T> {}
+typeConstructor [T] {}
 
 /// Values.
 ///
@@ -1165,7 +1166,7 @@ capability Values<T> {
     fn callable_where_clauses_must_reference_known_parameters_and_capabilities() {
         let source = r#"
 /// Arrays.
-typeConstructor Array<T> {
+typeConstructor [T] {
     /// Invalid parameter constraint.
     fn badParameter() -> bool where Missing: Equatable {
         return false

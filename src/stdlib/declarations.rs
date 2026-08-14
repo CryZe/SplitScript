@@ -179,10 +179,19 @@ pub struct StdlibCapability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StdlibTypeConstructor {
     pub id: StdlibTypeConstructorId,
+    pub syntax: TypeConstructorSyntax,
     pub name: &'static str,
     pub parameters: &'static [TypeParameter],
     pub must_use: Option<&'static str>,
     pub documentation: Documentation<StdlibSymbolId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeConstructorSyntax {
+    Named,
+    Array,
+    Optional,
+    Fallible,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

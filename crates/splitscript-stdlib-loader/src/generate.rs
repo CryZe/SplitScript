@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use splitscript_syntax::PrimitiveType;
+use splitscript_syntax::{PrimitiveType, standard_library::TypeConstructorSyntax};
 
 use crate::{
     Attribute, AttributeArgument, CallableOwnerDeclaration, Declaration, Error,
@@ -125,11 +125,20 @@ impl<'a> CatalogGenerator<'a> {
         for declaration in &self.library.declarations {
             if let Declaration::TypeConstructor(owner) = declaration {
                 let id = ident(&owner.name);
+                let syntax = match owner
+                    .type_constructor_syntax
+                    .expect("type constructors always have a source form")
+                {
+                    TypeConstructorSyntax::Named => "Named",
+                    TypeConstructorSyntax::Array => "Array",
+                    TypeConstructorSyntax::Optional => "Optional",
+                    TypeConstructorSyntax::Fallible => "Fallible",
+                };
                 let must_use = optional_attribute_name(&owner.attributes, "mustUse")
                     .map(|reason| format!("Some({})", quote(reason)))
                     .unwrap_or_else(|| "None".to_owned());
                 output.push_str(&format!(
-                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, name: {}, parameters: {}, must_use: {must_use}, documentation: {} }},\n",
+                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, syntax: TypeConstructorSyntax::{syntax}, name: {}, parameters: {}, must_use: {must_use}, documentation: {} }},\n",
                     quote(&owner.name),
                     self.type_parameters(&owner.type_parameters, owner),
                     self.documentation(&owner.documentation)
@@ -347,6 +356,7 @@ impl<'a> CatalogGenerator<'a> {
                 Declaration::Struct(declaration) | Declaration::IntrinsicType(declaration) => {
                     let owner = CallableOwnerDeclaration {
                         name: declaration.name.clone(),
+                        type_constructor_syntax: None,
                         type_parameters: Vec::new(),
                         documentation: declaration.documentation.clone(),
                         attributes: declaration.attributes.clone(),
@@ -1062,7 +1072,7 @@ namespace timer {}
 /// ```splitscript
 /// let value: u32? = 4
 /// ```
-typeConstructor Option<T> {}
+typeConstructor T? {}
 "#;
         let generated = generate_catalog(&parse(source).unwrap()).unwrap();
         assert!(generated.contains(

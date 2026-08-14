@@ -284,9 +284,9 @@ numbered-settings case in [`docs/DDS_PORT.md`](docs/DDS_PORT.md).
   inferred numeric and memory-reading constraints are checked at every call.
 - Named immutable GC records with nested field access, checked literals,
   function parameters and returns, and persistence across suspension.
-- Exhaustive `match` expressions for enums, Options, and Results, plus
-  structural `==` / `!=` for enums, records, Options, and Results whose
-  contained values support equality.
+- Exhaustive `match` expressions for enums, optional `T?` values, and fallible
+  `T!` values, plus structural `==` / `!=` for enums, records, `T?`, and `T!`
+  values whose contained values support equality.
 - Explicit `None`/`Some(value)` and `Ok(value)`/`Err(error)` wrapper syntax,
   while plain values still lift automatically when `T?` or `T!` is expected.
 - Type-directed methods with an implicit `self` and nested receiver calls.

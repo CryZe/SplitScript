@@ -156,7 +156,10 @@ fn initialize_checker(
     }
     for application in &program.type_applications {
         let name = program.type_name(application.constructor);
-        let Some(constructor) = checker.standard_library.type_constructor_by_name(name) else {
+        let Some(constructor) = checker
+            .standard_library
+            .named_type_constructor_by_name(name)
+        else {
             continue;
         };
         if !matches!(

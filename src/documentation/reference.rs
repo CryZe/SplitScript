@@ -103,15 +103,16 @@ impl DocumentationReference {
             }
         }));
         entries.extend(self.library.type_constructors().iter().map(|constructor| {
+            let signature = render_type_constructor(constructor, &self.library);
             DocumentationIndexEntry {
                 uri: symbol_uri(
                     StdlibSymbolId::TypeConstructor(constructor.id),
                     &self.library,
                 ),
-                title: constructor.name.to_owned(),
+                title: signature.clone(),
                 kind: "type constructor",
                 summary: constructor.documentation.summary,
-                signature: Some(render_type_constructor(constructor, &self.library)),
+                signature: Some(signature),
             }
         }));
         entries.extend(
@@ -176,7 +177,7 @@ impl DocumentationReference {
                 .iter()
                 .map(|item| DocumentationIndexEntry {
                     uri: symbol_uri(StdlibSymbolId::Item(item.id), &self.library),
-                    title: item.qualified_name.to_owned(),
+                    title: render_item_name(item, &self.library),
                     kind: if is_operator(item) {
                         "operator"
                     } else {
@@ -285,7 +286,7 @@ impl DocumentationReference {
                     .map(|value| {
                         self.declaration_page(
                             StdlibSymbolId::TypeConstructor(value.id),
-                            value.name.to_owned(),
+                            render_type_constructor(value, &self.library),
                             "type constructor",
                             Some(render_type_constructor(value, &self.library)),
                             &value.documentation,
@@ -429,6 +430,7 @@ impl DocumentationReference {
                     .iter()
                     .find(|value| symbol_uri(StdlibSymbolId::Item(value.id), &self.library) == uri)
                     .map(|value| {
+                        let title = render_item_name(value, &self.library);
                         let documentation = StandardLibraryDocumentation::generate_with_library(
                             &self.library,
                             value.id,
@@ -437,7 +439,7 @@ impl DocumentationReference {
                         let mut markdown = format!(
                             "{}\n\n# {}\n\n_{}_\n\n{}",
                             self.symbol_breadcrumb(StdlibSymbolId::Item(value.id), uri),
-                            value.qualified_name,
+                            title,
                             if is_operator(value) {
                                 "Operator"
                             } else {
@@ -456,7 +458,7 @@ impl DocumentationReference {
                         );
                         DocumentationPage {
                             uri: uri.to_owned(),
-                            title: value.qualified_name.to_owned(),
+                            title,
                             markdown,
                         }
                     })
@@ -827,7 +829,7 @@ impl DocumentationReference {
                 symbol_uri(StdlibSymbolId::Capability(id), &self.library),
             )],
             StdlibOwner::TypeConstructor(id) => vec![(
-                self.library.type_constructor(id).name.to_owned(),
+                render_type_constructor(self.library.type_constructor(id), &self.library),
                 symbol_uri(StdlibSymbolId::TypeConstructor(id), &self.library),
             )],
         }
@@ -862,7 +864,23 @@ fn render_type_constructor(
         })
         .collect::<Vec<_>>()
         .join(", ");
-    format!("{}<{parameters}>", constructor.name)
+    match constructor.syntax {
+        crate::stdlib::TypeConstructorSyntax::Named => {
+            format!("{}<{parameters}>", constructor.name)
+        }
+        crate::stdlib::TypeConstructorSyntax::Array => format!("[{parameters}]"),
+        crate::stdlib::TypeConstructorSyntax::Optional => format!("{parameters}?"),
+        crate::stdlib::TypeConstructorSyntax::Fallible => format!("{parameters}!"),
+    }
+}
+
+fn type_constructor_slug(constructor: &crate::stdlib::StdlibTypeConstructor) -> &'static str {
+    match constructor.syntax {
+        crate::stdlib::TypeConstructorSyntax::Named => constructor.name,
+        crate::stdlib::TypeConstructorSyntax::Array => "array",
+        crate::stdlib::TypeConstructorSyntax::Optional => "optional",
+        crate::stdlib::TypeConstructorSyntax::Fallible => "fallible",
+    }
 }
 
 fn render_type_declaration(ty: &crate::stdlib::StdlibType) -> String {
@@ -870,6 +888,17 @@ fn render_type_declaration(ty: &crate::stdlib::StdlibType) -> String {
         StdlibTypeKind::Intrinsic => ty.name.to_owned(),
         StdlibTypeKind::Struct => format!("record {}", ty.name),
         StdlibTypeKind::Enum => format!("enum {}", ty.name),
+    }
+}
+
+fn render_item_name(item: &crate::stdlib::StdlibItem, library: &StandardLibrary) -> String {
+    match item.owner {
+        StdlibOwner::TypeConstructor(owner) => format!(
+            "{}.{}",
+            render_type_constructor(library.type_constructor(owner), library),
+            item.name
+        ),
+        _ => item.qualified_name.to_owned(),
     }
 }
 
@@ -1052,7 +1081,7 @@ fn symbol_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
         StdlibSymbolId::StateProvider(id) => library.state_provider(id).name.to_owned(),
         StdlibSymbolId::Namespace(id) => library.namespace(id).path.join("."),
         StdlibSymbolId::Capability(id) => library.capability(id).name.to_owned(),
-        StdlibSymbolId::TypeConstructor(id) => library.type_constructor(id).name.to_owned(),
+        StdlibSymbolId::TypeConstructor(id) => library.render_type_constructor(id),
         StdlibSymbolId::Type(id) => library.type_decl(id).name.to_owned(),
         StdlibSymbolId::Field(id) => {
             let field = library.field(id);
@@ -1062,7 +1091,7 @@ fn symbol_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
             let variant = library.variant(id);
             format!("{}.{}", library.type_decl(variant.owner).name, variant.name)
         }
-        StdlibSymbolId::Item(id) => library.item(id).qualified_name.to_owned(),
+        StdlibSymbolId::Item(id) => render_item_name(library.item(id), library),
     }
 }
 
@@ -1079,7 +1108,7 @@ fn symbol_local_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> Stri
         StdlibSymbolId::StateProvider(id) => library.state_provider(id).name.to_owned(),
         StdlibSymbolId::Namespace(id) => library.namespace(id).name.to_owned(),
         StdlibSymbolId::Capability(id) => library.capability(id).name.to_owned(),
-        StdlibSymbolId::TypeConstructor(id) => library.type_constructor(id).name.to_owned(),
+        StdlibSymbolId::TypeConstructor(id) => library.render_type_constructor(id),
         StdlibSymbolId::Type(id) => library.type_decl(id).name.to_owned(),
         StdlibSymbolId::Field(id) => library.field(id).name.to_owned(),
         StdlibSymbolId::Variant(id) => library.variant(id).name.to_owned(),
@@ -1122,8 +1151,8 @@ fn symbol_uri(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
             library.capability(id).name
         ),
         StdlibSymbolId::TypeConstructor(id) => format!(
-            "/stdlib/generic-types/{}/index.md",
-            library.type_constructor(id).name
+            "/stdlib/type-forms/{}/index.md",
+            type_constructor_slug(library.type_constructor(id))
         ),
         StdlibSymbolId::Type(id) => {
             format!("/stdlib/types/{}/index.md", library.type_decl(id).name)
@@ -1184,8 +1213,8 @@ fn symbol_uri(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
                     item.name
                 ),
                 StdlibOwner::TypeConstructor(owner) => format!(
-                    "/stdlib/generic-types/{}/{}/{}.md",
-                    library.type_constructor(owner).name,
+                    "/stdlib/type-forms/{}/{}/{}.md",
+                    type_constructor_slug(library.type_constructor(owner)),
                     if is_operator(item) {
                         "operators"
                     } else {
@@ -1403,11 +1432,33 @@ mod tests {
         ));
 
         let array = reference
-            .page("/stdlib/generic-types/Array/index.md")
+            .page("/stdlib/type-forms/array/index.md")
             .expect("Array has a page");
         assert!(array.markdown.contains(
             "| [clear](methods/clear.md) | Removes every element from a growable array. |  |"
         ));
         assert!(!array.markdown.contains("\n- [clear](methods/clear.md)"));
+
+        let type_form_titles = reference
+            .index()
+            .into_iter()
+            .filter(|entry| entry.kind == "type constructor")
+            .map(|entry| entry.title)
+            .collect::<Vec<_>>();
+        assert!(type_form_titles.contains(&"[T]".to_owned()));
+        assert!(type_form_titles.contains(&"T?".to_owned()));
+        assert!(type_form_titles.contains(&"T!".to_owned()));
+        assert!(
+            !type_form_titles
+                .iter()
+                .any(|title| { matches!(title.as_str(), "Array" | "Option" | "Result") })
+        );
+
+        let fallible = reference
+            .page("/stdlib/type-forms/fallible/index.md")
+            .expect("T! has a page");
+        assert!(fallible.markdown.contains("# T!"));
+        assert!(fallible.markdown.contains("discardError"));
+        assert!(!fallible.markdown.contains("Result"));
     }
 }

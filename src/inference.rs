@@ -59,9 +59,9 @@ impl fmt::Display for Type {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Known(id) => write!(formatter, "type#{}", id.index()),
-            Self::Array(id) => write!(formatter, "Array#{id}"),
-            Self::Option(id) => write!(formatter, "Option#{id}"),
-            Self::Result(id) => write!(formatter, "Result#{id}"),
+            Self::Array(id) => write!(formatter, "[T]#{id}"),
+            Self::Option(id) => write!(formatter, "T?#{id}"),
+            Self::Result(id) => write!(formatter, "T!#{id}"),
             Self::Async(id) => write!(formatter, "Async#{id}"),
             Self::Set(id) => write!(formatter, "Set#{id}"),
             Self::Variable(id) => write!(formatter, "?{id}"),
@@ -342,11 +342,18 @@ impl InferenceContext {
             TypeKind::GenericParameter { index, .. } => {
                 crate::types::generic_parameter_name(*index)
             }
-            TypeKind::Array { .. } => "Array".into(),
-            TypeKind::Set { .. } => "Set".into(),
-            TypeKind::Option { .. } => "Option".into(),
-            TypeKind::Result { .. } => "Result".into(),
-            TypeKind::Async { .. } => "async".into(),
+            TypeKind::Array {
+                element, length, ..
+            } => match length {
+                Some(length) => format!("[{}; {length}]", self.known_type_name(*element)),
+                None => format!("[{}]", self.known_type_name(*element)),
+            },
+            TypeKind::Set { element, .. } => {
+                format!("Set<{}>", self.known_type_name(*element))
+            }
+            TypeKind::Option { value, .. } => format!("{}?", self.known_type_name(*value)),
+            TypeKind::Result { value, .. } => format!("{}!", self.known_type_name(*value)),
+            TypeKind::Async { value, .. } => format!("async {}", self.known_type_name(*value)),
         }
     }
 

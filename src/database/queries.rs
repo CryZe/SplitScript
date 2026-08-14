@@ -707,7 +707,7 @@ impl CompilerDatabase {
             && let Some(constructor) = self
                 .context
                 .standard_library()
-                .type_constructor_by_name(name)
+                .named_type_constructor_by_name(name)
         {
             return Ok(Some(DefinitionTarget::StandardLibrarySymbol(
                 StdlibSymbolId::TypeConstructor(constructor.id),

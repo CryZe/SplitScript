@@ -1,7 +1,8 @@
 use super::{
     Attribute, AttributeArgument, CallableOwnerDeclaration, Declaration, Documentation,
     EnumDeclaration, Error, Example, FieldDeclaration, FunctionDeclaration, Library, Parameter,
-    StateProviderDeclaration, StructDeclaration, Type, TypeParameter, VariantDeclaration,
+    StateProviderDeclaration, StructDeclaration, Type, TypeConstructorSyntax, TypeParameter,
+    VariantDeclaration,
 };
 use crate::{SyntaxMode, Token, TokenCursor, TokenKind, lex, parser::parse_integer};
 
@@ -71,10 +72,16 @@ impl Parser<'_> {
                     false,
                 )?));
             } else if self.eat_ident("typeConstructor") {
-                let name = self.ident("expected a type-constructor name")?;
-                declarations.push(Declaration::TypeConstructor(
-                    self.callable_owner_declaration(name, documentation, attributes, false)?,
-                ));
+                let (name, syntax, type_parameters) = self.type_constructor_head()?;
+                let mut declaration = self.callable_owner_declaration_with_parameters(
+                    name,
+                    type_parameters,
+                    documentation,
+                    attributes,
+                    false,
+                )?;
+                declaration.type_constructor_syntax = Some(syntax);
+                declarations.push(Declaration::TypeConstructor(declaration));
             } else if self.eat_ident("extend") {
                 let name = self.ident("expected a core type after `extend`")?;
                 declarations.push(Declaration::CoreExtension(
@@ -134,6 +141,23 @@ impl Parser<'_> {
         functions_are_static: bool,
     ) -> Result<CallableOwnerDeclaration, Error> {
         let type_parameters = self.type_parameters()?;
+        self.callable_owner_declaration_with_parameters(
+            name,
+            type_parameters,
+            documentation,
+            attributes,
+            functions_are_static,
+        )
+    }
+
+    fn callable_owner_declaration_with_parameters(
+        &mut self,
+        name: String,
+        type_parameters: Vec<TypeParameter>,
+        documentation: Documentation,
+        attributes: Vec<Attribute>,
+        functions_are_static: bool,
+    ) -> Result<CallableOwnerDeclaration, Error> {
         self.expect(TokenKind::LBrace, "expected `{` after the declaration name")?;
         let mut functions = Vec::new();
         while !self.at(&TokenKind::RBrace) {
@@ -159,11 +183,57 @@ impl Parser<'_> {
         self.bump();
         Ok(CallableOwnerDeclaration {
             name,
+            type_constructor_syntax: None,
             type_parameters,
             documentation,
             attributes,
             functions,
         })
+    }
+
+    fn type_constructor_head(
+        &mut self,
+    ) -> Result<(String, TypeConstructorSyntax, Vec<TypeParameter>), Error> {
+        if self.eat(&TokenKind::LBracket) {
+            let parameter = self.ident("expected a type parameter in the array type form")?;
+            self.expect(
+                TokenKind::RBracket,
+                "expected `]` after the array type parameter",
+            )?;
+            return Ok((
+                "Array".to_owned(),
+                TypeConstructorSyntax::Array,
+                vec![TypeParameter {
+                    name: parameter,
+                    constraints: Vec::new(),
+                }],
+            ));
+        }
+
+        let name = self.ident("expected a type-constructor form")?;
+        if self.eat(&TokenKind::Question) {
+            return Ok((
+                "Option".to_owned(),
+                TypeConstructorSyntax::Optional,
+                vec![TypeParameter {
+                    name,
+                    constraints: Vec::new(),
+                }],
+            ));
+        }
+        if self.eat(&TokenKind::Bang) {
+            return Ok((
+                "Result".to_owned(),
+                TypeConstructorSyntax::Fallible,
+                vec![TypeParameter {
+                    name,
+                    constraints: Vec::new(),
+                }],
+            ));
+        }
+
+        let type_parameters = self.type_parameters()?;
+        Ok((name, TypeConstructorSyntax::Named, type_parameters))
     }
 
     fn enum_declaration(
@@ -876,10 +946,38 @@ typeConstructor Box<T,> {
     }
 
     #[test]
+    fn parses_structural_type_constructor_forms_without_public_names() {
+        let library = parse(
+            r#"
+/// Arrays.
+typeConstructor [T] {}
+/// Optional values.
+typeConstructor T? {}
+/// Fallible values.
+typeConstructor T! {}
+"#,
+        )
+        .expect("structural type forms should parse");
+        let expected = [
+            ("Array", TypeConstructorSyntax::Array),
+            ("Option", TypeConstructorSyntax::Optional),
+            ("Result", TypeConstructorSyntax::Fallible),
+        ];
+        for (declaration, (catalog_name, syntax)) in library.declarations.iter().zip(expected) {
+            let Declaration::TypeConstructor(constructor) = declaration else {
+                panic!("expected a type constructor")
+            };
+            assert_eq!(constructor.name, catalog_name);
+            assert_eq!(constructor.type_constructor_syntax, Some(syntax));
+            assert_eq!(constructor.type_parameters[0].name, "T");
+        }
+    }
+
+    #[test]
     fn parses_constraints_on_inherited_callable_type_parameters() {
         let source = r#"
 /// Arrays.
-typeConstructor Array<T> {
+typeConstructor [T] {
     /// Finds a value.
     fn contains(value: T) -> bool where T: Equatable + Display, {
         return false
@@ -910,7 +1008,7 @@ namespace process.read {}
 @behavior(declared)
 capability Numeric<T> {}
 /// Arrays.
-typeConstructor Array<T> {}
+typeConstructor [T] {}
 extend address {}
 /// GBA emulators.
 @processType(GbaEmulator)

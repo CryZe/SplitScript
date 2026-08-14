@@ -212,8 +212,8 @@ The semantic `TypeStore` is created before inference. Core primitives,
 standard-library types, and source record/enum types enter inference as their
 canonical `TypeId` and retain that exact identity through checked publication,
 rather than passing through parallel enums and post-inference conversion
-tables. Only inference variables and temporarily unresolved array, Option, and
-Result constructor terms remain solver-local. Namespace, nominal-type, field,
+tables. Only inference variables and temporarily unresolved `[T]`, `T?`, and
+`T!` constructor terms remain solver-local. Namespace, nominal-type, field,
 variant, and callable IDs are generated from the same declaration rows as their
 names, ownership, documentation, and representation metadata.
 
@@ -331,7 +331,7 @@ Catalog entries can also declare a use obligation with
 `@mustUse("reason")`. A bare expression statement that discards such a return
 value produces a warning while compilation and Wasm generation still succeed.
 The marker may be attached to a callable for an operation-specific explanation,
-or to a type constructor such as `Option<T>` and `Result<T>` so the obligation
+or to a type form such as `T?` and `T!` so the obligation
 follows values returned by user functions as well. `String.toAsciiLowerCase`,
 `String.replaceAll`, and `String.split` use callable-specific reasons because
 strings are immutable: they return transformed values and never change their
@@ -483,7 +483,7 @@ directory, name/ordinal/function tables, and rejects forwarded exports rather
 than pretending their forwarder string is executable code. This is useful for
 runtime metadata discovery such as Mono's `mono_assembly_foreach`; it is not a
 cross-platform symbol API, and malformed or absent exports remain ordinary
-`Result` errors.
+`T!` errors.
 
 An `address` supports generic `offset<T: Integer>` for displacements and
 `add(u64)` for unsigned full-width deltas. Signed arguments retain their sign;
@@ -506,7 +506,7 @@ fixed-width primitives and both source- and catalog-declared records containing
 only readable fields. Record fields use declaration order and natural
 alignment; one host read obtains the complete layout before the compiler
 recursively constructs its GC value.
-`Result<T>.toOption()` is ordinary source-defined library composition over
+`T!.discardError()` is ordinary source-defined library composition over
 wrapper matching. It turns success into a present `T?` and error into `None`,
 which lets one intentionally unavailable state field commit as absent while
 all remaining required field failures continue to reject the transaction. It

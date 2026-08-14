@@ -41,10 +41,21 @@ pub struct StateProviderDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallableOwnerDeclaration {
     pub name: String,
+    /// The public source form of a type constructor. This is present only for
+    /// `typeConstructor` declarations; `name` remains its stable catalog ID.
+    pub type_constructor_syntax: Option<TypeConstructorSyntax>,
     pub type_parameters: Vec<TypeParameter>,
     pub documentation: Documentation,
     pub attributes: Vec<Attribute>,
     pub functions: Vec<FunctionDeclaration>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeConstructorSyntax {
+    Named,
+    Array,
+    Optional,
+    Fallible,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

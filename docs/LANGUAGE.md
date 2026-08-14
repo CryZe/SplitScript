@@ -484,7 +484,7 @@ while index < values.length {
 ```
 
 Like `else return`, loop control can be used directly as a diverging fallback
-for an Option or Result. This works even when the fallback is nested inside an
+for a `T?` or `T!` value. This works even when the fallback is nested inside an
 expression-valued `if`, match arm, or short-circuit expression:
 
 ```text
@@ -591,22 +591,22 @@ levelOrScene = if isDlcDemo {
 }
 ```
 
-## Optional and result values
+## Optional and fallible values
 
 `T?` represents an optional value and `T!` represents an operation that can
 fail with the language's standard string error. `None` constructs an empty
-option and `Err(message)` constructs a failed result. A plain `T` is lifted
-automatically when `T?` or `T!` is expected. `Some(value)` and `Ok(value)` are
+`T?` value and `Err(message)` constructs a failed `T!` value. A plain `T` is
+lifted automatically when `T?` or `T!` is expected. `Some(value)` and `Ok(value)` are
 available when the wrapper state should be explicit, but are never required.
 Because their payload supplies `T`, `Some(value)` and `Ok(value)` can infer a
 wrapper type without an annotation. `None` and `Err(message)` still need
 expected-type context because they contain no value from which to infer the
 missing `T`.
 
-Both wrappers support structural `==` and `!=` when `T` itself supports
-equality. Two empty Options are equal; an empty and present Option are not; two
-present Options compare their values. Results first compare whether they are
-successes or errors. Successes compare their values, errors compare their
+Both forms support structural `==` and `!=` when `T` itself supports
+equality. Two absent `T?` values are equal; an absent and present value are not;
+two present values compare their payloads. Fallible values first compare
+whether they are successes or errors. Successes compare their values, errors compare their
 error strings by content, and a success never equals an error. This composes
 through records and enums that contain wrapper fields or payloads.
 
@@ -618,7 +618,7 @@ discardable even when they return status information. Individual declarations
 can provide a more specific explanation; immutable string transforms do so to
 make clear that they return a new string.
 
-`Option` and `Result` additionally carry a must-use obligation on the value
+`T?` and `T!` additionally carry a must-use obligation on the value
 type itself, because absence or failure must not be silently ignored. Using a
 must-use value in an assignment, argument, return, match, `else`, or `?`
 consumes it. The warning is non-fatal: debug watch and release builds still emit
@@ -1241,19 +1241,19 @@ record- or array-valued state field; the whole aggregate is then one acceptance
 unit.
 
 When one field is genuinely optional, make its value type optional and convert
-that read's error with the source-defined `Result.toOption()`:
+that read's error with the source-defined `discardError()` method:
 
 ```text
 state "game.exe" {
     level: u32 = process.read(levelAddress);
-    bonus: u32? = process.read<u32>(bonusAddress).toOption();
+    bonus: u32? = process.read<u32>(bonusAddress).discardError();
 }
 ```
 
 A failed `level` read retains its last accepted value after initialization. A
 failed `bonus` read is instead accepted as `current.bonus == None`; a later
 successful read becomes a present `u32` without an explicit `Some` constructor.
-The error text is deliberately discarded, so `toOption()` should not be used
+The error text is deliberately discarded, so `discardError()` should not be used
 merely to silence an unexpected failure.
 
 Discovery globals currently require an initializer because they exist for the
@@ -1307,7 +1307,7 @@ attach/cancellation loops.
 expression, evaluates it once per update, and yields the contained `T` when it
 succeeds. An error keeps the suspension pending. Because `retry` is control
 flow rather than a standard-library function, it works equally well through a
-user helper whose Result type and value type are inferred:
+user helper whose `T!` type and value type are inferred:
 
 ```text
 fn readMarker() {
@@ -1417,7 +1417,7 @@ annotation, state-field usage, argument, fallback, or other surrounding type
 constraint. A synchronous read returns `T!`, so failure must be handled with
 `else`, propagated, or passed directly to a state field. Retrying the same call
 re-evaluates it on later ticks and yields `T` directly. `retry` responds to the
-Result state only; it does not invent a separate sentinel value for failure.
+`T!` state only; it does not invent a separate sentinel value for failure.
 
 ```text
 let mode: i32 = retry process.read(object + 0x10)
@@ -1602,7 +1602,7 @@ case-insensitive `NaN`, `inf`, and `Infinity`. Floating-point decimals are
 correctly rounded directly to the target width with ties to even: finite
 overflow produces signed infinity and underflow produces signed zero. Integer
 overflow remains an error. Whitespace, digit separators, and trailing text are
-rejected, so malformed game-memory input uses ordinary `Result` handling
+rejected, so malformed game-memory input uses ordinary `T!` handling
 rather than silently producing a partial value.
 
 The Wasm implementation uses allocation-free Simple Decimal Conversion with a

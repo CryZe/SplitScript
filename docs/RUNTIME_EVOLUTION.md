@@ -345,7 +345,7 @@ Before implementing this direction, settle:
 
 - how moves and implicit borrows appear in diagnostics, function signatures,
   returns, globals, and editor type information;
-- whether `Option`/`Result` receive specialized resource drop glue before user
+- whether `T?`/`T!` receive specialized resource drop glue before user
   records and variable-length collections;
 - how current aliasable arrays, sets, records, and future closures are
   restricted when they transitively contain a resource;

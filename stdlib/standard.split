@@ -1549,7 +1549,7 @@ capability MemoryReadable<T> {}
 /// ```splitscript
 /// let inventory: [u8] = [1, 2, 3]
 /// ```
-typeConstructor Array<T> {
+typeConstructor [T] {
     /// Returns the number of array elements.
     ///
     /// The result is the WebAssembly GC array length.
@@ -1926,7 +1926,7 @@ typeConstructor Set<T: Equatable> {
 
 /// Represents a value that may be absent.
 ///
-/// The postfix `?` type syntax constructs an Option value.
+/// Write `T?` to make any value type optional.
 ///
 /// # Example
 ///
@@ -1936,11 +1936,11 @@ typeConstructor Set<T: Equatable> {
 /// let possibleLevel: u32? = 4
 /// ```
 @mustUse("Optional values must be inspected or explicitly discarded.")
-typeConstructor Option<T> {}
+typeConstructor T? {}
 
 /// Represents a value or an error.
 ///
-/// The postfix `!` type syntax constructs a Result value.
+/// Write `T!` to make any value type fallible.
 ///
 /// # Example
 ///
@@ -1949,11 +1949,11 @@ typeConstructor Option<T> {}
 /// ```splitscript
 /// let health: u32! = 100
 /// ```
-@mustUse("Result values must be handled so failures are not silently ignored.")
-typeConstructor Result<T> {
+@mustUse("Fallible values must be handled so failures are not silently ignored.")
+typeConstructor T! {
     /// Converts a fallible value into an optional value.
     ///
-    /// A successful result becomes the present option value. An error becomes
+    /// A success becomes the present optional value. An error becomes
     /// `None`, discarding its diagnostic text. This is useful for state fields
     /// that are deliberately unavailable on some ticks; required fields should
     /// keep their `T!` so a failed read retains the last accepted field value.
@@ -1963,9 +1963,9 @@ typeConstructor Result<T> {
     /// Make one process read optional
     ///
     /// ```splitscript
-    /// let health: i32? = process.read<i32>(healthAddress).toOption()
+    /// let health: i32? = process.read<i32>(healthAddress).discardError()
     /// ```
-    fn toOption() -> T? {
+    fn discardError() -> T? {
         return match self {
             Ok(value) => Some(value),
             Err(_) => None,
@@ -3364,7 +3364,7 @@ struct MemoryPath {
 
     /// Resolves the path against the attached process.
     ///
-    /// Failed and null intermediate pointer reads propagate as a Result error.
+    /// Failed and null intermediate pointer reads propagate as a `T!` error.
     ///
     /// # Example
     ///

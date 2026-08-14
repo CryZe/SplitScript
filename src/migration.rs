@@ -108,7 +108,7 @@ This index maps common source-language concepts to canonical SplitScript APIs an
             let targets = concept
                 .targets
                 .iter()
-                .map(|target| format!("`{}`", target.display()))
+                .map(|target| format!("`{}`", self.target_display(*target)))
                 .collect::<Vec<_>>()
                 .join(", ");
             let direction = if concept.targets.is_empty() {
@@ -134,6 +134,25 @@ This index maps common source-language concepts to canonical SplitScript APIs an
             ));
         }
         output
+    }
+
+    fn target_display(&self, target: MigrationTarget) -> String {
+        if let MigrationTarget::StandardLibraryItem(name) = target
+            && let Some(item) = self.context.standard_library().item_by_name(name)
+            && let crate::stdlib::StdlibOwner::TypeConstructor(owner) = item.owner
+        {
+            let constructor = self.context.standard_library().type_constructor(owner);
+            if constructor.syntax != crate::stdlib::TypeConstructorSyntax::Named {
+                return format!(
+                    "{}.{}",
+                    self.context
+                        .standard_library()
+                        .render_type_constructor(owner),
+                    item.name
+                );
+            }
+        }
+        target.display().to_owned()
     }
 }
 

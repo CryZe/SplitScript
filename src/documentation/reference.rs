@@ -50,6 +50,10 @@ impl DocumentationMemberGroup {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DocumentationMember {
     Symbol(StdlibSymbolId),
+    CapabilitySymbol {
+        symbol: StdlibSymbolId,
+        capability: crate::stdlib::StdlibCapabilityId,
+    },
     CoreType(CoreTypeId),
 }
 
@@ -336,14 +340,22 @@ impl DocumentationReference {
                                         .variants_of(value.id)
                                         .map(|variant| StdlibSymbolId::Variant(variant.id)),
                                 ),
-                                DocumentationMemberGroup::symbols(
-                                    "Operators",
-                                    self.owned_operators(StdlibOwner::Type(value.id)),
-                                ),
-                                DocumentationMemberGroup::symbols(
-                                    "Methods",
-                                    self.owned_non_operators(StdlibOwner::Type(value.id)),
-                                ),
+                                DocumentationMemberGroup {
+                                    title: "Operators",
+                                    members: self.available_members(
+                                        StdlibOwner::Type(value.id),
+                                        value.capabilities,
+                                        true,
+                                    ),
+                                },
+                                DocumentationMemberGroup {
+                                    title: "Methods",
+                                    members: self.available_members(
+                                        StdlibOwner::Type(value.id),
+                                        value.capabilities,
+                                        false,
+                                    ),
+                                },
                             ],
                         )
                     })
@@ -469,6 +481,31 @@ impl DocumentationReference {
             .collect()
     }
 
+    fn available_members(
+        &self,
+        direct_owner: StdlibOwner,
+        capabilities: &[crate::stdlib::StdlibCapabilityId],
+        operators: bool,
+    ) -> Vec<DocumentationMember> {
+        self.library
+            .items()
+            .iter()
+            .filter(|item| item.owner == direct_owner && is_operator(item) == operators)
+            .map(|item| DocumentationMember::Symbol(StdlibSymbolId::Item(item.id)))
+            .chain(self.library.items().iter().filter_map(|item| {
+                let StdlibOwner::Capability(capability) = item.owner else {
+                    return None;
+                };
+                (is_operator(item) == operators
+                    && self.library.capabilities_satisfy(capabilities, capability))
+                .then_some(DocumentationMember::CapabilitySymbol {
+                    symbol: StdlibSymbolId::Item(item.id),
+                    capability,
+                })
+            }))
+            .collect()
+    }
+
     fn capability_types(
         &self,
         capability: crate::stdlib::StdlibCapabilityId,
@@ -526,14 +563,22 @@ impl DocumentationReference {
                         .iter()
                         .map(|id| StdlibSymbolId::Capability(*id)),
                 ),
-                DocumentationMemberGroup::symbols(
-                    "Operators",
-                    self.owned_operators(StdlibOwner::Core(ty.id)),
-                ),
-                DocumentationMemberGroup::symbols(
-                    "Methods",
-                    self.owned_non_operators(StdlibOwner::Core(ty.id)),
-                ),
+                DocumentationMemberGroup {
+                    title: "Operators",
+                    members: self.available_members(
+                        StdlibOwner::Core(ty.id),
+                        ty.capabilities,
+                        true,
+                    ),
+                },
+                DocumentationMemberGroup {
+                    title: "Methods",
+                    members: self.available_members(
+                        StdlibOwner::Core(ty.id),
+                        ty.capabilities,
+                        false,
+                    ),
+                },
             ],
         );
         DocumentationPage {
@@ -896,20 +941,35 @@ fn append_member_link(
     member: DocumentationMember,
     library: &StandardLibrary,
 ) {
-    let (label, target) = match member {
+    let (label, target, available_through) = match member {
         DocumentationMember::Symbol(symbol) => (
             symbol_local_label(symbol, library),
             symbol_uri(symbol, library),
+            None,
+        ),
+        DocumentationMember::CapabilitySymbol { symbol, capability } => (
+            symbol_local_label(symbol, library),
+            symbol_uri(symbol, library),
+            Some(capability),
         ),
         DocumentationMember::CoreType(ty) => (
             library.core_type(ty).name.to_owned(),
             core_type_uri(ty, library),
+            None,
         ),
     };
     markdown.push_str(&format!(
         "\n- [{label}]({})",
         relative_document_link(current_uri, &target)
     ));
+    if let Some(capability) = available_through {
+        let capability = StdlibSymbolId::Capability(capability);
+        markdown.push_str(&format!(
+            " — available through [{}]({})",
+            symbol_local_label(capability, library),
+            relative_document_link(current_uri, &symbol_uri(capability, library))
+        ));
+    }
 }
 
 /// Produces an ordinary relative Markdown link so VS Code's Markdown preview
@@ -973,7 +1033,8 @@ fn symbol_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
 
 fn member_label(member: DocumentationMember, library: &StandardLibrary) -> String {
     match member {
-        DocumentationMember::Symbol(symbol) => symbol_label(symbol, library),
+        DocumentationMember::Symbol(symbol)
+        | DocumentationMember::CapabilitySymbol { symbol, .. } => symbol_label(symbol, library),
         DocumentationMember::CoreType(ty) => library.core_type(ty).name.to_owned(),
     }
 }
@@ -1250,5 +1311,40 @@ mod tests {
                 .markdown
                 .contains("[FileVersion](../../types/FileVersion/index.md)")
         );
+    }
+
+    #[test]
+    fn type_pages_include_members_available_through_transitive_capabilities() {
+        let reference = DocumentationReference::default();
+        let integer = reference
+            .page("/stdlib/types/i32/index.md")
+            .expect("i32 has a page");
+
+        assert!(integer.markdown.contains(
+            "[+](../../capabilities/Numeric/operators/add.md) — available through \
+             [Numeric](../../capabilities/Numeric/index.md)"
+        ));
+        assert!(integer.markdown.contains(
+            "[%](../../capabilities/Integer/operators/remainder.md) — available through \
+             [Integer](../../capabilities/Integer/index.md)"
+        ));
+        assert!(integer.markdown.contains(
+            "[abs](../../capabilities/Signed/methods/abs.md) — available through \
+             [Signed](../../capabilities/Signed/index.md)"
+        ));
+
+        let duration = reference
+            .page("/stdlib/types/Duration/index.md")
+            .expect("Duration has a page");
+        assert!(
+            duration
+                .markdown
+                .lines()
+                .any(|line| line == "- [+](operators/add.md)")
+        );
+        assert!(duration.markdown.contains(
+            "[==](../../capabilities/Equatable/operators/equals.md) — available through \
+             [Equatable](../../capabilities/Equatable/index.md)"
+        ));
     }
 }

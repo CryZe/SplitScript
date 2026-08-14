@@ -155,9 +155,13 @@ impl DocumentationReference {
                 .map(|item| DocumentationIndexEntry {
                     uri: symbol_uri(StdlibSymbolId::Item(item.id), &self.library),
                     title: item.qualified_name.to_owned(),
-                    kind: match item.kind {
-                        ItemKind::Function => "function",
-                        ItemKind::Method { .. } => "method",
+                    kind: if is_operator(item) {
+                        "operator"
+                    } else {
+                        match item.kind {
+                            ItemKind::Function => "function",
+                            ItemKind::Method { .. } => "method",
+                        }
                     },
                     summary: item.documentation.summary,
                     signature: Some(self.library.render_signature(item.id)),
@@ -206,7 +210,7 @@ impl DocumentationReference {
                         },
                         DocumentationMemberGroup {
                             title: "Functions",
-                            members: self.owned_items(StdlibOwner::Namespace(value.id)),
+                            members: self.owned_non_operators(StdlibOwner::Namespace(value.id)),
                         },
                     ],
                 )
@@ -235,8 +239,14 @@ impl DocumentationReference {
                                         .collect(),
                                 },
                                 DocumentationMemberGroup {
+                                    title: "Operators",
+                                    members: self
+                                        .owned_operators(StdlibOwner::Capability(value.id)),
+                                },
+                                DocumentationMemberGroup {
                                     title: "Methods",
-                                    members: self.owned_items(StdlibOwner::Capability(value.id)),
+                                    members: self
+                                        .owned_non_operators(StdlibOwner::Capability(value.id)),
                                 },
                             ],
                         )
@@ -256,10 +266,19 @@ impl DocumentationReference {
                             "type constructor",
                             Some(render_type_constructor(value, &self.library)),
                             &value.documentation,
-                            vec![DocumentationMemberGroup {
-                                title: "Methods",
-                                members: self.owned_items(StdlibOwner::TypeConstructor(value.id)),
-                            }],
+                            vec![
+                                DocumentationMemberGroup {
+                                    title: "Operators",
+                                    members: self
+                                        .owned_operators(StdlibOwner::TypeConstructor(value.id)),
+                                },
+                                DocumentationMemberGroup {
+                                    title: "Methods",
+                                    members: self.owned_non_operators(
+                                        StdlibOwner::TypeConstructor(value.id),
+                                    ),
+                                },
+                            ],
                         )
                     })
             })
@@ -305,8 +324,12 @@ impl DocumentationReference {
                                         .collect(),
                                 },
                                 DocumentationMemberGroup {
+                                    title: "Operators",
+                                    members: self.owned_operators(StdlibOwner::Type(value.id)),
+                                },
+                                DocumentationMemberGroup {
                                     title: "Methods",
-                                    members: self.owned_items(StdlibOwner::Type(value.id)),
+                                    members: self.owned_non_operators(StdlibOwner::Type(value.id)),
                                 },
                             ],
                         )
@@ -390,9 +413,13 @@ impl DocumentationReference {
                             "{}\n\n# {}\n\n_{}_\n\n{}",
                             self.symbol_breadcrumb(StdlibSymbolId::Item(value.id), uri),
                             value.qualified_name,
-                            match value.kind {
-                                ItemKind::Function => "Function",
-                                ItemKind::Method { .. } => "Method",
+                            if is_operator(value) {
+                                "Operator"
+                            } else {
+                                match value.kind {
+                                    ItemKind::Function => "Function",
+                                    ItemKind::Method { .. } => "Method",
+                                }
                             },
                             documentation.hover_markdown()
                         );
@@ -411,11 +438,20 @@ impl DocumentationReference {
             })
     }
 
-    fn owned_items(&self, owner: StdlibOwner) -> Vec<StdlibSymbolId> {
+    fn owned_operators(&self, owner: StdlibOwner) -> Vec<StdlibSymbolId> {
         self.library
             .items()
             .iter()
-            .filter(|item| item.owner == owner)
+            .filter(|item| item.owner == owner && is_operator(item))
+            .map(|item| StdlibSymbolId::Item(item.id))
+            .collect()
+    }
+
+    fn owned_non_operators(&self, owner: StdlibOwner) -> Vec<StdlibSymbolId> {
+        self.library
+            .items()
+            .iter()
+            .filter(|item| item.owner == owner && !is_operator(item))
             .map(|item| StdlibSymbolId::Item(item.id))
             .collect()
     }
@@ -460,8 +496,12 @@ impl DocumentationReference {
                         .collect(),
                 },
                 DocumentationMemberGroup {
+                    title: "Operators",
+                    members: self.owned_operators(StdlibOwner::Core(ty.id)),
+                },
+                DocumentationMemberGroup {
                     title: "Methods",
-                    members: self.owned_items(StdlibOwner::Core(ty.id)),
+                    members: self.owned_non_operators(StdlibOwner::Core(ty.id)),
                 },
             ],
         );
@@ -586,7 +626,7 @@ impl DocumentationReference {
             ),
             (
                 "Functions",
-                self.owned_items(StdlibOwner::Root)
+                self.owned_non_operators(StdlibOwner::Root)
                     .into_iter()
                     .map(|item| symbol_uri(item, &self.library))
                     .collect(),
@@ -893,8 +933,24 @@ fn symbol_local_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> Stri
         StdlibSymbolId::Type(id) => library.type_decl(id).name.to_owned(),
         StdlibSymbolId::Field(id) => library.field(id).name.to_owned(),
         StdlibSymbolId::Variant(id) => library.variant(id).name.to_owned(),
-        StdlibSymbolId::Item(id) => library.item(id).name.to_owned(),
+        StdlibSymbolId::Item(id) => {
+            let item = library.item(id);
+            operator_symbol(item).unwrap_or(item.name).to_owned()
+        }
     }
+}
+
+fn is_operator(item: &crate::stdlib::StdlibItem) -> bool {
+    item.binary_operator.is_some() || item.unary_operator.is_some()
+}
+
+fn operator_symbol(item: &crate::stdlib::StdlibItem) -> Option<&'static str> {
+    item.binary_operator
+        .map(crate::stdlib::StandardBinaryOperator::symbol)
+        .or_else(|| {
+            item.unary_operator
+                .map(crate::stdlib::StandardUnaryOperator::symbol)
+        })
 }
 
 fn core_type_uri(id: CoreTypeId, library: &StandardLibrary) -> String {
@@ -948,23 +1004,43 @@ fn symbol_uri(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
                     item.name
                 ),
                 StdlibOwner::Type(owner) => format!(
-                    "/stdlib/types/{}/methods/{}.md",
+                    "/stdlib/types/{}/{}/{}.md",
                     library.type_decl(owner).name,
+                    if is_operator(item) {
+                        "operators"
+                    } else {
+                        "methods"
+                    },
                     item.name
                 ),
                 StdlibOwner::Core(owner) => format!(
-                    "/stdlib/types/{}/methods/{}.md",
+                    "/stdlib/types/{}/{}/{}.md",
                     library.core_type(owner).name,
+                    if is_operator(item) {
+                        "operators"
+                    } else {
+                        "methods"
+                    },
                     item.name
                 ),
                 StdlibOwner::Capability(owner) => format!(
-                    "/stdlib/capabilities/{}/methods/{}.md",
+                    "/stdlib/capabilities/{}/{}/{}.md",
                     library.capability(owner).name,
+                    if is_operator(item) {
+                        "operators"
+                    } else {
+                        "methods"
+                    },
                     item.name
                 ),
                 StdlibOwner::TypeConstructor(owner) => format!(
-                    "/stdlib/generic-types/{}/methods/{}.md",
+                    "/stdlib/generic-types/{}/{}/{}.md",
                     library.type_constructor(owner).name,
+                    if is_operator(item) {
+                        "operators"
+                    } else {
+                        "methods"
+                    },
                     item.name
                 ),
             }
@@ -993,6 +1069,7 @@ mod tests {
             "state provider",
             "function",
             "method",
+            "operator",
         ] {
             assert!(index.iter().any(|entry| entry.kind == kind), "{kind}");
         }
@@ -1077,5 +1154,31 @@ mod tests {
             ),
             "fromMinutes.md"
         );
+    }
+
+    #[test]
+    fn operators_are_separate_from_methods_under_their_owner() {
+        let reference = DocumentationReference::default();
+        let index = reference.index();
+        let add = index
+            .iter()
+            .find(|entry| entry.title == "Numeric.add")
+            .expect("Numeric.add is indexed");
+        assert_eq!(add.kind, "operator");
+        assert_eq!(add.uri, "/stdlib/capabilities/Numeric/operators/add.md");
+
+        let numeric = reference
+            .page("/stdlib/capabilities/Numeric/index.md")
+            .expect("Numeric has a page");
+        assert!(numeric.markdown.contains("## Operators"));
+        assert!(numeric.markdown.contains("[+](operators/add.md)"));
+        assert!(numeric.markdown.contains("## Methods"));
+        assert!(numeric.markdown.contains("[squared](methods/squared.md)"));
+
+        let operator = reference.page(&add.uri).expect("the + operator has a page");
+        assert!(operator.markdown.starts_with(
+            "[Standard library](../../../../index.md) / [Numeric](../index.md) / add"
+        ));
+        assert!(operator.markdown.contains("\n\n_Operator_\n\n"));
     }
 }

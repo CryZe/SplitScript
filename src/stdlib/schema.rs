@@ -292,11 +292,45 @@ pub enum StandardBinaryOperator {
     GreaterThanOrEqual,
 }
 
+impl StandardBinaryOperator {
+    /// Canonical source spelling used by documentation and editor tooling.
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Subtract => "-",
+            Self::Multiply => "*",
+            Self::Divide => "/",
+            Self::Remainder => "%",
+            Self::BitOr => "|",
+            Self::BitXor => "^",
+            Self::BitAnd => "&",
+            Self::ShiftLeft => "<<",
+            Self::ShiftRight => ">>",
+            Self::Equal => "==",
+            Self::NotEqual => "!=",
+            Self::LessThan => "<",
+            Self::LessThanOrEqual => "<=",
+            Self::GreaterThan => ">",
+            Self::GreaterThanOrEqual => ">=",
+        }
+    }
+}
+
 /// Source-language unary syntax implemented by an ordinary catalog method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StandardUnaryOperator {
     Not,
     Negate,
+}
+
+impl StandardUnaryOperator {
+    /// Canonical source spelling used by documentation and editor tooling.
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Self::Not => "!",
+            Self::Negate => "-",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

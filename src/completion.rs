@@ -5,10 +5,12 @@ use std::collections::BTreeMap;
 mod settings;
 mod state;
 mod top_level;
+mod types;
 
 use settings::complete_settings_dsl;
 use state::complete_state_dsl;
 use top_level::{complete_state_header, complete_top_level};
+use types::{complete_explicit_type_argument, complete_type_position};
 
 use crate::{
     ast::{
@@ -88,14 +90,18 @@ pub(crate) fn complete(
         Ok(completions)
     } else if let Some(completions) = complete_state_header(&source, offset, &standard_library) {
         Ok(completions)
-    } else if let Some(completions) =
-        complete_state_dsl(&source, &syntax, offset, &standard_library)
-    {
-        Ok(completions)
     } else if let Some(completions) = complete_state_decoder(&source, offset) {
         Ok(completions)
     } else if let Some(completions) =
-        complete_type_argument(&source, &syntax, offset, &standard_library)
+        complete_explicit_type_argument(&source, &syntax, offset, &standard_library)
+    {
+        Ok(completions)
+    } else if let Some(completions) =
+        complete_type_position(&source, &syntax, offset, &standard_library)
+    {
+        Ok(completions)
+    } else if let Some(completions) =
+        complete_state_dsl(&source, &syntax, offset, &standard_library)
     {
         Ok(completions)
     } else if let Some(context) = member_context(&source, offset) {
@@ -350,65 +356,6 @@ fn completion_operation_analysis(
         .semantic_snapshot()
         .ok()
         .and_then(|snapshot| snapshot.effects().cloned())
-}
-
-fn complete_type_argument(
-    source: &str,
-    syntax: &Program,
-    offset: usize,
-    library: &StandardLibrary,
-) -> Option<CompletionList> {
-    let replacement = identifier_span(source, offset);
-    let before = &source[..replacement.start];
-    let open = before.rfind('<')?;
-    let name_end = open;
-    let mut name_start = name_end;
-    while name_start > 0 && is_identifier_byte(source.as_bytes()[name_start - 1]) {
-        name_start -= 1;
-    }
-    if name_start == name_end {
-        return None;
-    }
-    let name = &source[name_start..name_end];
-    let is_generic_call = library
-        .items()
-        .iter()
-        .any(|item| item.name == name && item.signature.explicit_type_parameters != 0);
-    if !is_generic_call || source[open + 1..replacement.start].contains(['>', '(', ')', '{', '}']) {
-        return None;
-    }
-
-    let prefix = source[replacement.start..offset].to_owned();
-    let mut builder = CompletionBuilder::new(prefix, replacement);
-    for ty in library.core_types() {
-        builder.add(simple_completion(
-            ty.name,
-            CompletionKind::Type,
-            "primitive type",
-        ));
-    }
-    for ty in library.types() {
-        builder.add(simple_completion(
-            ty.name,
-            CompletionKind::Type,
-            "standard-library type",
-        ));
-    }
-    for record in &syntax.records {
-        builder.add(simple_completion(
-            &record.name,
-            CompletionKind::Struct,
-            "record type",
-        ));
-    }
-    for enumeration in &syntax.enums {
-        builder.add(simple_completion(
-            &enumeration.name,
-            CompletionKind::Enum,
-            "enum type",
-        ));
-    }
-    Some(builder.finish())
 }
 
 fn complete_state_decoder(source: &str, offset: usize) -> Option<CompletionList> {
@@ -1995,6 +1942,120 @@ whileAttached {
         let mut source_kind = CompilerDatabase::new(source);
         let candidates = labels(&mut source_kind, "i32 a");
         assert_eq!(candidates, vec!["at"]);
+    }
+
+    #[test]
+    fn every_type_grammar_position_uses_the_shared_type_catalog() {
+        let declarations = r#"
+record Position {
+    x: i32,
+}
+enum Mode {
+    Fast,
+}
+"#;
+        let cases = [
+            (
+                format!("{declarations}\nfn inspect(value: ) {{}}\nstate \"game.exe\" {{}}"),
+                "value: ",
+            ),
+            (
+                format!("{declarations}\nfn inspect() ->  {{}}\nstate \"game.exe\" {{}}"),
+                "-> ",
+            ),
+            (
+                format!("{declarations}\nlet globalValue:  = None\nstate \"game.exe\" {{}}"),
+                "globalValue: ",
+            ),
+            (
+                format!(
+                    "{declarations}\nfn inspect() {{ let localValue:  = None }}\nstate \"game.exe\" {{}}"
+                ),
+                "localValue: ",
+            ),
+            (
+                format!(
+                    "{declarations}\nfn inspect(value) {{ let cast = value as  }}\nstate \"game.exe\" {{}}"
+                ),
+                "value as ",
+            ),
+            (
+                format!("{declarations}\nstate GBA {{ watched:  at 0x100; }}"),
+                "watched: ",
+            ),
+            (
+                format!("{declarations}\nrecord Holder {{ field: , }}\nstate \"game.exe\" {{}}"),
+                "field: ",
+            ),
+            (
+                format!("{declarations}\nenum Wrapped {{ Value(), }}\nstate \"game.exe\" {{}}"),
+                "Value(",
+            ),
+            (
+                format!("{declarations}\nlet genericValue: Set< = None\nstate \"game.exe\" {{}}"),
+                "Set<",
+            ),
+            (
+                format!("{declarations}\nlet arrayValue: [ = None\nstate \"game.exe\" {{}}"),
+                "arrayValue: [",
+            ),
+        ];
+
+        for (source, marker) in cases {
+            let mut database = CompilerDatabase::new(source);
+            let offset = database.source().find(marker).unwrap() + marker.len();
+            let completions = database.completions(offset).unwrap();
+            let labels = completions
+                .items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>();
+            for expected in [
+                "i32", "String", "Position", "Mode", "Set", "[T]", "[T; N]", "T?", "T!", "async T",
+            ] {
+                assert!(
+                    labels.contains(&expected),
+                    "missing `{expected}` at `{marker}`: {labels:#?}"
+                );
+            }
+            for value_candidate in ["print", "process", "current", "return"] {
+                assert!(
+                    !labels.contains(&value_candidate),
+                    "value candidate `{value_candidate}` leaked into `{marker}`: {labels:#?}"
+                );
+            }
+            assert!(completions.items.iter().all(|item| matches!(
+                item.kind,
+                CompletionKind::Type | CompletionKind::Struct | CompletionKind::Enum
+            )));
+            let set = completions
+                .items
+                .iter()
+                .find(|item| item.label == "Set")
+                .unwrap();
+            assert_eq!(set.insert_text, "Set<${1:T}>");
+            assert!(set.is_snippet);
+            assert!(set.documentation.is_some());
+        }
+    }
+
+    #[test]
+    fn value_colons_are_not_mistaken_for_type_annotations() {
+        let source = r#"
+record Position {
+    x: i32,
+}
+state "game.exe" {}
+fn inspect() {
+    let position = Position { x: pri }
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let completions = labels(&mut database, "x: pri");
+        assert!(
+            completions.contains(&"print".to_owned()),
+            "{completions:#?}"
+        );
     }
 
     #[test]

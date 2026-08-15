@@ -1006,6 +1006,15 @@ syntax-invalid documents retain their diagnostics and receive no destructive
 formatting edit. The server advertises only implemented capabilities during
 `initialize` and observes the standard `shutdown`/`exit` lifecycle.
 
+Completion recognizes type grammar before falling back to ordinary expression
+scope. One lexical type-prefix parser remains usable while the recovering AST
+contains a missing or partial type and covers annotations, return arrows,
+casts, enum payloads, nested arrays and generic arguments. All of these sites
+consume one catalog-backed candidate builder, so primitives, standard-library
+types and named constructors, source records and enums, and structural type
+syntax cannot drift between grammar positions. Declaration-role checks keep
+record-literal fields and other value colons on the expression-completion path.
+
 Semantic highlighting is a compiler query rather than an LSP-specific AST
 walk. [`src/highlight.rs`](../src/highlight.rs) merges lossless lexer tokens,
 syntax declarations, and semantic resolutions into a sorted index of byte

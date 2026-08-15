@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-15: type-directed completion in every type position
+
+- Replaced separate generic-call and shallow state-field completion paths with
+  one lexical recognizer for function parameters and results, global and local
+  annotations, casts, state and layout fields, record fields, enum payloads,
+  nested arrays, generic constructors, and explicit generic call arguments.
+- Restricted those positions to type candidates and structural type snippets,
+  eliminating unrelated functions, values, namespaces, and control-flow
+  keywords while retaining completion during syntax recovery.
+- Centralized primitive, standard-library, named-constructor, source record,
+  source enum, array, option, result, and async candidates with catalog-backed
+  documentation and snippets.
+
 ## 2026-08-15: declaration-aware type mismatch diagnostics
 
 - Carried the source of an expected type through parameters, explicit return

@@ -2,7 +2,7 @@
 
 use super::{
     CompletionBuilder, CompletionItem, CompletionKind, CompletionList, identifier_span, lexer,
-    simple_completion,
+    types::add_type_completions,
 };
 use crate::{
     ast::{Program, Span},
@@ -327,55 +327,6 @@ fn add_layout_completion(builder: &mut CompletionBuilder) {
         "version-specific state layout",
         "layout ${1:Name} {\n\t$0\n},",
         "Adds one named memory layout. An `onAttach` block selects its generated `StateLayout` variant.",
-    );
-}
-
-fn add_type_completions(
-    builder: &mut CompletionBuilder,
-    syntax: &Program,
-    standard_library: &StandardLibrary,
-) {
-    for ty in standard_library.core_types() {
-        builder.add(simple_completion(
-            ty.name,
-            CompletionKind::Type,
-            "primitive type",
-        ));
-    }
-    for ty in standard_library.types() {
-        builder.add(simple_completion(
-            ty.name,
-            CompletionKind::Type,
-            "standard-library type",
-        ));
-    }
-    for record in &syntax.records {
-        builder.add(simple_completion(
-            &record.name,
-            CompletionKind::Struct,
-            "record type",
-        ));
-    }
-    for enumeration in syntax.enum_declarations() {
-        builder.add(simple_completion(
-            &enumeration.name,
-            CompletionKind::Enum,
-            "enum type",
-        ));
-    }
-    add_snippet(
-        builder,
-        "[T]",
-        "array type",
-        "[${1:T}]",
-        "An array whose length is not part of its type.",
-    );
-    add_snippet(
-        builder,
-        "[T; N]",
-        "fixed-length array type",
-        "[${1:T}; ${2:length}]",
-        "An array whose compile-time length is part of its type.",
     );
 }
 

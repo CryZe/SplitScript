@@ -209,6 +209,9 @@ impl TypedVisitor for CallCollector<'_> {
         {
             collect_call_facts(self.facts, call, program, false);
         }
+        if matches!(statement.kind, hir::TypedStatementKind::StateAssign { .. }) {
+            self.facts.effects.push(Effect::WritesCurrentState);
+        }
         if let hir::TypedStatementKind::IndexAssign { assignment, .. } = &statement.kind {
             collect_call_facts(self.facts, &assignment.operator, program, false);
         }
@@ -525,11 +528,12 @@ const fn effect_order(effect: Effect) -> u8 {
         Effect::ReadsProcess => 5,
         Effect::RequiresAttachedProcess => 6,
         Effect::RequiresStateSnapshots => 7,
-        Effect::Retryable => 8,
-        Effect::Suspends => 9,
-        Effect::CancelsOnProcessClose => 10,
-        Effect::WritesTimer => 11,
-        Effect::WritesRuntime => 12,
+        Effect::WritesCurrentState => 8,
+        Effect::Retryable => 9,
+        Effect::Suspends => 10,
+        Effect::CancelsOnProcessClose => 11,
+        Effect::WritesTimer => 12,
+        Effect::WritesRuntime => 13,
     }
 }
 

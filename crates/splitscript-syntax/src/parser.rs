@@ -23,9 +23,7 @@ use crate::{
         VariableDecl,
     },
     diagnostic::Diagnostic,
-    migration::{
-        ASL_MUTABLE_CURRENT_DIAGNOSTIC, ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC,
-    },
+    migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
     source::{RecoveryNode, RecoveryNodeKind},
 };
 
@@ -364,6 +362,7 @@ fn statement_span(statement: &Stmt) -> Span {
     match statement {
         Stmt::Debug { span, .. }
         | Stmt::Assign { span, .. }
+        | Stmt::StateAssign { span, .. }
         | Stmt::IndexAssign { span, .. }
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }

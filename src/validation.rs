@@ -813,6 +813,7 @@ fn collect_assignment_usage(
                 collect_assignment_usage(body, reads, writes);
             }
             TypedStatementKind::Variable { .. }
+            | TypedStatementKind::StateAssign { .. }
             | TypedStatementKind::IndexAssign { .. }
             | TypedStatementKind::Break
             | TypedStatementKind::Continue
@@ -1402,6 +1403,7 @@ fn validate_must_use_block(
             }
             TypedStatementKind::Variable { .. }
             | TypedStatementKind::Assign { .. }
+            | TypedStatementKind::StateAssign { .. }
             | TypedStatementKind::IndexAssign { .. }
             | TypedStatementKind::Break
             | TypedStatementKind::Continue

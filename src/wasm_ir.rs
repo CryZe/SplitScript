@@ -392,6 +392,11 @@ pub enum Statement {
         operation: Option<AssignmentOperation>,
         value: ExprId,
     },
+    StateStore {
+        target: ValueId,
+        operation: Option<AssignmentOperation>,
+        value: ExprId,
+    },
     StoreTemporary {
         target: TemporaryId,
         value: ExprId,
@@ -1358,6 +1363,9 @@ fn analyze_statements_liveness(
                 if operation.is_some() && local_values.contains(target) {
                     live.insert(*target);
                 }
+                collect_expression_values(*value, live, local_values, program);
+            }
+            Statement::StateStore { value, .. } => {
                 collect_expression_values(*value, live, local_values, program);
             }
             Statement::Evaluate { expression, .. } => {
@@ -2465,6 +2473,26 @@ fn lower_async_statements(
                 );
                 result = wrap_async_expression_steps(normalized.steps, result);
             }
+            TypedStatementKind::StateAssign {
+                assignment,
+                op,
+                value,
+                ..
+            } => {
+                let normalized =
+                    normalize_expression_suspensions(*value, typed_hir, semantics, wasm_ir);
+                result.statements.insert(
+                    0,
+                    Statement::StateStore {
+                        target: assignment.target,
+                        operation: lower_assignment_operation(
+                            assignment, *op, typed_hir, semantics,
+                        ),
+                        value: normalized.value,
+                    },
+                );
+                result = wrap_async_expression_steps(normalized.steps, result);
+            }
             TypedStatementKind::IndexAssign {
                 assignment,
                 target,
@@ -2813,7 +2841,9 @@ fn typed_block_contains_await(
             TypedStatementKind::Variable { initializer, .. } => {
                 typed_expression_contains_suspension(*initializer, typed_hir)
             }
-            TypedStatementKind::Assign { value, .. } | TypedStatementKind::Expression(value) => {
+            TypedStatementKind::Assign { value, .. }
+            | TypedStatementKind::StateAssign { value, .. }
+            | TypedStatementKind::Expression(value) => {
                 typed_expression_contains_suspension(*value, typed_hir)
             }
             TypedStatementKind::If {
@@ -2896,6 +2926,7 @@ fn assign_async_states(block: &mut Block, next: &mut u32) {
                 assign_async_states(body, next)
             }
             Statement::Store { .. }
+            | Statement::StateStore { .. }
             | Statement::DebugLocation(_)
             | Statement::StoreTemporary { .. }
             | Statement::IndexStore { .. }
@@ -2981,6 +3012,7 @@ fn set_async_while_targets(
                 set_async_while_targets(body, header_state, exit_state);
             }
             Statement::Store { .. }
+            | Statement::StateStore { .. }
             | Statement::DebugLocation(_)
             | Statement::StoreTemporary { .. }
             | Statement::IndexStore { .. }
@@ -3044,6 +3076,18 @@ fn lower_statements(
                 block.statements.push(Statement::Store {
                     target: assignment.target,
                     declaration: false,
+                    operation: lower_assignment_operation(assignment, *op, typed_hir, semantics),
+                    value: *value,
+                });
+            }
+            TypedStatementKind::StateAssign {
+                assignment,
+                op,
+                value,
+                ..
+            } => {
+                block.statements.push(Statement::StateStore {
+                    target: assignment.target,
                     operation: lower_assignment_operation(assignment, *op, typed_hir, semantics),
                     value: *value,
                 });
@@ -3367,6 +3411,7 @@ impl Visitor for LocalPlanner<'_> {
                 self.value(*version_value);
             }
             Statement::Store { .. }
+            | Statement::StateStore { .. }
             | Statement::DebugLocation(_)
             | Statement::IndexStore { .. }
             | Statement::Evaluate { .. }

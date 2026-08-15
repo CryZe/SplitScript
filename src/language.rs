@@ -1131,8 +1131,8 @@ define_language_catalog! {
         LanguageItemKind::SnapshotRoot,
         "current.stateField",
         "Accesses the current committed state snapshot.",
-        "State fields refresh before whileAttached and timer-decision actions run. A failed field retains its last accepted value.",
-        "let level = current.level",
+        "State fields refresh before whileAttached and timer-decision actions run. Direct assignment replaces a field for the remainder of this tick and the resulting snapshot becomes old on the next successful poll. A failed field retains its last accepted value.",
+        "current.level = 1",
         STATE_SOURCE
     ),
     compiler_symbol_item!(

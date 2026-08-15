@@ -329,6 +329,12 @@ pub enum TypedStatementKind {
         op: Option<BinaryOp>,
         value: ExprId,
     },
+    StateAssign {
+        assignment: ResolvedAssignment,
+        target: ExprId,
+        op: Option<BinaryOp>,
+        value: ExprId,
+    },
     IndexAssign {
         assignment: ResolvedIndexAssignment,
         target: ExprId,
@@ -735,7 +741,7 @@ struct TypedBodyBuilder<'a> {
 
 impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
-        if let Stmt::Assign { id, span, .. } = statement {
+        if let Stmt::Assign { id, span, .. } | Stmt::StateAssign { id, span, .. } = statement {
             self.assignments.insert(
                 *id,
                 ResolvedAssignment {
@@ -906,6 +912,10 @@ pub fn walk_typed_statement<V: TypedVisitor>(
     match &statement.kind {
         TypedStatementKind::Variable { initializer, .. } => visit_expression(*initializer),
         TypedStatementKind::Assign { value, .. } => visit_expression(*value),
+        TypedStatementKind::StateAssign { target, value, .. } => {
+            visit_expression(*target);
+            visit_expression(*value);
+        }
         TypedStatementKind::IndexAssign { target, value, .. } => {
             visit_expression(*target);
             visit_expression(*value);
@@ -1310,6 +1320,7 @@ fn lower_block(
                         let span = match statement {
                             Stmt::Variable(variable) => variable.span,
                             Stmt::Assign { span, .. }
+                            | Stmt::StateAssign { span, .. }
                             | Stmt::IndexAssign { span, .. }
                             | Stmt::If { span, .. }
                             | Stmt::While { span, .. }
@@ -1353,6 +1364,25 @@ fn lower_block(
                                 operator: semantics.assignment_call(*id).cloned(),
                                 span: *span,
                             },
+                            op: *op,
+                            value: value.id,
+                        },
+                        Stmt::StateAssign {
+                            id,
+                            target,
+                            op,
+                            value,
+                            span,
+                        } => TypedStatementKind::StateAssign {
+                            assignment: ResolvedAssignment {
+                                id: *id,
+                                target: semantics
+                                    .assignment_target(*id)
+                                    .expect("checked state assignments have resolved targets"),
+                                operator: semantics.assignment_call(*id).cloned(),
+                                span: *span,
+                            },
+                            target: target.id,
                             op: *op,
                             value: value.id,
                         },

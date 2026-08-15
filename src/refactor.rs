@@ -223,7 +223,7 @@ fn can_hoist_from_statement(statement: &Stmt, target: ExprId) -> bool {
         Stmt::Assign { value, .. } | Stmt::Expression(value) | Stmt::Throw { error: value, .. } => {
             (value, false)
         }
-        Stmt::IndexAssign { .. } => return false,
+        Stmt::StateAssign { .. } | Stmt::IndexAssign { .. } => return false,
         Stmt::If { condition, .. } => (condition, false),
         Stmt::While { condition, .. } => (condition, true),
         Stmt::For { iterable, .. } => (iterable, false),
@@ -980,6 +980,7 @@ fn statement_span(statement: &Stmt) -> Span {
     match statement {
         Stmt::Debug { span, .. }
         | Stmt::Assign { span, .. }
+        | Stmt::StateAssign { span, .. }
         | Stmt::IndexAssign { span, .. }
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }

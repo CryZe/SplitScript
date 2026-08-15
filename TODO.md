@@ -41,8 +41,9 @@ completed source/compiler/fixture review and per-candidate classifications are
 recorded in [`docs/PORTING_CAMPAIGN_AUDIT.md`](docs/PORTING_CAMPAIGN_AUDIT.md).
 
 - [ ] Connect recognizable legacy constructs directly to the existing solution.
-  Assigning to `current.field` should link to the state-field rejection/filter
-  recipe; `startup`, `init`, `update`, and timer events should link to their
+  Direct `current.field` assignment is now supported, while the porting guide
+  distinguishes it from transactional candidate rejection. `startup`, `init`,
+  `update`, and timer events should link to their
   exact lifecycle mapping; module-list probes should distinguish
   `loadedModule(name)`, waiting `module(name)`, executable version/fingerprint
   checks, and genuinely required full enumeration. This campaign missed these

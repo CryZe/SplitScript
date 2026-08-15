@@ -700,11 +700,27 @@ turn a retrying scan into a one-shot result.
 ## Retaining the last accepted field value
 
 Some ASL `update` blocks overwrite one newly read watcher with its old value to
-filter a transient sentinel. Do not make `current` mutable. Reject that field's
-candidate instead; its accepted value stays unchanged while unrelated fields
-can advance.
+filter a transient sentinel. The direct port is valid in `whileAttached`:
 
-Use an ordinary trailing `if` on that pointer-path field instead:
+```splitscript
+whileAttached {
+    if current.scene == 7 || current.scene == 8 {
+        current.scene = old.scene
+    }
+}
+```
+
+`current` is the one mutable snapshot root; `old` remains read-only history.
+An assignment is visible to later code and later lifecycle actions in the same
+tick, and the mutated snapshot naturally becomes `old` on the next successful
+poll. Compound forms such as `current.count += 1` use the field's ordinary
+typed operator.
+
+Use a state-field filter instead when the candidate itself is invalid. This is
+the stronger transactional form: it can reject the first candidate before any
+snapshot is published, and it keeps the acceptance rule beside the read.
+
+Add an ordinary trailing `if` to that pointer-path field:
 
 ```splitscript
 state "game.exe" {

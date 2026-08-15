@@ -2439,6 +2439,7 @@ fn collect_async_states<'a>(
                 collect_async_states(body, states, loop_targets)
             }
             wasm_ir::Statement::Store { .. }
+            | wasm_ir::Statement::StateStore { .. }
             | wasm_ir::Statement::DebugLocation(_)
             | wasm_ir::Statement::StoreTemporary { .. }
             | wasm_ir::Statement::IndexStore { .. }
@@ -2580,6 +2581,17 @@ fn compile_async_flow(
             } => {
                 compile_assignment(function, *target, operation.as_ref(), *value, context);
             }
+            wasm_ir::Statement::StateStore {
+                target,
+                operation,
+                value,
+            } => super::expression::compile_state_assignment(
+                function,
+                *target,
+                operation.as_ref(),
+                *value,
+                context,
+            ),
             wasm_ir::Statement::StoreTemporary { target, value } => {
                 compile_temporary_set(function, *target, *value, context);
             }

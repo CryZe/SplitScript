@@ -1240,7 +1240,7 @@ fn a_source_type_named_list_is_not_mistaken_for_the_legacy_collection() {
 }
 
 #[test]
-fn assignments_to_current_explain_immutable_snapshot_migrations() {
+fn current_state_fields_can_be_replaced_but_old_state_remains_read_only() {
     let source = r#"
         state "game.exe" {
             scene: i32 at 0x1000;
@@ -1248,38 +1248,69 @@ fn assignments_to_current_explain_immutable_snapshot_migrations() {
 
         whileAttached {
             if current.scene == 7 || current.scene == 8 {
-                current.scene = old.scene
+                current.scene += 1
             }
         }
     "#;
-    let diagnostics = splitscript::parse(source)
-        .expect_err("legacy assignments to current should receive migration guidance");
+    splitscript::compile(source).expect("the current snapshot is intentionally mutable");
 
+    let old_source = source.replace("current.scene += 1", "old.scene = current.scene");
+    let diagnostics =
+        splitscript::parse(&old_source).expect_err("the historical snapshot must remain read-only");
     assert_eq!(diagnostics.len(), 1);
-    let diagnostic = &diagnostics[0];
+    assert_eq!(diagnostics[0].message, "`old` state is read-only");
     assert_eq!(
-        diagnostic.message,
-        "SplitScript state snapshots are immutable"
+        &old_source[diagnostics[0].span.start..diagnostics[0].span.end],
+        "old.scene"
     );
-    assert_eq!(
-        &source[diagnostic.span.start..diagnostic.span.end],
-        "current.scene"
-    );
-    assert!(diagnostic.fixes.is_empty());
     assert!(
-        diagnostic
+        diagnostics[0]
             .notes
             .iter()
-            .any(|note| { note.contains("trailing `if`") && note.contains("`Err(message)`") })
+            .any(|note| note.contains("`current`"))
     );
-    assert!(diagnostic.notes.iter().any(|note| {
-        note.contains("initial candidate") && note.contains("successful sibling fields")
+}
+
+#[test]
+fn current_state_assignment_uses_field_types_and_snapshot_availability() {
+    let source = r#"
+        state "game.exe" {
+            scene: i32 at 0x1000;
+        }
+
+        fn normalizeScene() {
+            current.scene = 1
+        }
+
+        whileAttached {
+            normalizeScene()
+        }
+    "#;
+    splitscript::compile(source)
+        .expect("snapshot-aware helpers may replace fields on the current snapshot");
+
+    let unavailable = source.replace("whileAttached", "onDetach");
+    let diagnostics = splitscript::compile(&unavailable)
+        .expect_err("a current-state mutation requires committed snapshots");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("requires state snapshots and is unavailable in `onDetach`")
     }));
-    assert!(
-        diagnostic.notes.iter().any(|note| {
-            note.contains("state-field expression") && note.contains("global `let`")
-        })
-    );
+
+    let wrong_type = source.replace("current.scene = 1", "current.scene = false");
+    let diagnostics = splitscript::compile(&wrong_type)
+        .expect_err("the assigned value must match the state field");
+    let mismatch = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message == "expected `i32`, found `bool`")
+        .unwrap_or_else(|| panic!("the assignment has a type mismatch: {diagnostics:#?}"));
+    assert!(mismatch.labels.iter().any(|label| {
+        label
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("state field has type `i32`"))
+    }));
 }
 
 #[test]

@@ -37,6 +37,7 @@ impl Checker {
                     inner.as_ref(),
                     Stmt::Variable(_)
                         | Stmt::Assign { .. }
+                        | Stmt::StateAssign { .. }
                         | Stmt::If { .. }
                         | Stmt::While { .. }
                         | Stmt::For { .. }
@@ -124,6 +125,61 @@ impl Checker {
                         }
                     }
                     None => self.error(format!("unknown variable `{name}`"), *span),
+                }
+            }
+            Stmt::StateAssign {
+                id,
+                target,
+                op,
+                value,
+                span,
+            } => {
+                let target_type = self.expr(target, None);
+                let field = match &target.kind {
+                    crate::ast::ExprKind::Path(path) => path.get(1),
+                    _ => None,
+                }
+                .and_then(|name| self.visible_state_field(name));
+                let Some((field, field_type)) = field else {
+                    self.expr(value, None);
+                    return;
+                };
+                self.semantics.resolve_assignment(*id, field);
+                let declaration_span = self.declarations.state_field_spans[&field];
+                if let Some(op) = op {
+                    let Some(right_type) = self.expr(value, None) else {
+                        return;
+                    };
+                    if self.diagnose_string_compound_assignment(*op, field_type, right_type, *span)
+                    {
+                        return;
+                    }
+                    let resolved = self.resolve_state_assignment_operator(
+                        *id, *op, field_type, right_type, field, *span,
+                    );
+                    if let Some(result) = resolved {
+                        let field_type_name = self.type_name(field_type);
+                        self.with_expected_type_source(
+                            super::ExpectedTypeSource {
+                                span: declaration_span,
+                                label: format!("state field has type `{field_type_name}`"),
+                            },
+                            |checker| checker.unify_expected(result, field_type, *span),
+                        );
+                    } else if let Some(operand_type) = self.unify(field_type, right_type, *span) {
+                        self.require_binary_operand(*op, operand_type, *span);
+                    }
+                } else {
+                    let field_type_name = self.type_name(field_type);
+                    self.with_expected_type_source(
+                        super::ExpectedTypeSource {
+                            span: declaration_span,
+                            label: format!("state field has type `{field_type_name}`"),
+                        },
+                        |checker| {
+                            checker.expr(value, target_type.or(Some(field_type)));
+                        },
+                    );
                 }
             }
             Stmt::IndexAssign {

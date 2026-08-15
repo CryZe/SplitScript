@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-15: explicit current-state overrides
+
+- Made `current.field = value` and compound forms first-class typed
+  assignments. They use ordinary field inference and operator resolution,
+  remain available through snapshot-dependent helper functions, affect later
+  actions in the same tick, and become `old` on the following successful poll.
+- Kept `old` directly read-only and added focused diagnostics for attempts to
+  rewrite history. State-field filters remain the transactional alternative
+  when an invalid candidate must be rejected before initial publication.
+- Carried the statement through recovered syntax, semantic navigation,
+  formatting, effects, typed HIR, suspension-safe Wasm IR, Wasm GC lowering,
+  documentation, and an executing runtime test.
+
 ## 2026-08-15: type-directed completion in every type position
 
 - Replaced separate generic-call and shallow state-field completion paths with

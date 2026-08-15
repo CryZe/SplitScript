@@ -1224,6 +1224,13 @@ It may explicitly return a boolean control result: `false` skips all timer
 decisions for the current update, while `true`, a bare `return`, and fallthrough
 continue normally. State has already refreshed and is not rolled back.
 
+`current.field = value` explicitly replaces one field after that refresh;
+compound forms such as `current.count += 1` use the field's normal typed
+operator. The replacement is visible to later statements and later actions in
+the same tick, then becomes part of `old` on the next successful poll. `old` is
+always read-only. Prefer a trailing state-field `if` when an invalid candidate
+must be rejected before the first complete snapshot can be published.
+
 ## Discovered state and watchers
 
 An `at` field retains the compact static pointer-path syntax. A state field may

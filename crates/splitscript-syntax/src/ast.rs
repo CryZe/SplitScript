@@ -888,6 +888,16 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    /// Replaces one field of the committed current state snapshot. The target
+    /// expression is retained so editor features treat `current` and the
+    /// field exactly like an ordinary state-field access.
+    StateAssign {
+        id: AssignmentId,
+        target: Expr,
+        op: Option<BinaryOp>,
+        value: Expr,
+        span: Span,
+    },
     IndexAssign {
         id: AssignmentId,
         target: Expr,

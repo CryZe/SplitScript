@@ -293,6 +293,7 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
         match statement {
             Stmt::Assign { span, .. }
+            | Stmt::StateAssign { span, .. }
             | Stmt::IndexAssign { span, .. }
             | Stmt::Return { span, .. }
             | Stmt::Throw { span, .. }
@@ -1716,6 +1717,25 @@ whileAttached {
         assert_eq!(formatted, expected);
         assert_eq!(format_source(&formatted).unwrap(), formatted);
         crate::check(crate::lower(crate::parse(&formatted).unwrap())).unwrap();
+    }
+
+    #[test]
+    fn formats_current_state_field_assignment_as_an_ordinary_assignment() {
+        let source = r#"state "game.exe"{scene:i32 at 0x1000}
+whileAttached{current . scene=old . scene
+current.scene +=1}"#;
+        let expected = r#"state "game.exe" {
+    scene: i32 at 0x1000;
+}
+whileAttached {
+    current.scene = old.scene
+    current.scene += 1
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        crate::compile(&formatted).expect("formatted current-state assignments should compile");
     }
 
     #[test]

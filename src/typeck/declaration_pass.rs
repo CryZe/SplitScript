@@ -38,6 +38,10 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
             checker.declarations.state_fields_by_id.insert(field.id, ty);
             checker
                 .declarations
+                .state_field_spans
+                .insert(field.id, field.span);
+            checker
+                .declarations
                 .state_storage_fields
                 .insert(field.id, field.id);
             if checker
@@ -61,6 +65,10 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
                 let ty = collect_state_field_type(checker, field, provider);
                 checker.semantics.resolve_value_type(field.id, ty);
                 checker.declarations.state_fields_by_id.insert(field.id, ty);
+                checker
+                    .declarations
+                    .state_field_spans
+                    .insert(field.id, field.span);
                 if fields.insert(field.name.clone(), (field.id, ty)).is_some() {
                     checker.error(
                         format!("duplicate state field `{}` in this layout", field.name),

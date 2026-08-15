@@ -505,6 +505,7 @@ impl HighlightCollector<'_> {
                 })
             })
         });
+        let current_state_path = matches!(resolved_value, Some(ResolvedValue::CurrentState(_)));
         if let Some(value) = resolved_value {
             match value {
                 ResolvedValue::ProviderValue(_) => {
@@ -532,7 +533,13 @@ impl HighlightCollector<'_> {
                 ResolvedValue::SettingsView | ResolvedValue::OldSettingsView => {
                     self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
                 }
-                ResolvedValue::CurrentState(_) | ResolvedValue::OldState(_) => {
+                ResolvedValue::CurrentState(_) => {
+                    self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
+                    if let Some(span) = spans.get(1) {
+                        self.insert(*span, SemanticTokenKind::StateField, 0);
+                    }
+                }
+                ResolvedValue::OldState(_) => {
                     self.insert(spans[0], SemanticTokenKind::Variable, MODIFIER_READONLY);
                     if let Some(span) = spans.get(1) {
                         self.insert(*span, SemanticTokenKind::StateField, MODIFIER_READONLY);
@@ -589,9 +596,14 @@ impl HighlightCollector<'_> {
             };
             for (span, member) in spans.iter().skip(start).take(members.len()).zip(members) {
                 let (kind, modifiers) = match member {
-                    ResolvedMember::StateField(_) => {
-                        (SemanticTokenKind::StateField, MODIFIER_READONLY)
-                    }
+                    ResolvedMember::StateField(_) => (
+                        SemanticTokenKind::StateField,
+                        if current_state_path {
+                            0
+                        } else {
+                            MODIFIER_READONLY
+                        },
+                    ),
                     ResolvedMember::SettingField(_) => {
                         (SemanticTokenKind::Setting, MODIFIER_READONLY)
                     }
@@ -1703,6 +1715,36 @@ whileAttached {
                 MODIFIER_READONLY
             ));
         }
+    }
+
+    #[test]
+    fn highlights_current_state_fields_as_mutable_and_old_fields_as_read_only() {
+        let source = r#"state "game.exe" {
+    room: u8 at 0x100;
+}
+whileAttached {
+    current.room = old.room
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+
+        let current_field = source.find("current.room").unwrap() + "current.".len();
+        let old_field = source.find("old.room").unwrap() + "old.".len();
+        let highlight_at = |offset| {
+            highlights
+                .highlights()
+                .iter()
+                .find(|highlight| highlight.span.start == offset)
+                .expect("state field should have a semantic token")
+        };
+
+        assert_eq!(
+            highlight_at(current_field).kind,
+            SemanticTokenKind::StateField
+        );
+        assert_eq!(highlight_at(current_field).modifiers, 0);
+        assert_eq!(highlight_at(old_field).kind, SemanticTokenKind::StateField);
+        assert_eq!(highlight_at(old_field).modifiers, MODIFIER_READONLY);
     }
 
     #[test]

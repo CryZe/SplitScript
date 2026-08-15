@@ -126,6 +126,7 @@ pub(super) struct DeclarationEnvironment {
     /// Every concrete state-field declaration, including declarations in
     /// later named layouts that project into a common field.
     pub(super) state_fields_by_id: HashMap<ValueId, Type>,
+    pub(super) state_field_spans: HashMap<ValueId, crate::ast::Span>,
     /// Concrete fields available after refining `layout` to a variant.
     pub(super) layout_state_fields: HashMap<EnumVariantId, HashMap<String, (ValueId, Type)>>,
     /// Concrete declarations mapped to their physical snapshot field. Common
@@ -151,6 +152,7 @@ impl DeclarationEnvironment {
         Self {
             state_fields: HashMap::new(),
             state_fields_by_id: HashMap::new(),
+            state_field_spans: HashMap::new(),
             layout_state_fields: HashMap::new(),
             state_storage_fields: HashMap::new(),
             settings: HashMap::new(),

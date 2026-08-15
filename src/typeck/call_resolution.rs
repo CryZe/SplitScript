@@ -128,6 +128,29 @@ impl Checker {
         Some(result)
     }
 
+    pub(super) fn resolve_state_assignment_operator(
+        &mut self,
+        assignment: crate::ast::AssignmentId,
+        op: crate::ast::BinaryOp,
+        left_type: Type,
+        right_type: Type,
+        target: crate::ast::ValueId,
+        span: Span,
+    ) -> Option<Type> {
+        let (result, call) = self.binary_operator_call(
+            op,
+            left_type,
+            right_type,
+            ResolvedReceiver::Path {
+                root: ResolvedValue::CurrentState(target),
+                members: Vec::new(),
+            },
+            span,
+        )?;
+        self.semantics.resolve_assignment_call(assignment, call);
+        Some(result)
+    }
+
     pub(super) fn resolve_index_assignment_operator(
         &mut self,
         assignment: crate::ast::AssignmentId,
@@ -1829,7 +1852,7 @@ impl Checker {
         }
     }
 
-    fn visible_state_field(&self, name: &str) -> Option<(crate::ast::ValueId, Type)> {
+    pub(super) fn visible_state_field(&self, name: &str) -> Option<(crate::ast::ValueId, Type)> {
         self.declarations
             .state_fields
             .get(name)

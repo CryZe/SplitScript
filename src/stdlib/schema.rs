@@ -37,6 +37,7 @@ pub enum Effect {
     ReadsProcess,
     RequiresAttachedProcess,
     RequiresStateSnapshots,
+    WritesCurrentState,
     Retryable,
     Suspends,
     CancelsOnProcessClose,
@@ -45,7 +46,7 @@ pub enum Effect {
 }
 
 impl Effect {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 14] = [
         Self::Pure,
         Self::Allocates,
         Self::MutatesValue,
@@ -54,6 +55,7 @@ impl Effect {
         Self::ReadsProcess,
         Self::RequiresAttachedProcess,
         Self::RequiresStateSnapshots,
+        Self::WritesCurrentState,
         Self::Retryable,
         Self::Suspends,
         Self::CancelsOnProcessClose,
@@ -75,6 +77,7 @@ impl Effect {
             Self::ReadsProcess => "reads process memory",
             Self::RequiresAttachedProcess => "requires an attached process",
             Self::RequiresStateSnapshots => "requires state snapshots",
+            Self::WritesCurrentState => "writes current state",
             Self::Retryable => "retryable",
             Self::Suspends => "suspends",
             Self::CancelsOnProcessClose => "cancels when the process closes",

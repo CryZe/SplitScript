@@ -386,7 +386,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
     match definition.id {
         SourceDefinitionId::State => Some(source_markdown(
             "current / old: state snapshot",
-            "Read-only state snapshots. `current` contains the latest accepted state and `old` contains the preceding snapshot; failed fields retain their accepted values.",
+            "`current` contains the latest accepted state and permits direct field replacement; `old` is the read-only preceding snapshot. Failed fields retain their accepted values.",
         )),
         SourceDefinitionId::Settings => Some(source_markdown(
             "settings / oldSettings: settings view",

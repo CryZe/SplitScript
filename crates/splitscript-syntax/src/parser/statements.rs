@@ -3,9 +3,8 @@
 //! Statement grammar.
 
 use super::{
-    ASL_MUTABLE_CURRENT_DIAGNOSTIC, ASL_TIMER_CONTROL_DIAGNOSTIC, Block, Diagnostic, ExprKind,
-    ForBinding, Parser, RecoveryNode, RecoveryNodeKind, Span, Stmt, TokenKind, VariableDecl,
-    assignment_operator, statement_span,
+    ASL_TIMER_CONTROL_DIAGNOSTIC, Block, Diagnostic, ExprKind, ForBinding, Parser, RecoveryNode,
+    RecoveryNodeKind, Span, Stmt, TokenKind, VariableDecl, assignment_operator, statement_span,
 };
 
 impl Parser<'_> {
@@ -203,14 +202,6 @@ impl Parser<'_> {
                 },
             });
         }
-        if self.at_ident("current")
-            && self.peek(1).kind == TokenKind::Dot
-            && matches!(self.peek(2).kind, TokenKind::Ident(_))
-            && assignment_operator(&self.peek(3).kind).is_some()
-        {
-            let target = self.current().span.join(self.peek(2).span);
-            return Err(self.migration_diagnostic(ASL_MUTABLE_CURRENT_DIAGNOSTIC, target));
-        }
         if self.at_ident("timer")
             && self.peek(1).kind == TokenKind::Dot
             && matches!(&self.peek(2).kind, TokenKind::Ident(name) if name == "Run")
@@ -257,6 +248,22 @@ impl Parser<'_> {
             let value = self.root_expression();
             self.terminator()?;
             let span = expr.span.join(self.previous().span);
+            if matches!(&expr.kind, ExprKind::Path(path) if path.len() == 2 && path[0] == "current")
+            {
+                return Ok(Stmt::StateAssign {
+                    id: self.new_assignment_id(),
+                    target: expr,
+                    op,
+                    value,
+                    span,
+                });
+            }
+            if matches!(&expr.kind, ExprKind::Path(path) if path.first().is_some_and(|root| root == "old"))
+            {
+                return Err(Diagnostic::new("`old` state is read-only", expr.span)
+                    .with_primary_label("history cannot be changed")
+                    .with_note("assign to the corresponding `current` field instead"));
+            }
             if let Some(op) = op {
                 if !matches!(expr.kind, ExprKind::Index { .. }) {
                     return Err(Diagnostic::new(

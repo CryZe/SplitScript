@@ -157,6 +157,7 @@ pub(super) fn validate_intrinsic_effects() -> Vec<String> {
             Effect::ReadsTimer,
             Effect::ReadsRuntime,
             Effect::ReadsProcess,
+            Effect::WritesCurrentState,
             Effect::WritesTimer,
             Effect::WritesRuntime,
         ] {

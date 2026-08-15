@@ -997,6 +997,38 @@ fn catalog_declared_unary_operators_execute_for_globals_and_methods() {
 }
 
 #[test]
+fn current_state_assignment_overrides_this_tick_and_becomes_next_ticks_old_state() {
+    let source = r#"
+        state "game.exe" {
+            scene: i32 at 0x7fff_0000
+        }
+
+        fn rejectTransientScene() {
+            if current.scene == 7 {
+                current.scene = old.scene
+            }
+        }
+
+        whileAttached {
+            rejectTransientScene()
+            print(`{old.scene}:{current.scene}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    store.data_mut().raw_scene = 7;
+    update.call(&mut store, ()).unwrap();
+    store.data_mut().raw_scene = 9;
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(store.data().messages, ["1:1", "1:9"]);
+}
+
+#[test]
 fn floating_point_square_root_preserves_width_and_ieee_edges() {
     let source = r#"
         state "game.exe" {}

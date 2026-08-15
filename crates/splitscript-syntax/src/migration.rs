@@ -179,8 +179,6 @@ pub const ASL_TIMER_RUN_METADATA_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.timer.run-metadata-path");
 pub const ASL_TIMER_CONTROL_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.timer.control-path");
-pub const ASL_MUTABLE_CURRENT_DIAGNOSTIC: MigrationDiagnosticId =
-    MigrationDiagnosticId::new("asl.state.mutable-current-assignment");
 pub const ASL_LIST_TYPE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.collection.list-type");
 pub const ASL_SETTINGS_ADD_DIAGNOSTIC: MigrationDiagnosticId =
@@ -401,18 +399,6 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "the current host does not expose run-offset or timing-method reads or writes to WebAssembly autosplitters",
             "a future API must define ordering with timer decisions, reset and undo behavior, persistence, precision, and how concurrent UI changes are resolved",
             "do not silently drop this operation or replace it with `setVariable`; record the port as behavior-limited until the host contract exists",
-        ],
-    },
-    MigrationDiagnostic {
-        id: ASL_MUTABLE_CURRENT_DIAGNOSTIC,
-        concept: MigrationConceptId::new("asl.state.mutable-current"),
-        message: "SplitScript state snapshots are immutable",
-        primary_label: "move this transformation to the state declaration or script-owned state",
-        notes: &[
-            "to retain an old field when a transient candidate is read, add a trailing `if` to that state field and return `Err(message)` for the rejected candidate",
-            "after initialization, rejecting one field retains its last accepted value while successful sibling fields continue to advance; rejecting the initial candidate prevents publishing a fabricated snapshot",
-            "computed values that are not process snapshots belong in a state-field expression or an ordinary global `let`, depending on whether they should refresh with memory or remain script-owned",
-            "there is no automatic rewrite because an assignment to `current` can represent filtering, derivation, or mutable run state in legacy ASL",
         ],
     },
     MigrationDiagnostic {
@@ -1949,9 +1935,9 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         id: MigrationConceptId::new("asl.state.mutable-current"),
         name: "Assignments to current",
         sources: ASL,
-        support: MigrationSupport::TypedPattern,
-        summary: "Keep snapshots immutable. Define derived values in the state declaration; when a transient candidate should retain its last accepted value, use a trailing field `if` and return `Err(message)`.",
-        targets: &[MigrationTarget::Language("state")],
+        support: MigrationSupport::Direct,
+        summary: "Assign directly to `current.field` for an explicit post-read override; `old` remains read-only. Use a trailing state-field `if` when rejection must happen at the transactional acceptance boundary, including the first snapshot.",
+        targets: &[MigrationTarget::Language("current")],
         cookbook_anchor: Some("retaining-the-last-accepted-field-value"),
         spellings: &[],
     },

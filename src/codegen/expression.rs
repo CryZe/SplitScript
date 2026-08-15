@@ -282,6 +282,13 @@ fn compile_block_with_loop(
             } => {
                 compile_assignment(function, *target, operation.as_ref(), *value, context);
             }
+            wasm_ir::Statement::StateStore {
+                target,
+                operation,
+                value,
+            } => {
+                compile_state_assignment(function, *target, operation.as_ref(), *value, context);
+            }
             wasm_ir::Statement::StoreTemporary { target, value } => {
                 compile_temporary_set(function, *target, *value, context);
             }
@@ -841,6 +848,30 @@ pub(super) fn compile_assignment(
             function.instruction(&Instruction::GlobalSet(global));
         }
     }
+}
+
+pub(super) fn compile_state_assignment(
+    function: &mut Function,
+    target: ValueId,
+    operation: Option<&wasm_ir::AssignmentOperation>,
+    value: ExprId,
+    context: &ExprContext<'_>,
+) {
+    let (field_index, storage) = state_storage_index(target, context.semantics);
+    let ty = value_type(storage, context.semantics);
+    function
+        .instruction(&Instruction::GlobalGet(context.runtime_globals.current))
+        .instruction(&Instruction::RefAsNonNull);
+    compile_assignment_value(function, operation, value, ty, context, |function| {
+        function
+            .instruction(&Instruction::GlobalGet(context.runtime_globals.current))
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(function, STATE_TYPE, field_index, ty);
+    });
+    function.instruction(&Instruction::StructSet {
+        struct_type_index: STATE_TYPE,
+        field_index,
+    });
 }
 
 pub(super) fn compile_index_assignment(

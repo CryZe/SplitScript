@@ -295,6 +295,22 @@ fn render_typed_block(
                 )
                 .unwrap();
             }
+            TypedStatementKind::StateAssign {
+                assignment,
+                target,
+                op,
+                value,
+            } => {
+                writeln!(
+                    output,
+                    "{indent}state-assign a{} -> v{} target=e{} op={op:?} value=e{}",
+                    assignment.id.index(),
+                    assignment.target.index(),
+                    target.index(),
+                    value.index()
+                )
+                .unwrap();
+            }
             TypedStatementKind::IndexAssign {
                 assignment,
                 target,

@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
+    Diagnostic,
     ast::{
         BinaryOp, Expr, ExprId, ExprKind, FallbackBranch, InterpolatedPart, MatchPattern, Span,
         SuspensionMode, UnaryOp,
@@ -1022,6 +1023,11 @@ impl Checker {
             return self.expect_expression(expression, result, expected, span);
         }
 
+        if self.diagnose_string_addition(op, left_ty, right_ty, span) {
+            let result = self.error_type();
+            return self.expect_expression(expression, result, expected, span);
+        }
+
         if let Some(result) =
             self.resolve_binary_operator(op, left_ty, right_ty, expression, left.id, span)
         {
@@ -1038,6 +1044,52 @@ impl Checker {
             operand_ty
         };
         self.expect_expression(expression, result, expected, span)
+    }
+
+    pub(super) fn diagnose_string_addition(
+        &mut self,
+        op: BinaryOp,
+        left: Type,
+        right: Type,
+        span: Span,
+    ) -> bool {
+        if op != BinaryOp::Add {
+            return false;
+        }
+        let left = self.shallow_type(left);
+        let right = self.shallow_type(right);
+        if self.standard_type_id(left) != Some(StdlibTypeId::String)
+            && self.standard_type_id(right) != Some(StdlibTypeId::String)
+        {
+            return false;
+        }
+
+        self.errors.push(
+            Diagnostic::type_error("`+` does not concatenate strings in SplitScript", span)
+                .with_primary_label("construct the string explicitly")
+                .with_note(
+                    "use a template literal such as `{left}{right}` when joining values; interpolation accepts any `Display` value",
+                )
+                .with_note(
+                    "use `String.concat(values)` when the inputs are already stored in a `[String]`",
+                )
+                .with_note(
+                    "no automatic rewrite is offered because the intended text, separators, and evaluation grouping belong to the author",
+                ),
+        );
+        true
+    }
+
+    pub(super) fn diagnose_string_compound_assignment(
+        &mut self,
+        op: BinaryOp,
+        left: Type,
+        right: Type,
+        span: Span,
+    ) -> bool {
+        let left = self.shallow_type(left);
+        self.standard_type_id(left) == Some(StdlibTypeId::String)
+            && self.diagnose_string_addition(op, left, right, span)
     }
 
     pub(super) fn require_binary_operand(

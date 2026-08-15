@@ -1,5 +1,31 @@
 # SplitScript roadmap
 
+## 2026-08-15: explicit string-concatenation guidance
+
+- Replaced the generic numeric-capability error for string `+` and `+=` with a
+  focused diagnostic that recommends template interpolation for `Display`
+  values and `String.concat` for an existing `[String]`.
+- Covered string/string and mixed string/numeric expressions, local compound
+  assignment, and indexed compound assignment without adding string `+` or an
+  evaluation-changing automatic rewrite.
+- Kept numeric and user-defined catalog operators on the ordinary resolution
+  path; the diagnostic triggers only when an operand resolves to the standard
+  `String` type.
+
+## 2026-08-15: six-script porting campaign audit
+
+- Audited every report from the `69f2bd9` campaign against its source ASL, the
+  current compiler, maintained ports, and deterministic host fixtures without
+  rerunning the campaign or treating compilation as behavioral parity.
+- Classified Arietta of Spirits, Operation Matriarchy, and Neon White as
+  compile-only candidates; Aquanox, A Plague Tale: Innocence, and Axiom Verge
+  are behavior-limited. No candidate was an intentionally failing probe.
+- Recorded the exact omissions and separated a fixed formatter defect,
+  discoverability failures for existing facilities, genuine compiler work,
+  host-runtime requirements, and unsupported claims. Five separate maintained
+  ports have bounded runtime evidence; Neon White still needs promotion and a
+  deterministic fixture.
+
 ## 2026-08-12: one exact process-detach lifecycle action
 
 - Replaced the overlapping `onDetached` and `onProcessExit` actions with

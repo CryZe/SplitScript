@@ -73,7 +73,11 @@ impl Checker {
                             self.semantics.resolve_assignment(*id, target);
                         }
                         if let Some(op) = op {
-                            if let Some(right_type) = self.expr(value, None) {
+                            if let Some(right_type) = self.expr(value, None)
+                                && !self.diagnose_string_compound_assignment(
+                                    *op, binding.ty, right_type, *span,
+                                )
+                            {
                                 let resolved = binding.id.and_then(|target| {
                                     self.resolve_assignment_operator(
                                         *id, *op, binding.ty, right_type, target, *span,
@@ -108,6 +112,9 @@ impl Checker {
                 let Some(right_type) = self.expr(value, None) else {
                     return;
                 };
+                if self.diagnose_string_compound_assignment(*op, element_type, right_type, *span) {
+                    return;
+                }
                 if let Some(result) = self.resolve_index_assignment_operator(
                     *id,
                     *op,

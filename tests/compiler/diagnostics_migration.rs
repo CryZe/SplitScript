@@ -1333,6 +1333,59 @@ fn duplicate_option_and_result_postfixes_have_a_focused_diagnostic() {
 }
 
 #[test]
+fn string_addition_recommends_explicit_string_construction() {
+    use splitscript::DiagnosticLabelStyle;
+
+    for expression in [
+        "left + right",
+        "left + count",
+        "left += right",
+        "values[0] += right",
+    ] {
+        let statement = if expression.contains("+=") {
+            expression.to_owned()
+        } else {
+            format!("let combined = {expression}")
+        };
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+                fn combine(left: String, right: String, count: u32, values: [String]) {{
+                    {statement}
+                }}
+            "#
+        );
+        let errors = splitscript::compile(&source)
+            .expect_err("string addition should produce migration guidance");
+        let diagnostic = errors
+            .iter()
+            .find(|diagnostic| diagnostic.message.contains("does not concatenate strings"))
+            .unwrap_or_else(|| {
+                panic!("missing string-addition diagnostic for `{expression}`: {errors:#?}")
+            });
+        assert_eq!(diagnostic.labels.len(), 1);
+        assert_eq!(diagnostic.labels[0].style, DiagnosticLabelStyle::Primary);
+        assert_eq!(
+            diagnostic.labels[0].message.as_deref(),
+            Some("construct the string explicitly")
+        );
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("template literal") && note.contains("Display"))
+        );
+        assert!(
+            diagnostic
+                .notes
+                .iter()
+                .any(|note| note.contains("String.concat") && note.contains("[String]"))
+        );
+        assert!(diagnostic.fixes.is_empty());
+    }
+}
+
+#[test]
 fn failed_initializers_keep_poisoned_bindings_without_follow_on_errors() {
     use splitscript::{
         compiler::ast::Stmt,

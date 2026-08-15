@@ -36,16 +36,13 @@ General rules:
 The latest six-script campaign used compiler revision `69f2bd9`, so reports of
 already-implemented facilities are discoverability evidence, not stale-compiler
 evidence. The candidates compile but have not been checked against games or
-deterministic host fixtures; compilation success is not behavioral parity.
+deterministic host fixtures; compilation success is not behavioral parity. The
+completed source/compiler/fixture review and per-candidate classifications are
+recorded in [`docs/PORTING_CAMPAIGN_AUDIT.md`](docs/PORTING_CAMPAIGN_AUDIT.md).
 
-- [ ] Triage every campaign report against the source ASL, the current compiler,
-  and the maintained ports. Classify each candidate as compile-only,
-  runtime-verified, behavior-limited, or intentionally failing, and record the
-  compiler revision plus every omission. Recompile only focused probes; do not
-  rerun the same campaign under the fiction that it used another compiler.
-- [ ] Raise the diagnostic bar for the concrete dead ends in this campaign:
-  string `+` should recommend interpolation or `String.concat`; an unhandled
-  `T!` should name `else`, `match`, and context-valid `?`; `else None` inside a
+- [ ] Raise the diagnostic bar for the remaining concrete dead ends in this
+  campaign: an unhandled `T!` should name `else`, `match`, and context-valid
+  `?`; `else None` inside a
   direct fallible return should explain when `else return None` is required;
   and failed generic constraints should name the unsatisfied capabilities and,
   when finite, the accepted concrete types. Offer machine-applicable edits only

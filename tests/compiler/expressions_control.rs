@@ -3,6 +3,165 @@
 use super::*;
 
 #[test]
+fn user_call_type_mismatches_name_the_argument_and_label_the_parameter() {
+    let source = r#"
+        record Pos {
+            x: u16,
+        }
+
+        fn getX(pos: Pos) -> u16 {
+            return pos.x
+        }
+
+        fn bar() -> u16 {
+            return getX(6)
+        }
+
+        state GBA {}
+    "#;
+    let diagnostics = splitscript::compile(source).expect_err("the argument has the wrong type");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message == "expected `Pos`, found an integer literal")
+        .expect("the call site should explain the source-level mismatch");
+    assert_eq!(diagnostic.labels.len(), 2, "{diagnostic:#?}");
+    assert_eq!(
+        diagnostic.labels[0].message.as_deref(),
+        Some("this value is an integer literal")
+    );
+    assert_eq!(
+        diagnostic.labels[1].message.as_deref(),
+        Some("parameter `pos` requires `Pos`")
+    );
+    let parameter_start = source.find("pos: Pos").unwrap();
+    assert_eq!(diagnostic.labels[1].span.start, parameter_start);
+    assert_eq!(
+        diagnostic.labels[1].span.end,
+        parameter_start + "pos: Pos".len()
+    );
+}
+
+#[test]
+fn declared_type_mismatches_point_to_every_source_of_the_expectation() {
+    let source = r#"
+        record Pos {
+            x: u16,
+        }
+
+        record Boxed {
+            value: Pos,
+        }
+
+        enum Wrapped {
+            Value(Pos),
+        }
+
+        let globalPos: Pos = 1
+
+        state GBA {
+            statePos: Pos = 2;
+            filteredPos: Pos at 0x100 if true { 8 } else { value };
+        }
+
+        fn badReturn() -> Pos {
+            return 3
+        }
+
+        fn exercise() {
+            let badLocal: Pos = 4
+            let localPos: Pos = Pos { x: 0 }
+            localPos = 5
+            let boxed = Boxed { value: 6 }
+            let wrapped = Wrapped.Value(7)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source).expect_err("every value has the wrong type");
+    let expectation_labels = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.message == "expected `Pos`, found an integer literal")
+        .filter_map(|diagnostic| diagnostic.labels.get(1))
+        .filter_map(|label| label.message.as_deref())
+        .collect::<Vec<_>>();
+
+    for expected in [
+        "global variable `globalPos` is declared as `Pos`",
+        "state field `statePos` is declared as `Pos`",
+        "state field `filteredPos` is declared as `Pos`",
+        "function `badReturn` is declared to return `Pos`",
+        "variable `badLocal` is declared as `Pos`",
+        "variable `localPos` has type `Pos`",
+        "record field `Boxed.value` is declared as `Pos`",
+        "variant `Wrapped.Value` declares a payload of type `Pos`",
+    ] {
+        assert!(
+            expectation_labels.contains(&expected),
+            "missing `{expected}` from {expectation_labels:#?}; diagnostics: {diagnostics:#?}"
+        );
+    }
+}
+
+#[test]
+fn expected_type_provenance_survives_wrappers_nesting_and_generic_constraints() {
+    let source = r#"
+        record Pos {
+            x: u16,
+        }
+
+        fn addOne(value) {
+            return value + 1
+        }
+
+        fn failed() -> i32! {
+            return Err("failed")
+        }
+
+        fn missing() -> Pos {}
+
+        fn exercise() {
+            let positions: [Pos] = [8]
+            let maybe: i32? = None
+            let optionalPos: Pos = maybe
+            let resultPos: Pos = failed()
+            let tiny: u8 = 300
+            print(addOne(Pos { x: 1 }))
+        }
+
+        state GBA {}
+    "#;
+    let diagnostics = splitscript::compile(source).expect_err("the declarations are incompatible");
+
+    for expected_label in [
+        "variable `positions` is declared as `[Pos]`",
+        "variable `optionalPos` is declared as `Pos`",
+        "variable `resultPos` is declared as `Pos`",
+        "variable `tiny` is declared as `u8`",
+        "function `missing` is declared to return `Pos`",
+        "parameter `value` requires `Numeric`",
+    ] {
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic
+                .labels
+                .iter()
+                .any(|label| label.message.as_deref() == Some(expected_label))),
+            "missing `{expected_label}` from {diagnostics:#?}"
+        );
+    }
+
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("integer literal does not fit in `u8`")
+            && diagnostic.labels[0].message.as_deref()
+                == Some("this integer literal does not fit in the declared type")
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("type `Pos` does not satisfy the required `Numeric` capability")
+    }));
+}
+
+#[test]
 fn literal_setting_keys_are_checked_against_declared_runtime_keys() {
     let source = r#"
         enum Mode { Fast, Slow }

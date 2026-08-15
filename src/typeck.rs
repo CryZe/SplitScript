@@ -63,6 +63,12 @@ struct CallSyntax<'a> {
     type_arguments: &'a [TypeRef],
 }
 
+#[derive(Clone)]
+struct ExpectedTypeSource {
+    span: Span,
+    label: String,
+}
+
 pub struct CheckOutput {
     pub semantics: SemanticModel,
     pub enum_types: Vec<EnumDecl>,
@@ -131,6 +137,7 @@ struct EnumVariantInfo {
     id: ResolvedEnumVariantId,
     name: String,
     payload: Option<Type>,
+    source_span: Option<Span>,
 }
 
 #[derive(Clone)]
@@ -162,6 +169,8 @@ struct Checker {
     semantics: SemanticBuilder,
     standard_field_types: HashMap<crate::stdlib::StdlibFieldId, Type>,
     active_function_component: HashSet<FunctionId>,
+    expected_type_source: Option<ExpectedTypeSource>,
+    return_type_source: Option<ExpectedTypeSource>,
 }
 
 impl Checker {
@@ -223,6 +232,28 @@ impl Checker {
         let previous = std::mem::replace(&mut self.none_policy, policy);
         let output = operation(self);
         self.none_policy = previous;
+        output
+    }
+
+    fn with_expected_type_source<T>(
+        &mut self,
+        source: ExpectedTypeSource,
+        operation: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let previous = self.expected_type_source.replace(source);
+        let output = operation(self);
+        self.expected_type_source = previous;
+        output
+    }
+
+    fn with_return_type_source<T>(
+        &mut self,
+        source: Option<ExpectedTypeSource>,
+        operation: impl FnOnce(&mut Self) -> T,
+    ) -> T {
+        let previous = std::mem::replace(&mut self.return_type_source, source);
+        let output = operation(self);
+        self.return_type_source = previous;
         output
     }
 
@@ -352,9 +383,9 @@ impl Checker {
                 return Some(expected);
             }
             (Type::Option(_), Type::Option(_)) | (Type::Result(_), Type::Result(_)) => {
-                return self.unify(actual, expected, span);
+                return self.unify_expected(actual, expected, span);
             }
-            (Type::Variable(_), _) => return self.unify(actual, expected, span),
+            (Type::Variable(_), _) => return self.unify_expected(actual, expected, span),
             (Type::Option(option), Type::Result(_)) if nested_wrapper_lift => (
                 ValueConversionKind::LiftOption,
                 self.inference.option_value(option),
@@ -366,7 +397,7 @@ impl Checker {
             (_, Type::Result(result)) => {
                 let value = self.inference.result_value(result);
                 if matches!(self.shallow_type(value), Type::Variable(_)) {
-                    self.unify(value, expected, span)?;
+                    self.unify_expected(value, expected, span)?;
                 }
                 let expected = self.type_name(expected);
                 self.diagnose_unhandled_result(
@@ -379,16 +410,18 @@ impl Checker {
             (_, Type::Option(option)) => {
                 let value = self.inference.option_value(option);
                 if matches!(self.shallow_type(value), Type::Variable(_)) {
-                    self.unify(value, expected, span)?;
+                    self.unify_expected(value, expected, span)?;
                 }
                 let actual = self.type_name(actual_shallow);
                 let expected = self.type_name(expected);
-                self.error(
+                let diagnostic = Diagnostic::type_error(
                     format!(
                         "cannot use optional `{actual}` where `{expected}` is required; unwrap it with `else` or handle it with `match`"
                     ),
                     span,
                 );
+                let diagnostic = self.with_expected_source_label(diagnostic);
+                self.errors.push(diagnostic);
                 return None;
             }
             (Type::Option(option), _) => (
@@ -399,9 +432,9 @@ impl Checker {
                 ValueConversionKind::LiftResult,
                 self.inference.result_value(result),
             ),
-            _ => return self.unify(actual, expected, span),
+            _ => return self.unify_expected(actual, expected, span),
         };
-        self.unify(actual, value, span)?;
+        self.unify_expected(actual, value, span)?;
         self.semantics
             .resolve_value_conversion(expression, kind, actual, expected);
         Some(expected)
@@ -438,6 +471,7 @@ impl Checker {
                 "postfix `?` is available here and returns the error from the current fallible boundary",
             );
         }
+        diagnostic = self.with_expected_source_label(diagnostic);
         self.errors.push(diagnostic);
         true
     }
@@ -470,6 +504,75 @@ impl Checker {
                 self.error(message, span);
                 None
             }
+        }
+    }
+
+    fn unify_expected(&mut self, actual: Type, expected: Type, span: Span) -> Option<Type> {
+        let actual_before = self.shallow_type(actual);
+        let expected_before = self.shallow_type(expected);
+        match self.inference.unify(actual, expected) {
+            Ok(ty) => Some(ty),
+            Err(error) => {
+                let diagnostic =
+                    self.expected_type_diagnostic(actual_before, expected_before, &error, span);
+                self.errors.push(diagnostic);
+                None
+            }
+        }
+    }
+
+    fn expected_type_diagnostic(
+        &mut self,
+        actual: Type,
+        expected: Type,
+        error: &crate::inference::InferenceError,
+        span: Span,
+    ) -> Diagnostic {
+        let expected_name = self.type_name(expected);
+        let is_source_mismatch = matches!(
+            error,
+            crate::inference::InferenceError::TypeMismatch { .. }
+                | crate::inference::InferenceError::UnsupportedOperation { .. }
+                | crate::inference::InferenceError::UnsatisfiedConstraints { .. }
+        );
+        let diagnostic = if !matches!(expected, Type::Variable(_)) && is_source_mismatch {
+            let (found, primary_label) = match self.inference.literal_kind(actual) {
+                Some(crate::inference::LiteralKind::Integer) => (
+                    "an integer literal".to_owned(),
+                    "this value is an integer literal".to_owned(),
+                ),
+                Some(crate::inference::LiteralKind::Float) => (
+                    "a floating-point literal".to_owned(),
+                    "this value is a floating-point literal".to_owned(),
+                ),
+                None => {
+                    let actual_name = self.type_name(actual);
+                    (
+                        format!("`{actual_name}`"),
+                        format!("this value has type `{actual_name}`"),
+                    )
+                }
+            };
+            Diagnostic::type_error(format!("expected `{expected_name}`, found {found}"), span)
+                .with_primary_label(primary_label)
+        } else if matches!(
+            error,
+            crate::inference::InferenceError::IntegerLiteralOutOfRange(_)
+        ) {
+            Diagnostic::type_error(self.inference_error_message(error.clone()), span)
+                .with_primary_label("this integer literal does not fit in the declared type")
+        } else {
+            Diagnostic::type_error(self.inference_error_message(error.clone()), span)
+                .with_primary_label("this value does not meet the declared type requirements")
+        };
+        self.with_expected_source_label(diagnostic)
+    }
+
+    fn with_expected_source_label(&self, diagnostic: Diagnostic) -> Diagnostic {
+        if let Some(source) = self.expected_type_source.as_ref() {
+            diagnostic.with_secondary_label(source.span, source.label.clone())
+        } else {
+            diagnostic
         }
     }
 
@@ -507,6 +610,7 @@ impl Checker {
                             id: ResolvedEnumVariantId::Source(variant.id),
                             name: variant.name.clone(),
                             payload: variant.payload.map(|ty| self.syntax_type(ty)),
+                            source_span: Some(variant.span),
                         })
                         .collect(),
                 }),
@@ -522,6 +626,7 @@ impl Checker {
                             id: ResolvedEnumVariantId::Standard(variant.id),
                             name: variant.name.to_owned(),
                             payload: None,
+                            source_span: None,
                         })
                         .collect(),
                 })

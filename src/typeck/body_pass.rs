@@ -55,7 +55,23 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
                             Type::Option(checker.inference.option_type(value))
                         })
                     });
-                checker.expr(&global.value, expected)
+                if global.annotation.is_some()
+                    && let Some(expected) = expected
+                {
+                    let expected_name = checker.type_name(expected);
+                    checker.with_expected_type_source(
+                        super::ExpectedTypeSource {
+                            span: global.name_span,
+                            label: format!(
+                                "global variable `{}` is declared as `{expected_name}`",
+                                global.name,
+                            ),
+                        },
+                        |checker| checker.expr(&global.value, Some(expected)),
+                    )
+                } else {
+                    checker.expr(&global.value, expected)
+                }
             },
         );
         let run_scoped_initializer = checker.semantics.standard_library_item(global.value.id)
@@ -96,6 +112,7 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
                 ty,
                 mutable: global.mutable,
                 debug_only: global.debug_only,
+                declaration_span: Some(global.name_span),
             },
         );
     }
@@ -167,7 +184,13 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
                                 expression.span,
                             );
                         } else {
-                            checker.unify(actual, field_type, expression.span);
+                            unify_state_field_value(
+                                checker,
+                                actual,
+                                field_type,
+                                field,
+                                expression.span,
+                            );
                             checker.expect_expression(
                                 expression.id,
                                 actual,
@@ -178,10 +201,22 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
                         boundary
                     } else if let Type::Result(result) = actual {
                         let value = checker.inference.result_value(result);
-                        checker.unify(value, field_type, expression.span);
+                        unify_state_field_value(
+                            checker,
+                            value,
+                            field_type,
+                            field,
+                            expression.span,
+                        );
                         actual
                     } else {
-                        checker.unify(actual, field_type, expression.span);
+                        unify_state_field_value(
+                            checker,
+                            actual,
+                            field_type,
+                            field,
+                            expression.span,
+                        );
                         let result = Type::Result(checker.inference.result_type(actual));
                         checker.expect_expression(
                             expression.id,
@@ -205,15 +240,28 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
                         ty: field_type,
                         mutable: false,
                         debug_only: false,
+                        declaration_span: Some(field.span),
                     },
                 )]));
                 checker
                     .semantics
                     .resolve_value_type(transform.value, field_type);
                 let poll_result = Type::Result(checker.inference.result_type(field_type));
+                let field_type_name = checker.type_name(field_type);
                 let (actual, _) = checker.with_failure_context(
                     FailureContext::boundary(poll_result),
-                    |checker| checker.expr(&transform.expression, Some(poll_result)),
+                    |checker| {
+                        checker.with_expected_type_source(
+                            super::ExpectedTypeSource {
+                                span: state_field_declaration_span(field),
+                                label: format!(
+                                    "state field `{}` is declared as `{field_type_name}`",
+                                    field.name
+                                ),
+                            },
+                            |checker| checker.expr(&transform.expression, Some(poll_result)),
+                        )
+                    },
                 );
                 if actual.is_none() {
                     checker.error(
@@ -225,6 +273,43 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
             }
         }
     });
+}
+
+fn unify_state_field_value(
+    checker: &mut Checker,
+    actual: Type,
+    expected: Type,
+    field: &crate::ast::StateField,
+    span: Span,
+) {
+    if field.annotation.is_some() {
+        let expected_name = checker.type_name(expected);
+        checker.with_expected_type_source(
+            super::ExpectedTypeSource {
+                span: state_field_declaration_span(field),
+                label: format!(
+                    "state field `{}` is declared as `{expected_name}`",
+                    field.name
+                ),
+            },
+            |checker| {
+                checker.unify_expected(actual, expected, span);
+            },
+        );
+    } else {
+        checker.unify(actual, expected, span);
+    }
+}
+
+fn state_field_declaration_span(field: &crate::ast::StateField) -> Span {
+    let end = match &field.source {
+        StateSource::Expression(expression) => expression.span.start,
+        StateSource::Pointer(path) => path.at_span.map_or(field.span.end, |span| span.start),
+    };
+    Span {
+        start: field.span.start,
+        end,
+    }
 }
 
 fn check_function_bodies(checker: &mut Checker, program: &Program) {
@@ -270,48 +355,67 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
                     _ => None,
                 })
                 .unwrap_or(CallableContext::Function);
-            checker.with_callable_context(callable, signature.completion, failure, |checker| {
-                checker.scopes.clear();
-                checker.scopes.push(HashMap::new());
-                for (parameter, ty) in function.params.iter().zip(signature.params.iter().copied())
-                {
-                    if checker.is_provider_value_name(&parameter.name) {
-                        checker.error(
-                            format!("`{}` is reserved by the state provider", parameter.name),
-                            parameter.span,
-                        );
+            let return_type_source = function.return_annotation_span.map(|span| {
+                let result = checker.type_name(signature.completion);
+                super::ExpectedTypeSource {
+                    span,
+                    label: format!(
+                        "function `{}` is declared to return `{result}`",
+                        function.name
+                    ),
+                }
+            });
+            checker.with_return_type_source(return_type_source, |checker| {
+                checker.with_callable_context(callable, signature.completion, failure, |checker| {
+                    checker.scopes.clear();
+                    checker.scopes.push(HashMap::new());
+                    for (parameter, ty) in
+                        function.params.iter().zip(signature.params.iter().copied())
+                    {
+                        if checker.is_provider_value_name(&parameter.name) {
+                            checker.error(
+                                format!("`{}` is reserved by the state provider", parameter.name),
+                                parameter.span,
+                            );
+                        }
+                        let duplicate = checker.scopes[0]
+                            .insert(
+                                parameter.name.clone(),
+                                Binding {
+                                    id: Some(parameter.id),
+                                    ty,
+                                    mutable: true,
+                                    debug_only: checker.debug_context.is_debug(),
+                                    declaration_span: Some(parameter.span),
+                                },
+                            )
+                            .is_some();
+                        if duplicate {
+                            checker.error(
+                                format!("duplicate parameter `{}`", parameter.name),
+                                parameter.span,
+                            );
+                        }
                     }
-                    let duplicate = checker.scopes[0]
-                        .insert(
-                            parameter.name.clone(),
-                            Binding {
-                                id: Some(parameter.id),
-                                ty,
-                                mutable: true,
-                                debug_only: checker.debug_context.is_debug(),
-                            },
+                    checker.block(&function.body, false);
+                    if signature.completion != checker.core_type(crate::stdlib::CoreTypeId::None)
+                        && !definitely_returns(&function.body)
+                    {
+                        let result = checker.type_name(signature.completion);
+                        let mut diagnostic = Diagnostic::type_error(
+                            format!(
+                                "function `{}` must return `{}` on every path",
+                                function.name, result
+                            ),
+                            function.body.span,
                         )
-                        .is_some();
-                    if duplicate {
-                        checker.error(
-                            format!("duplicate parameter `{}`", parameter.name),
-                            parameter.span,
-                        );
+                        .with_primary_label("this body can reach its end without returning");
+                        if let Some(source) = checker.return_type_source.clone() {
+                            diagnostic = diagnostic.with_secondary_label(source.span, source.label);
+                        }
+                        checker.errors.push(diagnostic);
                     }
-                }
-                checker.block(&function.body, false);
-                if signature.completion != checker.core_type(crate::stdlib::CoreTypeId::None)
-                    && !definitely_returns(&function.body)
-                {
-                    let result = checker.type_name(signature.completion);
-                    checker.error(
-                        format!(
-                            "function `{}` must return `{}` on every path",
-                            function.name, result
-                        ),
-                        function.body.span,
-                    );
-                }
+                });
             });
         },
     );

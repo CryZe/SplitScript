@@ -32,12 +32,14 @@ pub(super) struct Binding {
     pub(super) ty: Type,
     pub(super) mutable: bool,
     pub(super) debug_only: bool,
+    pub(super) declaration_span: Option<Span>,
 }
 
 #[derive(Clone)]
 pub(super) struct FunctionSignature {
     pub(super) id: FunctionId,
     pub(super) params: Vec<Type>,
+    pub(super) parameter_declarations: Vec<FunctionParameterDeclaration>,
     pub(super) result: Type,
     /// Value accepted by `return` inside the function body. For an async
     /// signature this is the `T` inside the call result's `async T`.
@@ -47,9 +49,16 @@ pub(super) struct FunctionSignature {
     pub(super) generalized: Vec<u32>,
 }
 
+#[derive(Clone)]
+pub(super) struct FunctionParameterDeclaration {
+    pub(super) name: String,
+    pub(super) span: Span,
+}
+
 pub(super) struct InstantiatedFunctionSignature {
     pub(super) id: FunctionId,
     pub(super) params: Vec<Type>,
+    pub(super) parameter_declarations: Vec<FunctionParameterDeclaration>,
     pub(super) result: Type,
     pub(super) type_arguments: Vec<Type>,
 }
@@ -59,6 +68,7 @@ impl FunctionSignature {
         InstantiatedFunctionSignature {
             id: self.id,
             params: self.params.clone(),
+            parameter_declarations: self.parameter_declarations.clone(),
             result: self.result,
             type_arguments: Vec::new(),
         }
@@ -88,6 +98,7 @@ impl FunctionSignature {
         InstantiatedFunctionSignature {
             id: self.id,
             params,
+            parameter_declarations: self.parameter_declarations.clone(),
             result,
             type_arguments,
         }

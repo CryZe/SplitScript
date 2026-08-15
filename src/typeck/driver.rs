@@ -146,6 +146,8 @@ fn initialize_checker(
         semantics: SemanticBuilder::with_state_provider(resolutions.state_provider()),
         standard_field_types: std::collections::HashMap::new(),
         active_function_component: std::collections::HashSet::new(),
+        expected_type_source: None,
+        return_type_source: None,
     };
     let fields = checker.standard_library.fields().to_vec();
     let variables = std::collections::HashMap::new();

@@ -92,7 +92,21 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
                     .insert(field.name.clone(), (field.id, canonical_ty));
                 for declaration in declarations.unwrap() {
                     let ty = checker.declarations.state_fields_by_id[&declaration.id];
-                    checker.unify(ty, canonical_ty, declaration.span);
+                    if declaration.id != field.id {
+                        let canonical_name = checker.type_name(canonical_ty);
+                        checker.with_expected_type_source(
+                            super::ExpectedTypeSource {
+                                span: field.span,
+                                label: format!(
+                                    "the first layout declares `{}` as `{canonical_name}`",
+                                    field.name
+                                ),
+                            },
+                            |checker| {
+                                checker.unify_expected(ty, canonical_ty, declaration.span);
+                            },
+                        );
+                    }
                     checker
                         .declarations
                         .state_storage_fields
@@ -122,6 +136,7 @@ fn collect_state_fields(checker: &mut Checker, program: &Program) {
                 ty,
                 mutable: false,
                 debug_only: false,
+                declaration_span: None,
             },
         );
     }
@@ -550,6 +565,16 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
         let signature = FunctionSignature {
             id: function.id,
             params,
+            parameter_declarations: function
+                .params
+                .iter()
+                .map(
+                    |parameter| super::declarations::FunctionParameterDeclaration {
+                        name: parameter.name.clone(),
+                        span: parameter.span,
+                    },
+                )
+                .collect(),
             result,
             completion,
             generalized: Vec::new(),

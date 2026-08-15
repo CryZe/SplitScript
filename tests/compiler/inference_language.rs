@@ -742,9 +742,8 @@ fn action_fallthroughs_use_domain_defaults_and_null_is_scoped() {
     let diagnostics =
         splitscript::compile(invalid).expect_err("start must not expose a nullable result");
     assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("types do not match")
-            && diagnostic.message.contains("None")
-            && diagnostic.message.contains("bool")
+        diagnostic.message == "expected `bool`, found `None`"
+            && diagnostic.labels[0].message.as_deref() == Some("this value has type `None`")
     }));
 
     let invalid_update = r#"
@@ -755,9 +754,9 @@ fn action_fallthroughs_use_domain_defaults_and_null_is_scoped() {
         .expect_err("whileAttached control flow must use a boolean result");
     assert!(
         diagnostics.iter().any(|diagnostic| {
-            diagnostic.message.contains("bool")
-                && (diagnostic.message.contains("types do not match")
-                    || diagnostic.message.contains("does not satisfy"))
+            diagnostic.message == "expected `bool`, found an integer literal"
+                && diagnostic.labels[0].message.as_deref()
+                    == Some("this value is an integer literal")
         }),
         "{diagnostics:#?}"
     );
@@ -1528,7 +1527,7 @@ fn indexed_assignment_updates_arrays_through_stable_aliases() {
     assert!(
         diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.message.contains("types do not match"))
+            .any(|diagnostic| diagnostic.message == "expected `u8`, found `String`")
     );
 }
 

@@ -212,6 +212,15 @@ variables, numeric-literal constraints, capability requirements, and nested
 supported; an occurs check rejects polymorphic recursion that would require an
 infinite type with a focused diagnostic.
 
+Expected-type checking retains source provenance separately from the inferred
+type graph. An explicit parameter, result, variable, state field, record field,
+or enum payload therefore contributes both its semantic type and the span and
+wording of the declaration that imposed it. Nested collection and wrapper
+checking preserves that provenance. A mismatch labels the supplied expression
+as primary and the declaring contract as secondary; capability constraints and
+literal range failures keep their more specific explanations instead of being
+collapsed into a generic type mismatch.
+
 `semantic::FunctionInstance` separates a declaration from a concrete body. Its
 structural identity contains the `FunctionId`, inferred type arguments, and the
 exact concrete parameter/result signature. The signature is required because

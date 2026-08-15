@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-15: declaration-aware type mismatch diagnostics
+
+- Carried the source of an expected type through parameters, explicit return
+  types, globals, locals, later assignments, state fields and their filters,
+  record fields, enum payloads, and nested option/result/collection checking.
+- Reworded concrete mismatches around the supplied value, including
+  unsuffixed integer and floating-point literals, while preserving focused
+  capability, integer-range, optional-value, and fallible-value diagnostics.
+- Added secondary labels at the declaration that imposed the expectation, so
+  the native CLI and LSP show both the incompatible use and its type contract.
+
 ## 2026-08-15: statically safe settings-key lookups
 
 - Indexed every declared host key and its setting kind in the declaration

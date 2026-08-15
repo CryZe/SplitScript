@@ -1,3 +1,5 @@
-diagnostics.split:5:30: error[SS0003]: types do not match: `String` and `i32`
+diagnostics.split:5:30: error[SS0003]: expected `i32`, found `String`
+  = primary: this value has type `String`
+  = secondary diagnostics.split:5:17: variable `wrong` is declared as `i32`
 diagnostics.split:6:30: error[SS0003]: type `bool` does not satisfy the required `Numeric` capability; accepted concrete types are address, f32, f64, i16, i32, i64, i8, u16, u32, u64 or u8
 diagnostics.split:7:27: error[SS0003]: unknown variable `unknown`

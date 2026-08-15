@@ -182,7 +182,18 @@ impl Checker {
                         if let Some(field) =
                             declaration.fields.iter().find(|field| field.name == *name)
                         {
-                            self.expr(value, Some(self.syntax_type(field.ty)));
+                            let field_type = self.syntax_type(field.ty);
+                            let field_type_name = self.type_name(field_type);
+                            self.with_expected_type_source(
+                                super::ExpectedTypeSource {
+                                    span: field.span,
+                                    label: format!(
+                                        "record field `{}.{}` is declared as `{field_type_name}`",
+                                        declaration.name, field.name,
+                                    ),
+                                },
+                                |checker| checker.expr(value, Some(field_type)),
+                            );
                             resolved_fields.push(ResolvedRecordFieldId::Source(field.id));
                         } else {
                             self.expr(value, None);
@@ -350,6 +361,7 @@ impl Checker {
                                                     ty: payload_type,
                                                     mutable: false,
                                                     debug_only: self.debug_context.is_debug(),
+                                                    declaration_span: Some(binding.name_span),
                                                 },
                                             );
                                         }
@@ -930,7 +942,21 @@ impl Checker {
             .resolve_enum_variant(expression, declared_variant.id);
         match (declared_variant.payload, arguments.first()) {
             (Some(payload_type), Some(payload)) => {
-                self.expr(payload, Some(payload_type));
+                if let Some(source_span) = declared_variant.source_span {
+                    let payload_type_name = self.type_name(payload_type);
+                    self.with_expected_type_source(
+                        super::ExpectedTypeSource {
+                            span: source_span,
+                            label: format!(
+                                "variant `{}.{variant}` declares a payload of type `{payload_type_name}`",
+                                declaration.name,
+                            ),
+                        },
+                        |checker| checker.expr(payload, Some(payload_type)),
+                    );
+                } else {
+                    self.expr(payload, Some(payload_type));
+                }
             }
             (Some(_), None) => self.error(format!("variant `{variant}` requires a payload"), span),
             (None, Some(payload)) => {

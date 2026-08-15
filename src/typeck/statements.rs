@@ -84,7 +84,22 @@ impl Checker {
                                     )
                                 });
                                 if let Some(result) = resolved {
-                                    self.unify(result, binding.ty, *span);
+                                    if let Some(declaration_span) = binding.declaration_span {
+                                        let binding_type = self.type_name(binding.ty);
+                                        self.with_expected_type_source(
+                                            super::ExpectedTypeSource {
+                                                span: declaration_span,
+                                                label: format!(
+                                                    "variable `{name}` has type `{binding_type}`"
+                                                ),
+                                            },
+                                            |checker| {
+                                                checker.unify_expected(result, binding.ty, *span);
+                                            },
+                                        );
+                                    } else {
+                                        self.unify_expected(result, binding.ty, *span);
+                                    }
                                 } else if let Some(operand_type) =
                                     self.unify(binding.ty, right_type, *span)
                                 {
@@ -92,7 +107,20 @@ impl Checker {
                                 }
                             }
                         } else {
-                            self.expr(value, Some(binding.ty));
+                            if let Some(declaration_span) = binding.declaration_span {
+                                let binding_type = self.type_name(binding.ty);
+                                self.with_expected_type_source(
+                                    super::ExpectedTypeSource {
+                                        span: declaration_span,
+                                        label: format!(
+                                            "variable `{name}` has type `{binding_type}`"
+                                        ),
+                                    },
+                                    |checker| checker.expr(value, Some(binding.ty)),
+                                );
+                            } else {
+                                self.expr(value, Some(binding.ty));
+                            }
                         }
                     }
                     None => self.error(format!("unknown variable `{name}`"), *span),
@@ -261,6 +289,7 @@ impl Checker {
                         ty: element_ty,
                         mutable: false,
                         debug_only: self.debug_context.is_debug(),
+                        declaration_span: Some(binding.span),
                     },
                 );
                 self.with_loop(|checker| checker.block(body, false));
@@ -343,7 +372,29 @@ impl Checker {
                             .map(|ty| self.syntax_type(ty))
                     };
                     expected.map_or(Some(result), |expected| {
-                        self.unify(result, expected, value.span)
+                        let source = if *returns {
+                            self.return_type_source.clone()
+                        } else {
+                            binding.as_ref().and_then(|binding| {
+                                binding.annotation.map(|_| {
+                                    let expected_name = self.type_name(expected);
+                                    super::ExpectedTypeSource {
+                                        span: binding.span,
+                                        label: format!(
+                                            "variable `{}` is declared as `{expected_name}`",
+                                            binding.name
+                                        ),
+                                    }
+                                })
+                            })
+                        };
+                        if let Some(source) = source {
+                            self.with_expected_type_source(source, |checker| {
+                                checker.unify_expected(result, expected, value.span)
+                            })
+                        } else {
+                            self.unify_expected(result, expected, value.span)
+                        }
                     })
                 });
                 if let Some(binding) = binding {
@@ -370,6 +421,7 @@ impl Checker {
                             ty,
                             mutable: true,
                             debug_only: self.debug_context.is_debug(),
+                            declaration_span: Some(binding.span),
                         },
                     );
                 }
@@ -400,7 +452,13 @@ impl Checker {
                 };
                 self.with_none_policy(policy, |checker| {
                     checker.with_expression_mode(ExpressionMode::DirectReturn, |checker| {
-                        checker.expr(value, Some(expected));
+                        if let Some(source) = checker.return_type_source.clone() {
+                            checker.with_expected_type_source(source, |checker| {
+                                checker.expr(value, Some(expected));
+                            });
+                        } else {
+                            checker.expr(value, Some(expected));
+                        }
                     });
                 });
             }
@@ -419,10 +477,15 @@ impl Checker {
                     ) => {}
             (false, expected, None) => {
                 let expected = self.type_name(expected);
-                self.error(
+                let mut diagnostic = crate::Diagnostic::type_error(
                     format!("expected a return value of type `{expected}`"),
                     span,
-                );
+                )
+                .with_primary_label("this return has no value");
+                if let Some(source) = self.return_type_source.clone() {
+                    diagnostic = diagnostic.with_secondary_label(source.span, source.label);
+                }
+                self.errors.push(diagnostic);
             }
         }
     }
@@ -444,9 +507,22 @@ impl Checker {
             );
         }
         let expected = variable.annotation.map(|ty| self.syntax_type(ty));
-        let mut ty = self
-            .expr(&variable.value, expected)
-            .unwrap_or_else(|| self.error_type());
+        let inferred = if let Some(expected) = expected {
+            let expected_name = self.type_name(expected);
+            self.with_expected_type_source(
+                super::ExpectedTypeSource {
+                    span: variable.name_span,
+                    label: format!(
+                        "variable `{}` is declared as `{expected_name}`",
+                        variable.name
+                    ),
+                },
+                |checker| checker.expr(&variable.value, Some(expected)),
+            )
+        } else {
+            self.expr(&variable.value, None)
+        };
+        let mut ty = inferred.unwrap_or_else(|| self.error_type());
         let unsupported_standard = self.standard_type_id(ty).is_some_and(|standard| {
             !self
                 .standard_library
@@ -470,6 +546,7 @@ impl Checker {
                 ty,
                 mutable: variable.mutable,
                 debug_only: self.debug_context.is_debug() || variable.debug_only,
+                declaration_span: Some(variable.name_span),
             },
         );
     }
@@ -521,6 +598,7 @@ impl Checker {
                 ty,
                 mutable: false,
                 debug_only: self.debug_context.is_debug(),
+                declaration_span: Some(binding.name_span),
             },
         );
     }

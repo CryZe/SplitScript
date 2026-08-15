@@ -150,6 +150,12 @@ enum LiteralDefault {
     Float,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LiteralKind {
+    Integer,
+    Float,
+}
+
 impl LiteralDefault {
     fn merge(left: Option<Self>, right: Option<Self>) -> Option<Self> {
         match (left, right) {
@@ -536,6 +542,18 @@ impl InferenceContext {
     pub(crate) fn variable_requirements(&mut self, variable: u32) -> Requirements {
         let root = self.root(variable);
         self.variables[root as usize].requirements.clone()
+    }
+
+    pub(crate) fn literal_kind(&mut self, ty: Type) -> Option<LiteralKind> {
+        let Type::Variable(variable) = self.shallow(ty) else {
+            return None;
+        };
+        let root = self.root(variable);
+        match self.variables[root as usize].literal_default {
+            Some(LiteralDefault::Integer) => Some(LiteralKind::Integer),
+            Some(LiteralDefault::Float) => Some(LiteralKind::Float),
+            None => None,
+        }
     }
 
     pub(crate) fn intern_generic_parameter(

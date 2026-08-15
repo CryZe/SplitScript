@@ -9,6 +9,9 @@ use std::{
 };
 
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
+use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
+
+mod cli_diagnostics;
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(150);
 
@@ -311,9 +314,7 @@ fn format_file(input: &Path, check: bool) -> bool {
     let formatted = match splitscript::format_source(&source) {
         Ok(formatted) => formatted,
         Err(errors) => {
-            for error in errors {
-                eprintln!("{}", error.render(&input.display().to_string(), &source));
-            }
+            emit_diagnostics(input, &source, &errors);
             return false;
         }
     };
@@ -392,18 +393,11 @@ fn compile_source(
     ) {
         Ok(output) => output,
         Err(errors) => {
-            for error in errors {
-                eprintln!("{}", error.render(&input.display().to_string(), source));
-            }
+            emit_diagnostics(input, source, &errors);
             return false;
         }
     };
-    for diagnostic in diagnostics {
-        eprintln!(
-            "{}",
-            diagnostic.render(&input.display().to_string(), source)
-        );
-    }
+    emit_diagnostics(input, source, &diagnostics);
 
     if let Err(error) = replace_output(output, &wasm) {
         eprintln!("{}: {error}", output.display());
@@ -412,6 +406,18 @@ fn compile_source(
 
     println!("compiled {} -> {}", input.display(), output.display());
     true
+}
+
+fn emit_diagnostics(input: &Path, source: &str, diagnostics: &[splitscript::Diagnostic]) {
+    let writer = StandardStream::stderr(ColorChoice::Auto);
+    if let Err(error) = cli_diagnostics::emit(
+        &mut writer.lock(),
+        &input.display().to_string(),
+        source,
+        diagnostics,
+    ) {
+        eprintln!("splitc: could not render diagnostics: {error}");
+    }
 }
 
 /// Writes beside the destination and renames only once the complete Wasm is

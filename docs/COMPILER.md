@@ -161,10 +161,14 @@ multi-edit underscore-suppression action. For unused declarations and members,
 the LSP reuses the identity-aware Rename query to update every reference,
 tries extra underscores on collisions, and type-checks the candidate before
 offering the action. The LSP publishes the same diagnostic codes as the
-CLI/compiler service. Spans
-remain byte offsets within the one source file; a `FileId` and source map are
-deliberately deferred until the language gains modules or another feature that
-accepts multiple sources.
+CLI/compiler service. The native CLI converts this shared value to
+`codespan-reporting` only at its terminal boundary. Errors and warnings are
+therefore rendered with annotated source snippets, terminal-aware color, and
+every primary and secondary label without coupling compiler passes to a
+particular presentation library. Formatter failures and watch-mode rebuilds
+use the same renderer. Spans remain byte offsets within the one source file; a
+`FileId` and source map are deliberately deferred until the language gains
+modules or another feature that accepts multiple sources.
 
 `WarningPolicy` independently configures each `SS100x` code as `allow`, `warn`,
 or `deny`. Policy is deliberately applied after semantic checking. `allow`

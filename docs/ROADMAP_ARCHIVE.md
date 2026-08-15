@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-15: source-annotated native CLI diagnostics
+
+- Replaced the native compiler and formatter CLI's flat diagnostic strings
+  with `codespan-reporting` source annotations while retaining the shared
+  compiler-owned diagnostic model used by the LSP and embedded service.
+- Preserved stable `SS` codes, warning severities, notes, fix guidance, Unicode
+  byte spans, and terminal-aware color across one-shot builds and watch mode.
+- Rendered all primary and secondary labels as source locations. A real
+  duplicate-state diagnostic verifies that both declarations remain visible,
+  alongside focused coverage for warnings, fixes, and zero-width EOF spans.
+
 ## 2026-08-15: self-guiding fallible and capability diagnostics
 
 - Replaced dead-end `T!` use errors with structured guidance for `else` and

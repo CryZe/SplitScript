@@ -1578,13 +1578,14 @@ fn infer_receiver(
     // completed call is itself the new receiver, so its result type is the
     // correct one. Non-path receivers have no textual receiver segments.
     let use_resolved_call_receiver = !context.receiver_path.is_empty();
-    if let Some(receiver) = analyze_receiver_source(
+    let direct = analyze_receiver_source(
         source.to_owned(),
         receiver_offset,
         compiler_context.clone(),
         use_resolved_call_receiver,
-    ) {
-        return Some(receiver);
+    );
+    if let Some((receiver, constraints, syntax, false)) = direct.as_ref() {
+        return Some((receiver.clone(), constraints.clone(), syntax.clone()));
     }
 
     let mut probe_source = String::with_capacity(source.len());
@@ -1592,6 +1593,8 @@ fn infer_receiver(
     let suffix_start = completion_probe_suffix_end(source, context.replacement.end);
     probe_source.push_str(&source[suffix_start..]);
     analyze_receiver_source(probe_source, receiver_offset, compiler_context, false)
+        .or(direct)
+        .map(|(receiver, constraints, syntax, _)| (receiver, constraints, syntax))
 }
 
 fn analyze_receiver_source(
@@ -1599,10 +1602,11 @@ fn analyze_receiver_source(
     receiver_offset: usize,
     compiler_context: crate::CompilerContext,
     use_resolved_call_receiver: bool,
-) -> Option<(TypeKind, Vec<StdlibCapabilityId>, Program)> {
+) -> Option<(TypeKind, Vec<StdlibCapabilityId>, Program, bool)> {
     let mut database = CompilerDatabase::with_context(compiler_context, source);
     let analysis = database.analysis_at(receiver_offset).ok()??;
     let snapshot = database.semantic_snapshot().ok()?;
+    let recovered = snapshot.checked().is_none();
     let resolved_call_receiver = match &analysis.resolution {
         Some(ExpressionResolution::Call(ResolvedCall::UserMethod { receiver_type, .. })) => {
             Some(*receiver_type)
@@ -1624,7 +1628,7 @@ fn analyze_receiver_source(
         .to_vec();
     let receiver = snapshot.semantics().types().kind(receiver_type).clone();
     let syntax = database.recovering_parse().ok()?.syntax().clone();
-    Some((receiver, constraints, syntax))
+    Some((receiver, constraints, syntax, recovered))
 }
 
 /// Removes an already-written call and propagation suffix from a completion

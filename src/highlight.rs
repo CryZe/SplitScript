@@ -1758,4 +1758,28 @@ settings {
             0
         ));
     }
+
+    #[test]
+    fn parser_errors_do_not_discard_semantic_highlighting_elsewhere() {
+        for broken in ["0b102", "\"unfinished"] {
+            let source = format!(
+                r#"
+fn retained(value: i32) -> i32 {{
+    return value
+}}
+state GBA {{}}
+split {{
+    let broken = {broken}
+    let result = retained(1)
+}}
+"#
+            );
+            let mut database = CompilerDatabase::new(&source);
+            let index = database
+                .semantic_highlights()
+                .expect("front-end errors should preserve independent semantic highlighting");
+            let call = source.rfind("retained").unwrap() + 1;
+            assert_eq!(kind_at(&index, call), Some(SemanticTokenKind::Function));
+        }
+    }
 }

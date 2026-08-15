@@ -232,6 +232,216 @@ fn bar() {
 }
 
 #[test]
+fn hover_survives_type_and_parser_errors_elsewhere_in_the_document() {
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    let source = r#"fn retained(value: i32) -> i32 {
+    return value
+}
+
+state GBA {}
+settings {
+    "Foo" => foo: true,
+}
+split {
+    let broken = 0b100
+    let result = retained(1)
+    return 0b100 || settings.foo
+}
+"#;
+    let diagnostics = server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": "file:///recovery.split",
+                "languageId": "splitscript",
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    assert!(
+        diagnostics[0]["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["message"] == "expected `bool`, found an integer literal")
+    );
+
+    let setting = source.rfind("foo").unwrap() + 1;
+    let (line, character) = position_parts(source, setting);
+    let hover = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "type-error",
+        "method": "textDocument/hover",
+        "params": {
+            "textDocument": { "uri": "file:///recovery.split" },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    assert!(
+        hover[0]["result"]["contents"]["value"]
+            .as_str()
+            .is_some_and(|markdown| markdown.contains("foo: bool")),
+        "{hover:#?}"
+    );
+
+    let broken_source = source.replacen("let broken = 0b100", "let broken = 0b102", 1);
+    let diagnostics = server.handle(notification(
+        "textDocument/didChange",
+        json!({
+            "textDocument": {
+                "uri": "file:///recovery.split",
+                "version": 2
+            },
+            "contentChanges": [{ "text": broken_source }]
+        }),
+    ));
+    assert!(
+        diagnostics[0]["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["message"]
+                == "digit `2` is not valid in a binary integer literal")
+    );
+
+    let retained_call = broken_source.rfind("retained").unwrap() + 1;
+    let (line, character) = position_parts(&broken_source, retained_call);
+    let hover = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "parser-error-hover",
+        "method": "textDocument/hover",
+        "params": {
+            "textDocument": { "uri": "file:///recovery.split" },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    assert!(
+        hover[0]["result"]["contents"]["value"]
+            .as_str()
+            .is_some_and(|markdown| markdown.contains("fn retained(value: i32) -> i32")),
+        "{hover:#?}"
+    );
+
+    let definition = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "parser-error-definition",
+        "method": "textDocument/definition",
+        "params": {
+            "textDocument": { "uri": "file:///recovery.split" },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    assert_eq!(
+        definition[0]["result"]["range"]["start"],
+        position(&broken_source, broken_source.find("retained").unwrap())
+    );
+
+    let references = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "parser-error-references",
+        "method": "textDocument/references",
+        "params": {
+            "textDocument": { "uri": "file:///recovery.split" },
+            "position": { "line": line, "character": character },
+            "context": { "includeDeclaration": true }
+        }
+    }));
+    assert_eq!(references[0]["result"].as_array().unwrap().len(), 2);
+
+    let highlights = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "parser-error-highlights",
+        "method": "textDocument/semanticTokens/full",
+        "params": { "textDocument": { "uri": "file:///recovery.split" } }
+    }));
+    assert!(
+        !highlights[0]["result"]["data"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "{highlights:#?}"
+    );
+
+    let lexical_source = source.replacen("let broken = 0b100", "let broken = \"unfinished", 1);
+    let diagnostics = server.handle(notification(
+        "textDocument/didChange",
+        json!({
+            "textDocument": {
+                "uri": "file:///recovery.split",
+                "version": 3
+            },
+            "contentChanges": [{ "text": lexical_source }]
+        }),
+    ));
+    assert!(
+        diagnostics[0]["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["message"] == "unterminated string literal")
+    );
+    let retained_call = lexical_source.rfind("retained").unwrap() + 1;
+    let (line, character) = position_parts(&lexical_source, retained_call);
+    let hover = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "lexical-error-hover",
+        "method": "textDocument/hover",
+        "params": {
+            "textDocument": { "uri": "file:///recovery.split" },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    assert!(
+        hover[0]["result"]["contents"]["value"]
+            .as_str()
+            .is_some_and(|markdown| markdown.contains("fn retained(value: i32) -> i32")),
+        "{hover:#?}"
+    );
+
+    let definition = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "lexical-error-definition",
+        "method": "textDocument/definition",
+        "params": {
+            "textDocument": { "uri": "file:///recovery.split" },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    assert_eq!(
+        definition[0]["result"]["range"]["start"],
+        position(&lexical_source, lexical_source.find("retained").unwrap())
+    );
+
+    let references = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "lexical-error-references",
+        "method": "textDocument/references",
+        "params": {
+            "textDocument": { "uri": "file:///recovery.split" },
+            "position": { "line": line, "character": character },
+            "context": { "includeDeclaration": true }
+        }
+    }));
+    assert_eq!(references[0]["result"].as_array().unwrap().len(), 2);
+
+    let highlights = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "lexical-error-highlights",
+        "method": "textDocument/semanticTokens/full",
+        "params": { "textDocument": { "uri": "file:///recovery.split" } }
+    }));
+    assert!(
+        !highlights[0]["result"]["data"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "{highlights:#?}"
+    );
+}
+
+#[test]
 fn publishes_unused_binding_warnings_without_rejecting_the_document() {
     let mut server = LanguageServer::default();
     initialize(&mut server);

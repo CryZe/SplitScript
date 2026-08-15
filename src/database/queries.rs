@@ -217,10 +217,20 @@ impl CompilerDatabase {
             self.cache.recovering_lowered = Some(match self.recovering_parse() {
                 Ok(recovered) => {
                     let syntax = recovered.syntax().clone();
+                    let mut compilation_syntax = syntax.clone();
+                    if recovered.diagnostics().is_empty()
+                        && let Some(augmented) = crate::stdlib::augment_program_with_library_bodies(
+                            recovered.source_document().source(),
+                            &recovered.context().standard_library(),
+                        )
+                        .expect("validated standard-library bodies parse in valid user source")
+                    {
+                        compilation_syntax = augmented;
+                    }
                     let mut resolution_diagnostics = recovered.resolution_diagnostics().to_vec();
                     let mut resolutions = crate::resolution::ProgramResolutions::default();
                     resolution_diagnostics.extend(crate::resolution::resolve_program(
-                        &syntax,
+                        &compilation_syntax,
                         &recovered.context().standard_library(),
                         &mut resolutions,
                     ));
@@ -229,9 +239,10 @@ impl CompilerDatabase {
                         source_name: recovered.source_name().to_owned(),
                         document: recovered.source_document().clone(),
                         hir: crate::hir::DeclarationIndex::lower(&syntax),
-                        compilation_syntax: syntax.clone(),
+                        compilation_syntax,
                         syntax,
                         resolutions,
+                        syntax_diagnostics: recovered.diagnostics().to_vec(),
                         resolution_diagnostics,
                     }))
                 }
@@ -265,7 +276,10 @@ impl CompilerDatabase {
 
     pub fn recovering_check(&mut self) -> QueryResult<RecoveredCheck> {
         if self.cache.recovering_checked.is_none() {
-            self.cache.recovering_checked = Some(match self.lower() {
+            // Editor semantics must start from the recovered syntax tree. Using
+            // strict lowering here makes one parser diagnostic discard every
+            // otherwise valid type, definition, and reference in the file.
+            self.cache.recovering_checked = Some(match self.recovering_lower() {
                 Ok(lowered) => Ok(Arc::new(crate::check_recovering((*lowered).clone()))),
                 Err(errors) => Err(errors),
             });

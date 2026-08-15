@@ -301,6 +301,9 @@ pub struct LoweredProgram {
     compilation_syntax: ast::Program,
     hir: hir::DeclarationIndex,
     resolutions: resolution::ProgramResolutions,
+    /// Parser diagnostics retained only by editor-oriented recovered lowering.
+    /// Strictly parsed programs always leave this empty.
+    syntax_diagnostics: Vec<Diagnostic>,
     resolution_diagnostics: Vec<Diagnostic>,
 }
 
@@ -533,9 +536,9 @@ pub fn parse_named_with_context(
     })
 }
 
-/// Parses as much of one SplitScript source file as possible. Lexer failures
-/// remain fatal for now; recoverable parser errors and explicit recovery nodes
-/// are returned alongside the partial syntax tree.
+/// Parses as much of one SplitScript source file as possible. Lexical and
+/// parser errors are returned alongside an offset-preserving partial syntax
+/// tree so editor features can continue operating on independent valid regions.
 pub fn parse_recovering(source: &str) -> Result<RecoveredParse, Vec<Diagnostic>> {
     parse_recovering_named_with_context(CompilerContext::default(), IN_MEMORY_SOURCE_NAME, source)
 }
@@ -552,9 +555,17 @@ pub fn parse_recovering_named_with_context(
     source_name: impl Into<String>,
     source: &str,
 ) -> Result<RecoveredParse, Vec<Diagnostic>> {
-    let lexed = lexer::lex_lossless(source).map_err(|error| vec![error])?;
+    let (lexed, mut diagnostics) = lexer::lex_lossless_recovering(source);
     let tokens = lexed.tokens().cloned().collect();
     let output = parser::parse_recovering(source, tokens);
+    diagnostics.extend(output.diagnostics);
+    diagnostics.sort_by_key(|diagnostic| {
+        (
+            diagnostic.span.start,
+            u8::from(diagnostic.code != DiagnosticCode::Lexical),
+            diagnostic.span.end,
+        )
+    });
     let resolution_diagnostics =
         resolution::validate_declarations(&output.program, &context.standard_library());
     Ok(RecoveredParse {
@@ -562,7 +573,7 @@ pub fn parse_recovering_named_with_context(
         source_name: source_name.into(),
         document: syntax::SourceDocument::from_lexed(source, lexed),
         syntax: output.program,
-        diagnostics: output.diagnostics,
+        diagnostics,
         resolution_diagnostics,
         recovery_nodes: output.recovery_nodes,
     })
@@ -599,6 +610,7 @@ pub fn lower(parsed: ParsedProgram) -> LoweredProgram {
         compilation_syntax,
         hir,
         resolutions,
+        syntax_diagnostics: Vec::new(),
         resolution_diagnostics,
     }
 }
@@ -613,10 +625,13 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         compilation_syntax,
         hir,
         resolutions,
+        syntax_diagnostics,
         resolution_diagnostics,
     } = lowered.into();
-    if !resolution_diagnostics.is_empty() {
-        return Err(resolution_diagnostics);
+    if !syntax_diagnostics.is_empty() || !resolution_diagnostics.is_empty() {
+        let mut diagnostics = syntax_diagnostics;
+        diagnostics.extend(resolution_diagnostics);
+        return Err(diagnostics);
     }
     let mut output = typeck::check_with_library(
         &compilation_syntax,
@@ -680,6 +695,7 @@ pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
         compilation_syntax,
         hir,
         resolutions,
+        syntax_diagnostics,
         resolution_diagnostics,
     } = lowered.into();
     let mut recovered = typeck::check_recovering_with_library(
@@ -687,29 +703,32 @@ pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
         &resolutions,
         context.standard_library(),
     );
-    let validation =
-        (resolution_diagnostics.is_empty() && recovered.diagnostics.is_empty()).then(|| {
-            let typed_hir = hir::TypedProgram::build(
-                hir.clone(),
-                &compilation_syntax,
-                &recovered.output.semantics,
-                context.standard_library(),
-                hir::visible_expression_count(&syntax),
-                syntax.functions.len(),
-            );
-            recovered
-                .output
-                .semantics
-                .set_visible_expression_count(typed_hir.visible_expression_count());
-            validation::validate(
-                context.standard_library(),
-                &compilation_syntax,
-                &typed_hir,
-                &recovered.output.semantics,
-                &recovered.output.enum_types,
-            )
-        });
-    let mut diagnostics = resolution_diagnostics;
+    let validation = (syntax_diagnostics.is_empty()
+        && resolution_diagnostics.is_empty()
+        && recovered.diagnostics.is_empty())
+    .then(|| {
+        let typed_hir = hir::TypedProgram::build(
+            hir.clone(),
+            &compilation_syntax,
+            &recovered.output.semantics,
+            context.standard_library(),
+            hir::visible_expression_count(&syntax),
+            syntax.functions.len(),
+        );
+        recovered
+            .output
+            .semantics
+            .set_visible_expression_count(typed_hir.visible_expression_count());
+        validation::validate(
+            context.standard_library(),
+            &compilation_syntax,
+            &typed_hir,
+            &recovered.output.semantics,
+            &recovered.output.enum_types,
+        )
+    });
+    let mut diagnostics = syntax_diagnostics;
+    diagnostics.extend(resolution_diagnostics);
     diagnostics.extend(recovered.diagnostics);
     if let Some(validation) = &validation {
         diagnostics.extend(validation.diagnostics.iter().cloned());

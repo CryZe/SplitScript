@@ -2051,4 +2051,37 @@ fn bar() {
                 .any(|diagnostic| diagnostic.message == "expected `;` between state fields")
         );
     }
+
+    #[test]
+    fn hover_preserves_independent_semantics_across_parser_errors() {
+        let source = r#"
+fn retained(value: i32) -> i32 {
+    return value
+}
+
+state GBA {}
+
+split {
+    let broken = 0b102
+    return retained(1) == 1
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        assert!(
+            database
+                .recovering_parse()
+                .unwrap()
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic
+                    .message
+                    .contains("not valid in a binary integer literal"))
+        );
+
+        let hover = database
+            .hover(source.rfind("retained").unwrap() + 1)
+            .unwrap()
+            .expect("an unrelated parser error must not disable semantic hover");
+        assert!(hover.markdown.contains("fn retained(value: i32) -> i32"));
+    }
 }

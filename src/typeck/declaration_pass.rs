@@ -25,7 +25,9 @@ pub(super) fn collect(checker: &mut Checker, program: &Program) {
 }
 
 fn collect_state_fields(checker: &mut Checker, program: &Program) {
-    let state = program.state.as_ref().unwrap();
+    let Some(state) = program.state.as_ref() else {
+        return;
+    };
     let provider = checker
         .provider_value
         .map(|(provider, _)| checker.standard_library.state_provider(provider));

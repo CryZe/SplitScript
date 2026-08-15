@@ -132,14 +132,6 @@ impl WarningPolicy {
         }
     }
 
-    pub(crate) fn changes(self, diagnostic: &Diagnostic) -> bool {
-        diagnostic.severity == DiagnosticSeverity::Warning
-            && match self.level(diagnostic.code) {
-                Some(level) => !matches!(level, WarningLevel::Warn),
-                None => false,
-            }
-    }
-
     /// Applies this policy while retaining diagnostic codes and structured
     /// source information. Parser and type errors are never affected.
     pub fn apply(self, diagnostics: impl IntoIterator<Item = Diagnostic>) -> Vec<Diagnostic> {
@@ -831,18 +823,19 @@ pub fn compile_named_with_context_and_options_diagnostics(
     source: &str,
     options: CompilerOptions,
 ) -> Result<(Vec<u8>, Vec<Diagnostic>), Vec<Diagnostic>> {
-    let parsed = parse_named_with_context(context, source_name, source)?;
-    let lowered = lower(parsed);
-    let checked = check(lowered)?;
-    let diagnostics = options
-        .warnings
-        .apply(checked.diagnostics().iter().cloned());
+    let mut database =
+        database::CompilerDatabase::with_context_and_source_name(context, source_name, source);
+    database.set_warning_policy(options.warnings);
+    let diagnostics = database.diagnostics().to_vec();
     if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
     {
         return Err(diagnostics);
     }
+    let checked = database
+        .check()
+        .expect("an error-free diagnostic set has a strictly checked program");
     Ok((codegen_with_options(&checked, options), diagnostics))
 }
 

@@ -42,6 +42,33 @@ fn compiler_database_publishes_non_fatal_warnings() {
 }
 
 #[test]
+fn one_shot_compilation_reports_syntax_and_independent_type_errors_together() {
+    let source = r#"
+        state GBA {}
+
+        fn conflictingReturns() {
+            if true { return 5 }
+            return false
+        }
+
+        fn malformedLiteral(value: u32) -> bool {
+            return value > 0gxb101
+        }
+    "#;
+    let diagnostics = splitscript::compile(source).expect_err("both errors reject compilation");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message == "unknown integer type suffix `gxb101`" })
+    );
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .starts_with("type `bool` does not satisfy the required `Numeric` capability")
+    }));
+}
+
+#[test]
 fn compiler_database_applies_warning_policy_without_losing_semantics() {
     use splitscript::{
         DiagnosticCode, DiagnosticSeverity, WarningLevel, WarningPolicy,
@@ -250,7 +277,13 @@ fn compiler_database_caches_queries_and_invalidates_on_source_changes() {
     assert_eq!(recovered_error.syntax().actions[0].body.statements.len(), 2);
     let parse_errors = database.parse().unwrap_err();
     assert_eq!(parse_errors[0].code, DiagnosticCode::Syntax);
-    assert!(Arc::ptr_eq(&parse_errors, &database.diagnostics()));
+    let diagnostics = database.diagnostics();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::Syntax)
+    );
+    assert!(Arc::ptr_eq(&diagnostics, &database.diagnostics()));
 
     assert!(database.set_source(valid));
     assert_eq!(database.revision().index(), 2);

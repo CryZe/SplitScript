@@ -790,20 +790,65 @@ impl CompilerDatabase {
                 Ok(checked) => self
                     .warning_policy
                     .apply(checked.diagnostics().iter().cloned()),
-                Err(errors)
-                    if !errors
-                        .iter()
-                        .any(|diagnostic| self.warning_policy.changes(diagnostic)) =>
-                {
-                    self.cache.diagnostics = Some(errors);
-                    return Arc::clone(self.cache.diagnostics.as_ref().unwrap());
+                Err(strict_errors) => {
+                    // Strict checking necessarily stops at the first failed
+                    // compiler stage. Diagnostics are more useful when a
+                    // recoverable syntax error does not hide independent type
+                    // errors elsewhere, so retain every strict diagnostic and
+                    // supplement it with facts from recovered checking.
+                    let mut diagnostics = strict_errors.to_vec();
+                    if let Ok(recovered) = self.recovering_check() {
+                        let failed_regions = strict_errors
+                            .iter()
+                            .filter_map(|diagnostic| {
+                                diagnostic_recovery_region(recovered.syntax(), diagnostic.span)
+                            })
+                            .collect::<Vec<_>>();
+                        for diagnostic in recovered.diagnostics() {
+                            let depends_on_failed_region =
+                                diagnostic_recovery_region(recovered.syntax(), diagnostic.span)
+                                    .is_some_and(|region| failed_regions.contains(&region));
+                            if !diagnostics.contains(diagnostic) && !depends_on_failed_region {
+                                diagnostics.push(diagnostic.clone());
+                            }
+                        }
+                    }
+                    self.warning_policy.apply(diagnostics)
                 }
-                Err(errors) => self.warning_policy.apply(errors.iter().cloned()),
             };
             self.cache.diagnostics = Some(Arc::from(diagnostics));
         }
         Arc::clone(self.cache.diagnostics.as_ref().unwrap())
     }
+}
+
+/// Returns the independently checkable declaration boundary containing a
+/// diagnostic. Recovered errors within a declaration whose syntax or signature
+/// already failed are usually consequences of the placeholder types used to
+/// continue checking; errors in another declaration remain useful.
+fn diagnostic_recovery_region(program: &crate::ast::Program, target: Span) -> Option<Span> {
+    let contains = |region: Span| region.start <= target.start && target.end <= region.end;
+    let mut regions = program
+        .functions
+        .iter()
+        .map(|function| function.span)
+        .chain(program.actions.iter().map(|action| action.span))
+        .chain(program.globals.iter().map(|global| global.span))
+        .chain(program.records.iter().map(|record| record.span))
+        .chain(program.enums.iter().map(|enumeration| enumeration.span))
+        .chain(program.settings.iter().map(|setting| setting.span))
+        .chain(program.tick_rate.iter().map(|tick_rate| tick_rate.span))
+        .chain(
+            program
+                .state
+                .iter()
+                .flat_map(|state| state.all_fields())
+                .map(|field| field.span),
+        )
+        .filter(|region| contains(*region))
+        .collect::<Vec<_>>();
+    regions.sort_by_key(|region| region.end.saturating_sub(region.start));
+    regions.into_iter().next()
 }
 
 struct ContextualLanguageItemAt {

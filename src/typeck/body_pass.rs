@@ -163,7 +163,12 @@ fn globals_inferred_as_options(program: &Program) -> HashSet<String> {
 fn check_state_expressions(checker: &mut Checker, program: &Program) {
     checker.scopes.clear();
     checker.with_expression_mode(ExpressionMode::StateSource, |checker| {
-        for field in program.state.as_ref().unwrap().all_fields() {
+        for field in program
+            .state
+            .as_ref()
+            .into_iter()
+            .flat_map(|state| state.all_fields())
+        {
             let field_type = checker.declarations.state_fields_by_id[&field.id];
             if let StateSource::Expression(expression) = &field.source {
                 let boundary = contains_propagation(expression)

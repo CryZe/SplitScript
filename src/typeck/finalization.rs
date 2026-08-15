@@ -33,7 +33,12 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     if !checker.errors.is_empty() {
         checker.inference.recover_unbound();
     }
-    for field in program.state.as_ref().unwrap().all_fields() {
+    for field in program
+        .state
+        .as_ref()
+        .into_iter()
+        .flat_map(|state| state.all_fields())
+    {
         if matches!(field.source, StateSource::Pointer(_)) {
             let Some(field_type) = checker
                 .declarations

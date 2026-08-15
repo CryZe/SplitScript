@@ -463,7 +463,7 @@ fn bar() {
 fn other()
 
 debug fn foo(x: u32, pos: Pos) -> TimerState {
-    if x > 0xb101 || settings.foo {
+    if x > 0gxb101 || settings.foo {
         return TimerState.Paused
     }
     return TimerState.NotRunning
@@ -491,7 +491,19 @@ settings {
             }
         }),
     ));
-    assert!(!diagnostics.is_empty());
+    let diagnostics = diagnostics[0]["params"]["diagnostics"]
+        .as_array()
+        .expect("opening the showcase publishes diagnostics");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic["message"] == "unknown integer type suffix `gxb101`" })
+    );
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic["message"].as_str().is_some_and(|message| {
+            message.starts_with("type `bool` does not satisfy the required `Numeric` capability")
+        })
+    }));
 
     let offset = source.find("TimerState.Paused").unwrap();
     let (line, character) = position_parts(source, offset);

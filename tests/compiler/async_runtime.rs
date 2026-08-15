@@ -1419,10 +1419,26 @@ fn result_mismatches_use_source_types_and_explain_unwrapping() {
     )
     .expect_err("a fallible function call cannot be assigned directly to u32");
 
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.message
-            == "cannot use fallible `u32!` where `u32` is required; unwrap it with `else`, propagate it with `?`, or use `retry` in `onAttach`"
-    }), "{diagnostics:#?}");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("fallible value `u32!` must be handled")
+                && diagnostic
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("else fallback"))
+                && diagnostic
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("match value"))
+                && diagnostic
+                    .notes
+                    .iter()
+                    .all(|note| !note.contains("postfix `?`"))
+        }),
+        "{diagnostics:#?}"
+    );
     assert!(diagnostics.iter().all(|diagnostic| {
         !diagnostic.message.contains("Result#")
             && !diagnostic.message.contains("Option#")

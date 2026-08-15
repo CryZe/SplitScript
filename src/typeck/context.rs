@@ -82,6 +82,7 @@ impl CallableContext {
 pub(super) enum ExpressionMode {
     #[default]
     Normal,
+    DirectReturn,
     StateSource,
     SuspensionOperand,
 }

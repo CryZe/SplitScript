@@ -795,7 +795,7 @@ fn as_casts_lower_all_numeric_representations_and_integer_strings() {
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("does not support this operation")
+            .contains("does not satisfy the required `Numeric` capability")
     }));
 }
 

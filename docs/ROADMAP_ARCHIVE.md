@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-15: self-guiding fallible and capability diagnostics
+
+- Replaced dead-end `T!` use errors with structured guidance for `else` and
+  `match`, adding postfix `?` only when the enclosing function actually has a
+  fallible boundary.
+- Recognized `return fallibleValue else None` in a function returning `T?` and
+  provided a machine-applicable `else return None` rewrite, validated by
+  compiling the edited source.
+- Preserved capability requirements through failed inference so diagnostics
+  name the exact missing capability. Declared-only capability sets also list
+  every accepted concrete type, while structural capabilities avoid claiming
+  that records or fixed arrays form a closed set.
+
 ## 2026-08-15: explicit string-concatenation guidance
 
 - Replaced the generic numeric-capability error for string `+` and `+=` with a

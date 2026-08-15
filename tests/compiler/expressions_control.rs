@@ -534,7 +534,7 @@ fn if_expressions_require_an_else_and_matching_branch_types() {
         errors
             .iter()
             .any(|error| error.message.contains("types do not match")
-                || error.message.contains("constraints"))
+                || error.message.contains("capability"))
     );
 }
 
@@ -852,7 +852,7 @@ fn compound_assignments_reuse_binary_typing_and_lowering() {
     let errors = splitscript::compile(invalid)
         .expect_err("compound arithmetic must reject non-numeric operands");
     assert!(errors.iter().any(|error| {
-        error.message.contains("bool") && error.message.contains("does not support this operation")
+        error.message.contains("bool") && error.message.contains("`Numeric` capability")
     }));
 }
 
@@ -932,7 +932,7 @@ fn runtime_text_outputs_accept_display_values() {
         assert!(
             diagnostics.iter().any(|diagnostic| diagnostic
                 .message
-                .contains("does not satisfy the inferred constraints")),
+                .contains("does not satisfy the required `Display` capability")),
             "{diagnostics:#?}"
         );
     }
@@ -1014,7 +1014,7 @@ fn template_strings_reject_values_without_string_casts() {
     assert!(diagnostics.iter().any(|diagnostic| {
         diagnostic
             .message
-            .contains("does not support this operation")
+            .contains("does not satisfy the required `Display` capability")
     }));
 }
 

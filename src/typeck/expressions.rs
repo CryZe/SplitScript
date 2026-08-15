@@ -626,7 +626,8 @@ impl Checker {
             }
             ExprKind::Fallback { value, fallback } => {
                 let wrapper = self.expr(value, None)?;
-                let value_type = match self.shallow_type(wrapper) {
+                let wrapper = self.shallow_type(wrapper);
+                let value_type = match wrapper {
                     Type::Option(option) => self.inference.option_value(option),
                     Type::Result(result) => self.inference.result_value(result),
                     ty => {
@@ -640,7 +641,40 @@ impl Checker {
                 };
                 match fallback {
                     FallbackBranch::Value(fallback) => {
-                        self.expr(fallback, Some(value_type));
+                        let direct_optional_return = if self.expression_mode
+                            == super::context::ExpressionMode::DirectReturn
+                            && matches!(wrapper, Type::Result(_))
+                            && matches!(fallback.kind, ExprKind::None)
+                        {
+                            expected.is_some_and(|expected| {
+                                matches!(self.shallow_type(expected), Type::Option(_))
+                            })
+                        } else {
+                            false
+                        };
+                        if direct_optional_return {
+                            self.expr(fallback, None);
+                            self.errors.push(
+                                Diagnostic::type_error(
+                                    "`else None` supplies the unwrapped fallback value, not the optional function return",
+                                    fallback.span,
+                                )
+                                .with_primary_label("return the absent optional value from this branch")
+                                .with_note(
+                                    "write `else return None` when failure should make the enclosing function return `None`",
+                                )
+                                .with_machine_applicable_fix(
+                                    "return `None` from the fallback branch",
+                                    Span {
+                                        start: fallback.span.start,
+                                        end: fallback.span.start,
+                                    },
+                                    "return ",
+                                ),
+                            );
+                        } else {
+                            self.expr(fallback, Some(value_type));
+                        }
                     }
                     FallbackBranch::Return { value, span } => {
                         self.check_return(value.as_deref(), *span);
@@ -1144,6 +1178,10 @@ impl Checker {
         if self.is_error_type(receiver_ty) {
             self.expr(index, None);
             return Some(receiver_ty);
+        }
+        if self.diagnose_unhandled_result(receiver_ty, "indexing it", bracket_span) {
+            self.expr(index, None);
+            return None;
         }
         let element = match self.shallow_type(receiver_ty) {
             Type::Array(array) => self.inference.array_element(array),

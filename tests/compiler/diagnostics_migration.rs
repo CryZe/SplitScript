@@ -1386,6 +1386,153 @@ fn string_addition_recommends_explicit_string_construction() {
 }
 
 #[test]
+fn fallible_values_explain_only_the_available_handling_forms() {
+    let invalid = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn parts() -> [String]! {
+                return ["alpha"]
+            }
+
+            fn first() -> String {
+                return parts()[0]
+            }
+        "#,
+    )
+    .expect_err("indexing an unhandled fallible array must fail");
+    let invalid = invalid
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("fallible value"))
+        .unwrap_or_else(|| panic!("missing fallible-value guidance: {invalid:#?}"));
+    assert!(
+        invalid
+            .notes
+            .iter()
+            .any(|note| note.contains("else fallback"))
+    );
+    assert!(
+        invalid
+            .notes
+            .iter()
+            .any(|note| note.contains("match value"))
+    );
+    assert!(
+        invalid
+            .notes
+            .iter()
+            .all(|note| !note.contains("postfix `?`"))
+    );
+
+    let propagating = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn parts() -> [String]! {
+                return ["alpha"]
+            }
+
+            fn first() -> String! {
+                return parts()[0]
+            }
+        "#,
+    )
+    .expect_err("the fallible array must be propagated before indexing");
+    let propagating = propagating
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("fallible value"))
+        .unwrap_or_else(|| panic!("missing propagation guidance: {propagating:#?}"));
+    assert!(
+        propagating
+            .notes
+            .iter()
+            .any(|note| note.contains("postfix `?`") && note.contains("available here"))
+    );
+    assert!(propagating.fixes.is_empty());
+}
+
+#[test]
+fn direct_fallible_optional_returns_recommend_else_return_none() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state "game.exe" {}
+
+        fn optionalName() -> String? {
+            return process.readUtf16Le(0x100, 32) else None
+        }
+    "#;
+    let errors = splitscript::compile(source)
+        .expect_err("a value fallback cannot stand in for the optional function return");
+    let diagnostic = errors
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("optional function return"))
+        .unwrap_or_else(|| panic!("missing direct-return guidance: {errors:#?}"));
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("else return None"))
+    );
+    assert_eq!(diagnostic.fixes.len(), 1);
+    assert_eq!(
+        diagnostic.fixes[0].applicability,
+        FixApplicability::MachineApplicable
+    );
+    assert_eq!(diagnostic.fixes[0].edits[0].replacement, "return ");
+    let edit = &diagnostic.fixes[0].edits[0];
+    let fixed = format!(
+        "{}{}{}",
+        &source[..edit.span.start],
+        edit.replacement,
+        &source[edit.span.end..]
+    );
+    splitscript::compile(&fixed).expect("the machine-applicable rewrite must compile");
+}
+
+#[test]
+fn capability_failures_name_requirements_and_finite_accepted_types() {
+    for expression in [
+        "Duration.fromMilliseconds(value)",
+        "Duration.fromMilliseconds<i64>(value)",
+    ] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+                fn duration(value: i64) -> Duration {{
+                    return {expression}
+                }}
+            "#
+        );
+        let errors = splitscript::compile(&source)
+            .expect_err("integer milliseconds must not satisfy the Float capability");
+        assert!(
+            errors.iter().any(|diagnostic| {
+                diagnostic.message.contains("type `i64`")
+                    && diagnostic.message.contains("`Float` capability")
+                    && diagnostic.message.contains("f32 or f64")
+            }),
+            "missing concrete capability guidance for `{expression}`: {errors:#?}"
+        );
+    }
+
+    let structural = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn invalidRead() {
+                process.read<String>(0x100)
+            }
+        "#,
+    )
+    .expect_err("String is not memory readable");
+    let diagnostic = structural
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("`MemoryReadable` capability"))
+        .unwrap_or_else(|| panic!("missing structural capability guidance: {structural:#?}"));
+    assert!(!diagnostic.message.contains("accepted concrete types"));
+}
+
+#[test]
 fn failed_initializers_keep_poisoned_bindings_without_follow_on_errors() {
     use splitscript::{
         compiler::ast::Stmt,

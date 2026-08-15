@@ -368,12 +368,10 @@ impl Checker {
                 if matches!(self.shallow_type(value), Type::Variable(_)) {
                     self.unify(value, expected, span)?;
                 }
-                let actual = self.type_name(actual_shallow);
                 let expected = self.type_name(expected);
-                self.error(
-                    format!(
-                        "cannot use fallible `{actual}` where `{expected}` is required; unwrap it with `else`, propagate it with `?`, or use `retry` in `onAttach`"
-                    ),
+                self.diagnose_unhandled_result(
+                    actual_shallow,
+                    format!("using it where `{expected}` is required"),
                     span,
                 );
                 return None;
@@ -407,6 +405,41 @@ impl Checker {
         self.semantics
             .resolve_value_conversion(expression, kind, actual, expected);
         Some(expected)
+    }
+
+    fn diagnose_unhandled_result(
+        &mut self,
+        actual: Type,
+        use_context: impl Into<String>,
+        span: Span,
+    ) -> bool {
+        let actual = self.shallow_type(actual);
+        if !matches!(actual, Type::Result(_)) {
+            return false;
+        }
+
+        let actual = self.type_name(actual);
+        let mut diagnostic = Diagnostic::type_error(
+            format!(
+                "fallible value `{actual}` must be handled before {}",
+                use_context.into()
+            ),
+            span,
+        )
+        .with_primary_label("this expression still has a fallible `T!` type")
+        .with_note(
+            "use `value else fallback` when an ordinary fallback value should replace the error",
+        )
+        .with_note(
+            "use `match value { Ok(value) => ..., Err(error) => ... }` when both outcomes matter",
+        );
+        if self.failure.result().is_some() {
+            diagnostic = diagnostic.with_note(
+                "postfix `?` is available here and returns the error from the current fallible boundary",
+            );
+        }
+        self.errors.push(diagnostic);
+        true
     }
 
     fn fresh_inference(

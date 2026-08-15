@@ -399,7 +399,9 @@ impl Checker {
                     NonePolicy::OptionalOnly
                 };
                 self.with_none_policy(policy, |checker| {
-                    checker.expr(value, Some(expected));
+                    checker.with_expression_mode(ExpressionMode::DirectReturn, |checker| {
+                        checker.expr(value, Some(expected));
+                    });
                 });
             }
             (false, _, None)

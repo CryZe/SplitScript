@@ -49,6 +49,13 @@ and `String.concat` instead of ending at a numeric-capability error. No rewrite
 is offered because text, separators, and evaluation grouping require author
 intent.
 
+Fallible-value diagnostics now name value fallback and exhaustive `match`
+handling, and mention postfix `?` only inside an actual failure boundary. A
+direct optional return using `else None` gets a narrowly-scoped
+machine-applicable `else return None` rewrite. Generic failures retain their
+capability requirements through inference, name the missing capability, and
+list accepted concrete types when the catalog proves that set is finite.
+
 ### Supported facilities that were missed
 
 These reports indicate discoverability or diagnostic failures, not missing
@@ -73,12 +80,8 @@ facilities rather than adding compatibility aliases or duplicate abstractions.
 
 ### Real compiler and documentation work
 
-The campaign provides concrete cases for:
+The campaign provides remaining concrete cases for:
 
-- result diagnostics that name `else`, `match`, and context-valid `?`;
-- direct fallible returns that explain `else return None`;
-- capability failures that state the missing capability or finite accepted
-  concrete types;
 - literal settings-key checking, completion, and nearest-key suggestions;
 - lifecycle, state-mutation, module-discovery, and missing-state diagnostics
   that link directly to the canonical recipe;

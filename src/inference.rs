@@ -120,9 +120,18 @@ impl BitOr for Requirements {
 #[derive(Debug, Clone)]
 pub(crate) enum InferenceError {
     Message(String),
-    TypeMismatch { left: Type, right: Type },
-    UnsupportedOperation(Type),
-    UnsatisfiedConstraints(Type),
+    TypeMismatch {
+        left: Type,
+        right: Type,
+    },
+    UnsupportedOperation {
+        ty: Type,
+        requirements: Requirements,
+    },
+    UnsatisfiedConstraints {
+        ty: Type,
+        requirements: Requirements,
+    },
     IntegerLiteralOutOfRange(Type),
 }
 
@@ -633,7 +642,10 @@ impl InferenceContext {
             {
                 Ok(())
             }
-            concrete => Err(InferenceError::UnsupportedOperation(concrete)),
+            concrete => Err(InferenceError::UnsupportedOperation {
+                ty: concrete,
+                requirements,
+            }),
         }
     }
 
@@ -1329,7 +1341,10 @@ impl InferenceContext {
             ty,
             &inference.requirements,
         ) {
-            return Err(InferenceError::UnsatisfiedConstraints(ty));
+            return Err(InferenceError::UnsatisfiedConstraints {
+                ty,
+                requirements: inference.requirements.clone(),
+            });
         }
         if let Some(literal) = inference.largest_literal
             && !fits_unsigned_literal(&self.types, literal, ty)

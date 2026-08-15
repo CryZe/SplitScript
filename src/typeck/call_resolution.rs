@@ -15,9 +15,9 @@ use crate::{
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
     signature::parse_signature,
     stdlib::{
-        Availability, DeclaredTypeRef, ItemKind, ParameterRule, StandardBinaryOperator,
-        StandardUnaryOperator, StdlibItem, StdlibItemId, StdlibTypeConstructorId, StdlibTypeId,
-        TypeRef as CatalogTypeRef,
+        Availability, CapabilityBehavior, DeclaredTypeRef, ItemKind, ParameterRule,
+        StandardBinaryOperator, StandardUnaryOperator, StdlibItem, StdlibItemId,
+        StdlibTypeConstructorId, StdlibTypeId, TypeRef as CatalogTypeRef,
     },
     stdlib_semantic::{CallCandidate, StandardLibrarySemanticExt},
     types::TypeKind,
@@ -969,20 +969,9 @@ impl Checker {
                 .unwrap_or_else(|| self.fresh_inference(requirements.clone(), None));
             if !requirements.is_empty() {
                 if explicitly_selected {
-                    if self.inference.require(ty, requirements).is_err() {
-                        let required = parameter
-                            .constraints
-                            .iter()
-                            .map(|capability| self.standard_library.capability(*capability).name)
-                            .collect::<Vec<_>>()
-                            .join(" + ");
-                        let selected = self.type_name(ty);
-                        self.error(
-                            format!(
-                                "type `{selected}` does not satisfy the required `{required}` capability"
-                            ),
-                            span,
-                        );
+                    if let Err(error) = self.inference.require(ty, requirements) {
+                        let message = self.inference_error_message(error);
+                        self.error(message, span);
                         return None;
                     }
                 } else {
@@ -1960,20 +1949,77 @@ impl Checker {
                 self.type_name(left),
                 self.type_name(right)
             ),
-            InferenceError::UnsupportedOperation(ty) => {
-                format!(
-                    "type `{}` does not support this operation",
-                    self.type_name(ty)
-                )
+            InferenceError::UnsupportedOperation { ty, requirements }
+            | InferenceError::UnsatisfiedConstraints { ty, requirements } => {
+                self.capability_failure_message(ty, &requirements)
             }
-            InferenceError::UnsatisfiedConstraints(ty) => format!(
-                "type `{}` does not satisfy the inferred constraints",
-                self.type_name(ty)
-            ),
             InferenceError::IntegerLiteralOutOfRange(ty) => {
                 format!("integer literal does not fit in `{}`", self.type_name(ty))
             }
         }
+    }
+
+    fn capability_failure_message(&mut self, ty: Type, requirements: &Requirements) -> String {
+        let ty_name = self.type_name(ty);
+        let requirements = self
+            .standard_library
+            .minimal_capabilities(requirements.as_slice());
+        let names = requirements
+            .iter()
+            .map(|capability| self.standard_library.capability(*capability).name)
+            .collect::<Vec<_>>();
+        let requirement = match names.as_slice() {
+            [] => "the required capabilities".to_owned(),
+            [name] => format!("the required `{name}` capability"),
+            _ => format!("the required capabilities `{}`", names.join("` + `")),
+        };
+        let mut message = format!("type `{ty_name}` does not satisfy {requirement}");
+
+        let finite = requirements.iter().all(|capability| {
+            self.standard_library.capability(*capability).behavior == CapabilityBehavior::Declared
+        });
+        if finite {
+            let store = self.inference.type_store();
+            let mut accepted = self
+                .standard_library
+                .core_types()
+                .iter()
+                .filter(|candidate| {
+                    let ty = Type::Known(store.id_for_core(candidate.id));
+                    requirements.iter().all(|capability| {
+                        type_may_have_capability(&self.standard_library, store, ty, *capability)
+                    })
+                })
+                .map(|candidate| candidate.name)
+                .chain(
+                    self.standard_library
+                        .types()
+                        .iter()
+                        .filter(|candidate| {
+                            let ty = Type::Known(store.id_for_standard(candidate.id));
+                            requirements.iter().all(|capability| {
+                                type_may_have_capability(
+                                    &self.standard_library,
+                                    store,
+                                    ty,
+                                    *capability,
+                                )
+                            })
+                        })
+                        .map(|candidate| candidate.name),
+                )
+                .collect::<Vec<_>>();
+            accepted.sort_unstable();
+            if !accepted.is_empty() {
+                let accepted = match accepted.as_slice() {
+                    [only] => (*only).to_owned(),
+                    [head @ .., last] => format!("{} or {last}", head.join(", ")),
+                    [] => unreachable!(),
+                };
+                message.push_str(&format!("; accepted concrete types are {accepted}"));
+            }
+        }
+        message
     }
 }
 

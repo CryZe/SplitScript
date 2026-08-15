@@ -40,13 +40,6 @@ deterministic host fixtures; compilation success is not behavioral parity. The
 completed source/compiler/fixture review and per-candidate classifications are
 recorded in [`docs/PORTING_CAMPAIGN_AUDIT.md`](docs/PORTING_CAMPAIGN_AUDIT.md).
 
-- [ ] Raise the diagnostic bar for the remaining concrete dead ends in this
-  campaign: an unhandled `T!` should name `else`, `match`, and context-valid
-  `?`; `else None` inside a
-  direct fallible return should explain when `else return None` is required;
-  and failed generic constraints should name the unsatisfied capabilities and,
-  when finite, the accepted concrete types. Offer machine-applicable edits only
-  when evaluation order and semantics are provably preserved.
 - [ ] Make statically knowable setting keys safe. Validate string literals passed
   to `settings.enabled`, `oldSettings.enabled`, and related declaration lookups
   against the exact declared host keys, suggest the closest key, and complete

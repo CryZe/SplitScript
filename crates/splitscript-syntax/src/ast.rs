@@ -430,16 +430,20 @@ pub struct ArrayTypeDecl {
     pub length: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct OptionTypeDecl {
     pub id: OptionTypeId,
     pub value: TypeRef,
+    /// Every source-written `?` for this interned structural type.
+    pub occurrences: Vec<Span>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct ResultTypeDecl {
     pub id: ResultTypeId,
     pub value: TypeRef,
+    /// Every source-written `!` for this interned structural type.
+    pub occurrences: Vec<Span>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1049,6 +1053,8 @@ pub enum ExprKind {
         name_span: Span,
         receiver: Option<Box<Expr>>,
         type_arguments: Vec<TypeRef>,
+        /// Source range from `<` through `>` for an explicit generic call.
+        type_argument_span: Option<Span>,
         args: Vec<Expr>,
     },
 }

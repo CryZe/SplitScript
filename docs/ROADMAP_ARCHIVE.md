@@ -2467,10 +2467,10 @@ lowering IR from the architecture checkpoint are prerequisites for this work.
   explicit success constructor. A plain `T` automatically lifts into the
   successful result when `T!` is expected. Require an annotation or other
   expected-type context when `Err` has no constraint on its success type.
-- [x] Reject adjacent repeated postfix constructors (`T??`, `T!!`, `T?!`, and
-  `T!?`) with a focused diagnostic. Nested constructed types remain possible
-  through an enclosing type, such as `[T?]!`, without giving adjacent
-  punctuation an ambiguous meaning.
+- [x] Reject identical adjacent postfix constructors (`T??` and `T!!`) with a
+  focused diagnostic. Mixed postfixes compose normally: `T!?` is an optional
+  result and `T?!` is a fallible option. Expression propagation after a cast
+  remains explicit through parentheses, such as `(value as T!)?`.
 - [x] Record optional/successful lifts explicitly on typed-HIR expression edges
   with source and target `TypeId`s, and lower empty, successful, and failed
   values to their WebAssembly GC representations.
@@ -3334,3 +3334,20 @@ language catalog document the refinement rule.
   transitions reassert the declarative policy.
 - Expanded the Lunістice fixture to spread IL2CPP discovery across a 4 MiB
   module and verify that the attached cadence is selected before scanning.
+
+# 2026-08-15: whitespace-independent type boundaries
+
+- Kept maximal-munch `>=`, `>>`, `>>=`, and `!=` tokens for ordinary
+  expressions while allowing the type grammar to fission them contextually
+  into source-accurate generic closers and, at declaration initializer
+  boundaries, result postfixes and residual assignments. Expression casts keep
+  `T!=value` as inequality, while `T! == value` explicitly casts to a fallible
+  type before comparing.
+- Retained every written constructed-type boundary and explicit generic-call
+  range in the syntax model, then gave the formatter a logical token stream so
+  adjacent and multiline nested generics format and indent as distinct
+  delimiters without changing the lossless lexer.
+- Added compact, spaced, and tab-separated boundary matrices; nested generic
+  declarations and calls; option/result postfixes; privileged standard-library
+  source; ordinary comparison/shift operators; multiline trailing commas; and
+  parse/format/parse idempotence coverage alongside the maintained examples.

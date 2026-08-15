@@ -835,6 +835,7 @@ impl Checker {
                 receiver,
                 type_arguments,
                 args,
+                ..
             } => {
                 if let Some(enumeration) = self.resolutions.expression_enum(expr.id) {
                     debug_assert!(receiver.is_none());

@@ -24,7 +24,7 @@ impl Parser<'_> {
                 // statement as a continuation of this expression.
                 break;
             }
-            if (self.at(&TokenKind::LParen) || self.begins_generic_call(left.span.end))
+            if (self.at(&TokenKind::LParen) || self.begins_generic_call())
                 && matches!(&left.kind, ExprKind::Member { .. })
             {
                 let start = left.span;
@@ -39,7 +39,7 @@ impl Parser<'_> {
                 let mut callee = Vec::new();
                 let receiver = flatten_postfix_receiver(*receiver, &mut callee);
                 callee.push(name);
-                let type_arguments = self.call_type_arguments(left.span.end)?;
+                let (type_arguments, type_argument_span) = self.call_type_arguments()?;
                 self.expect(TokenKind::LParen, "expected `(` after generic arguments")?;
                 let (args, end) =
                     self.expression_list(TokenKind::RParen, "expected `)` after arguments", true);
@@ -49,6 +49,7 @@ impl Parser<'_> {
                         name_span,
                         receiver: Some(Box::new(receiver)),
                         type_arguments,
+                        type_argument_span,
                         args,
                     },
                     start.join(end),
@@ -436,6 +437,7 @@ impl Parser<'_> {
                             },
                             receiver: None,
                             type_arguments: Vec::new(),
+                            type_argument_span: None,
                             args,
                         },
                         token.span.join(version_span),
@@ -494,8 +496,8 @@ impl Parser<'_> {
                     path.push(name);
                     name_span = span;
                 }
-                if self.at(&TokenKind::LParen) || self.begins_generic_call(name_span.end) {
-                    let type_arguments = self.call_type_arguments(name_span.end)?;
+                if self.at(&TokenKind::LParen) || self.begins_generic_call() {
+                    let (type_arguments, type_argument_span) = self.call_type_arguments()?;
                     self.expect(TokenKind::LParen, "expected `(` after generic arguments")?;
                     let (args, end) = self.expression_list(
                         TokenKind::RParen,
@@ -508,6 +510,7 @@ impl Parser<'_> {
                             name_span,
                             receiver: None,
                             type_arguments,
+                            type_argument_span,
                             args,
                         },
                         token.span.join(end),
@@ -572,23 +575,39 @@ impl Parser<'_> {
         Ok((name, value))
     }
 
-    /// Recognizes the unambiguous, whitespace-free call spelling `name<T>(...)`.
-    /// Requiring `<` to touch the callee keeps ordinary comparisons such as
-    /// `value < limit` out of the generic-call grammar without a turbofish.
-    fn begins_generic_call(&self, callee_end: usize) -> bool {
-        if !self.at(&TokenKind::Lt) || self.current().span.start != callee_end {
+    /// Recognizes a complete `name<T>(...)` call before committing `<` to the
+    /// generic-call grammar. The closing `>` followed by `(` disambiguates it
+    /// from an ordinary comparison without making whitespace significant.
+    fn begins_generic_call(&self) -> bool {
+        if !self.at(&TokenKind::Lt) {
             return false;
         }
         let mut offset = 1usize;
         let mut brackets = 0usize;
+        let mut angles = 1usize;
         loop {
             match self.peek(offset).kind {
                 TokenKind::LBracket => brackets += 1,
                 TokenKind::RBracket if brackets > 0 => brackets -= 1,
+                TokenKind::Lt if brackets == 0 => angles += 1,
                 TokenKind::Gt if brackets == 0 => {
-                    let open = self.peek(offset + 1);
-                    return open.kind == TokenKind::LParen;
+                    angles -= 1;
+                    if angles == 0 {
+                        return self.peek(offset + 1).kind == TokenKind::LParen;
+                    }
                 }
+                TokenKind::Shr if brackets == 0 => {
+                    if angles < 2 {
+                        return false;
+                    }
+                    angles -= 2;
+                    if angles == 0 {
+                        return self.peek(offset + 1).kind == TokenKind::LParen;
+                    }
+                }
+                // These contain an assignment after their leading generic
+                // closers, so they cannot directly precede a call's `(`.
+                TokenKind::Ge | TokenKind::ShrAssign if brackets == 0 => return false,
                 TokenKind::Semicolon if brackets == 0 => return false,
                 TokenKind::Eof | TokenKind::LBrace | TokenKind::RBrace => {
                     return false;
@@ -599,22 +618,22 @@ impl Parser<'_> {
         }
     }
 
-    fn call_type_arguments(&mut self, callee_end: usize) -> Result<Vec<TypeRef>, Diagnostic> {
-        if !self.begins_generic_call(callee_end) {
-            return Ok(Vec::new());
+    fn call_type_arguments(&mut self) -> Result<(Vec<TypeRef>, Option<Span>), Diagnostic> {
+        if !self.begins_generic_call() {
+            return Ok((Vec::new(), None));
         }
-        self.bump();
+        let opening = self.bump().span;
         let mut arguments = Vec::new();
         loop {
             arguments.push(self.parse_type("expected a type argument after `<`")?.0);
             if self.eat(&TokenKind::Comma).is_some() {
-                if self.eat(&TokenKind::Gt).is_some() {
-                    return Ok(arguments);
+                if let Some(closing) = self.eat_generic_close() {
+                    return Ok((arguments, Some(opening.join(closing))));
                 }
                 continue;
             }
-            self.expect(TokenKind::Gt, "expected `>` after type arguments")?;
-            return Ok(arguments);
+            let closing = self.expect_generic_close("expected `>` after type arguments")?;
+            return Ok((arguments, Some(opening.join(closing))));
         }
     }
 

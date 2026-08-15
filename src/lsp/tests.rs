@@ -1172,7 +1172,7 @@ fn document_symbols_and_code_actions_preserve_compiler_structure() {
     ));
     assert_eq!(
         diagnostics[0]["params"]["diagnostics"][0]["data"]["fixes"][0]["title"],
-        "remove the repeated postfix"
+        "remove the duplicate wrapper"
     );
     let actions = server.handle(json!({
         "jsonrpc": "2.0",
@@ -1192,7 +1192,7 @@ fn document_symbols_and_code_actions_preserve_compiler_structure() {
     }));
     let quick_fixes = actions[0]["result"].as_array().unwrap();
     assert_eq!(quick_fixes.len(), 1);
-    assert_eq!(quick_fixes[0]["title"], "remove the repeated postfix");
+    assert_eq!(quick_fixes[0]["title"], "remove the duplicate wrapper");
     assert_eq!(quick_fixes[0]["kind"], "quickfix");
     assert_eq!(quick_fixes[0]["isPreferred"], true);
     assert_eq!(

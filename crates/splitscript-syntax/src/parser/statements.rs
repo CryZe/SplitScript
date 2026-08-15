@@ -292,6 +292,7 @@ impl Parser<'_> {
                     },
                     receiver: Some(receiver),
                     type_arguments: Vec::new(),
+                    type_argument_span: None,
                     args: vec![*index, value],
                 },
                 span,
@@ -346,7 +347,7 @@ impl Parser<'_> {
         }
         let (name, name_span) = self.expect_any_ident("expected a variable name")?;
         let annotation = if self.eat(&TokenKind::Colon).is_some() {
-            Some(self.parse_type("expected a type name")?.0)
+            Some(self.parse_type_before_assignment("expected a type name")?.0)
         } else {
             None
         };

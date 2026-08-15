@@ -432,11 +432,11 @@ impl Parser<'_> {
                 if !self.eat(&TokenKind::Comma) {
                     break;
                 }
-                if self.at(&TokenKind::Gt) {
+                if self.at_generic_close() {
                     break;
                 }
             }
-            self.expect(TokenKind::Gt, "expected `>` after type parameters")?;
+            self.expect_generic_close("expected `>` after type parameters")?;
         }
         Ok(type_parameters)
     }
@@ -507,14 +507,14 @@ impl Parser<'_> {
                 loop {
                     arguments.push(self.ty()?);
                     if self.eat(&TokenKind::Comma) {
-                        if self.at(&TokenKind::Gt) {
+                        if self.at_generic_close() {
                             break;
                         }
                     } else {
                         break;
                     }
                 }
-                self.expect(TokenKind::Gt, "expected `>` after type arguments")?;
+                self.expect_generic_close("expected `>` after type arguments")?;
                 Type::Application {
                     constructor: name,
                     arguments,
@@ -523,10 +523,27 @@ impl Parser<'_> {
                 Type::Name(name)
             }
         };
-        if self.eat(&TokenKind::Question) {
-            ty = Type::Option(Box::new(ty));
-        } else if self.eat(&TokenKind::Bang) {
-            ty = Type::Result(Box::new(ty));
+        let mut previous_suffix = None;
+        loop {
+            let is_option = if self.eat(&TokenKind::Question) {
+                true
+            } else if self.eat(&TokenKind::Bang) {
+                false
+            } else {
+                break;
+            };
+            if previous_suffix == Some(is_option) {
+                let spelling = if is_option { "?" } else { "!" };
+                return Err(self.error(format!(
+                    "a type cannot have two adjacent `{spelling}` wrappers"
+                )));
+            }
+            ty = if is_option {
+                Type::Option(Box::new(ty))
+            } else {
+                Type::Result(Box::new(ty))
+            };
+            previous_suffix = Some(is_option);
         }
         Ok(ty)
     }
@@ -607,6 +624,21 @@ impl Parser<'_> {
         } else {
             Err(self.error(message))
         }
+    }
+
+    fn expect_generic_close(&mut self, message: &str) -> Result<(), Error> {
+        if self.cursor.eat_leading_gt().is_some() {
+            Ok(())
+        } else {
+            Err(self.error(message))
+        }
+    }
+
+    fn at_generic_close(&self) -> bool {
+        matches!(
+            self.current().kind,
+            TokenKind::Gt | TokenKind::Ge | TokenKind::Shr | TokenKind::ShrAssign
+        )
     }
 
     fn eat(&mut self, expected: &TokenKind) -> bool {
@@ -992,6 +1024,39 @@ typeConstructor Box<T,> {
         assert_eq!(box_type.functions[0].type_parameters[0].name, "U");
         assert_eq!(box_type.functions[0].parameters[0].name, "value");
         assert_eq!(box_type.functions[0].result.to_string(), "Box<U>");
+    }
+
+    #[test]
+    fn parses_adjacent_nested_generic_closers_in_privileged_source() {
+        let source = r#"
+/// Generic container.
+typeConstructor Box<T> {
+    /// Nests a value.
+    fn nested<U>(value: U) -> Box<Box<U>>;
+}
+"#;
+        let library = parse(source).expect("nested generic closers should parse without spaces");
+        let Declaration::TypeConstructor(box_type) = &library.declarations[0] else {
+            panic!("expected a type constructor")
+        };
+        assert_eq!(box_type.functions[0].result.to_string(), "Box<Box<U>>");
+    }
+
+    #[test]
+    fn parses_mixed_optional_and_fallible_wrappers_in_privileged_source() {
+        let source = r#"
+/// Generic container.
+typeConstructor Box<T> {
+    /// Changes the wrapper order.
+    fn transpose(value: T!?) -> T?!;
+}
+"#;
+        let library = parse(source).expect("mixed type wrappers should compose");
+        let Declaration::TypeConstructor(box_type) = &library.declarations[0] else {
+            panic!("expected a type constructor")
+        };
+        assert_eq!(box_type.functions[0].parameters[0].ty.to_string(), "T!?");
+        assert_eq!(box_type.functions[0].result.to_string(), "T?!");
     }
 
     #[test]

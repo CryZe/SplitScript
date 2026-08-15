@@ -139,6 +139,29 @@ impl Parser<'_> {
         }
     }
 
+    pub(super) fn expect_generic_close(
+        &mut self,
+        message: &'static str,
+    ) -> Result<Span, Diagnostic> {
+        self.eat_generic_close()
+            .ok_or_else(|| Diagnostic::new(message, self.current().span))
+    }
+
+    pub(super) fn eat_generic_close(&mut self) -> Option<Span> {
+        self.cursor.eat_leading_gt()
+    }
+
+    pub(super) fn eat_fallible_type_suffix(&mut self) -> Option<Span> {
+        self.cursor.eat_leading_bang()
+    }
+
+    pub(super) fn at_generic_close(&self) -> bool {
+        matches!(
+            self.current().kind,
+            TokenKind::Gt | TokenKind::Ge | TokenKind::Shr | TokenKind::ShrAssign
+        )
+    }
+
     pub(super) fn eat_ident(&mut self, expected: &str) -> Option<Span> {
         if self.at_ident(expected) {
             Some(self.bump().span)

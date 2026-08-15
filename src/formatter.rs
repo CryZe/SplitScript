@@ -10,7 +10,7 @@ use crate::{
         SettingFamilyDecl, SettingKind, StateDecl, StateField, Stmt, TypeApplicationDecl,
         VariableDecl,
     },
-    lexer::{Lexeme, TokenKind, TriviaKind},
+    lexer::{Lexeme, Token, TokenKind, TriviaKind},
     syntax::SourceDocument,
     visit::{self, Visitor},
 };
@@ -132,6 +132,7 @@ struct SyntaxLayoutCollector<'a> {
     break_after: HashSet<usize>,
     generic_opens: HashSet<usize>,
     generic_closes: HashSet<usize>,
+    fallible_type_suffixes: HashSet<usize>,
     index_opens: HashSet<usize>,
 }
 
@@ -385,21 +386,15 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             name_span,
             receiver,
             type_arguments,
+            type_argument_span,
             ..
         } = &expression.kind
         {
-            if !type_arguments.is_empty() {
-                let mut angles = self.document.tokens().filter(|token| {
-                    name_span.end <= token.span.start
-                        && token.span.end <= expression.span.end
-                        && matches!(token.kind, TokenKind::Lt | TokenKind::Gt)
-                });
-                if let Some(open) = angles.next() {
-                    self.generic_opens.insert(open.span.start);
-                }
-                if let Some(close) = angles.next() {
-                    self.generic_closes.insert(close.span.start);
-                }
+            if !type_arguments.is_empty()
+                && let Some(span) = type_argument_span
+            {
+                self.generic_opens.insert(span.start);
+                self.generic_closes.insert(span.end - 1);
             }
             // Indexed assignment is represented as a compiler-inserted call
             // to Array.set. Its outer Index node is intentionally absent, so
@@ -433,16 +428,18 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
 
 struct Formatter<'a> {
     document: &'a SourceDocument,
+    lexemes: Vec<Lexeme>,
     output: String,
     indentation: usize,
     line_start: bool,
-    previous: Option<&'a Lexeme>,
+    previous: Option<Lexeme>,
     previous_was_prefix: bool,
     previous_was_generic_close: bool,
     gap_line_breaks: usize,
     generic_depth: usize,
     generic_opens: HashSet<usize>,
     generic_closes: HashSet<usize>,
+    fallible_type_suffixes: HashSet<usize>,
     index_opens: HashSet<usize>,
     bracket_depth: usize,
     multiline_headers: Vec<HeaderRange>,
@@ -473,19 +470,36 @@ impl<'a> Formatter<'a> {
             break_after: HashSet::new(),
             generic_opens: HashSet::new(),
             generic_closes: HashSet::new(),
+            fallible_type_suffixes: syntax
+                .result_types
+                .iter()
+                .flat_map(|result| result.occurrences.iter().map(|span| span.start))
+                .collect(),
             index_opens: HashSet::new(),
         };
         layout.visit_program(syntax);
+        let lexemes = formatting_lexemes(
+            document,
+            &layout.generic_closes,
+            &layout.fallible_type_suffixes,
+        );
         let trailing_punctuation = trailing_list_punctuation(
             document,
+            &lexemes,
             syntax,
             &layout.break_after,
             &layout.generic_opens,
             &layout.generic_closes,
         );
-        let delimiters = delimiter_ranges(document, &layout.generic_opens, &layout.generic_closes);
+        let delimiters = delimiter_ranges(
+            document,
+            &lexemes,
+            &layout.generic_opens,
+            &layout.generic_closes,
+        );
         Self {
             document,
+            lexemes,
             output: String::with_capacity(document.source().len()),
             indentation: 0,
             line_start: true,
@@ -496,6 +510,7 @@ impl<'a> Formatter<'a> {
             generic_depth: 0,
             generic_opens: layout.generic_opens,
             generic_closes: layout.generic_closes,
+            fallible_type_suffixes: layout.fallible_type_suffixes,
             index_opens: layout.index_opens,
             bracket_depth: 0,
             multiline_headers,
@@ -512,7 +527,8 @@ impl<'a> Formatter<'a> {
     }
 
     fn finish(mut self) -> String {
-        for lexeme in self.document.lexemes() {
+        let lexemes = std::mem::take(&mut self.lexemes);
+        for lexeme in &lexemes {
             match lexeme {
                 Lexeme::Trivia(trivia) if trivia.kind == TriviaKind::Whitespace => {
                     let text = self.document.text(trivia.span);
@@ -530,7 +546,7 @@ impl<'a> Formatter<'a> {
         self.output
     }
 
-    fn write_lexeme(&mut self, current: &'a Lexeme) {
+    fn write_lexeme(&mut self, current: &Lexeme) {
         let current_token = token_kind(current);
         if matches!(current_token, Some(TokenKind::Comma))
             && self.omitted_commas.contains(&current.span().start)
@@ -545,8 +561,14 @@ impl<'a> Formatter<'a> {
         }
 
         if self.trailing_comma_before.contains(&current.span().start)
-            && !matches!(self.previous.and_then(token_kind), Some(TokenKind::Comma))
-            && self.previous.is_some_and(|previous| !is_comment(previous))
+            && !matches!(
+                self.previous.as_ref().and_then(token_kind),
+                Some(TokenKind::Comma)
+            )
+            && self
+                .previous
+                .as_ref()
+                .is_some_and(|previous| !is_comment(previous))
         {
             self.output.push(',');
         }
@@ -554,10 +576,13 @@ impl<'a> Formatter<'a> {
             .trailing_semicolon_before
             .contains(&current.span().start)
             && !matches!(
-                self.previous.and_then(token_kind),
+                self.previous.as_ref().and_then(token_kind),
                 Some(TokenKind::Semicolon)
             )
-            && self.previous.is_some_and(|previous| !is_comment(previous))
+            && self
+                .previous
+                .as_ref()
+                .is_some_and(|previous| !is_comment(previous))
         {
             self.output.push(';');
         }
@@ -581,8 +606,10 @@ impl<'a> Formatter<'a> {
             self.bracket_depth = self.bracket_depth.saturating_sub(1);
         }
 
-        self.previous_was_prefix = current_token
-            .is_some_and(|kind| is_prefix_operator(kind, self.previous.and_then(token_kind)));
+        self.previous_was_prefix = !self.fallible_type_suffixes.contains(&current.span().start)
+            && current_token.is_some_and(|kind| {
+                is_prefix_operator(kind, self.previous.as_ref().and_then(token_kind))
+            });
         self.previous_was_generic_close = current_is_generic_close;
         if matches!(current_token, Some(TokenKind::LBrace)) {
             self.brace_stack.push(BraceFrame {
@@ -596,12 +623,12 @@ impl<'a> Formatter<'a> {
         {
             self.indentation = frame.parent_indentation;
         }
-        self.previous = Some(current);
+        self.previous = Some(current.clone());
         self.gap_line_breaks = 0;
     }
 
     fn separation(&self, current: &Lexeme) -> Separation {
-        let Some(previous) = self.previous else {
+        let Some(previous) = self.previous.as_ref() else {
             return Separation::None;
         };
         let previous_token = token_kind(previous);
@@ -612,9 +639,7 @@ impl<'a> Formatter<'a> {
             Separation::Newline
         };
 
-        if self.generic_opens.contains(&current.span().start)
-            || self.generic_closes.contains(&previous.span().start)
-        {
+        if self.generic_opens.contains(&current.span().start) {
             return Separation::None;
         }
         if self.index_opens.contains(&current.span().start) && !is_comment(previous) {
@@ -739,14 +764,21 @@ impl<'a> Formatter<'a> {
 
     fn continuation_indentation(&self, lexeme: &Lexeme) -> usize {
         let offset = lexeme.span().start;
-        let syntax_offset = match token_kind(lexeme) {
-            Some(TokenKind::RParen | TokenKind::RBracket) => self
-                .delimiters
+        let syntax_offset = if self.generic_closes.contains(&offset) {
+            self.delimiters
                 .iter()
                 .find(|range| range.closing == offset)
-                .map(|range| range.opening),
-            Some(TokenKind::RBrace) => None,
-            _ => Some(offset),
+                .map(|range| range.opening)
+        } else {
+            match token_kind(lexeme) {
+                Some(TokenKind::RParen | TokenKind::RBracket) => self
+                    .delimiters
+                    .iter()
+                    .find(|range| range.closing == offset)
+                    .map(|range| range.opening),
+                Some(TokenKind::RBrace) => None,
+                _ => Some(offset),
+            }
         };
         let syntax_continuation =
             syntax_offset.is_some_and(|offset| self.has_syntax_continuation(offset));
@@ -812,14 +844,121 @@ struct PendingDelimiter {
     direct_breaks: Vec<usize>,
 }
 
+/// Splits maximal-munch operators at parser-confirmed type boundaries.
+///
+/// The lossless lexer must continue to produce `>=`, `>>`, `>>=`, and `!=` as
+/// operators. Once parsing has identified source-accurate generic closers and
+/// result postfixes, the formatter needs their logical token boundaries so
+/// indentation, trailing punctuation, and mandatory spacing behave exactly as
+/// if the source had separated the characters already.
+fn formatting_lexemes(
+    document: &SourceDocument,
+    generic_closes: &HashSet<usize>,
+    fallible_type_suffixes: &HashSet<usize>,
+) -> Vec<Lexeme> {
+    let mut output = Vec::with_capacity(document.lexemes().len());
+    for lexeme in document.lexemes() {
+        let Lexeme::Token(token) = lexeme else {
+            output.push(lexeme.clone());
+            continue;
+        };
+        if token.kind == TokenKind::BangEq && fallible_type_suffixes.contains(&token.span.start) {
+            output.push(Lexeme::Token(Token {
+                kind: TokenKind::Bang,
+                span: crate::ast::Span {
+                    start: token.span.start,
+                    end: token.span.start + 1,
+                },
+            }));
+            output.push(Lexeme::Token(Token {
+                kind: TokenKind::Assign,
+                span: crate::ast::Span {
+                    start: token.span.start + 1,
+                    end: token.span.end,
+                },
+            }));
+            continue;
+        }
+        let close_count = (token.span.start..token.span.end)
+            .take_while(|offset| generic_closes.contains(offset))
+            .count();
+        if close_count == 0 {
+            output.push(lexeme.clone());
+            continue;
+        }
+
+        for offset in token.span.start..token.span.start + close_count {
+            output.push(Lexeme::Token(Token {
+                kind: TokenKind::Gt,
+                span: crate::ast::Span {
+                    start: offset,
+                    end: offset + 1,
+                },
+            }));
+        }
+        let residual_start = token.span.start + close_count;
+        if residual_start == token.span.end {
+            continue;
+        }
+        let kind = match &document.source()[residual_start..token.span.end] {
+            "=" => TokenKind::Assign,
+            ">" => TokenKind::Gt,
+            ">=" => TokenKind::Ge,
+            residual => unreachable!("unsupported generic-close residual `{residual}`"),
+        };
+        output.push(Lexeme::Token(Token {
+            kind,
+            span: crate::ast::Span {
+                start: residual_start,
+                end: token.span.end,
+            },
+        }));
+    }
+    coalesce_contextual_operators(output, generic_closes)
+}
+
+/// Rejoins operator characters that straddle a parser-confirmed type
+/// boundary. The original lossless lexer sees `>==` as `>=` and `=`; after the
+/// generic close is fissioned, the two adjacent assignment characters are the
+/// equality operator belonging to the surrounding expression.
+fn coalesce_contextual_operators(
+    lexemes: Vec<Lexeme>,
+    generic_closes: &HashSet<usize>,
+) -> Vec<Lexeme> {
+    let mut output: Vec<Lexeme> = Vec::with_capacity(lexemes.len());
+    for lexeme in lexemes {
+        if let Lexeme::Token(current) = &lexeme
+            && !generic_closes.contains(&current.span.start)
+            && let Some(Lexeme::Token(previous)) = output.last_mut()
+            && !generic_closes.contains(&previous.span.start)
+            && previous.span.end == current.span.start
+        {
+            let combined = match (&previous.kind, &current.kind) {
+                (TokenKind::Assign, TokenKind::Assign) => Some(TokenKind::EqEq),
+                (TokenKind::Gt, TokenKind::Gt) => Some(TokenKind::Shr),
+                (TokenKind::Gt, TokenKind::Ge) => Some(TokenKind::ShrAssign),
+                _ => None,
+            };
+            if let Some(kind) = combined {
+                previous.kind = kind;
+                previous.span.end = current.span.end;
+                continue;
+            }
+        }
+        output.push(lexeme);
+    }
+    output
+}
+
 fn delimiter_ranges(
     document: &SourceDocument,
+    lexemes: &[Lexeme],
     generic_opens: &HashSet<usize>,
     generic_closes: &HashSet<usize>,
 ) -> Vec<DelimiterRange> {
     let mut stack = Vec::<PendingDelimiter>::new();
     let mut ranges = Vec::new();
-    for lexeme in document.lexemes() {
+    for lexeme in lexemes {
         match lexeme {
             Lexeme::Trivia(trivia) if trivia.kind == TriviaKind::Whitespace => {
                 if line_breaks(document.text(trivia.span)) > 0
@@ -890,6 +1029,7 @@ struct TrailingPunctuation {
 
 fn trailing_list_punctuation(
     document: &SourceDocument,
+    lexemes: &[Lexeme],
     syntax: &Program,
     break_after: &HashSet<usize>,
     generic_opens: &HashSet<usize>,
@@ -907,7 +1047,7 @@ fn trailing_list_punctuation(
     let mut stack = Vec::<ListDelimiter>::new();
     let mut closings = HashSet::new();
     let mut omitted_commas = HashSet::new();
-    for lexeme in document.lexemes() {
+    for lexeme in lexemes {
         match lexeme {
             Lexeme::Trivia(trivia)
                 if matches!(
@@ -2066,6 +2206,22 @@ whileAttached {
     }
 
     #[test]
+    fn formats_deeply_nested_generic_call_arguments() {
+        let source = r#"state "game.exe"{}
+fn example(){make < Box < Box < u32 > > > ()}
+"#;
+        let expected = r#"state "game.exe" {}
+fn example() {
+    make<Box<Box<u32>>>()
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn keeps_generic_type_arguments_attached() {
         let source = r#"state "game.exe"{}
 fn contains(visited:Set < String >,other:Set < String, >)->bool{return visited.contains("Atrium")||other.contains("Library")}"#;
@@ -2081,6 +2237,172 @@ fn contains(visited: Set<String>, other: Set<String>) -> bool {
     }
 
     #[test]
+    fn separates_generic_closers_from_following_assignments() {
+        let source = r#"state "game.exe"{}
+fn example(){let doneMaps:Set<String>=Set.new<String>();let nested:Set<Set<String>>=Set.new<Set<String>>()}
+"#;
+        let expected = r#"state "game.exe" {}
+fn example() {
+    let doneMaps: Set<String> = Set.new<String>();
+    let nested: Set<Set<String>> = Set.new<Set<String>>()
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn does_not_split_shift_and_comparison_operators_in_expressions() {
+        let source = r#"state "game.exe"{}
+fn operators(left,right){let compared=left>=right;let shifted=left>>right;left>>=right}
+"#;
+        let expected = r#"state "game.exe" {}
+fn operators(left, right) {
+    let compared = left >= right;
+    let shifted = left >> right;
+    left >>= right
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn generic_assignment_boundaries_round_trip_across_whitespace_variants() {
+        for ty in [
+            "Set<String>",
+            "Set<Set<String>>",
+            "Set<Set<Set<String>>>",
+            "Set<String>?",
+            "Set<String>!",
+            "Set<Set<String>>!",
+        ] {
+            for gap in ["", " ", "\t"] {
+                let source = format!(
+                    "state \"game.exe\" {{}}\nfn example() {{ let value: {ty}{gap}={gap}sourceValue() }}"
+                );
+                let formatted = format_source(&source).unwrap_or_else(|diagnostics| {
+                    panic!("failed to format `{ty}` with gap {gap:?}: {diagnostics:?}")
+                });
+                assert!(
+                    formatted.contains(&format!("let value: {ty} = sourceValue()")),
+                    "{formatted}"
+                );
+                assert_eq!(format_source(&formatted).unwrap(), formatted);
+            }
+        }
+    }
+
+    #[test]
+    fn separates_generic_cast_targets_from_equality_operators() {
+        for (comparison, canonical) in [
+            ("expr as List<u32> == foo", "expr as List<u32> == foo"),
+            ("expr as List<u32>==foo", "expr as List<u32> == foo"),
+            (
+                "expr as List<List<u32>>==foo",
+                "expr as List<List<u32>> == foo",
+            ),
+            ("expr as T!=foo", "expr as T != foo"),
+            ("expr as T! == foo", "expr as T! == foo"),
+        ] {
+            let source =
+                format!("state \"game.exe\" {{}}\nfn compare(expr, foo) {{ return {comparison} }}");
+            let expected = format!(
+                r#"state "game.exe" {{}}
+fn compare(expr, foo) {{
+    return {canonical}
+}}
+"#
+            );
+
+            let formatted = format_source(&source).unwrap();
+            assert_eq!(formatted, expected);
+            assert_eq!(format_source(&formatted).unwrap(), formatted);
+        }
+    }
+
+    #[test]
+    fn cast_type_operator_boundaries_format_idempotently() {
+        let cases = [
+            ("value as T==other", "value as T == other"),
+            ("value as T>other", "value as T > other"),
+            ("value as T>=other", "value as T >= other"),
+            ("value as T>>other", "value as T >> other"),
+            ("value as T<<other", "value as T << other"),
+            ("value as T<=other", "value as T <= other"),
+            ("value as Box<u32>==other", "value as Box<u32> == other"),
+            ("value as Box<u32>!=other", "value as Box<u32> != other"),
+            ("value as Box<u32>>other", "value as Box<u32> > other"),
+            ("value as Box<u32>>=other", "value as Box<u32> >= other"),
+            ("value as Box<u32>>>other", "value as Box<u32> >> other"),
+            ("value as Box<u32><other", "value as Box<u32> < other"),
+            ("value as Box<u32><=other", "value as Box<u32> <= other"),
+            ("value as Box<u32><<other", "value as Box<u32> << other"),
+            (
+                "value as Box<Box<u32>>==other",
+                "value as Box<Box<u32>> == other",
+            ),
+            (
+                "value as Box<Box<u32>>>other",
+                "value as Box<Box<u32>> > other",
+            ),
+            (
+                "value as Box<Box<u32>>>>other",
+                "value as Box<Box<u32>> >> other",
+            ),
+            ("value as T!=other", "value as T != other"),
+            ("value as T! == other", "value as T! == other"),
+            ("value as T!!=other", "value as T! != other"),
+            ("value as T?==other", "value as T? == other"),
+            ("value as Box<u32>?==other", "value as Box<u32>? == other"),
+            ("value as Box<u32>!!=other", "value as Box<u32>! != other"),
+            ("value as T!?", "value as T!?"),
+            ("value as T?!", "value as T?!"),
+            ("value as [u32; 4]==other", "value as [u32; 4] == other"),
+            ("(value as T)?", "(value as T)?"),
+            ("(value as T?)?", "(value as T?)?"),
+            ("(value as T!)?", "(value as T!)?"),
+        ];
+
+        for (expression, canonical) in cases {
+            let source = format!(
+                "state \"game.exe\" {{}} fn compare(value, other) {{ return {expression} }}"
+            );
+            let formatted = format_source(&source).unwrap_or_else(|diagnostics| {
+                panic!("failed to format `{expression}`: {diagnostics:?}")
+            });
+            assert!(
+                formatted.contains(&format!("return {canonical}")),
+                "{formatted}"
+            );
+            assert_eq!(format_source(&formatted).unwrap(), formatted);
+        }
+
+        for expression in ["value as T??", "value as T!!"] {
+            let source =
+                format!("state \"game.exe\" {{}} fn compare(value) {{ return {expression} }}");
+            let diagnostics =
+                format_source(&source).expect_err("formatting must reject duplicate type wrappers");
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.message.contains("two adjacent")),
+                "{diagnostics:?}"
+            );
+        }
+
+        let less_than =
+            "state \"game.exe\" {} fn compare(value, other) { return (value as T)<other }";
+        let formatted = format_source(less_than).unwrap();
+        assert!(formatted.contains("return (value as T) < other"));
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn adds_trailing_commas_to_multiline_generic_types() {
         let source = r#"state "game.exe" {}
 fn visit(values: Set<
@@ -2090,6 +2412,28 @@ String
         let formatted = format_source(source).unwrap();
         assert!(formatted.contains("Set<\n"), "{formatted}");
         assert!(formatted.contains("String,\n"), "{formatted}");
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn formats_nested_multiline_generic_closers_as_distinct_delimiters() {
+        let source = r#"state "game.exe" {}
+fn visit(values: Set<
+Set<
+String
+>
+>) {}
+"#;
+        let expected = r#"state "game.exe" {}
+fn visit(values: Set<
+    Set<
+        String,
+    >,
+>) {}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
         assert_eq!(format_source(&formatted).unwrap(), formatted);
     }
 

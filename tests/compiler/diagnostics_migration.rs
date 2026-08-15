@@ -1283,10 +1283,10 @@ fn assignments_to_current_explain_immutable_snapshot_migrations() {
 }
 
 #[test]
-fn repeated_option_and_result_postfixes_have_a_focused_diagnostic() {
+fn duplicate_option_and_result_postfixes_have_a_focused_diagnostic() {
     use splitscript::{DiagnosticLabelStyle, FixApplicability};
 
-    for annotation in ["i32??", "i32!!", "i32?!", "i32!?"] {
+    for annotation in ["i32??", "i32!!"] {
         let source = format!(
             r#"
                 state "game.exe" {{}}
@@ -1294,12 +1294,10 @@ fn repeated_option_and_result_postfixes_have_a_focused_diagnostic() {
             "#
         );
         let errors =
-            splitscript::parse(&source).expect_err("repeated postfixes should be rejected");
+            splitscript::parse(&source).expect_err("duplicate postfixes should be rejected");
         assert_eq!(errors.len(), 1);
         assert!(
-            errors[0]
-                .message
-                .contains("repeated optional/result postfixes"),
+            errors[0].message.contains("two adjacent"),
             "unexpected diagnostic for {annotation}: {}",
             errors[0].message
         );
@@ -1307,7 +1305,7 @@ fn repeated_option_and_result_postfixes_have_a_focused_diagnostic() {
         assert_eq!(errors[0].labels[0].style, DiagnosticLabelStyle::Primary);
         assert_eq!(
             errors[0].labels[0].message.as_deref(),
-            Some("this second wrapper postfix is not allowed")
+            Some("this wrapper duplicates the preceding wrapper")
         );
         assert_eq!(errors[0].notes.len(), 1);
         assert_eq!(errors[0].fixes.len(), 1);
@@ -1319,6 +1317,18 @@ fn repeated_option_and_result_postfixes_have_a_focused_diagnostic() {
         let edit = &errors[0].fixes[0].edits[0];
         assert_eq!(&source[edit.span.start..edit.span.end], &annotation[4..]);
         assert!(edit.replacement.is_empty());
+    }
+
+    for annotation in ["i32!?", "i32?!"] {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+                fn valid(value: {annotation}) {{}}
+            "#
+        );
+        splitscript::parse(&source).unwrap_or_else(|errors| {
+            panic!("mixed wrapper `{annotation}` should parse: {errors:?}")
+        });
     }
 }
 

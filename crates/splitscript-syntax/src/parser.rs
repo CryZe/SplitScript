@@ -909,6 +909,376 @@ mod tests {
     }
 
     #[test]
+    fn parses_adjacent_nested_generic_closers_and_assignments() {
+        let source = r#"
+            state "game.exe" {}
+            fn example() {
+                let first: Set<String>=Set.new<String>()
+                let nested: Set<Set<String>>=Set.new<Set<String>>()
+                let deep: Set<Set<Set<String>>>=Set.new<Set<Set<String>>>()
+                let optional: Set<String>? = None
+                let fallible: Set<String>! = unavailable()
+                make<Set<String>>()
+                make < Set<Set<String>> > ()
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap())
+            .expect("generic closers must not require whitespace before `=` or another `>`");
+
+        let nested = program
+            .type_applications
+            .iter()
+            .find(|application| {
+                application.arguments.iter().any(|argument| {
+                    matches!(
+                        argument,
+                        TypeRef::Application(inner)
+                            if program.type_name(program.type_applications[inner.index()].constructor)
+                                == "Set"
+                    )
+                })
+            })
+            .expect("nested Set application should be retained");
+        let occurrence = nested
+            .occurrences
+            .first()
+            .expect("nested application should retain its source occurrence");
+        assert_eq!(
+            &source[occurrence.closing.start..occurrence.closing.end],
+            ">"
+        );
+        assert_eq!(
+            source.as_bytes()[occurrence.closing.start - 1],
+            b'>',
+            "the inner and outer closers should occupy distinct bytes of `>>`"
+        );
+        assert_eq!(
+            source.as_bytes()[occurrence.closing.end],
+            b'=',
+            "the assignment should remain after the outer generic closer"
+        );
+    }
+
+    #[test]
+    fn keeps_comparison_and_shift_operators_maximally_munched_in_expressions() {
+        let source = r#"
+            state "game.exe" {}
+            fn operators(left, right) {
+                let compared = left >= right
+                let less = left < right
+                let shifted = left >> right
+                left >>= right
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let statements = &program.functions[0].body.statements;
+        let Stmt::Variable(compared) = &statements[0] else {
+            panic!("expected comparison variable")
+        };
+        assert!(matches!(
+            compared.value.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Ge,
+                ..
+            }
+        ));
+        let Stmt::Variable(less) = &statements[1] else {
+            panic!("expected less-than variable")
+        };
+        assert!(matches!(
+            less.value.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Lt,
+                ..
+            }
+        ));
+        let Stmt::Variable(shifted) = &statements[2] else {
+            panic!("expected shift variable")
+        };
+        assert!(matches!(
+            shifted.value.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Shr,
+                ..
+            }
+        ));
+        assert!(matches!(
+            statements[3],
+            Stmt::Assign {
+                op: Some(BinaryOp::Shr),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn generic_cast_targets_end_before_equality_expressions() {
+        for source in [
+            "state \"game.exe\" {} fn compare(expr, foo) { return expr as List<u32> == foo }",
+            "state \"game.exe\" {} fn compare(expr, foo) { return expr as List<u32>==foo }",
+            "state \"game.exe\" {} fn compare(expr, foo) { return expr as List<List<u32>>==foo }",
+        ] {
+            let program = parse(source, lex(source, SyntaxMode::Program).unwrap())
+                .expect("a generic cast target should leave the following equality operator");
+            let Stmt::Return {
+                value: Some(value), ..
+            } = &program.functions[0].body.statements[0]
+            else {
+                panic!("expected a returned expression")
+            };
+            assert!(matches!(
+                value.kind,
+                ExprKind::Binary {
+                    op: BinaryOp::Eq,
+                    ref left,
+                    ..
+                } if matches!(left.kind, ExprKind::Cast { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn bang_eq_after_a_cast_is_inequality_not_a_result_postfix() {
+        let source = r#"
+            state "game.exe" {}
+            fn compare(expr, foo) {
+                let ordinary = expr as T!=foo
+                let fallible = expr as T! == foo
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let Stmt::Variable(ordinary) = &program.functions[0].body.statements[0] else {
+            panic!("expected an ordinary comparison")
+        };
+        assert!(matches!(
+            ordinary.value.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Ne,
+                ref left,
+                ..
+            } if matches!(left.kind, ExprKind::Cast { target: TypeRef::Named(_), .. })
+        ));
+
+        let Stmt::Variable(fallible) = &program.functions[0].body.statements[1] else {
+            panic!("expected a fallible cast comparison")
+        };
+        assert!(matches!(
+            fallible.value.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Eq,
+                ref left,
+                ..
+            } if matches!(left.kind, ExprKind::Cast { target: TypeRef::Result(_), .. })
+        ));
+    }
+
+    #[test]
+    fn mixed_cast_type_wrappers_compose_and_propagation_requires_parentheses() {
+        for (expression, outer_is_option) in [("value as T!?", true), ("value as T?!", false)] {
+            let source =
+                format!("state \"game.exe\" {{}} fn propagate(value) {{ return {expression} }}");
+            let program = parse(&source, lex(&source, SyntaxMode::Program).unwrap())
+                .unwrap_or_else(|diagnostic| {
+                    panic!("failed to parse `{expression}`: {diagnostic:?}")
+                });
+            let Stmt::Return {
+                value: Some(value), ..
+            } = &program.functions[0].body.statements[0]
+            else {
+                panic!("expected a returned cast")
+            };
+            let ExprKind::Cast { target, .. } = value.kind else {
+                panic!("`{expression}` should remain one cast expression")
+            };
+            let nested = match (target, outer_is_option) {
+                (TypeRef::Option(id), true) => {
+                    program
+                        .option_types
+                        .iter()
+                        .find(|option| option.id == id)
+                        .expect("outer option type")
+                        .value
+                }
+                (TypeRef::Result(id), false) => {
+                    program
+                        .result_types
+                        .iter()
+                        .find(|result| result.id == id)
+                        .expect("outer result type")
+                        .value
+                }
+                _ => panic!("`{expression}` has the wrong outer wrapper"),
+            };
+            assert!(matches!(
+                (nested, outer_is_option),
+                (TypeRef::Result(_), true) | (TypeRef::Option(_), false)
+            ));
+        }
+
+        for expression in ["value as T??", "value as T!!"] {
+            let source =
+                format!("state \"game.exe\" {{}} fn invalid(value) {{ return {expression} }}");
+            let error = parse(&source, lex(&source, SyntaxMode::Program).unwrap())
+                .expect_err("identical adjacent wrappers must be rejected");
+            assert!(error.message.contains("two adjacent"));
+        }
+
+        for (expression, expected_target) in [
+            ("(value as T?)?", "option"),
+            ("(value as T!)?", "result"),
+            ("(value as T)?", "plain"),
+        ] {
+            let source =
+                format!("state \"game.exe\" {{}} fn propagate(value) {{ return {expression} }}");
+            let program = parse(&source, lex(&source, SyntaxMode::Program).unwrap())
+                .unwrap_or_else(|diagnostic| {
+                    panic!("failed to parse `{expression}`: {diagnostic:?}")
+                });
+            let Stmt::Return {
+                value: Some(value), ..
+            } = &program.functions[0].body.statements[0]
+            else {
+                panic!("expected a propagated cast")
+            };
+            let ExprKind::Propagate(cast) = &value.kind else {
+                panic!("`{expression}` should apply postfix `?` to the cast")
+            };
+            assert!(matches!(
+                (&cast.kind, expected_target),
+                (
+                    ExprKind::Cast {
+                        target: TypeRef::Option(_),
+                        ..
+                    },
+                    "option"
+                ) | (
+                    ExprKind::Cast {
+                        target: TypeRef::Result(_),
+                        ..
+                    },
+                    "result"
+                ) | (
+                    ExprKind::Cast {
+                        target: TypeRef::Named(_),
+                        ..
+                    },
+                    "plain"
+                )
+            ));
+        }
+
+        for annotation in ["T??", "T!!"] {
+            let declaration = format!(
+                "state \"game.exe\" {{}} fn invalid() {{ let value: {annotation} = None }}"
+            );
+            let error = parse(
+                &declaration,
+                lex(&declaration, SyntaxMode::Program).unwrap(),
+            )
+            .expect_err("declarations must still reject duplicate type wrappers");
+            assert!(error.message.contains("two adjacent"));
+        }
+    }
+
+    #[test]
+    fn cast_type_boundaries_preserve_the_following_binary_operator() {
+        let cases = [
+            ("value as T==other", BinaryOp::Eq),
+            ("value as T>other", BinaryOp::Gt),
+            ("value as T>=other", BinaryOp::Ge),
+            ("value as T>>other", BinaryOp::Shr),
+            ("value as T<<other", BinaryOp::Shl),
+            ("value as T<=other", BinaryOp::Le),
+            ("value as Box<u32>==other", BinaryOp::Eq),
+            ("value as Box<u32>!=other", BinaryOp::Ne),
+            ("value as Box<u32>>other", BinaryOp::Gt),
+            ("value as Box<u32>>=other", BinaryOp::Ge),
+            ("value as Box<u32>>>other", BinaryOp::Shr),
+            ("value as Box<u32><other", BinaryOp::Lt),
+            ("value as Box<u32><=other", BinaryOp::Le),
+            ("value as Box<u32><<other", BinaryOp::Shl),
+            ("value as Box<Box<u32>>==other", BinaryOp::Eq),
+            ("value as Box<Box<u32>>>other", BinaryOp::Gt),
+            ("value as Box<Box<u32>>>>other", BinaryOp::Shr),
+            ("value as T!=other", BinaryOp::Ne),
+            ("value as T! == other", BinaryOp::Eq),
+            ("value as T!!=other", BinaryOp::Ne),
+            ("value as T?==other", BinaryOp::Eq),
+            ("value as Box<u32>?==other", BinaryOp::Eq),
+            ("value as Box<u32>!!=other", BinaryOp::Ne),
+            ("value as [u32; 4]==other", BinaryOp::Eq),
+        ];
+
+        for (expression, expected) in cases {
+            let source = format!(
+                "state \"game.exe\" {{}} fn compare(value, other) {{ return {expression} }}"
+            );
+            let program = parse(&source, lex(&source, SyntaxMode::Program).unwrap())
+                .unwrap_or_else(|diagnostic| {
+                    panic!("failed to parse `{expression}`: {diagnostic:?}")
+                });
+            let Stmt::Return {
+                value: Some(value), ..
+            } = &program.functions[0].body.statements[0]
+            else {
+                panic!("expected `{expression}` to remain a returned binary expression")
+            };
+            assert!(
+                matches!(value.kind, ExprKind::Binary { op, .. } if op == expected),
+                "`{expression}` did not retain {expected:?}: {:?}",
+                value.kind
+            );
+        }
+    }
+
+    #[test]
+    fn less_than_after_a_named_cast_requires_parentheses() {
+        let ambiguous =
+            "state \"game.exe\" {} fn compare(value, other) { return value as T < other }";
+        let error = parse(ambiguous, lex(ambiguous, SyntaxMode::Program).unwrap())
+            .expect_err("a bare `<` begins generic type arguments after a named cast");
+        assert_eq!(error.message, "expected `>` after generic type arguments");
+
+        let explicit =
+            "state \"game.exe\" {} fn compare(value, other) { return (value as T) < other }";
+        let program = parse(explicit, lex(explicit, SyntaxMode::Program).unwrap()).unwrap();
+        let Stmt::Return {
+            value: Some(value), ..
+        } = &program.functions[0].body.statements[0]
+        else {
+            panic!("expected a parenthesized cast comparison")
+        };
+        assert!(matches!(
+            value.kind,
+            ExprKind::Binary {
+                op: BinaryOp::Lt,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn strict_inequality_after_a_cast_remains_migration_syntax() {
+        for (expression, operator, replacement) in [
+            ("value as T!==other", "!==", "!=`"),
+            ("value as Box<T>===other", "===", "==`"),
+            ("value as Box<Box<T>>===other", "===", "==`"),
+        ] {
+            let source = format!(
+                "state \"game.exe\" {{}} fn compare(value, other) {{ return {expression} }}"
+            );
+            let recovered = parse_recovering(&source, lex(&source, SyntaxMode::Program).unwrap());
+            assert_eq!(recovered.diagnostics.len(), 1, "{expression}");
+            let diagnostic = &recovered.diagnostics[0];
+            assert_eq!(
+                &source[diagnostic.span.start..diagnostic.span.end],
+                operator
+            );
+            assert!(diagnostic.message.contains(replacement));
+        }
+    }
+
+    #[test]
     fn state_fields_use_semicolons_because_pointer_paths_use_commas() {
         let valid = r#"
             state "game.exe" {

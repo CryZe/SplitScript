@@ -31,37 +31,7 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — make generic syntax and formatting round-trip safe
-
-The current formatter can turn valid `Set<String> = ...` into
-`Set<String>= ...`. Maximal-munch lexing then produces the comparison token
-`>=`, so the formatted file no longer parses. The same architectural problem
-already prevents adjacent nested generic closers such as `Set<Set<T>>` because
-the lexer produces the shift token `>>`; `>>=` combines both cases. This is a
-source-corrupting defect and takes precedence over new language surface.
-
-- [ ] Make the parser's token cursor split compound `>=`, `>>`, and `>>=`
-  tokens into source-accurate `>` closers plus their residual token only when
-  the type grammar is expecting generic closers. Keep maximal-munch lexing and
-  ordinary comparison/shift expressions unchanged. Apply the same mechanism to
-  declaration types, nested type arguments, explicit generic calls without a
-  turbofish, recovery parsing, formatter layout discovery, and editor syntax
-  queries; do not add a whitespace-sensitive grammar or special-case `Set`.
-- [ ] Fix the formatter to preserve a lexical boundary after a generic close
-  whenever concatenation would create `>=`, `>>`, or `>>=`. Canonical output
-  should remain readable even though the parser accepts the compact boundary
-  defensively.
-- [ ] Add a token-boundary matrix covering nested generics, `?`/`!`
-  suffixes, assignments and compound assignments, generic calls, comparisons,
-  shifts, multiline/trailing-comma type arguments, and malformed recovery
-  cases. Require parse/format/parse equivalence and formatter idempotence for
-  every valid fixture.
-- [ ] Add a generated whitespace-boundary/property test over valid token pairs
-  and the maintained example corpus. `fmt --check`, the VS Code formatter, and
-  `cargo xtask check` must all prove that canonical formatting cannot change
-  token meaning or turn a compiling file into a parse error.
-
-## P0 — turn current ASL porting feedback into self-guiding workflows
+## Now — turn current ASL porting feedback into self-guiding workflows
 
 The latest six-script campaign used compiler revision `69f2bd9`, so reports of
 already-implemented facilities are discoverability evidence, not stale-compiler

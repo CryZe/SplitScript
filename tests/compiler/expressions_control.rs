@@ -3,6 +3,32 @@
 use super::*;
 
 #[test]
+fn binary_integer_literals_type_check_and_report_boolean_misuse() {
+    splitscript::compile(
+        r#"
+            state GBA {}
+
+            fn binaryValues() -> bool {
+                let flags: u8 = 0b1010_0101
+                let mask = 0B1111_0000u8
+                let maximum: u64 = 0b11111111_11111111_11111111_11111111_11111111_11111111_11111111_11111111
+                return flags & mask == 0b1010_0000 && maximum == 0xffff_ffff_ffff_ffffu64
+            }
+        "#,
+    )
+    .expect("binary integer literals should compile with inference and suffixes");
+
+    let diagnostics = splitscript::compile("state GBA {} split { return 0b100 || true }")
+        .expect_err("an integer is not a boolean operand");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message == "expected `bool`, found an integer literal"),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn user_call_type_mismatches_name_the_argument_and_label_the_parameter() {
     let source = r#"
         record Pos {

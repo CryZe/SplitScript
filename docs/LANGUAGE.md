@@ -244,8 +244,10 @@ call-site constraint. If the remaining field set matches multiple nominal
 records, the compiler reports those candidates instead of guessing.
 
 Annotations and integer suffixes are constraints, not a routine requirement.
-Suffixes such as `1u8`, `10i64`, and `0xffu32` remain available when a literal is
-genuinely unconstrained or when an exact type should be documented. An
+Integer literals may be decimal (`42`), hexadecimal (`0xff`), or binary
+(`0b1111_0000`); `_` separators are ignored. Suffixes such as `1u8`, `10i64`,
+`0xffu32`, and `0b1000u16` remain available when a literal is genuinely
+unconstrained or when an exact type should be documented. An
 unresolved inference component defaults when it contains an unsuffixed literal
 or has a specific numeric-kind constraint: integer literals and `Integer`
 values default to `i32`, while floating-point literals and `Float` values

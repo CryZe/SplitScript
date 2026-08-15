@@ -1938,6 +1938,23 @@ fn describe(value) {
     }
 
     #[test]
+    fn preserves_binary_integer_literals_and_their_suffixes() {
+        let source = r#"state GBA{flags:u8 at 0b0010_0000;mask:u16 at 0B1111u16}split{return current.flags&0b10!=0}"#;
+        let expected = r#"state GBA {
+    flags: u8 at 0b0010_0000;
+    mask: u16 at 0B1111u16;
+}
+split {
+    return current.flags & 0b10 != 0
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn indents_multiline_statement_expressions_without_indenting_nested_blocks_twice() {
         let source = r#"state "game.exe" {
 choice = if enabled {

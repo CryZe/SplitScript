@@ -487,17 +487,38 @@ impl Lexer<'_> {
         let mut is_float = false;
         if self.starts_with(b"0x") || self.starts_with(b"0X") {
             self.pos += 2;
-            let digits = self.pos;
+            let mut has_digit = false;
             while self
                 .bytes
                 .get(self.pos)
                 .is_some_and(|byte| byte.is_ascii_hexdigit() || *byte == b'_')
             {
+                has_digit |= self.bytes[self.pos].is_ascii_hexdigit();
                 self.pos += 1;
             }
-            if self.pos == digits {
+            if !has_digit {
                 return Err(Error::lexical(
                     "expected hexadecimal digits after `0x`",
+                    Span {
+                        start,
+                        end: self.pos,
+                    },
+                ));
+            }
+        } else if self.starts_with(b"0b") || self.starts_with(b"0B") {
+            self.pos += 2;
+            let mut has_digit = false;
+            while self
+                .bytes
+                .get(self.pos)
+                .is_some_and(|byte| matches!(byte, b'0' | b'1' | b'_'))
+            {
+                has_digit |= matches!(self.bytes[self.pos], b'0' | b'1');
+                self.pos += 1;
+            }
+            if !has_digit {
+                return Err(Error::lexical(
+                    "expected binary digits after `0b`",
                     Span {
                         start,
                         end: self.pos,
@@ -789,7 +810,7 @@ mod tests {
     #[test]
     fn lexes_language_operators_and_typed_integer() {
         let tokens = lex(
-            "current.level != old.level && 0xffu32 > 2; a += 1; b -= 1; c *= 2; d /= 2; e %= 2; f |= 1; g &= 1; h ^= 1; i <<= 1; j >>= 1",
+            "current.level != old.level && 0xffu32 > 0b10; let mask = 0B1111_0000u8; a += 1; b -= 1; c *= 2; d /= 2; e %= 2; f |= 1; g &= 1; h ^= 1; i <<= 1; j >>= 1",
             SyntaxMode::Program,
         )
         .unwrap();
@@ -799,6 +820,16 @@ mod tests {
             tokens
                 .iter()
                 .any(|token| token.kind == TokenKind::Int("0xffu32".into()))
+        );
+        assert!(
+            tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Int("0b10".into()))
+        );
+        assert!(
+            tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Int("0B1111_0000u8".into()))
         );
         for expected in [
             TokenKind::PlusAssign,
@@ -813,6 +844,20 @@ mod tests {
             TokenKind::ShrAssign,
         ] {
             assert!(tokens.iter().any(|token| token.kind == expected));
+        }
+    }
+
+    #[test]
+    fn rejects_binary_and_hexadecimal_prefixes_without_digits() {
+        for (source, message) in [
+            ("0b", "expected binary digits after `0b`"),
+            ("0B_", "expected binary digits after `0b`"),
+            ("0x", "expected hexadecimal digits after `0x`"),
+            ("0X_", "expected hexadecimal digits after `0x`"),
+        ] {
+            let error = lex(source, SyntaxMode::Program)
+                .expect_err("a radix prefix requires at least one digit");
+            assert_eq!(error.message, message);
         }
     }
 

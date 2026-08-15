@@ -406,9 +406,38 @@ pub(crate) fn parse_integer(text: &str) -> Result<(u64, Option<TypeRef>), String
     let (digits, radix) = digits
         .strip_prefix("0x")
         .or_else(|| digits.strip_prefix("0X"))
-        .map_or((digits.as_str(), 10), |digits| (digits, 16));
-    let value = u64::from_str_radix(digits, radix)
-        .map_err(|_| "integer literal does not fit in 64 bits".to_owned())?;
+        .map_or_else(
+            || {
+                digits
+                    .strip_prefix("0b")
+                    .or_else(|| digits.strip_prefix("0B"))
+                    .map_or((digits.as_str(), 10), |digits| (digits, 2))
+            },
+            |digits| (digits, 16),
+        );
+    let value = u64::from_str_radix(digits, radix).map_err(|error| match error.kind() {
+        std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow => {
+            "integer literal does not fit in 64 bits".to_owned()
+        }
+        std::num::IntErrorKind::Empty => "integer literal requires at least one digit".to_owned(),
+        std::num::IntErrorKind::InvalidDigit => {
+            let (invalid_index, invalid) = digits
+                .char_indices()
+                .find(|(_, digit)| digit.to_digit(radix).is_none())
+                .expect("invalid integer literals contain an invalid digit");
+            if invalid.is_ascii_digit() {
+                let base = match radix {
+                    2 => "binary",
+                    16 => "hexadecimal",
+                    _ => "decimal",
+                };
+                format!("digit `{invalid}` is not valid in a {base} integer literal")
+            } else {
+                format!("unknown integer type suffix `{}`", &digits[invalid_index..])
+            }
+        }
+        _ => "invalid integer literal".to_owned(),
+    })?;
     Ok((value, suffix))
 }
 
@@ -417,6 +446,38 @@ mod tests {
     use crate::{PrimitiveType, SyntaxMode, lex};
 
     use super::*;
+
+    #[test]
+    fn parses_binary_integer_literals() {
+        assert_eq!(parse_integer("0b1010"), Ok((10, None)));
+        assert_eq!(parse_integer("0B1111_0000"), Ok((0xf0, None)));
+        assert_eq!(
+            parse_integer("0b1000u16"),
+            Ok((8, Some(TypeRef::core(PrimitiveType::U16))))
+        );
+    }
+
+    #[test]
+    fn diagnoses_invalid_and_overflowing_integer_literals_accurately() {
+        assert_eq!(
+            parse_integer("0b102"),
+            Err("digit `2` is not valid in a binary integer literal".to_owned())
+        );
+        assert_eq!(
+            parse_integer("0b101usize"),
+            Err("unknown integer type suffix `usize`".to_owned())
+        );
+        assert_eq!(
+            parse_integer("18446744073709551616"),
+            Err("integer literal does not fit in 64 bits".to_owned())
+        );
+        assert_eq!(
+            parse_integer(
+                "0b1_00000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000"
+            ),
+            Err("integer literal does not fit in 64 bits".to_owned())
+        );
+    }
 
     #[test]
     fn parses_domain_shaped_autosplitter() {

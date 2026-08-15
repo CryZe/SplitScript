@@ -31,91 +31,115 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — turn the bulk ASL ports into faithful migration evidence
+## Now — make generic syntax and formatting round-trip safe
 
-The external porting campaign is valuable pressure-test input, not yet a
-maintained corpus. Its 392 sources used the current compiler but were not run
-against games or the repository's deterministic host fixtures. Several reports
-miss facilities that were already available, which is evidence that our
-documentation, examples, completion, or diagnostics did not make the intended
-solution discoverable. Compilation success must not be mistaken for attachment
-or behavioral parity.
+The current formatter can turn valid `Set<String> = ...` into
+`Set<String>= ...`. Maximal-munch lexing then produces the comparison token
+`>=`, so the formatted file no longer parses. The same architectural problem
+already prevents adjacent nested generic closers such as `Set<Set<T>>` because
+the lexer produces the shift token `>>`; `>>=` combines both cases. This is a
+source-corrupting defect and takes precedence over new language surface.
 
-- [ ] Triage every reported limitation against the current language and the
-  source ASL before planning a replacement feature. For facilities that already
-  exist, identify why the author missed them and improve the relevant search
-  path: cookbook, standard-library docs, completion, hover, or a contextual
-  diagnostic. Recompile only focused probes needed to reproduce a concrete
-  report; do not rerun the campaign as though it used a stale compiler.
-- [ ] Classify each external port as compile-only, runtime-verified,
-  behavior-limited, or intentionally failing; compare the source ASL for
-  semantic omissions instead of trusting generated port notes. Record the
-  compiler revision for future campaigns as provenance, not because this
-  campaign used a different compiler.
-- [ ] Continue refreshing the ASL migration catalog and cookbook for
-  non-lifecycle misunderstandings found by the campaign. The next concrete
-  audit found that A Hat in Time's irregular nested tree would require
-  recursive compile-time templates, not a useful extension of numeric setting
-  families. Keep it explicit until another maintained port demonstrates a
-  small shared abstraction. Host-backed current game
-  time, run/segment metadata, run offset, and timing-method paths now receive
-  distinct behavior-limited diagnostics and cookbook guidance while their
-  typed runtime contract remains in R5. String/array length, collection count,
-  `Convert.To*`, and the existing timer-phase API also have canonical guidance;
-  consult the roadmap archive before re-planning completed string, numeric,
-  timer-state, collection, or finite-settings slices. Do not add compatibility
-  aliases.
-- [ ] Use those maintained ports to decide each next implementation slice.
-  Prefer a concrete, recurring game-independent gap over callbacks, reflection,
-  UI prompts, or unrestricted filesystem access. Move a
-  gap back down the roadmap when the current language can already express it
-  clearly and only documentation or diagnostics were missing. The maintained
-  Axiom Verge audit showed that its C# delegates reduce cleanly to named typed
-  functions; its actual reusable prerequisites were synchronous optional-module
-  lookup and the distinction between a declared setting and an enabled one.
-  It also confirms that exact timer events and conditional settings hierarchy
-  belong at the host boundary already tracked below, not in closure syntax.
+- [ ] Make the parser's token cursor split compound `>=`, `>>`, and `>>=`
+  tokens into source-accurate `>` closers plus their residual token only when
+  the type grammar is expecting generic closers. Keep maximal-munch lexing and
+  ordinary comparison/shift expressions unchanged. Apply the same mechanism to
+  declaration types, nested type arguments, explicit generic calls without a
+  turbofish, recovery parsing, formatter layout discovery, and editor syntax
+  queries; do not add a whitespace-sensitive grammar or special-case `Set`.
+- [ ] Fix the formatter to preserve a lexical boundary after a generic close
+  whenever concatenation would create `>=`, `>>`, or `>>=`. Canonical output
+  should remain readable even though the parser accepts the compact boundary
+  defensively.
+- [ ] Add a token-boundary matrix covering nested generics, `?`/`!`
+  suffixes, assignments and compound assignments, generic calls, comparisons,
+  shifts, multiline/trailing-comma type arguments, and malformed recovery
+  cases. Require parse/format/parse equivalence and formatter idempotence for
+  every valid fixture.
+- [ ] Add a generated whitespace-boundary/property test over valid token pairs
+  and the maintained example corpus. `fmt --check`, the VS Code formatter, and
+  `cargo xtask check` must all prove that canonical formatting cannot change
+  token meaning or turn a compiling file into a parse error.
+
+## P0 — turn current ASL porting feedback into self-guiding workflows
+
+The latest six-script campaign used compiler revision `69f2bd9`, so reports of
+already-implemented facilities are discoverability evidence, not stale-compiler
+evidence. The candidates compile but have not been checked against games or
+deterministic host fixtures; compilation success is not behavioral parity.
+
+- [ ] Triage every campaign report against the source ASL, the current compiler,
+  and the maintained ports. Classify each candidate as compile-only,
+  runtime-verified, behavior-limited, or intentionally failing, and record the
+  compiler revision plus every omission. Recompile only focused probes; do not
+  rerun the same campaign under the fiction that it used another compiler.
+- [ ] Raise the diagnostic bar for the concrete dead ends in this campaign:
+  string `+` should recommend interpolation or `String.concat`; an unhandled
+  `T!` should name `else`, `match`, and context-valid `?`; `else None` inside a
+  direct fallible return should explain when `else return None` is required;
+  and failed generic constraints should name the unsatisfied capabilities and,
+  when finite, the accepted concrete types. Offer machine-applicable edits only
+  when evaluation order and semantics are provably preserved.
+- [ ] Make statically knowable setting keys safe. Validate string literals passed
+  to `settings.enabled`, `oldSettings.enabled`, and related declaration lookups
+  against the exact declared host keys, suggest the closest key, and complete
+  keys inside the string argument. Prefer `settings.name` when the declaration
+  is statically known. Dynamic memory-derived strings remain a legitimate
+  runtime lookup; document `settings.contains(key)` for code that must
+  distinguish an unknown key from a disabled known setting.
+- [ ] Connect recognizable legacy constructs directly to the existing solution.
+  Assigning to `current.field` should link to the state-field rejection/filter
+  recipe; `startup`, `init`, `update`, and timer events should link to their
+  exact lifecycle mapping; module-list probes should distinguish
+  `loadedModule(name)`, waiting `module(name)`, executable version/fingerprint
+  checks, and genuinely required full enumeration. This campaign missed these
+  features despite compiler-owned migration entries, so merely adding more prose
+  is insufficient.
+- [ ] Repair stale or misleading diagnostics encountered by focused probes. A
+  script with no `state` is not a helper module: SplitScript is currently a
+  single-file executable autosplitter and requires an attachment provider.
+  Explain that contract using canonical `state "game.exe" {}` / `state GBA {}`
+  syntax instead of the obsolete `state(process, { ... })` spelling. Revisit
+  state-less scripts only together with real host-driven timer events.
+- [ ] Make the migration material available wherever the compiler is used. The
+  maintained Axiom Verge guide and the referenced examples exist in this tree;
+  the campaign reporting them missing means its documentation workspace or
+  navigation was incomplete. Add link/package checks for every referenced guide
+  and example, expose migration recipes in the in-editor documentation graph,
+  and give native CLI diagnostics stable topic identifiers that can be opened
+  without searching repository files.
+- [ ] Do not reintroduce already-rejected compatibility surface. Growable `[T]`
+  is the ordered `List<T>` replacement; named typed functions cover the audited
+  captured-lambda cases; state fields may use constants and candidate rejection;
+  `process.loadedModule` and typed executable versions cover known edition
+  probes; `scan` plus `readRelative32` covers the reviewed `OnFound` transforms;
+  and `onAttach` plus `retry` replaces background retry tasks without exposing
+  threads. Add new syntax only after a maintained port proves one of these is
+  still semantically insufficient.
 
 ### Make compiler-owned documentation browsable inside the editor
 
 Treat the in-editor reference as the primary documentation product. Use VS
 Code's built-in Markdown preview rather than building a custom HTML webview.
 Standalone HTML is a later renderer of the same model, not the next milestone.
+The compiler and both native and bundled servers already expose hierarchical
+standard-library pages through read-only `splitscript-docs:` Markdown documents;
+VS Code opens the index beside a script, supports search, breadcrumbs, links,
+and compiler-derived semantic code. Keep that working base and finish the
+missing graph rather than rebuilding the viewer.
 
-- [ ] Turn the existing renderer-independent standard-library and language
-  catalogs into one stable documentation graph. Give namespaces, types,
-  capabilities, functions, methods, fields, enum variants, keywords,
-  lifecycle blocks, settings constructs, migration concepts, and cookbook
-  recipes stable identities and explicit related-symbol links. Keep
-  signatures, effects, runtime behavior, focused compiler-checked examples,
-  and migration status compiler-owned; do not duplicate them in the VS Code
-  extension.
-- [ ] Add a compiler/language-server documentation query that works in both the
-  native and bundled WebAssembly servers. It should expose the searchable
-  index plus individual structured pages, and support direct lookup from a
-  resolved standard-library or language symbol. Use an LSP-standard transport
-  where it fits, but allow a namespaced SplitScript request for the structured
-  graph rather than flattening useful metadata merely to avoid an extension
-  method.
-- [ ] Build a VS Code documentation reference over that query: an **Open
-  SplitScript Documentation** command, a searchable symbol/topic index, a
-  navigable hierarchy, back/forward navigation, links among related symbols,
-  and links between canonical APIs and ASL/C#/Rust/JavaScript porting guidance.
-  Render compiler-provided Markdown in a VS Code-owned view or preview; the
-  extension may provide the presentation, but must not become the source of
-  documentation truth.
+- [ ] Extend the existing renderer-independent standard-library graph with the
+  compiler-owned language and migration catalogs. Give keywords, lifecycle
+  blocks, state/settings constructs, migration concepts, and cookbook recipes
+  the same stable identities and explicit related-symbol links already used by
+  namespaces, types, capabilities, functions, methods, fields, variants, and
+  operators. Keep signatures, effects, runtime behavior, focused
+  compiler-checked examples, and migration status out of the VS Code client.
 - [ ] Link ordinary editor workflows into the browser. Hover and completion
   details should offer **Open full documentation**; standard-library
   definition navigation should reach the exact documented symbol, while a
   separate source link may expose its privileged `standard.split` declaration
   when that is useful. Preserve normal source definitions for user symbols.
-- [ ] Use read-only `splitscript-docs:` virtual documents as an interoperability
-  surface where plain textual documents are useful. A virtual document is
-  transport for text, not inherently HTML, Markdown, or fake source: prefer
-  generated Markdown for reference and porting pages, and generate synthetic
-  SplitScript source only for a concrete source-navigation need. Keep URI and
-  anchor identities stable so links, history, and future non-VS-Code clients
-  agree.
 - [ ] Cover the documentation graph and reference contract with catalog
   validation, link checking, deterministic snapshots, native/bundled-server
   parity, and VS Code desktop/web integration tests. Missing documentation or
@@ -253,7 +277,8 @@ Standalone HTML is a later renderer of the same model, not the next milestone.
 - [ ] Expand capability-driven diagnostics and code actions beyond the initial
   structured entries. Emit one focused explanation and suppress predictable
   cascades for recognizable ASL constructs, including legacy lifecycle blocks,
-  timer member chains and member casing. Distinguish “supported under a
+  timer member chains, member casing, result recovery, and string
+  concatenation. Distinguish “supported under a
   different spelling,” “requires a semantic rewrite,” “requires host support,”
   and “intentionally sandboxed out.” Use machine-applicable rewrites only after
   resolution proves equivalence and that user-defined names are not being
@@ -267,17 +292,20 @@ Standalone HTML is a later renderer of the same model, not the next milestone.
   followed by interpolation in SplitScript.
 - [ ] Write short compiler-checked guides for authors coming from ASL/C#,
   TypeScript/JavaScript, and Rust. Explain semantic differences—lifecycle,
-  fixed-width numbers, `Duration`, async cancellation, `Option`/`Result`,
+  fixed-width numbers, `Duration`, async cancellation, `T?`/`T!`,
   settings, and process reads—not only token substitutions.
 - [ ] Include the canonical compiler identity already exposed by the compiler
   service and generated-module metadata in machine-readable port reports so
   future evidence remains reproducible.
 
-## P1 — source-level debugging in debug builds
+## P1 — source-level debugging after the debugger boundary is chosen
 
 Debug builds should support breakpoints and source stepping in `.split` files;
 release builds must remain stripped. Embedded DWARF is the source-level format.
-Do not add JavaScript source maps.
+Do not add JavaScript source maps. Further implementation is deliberately
+paused until the JavaScript-debugger experiment is compared with the current
+native Wasmtime path and a typed-IR interpreter; do not let partially working
+DWARF displace current porting and language-correctness work.
 
 ### Prove the Wasmtime/debugger boundary
 
@@ -458,6 +486,14 @@ remaining work is product hardening and distribution.
   immutable String operations beyond the corpus-proven P0 slice, additional
   numeric operations, and typed time operations proven useful by maintained
   ports.
+- [ ] Add an associative map only after a maintained port demonstrates a
+  runtime key-to-value lookup that cannot be folded into `settings`, a record,
+  a finite `match`, or parallel typed arrays. If that evidence arrives, design
+  one typed `Map<K, V>` around the source-defined equality/hash capability
+  hierarchy, stable GC identity, mutation-during-iteration rules, indexing
+  absence semantics, documentation, and inference. Do not add C#
+  `Dictionary<K, V>` as a compatibility alias; the A Plague Tale chapter table
+  is compile-time settings data and is not evidence for a runtime map.
 - [ ] Add general floating-point power only when a maintained port needs a
   negative or non-integral exponent. Port and attribute a vetted implementation
   such as Rust compiler-builtins' MIT-licensed libm `pow`/`powf`, including its
@@ -520,12 +556,12 @@ remaining work is product hardening and distribution.
   add documentation, diagnostics, and attachment fixtures for all three hosts.
 - [ ] Specialize physical aggregate layouts around zero-sized `None` only when
   measured size or allocation pressure justifies it. Records may omit unit
-  fields; `Option<None>` still needs distinct empty/present states;
-  `Result<None>` retains tag/error; `[None]` retains its logical length. Keep
+  fields; `None?` still needs distinct empty/present states; `None!` retains
+  tag/error; `[None]` retains its logical length. Keep
   all specialization behind one physical-layout abstraction so construction,
   matching, equality, field indices, DWARF, and codegen cannot disagree.
 - [ ] Design explicit `throw`/`catch` boundaries later. Postfix `?` remains the
-  ergonomic propagation operation and uncaught errors return through `Result`.
+  ergonomic propagation operation and uncaught errors return through `T!`.
 - [ ] Coalesce non-overlapping async-frame slots only if real autosplitters make
   frame size material and cleanup remains cancellation-safe.
 - [ ] Extend `debug` to more declaration kinds only when a concrete use case
@@ -549,6 +585,11 @@ remaining work is product hardening and distribution.
 - [ ] Re-audit old notes after major compiler milestones. Missing or
   hard-to-find documentation, weak diagnostics, and unrecorded compiler
   provenance must not become duplicate feature work.
+- [ ] Preserve diagnostics that porters explicitly found useful. Keep focused
+  regression tests for optional/value mismatches, unhandled `T!` values, and
+  machine-applicable unused-variable fixes while improving adjacent guidance;
+  a new help path must not replace a clearer primary error or reintroduce
+  cascades.
 - [ ] Maintain a representative warning-free corpus spanning native games,
   Unity Mono/IL2CPP, emulators, pointer paths, signatures, settings trees,
   loading, game time, cancellation, and unusual numeric layouts.
@@ -566,25 +607,28 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Establish the compiler-owned documentation graph and the VS Code
-   documentation reference, then route standard-library symbols and migration
-   guidance into it. Use the resulting search and navigation paths while
-   auditing the campaign's misunderstandings instead of treating standalone
-   HTML as the immediate documentation target.
-2. Continue the campaign audit and improve completion and contextual
-   diagnostics where documentation alone would not have revealed an existing
-   feature. Defer process-name warnings until the host's cross-platform
-   matching contract is settled.
-3. Keep irregular nested static settings explicit until another maintained
+1. Fix compound-token fission and formatter lexical boundaries, then lock in
+   parse/format/parse equivalence across nested generics and the maintained
+   corpus. No formatter may remain capable of corrupting compiling source.
+2. Close the latest campaign's self-guidance gaps: contextual result/string/
+   constraint diagnostics, compile-time checking and completion for literal
+   setting keys, canonical missing-state guidance, and direct links from
+   recognizable ASL constructs to their existing recipes.
+3. Extend the working in-editor standard-library reference with language and
+   migration topics, finish exact hidden-context examples, and link hover,
+   completion, diagnostics, and native CLI topics into the same graph. Treat
+   standalone HTML as a later renderer.
+4. Keep irregular nested static settings explicit until another maintained
    port demonstrates a small reusable table abstraction; select the next
    concrete provider or host-contract fixture instead of inventing a settings
    metaprogramming language.
-4. In parallel with stable language semantics, establish the Wasmtime/DWARF
-   compatibility fixture and land debug names plus source-line stepping.
 5. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench.
 6. Add Unity Mono and the next emulator/engine provider from representative
    ports.
-7. Keep physical `None` aggregate specialization and sandbox-sensitive host
+7. Resume source-debugging work only after the JavaScript debugger, native
+   Wasmtime/DWARF path, and typed-IR interpreter have been compared against the
+   same GC and async fixtures.
+8. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

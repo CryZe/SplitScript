@@ -442,6 +442,80 @@ split {
 }
 
 #[test]
+fn showcase_declaration_recovery_does_not_panic_the_language_server() {
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    let source = r#"state GBA {
+    pos: Pos at 0x100;
+}
+
+record Pos {
+    x: f32,
+}
+
+fn bar() {
+    if true {
+        return 5
+    }
+    return false
+}
+
+fn other()
+
+debug fn foo(x: u32, pos: Pos) -> TimerState {
+    if x > 0xb101 || settings.foo {
+        return TimerState.Paused
+    }
+    return TimerState.NotRunning
+}
+
+settings {
+    "Foo" => bar: true,
+    "Yay" {
+        "Some more" => foo: true,
+        "Label" => aFile: file {
+            "Files" => "*.*",
+        },
+        "Label" => okok: true,
+    },
+}
+"#;
+    let diagnostics = server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": "file:///showcase.split",
+                "languageId": "splitscript",
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    assert!(!diagnostics.is_empty());
+
+    let offset = source.find("TimerState.Paused").unwrap();
+    let (line, character) = position_parts(source, offset);
+    let hover = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "showcase-hover",
+        "method": "textDocument/hover",
+        "params": {
+            "textDocument": { "uri": "file:///showcase.split" },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    assert_eq!(hover[0]["id"], "showcase-hover");
+
+    let highlights = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": "showcase-highlights",
+        "method": "textDocument/semanticTokens/full",
+        "params": { "textDocument": { "uri": "file:///showcase.split" } }
+    }));
+    assert_eq!(highlights[0]["id"], "showcase-highlights");
+}
+
+#[test]
 fn publishes_unused_binding_warnings_without_rejecting_the_document() {
     let mut server = LanguageServer::default();
     initialize(&mut server);

@@ -35,7 +35,20 @@ pub(super) fn dependency_order(program: &Program) -> Vec<FunctionComponent> {
         }
     }
 
-    let mut edges = vec![Vec::new(); program.functions.len()];
+    // Function IDs are stable parser identities, not dense vector indexes.
+    // Recovery can consume an ID for a malformed declaration and continue with
+    // a later function, leaving a deliberate gap in the surviving syntax tree.
+    let functions = program
+        .functions
+        .iter()
+        .map(|function| function.id)
+        .collect::<Vec<_>>();
+    let positions = functions
+        .iter()
+        .enumerate()
+        .map(|(position, function)| (*function, position))
+        .collect::<HashMap<_, _>>();
+    let mut edges = vec![Vec::new(); functions.len()];
     for function in &program.functions {
         let mut collector = DependencyCollector {
             free_functions: &free_functions,
@@ -45,20 +58,16 @@ pub(super) fn dependency_order(program: &Program) -> Vec<FunctionComponent> {
         collector.visit_block(&function.body);
         collector
             .dependencies
-            .sort_by_key(|function| function.index());
+            .sort_by_key(|function| positions[function]);
         collector.dependencies.dedup();
-        edges[function.id.index()] = collector.dependencies;
+        edges[positions[&function.id]] = collector
+            .dependencies
+            .into_iter()
+            .map(|dependency| positions[&dependency])
+            .collect();
     }
 
-    Components::new(
-        edges,
-        program
-            .functions
-            .iter()
-            .map(|function| function.id)
-            .collect(),
-    )
-    .finish()
+    Components::new(edges, functions).finish()
 }
 
 struct DependencyCollector<'a> {
@@ -89,18 +98,18 @@ impl<'ast> Visitor<'ast> for DependencyCollector<'_> {
 }
 
 struct Components {
-    edges: Vec<Vec<FunctionId>>,
+    edges: Vec<Vec<usize>>,
     functions: Vec<FunctionId>,
     next_index: usize,
     indices: Vec<Option<usize>>,
     lowlinks: Vec<usize>,
-    stack: Vec<FunctionId>,
+    stack: Vec<usize>,
     on_stack: Vec<bool>,
     output: Vec<FunctionComponent>,
 }
 
 impl Components {
-    fn new(edges: Vec<Vec<FunctionId>>, functions: Vec<FunctionId>) -> Self {
+    fn new(edges: Vec<Vec<usize>>, functions: Vec<FunctionId>) -> Self {
         let count = edges.len();
         Self {
             edges,
@@ -115,38 +124,35 @@ impl Components {
     }
 
     fn finish(mut self) -> Vec<FunctionComponent> {
-        for function in self.functions.clone() {
-            if self.indices[function.index()].is_none() {
+        for function in 0..self.functions.len() {
+            if self.indices[function].is_none() {
                 self.visit(function);
             }
         }
         self.output
     }
 
-    fn visit(&mut self, function: FunctionId) {
-        let function_index = function.index();
+    fn visit(&mut self, function: usize) {
         let index = self.next_index;
         self.next_index += 1;
-        self.indices[function_index] = Some(index);
-        self.lowlinks[function_index] = index;
+        self.indices[function] = Some(index);
+        self.lowlinks[function] = index;
         self.stack.push(function);
-        self.on_stack[function_index] = true;
+        self.on_stack[function] = true;
 
         // Clone this small, deduplicated adjacency list so recursive traversal
         // can mutably update the graph state without split-borrow machinery.
-        for dependency in self.edges[function_index].clone() {
-            let dependency_index = dependency.index();
-            if self.indices[dependency_index].is_none() {
+        for dependency in self.edges[function].clone() {
+            if self.indices[dependency].is_none() {
                 self.visit(dependency);
-                self.lowlinks[function_index] =
-                    self.lowlinks[function_index].min(self.lowlinks[dependency_index]);
-            } else if self.on_stack[dependency_index] {
-                self.lowlinks[function_index] = self.lowlinks[function_index]
-                    .min(self.indices[dependency_index].expect("visited functions have indices"));
+                self.lowlinks[function] = self.lowlinks[function].min(self.lowlinks[dependency]);
+            } else if self.on_stack[dependency] {
+                self.lowlinks[function] = self.lowlinks[function]
+                    .min(self.indices[dependency].expect("visited functions have indices"));
             }
         }
 
-        if self.lowlinks[function_index] != index {
+        if self.lowlinks[function] != index {
             return;
         }
         let mut functions = Vec::new();
@@ -155,8 +161,8 @@ impl Components {
                 .stack
                 .pop()
                 .expect("a component root remains on the traversal stack");
-            self.on_stack[member.index()] = false;
-            functions.push(member);
+            self.on_stack[member] = false;
+            functions.push(self.functions[member]);
             if member == function {
                 break;
             }
@@ -178,7 +184,16 @@ mod tests {
                 component
                     .functions
                     .into_iter()
-                    .map(|function| parsed.syntax.functions[function.index()].name.clone())
+                    .map(|function| {
+                        parsed
+                            .syntax
+                            .functions
+                            .iter()
+                            .find(|declaration| declaration.id == function)
+                            .expect("graph identities belong to source functions")
+                            .name
+                            .clone()
+                    })
                     .collect()
             })
             .collect()
@@ -229,5 +244,46 @@ mod tests {
         );
 
         assert_eq!(names, vec![vec!["unwrap"], vec!["use"]]);
+    }
+
+    #[test]
+    fn recovered_function_identity_gaps_are_not_vector_indexes() {
+        let recovered = crate::parse_recovering(
+            r#"
+                fn before() { return }
+                fn missing()
+                debug fn after() { return before() }
+            "#,
+        )
+        .expect("parser recovery should retain later declarations");
+        assert!(!recovered.diagnostics().is_empty());
+        assert!(
+            recovered
+                .syntax()
+                .functions
+                .iter()
+                .any(|function| function.id.index() >= recovered.syntax().functions.len())
+        );
+
+        let names = dependency_order(recovered.syntax())
+            .into_iter()
+            .map(|component| {
+                component
+                    .functions
+                    .into_iter()
+                    .map(|function| {
+                        recovered
+                            .syntax()
+                            .functions
+                            .iter()
+                            .find(|declaration| declaration.id == function)
+                            .unwrap()
+                            .name
+                            .clone()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec![vec!["before"], vec!["after"]]);
     }
 }

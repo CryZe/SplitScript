@@ -40,13 +40,6 @@ deterministic host fixtures; compilation success is not behavioral parity. The
 completed source/compiler/fixture review and per-candidate classifications are
 recorded in [`docs/PORTING_CAMPAIGN_AUDIT.md`](docs/PORTING_CAMPAIGN_AUDIT.md).
 
-- [ ] Make statically knowable setting keys safe. Validate string literals passed
-  to `settings.enabled`, `oldSettings.enabled`, and related declaration lookups
-  against the exact declared host keys, suggest the closest key, and complete
-  keys inside the string argument. Prefer `settings.name` when the declaration
-  is statically known. Dynamic memory-derived strings remain a legitimate
-  runtime lookup; document `settings.contains(key)` for code that must
-  distinguish an unknown key from a disabled known setting.
 - [ ] Connect recognizable legacy constructs directly to the existing solution.
   Assigning to `current.field` should link to the state-field rejection/filter
   recipe; `startup`, `init`, `update`, and timer events should link to their

@@ -175,18 +175,25 @@ namespace runtime {
 /// Look up a boolean setting by its stable host key
 ///
 /// ```splitscript
+/// # state "game.exe" {}
+/// # settings { "Split boss" => splitBoss key "split-boss": true }
+/// # whileAttached {
 /// if settings.enabled("split-boss") {
 ///     print("Boss splitting is enabled")
 /// }
+/// # }
 /// ```
 @representation(scalar, i32)
 @valueUsage(localVariable, globalVariable)
 intrinsic type SettingsView {
     /// Returns a declared boolean setting selected by its stable host-map key.
     ///
-    /// Unknown keys and keys belonging to non-boolean settings return false.
-    /// The lookup reads the already-refreshed settings snapshot and does not
-    /// query the host or allocate.
+    /// String literals are checked against the declared boolean keys and are
+    /// completed by editor tooling. Computed unknown keys, and computed keys
+    /// belonging to non-boolean settings, return false. The lookup reads the
+    /// already-refreshed settings snapshot and does not query the host or
+    /// allocate. Prefer direct `settings.name` access when the declaration has
+    /// a statically visible source name.
     ///
     /// # Example
     ///
@@ -206,6 +213,8 @@ intrinsic type SettingsView {
     /// Reports whether a value setting declares the stable host key.
     ///
     /// This distinguishes a known disabled boolean from an unknown key.
+    /// Literal keys are checked and completed against boolean, choice, and
+    /// file declarations. Computed strings may still be unknown at runtime.
     /// Headings are visual structure rather than values and are not included.
     ///
     /// # Example

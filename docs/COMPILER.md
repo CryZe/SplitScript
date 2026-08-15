@@ -501,6 +501,13 @@ therefore consume one concrete declaration model. Source symbols, member
 completion, rename, and document outlines filter the generated declarations so
 implementation names never leak into the language.
 
+The declaration pass also owns an exact runtime-key index with each key's
+setting kind, declaration span, and optional source-visible member name.
+Resolved calls to `SettingsView.enabled` and `contains` validate ordinary string
+literals against that index, while computed strings deliberately remain runtime
+lookups. Completion uses the same declarations to offer only compatible keys
+inside the quoted argument and replaces only the literal's contents.
+
 The first physical backend split follows that boundary:
 [`src/codegen/imports.rs`](../src/codegen/imports.rs) owns host-import type
 emission and the catalog-order-to-function-index mapping. It returns the import

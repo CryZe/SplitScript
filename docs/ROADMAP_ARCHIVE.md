@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-15: statically safe settings-key lookups
+
+- Indexed every declared host key and its setting kind in the declaration
+  environment, including explicit keys and expanded finite-family keys.
+- Validated literal keys passed to `SettingsView.enabled` and `contains`, with
+  declaration labels, closest-key rewrites, kind-specific guidance, and direct
+  member suggestions where one exists. Computed strings retain runtime lookup
+  semantics.
+- Completed compatible keys inside quoted arguments for both current and old
+  settings views, replacing only the string contents and carrying setting
+  documentation into the editor.
+
 ## 2026-08-15: source-annotated native CLI diagnostics
 
 - Replaced the native compiler and formatter CLI's flat diagnostic strings

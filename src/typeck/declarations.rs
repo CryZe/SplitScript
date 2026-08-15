@@ -7,9 +7,24 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    ast::{EnumDecl, EnumVariantId, FunctionId, RecordDecl, ValueId},
+    ast::{EnumDecl, EnumVariantId, FunctionId, RecordDecl, Span, ValueId},
     inference::Type,
 };
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RuntimeSettingKind {
+    Bool,
+    Choice,
+    File,
+    Title,
+}
+
+#[derive(Clone)]
+pub(super) struct RuntimeSettingDeclaration {
+    pub(super) source_name: Option<String>,
+    pub(super) kind: RuntimeSettingKind,
+    pub(super) span: Span,
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct Binding {
@@ -106,6 +121,7 @@ pub(super) struct DeclarationEnvironment {
     /// declarations from later layouts map to the first layout's identity.
     pub(super) state_storage_fields: HashMap<ValueId, ValueId>,
     pub(super) settings: HashMap<String, (ValueId, Type)>,
+    pub(super) settings_by_runtime_key: HashMap<String, RuntimeSettingDeclaration>,
     pub(super) globals: HashMap<String, Binding>,
     pub(super) functions: HashMap<String, FunctionSignature>,
     pub(super) methods: HashMap<(Type, String), FunctionSignature>,
@@ -127,6 +143,7 @@ impl DeclarationEnvironment {
             layout_state_fields: HashMap::new(),
             state_storage_fields: HashMap::new(),
             settings: HashMap::new(),
+            settings_by_runtime_key: HashMap::new(),
             globals: HashMap::new(),
             functions: HashMap::new(),
             methods: HashMap::new(),

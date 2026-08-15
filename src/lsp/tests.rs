@@ -554,6 +554,59 @@ fn completion_uses_inferred_members_catalog_docs_and_utf16_text_edits() {
 }
 
 #[test]
+fn completion_replaces_only_the_setting_key_string_contents() {
+    let source = concat!(
+        "state \"game.exe\" {}\n",
+        "settings {\n",
+        "    /// Splits at the boss.\n",
+        "    \"Boss\" => boss key \"split-boss\": true,\n",
+        "}\n",
+        "whileAttached { let enabled = settings.enabled(\"spl\") }\n",
+    );
+    let offset = source.find("settings.enabled(\"spl").unwrap() + "settings.enabled(\"spl".len();
+    let (line, character) = position_parts(source, offset);
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": "file:///setting-key-completion.split",
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    let response = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 81,
+        "method": "textDocument/completion",
+        "params": {
+            "textDocument": { "uri": "file:///setting-key-completion.split" },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    let item = response[0]["result"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["label"] == "split-boss")
+        .expect("the declared key is completed");
+
+    assert_eq!(item["kind"], 10);
+    assert_eq!(item["textEdit"]["newText"], "split-boss");
+    assert_eq!(
+        item["textEdit"]["range"]["start"],
+        json!({ "line": line, "character": character - 3 })
+    );
+    assert_eq!(
+        item["textEdit"]["range"]["end"],
+        json!({ "line": line, "character": character })
+    );
+    assert_eq!(item["documentation"]["value"], "Splits at the boss.");
+}
+
+#[test]
 fn hover_and_signature_help_preserve_resolved_catalog_information() {
     let source = concat!(
         "// 🦊\n",

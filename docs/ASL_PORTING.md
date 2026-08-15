@@ -848,11 +848,12 @@ needed.
 Prefer direct `settings.name` access when the setting is known statically. For
 data tables whose entries select among declared boolean settings, give each
 declaration its exact host-map string with `key "..."` and use
-`settings.enabled(key)`. This remains boolean-only and returns false for an
-unknown key; it is not a dynamically typed replacement for choice or file
-settings. If the original settings have a boolean parent, gate the child result
-explicitly; a quoted SplitScript heading is visual only. The complete A Plague
-Tale example preserves its **All Chapters** parent semantics this way.
+`settings.enabled(key)`. This remains boolean-only and is not a dynamically
+typed replacement for choice or file settings. Literal keys are validated and
+completed against the declarations; computed unknown keys return false. If the
+original settings have a boolean parent, gate the child result explicitly; a
+quoted SplitScript heading is visual only. The complete A Plague Tale example
+preserves its **All Chapters** parent semantics this way.
 
 When cursor advancement depends on declaration membership rather than whether
 the split is enabled, keep the two questions separate:

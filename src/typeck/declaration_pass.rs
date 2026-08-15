@@ -14,7 +14,7 @@ use crate::{
 use super::{
     Checker,
     control_flow::contains_value_return,
-    declarations::{Binding, FunctionSignature},
+    declarations::{Binding, FunctionSignature, RuntimeSettingDeclaration, RuntimeSettingKind},
 };
 
 pub(super) fn collect(checker: &mut Checker, program: &Program) {
@@ -304,13 +304,30 @@ fn collect_settings(checker: &mut Checker, program: &Program) {
             .map_or(setting.span, crate::ast::SettingExternalKey::span);
         if runtime_key.is_empty() {
             checker.error("a setting key cannot be empty", key_span);
-        } else if runtime_keys
-            .insert(runtime_key.to_owned(), key_span)
-            .is_some()
-        {
-            checker.error(
-                format!("duplicate runtime setting key `{runtime_key}`"),
-                key_span,
+        } else if let Some(first_span) = runtime_keys.insert(runtime_key.to_owned(), key_span) {
+            checker.errors.push(
+                crate::Diagnostic::type_error(
+                    format!("duplicate runtime setting key `{runtime_key}`"),
+                    key_span,
+                )
+                .with_primary_label("this key is declared again here")
+                .with_secondary_label(first_span, "the first declaration is here"),
+            );
+        } else {
+            let kind = match setting.kind {
+                SettingKind::Bool { .. } => RuntimeSettingKind::Bool,
+                SettingKind::Choice { .. } => RuntimeSettingKind::Choice,
+                SettingKind::File { .. } => RuntimeSettingKind::File,
+                SettingKind::Title { .. } => RuntimeSettingKind::Title,
+            };
+            checker.declarations.settings_by_runtime_key.insert(
+                runtime_key.to_owned(),
+                RuntimeSettingDeclaration {
+                    source_name: (setting.source_visible && kind != RuntimeSettingKind::Title)
+                        .then(|| setting.name.clone()),
+                    kind,
+                    span: key_span,
+                },
             );
         }
         if let Some(ty) = setting_value_type(checker, setting) {

@@ -71,19 +71,24 @@ onAttach {
 whileAttached {
     let currentSettings = settings
     let previousSettings = oldSettings
+    // These variables deliberately exercise data-driven runtime misses. A
+    // misspelled literal is rejected and fixed by the compiler instead.
+    let missingKey = "missing"
+    let choiceKey = "captureMode"
+    let headingKey = "_heading0"
     setVariable("Auto Splitting", enabledName(currentSettings.enableAutoSplitting))
     setVariable("Auto Splitting by Key", enabledName(currentSettings.enabled("auto-splitting")))
     setVariable(
         "Previous Auto Splitting by Key",
         enabledName(previousSettings.enabled("auto-splitting")),
     )
-    setVariable("Unknown Setting by Key", enabledName(currentSettings.enabled("missing")))
-    setVariable("Choice Setting by Key", enabledName(currentSettings.enabled("captureMode")))
+    setVariable("Unknown Setting by Key", enabledName(currentSettings.enabled(missingKey)))
+    setVariable("Choice Setting by Key", enabledName(currentSettings.enabled(choiceKey)))
     setVariable("Contains Boolean Key", currentSettings.contains("auto-splitting"))
     setVariable("Contains Choice Key", currentSettings.contains("captureMode"))
     setVariable("Contains File Key", currentSettings.contains("layoutFile"))
-    setVariable("Contains Heading Key", currentSettings.contains("_heading0"))
-    setVariable("Contains Unknown Key", currentSettings.contains("missing"))
+    setVariable("Contains Heading Key", currentSettings.contains(headingKey))
+    setVariable("Contains Unknown Key", currentSettings.contains(missingKey))
     setVariable("Capture Source", captureModeName(currentSettings.captureMode))
     setVariable("Layout File", currentSettings.layoutFile)
 

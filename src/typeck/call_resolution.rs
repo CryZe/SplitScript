@@ -27,6 +27,7 @@ use super::{
     CallSyntax, Checker, DeferredMemberPath, MethodReceiver, PathResolution, ResolvedReceiver,
     catalog_type_argument, closest_name,
     context::{CallableContext, ExpressionMode},
+    declarations::{RuntimeSettingDeclaration, RuntimeSettingKind},
 };
 
 impl Checker {
@@ -1080,6 +1081,13 @@ impl Checker {
             self.validate_catalog_argument(argument, parameter.rule, item);
             concrete_signature.push(parameter_type);
         }
+        if matches!(
+            item.id,
+            StdlibItemId::SettingsViewEnabled | StdlibItemId::SettingsViewContains
+        ) && let Some(argument) = args.first()
+        {
+            self.validate_setting_key_argument(item.id, argument);
+        }
         concrete_signature.push(result_type);
         if operation.availability == Availability::OnAttach && !self.callable.can_suspend() {
             self.error(
@@ -1269,6 +1277,79 @@ impl Checker {
             },
             ParameterRule::StringLiteral => {}
         }
+    }
+
+    fn validate_setting_key_argument(&mut self, item: StdlibItemId, argument: &Expr) {
+        let ExprKind::String(key) = &argument.kind else {
+            // Data-driven keys are deliberately supported. Only literals can
+            // be proven invalid against this program's declarations.
+            return;
+        };
+        let accepts = |declaration: &RuntimeSettingDeclaration| match item {
+            StdlibItemId::SettingsViewEnabled => declaration.kind == RuntimeSettingKind::Bool,
+            StdlibItemId::SettingsViewContains => declaration.kind != RuntimeSettingKind::Title,
+            _ => unreachable!(),
+        };
+        if let Some(declaration) = self.declarations.settings_by_runtime_key.get(key).cloned() {
+            if accepts(&declaration) {
+                return;
+            }
+            let (actual, expected) = match declaration.kind {
+                RuntimeSettingKind::Choice => ("a choice setting", "a boolean setting"),
+                RuntimeSettingKind::File => ("a file setting", "a boolean setting"),
+                RuntimeSettingKind::Title => ("a settings heading", "a value setting"),
+                RuntimeSettingKind::Bool => unreachable!(),
+            };
+            let mut diagnostic = Diagnostic::type_error(
+                format!("setting key `{key}` names {actual}, not {expected}"),
+                argument.span,
+            )
+            .with_primary_label(format!(
+                "`{}` cannot read this declaration",
+                self.standard_library.item(item).qualified_name
+            ))
+            .with_secondary_label(declaration.span, "the setting is declared here");
+            if let Some(name) = declaration.source_name {
+                diagnostic = diagnostic.with_note(format!(
+                    "read this statically declared setting as `settings.{name}` or `oldSettings.{name}`"
+                ));
+            }
+            self.errors.push(diagnostic);
+            return;
+        }
+
+        let suggestion = closest_name(
+            key,
+            self.declarations
+                .settings_by_runtime_key
+                .iter()
+                .filter(|(_, declaration)| accepts(declaration))
+                .map(|(key, _)| key.as_str()),
+        );
+        let qualified_name = self.standard_library.item(item).qualified_name;
+        let dynamic_note = if item == StdlibItemId::SettingsViewEnabled {
+            "computed string keys remain valid for data-driven lookup; use `settings.contains(key)` when unknown and disabled settings must be distinguished"
+        } else {
+            "computed string keys remain valid for data-driven lookup and return false when no value setting declares the runtime key"
+        };
+        let mut diagnostic = Diagnostic::type_error(
+            format!("unknown setting key `{key}` passed to `{qualified_name}`"),
+            argument.span,
+        )
+        .with_primary_label("no compatible setting declares this exact host key")
+        .with_note(dynamic_note);
+        if let Some(suggestion) = suggestion
+            && let Some(declaration) = self.declarations.settings_by_runtime_key.get(&suggestion)
+        {
+            diagnostic = diagnostic
+                .with_secondary_label(declaration.span, "the closest declared key is here")
+                .with_machine_applicable_fix(
+                    format!("replace `{key}` with `{suggestion}`"),
+                    argument.span,
+                    quote_string_literal(&suggestion),
+                );
+        }
+        self.errors.push(diagnostic);
     }
 
     pub(super) fn array_type_id(&mut self, element: Type) -> ArrayTypeId {
@@ -2021,6 +2102,24 @@ impl Checker {
         }
         message
     }
+}
+
+fn quote_string_literal(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for character in value.chars() {
+        match character {
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            '\'' => quoted.push_str("\\'"),
+            character => quoted.push(character),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 fn member_name_span(span: Span, name: &str) -> Span {

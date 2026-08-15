@@ -80,7 +80,9 @@ pub(crate) fn complete(
     let standard_library = compiler_context.standard_library();
     let offset = floor_char_boundary(&source, offset.min(source.len()));
     let syntax = database.recovering_parse()?.syntax().clone();
-    if let Some(completions) = complete_tick_rate_field(&source, offset) {
+    if let Some(completions) = complete_setting_key(&source, &syntax, offset) {
+        Ok(completions)
+    } else if let Some(completions) = complete_tick_rate_field(&source, offset) {
         Ok(completions)
     } else if let Some(completions) = complete_settings_dsl(&source, offset) {
         Ok(completions)
@@ -136,6 +138,87 @@ pub(crate) fn complete(
             top_level,
         ))
     }
+}
+
+fn complete_setting_key(source: &str, syntax: &Program, offset: usize) -> Option<CompletionList> {
+    let lexed = lexer::lex_lossless(source).ok()?;
+    let tokens = lexed.tokens().collect::<Vec<_>>();
+    let (index, token) = tokens.iter().enumerate().find(|(_, token)| {
+        matches!(token.kind, TokenKind::String(_))
+            && token.span.start < offset
+            && offset < token.span.end
+    })?;
+    let [root, dot, method, open] = tokens.get(index.checked_sub(4)?..index)? else {
+        return None;
+    };
+    let TokenKind::Ident(root_name) = &root.kind else {
+        return None;
+    };
+    if !matches!(root_name.as_str(), "settings" | "oldSettings")
+        || !matches!(dot.kind, TokenKind::Dot)
+        || !matches!(open.kind, TokenKind::LParen)
+    {
+        return None;
+    }
+    let method = match &method.kind {
+        TokenKind::Ident(method) if method == "enabled" || method == "contains" => method.as_str(),
+        _ => return None,
+    };
+    let replacement = Span {
+        start: token.span.start + 1,
+        end: token.span.end.saturating_sub(1),
+    };
+    if !(replacement.start <= offset && offset <= replacement.end) {
+        return None;
+    }
+    let prefix = source[replacement.start..offset].to_owned();
+    let mut builder = CompletionBuilder::new(prefix, replacement);
+    for setting in &syntax.settings {
+        let compatible = match setting.kind {
+            SettingKind::Bool { .. } => true,
+            SettingKind::Choice { .. } | SettingKind::File { .. } => method == "contains",
+            SettingKind::Title { .. } => false,
+        };
+        if !compatible {
+            continue;
+        }
+        let kind = match setting.kind {
+            SettingKind::Bool { .. } => "boolean setting key",
+            SettingKind::Choice { .. } => "choice setting key",
+            SettingKind::File { .. } => "file setting key",
+            SettingKind::Title { .. } => unreachable!(),
+        };
+        let direct = if setting.source_visible {
+            format!("; directly available as {root_name}.{}", setting.name)
+        } else {
+            String::new()
+        };
+        builder.add(CompletionItem {
+            label: setting.runtime_key().to_owned(),
+            kind: CompletionKind::Setting,
+            detail: Some(format!("{kind}{direct}")),
+            documentation: setting.tooltip.clone(),
+            insert_text: escape_string_contents(setting.runtime_key()),
+            is_snippet: false,
+        });
+    }
+    Some(builder.finish())
+}
+
+fn escape_string_contents(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\'' => escaped.push_str("\\'"),
+            character => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 fn complete_tick_rate_field(source: &str, offset: usize) -> Option<CompletionList> {
@@ -1754,6 +1837,65 @@ mod tests {
         assert_eq!(completion.items[0].label, "detached");
         assert_eq!(completion.items[0].insert_text, "detached: ${1:1},");
         assert!(completion.items[0].is_snippet);
+    }
+
+    #[test]
+    fn completes_only_compatible_declared_setting_keys_inside_lookup_strings() {
+        let source = r#"state "game.exe" {}
+enum Mode { Fast, Slow }
+settings {
+    /// Splits at the boss.
+    "Boss" => boss key "split-boss": true,
+    "Mode" => mode key "run-mode": choice {
+        "Fast" => Mode.Fast default,
+        "Slow" => Mode.Slow,
+    },
+    for level in 2..=3 { `Level {level}` key `level-{level}`: true },
+}
+whileAttached {
+    let boss = settings.enabled("split")
+    let known = oldSettings.contains("")
+}
+"#;
+        let mut enabled = CompilerDatabase::new(source);
+        let enabled_offset =
+            source.find("settings.enabled(\"split").unwrap() + "settings.enabled(\"split".len();
+        let completion = enabled.completions(enabled_offset).unwrap();
+        assert_eq!(completion.items.len(), 1, "{completion:#?}");
+        assert_eq!(completion.items[0].label, "split-boss");
+        assert_eq!(completion.items[0].insert_text, "split-boss");
+        assert_eq!(
+            &source[completion.replacement.start..completion.replacement.end],
+            "split"
+        );
+        assert!(
+            completion.items[0]
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("settings.boss")
+        );
+        assert_eq!(
+            completion.items[0].documentation.as_deref(),
+            Some("Splits at the boss.")
+        );
+
+        let mut contains = CompilerDatabase::new(source);
+        let contains_offset =
+            source.find("oldSettings.contains(\"\"").unwrap() + "oldSettings.contains(\"".len();
+        let labels = contains
+            .completions(contains_offset)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+        for expected in ["split-boss", "run-mode", "level-2", "level-3"] {
+            assert!(
+                labels.contains(&expected.to_owned()),
+                "missing {expected}: {labels:#?}"
+            );
+        }
     }
 
     #[test]

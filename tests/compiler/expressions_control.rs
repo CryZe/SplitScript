@@ -3,6 +3,107 @@
 use super::*;
 
 #[test]
+fn literal_setting_keys_are_checked_against_declared_runtime_keys() {
+    let source = r#"
+        enum Mode { Fast, Slow }
+        state "game.exe" {}
+        settings {
+            "Boss" => boss key "split-boss": true,
+            "Mode" => mode key "run-mode": choice {
+                "Fast" => Mode.Fast default,
+                "Slow" => Mode.Slow,
+            },
+            "Paths" {
+                "Route" => route: file {},
+            },
+        }
+
+        whileAttached {
+            let enabled = settings.enabled("split-bos")
+            let wrongKind = settings.enabled("run-mode")
+            let heading = settings.contains("_heading0")
+            print(enabled)
+            print(wrongKind)
+            print(heading)
+        }
+    "#;
+    let diagnostics =
+        splitscript::compile(source).expect_err("statically invalid setting keys must be rejected");
+
+    let typo = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic
+                .message
+                .contains("unknown setting key `split-bos`")
+        })
+        .expect("the misspelled key has a focused diagnostic");
+    assert_eq!(typo.labels.len(), 2);
+    assert_eq!(typo.fixes.len(), 1);
+    assert_eq!(typo.fixes[0].edits[0].replacement, "\"split-boss\"");
+    assert!(
+        typo.notes
+            .iter()
+            .any(|note| note.contains("computed string keys"))
+    );
+
+    let wrong_kind = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("names a choice setting"))
+        .expect("a non-boolean key is distinguished from an unknown key");
+    assert_eq!(wrong_kind.labels.len(), 2);
+    assert!(
+        wrong_kind
+            .notes
+            .iter()
+            .any(|note| note.contains("settings.mode"))
+    );
+
+    let heading = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("names a settings heading"))
+        .expect("headings are not reported as value settings");
+    assert_eq!(heading.labels.len(), 2);
+    assert!(
+        heading
+            .notes
+            .iter()
+            .all(|note| !note.contains("settings._heading0")),
+        "headings must not suggest a nonexistent direct value member"
+    );
+}
+
+#[test]
+fn dynamic_and_compatible_setting_key_lookups_remain_valid() {
+    splitscript::compile(
+        r#"
+            enum Mode { Fast, Slow }
+            state "game.exe" {}
+            settings {
+                "Boss" => boss key "split-boss": true,
+                "Mode" => mode key "run-mode": choice {
+                    "Fast" => Mode.Fast default,
+                    "Slow" => Mode.Slow,
+                },
+            }
+
+            fn selected(view: SettingsView, key: String) {
+                return view.enabled(key) || view.contains(key)
+            }
+
+            whileAttached {
+                print(settings.enabled("split-boss"))
+                print(oldSettings.contains("run-mode"))
+                print(selected(settings, currentKey()))
+            }
+
+            fn currentKey() { return "split-boss" }
+        "#,
+    )
+    .expect("dynamic keys and compatible exact literals remain supported");
+}
+
+#[test]
 fn discarded_must_use_values_warn_without_failing_compilation() {
     let source = r#"
         state "game.exe" {}

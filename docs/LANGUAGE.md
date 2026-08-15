@@ -1102,9 +1102,14 @@ remain visual headings and do not implicitly gate child values.
 
 `settings.enabled(key)` performs allocation-free data-driven lookup over the
 declared boolean settings, using those same host-map strings. `oldSettings`
-provides the corresponding method for the preceding snapshot. Unknown keys—or
-keys belonging to a choice or file setting—return `false`; the API therefore
-does not erase heterogeneous setting values into a dynamic type.
+provides the corresponding method for the preceding snapshot. A literal key is
+validated against the declarations and editor completion offers only compatible
+boolean keys. For a computed string, an unknown key—or one belonging to a
+choice or file setting—returns `false`; the API therefore does not erase
+heterogeneous setting values into a dynamic type. Use `settings.contains(key)`
+when data-driven code must distinguish an unknown key from a declared but
+disabled setting. Its literal keys are checked and completed against boolean,
+choice, and file declarations; visual headings are not values.
 
 Controls are registered during `_start`. At the beginning of every exported
 tick, including detached ticks, the compiler loads the current host settings

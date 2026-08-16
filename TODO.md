@@ -42,26 +42,21 @@ recorded in [`docs/PORTING_CAMPAIGN_AUDIT.md`](docs/PORTING_CAMPAIGN_AUDIT.md).
 
 - [ ] Connect recognizable legacy constructs directly to the existing solution.
   Direct `current.field` assignment is now supported, while the porting guide
-  distinguishes it from transactional candidate rejection. `startup`, `init`,
-  `update`, and timer events should link to their
-  exact lifecycle mapping; module-list probes should distinguish
+  distinguishes it from transactional candidate rejection. Legacy lifecycle
+  diagnostics now carry stable topics that open their exact compiler-owned
+  migration pages. Finish module-list probes that distinguish
   `loadedModule(name)`, waiting `module(name)`, executable version/fingerprint
   checks, and genuinely required full enumeration. This campaign missed these
   features despite compiler-owned migration entries, so merely adding more prose
   is insufficient.
-- [ ] Repair stale or misleading diagnostics encountered by focused probes. A
-  script with no `state` is not a helper module: SplitScript is currently a
-  single-file executable autosplitter and requires an attachment provider.
-  Explain that contract using canonical `state "game.exe" {}` / `state GBA {}`
-  syntax instead of the obsolete `state(process, { ... })` spelling. Revisit
-  state-less scripts only together with real host-driven timer events.
 - [ ] Make the migration material available wherever the compiler is used. The
   maintained Axiom Verge guide and the referenced examples exist in this tree;
   the campaign reporting them missing means its documentation workspace or
-  navigation was incomplete. Add link/package checks for every referenced guide
-  and example, expose migration recipes in the in-editor documentation graph,
-  and give native CLI diagnostics stable topic identifiers that can be opened
-  without searching repository files.
+  navigation was incomplete. The in-editor graph now includes the complete
+  language and migration catalogs, the canonical ASL porting guide, and exact
+  links from migration diagnostics; the native CLI prints the same stable topic
+  identity. Add package checks for every referenced guide and example, and a
+  native command that opens or renders a topic without repository searching.
 - [ ] Do not reintroduce already-rejected compatibility surface. Growable `[T]`
   is the ordered `List<T>` replacement; named typed functions cover the audited
   captured-lambda cases; state fields may use constants and candidate rejection;
@@ -82,13 +77,6 @@ VS Code opens the index beside a script, supports search, breadcrumbs, links,
 and compiler-derived semantic code. Keep that working base and finish the
 missing graph rather than rebuilding the viewer.
 
-- [ ] Extend the existing renderer-independent standard-library graph with the
-  compiler-owned language and migration catalogs. Give keywords, lifecycle
-  blocks, state/settings constructs, migration concepts, and cookbook recipes
-  the same stable identities and explicit related-symbol links already used by
-  namespaces, types, capabilities, functions, methods, fields, variants, and
-  operators. Keep signatures, effects, runtime behavior, focused
-  compiler-checked examples, and migration status out of the VS Code client.
 - [ ] Link ordinary editor workflows into the browser. Hover and completion
   details should offer **Open full documentation**; standard-library
   definition navigation should reach the exact documented symbol, while a

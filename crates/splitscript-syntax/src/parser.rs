@@ -333,10 +333,19 @@ impl Parser<'_> {
             }
         }
         if program.state.is_none() {
-            self.diagnostics.push(Diagnostic::new(
-                "a SplitScript file needs a `state(process, { ... })` declaration",
-                Span::default(),
-            ));
+            self.diagnostics.push(
+                Diagnostic::new(
+                    "a SplitScript autosplitter needs one attachment `state` declaration",
+                    Span::default(),
+                )
+                .with_primary_label("no attachment provider is declared")
+                .with_note(
+                    "use `state \"game.exe\" { ... }` for a native process or `state GBA { ... }` for a supported provider",
+                )
+                .with_note(
+                    "SplitScript currently compiles one executable autosplitter per file; a state-less helper module is not a supported compilation unit",
+                ),
+            );
             self.recovery_nodes.push(RecoveryNode {
                 kind: RecoveryNodeKind::Missing,
                 span: Span::default(),

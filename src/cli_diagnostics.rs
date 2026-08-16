@@ -49,6 +49,9 @@ fn convert(file_id: usize, source: &str, diagnostic: &Diagnostic) -> CodespanDia
         .collect();
 
     let mut notes = diagnostic.notes.clone();
+    if let Some(topic) = &diagnostic.migration_topic {
+        notes.push(format!("help: SplitScript documentation topic `{topic}`"));
+    }
     notes.extend(diagnostic.fixes.iter().map(|fix| match fix.applicability {
         FixApplicability::MachineApplicable => format!("help: {}", fix.title),
         applicability => format!("help ({}): {}", applicability, fix.title),
@@ -146,6 +149,15 @@ mod tests {
         assert!(output.contains("state \"first.exe\" {}"));
         assert!(output.contains("state \"second.exe\" {}"));
         assert!(output.contains("the first state declaration is here"));
+    }
+
+    #[test]
+    fn renders_stable_documentation_topics_for_native_workflows() {
+        let diagnostic = Diagnostic::new("legacy lifecycle", Span { start: 0, end: 6 })
+            .with_migration_topic("asl.lifecycle.update");
+        let output = render("legacy.split", "update", &[diagnostic]);
+
+        assert!(output.contains("SplitScript documentation topic `asl.lifecycle.update`"));
     }
 
     fn render(source_name: &str, source: &str, diagnostics: &[Diagnostic]) -> String {

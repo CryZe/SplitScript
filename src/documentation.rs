@@ -5,4 +5,5 @@ mod entry;
 mod reference;
 
 pub use entry::{DocumentedParameter, StandardLibraryDocumentation};
+pub(crate) use reference::migration_topic_uri;
 pub use reference::{DocumentationIndexEntry, DocumentationPage, DocumentationReference};

@@ -41,6 +41,15 @@ and LSP traffic; its extension code is bundled into one file as required by the
 web extension host. Workspace and extension files are accessed only through
 VS Code URIs and `workspace.fs`, including in virtual workspaces.
 
+## Documentation
+
+**SplitScript: Open Documentation** opens the compiler-owned reference beside
+the current script. It includes the language, lifecycle blocks, migration
+guidance, the ASL porting guide, and the standard library in one searchable,
+hierarchical graph. Migration diagnostics link to the exact corresponding
+page. **SplitScript: Search Documentation** searches every page by symbol,
+concept, kind, signature, and summary without requiring repository files.
+
 ## Development
 
 From this directory:

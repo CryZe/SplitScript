@@ -136,7 +136,8 @@ This index maps common source-language concepts to canonical SplitScript APIs an
         output
     }
 
-    fn target_display(&self, target: MigrationTarget) -> String {
+    /// Renders a canonical target using the language's public type syntax.
+    pub fn target_display(&self, target: MigrationTarget) -> String {
         if let MigrationTarget::StandardLibraryItem(name) = target
             && let Some(item) = self.context.standard_library().item_by_name(name)
             && let crate::stdlib::StdlibOwner::TypeConstructor(owner) = item.owner

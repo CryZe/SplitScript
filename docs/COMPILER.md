@@ -1075,7 +1075,7 @@ half-open span ends at the caret, including before adjacent punctuation;
 semantic postfix `?`/`!` tokens retain exact precedence. Neither policy skips
 whitespace, and all remain well-defined at line endings and EOF.
 Standard-library and language-catalog definitions deliberately return no source
-location; future generated or virtual documentation can provide a separate
+location. The compiler-owned virtual documentation graph provides a separate
 navigation target without weakening source identity.
 
 Rename builds directly on that navigation boundary. `rename_target_at` returns
@@ -1139,6 +1139,19 @@ updates the same open document to a resolved call, and verifies both completion
 and hover exactly against the corresponding generated entries. The future HTML
 and machine-readable documentation exporters should consume this model instead
 of rebuilding catalog presentation.
+
+[`src/documentation/reference.rs`](../src/documentation/reference.rs) joins
+that standard-library model with `LanguageCatalog`, `MigrationCatalog`, and the
+canonical ASL porting guide into one renderer-independent hierarchy. Stable
+virtual paths identify language constructs, migration concepts, cookbook
+anchors, namespaces, types, capabilities, members, variants, and operators.
+Migration pages resolve their canonical targets back through the same language
+and standard-library catalogs, while catalog examples retain semantic tokens
+and exact definition links. The LSP serves both the searchable index and pages;
+the VS Code client only presents those Markdown documents. Structured migration
+diagnostics carry their concept identity through native CLI, LSP, and embedded
+compiler responses, so frontends do not infer a documentation destination from
+error prose.
 
 ## VS Code client
 

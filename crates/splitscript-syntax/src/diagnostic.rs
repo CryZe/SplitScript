@@ -144,6 +144,9 @@ pub struct Diagnostic {
     pub labels: Vec<DiagnosticLabel>,
     pub notes: Vec<String>,
     pub fixes: Vec<DiagnosticFix>,
+    /// Stable compiler-owned migration concept identity. Frontends decide how
+    /// to present or open it.
+    pub migration_topic: Option<String>,
 }
 
 impl Diagnostic {
@@ -184,6 +187,7 @@ impl Diagnostic {
             }],
             notes: Vec::new(),
             fixes: Vec::new(),
+            migration_topic: None,
         }
     }
 
@@ -208,6 +212,11 @@ impl Diagnostic {
 
     pub fn with_fix(mut self, fix: DiagnosticFix) -> Self {
         self.fixes.push(fix);
+        self
+    }
+
+    pub fn with_migration_topic(mut self, topic: impl Into<String>) -> Self {
+        self.migration_topic = Some(topic.into());
         self
     }
 

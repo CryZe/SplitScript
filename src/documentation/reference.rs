@@ -2,7 +2,8 @@
 
 use crate::{
     catalog::Documentation,
-    language::LanguageCatalog,
+    language::{LanguageCatalog, LanguageItem, LanguageItemId, LanguageItemKind},
+    migration::{MigrationCatalog, MigrationConcept, MigrationConceptId, MigrationTarget},
     stdlib::{
         CoreTypeId, FieldVisibility, ItemKind, StandardLibrary, StdlibOwner, StdlibSymbolId,
         StdlibTypeKind,
@@ -69,7 +70,47 @@ pub struct DocumentationReference {
 
 impl DocumentationReference {
     pub fn index(&self) -> Vec<DocumentationIndexEntry> {
-        let mut entries = Vec::new();
+        let mut entries = vec![
+            DocumentationIndexEntry {
+                uri: "/language/index.md".to_owned(),
+                title: "Language".to_owned(),
+                kind: "guide",
+                summary: "Syntax, declarations, lifecycle blocks, and contextual values.",
+                signature: None,
+            },
+            DocumentationIndexEntry {
+                uri: "/migration/index.md".to_owned(),
+                title: "Migration".to_owned(),
+                kind: "guide",
+                summary: "Guidance from ASL and familiar languages to canonical SplitScript.",
+                signature: None,
+            },
+        ];
+
+        entries.extend(LanguageCatalog::new().items().filter_map(|item| {
+            (!matches!(item.kind, LanguageItemKind::BuiltinType(_))).then(|| {
+                DocumentationIndexEntry {
+                    uri: language_item_uri(item.id),
+                    title: item.name.to_owned(),
+                    kind: language_item_kind_label(item.kind),
+                    summary: item.documentation.summary,
+                    signature: Some(item.form.to_owned()),
+                }
+            })
+        }));
+
+        entries.extend(
+            MigrationCatalog::default()
+                .concepts()
+                .iter()
+                .map(|concept| DocumentationIndexEntry {
+                    uri: migration_concept_uri(concept.id),
+                    title: concept.name.to_owned(),
+                    kind: "migration concept",
+                    summary: concept.summary,
+                    signature: Some(concept.id.as_str().to_owned()),
+                }),
+        );
 
         entries.extend(
             self.library
@@ -203,6 +244,34 @@ impl DocumentationReference {
     pub fn page(&self, uri: &str) -> Option<DocumentationPage> {
         if uri == "/index.md" {
             return Some(self.index_page());
+        }
+
+        if uri == "/language/index.md" {
+            return Some(self.language_index_page());
+        }
+
+        if uri == "/migration/index.md" {
+            return Some(self.migration_index_page());
+        }
+
+        if uri == "/guides/asl-porting.md" {
+            return Some(self.asl_porting_guide_page());
+        }
+
+        if let Some(item) = LanguageCatalog::new().items().find(|item| {
+            !matches!(item.kind, LanguageItemKind::BuiltinType(_))
+                && language_item_uri(item.id) == uri
+        }) {
+            return Some(self.language_item_page(item));
+        }
+
+        let migration = MigrationCatalog::default();
+        if let Some(concept) = migration
+            .concepts()
+            .iter()
+            .find(|concept| migration_concept_uri(concept.id) == uri)
+        {
+            return Some(self.migration_concept_page(concept, &migration));
         }
 
         if let Some(ty) = self
@@ -649,13 +718,209 @@ impl DocumentationReference {
         }
     }
 
+    fn language_index_page(&self) -> DocumentationPage {
+        let uri = "/language/index.md";
+        let mut markdown = format!(
+            "{}\n\n# Language\n\nCompiler-owned syntax, declarations, lifecycle blocks, and contextual values.\n",
+            reference_breadcrumb(uri, Vec::new(), "Language")
+        );
+        let groups = [
+            ("Declarations", "declaration"),
+            ("Lifecycle blocks", "lifecycle block"),
+            ("Keywords", "keyword"),
+            ("Syntax", "syntax"),
+            ("Contextual values", "contextual value"),
+        ];
+        let language = LanguageCatalog::new();
+        for (title, kind) in groups {
+            let mut items = language
+                .items()
+                .filter(|item| language_item_kind_label(item.kind) == kind)
+                .collect::<Vec<_>>();
+            items.sort_by_key(|item| item.name.to_ascii_lowercase());
+            if items.is_empty() {
+                continue;
+            }
+            markdown.push_str(&format!("\n## {title}\n"));
+            append_reference_table_header(&mut markdown, &["Symbol", "Description"]);
+            for item in items {
+                markdown.push_str(&format!(
+                    "\n| [{}]({}) | {} |",
+                    escape_markdown_table_cell(item.name),
+                    relative_document_link(uri, &language_item_uri(item.id)),
+                    escape_markdown_table_cell(item.documentation.summary),
+                ));
+            }
+        }
+        DocumentationPage {
+            uri: uri.to_owned(),
+            title: "SplitScript language".to_owned(),
+            markdown,
+        }
+    }
+
+    fn language_item_page(&self, item: &LanguageItem) -> DocumentationPage {
+        let uri = language_item_uri(item.id);
+        let mut markdown = format!(
+            "{}\n\n# {}\n\n_{}_\n\n{}\n\n{}\n\n{}",
+            reference_breadcrumb(
+                &uri,
+                vec![("Language".to_owned(), "/language/index.md".to_owned())],
+                item.name,
+            ),
+            item.name,
+            language_item_kind_label(item.kind),
+            code::signature(item.form, &uri, None, &self.library),
+            item.documentation.summary,
+            item.documentation.details,
+        );
+        append_examples(
+            &mut markdown,
+            &uri,
+            &self.library,
+            item.documentation.examples,
+        );
+        if !item.documentation.related.is_empty() {
+            markdown.push_str("\n\n## Related\n");
+            append_reference_table_header(&mut markdown, &["Symbol", "Description"]);
+            for related in item.documentation.related {
+                let related = LanguageCatalog::new().item(*related);
+                markdown.push_str(&format!(
+                    "\n| [{}]({}) | {} |",
+                    escape_markdown_table_cell(related.name),
+                    relative_document_link(&uri, &language_item_uri(related.id)),
+                    escape_markdown_table_cell(related.documentation.summary),
+                ));
+            }
+        }
+        DocumentationPage {
+            uri,
+            title: item.name.to_owned(),
+            markdown,
+        }
+    }
+
+    fn migration_index_page(&self) -> DocumentationPage {
+        let uri = "/migration/index.md";
+        let migration = MigrationCatalog::default();
+        let mut concepts = migration.concepts().iter().collect::<Vec<_>>();
+        concepts.sort_by_key(|concept| concept.name.to_ascii_lowercase());
+        let mut markdown = format!(
+            "{}\n\n# Migration\n\nCompiler-owned guidance from ASL, C#, JavaScript, and Rust to canonical SplitScript syntax and APIs.\n",
+            reference_breadcrumb(uri, Vec::new(), "Migration")
+        );
+        append_reference_table_header(&mut markdown, &["Concept", "Description"]);
+        for concept in concepts {
+            markdown.push_str(&format!(
+                "\n| [{}]({}) | {} |",
+                escape_markdown_table_cell(concept.name),
+                relative_document_link(uri, &migration_concept_uri(concept.id)),
+                escape_markdown_table_cell(concept.summary),
+            ));
+        }
+        DocumentationPage {
+            uri: uri.to_owned(),
+            title: "Migrate to SplitScript".to_owned(),
+            markdown,
+        }
+    }
+
+    fn migration_concept_page(
+        &self,
+        concept: &MigrationConcept,
+        migration: &MigrationCatalog,
+    ) -> DocumentationPage {
+        let uri = migration_concept_uri(concept.id);
+        let sources = concept
+            .sources
+            .iter()
+            .map(|source| source.name())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut markdown = format!(
+            "{}\n\n# {}\n\n_Migration from {sources}_\n\n**Status:** {}\n\n{}",
+            reference_breadcrumb(
+                &uri,
+                vec![("Migration".to_owned(), "/migration/index.md".to_owned())],
+                concept.name,
+            ),
+            concept.name,
+            concept.support.label(),
+            concept.summary,
+        );
+        if !concept.targets.is_empty() {
+            markdown.push_str("\n\n## Canonical SplitScript\n");
+            append_reference_table_header(&mut markdown, &["Symbol", "Kind"]);
+            for target in concept.targets {
+                let label = migration.target_display(*target);
+                let rendered = migration_target_uri(*target, &self.library).map_or_else(
+                    || format!("`{}`", escape_markdown_table_cell(&label)),
+                    |target_uri| {
+                        format!(
+                            "[{}]({})",
+                            escape_markdown_table_cell(&label),
+                            relative_document_link(&uri, &target_uri),
+                        )
+                    },
+                );
+                markdown.push_str(&format!(
+                    "\n| {rendered} | {} |",
+                    migration_target_kind(*target),
+                ));
+            }
+        }
+        if let Some(anchor) = concept.cookbook_anchor {
+            markdown.push_str(&format!(
+                "\n\n[Open the complete porting recipe]({}#{anchor})",
+                relative_document_link(&uri, "/guides/asl-porting.md"),
+            ));
+        }
+        if !concept.spellings.is_empty() {
+            markdown.push_str("\n\n## Recognized spellings\n");
+            append_reference_table_header(&mut markdown, &["Source", "Spelling"]);
+            for spelling in concept.spellings {
+                markdown.push_str(&format!(
+                    "\n| {} | `{}` |",
+                    spelling.source.name(),
+                    escape_markdown_table_cell(spelling.spelling),
+                ));
+            }
+        }
+        DocumentationPage {
+            uri,
+            title: concept.name.to_owned(),
+            markdown,
+        }
+    }
+
+    fn asl_porting_guide_page(&self) -> DocumentationPage {
+        let uri = "/guides/asl-porting.md";
+        let markdown = format!(
+            "{}\n\n{}",
+            reference_breadcrumb(uri, Vec::new(), "Porting ASL to SplitScript"),
+            include_str!("../../docs/ASL_PORTING.md"),
+        );
+        DocumentationPage {
+            uri: uri.to_owned(),
+            title: "Porting ASL to SplitScript".to_owned(),
+            markdown,
+        }
+    }
+
     fn index_page(&self) -> DocumentationPage {
         let entries = self.index();
         let mut markdown = String::from(
-            "# SplitScript standard library\n\n\
-             This reference is generated from the same compiler-owned catalog used by type checking, completion, and hover.\n",
+            "# SplitScript reference\n\n\
+             This reference is generated from the same compiler-owned catalogs used by parsing, type checking, migration diagnostics, completion, and hover.\n",
         );
-        let sections: [(&str, Vec<String>); 5] = [
+        let sections: [(&str, Vec<String>); 6] = [
+            (
+                "Guides",
+                vec![
+                    "/language/index.md".to_owned(),
+                    "/migration/index.md".to_owned(),
+                ],
+            ),
             (
                 "Namespaces",
                 self.library
@@ -737,7 +1002,7 @@ impl DocumentationReference {
         }
         DocumentationPage {
             uri: "/index.md".to_owned(),
-            title: "SplitScript standard library".to_owned(),
+            title: "SplitScript reference".to_owned(),
             markdown,
         }
     }
@@ -1088,8 +1353,12 @@ pub(super) fn relative_document_link(current_uri: &str, target_uri: &str) -> Str
 }
 
 fn breadcrumb(uri: &str, ancestors: Vec<(String, String)>, current: &str) -> String {
+    reference_breadcrumb(uri, ancestors, current)
+}
+
+fn reference_breadcrumb(uri: &str, ancestors: Vec<(String, String)>, current: &str) -> String {
     let mut markdown = format!(
-        "[Standard library]({})",
+        "[SplitScript reference]({})",
         relative_document_link(uri, "/index.md")
     );
     for (label, target) in ancestors {
@@ -1160,6 +1429,103 @@ fn operator_symbol(item: &crate::stdlib::StdlibItem) -> Option<&'static str> {
 
 pub(super) fn core_type_uri(id: CoreTypeId, library: &StandardLibrary) -> String {
     format!("/stdlib/types/{}/index.md", library.core_type(id).name)
+}
+
+pub(super) fn language_item_uri(id: LanguageItemId) -> String {
+    let language = LanguageCatalog::new();
+    let item = language.item(id);
+    if matches!(item.kind, LanguageItemKind::BuiltinType(_)) {
+        return format!("/stdlib/types/{}/index.md", item.name);
+    }
+    let slug = match item.name {
+        "==" => "equality".to_owned(),
+        "!=" => "inequality".to_owned(),
+        "T?" => "optional-type".to_owned(),
+        "T!" => "fallible-type".to_owned(),
+        "[T; N]" => "array-type".to_owned(),
+        "///" => "documentation-comment".to_owned(),
+        name => documentation_slug(name),
+    };
+    format!("/language/{slug}.md")
+}
+
+pub fn migration_concept_uri(id: MigrationConceptId) -> String {
+    migration_topic_uri(id.as_str())
+}
+
+pub(crate) fn migration_topic_uri(topic: &str) -> String {
+    format!("/migration/{}.md", topic.replace('.', "/"))
+}
+
+fn documentation_slug(name: &str) -> String {
+    let mut slug = String::new();
+    let mut separator = false;
+    let mut previous_was_lowercase = false;
+    for character in name.chars() {
+        if character.is_ascii_alphanumeric() {
+            if (separator || (character.is_ascii_uppercase() && previous_was_lowercase))
+                && !slug.is_empty()
+            {
+                slug.push('-');
+            }
+            separator = false;
+            slug.push(character.to_ascii_lowercase());
+            previous_was_lowercase = character.is_ascii_lowercase();
+        } else {
+            separator = true;
+            previous_was_lowercase = false;
+        }
+    }
+    slug
+}
+
+fn language_item_kind_label(kind: LanguageItemKind) -> &'static str {
+    match kind {
+        LanguageItemKind::Keyword => "keyword",
+        LanguageItemKind::Declaration => "declaration",
+        LanguageItemKind::Syntax => "syntax",
+        LanguageItemKind::BuiltinType(_) => "built-in type",
+        LanguageItemKind::SnapshotRoot => "contextual value",
+        LanguageItemKind::Action(_) => "lifecycle block",
+    }
+}
+
+fn migration_target_uri(target: MigrationTarget, library: &StandardLibrary) -> Option<String> {
+    match target {
+        MigrationTarget::Language(name) => {
+            LanguageCatalog::new()
+                .item_for_source_token(name)
+                .map(|item| match item.kind {
+                    LanguageItemKind::BuiltinType(ty) => core_type_uri(ty, library),
+                    _ => language_item_uri(item.id),
+                })
+        }
+        MigrationTarget::StandardLibraryType(name) => library
+            .type_by_name(name)
+            .map(|ty| symbol_uri(StdlibSymbolId::Type(ty.id), library))
+            .or_else(|| {
+                library
+                    .core_types()
+                    .iter()
+                    .find(|ty| ty.name == name)
+                    .map(|ty| core_type_uri(ty.id, library))
+            }),
+        MigrationTarget::StandardLibraryItem(name) => library
+            .item_by_name(name)
+            .map(|item| symbol_uri(StdlibSymbolId::Item(item.id), library)),
+        MigrationTarget::StateProvider(name) => library
+            .state_provider_by_name(name)
+            .map(|provider| symbol_uri(StdlibSymbolId::StateProvider(provider.id), library)),
+    }
+}
+
+fn migration_target_kind(target: MigrationTarget) -> &'static str {
+    match target {
+        MigrationTarget::Language(_) => "language",
+        MigrationTarget::StandardLibraryType(_) => "type",
+        MigrationTarget::StandardLibraryItem(_) => "standard library",
+        MigrationTarget::StateProvider(_) => "state provider",
+    }
 }
 
 pub(super) fn symbol_uri(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
@@ -1288,7 +1654,7 @@ mod tests {
         assert!(page.markdown.contains("\n\n# Duration\n"));
         assert!(
             page.markdown
-                .starts_with("[Standard library](../../../index.md) / Duration")
+                .starts_with("[SplitScript reference](../../../index.md) / Duration")
         );
         assert!(
             page.markdown
@@ -1301,8 +1667,10 @@ mod tests {
     fn reference_root_only_contains_top_level_declarations() {
         let reference = DocumentationReference::default();
         let page = reference.page("/index.md").expect("root page exists");
-        assert_eq!(page.title, "SplitScript standard library");
-        assert!(page.markdown.contains("# SplitScript standard library"));
+        assert_eq!(page.title, "SplitScript reference");
+        assert!(page.markdown.contains("# SplitScript reference"));
+        assert!(page.markdown.contains("[Language](language/index.md)"));
+        assert!(page.markdown.contains("[Migration](migration/index.md)"));
         assert!(
             page.markdown
                 .contains("[Duration](stdlib/types/Duration/index.md)")
@@ -1325,21 +1693,21 @@ mod tests {
             .page("/stdlib/types/Duration/methods/fromSeconds.md")
             .expect("Duration.fromSeconds has a page");
         assert!(method.markdown.starts_with(
-            "[Standard library](../../../../index.md) / [Duration](../index.md) / fromSeconds"
+            "[SplitScript reference](../../../../index.md) / [Duration](../index.md) / fromSeconds"
         ));
 
         let field = reference
             .page("/stdlib/types/FileVersion/fields/major.md")
             .expect("FileVersion.major has a page");
         assert!(field.markdown.starts_with(
-            "[Standard library](../../../../index.md) / [FileVersion](../index.md) / major"
+            "[SplitScript reference](../../../../index.md) / [FileVersion](../index.md) / major"
         ));
 
         let variant = reference
             .page("/stdlib/types/TimerState/variants/Running.md")
             .expect("TimerState.Running has a page");
         assert!(variant.markdown.starts_with(
-            "[Standard library](../../../../index.md) / [TimerState](../index.md) / Running"
+            "[SplitScript reference](../../../../index.md) / [TimerState](../index.md) / Running"
         ));
     }
 
@@ -1364,6 +1732,75 @@ mod tests {
         );
         assert!(!page.markdown.contains("# state \"game.exe\""));
         assert!(!page.markdown.contains("# let player"));
+    }
+
+    #[test]
+    fn language_and_migration_catalogs_are_navigable_reference_pages() {
+        let reference = DocumentationReference::default();
+        let index = reference.index();
+
+        let while_attached = index
+            .iter()
+            .find(|entry| entry.title == "whileAttached" && entry.kind == "lifecycle block")
+            .expect("language lifecycle blocks are searchable");
+        assert_eq!(while_attached.uri, "/language/while-attached.md");
+        let language_page = reference
+            .page(&while_attached.uri)
+            .expect("language item has a page");
+        assert!(language_page.markdown.starts_with(
+            "[SplitScript reference](../index.md) / [Language](index.md) / whileAttached"
+        ));
+        assert!(language_page.markdown.contains("# whileAttached"));
+        assert!(language_page.markdown.contains("_lifecycle block_"));
+        assert!(
+            language_page
+                .markdown
+                .contains("<pre class=\"hljs splitscript-code\">")
+        );
+
+        let update = index
+            .iter()
+            .find(|entry| entry.signature.as_deref() == Some("asl.lifecycle.update"))
+            .expect("migration concepts are searchable by stable identity");
+        assert_eq!(update.uri, "/migration/asl/lifecycle/update.md");
+        let migration_page = reference.page(&update.uri).expect("migration page exists");
+        assert!(migration_page.markdown.contains("# update lifecycle block"));
+        assert!(
+            migration_page
+                .markdown
+                .contains("[whileAttached](../../../language/while-attached.md)")
+        );
+        assert!(
+            migration_page
+                .markdown
+                .contains("../../../guides/asl-porting.md#legacy-asl-lifecycle-blocks")
+        );
+
+        let guide = reference
+            .page("/guides/asl-porting.md")
+            .expect("the canonical porting guide is bundled");
+        assert!(guide.markdown.contains("# Porting ASL to SplitScript"));
+        assert!(guide.markdown.contains("## Legacy ASL lifecycle blocks"));
+    }
+
+    #[test]
+    fn every_searchable_documentation_identity_has_one_page() {
+        let reference = DocumentationReference::default();
+        let index = reference.index();
+        let mut uris = std::collections::HashSet::new();
+        for entry in index {
+            assert!(
+                uris.insert(entry.uri.clone()),
+                "duplicate URI `{}`",
+                entry.uri
+            );
+            assert!(
+                reference.page(&entry.uri).is_some(),
+                "missing page for `{}` ({})",
+                entry.title,
+                entry.uri,
+            );
+        }
     }
 
     #[test]
@@ -1416,7 +1853,7 @@ mod tests {
 
         let operator = reference.page(&add.uri).expect("the + operator has a page");
         assert!(operator.markdown.starts_with(
-            "[Standard library](../../../../index.md) / [Numeric](../index.md) / add"
+            "[SplitScript reference](../../../../index.md) / [Numeric](../index.md) / add"
         ));
         assert!(operator.markdown.contains("\n\n_Operator_\n\n"));
 

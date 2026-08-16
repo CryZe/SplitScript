@@ -62,6 +62,36 @@ fn recovering_parse_reports_multiple_errors_and_keeps_later_declarations() {
 }
 
 #[test]
+fn missing_state_uses_canonical_attachment_syntax() {
+    let recovered = splitscript::parse_recovering("fn helper() { return 1 }").unwrap();
+    let diagnostic = recovered
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("attachment `state`"))
+        .expect("missing state has a focused diagnostic");
+
+    assert_eq!(
+        diagnostic.message,
+        "a SplitScript autosplitter needs one attachment `state` declaration"
+    );
+    assert!(diagnostic.notes.iter().any(|note| {
+        note.contains("state \"game.exe\" { ... }") && note.contains("state GBA { ... }")
+    }));
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("helper module"))
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .all(|note| !note.contains("state(process"))
+    );
+}
+
+#[test]
 fn legacy_lifecycle_blocks_get_semantic_migration_guidance() {
     let source = r#"
         state "game.exe" {}
@@ -109,6 +139,23 @@ fn legacy_lifecycle_blocks_get_semantic_migration_guidance() {
             .iter()
             .all(|diagnostic| diagnostic.fixes.is_empty()),
         "lifecycle migration cannot be a blind machine-applicable rename"
+    );
+    let topics = recovered
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| diagnostic.migration_topic.as_deref().unwrap())
+        .collect::<Vec<_>>();
+    assert!(topics.contains(&"asl.lifecycle.startup"));
+    assert!(topics.contains(&"asl.lifecycle.init"));
+    assert!(topics.contains(&"asl.lifecycle.update"));
+    assert!(topics.contains(&"asl.lifecycle.exit"));
+    assert!(topics.contains(&"asl.lifecycle.shutdown"));
+    assert_eq!(
+        topics
+            .iter()
+            .filter(|topic| **topic == "asl.timer.events")
+            .count(),
+        3
     );
     assert_eq!(recovered.syntax().actions.len(), 1);
     assert_eq!(recovered.syntax().actions[0].kind.name(), "whileAttached");

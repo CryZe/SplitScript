@@ -4,12 +4,12 @@ use crate::{
     catalog::Example,
     database::{CompilerDatabase, DefinitionTarget},
     highlight::SemanticTokenKind,
-    language::{LanguageCatalog, LanguageItemKind},
+    language::LanguageCatalog,
     lexer::{Lexeme, TokenKind, TriviaKind, lex_lossless},
     stdlib::{StandardLibrary, StdlibSymbolId},
 };
 
-use super::reference::{core_type_uri, relative_document_link, symbol_uri};
+use super::reference::{core_type_uri, language_item_uri, relative_document_link, symbol_uri};
 
 #[derive(Debug, Clone)]
 struct Annotation {
@@ -260,6 +260,12 @@ fn lexical_target(
             &core_type_uri(ty.id, library),
         ));
     }
+    if let Some(item) = LanguageCatalog::new().item_for_source_token(name) {
+        return Some(relative_document_link(
+            current_uri,
+            &language_item_uri(item.id),
+        ));
+    }
     None
 }
 
@@ -271,12 +277,7 @@ fn target_uri(
     let target = match target {
         DefinitionTarget::StandardLibrary(item) => symbol_uri(StdlibSymbolId::Item(item), library),
         DefinitionTarget::StandardLibrarySymbol(symbol) => symbol_uri(symbol, library),
-        DefinitionTarget::Language(id) => {
-            let LanguageItemKind::BuiltinType(ty) = LanguageCatalog::new().item(id).kind else {
-                return None;
-            };
-            core_type_uri(ty, library)
-        }
+        DefinitionTarget::Language(id) => language_item_uri(id),
         DefinitionTarget::Source(_) => return None,
     };
     Some(relative_document_link(current_uri, &target))

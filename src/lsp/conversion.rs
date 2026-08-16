@@ -59,7 +59,7 @@ pub(super) fn diagnostic_json(uri: &str, source: &str, diagnostic: &Diagnostic) 
             })
         })
         .collect::<Vec<_>>();
-    json!({
+    let mut value = json!({
         "range": {
             "start": position(source, diagnostic.span.start),
             "end": position(source, diagnostic.span.end)
@@ -75,7 +75,17 @@ pub(super) fn diagnostic_json(uri: &str, source: &str, diagnostic: &Diagnostic) 
         "message": message,
         "relatedInformation": related_information,
         "data": { "fixes": fixes }
-    })
+    });
+    if let Some(topic) = &diagnostic.migration_topic {
+        value["codeDescription"] = json!({
+            "href": format!(
+                "splitscript-docs:{}",
+                crate::documentation::migration_topic_uri(topic),
+            )
+        });
+        value["data"]["migrationTopic"] = json!(topic);
+    }
+    value
 }
 
 pub(super) fn location_json(uri: &str, source: &str, span: Span) -> Value {

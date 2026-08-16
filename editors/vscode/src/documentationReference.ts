@@ -94,9 +94,9 @@ export class DocumentationReferenceController implements vscode.Disposable {
         );
         const items: DocumentationQuickPickItem[] = [
             {
-                label: '$(book) Standard library index',
+                label: '$(book) SplitScript reference',
                 description: 'reference',
-                detail: 'Browse every documented SplitScript standard-library symbol.',
+                detail: 'Browse the language, migration guidance, and standard library.',
                 uri: INDEX_URI,
                 alwaysShow: true,
             },
@@ -109,7 +109,7 @@ export class DocumentationReferenceController implements vscode.Disposable {
         ];
         const selected = await vscode.window.showQuickPick(items, {
             title: 'SplitScript documentation',
-            placeHolder: 'Search standard-library symbols',
+            placeHolder: 'Search language, migration, and standard-library documentation',
             matchOnDescription: true,
             matchOnDetail: true,
         });

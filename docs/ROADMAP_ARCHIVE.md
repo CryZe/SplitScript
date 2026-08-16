@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-16: navigable language and migration reference
+
+- Extended the compiler-owned documentation graph beyond the standard library
+  with searchable language items, lifecycle blocks, contextual roots, every
+  structured migration concept, and the canonical ASL porting guide. Pages use
+  stable hierarchical identities, breadcrumbs, compiler-checked examples, and
+  direct links from migration guidance to canonical language and library APIs.
+- Attached stable migration topics to structured parser, resolver, and type
+  checker diagnostics. The LSP publishes exact `splitscript-docs:` code links,
+  the embedded service preserves the topic, and the native CLI prints it.
+- Replaced the obsolete state-less-file error with the current single-file
+  autosplitter contract and canonical `state "game.exe" { ... }` / `state GBA
+  { ... }` syntax. Added graph-wide page/identity validation and focused
+  lifecycle, LSP, CLI, and parser coverage.
+
 ## 2026-08-15: explicit current-state overrides
 
 - Made `current.field = value` and compound forms first-class typed

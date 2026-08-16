@@ -148,6 +148,7 @@ pub struct ServiceDiagnostic {
     pub labels: Vec<ServiceDiagnosticLabel>,
     pub notes: Vec<String>,
     pub fixes: Vec<ServiceDiagnosticFix>,
+    pub migration_topic: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -256,6 +257,7 @@ impl From<Diagnostic> for ServiceDiagnostic {
                 .into_iter()
                 .map(ServiceDiagnosticFix::from)
                 .collect(),
+            migration_topic: diagnostic.migration_topic,
         }
     }
 }

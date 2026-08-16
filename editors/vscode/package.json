@@ -146,14 +146,14 @@
       },
       {
         "command": "splitscript.openDocumentation",
-        "title": "SplitScript: Open Standard Library Documentation",
-        "shortTitle": "Open Standard Library Documentation",
+        "title": "SplitScript: Open Documentation",
+        "shortTitle": "Open Documentation",
         "icon": "$(book)"
       },
       {
         "command": "splitscript.searchDocumentation",
-        "title": "SplitScript: Search Standard Library Documentation",
-        "shortTitle": "Search Standard Library Documentation",
+        "title": "SplitScript: Search Documentation",
+        "shortTitle": "Search Documentation",
         "icon": "$(search)"
       },
       {

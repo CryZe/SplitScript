@@ -251,8 +251,9 @@ impl Parser<'_> {
     pub(super) fn migration_diagnostic(&self, id: MigrationDiagnosticId, span: Span) -> Diagnostic {
         let metadata = migration_diagnostic(id)
             .expect("parser migration diagnostic IDs must exist in the migration catalog");
-        let mut diagnostic =
-            Diagnostic::new(metadata.message, span).with_primary_label(metadata.primary_label);
+        let mut diagnostic = Diagnostic::new(metadata.message, span)
+            .with_primary_label(metadata.primary_label)
+            .with_migration_topic(metadata.concept.as_str());
         for note in metadata.notes {
             diagnostic = diagnostic.with_note(*note);
         }

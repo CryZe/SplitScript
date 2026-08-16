@@ -506,7 +506,8 @@ impl Checker {
             let metadata =
                 migration_diagnostic(id).expect("type checker migration diagnostic IDs must exist");
             let mut diagnostic = Diagnostic::type_error(metadata.message, name_span)
-                .with_primary_label(metadata.primary_label);
+                .with_primary_label(metadata.primary_label)
+                .with_migration_topic(metadata.concept.as_str());
             for note in metadata.notes {
                 diagnostic = diagnostic.with_note(*note);
             }
@@ -969,7 +970,8 @@ impl Checker {
             let metadata =
                 migration_diagnostic(id).expect("type checker migration diagnostic IDs must exist");
             let mut diagnostic = Diagnostic::type_error(metadata.message, name_span)
-                .with_primary_label(metadata.primary_label);
+                .with_primary_label(metadata.primary_label)
+                .with_migration_topic(metadata.concept.as_str());
             for note in metadata.notes {
                 diagnostic = diagnostic.with_note(*note);
             }
@@ -986,7 +988,8 @@ impl Checker {
             let metadata = migration_diagnostic(ASL_SETTINGS_ADD_DIAGNOSTIC)
                 .expect("type checker migration diagnostic IDs must exist");
             let mut diagnostic = Diagnostic::type_error(metadata.message, name_span)
-                .with_primary_label(metadata.primary_label);
+                .with_primary_label(metadata.primary_label)
+                .with_migration_topic(metadata.concept.as_str());
             for note in metadata.notes {
                 diagnostic = diagnostic.with_note(*note);
             }
@@ -1565,7 +1568,8 @@ impl Checker {
                         let metadata = migration_diagnostic(id)
                             .expect("type checker migration diagnostic IDs must exist");
                         let mut diagnostic = Diagnostic::type_error(metadata.message, span)
-                            .with_primary_label(metadata.primary_label);
+                            .with_primary_label(metadata.primary_label)
+                            .with_migration_topic(metadata.concept.as_str());
                         for note in metadata.notes {
                             diagnostic = diagnostic.with_note(*note);
                         }
@@ -1796,7 +1800,8 @@ impl Checker {
         let metadata =
             migration_diagnostic(id).expect("type checker migration diagnostic IDs must exist");
         let mut diagnostic = Diagnostic::type_error(metadata.message, span)
-            .with_primary_label(metadata.primary_label);
+            .with_primary_label(metadata.primary_label)
+            .with_migration_topic(metadata.concept.as_str());
         for note in metadata.notes {
             diagnostic = diagnostic.with_note(*note);
         }

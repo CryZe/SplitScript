@@ -32,6 +32,11 @@ fn serves_compiler_owned_documentation_index_and_markdown_pages() {
             && entry["uri"] == "/stdlib/types/Duration/index.md"
             && entry["kind"] == "record"
     }));
+    assert!(entries.iter().any(|entry| {
+        entry["signature"] == "asl.lifecycle.update"
+            && entry["uri"] == "/migration/asl/lifecycle/update.md"
+            && entry["kind"] == "migration concept"
+    }));
 
     let page = server.handle(json!({
         "jsonrpc": "2.0",
@@ -45,6 +50,20 @@ fn serves_compiler_owned_documentation_index_and_markdown_pages() {
             .as_str()
             .unwrap()
             .contains("[fromSeconds](methods/fromSeconds.md)")
+    );
+
+    let migration = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 43,
+        "method": "splitscript/documentation/page",
+        "params": { "uri": "/migration/asl/lifecycle/update.md" }
+    }));
+    assert_eq!(migration[0]["result"]["title"], "update lifecycle block");
+    assert!(
+        migration[0]["result"]["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("[whileAttached](../../../language/while-attached.md)")
     );
 
     let missing = server.handle(json!({
@@ -609,6 +628,21 @@ fn diagnostic_conversion_preserves_notes_labels_and_fixes() {
     );
     assert_eq!(converted["data"]["fixes"][0]["title"], "replace it");
     assert_eq!(converted["data"]["fixes"][0]["edits"][0]["newText"], "0");
+}
+
+#[test]
+fn migration_diagnostics_link_to_their_compiler_owned_reference_page() {
+    use crate::ast::Span;
+
+    let diagnostic = Diagnostic::new("legacy lifecycle", Span { start: 0, end: 6 })
+        .with_migration_topic("asl.lifecycle.update");
+    let converted = diagnostic_json("file:///game.split", "update", &diagnostic);
+
+    assert_eq!(
+        converted["codeDescription"]["href"],
+        "splitscript-docs:/migration/asl/lifecycle/update.md"
+    );
+    assert_eq!(converted["data"]["migrationTopic"], "asl.lifecycle.update");
 }
 
 #[test]

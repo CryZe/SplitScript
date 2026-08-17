@@ -37,6 +37,17 @@ try {
 
     worker.postMessage({
         jsonrpc: "2.0",
+        id: 2,
+        method: "splitscript/documentation/page",
+        params: { uri: "/stdlib/types/Duration/index.md" },
+    });
+    const [documentation] = await once(worker, "message");
+    assert.equal(documentation.id, 2);
+    assert.equal(documentation.result.title, "Duration");
+    assert.match(documentation.result.markdown, /\[fromSeconds\]\(methods\/fromSeconds\.md\)/);
+
+    worker.postMessage({
+        jsonrpc: "2.0",
         method: "textDocument/didOpen",
         params: {
             textDocument: {
@@ -54,12 +65,12 @@ try {
 
     worker.postMessage({
         jsonrpc: "2.0",
-        id: 2,
+        id: 3,
         method: "shutdown",
         params: null,
     });
     const [shutdown] = await once(worker, "message");
-    assert.equal(shutdown.id, 2);
+    assert.equal(shutdown.id, 3);
     assert.equal(shutdown.result, null);
     worker.postMessage({ jsonrpc: "2.0", method: "exit", params: null });
 } finally {

@@ -24,6 +24,33 @@ export async function run(): Promise<void> {
     await vscode.commands.executeCommand('splitscript.restartLanguageServer');
     await hoverAt(script, hoverPosition);
 
+    const printPosition = document.positionAt(document.getText().indexOf('print') + 1);
+    const printHovers = await hoverAt(script, printPosition);
+    const printMarkdown = printHovers.flatMap(hover => hover.contents)
+        .filter(
+            (content): content is vscode.MarkdownString =>
+                content instanceof vscode.MarkdownString,
+        )
+        .map(content => content.value)
+        .join('\n');
+    assert(
+        printMarkdown.includes(
+            'command:splitscript.openDocumentation?%5B%22%2Fstdlib%2Ffunctions%2Fprint.md%22%5D',
+        ),
+        'catalog hover does not link to its exact compiler-owned documentation page',
+    );
+    await vscode.commands.executeCommand(
+        'splitscript.openDocumentation',
+        '/stdlib/functions/print.md',
+    );
+    const printDocumentation = await vscode.workspace.openTextDocument(
+        vscode.Uri.parse('splitscript-docs:/stdlib/functions/print.md'),
+    );
+    assert(
+        printDocumentation.getText().includes('# print'),
+        'the documentation command did not open the requested symbol page',
+    );
+
     await vscode.commands.executeCommand('splitscript.openDocumentation');
     await waitFor(
         async () => (vscode.window.tabGroups.all.length >= 2 ? true : undefined),
@@ -98,14 +125,17 @@ export async function run(): Promise<void> {
     }
 }
 
-async function hoverAt(uri: vscode.Uri, position: vscode.Position): Promise<void> {
-    await waitFor(async () => {
+async function hoverAt(
+    uri: vscode.Uri,
+    position: vscode.Position,
+): Promise<readonly vscode.Hover[]> {
+    return waitFor(async () => {
         const hovers = await vscode.commands.executeCommand<readonly vscode.Hover[]>(
             'vscode.executeHoverProvider',
             uri,
             position,
         );
-        return hovers !== undefined && hovers.length > 0 ? true : undefined;
+        return hovers !== undefined && hovers.length > 0 ? hovers : undefined;
     }, 'the browser language server returned no hover');
 }
 

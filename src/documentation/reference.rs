@@ -69,6 +69,14 @@ pub struct DocumentationReference {
 }
 
 impl DocumentationReference {
+    /// Validates catalogs and every rendered page in the documentation graph.
+    ///
+    /// This checks the same graph consumed by native tools and editor clients,
+    /// including canonical page identities, local links, and heading anchors.
+    pub fn validate(&self) -> Vec<String> {
+        super::validation::validate(self, &self.library)
+    }
+
     /// Returns the stable virtual page for a language-catalog item.
     pub fn language_item_uri(&self, item: LanguageItemId) -> String {
         language_item_uri(item)
@@ -806,7 +814,7 @@ impl DocumentationReference {
         }
         DocumentationPage {
             uri: uri.to_owned(),
-            title: "SplitScript language".to_owned(),
+            title: "Language".to_owned(),
             markdown,
         }
     }
@@ -872,7 +880,7 @@ impl DocumentationReference {
         }
         DocumentationPage {
             uri: uri.to_owned(),
-            title: "Migrate to SplitScript".to_owned(),
+            title: "Migration".to_owned(),
             markdown,
         }
     }

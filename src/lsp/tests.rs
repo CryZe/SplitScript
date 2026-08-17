@@ -19,6 +19,7 @@ fn initialize(server: &mut LanguageServer) {
 fn serves_compiler_owned_documentation_index_and_markdown_pages() {
     let mut server = LanguageServer::default();
     initialize(&mut server);
+    let reference = DocumentationReference::default();
 
     let index = server.handle(json!({
         "jsonrpc": "2.0",
@@ -27,6 +28,11 @@ fn serves_compiler_owned_documentation_index_and_markdown_pages() {
         "params": {}
     }));
     let entries = index[0]["result"].as_array().unwrap();
+    assert_eq!(
+        index[0]["result"],
+        serde_json::to_value(reference.index()).unwrap(),
+        "the LSP index must be the compiler-owned reference without an adapter projection"
+    );
     assert!(entries.iter().any(|entry| {
         entry["title"] == "Duration"
             && entry["uri"] == "/stdlib/types/Duration/index.md"
@@ -73,6 +79,28 @@ fn serves_compiler_owned_documentation_index_and_markdown_pages() {
         "params": { "uri": "/missing.md" }
     }));
     assert_eq!(missing[0]["error"]["code"], -32602);
+
+    let page_uris = std::iter::once("/index.md".to_owned())
+        .chain(reference.index().into_iter().map(|entry| entry.uri));
+    for (request_id, page_uri) in page_uris.enumerate() {
+        let response = server.handle(json!({
+            "jsonrpc": "2.0",
+            "id": request_id + 100,
+            "method": "splitscript/documentation/page",
+            "params": { "uri": page_uri }
+        }));
+        assert_eq!(
+            response[0]["result"],
+            serde_json::to_value(
+                reference
+                    .page(&page_uri)
+                    .expect("every reference page exists")
+            )
+            .unwrap(),
+            "LSP page differs from compiler-owned page `{}`",
+            page_uri,
+        );
+    }
 }
 
 #[test]

@@ -1,5 +1,19 @@
 # SplitScript roadmap
 
+## 2026-08-17: validated documentation graph across compiler products
+
+- Added one compiler-owned validation pass over all 413 reference
+  pages. It composes language, migration, and standard-library catalog
+  validation with canonical page identity, complete metadata, relative link,
+  semantic-code HTML link, and heading-fragment checks.
+- Added a deterministic reference-index snapshot so an accidental symbol,
+  hierarchy, title, signature, or summary change fails repository verification
+  and requires an intentional expectation update.
+- Compared every native LSP page with the direct documentation model and added
+  exact-page checks through both packaged desktop and browser language-server
+  workers. The VS Code web-host acceptance test now verifies that catalog hover
+  opens the requested symbol page beside the script.
+
 ## 2026-08-17: documentation links in ordinary editor workflows
 
 - Added exact compiler-owned documentation identities to catalog-backed hover

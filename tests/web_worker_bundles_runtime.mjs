@@ -63,6 +63,16 @@ const initialized = await language.nextMessage();
 assert.equal(initialized.id, 3);
 assert.equal(initialized.result.serverInfo.name, "splitls");
 assert.equal(initialized.result.capabilities.semanticTokensProvider.full, true);
+language.dispatch({
+    jsonrpc: "2.0",
+    id: 4,
+    method: "splitscript/documentation/page",
+    params: { uri: "/stdlib/types/Duration/index.md" },
+});
+const documentation = await language.nextMessage();
+assert.equal(documentation.id, 4);
+assert.equal(documentation.result.title, "Duration");
+assert.match(documentation.result.markdown, /\[fromSeconds\]\(methods\/fromSeconds\.md\)/);
 
 console.log("web extension and browser worker bundles passed");
 

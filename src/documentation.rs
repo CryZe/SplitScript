@@ -4,6 +4,7 @@ mod bundled;
 mod code;
 mod entry;
 mod reference;
+mod validation;
 
 pub use entry::{DocumentedParameter, StandardLibraryDocumentation};
 pub(crate) use reference::migration_topic_uri;

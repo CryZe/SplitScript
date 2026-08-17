@@ -47,10 +47,6 @@ VS Code opens the index beside a script, supports search, breadcrumbs, links,
 and compiler-derived semantic code. Keep that working base and finish the
 missing graph rather than rebuilding the viewer.
 
-- [ ] Cover the documentation graph and reference contract with catalog
-  validation, link checking, deterministic snapshots, native/bundled-server
-  parity, and VS Code desktop/web integration tests. Missing documentation or
-  broken related-symbol and migration links should fail the repository check.
 - [ ] Finish semantic code in generated reference pages. Signatures now use
   catalog identities for syntax coloring and navigation, and examples can use
   rustdoc-style hidden `# ` fixture lines so the compiler can map exact

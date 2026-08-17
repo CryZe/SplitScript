@@ -1165,6 +1165,15 @@ only that one command in language-server Markdown, and the command opens the
 exact page beside the script; other command URIs remain inert. Standard-library
 and language go-to-definition responses use the same URI directly.
 
+[`src/documentation/validation.rs`](../src/documentation/validation.rs) checks
+the complete rendered graph rather than a hand-picked set of pages. It composes
+the three catalog validators, requires complete and unique index metadata,
+renders every indexed page, resolves Markdown and semantic-code HTML links
+relative to their virtual document, and verifies heading fragments. A stable
+fingerprint snapshots the ordered reference index. Native LSP tests compare all
+pages with this model, while packaged desktop and browser worker tests exercise
+the same page endpoint through the compiled adapter.
+
 ## VS Code client
 
 [`editors/vscode`](../editors/vscode) is a thin TypeScript extension around the

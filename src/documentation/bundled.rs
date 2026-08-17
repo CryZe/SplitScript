@@ -1,6 +1,19 @@
 //! Self-contained maintained guides bundled into every documentation frontend.
 
-use super::{DocumentationIndexEntry, DocumentationPage, reference::relative_document_link};
+use std::collections::HashSet;
+
+use crate::{
+    CompilerContext,
+    migration::{MigrationCatalog, MigrationConcept, MigrationTarget, markdown_anchor},
+};
+
+use super::{
+    DocumentationIndexEntry, DocumentationPage,
+    reference::{
+        append_reference_table_header, escape_markdown_table_cell, migration_concept_uri,
+        migration_target_uri, relative_document_link,
+    },
+};
 
 #[derive(Debug, Clone, Copy)]
 struct BundledGuide {
@@ -29,6 +42,7 @@ pub(super) fn index() -> impl Iterator<Item = DocumentationIndexEntry> {
 
 pub(super) fn page(uri: &str) -> Option<DocumentationPage> {
     let guide = GUIDES.iter().find(|guide| guide.uri == uri)?;
+    let source = rendered_guide_source(guide.source);
     Some(DocumentationPage {
         uri: guide.uri.to_owned(),
         title: guide.title.to_owned(),
@@ -36,9 +50,103 @@ pub(super) fn page(uri: &str) -> Option<DocumentationPage> {
             "[SplitScript reference]({}) / {}\n\n{}",
             relative_document_link(guide.uri, "/index.md"),
             guide.title,
-            rendered_guide_source(guide.source),
+            insert_migration_overview(guide.uri, &source, guide.source),
         ),
     })
+}
+
+/// Adds a compact catalog-owned map ahead of the detailed recipes. Grouping by
+/// cookbook heading keeps this useful as orientation rather than reproducing
+/// the exhaustive migration index, while canonical target links still resolve
+/// through the same language and standard-library catalogs as hover and
+/// completion.
+fn insert_migration_overview(uri: &str, rendered: &str, source: &str) -> String {
+    let Some((introduction, recipes)) = rendered.split_once("\n## ") else {
+        return rendered.to_owned();
+    };
+    let overview = migration_overview(uri, source);
+    format!("{introduction}\n\n{overview}\n\n## {recipes}")
+}
+
+fn migration_overview(uri: &str, source: &str) -> String {
+    let context = CompilerContext::new();
+    let library = context.standard_library();
+    let migration = MigrationCatalog::new(context);
+    let mut markdown = String::from(
+        "## Quick migration map\n\n\
+         Each row links a legacy source pattern to its focused recipe and the canonical \
+         SplitScript symbols used by that recipe. Open a symbol for its complete API \
+         documentation.\n",
+    );
+    append_reference_table_header(&mut markdown, &["Legacy source", "Canonical SplitScript"]);
+
+    for (heading, anchor) in cookbook_headings(source) {
+        let concepts = migration
+            .concepts()
+            .iter()
+            .filter(|concept| concept.cookbook_anchor == Some(anchor.as_str()))
+            .collect::<Vec<_>>();
+        if concepts.is_empty() {
+            continue;
+        }
+
+        let recipe = format!("[{}](#{anchor})", escape_markdown_table_cell(&heading),);
+        let targets = overview_targets(uri, &migration, &library, &concepts);
+        markdown.push_str(&format!("\n| {recipe} | {targets} |"));
+    }
+    markdown
+}
+
+fn cookbook_headings(source: &str) -> impl Iterator<Item = (String, String)> + '_ {
+    source.lines().filter_map(|line| {
+        let heading = line.strip_prefix("## ")?;
+        Some((heading.to_owned(), markdown_anchor(heading)))
+    })
+}
+
+fn overview_targets(
+    uri: &str,
+    migration: &MigrationCatalog,
+    library: &crate::stdlib::StandardLibrary,
+    concepts: &[&MigrationConcept],
+) -> String {
+    let mut seen = HashSet::new();
+    let mut seen_unavailable = HashSet::new();
+    let mut entries = Vec::new();
+    for concept in concepts {
+        for target in concept.targets {
+            if !seen.insert(*target) {
+                continue;
+            }
+            entries.push(overview_target(uri, migration, library, *target));
+        }
+    }
+
+    for concept in concepts.iter().filter(|concept| concept.targets.is_empty()) {
+        if !seen_unavailable.insert(concept.id) {
+            continue;
+        }
+        entries.push(format!(
+            "{}: [{}]({})",
+            concept.support.label(),
+            escape_markdown_table_cell(concept.name),
+            relative_document_link(uri, &migration_concept_uri(concept.id)),
+        ));
+    }
+    entries.join(", ")
+}
+
+fn overview_target(
+    uri: &str,
+    migration: &MigrationCatalog,
+    library: &crate::stdlib::StandardLibrary,
+    target: MigrationTarget,
+) -> String {
+    let label = escape_markdown_table_cell(&migration.target_display(target));
+    migration_target_uri(target, library).map_or_else(
+        || format!("`{label}`"),
+        |target_uri| format!("[{label}]({})", relative_document_link(uri, &target_uri),),
+    )
 }
 
 /// Renders rustdoc-style hidden lines out of SplitScript examples while
@@ -159,6 +267,25 @@ mod tests {
             failures.is_empty(),
             "bundled guide examples did not compile:\n{}",
             failures.join("\n\n")
+        );
+    }
+
+    #[test]
+    fn asl_guide_has_a_catalog_owned_migration_map() {
+        let page = page("/guides/asl-porting.md").expect("ASL guide exists");
+        assert!(page.markdown.contains("## Quick migration map"));
+        assert!(
+            page.markdown
+                .contains("[Attachment state declarations](#attachment-state-declarations)")
+        );
+        assert!(page.markdown.contains("../language/state.md"));
+        assert!(
+            page.markdown
+                .contains("[Process.scan](../stdlib/types/Process/methods/scan.md)")
+        );
+        assert!(
+            page.markdown
+                .contains("Planned: [shutdown lifecycle block](")
         );
     }
 

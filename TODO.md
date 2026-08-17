@@ -150,12 +150,12 @@ General rules:
   casts, monotonic delays, exact process-name matching, and reusable helpers
   that accept arbitrary snapshots explicitly. Snapshot-dependent helpers that
   use the contextual `old`/`current` values directly are now documented and
-  compiler-checked. Add a concise source-to-target
-  capability table that links to complete standard-library symbols instead of
-  making authors search the language reference. Compile the owning maintained
-  examples in `cargo xtask check`. All current focused snippets now compile
-  with adjacent rustdoc-style hidden context; require the same of every new or
-  changed recipe.
+  compiler-checked. Compile the owning maintained examples in
+  `cargo xtask check`. All current focused snippets now compile with adjacent
+  rustdoc-style hidden context; require the same of every new or changed
+  recipe. The bundled guide's catalog-generated quick map now groups migration
+  concepts by focused recipe and links every canonical target to its complete
+  language or standard-library page.
 - [ ] Expand capability-driven diagnostics and code actions beyond the initial
   structured entries. Emit one focused explanation and suppress predictable
   cascades for recognizable ASL constructs, including legacy lifecycle blocks,

@@ -1,5 +1,25 @@
 # SplitScript roadmap
 
+## 2026-08-17: race-free standard-library initialization
+
+- Replaced the check-then-initialize sequence for compiler-derived
+  standard-library operation metadata with `OnceLock`'s atomic initialization
+  boundary, so parallel compiler and documentation requests cannot derive the
+  same source bodies concurrently.
+- Added a multithreaded regression test that proves one initialization closure
+  wins and every caller observes the initialized catalog.
+
+## 2026-08-17: navigable migration map
+
+- Added a concise quick map to the bundled ASL porting guide, grouping the
+  compiler-owned migration catalog by focused cookbook recipe rather than
+  duplicating its exhaustive concept index.
+- Linked canonical targets directly into the generated language and
+  standard-library reference, while keeping target-less planned host features
+  visible through their detailed migration pages.
+- Validated the generated recipe anchors and symbol links as part of the
+  complete documentation graph.
+
 ## 2026-08-17: compiler-checked porting cookbook
 
 - Made every SplitScript fence in the bundled ASL porting guide compile as an

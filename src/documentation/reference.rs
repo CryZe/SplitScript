@@ -1359,7 +1359,7 @@ fn member_summary(member: DocumentationMember, library: &StandardLibrary) -> &'s
     }
 }
 
-fn append_reference_table_header(markdown: &mut String, columns: &[&str]) {
+pub(super) fn append_reference_table_header(markdown: &mut String, columns: &[&str]) {
     markdown.push_str("\n<div class=\"splitscript-reference-table\"></div>\n\n|");
     for column in columns {
         markdown.push_str(&format!(" {column} |"));
@@ -1370,7 +1370,7 @@ fn append_reference_table_header(markdown: &mut String, columns: &[&str]) {
     }
 }
 
-fn escape_markdown_table_cell(value: &str) -> String {
+pub(super) fn escape_markdown_table_cell(value: &str) -> String {
     value.replace('|', "\\|")
 }
 
@@ -1537,7 +1537,10 @@ fn language_item_kind_label(kind: LanguageItemKind) -> &'static str {
     }
 }
 
-fn migration_target_uri(target: MigrationTarget, library: &StandardLibrary) -> Option<String> {
+pub(super) fn migration_target_uri(
+    target: MigrationTarget,
+    library: &StandardLibrary,
+) -> Option<String> {
     match target {
         MigrationTarget::Language(name) => {
             LanguageCatalog::new()

@@ -164,7 +164,7 @@ fn cookbook_anchors() -> impl Iterator<Item = String> {
         .map(markdown_anchor)
 }
 
-fn markdown_anchor(heading: &str) -> String {
+pub(crate) fn markdown_anchor(heading: &str) -> String {
     let mut anchor = String::new();
     let mut pending_separator = false;
     for character in heading.chars().flat_map(char::to_lowercase) {

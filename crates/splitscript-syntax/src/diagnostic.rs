@@ -122,6 +122,50 @@ pub struct DiagnosticFix {
     pub edits: Vec<TextEdit>,
 }
 
+/// Lazily allocated collection of machine-readable diagnostic fixes.
+///
+/// Diagnostics are the parser's error value, so keeping the empty case to one
+/// pointer avoids inflating every small `Result` and does not allocate for the
+/// common no-fix case. Slice behavior remains available through dereferencing.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DiagnosticFixes(Option<Box<DiagnosticFixStorage>>);
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct DiagnosticFixStorage {
+    values: Vec<DiagnosticFix>,
+}
+
+impl DiagnosticFixes {
+    pub fn push(&mut self, fix: DiagnosticFix) {
+        self.0.get_or_insert_with(Box::default).values.push(fix);
+    }
+
+    pub fn as_slice(&self) -> &[DiagnosticFix] {
+        self
+    }
+}
+
+impl std::ops::Deref for DiagnosticFixes {
+    type Target = [DiagnosticFix];
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+            .as_deref()
+            .map_or(&[], |storage| storage.values.as_slice())
+    }
+}
+
+impl IntoIterator for DiagnosticFixes {
+    type Item = DiagnosticFix;
+    type IntoIter = std::vec::IntoIter<DiagnosticFix>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0
+            .map_or_else(Vec::new, |storage| storage.values)
+            .into_iter()
+    }
+}
+
 impl fmt::Display for DiagnosticSeverity {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
@@ -143,10 +187,10 @@ pub struct Diagnostic {
     pub span: Span,
     pub labels: Vec<DiagnosticLabel>,
     pub notes: Vec<String>,
-    pub fixes: Vec<DiagnosticFix>,
+    pub fixes: DiagnosticFixes,
     /// Stable compiler-owned migration concept identity. Frontends decide how
     /// to present or open it.
-    pub migration_topic: Option<String>,
+    pub migration_topic: Option<Box<str>>,
 }
 
 impl Diagnostic {
@@ -186,7 +230,7 @@ impl Diagnostic {
                 message: None,
             }],
             notes: Vec::new(),
-            fixes: Vec::new(),
+            fixes: DiagnosticFixes::default(),
             migration_topic: None,
         }
     }
@@ -216,7 +260,7 @@ impl Diagnostic {
     }
 
     pub fn with_migration_topic(mut self, topic: impl Into<String>) -> Self {
-        self.migration_topic = Some(topic.into());
+        self.migration_topic = Some(topic.into().into_boxed_str());
         self
     }
 
@@ -261,7 +305,7 @@ impl Diagnostic {
         for note in &self.notes {
             rendered.push_str(&format!("\n  = note: {note}"));
         }
-        for fix in &self.fixes {
+        for fix in self.fixes.iter() {
             rendered.push_str(&format!(
                 "\n  = help: {} ({})",
                 fix.title, fix.applicability

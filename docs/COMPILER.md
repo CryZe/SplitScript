@@ -1142,7 +1142,9 @@ of rebuilding catalog presentation.
 
 [`src/documentation/reference.rs`](../src/documentation/reference.rs) joins
 that standard-library model with `LanguageCatalog`, `MigrationCatalog`, and the
-canonical ASL porting guide into one renderer-independent hierarchy. Stable
+self-contained maintained guides from
+[`src/documentation/bundled.rs`](../src/documentation/bundled.rs) into one
+renderer-independent hierarchy. Stable
 virtual paths identify language constructs, migration concepts, cookbook
 anchors, namespaces, types, capabilities, members, variants, and operators.
 Migration pages resolve their canonical targets back through the same language
@@ -1151,7 +1153,10 @@ and exact definition links. The LSP serves both the searchable index and pages;
 the VS Code client only presents those Markdown documents. Structured migration
 diagnostics carry their concept identity through native CLI, LSP, and embedded
 compiler responses, so frontends do not infer a documentation destination from
-error prose.
+error prose. Native `splitc docs` resolves an exact catalog title, stable
+migration identity, or virtual path and renders the same Markdown. Guide links
+are intentionally self-contained: focused snippets explain individual concepts,
+while complete `.split` examples are neither bundled nor required navigation.
 
 ## VS Code client
 

@@ -129,13 +129,23 @@ splitc game.split -o game.wasm --profile release
 splitc game.split -o game.wasm --deny warnings --allow SS1003
 splitc fmt game.split
 splitc fmt game.split --check
+splitc docs
+splitc docs Process.read
+splitc docs asl.lifecycle.update
 splitc --help
 splitc --version
 ```
 
-`splitc --help` documents compilation, watch, formatting, profiles, and warning
-policy. Command-specific help is available through `splitc help watch`,
-`splitc watch --help`, and the corresponding `fmt` forms. Help and version
+`splitc docs` renders the compiler-owned reference as Markdown. An exact
+standard-library title, stable migration topic printed by a diagnostic, or
+virtual reference path selects one page; the command does not require a source
+checkout. The self-contained porting guide is bundled and uses focused snippets
+instead of depending on, linking to, or embedding complete autosplitter files.
+
+`splitc --help` documents compilation, watch, formatting, documentation,
+profiles, and warning policy. Command-specific help is available through
+`splitc help watch`, `splitc watch --help`, and the corresponding `fmt` and
+`docs` forms. Help and version
 queries write to standard output and exit successfully; invalid invocations
 retain a distinct usage-error exit status.
 

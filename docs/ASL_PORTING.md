@@ -1,20 +1,11 @@
 # Porting ASL to SplitScript
 
-This guide records mappings proven by maintained, host-executed ports. It is
-not a token-substitution table: ASL's dynamic state and C# runtime sometimes
-need a typed SplitScript design rather than a literal translation.
-
-The complete reference for the recipes below is
-[`examples/a_plague_tale_innocence.split`](../examples/a_plague_tale_innocence.split).
-`cargo xtask check` compiles that source in release mode and runs its Steam,
-Epic, Xbox, and unsupported-build fixtures. The smaller
-[`examples/arietta_of_spirits.split`](../examples/arietta_of_spirits.split)
-example isolates bounded native strings, lifecycle transitions, and pause-menu
-load removal. [`examples/aquanox.split`](../examples/aquanox.split) demonstrates
-a nullable native-string watcher whose failed read is observable as `None`.
-The [maintained Axiom Verge port](AXIOM_VERGE_PORT.md) combines dynamic UTF-16
-event names with declared-setting membership, recursive legacy parent gating,
-and optional-module platform detection.
+This self-contained guide records mappings proven by maintained, host-executed
+ports. It is not a token-substitution table: ASL's dynamic state and C# runtime
+sometimes need a typed SplitScript design rather than a literal translation.
+Every required semantic distinction and canonical pattern is explained here;
+it has no source-file or repository-document prerequisites. Examples are small,
+focused snippets that explain one concept rather than complete autosplitters.
 
 ## Signed pointer offsets
 
@@ -264,9 +255,8 @@ let levelParts = fileParts[0].split("_") else []
 ```
 
 The empty delimiter is an error rather than a request to split UTF-8 bytes.
-[`examples/operation_matriarchy.split`](../examples/operation_matriarchy.split)
-uses this mapping to parse names such as `01_02_1.dds`; its host fixture proves
-the resulting start, reset, split, and loading transitions.
+For a name such as `01_02_1.dds`, the two calls above produce `01`, `02`, and
+`1` without discarding meaningful empty fields in other inputs.
 
 C# `Int32.Parse`, `Double.Parse`, and their fixed-width relatives map to
 `text.parse()`. Put the SplitScript numeric type at the receiving boundary and
@@ -657,10 +647,9 @@ let runningAddress = await data.staticField("isRunning")
 
 `MonoVersion.V3` selects the Unity 2021.2-and-newer PE64 layout; `V2` selects
 the preceding modern layout. These are explicit target-memory contracts, not
-automatically detected marketing versions. The maintained
-[`ARTIFICIAL` port](ARTIFICIAL_PORT.md) demonstrates static-field discovery
-and runtime-verified state polling. When a static field holds a replaceable
-managed singleton, retain the slot as a path and append the instance field:
+automatically detected marketing versions. When a static field holds a
+replaceable managed singleton, retain the slot as a path and append the
+instance field:
 
 ```splitscript
 let singleton = await data.staticFieldPath("script")
@@ -668,11 +657,10 @@ let valueOffset = await data.field("value")
 valuePath = singleton.dereference(valueOffset as i64)
 ```
 
-This rereads the singleton pointer whenever the state field resolves the path.
-The maintained [`Himno` port](HIMNO_PORT.md) verifies that behavior rather than
-caching an attachment-time object address. Older V1, 32-bit, ELF, and Mach-O
-Mono targets remain future layout families rather than falling back to a
-guessed offset set.
+This rereads the singleton pointer whenever the state field resolves the path,
+rather than caching an attachment-time object address. Older V1, 32-bit, ELF,
+and Mach-O Mono targets remain future layout families rather than falling back
+to a guessed offset set.
 
 When a port needs the mapping metadata itself, take a typed snapshot rather
 than reproducing the host's numeric count/index ABI:
@@ -739,14 +727,13 @@ first snapshot, rejection leaves state uninitialized, so no fabricated old
 value or stale value from another process is observable. Afterwards, the field
 retains its accepted value and successful sibling fields continue to advance.
 
-The maintained
-[`examples/aawcb.split`](../examples/aawcb.split) port uses this to retain its
-scene during loading scenes 7 and 8 while the entity count continues to
-advance. By contrast, an ASL `update` block that returns `false` does not roll
-back state at all; it skips lifecycle decisions after the refresh. SplitScript
-does not add a separate lifecycle concept for that behavior until a maintained
-port demonstrates that ordinary field expressions and `whileAttached` cannot
-represent the required result clearly.
+For example, the filter can retain a scene during loading scenes 7 and 8 while
+an independently read entity count continues to advance. By contrast, an ASL
+`update` block that returns `false` does not roll back state at all; it skips
+lifecycle decisions after the refresh. SplitScript does not add a separate
+lifecycle concept for that behavior until a maintained port demonstrates that
+ordinary field expressions and `whileAttached` cannot represent the required
+result clearly.
 
 ## Collection search and run-scoped sets
 

@@ -49,14 +49,6 @@ recorded in [`docs/PORTING_CAMPAIGN_AUDIT.md`](docs/PORTING_CAMPAIGN_AUDIT.md).
   checks, and genuinely required full enumeration. This campaign missed these
   features despite compiler-owned migration entries, so merely adding more prose
   is insufficient.
-- [ ] Make the migration material available wherever the compiler is used. The
-  maintained Axiom Verge guide and the referenced examples exist in this tree;
-  the campaign reporting them missing means its documentation workspace or
-  navigation was incomplete. The in-editor graph now includes the complete
-  language and migration catalogs, the canonical ASL porting guide, and exact
-  links from migration diagnostics; the native CLI prints the same stable topic
-  identity. Add package checks for every referenced guide and example, and a
-  native command that opens or renders a topic without repository searching.
 - [ ] Do not reintroduce already-rejected compatibility surface. Growable `[T]`
   is the ordered `List<T>` replacement; named typed functions cover the audited
   captured-lambda cases; state fields may use constants and candidate rejection;

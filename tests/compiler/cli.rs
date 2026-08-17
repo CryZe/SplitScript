@@ -16,6 +16,7 @@ fn help_is_successful_and_uses_stdout() {
         &["help", "watch"][..],
         &["watch", "--help"][..],
         &["fmt", "--help"][..],
+        &["docs", "--help"][..],
     ] {
         let output = splitc(arguments);
         assert!(output.status.success(), "arguments: {arguments:?}");
@@ -23,6 +24,33 @@ fn help_is_successful_and_uses_stdout() {
         let stdout = String::from_utf8(output.stdout).unwrap();
         assert!(stdout.contains("Usage:"), "arguments: {arguments:?}");
     }
+}
+
+#[test]
+fn documentation_topics_render_without_a_source_checkout() {
+    for (arguments, expected) in [
+        (&["docs"][..], "# SplitScript reference"),
+        (
+            &["docs", "asl.lifecycle.update"][..],
+            "# update lifecycle block",
+        ),
+        (&["docs", "Process.read"][..], "# Process.read"),
+    ] {
+        let output = splitc(arguments);
+        assert!(output.status.success(), "arguments: {arguments:?}");
+        assert!(output.stderr.is_empty(), "arguments: {arguments:?}");
+        assert!(
+            String::from_utf8(output.stdout).unwrap().contains(expected),
+            "arguments: {arguments:?}",
+        );
+    }
+
+    let unknown = splitc(&["docs", "Process.r"]);
+    assert_eq!(unknown.status.code(), Some(1));
+    assert!(unknown.stdout.is_empty());
+    let stderr = String::from_utf8(unknown.stderr).unwrap();
+    assert!(stderr.contains("unknown documentation topic"));
+    assert!(stderr.contains("Process.read"));
 }
 
 #[test]

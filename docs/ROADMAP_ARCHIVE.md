@@ -1,5 +1,19 @@
 # SplitScript roadmap
 
+## 2026-08-17: self-contained documentation in every compiler product
+
+- Added native `splitc docs`, which renders the same compiler-owned Markdown as
+  the editor by exact catalog title, stable migration identity, or virtual page
+  path. An omitted topic renders the reference index, and unknown topics offer
+  bounded exact-substring suggestions rather than choosing fuzzily.
+- Bundled the canonical ASL migration guide into native, language-server, and
+  extension products. Reworked it to be self-contained with focused conceptual
+  snippets: it neither embeds nor links to complete autosplitter files, so those
+  examples can be changed or removed independently.
+- Added catalog/page identity checks, self-containment validation, CLI parsing
+  coverage, and end-to-end topic rendering for both migration diagnostics and
+  standard-library symbols.
+
 ## 2026-08-16: navigable language and migration reference
 
 - Extended the compiler-owned documentation graph beyond the standard library

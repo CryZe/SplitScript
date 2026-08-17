@@ -33,9 +33,12 @@ enum Command {
         input: PathBuf,
         check: bool,
     },
+    Documentation {
+        topic: Option<String>,
+    },
 }
 
-/// Compile, watch, and format SplitScript autosplitters.
+/// Compile, watch, format, and explore SplitScript autosplitters.
 #[derive(Debug, Parser)]
 #[command(
     name = "splitc",
@@ -65,6 +68,12 @@ enum CliCommand {
     Watch(CompileArgs),
     /// Format a source file in place.
     Fmt(FormatArgs),
+    /// Render compiler-owned language, migration, and standard-library documentation.
+    #[command(
+        name = "docs",
+        after_help = "TOPIC may be an exact symbol such as Process.read, a migration identity printed by a diagnostic, or a virtual reference path. With no topic, renders the reference index."
+    )]
+    Documentation(DocumentationArgs),
 }
 
 #[derive(Debug, Args)]
@@ -86,6 +95,13 @@ struct FormatArgs {
     /// Verify canonical formatting without writing the file.
     #[arg(long)]
     check: bool,
+}
+
+#[derive(Debug, Args)]
+struct DocumentationArgs {
+    /// Exact symbol, migration identity, or virtual reference path to render.
+    #[arg(value_name = "TOPIC")]
+    topic: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -172,6 +188,9 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command, clap:
         Some(CliCommand::Fmt(arguments)) => Ok(Command::Format {
             input: arguments.input,
             check: arguments.check,
+        }),
+        Some(CliCommand::Documentation(arguments)) => Ok(Command::Documentation {
+            topic: arguments.topic,
         }),
         None => {
             let Some(input) = cli.input else {
@@ -300,7 +319,42 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         }
+        Command::Documentation { topic } => render_documentation(topic.as_deref()),
     }
+}
+
+fn render_documentation(topic: Option<&str>) -> ExitCode {
+    let reference = splitscript::DocumentationReference::default();
+    let requested = topic.unwrap_or("");
+    if let Some(page) = reference.topic(requested) {
+        print!("{}", page.markdown);
+        if !page.markdown.ends_with('\n') {
+            println!();
+        }
+        return ExitCode::SUCCESS;
+    }
+
+    eprintln!("splitc: unknown documentation topic `{requested}`");
+    let needle = requested.to_ascii_lowercase();
+    let suggestions = reference
+        .index()
+        .into_iter()
+        .filter(|entry| {
+            entry.title.to_ascii_lowercase().contains(&needle)
+                || entry
+                    .signature
+                    .as_deref()
+                    .is_some_and(|signature| signature.to_ascii_lowercase().contains(&needle))
+        })
+        .take(5)
+        .collect::<Vec<_>>();
+    if !suggestions.is_empty() {
+        eprintln!("matching topics:");
+        for suggestion in suggestions {
+            eprintln!("  {} ({})", suggestion.title, suggestion.uri);
+        }
+    }
+    ExitCode::FAILURE
 }
 
 fn format_file(input: &Path, check: bool) -> bool {
@@ -492,6 +546,21 @@ mod tests {
                 warnings: splitscript::WarningPolicy::default(),
             }
         );
+        assert_eq!(
+            parse_args(["splitc".into(), "docs".into()]).unwrap(),
+            Command::Documentation { topic: None }
+        );
+        assert_eq!(
+            parse_args([
+                "splitc".into(),
+                "docs".into(),
+                "asl.lifecycle.update".into(),
+            ])
+            .unwrap(),
+            Command::Documentation {
+                topic: Some("asl.lifecycle.update".to_owned()),
+            }
+        );
 
         let command = parse_args([
             "splitc".into(),
@@ -523,6 +592,7 @@ mod tests {
             vec!["splitc", "help", "watch"],
             vec!["splitc", "watch", "--help"],
             vec!["splitc", "fmt", "game.split", "--help"],
+            vec!["splitc", "docs", "--help"],
         ] {
             assert_eq!(
                 parse_args(arguments.into_iter().map(OsString::from))

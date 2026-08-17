@@ -10,7 +10,7 @@ use crate::{
     },
 };
 
-use super::{StandardLibraryDocumentation, code};
+use super::{StandardLibraryDocumentation, bundled, code};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,17 +87,18 @@ impl DocumentationReference {
             },
         ];
 
-        entries.extend(LanguageCatalog::new().items().filter_map(|item| {
-            (!matches!(item.kind, LanguageItemKind::BuiltinType(_))).then(|| {
-                DocumentationIndexEntry {
+        entries.extend(
+            LanguageCatalog::new()
+                .items()
+                .filter(|item| !matches!(item.kind, LanguageItemKind::BuiltinType(_)))
+                .map(|item| DocumentationIndexEntry {
                     uri: language_item_uri(item.id),
                     title: item.name.to_owned(),
                     kind: language_item_kind_label(item.kind),
                     summary: item.documentation.summary,
                     signature: Some(item.form.to_owned()),
-                }
-            })
-        }));
+                }),
+        );
 
         entries.extend(
             MigrationCatalog::default()
@@ -111,6 +112,7 @@ impl DocumentationReference {
                     signature: Some(concept.id.as_str().to_owned()),
                 }),
         );
+        entries.extend(bundled::index());
 
         entries.extend(
             self.library
@@ -241,6 +243,46 @@ impl DocumentationReference {
         entries
     }
 
+    /// Resolves a user-facing documentation topic to its canonical page.
+    ///
+    /// Native tools accept the stable migration identity printed by a
+    /// diagnostic, an exact reference title such as `Process.read`, or a
+    /// virtual document path. Fuzzy searching remains an editor concern so a
+    /// command never silently chooses the wrong similarly named symbol.
+    pub fn topic(&self, topic: &str) -> Option<DocumentationPage> {
+        let topic = topic.trim();
+        if topic.is_empty() {
+            return self.page("/index.md");
+        }
+
+        let uri = if topic.starts_with('/') {
+            topic.to_owned()
+        } else {
+            format!("/{topic}")
+        };
+        if let Some(page) = self.page(&uri) {
+            return Some(page);
+        }
+        let migration_uri = migration_topic_uri(topic);
+        if let Some(page) = self.page(&migration_uri) {
+            return Some(page);
+        }
+
+        let mut exact = self.index().into_iter().filter(|entry| {
+            entry.title.eq_ignore_ascii_case(topic)
+                || entry
+                    .signature
+                    .as_deref()
+                    .is_some_and(|signature| signature.eq_ignore_ascii_case(topic))
+        });
+        let entry = exact.next()?;
+        exact
+            .next()
+            .is_none()
+            .then(|| self.page(&entry.uri))
+            .flatten()
+    }
+
     pub fn page(&self, uri: &str) -> Option<DocumentationPage> {
         if uri == "/index.md" {
             return Some(self.index_page());
@@ -254,8 +296,8 @@ impl DocumentationReference {
             return Some(self.migration_index_page());
         }
 
-        if uri == "/guides/asl-porting.md" {
-            return Some(self.asl_porting_guide_page());
+        if let Some(page) = bundled::page(uri) {
+            return Some(page);
         }
 
         if let Some(item) = LanguageCatalog::new().items().find(|item| {
@@ -893,20 +935,6 @@ impl DocumentationReference {
         }
     }
 
-    fn asl_porting_guide_page(&self) -> DocumentationPage {
-        let uri = "/guides/asl-porting.md";
-        let markdown = format!(
-            "{}\n\n{}",
-            reference_breadcrumb(uri, Vec::new(), "Porting ASL to SplitScript"),
-            include_str!("../../docs/ASL_PORTING.md"),
-        );
-        DocumentationPage {
-            uri: uri.to_owned(),
-            title: "Porting ASL to SplitScript".to_owned(),
-            markdown,
-        }
-    }
-
     fn index_page(&self) -> DocumentationPage {
         let entries = self.index();
         let mut markdown = String::from(
@@ -916,10 +944,11 @@ impl DocumentationReference {
         let sections: [(&str, Vec<String>); 6] = [
             (
                 "Guides",
-                vec![
-                    "/language/index.md".to_owned(),
-                    "/migration/index.md".to_owned(),
-                ],
+                entries
+                    .iter()
+                    .filter(|entry| entry.kind == "guide")
+                    .map(|entry| entry.uri.clone())
+                    .collect(),
             ),
             (
                 "Namespaces",
@@ -1781,6 +1810,36 @@ mod tests {
             .expect("the canonical porting guide is bundled");
         assert!(guide.markdown.contains("# Porting ASL to SplitScript"));
         assert!(guide.markdown.contains("## Legacy ASL lifecycle blocks"));
+        assert!(!guide.markdown.contains("examples/"));
+        assert!(!guide.markdown.contains("AXIOM_VERGE_PORT.md"));
+        assert!(
+            reference
+                .page("/examples/a-plague-tale-innocence.md")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn native_topics_resolve_stable_identities_titles_and_paths_exactly() {
+        let reference = DocumentationReference::default();
+        assert_eq!(
+            reference.topic("").unwrap().uri,
+            "/index.md",
+            "an omitted CLI topic renders the reference index"
+        );
+        assert_eq!(
+            reference.topic("asl.lifecycle.update").unwrap().uri,
+            "/migration/asl/lifecycle/update.md"
+        );
+        assert_eq!(
+            reference.topic("Process.read").unwrap().uri,
+            "/stdlib/types/Process/methods/read.md"
+        );
+        assert_eq!(
+            reference.topic("guides/asl-porting.md").unwrap().uri,
+            "/guides/asl-porting.md"
+        );
+        assert!(reference.topic("read").is_none());
     }
 
     #[test]

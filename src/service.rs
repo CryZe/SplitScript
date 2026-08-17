@@ -257,7 +257,7 @@ impl From<Diagnostic> for ServiceDiagnostic {
                 .into_iter()
                 .map(ServiceDiagnosticFix::from)
                 .collect(),
-            migration_topic: diagnostic.migration_topic,
+            migration_topic: diagnostic.migration_topic.map(Into::into),
         }
     }
 }

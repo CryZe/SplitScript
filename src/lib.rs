@@ -14,6 +14,7 @@ mod completion;
 mod database;
 pub use splitscript_syntax::diagnostic;
 mod documentation;
+pub use documentation::{DocumentationIndexEntry, DocumentationPage, DocumentationReference};
 mod effects;
 mod equality;
 mod formatter;
@@ -52,8 +53,8 @@ pub use build_identity::{
     compiler_identity,
 };
 pub use diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticFix, DiagnosticLabel, DiagnosticLabelStyle,
-    DiagnosticSeverity, FixApplicability, TextEdit,
+    Diagnostic, DiagnosticCode, DiagnosticFix, DiagnosticFixes, DiagnosticLabel,
+    DiagnosticLabelStyle, DiagnosticSeverity, FixApplicability, TextEdit,
 };
 pub use formatter::format_source;
 

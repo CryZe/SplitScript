@@ -365,7 +365,7 @@ impl LanguageServer {
                             .collect(),
                     });
                 }
-                for fix in &fixes {
+                for fix in fixes.iter() {
                     let edits = fix
                         .edits
                         .iter()

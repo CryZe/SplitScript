@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-17: static settings migration recipe
+
+- Added a self-contained compiler-checked recipe for migrating ASL runtime
+  registration to typed boolean, choice, and file settings with explicit
+  labels, stable host keys, defaults, hierarchy, and documentation tooltips.
+- Documented current and previous per-tick settings views, explicit parent
+  gating, file filters, and the boundary between typed members, dynamic
+  boolean lookup, and declaration membership.
+- Repointed the existing registration and dynamic-key migration concepts to
+  the focused recipe, so the generated quick map separates ordinary static
+  settings from finite compile-time families.
+
 ## 2026-08-17: contiguous memory aggregate migration
 
 - Added a compiler-checked porting recipe for replacing physically contiguous

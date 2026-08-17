@@ -1114,6 +1114,84 @@ specific operation rather than describing `List<T>` itself as missing. Indexed
 insertion remains deferred until a maintained port demonstrates that it is
 needed.
 
+## Static settings declarations
+
+Move ASL `settings.Add(...)` registration into the declarative `settings`
+block. The quoted text before `=>` is the user-facing label, the identifier is
+the statically typed source member, and an optional `key "..."` preserves the
+exact stable string stored in the host settings map:
+
+```splitscript
+enum Route {
+    AnyPercent,
+    AllBosses,
+}
+
+settings {
+    /// Splits when a configured game event occurs.
+    "Enable Auto Splitting" => autoSplit key "auto-split": true,
+    /// Selects the route-specific split rules.
+    "Route" => route: choice {
+        "Any%" => Route.AnyPercent default,
+        "All Bosses" => Route.AllBosses,
+    },
+}
+
+state "game.exe" {
+    bossDefeated: bool at 0x1000;
+}
+
+split {
+    return settings.autoSplit
+        && settings.route == Route.AllBosses
+        && !old.bossDefeated
+        && current.bossDefeated
+}
+```
+
+Consecutive `///` documentation comments become the setting tooltip. The
+legacy comma-separated tooltip string is deliberately not accepted. Boolean
+settings are `bool`; a `choice` is the source enum named by its variants. One
+choice entry must carry `default`. Quoted groups add visual hierarchy only:
+they do not disable their children, so preserve an ASL parent checkbox by
+testing that boolean explicitly in the split condition.
+
+File selectors produce a `String` path and can declare extension globs, a
+catch-all `_`, and MIME filters. They remain typed settings rather than direct
+filesystem access:
+
+```splitscript
+state "game.exe" {}
+
+settings {
+    "Paths" {
+        /// Selects the layout consumed by the host integration.
+        "Layout File" => layoutFile: file {
+            "Layout files" => "*.json *.yaml",
+            _ => "*.*",
+            mime => "application/json",
+        },
+    },
+    /// Reloads the selected layout after the user changes this option.
+    "Live Reload" => liveReload: false,
+}
+
+whileAttached {
+    if settings.liveReload != oldSettings.liveReload {
+        print(`Live reload: {settings.liveReload}`)
+    }
+    setVariable("Layout", settings.layoutFile)
+}
+```
+
+`settings` and `oldSettings` are complete current and previous views refreshed
+once per update, so a comparison detects user changes without caching a second
+copy. Statically known values should use their typed members. When a data table
+selects among boolean keys, use `settings.enabled(key)`; use
+`settings.contains(key)` when declaration membership and a disabled value must
+remain distinct. Literal keys are checked and completed against this file's
+declarations, including explicit `key` strings.
+
 ## Finite settings families
 
 Prefer direct `settings.name` access when the setting is known statically. For

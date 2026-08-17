@@ -1999,7 +1999,7 @@ pub const CONCEPTS: &[MigrationConcept] = &[
             MigrationTarget::Language("settings"),
             MigrationTarget::Language("oldSettings"),
         ],
-        cookbook_anchor: None,
+        cookbook_anchor: Some("static-settings-declarations"),
         spellings: &[],
     },
     MigrationConcept {
@@ -2007,9 +2007,13 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "Runtime settings registration",
         sources: ASL,
         support: MigrationSupport::TypedPattern,
-        summary: "Move `settings.Add` calls into the static `settings` declaration; use a compile-time family for a bounded integer range instead of hand-expanding it.",
-        targets: &[MigrationTarget::Language("settings")],
-        cookbook_anchor: Some("finite-settings-families"),
+        summary: "Move `settings.Add` calls into the static `settings` declaration, preserving the display label, stable host key, default, hierarchy, and tooltip explicitly.",
+        targets: &[
+            MigrationTarget::Language("settings"),
+            MigrationTarget::Language("oldSettings"),
+            MigrationTarget::Language("stable setting key"),
+        ],
+        cookbook_anchor: Some("static-settings-declarations"),
         spellings: &[],
     },
     MigrationConcept {

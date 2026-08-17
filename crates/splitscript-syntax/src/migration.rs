@@ -1767,6 +1767,21 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: &[],
     },
     MigrationConcept {
+        id: MigrationConceptId::new("asl.state.contiguous-aggregate"),
+        name: "Contiguous memory aggregates",
+        sources: ASL,
+        support: MigrationSupport::TypedPattern,
+        summary: "Read physically contiguous values as one naturally aligned record or fixed-length `[T; N]` array when that type exactly matches the target-memory layout.",
+        targets: &[
+            MigrationTarget::Language("record"),
+            MigrationTarget::Language("[T; N]"),
+            MigrationTarget::Language("state"),
+            MigrationTarget::StandardLibraryItem("Process.read"),
+        ],
+        cookbook_anchor: Some("contiguous-records-and-fixed-arrays"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("asl.state.helper-snapshots"),
         name: "State snapshots in helper functions",
         sources: ASL,

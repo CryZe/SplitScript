@@ -128,6 +128,52 @@ The maintained Arietta of Spirits port uses independent `utf8(128)` and
 also proves the persistent-watcher rule: a failed stage-string read retains
 that field while a successful pause flag from the same poll still advances.
 
+## Contiguous records and fixed arrays
+
+Several separate ASL watchers may describe one physically contiguous native
+value. When the target layout is known, a SplitScript record reads the complete
+value once and gives each component a name. Fields use declaration order with
+natural alignment:
+
+```splitscript
+record LevelTimeParts {
+    minutes: f32,
+    seconds: f32,
+    hundredths: f32,
+}
+
+state "game.exe" {
+    levelTime: LevelTimeParts at "game.exe", 0x1200;
+}
+```
+
+This record is 12 bytes because all three fields have four-byte size and
+alignment. In a mixed record, each field starts at the next multiple of its
+own alignment and the final size is rounded to the largest field alignment.
+SplitScript currently reads these values as little-endian. Do not use a record
+for a packed, explicitly padded, or differently endian target layout; exact
+layout controls remain intentionally deferred until maintained-port evidence
+requires them.
+
+For a contiguous homogeneous region, `[T; N]` carries the physical element
+count in the type and also performs one host read:
+
+```splitscript
+state "game.exe" {
+    inventory: [u8; 6] at "game.exe", 0x2b32;
+}
+
+split {
+    return old.inventory[0] != current.inventory[0]
+}
+```
+
+Use `[T; N]`, not growable `[T]`, for process-memory layout. The fixed array
+still supports indexing and iteration, while its exact length prevents a port
+from silently reading a different number of bytes. A record or fixed array is
+`MemoryReadable` only when every contained field or element has a fixed
+readable layout.
+
 ## C# string operations
 
 SplitScript methods use lower camel case, so C# `StartsWith` becomes

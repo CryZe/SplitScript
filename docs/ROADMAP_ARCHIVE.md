@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-17: contiguous memory aggregate migration
+
+- Added a compiler-checked porting recipe for replacing physically contiguous
+  ASL watchers with one naturally aligned `MemoryReadable` record or exact
+  `[T; N]` state field, based on maintained record and byte-array ports.
+- Documented the one-read behavior, little-endian and natural-alignment rules,
+  growable-versus-fixed array distinction, and the cases that must wait for
+  explicit packing, offsets, or endianness controls.
+- Added the pattern to the compiler-owned migration catalog, generated index,
+  and navigable quick map with direct links to `record`, `[T; N]`, `state`, and
+  `Process.read`.
+
 ## 2026-08-17: race-free standard-library initialization
 
 - Replaced the check-then-initialize sequence for compiler-derived

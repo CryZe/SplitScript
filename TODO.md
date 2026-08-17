@@ -142,19 +142,6 @@ General rules:
 
 ## P1 — expand migration guidance and automated fixes
 
-- [ ] Finish the compiler-checked **Porting ASL to SplitScript** cookbook from
-  maintained ports. It now covers attachment and state, bounded and managed
-  strings, records and fixed arrays, conversions, versioned layouts, process
-  identity and modules, timer state and split index, load removal and computed
-  game time, host timer-metadata limits, delays, discovered and mixed-width
-  pointer paths, signatures and cancellation, state filtering, collections,
-  static and finite-family settings, lifecycle, and detach cleanup. Add one
-  focused recipe for reusable helpers that accept arbitrary snapshots
-  explicitly; snapshot-dependent helpers that use contextual `old`/`current`
-  are already covered. Keep every snippet independently compiler-checked with
-  adjacent rustdoc-style hidden context, keep maintained owning examples in
-  `cargo xtask check`, and extend the catalog-generated quick map rather than
-  duplicating a second index.
 - [ ] Expand capability-driven diagnostics and code actions beyond the initial
   structured entries. Emit one focused explanation and suppress predictable
   cascades for recognizable ASL constructs, including legacy lifecycle blocks,

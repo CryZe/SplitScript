@@ -1330,9 +1330,34 @@ timer-decision actions. Calling one from `setup`, `onAttach`, `onDetach`, a
 state source, or a state filter produces a focused diagnostic. This keeps the
 concise ASL helper shape without exposing default-initialized or stale state.
 
-Explicit snapshot parameters remain useful when a helper should operate on an
-arbitrary snapshot supplied by its caller, but they are not required merely to
-move a lifecycle condition into a named function.
+Pass snapshots explicitly when the helper should operate on caller-selected
+history or when its argument order is part of the helper's meaning:
+
+```splitscript
+state "game.exe" {
+    level: u32 at 0x1000
+}
+
+fn levelChanged(before, after) {
+    return before.level != after.level
+}
+
+fn enteredLevel(before, after, level) {
+    return levelChanged(before, after) && after.level == level
+}
+
+split {
+    return enteredLevel(old, current, 7u32)
+}
+```
+
+The field accesses and calls infer `before` and `after` as the generated
+`StateSnapshot` type. They are ordinary read-only values, so the caller may
+choose which available snapshots represent each role and may forward them
+through more helpers. Passing snapshots removes the helper's implicit snapshot
+dependency; only evaluating `old` and `current` at the call site requires a
+committed pair. Direct access remains the concise choice when a helper always
+means this tick's transition.
 
 ## Legacy ASL lifecycle blocks
 

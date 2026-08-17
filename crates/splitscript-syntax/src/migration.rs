@@ -1786,7 +1786,7 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "State snapshots in helper functions",
         sources: ASL,
         support: MigrationSupport::Direct,
-        summary: "Helpers may read `old` and `current` directly. The compiler propagates the snapshot requirement and rejects calls before committed snapshots exist.",
+        summary: "Helpers may read `old` and `current` directly or accept caller-selected snapshots as inferred parameters. The compiler propagates direct snapshot requirements and rejects calls before committed snapshots exist.",
         targets: &[
             MigrationTarget::Language("fn"),
             MigrationTarget::Language("old"),

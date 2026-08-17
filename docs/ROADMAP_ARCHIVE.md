@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-17: complete compiler-checked ASL cookbook
+
+- Completed the remaining helper recipe with explicit caller-selected
+  `StateSnapshot` parameters alongside concise contextual `old` and `current`
+  access.
+- Documented inference, read-only snapshot values, forwarding through helper
+  call graphs, and the narrower call-site availability boundary.
+- Every focused SplitScript recipe remains independently compiled, while the
+  migration catalog and bundled quick map provide the canonical index.
+
 ## 2026-08-17: load removal and computed game time migration
 
 - Added compiler-checked recipes for `isLoading` and `gameTime`, including

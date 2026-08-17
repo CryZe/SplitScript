@@ -222,9 +222,14 @@ intrinsic type SettingsView {
     /// Advance a data cursor even when its known split is disabled
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let checkpointKey = "checkpoint"
+    /// # let checkpointIndex = 0
     /// if settings.contains(checkpointKey) {
     ///     checkpointIndex += 1
     /// }
+    /// # }
     /// ```
     @intrinsic(SettingsContains)
     fn contains(
@@ -306,9 +311,13 @@ intrinsic type Process {
     /// Ignore an unsupported build
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let unsupported = true
     /// if unsupported {
     ///     await process.closed()
     /// }
+    /// # }
     /// ```
     @intrinsic(ProcessClosed)
     fn closed() -> None;
@@ -342,7 +351,11 @@ intrinsic type Process {
     /// Detect an optional Steam module
     ///
     /// ```splitscript
-    /// let steam = process.loadedModule("steam_api.dll") != None
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// let steam = process.loadedModule("steam_api.dll") else return
+    /// # print(steam.address)
+    /// # }
     /// ```
     @mustUse("the optional loaded module is otherwise discarded")
     @intrinsic(ProcessLoadedModule)
@@ -426,7 +439,12 @@ intrinsic type Process {
     /// Follow a pointer path
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let module = await process.mainModule()
     /// let player = retry process.follow(module.address, [0x100, 0x20])
+    /// # print(player)
+    /// # }
     /// ```
     @intrinsic(ProcessFollow)
     fn follow(
@@ -447,7 +465,12 @@ intrinsic type Process {
     /// Scan a memory range
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let module = await process.mainModule()
     /// let marker = await process.scan(module.address, module.size, sig"48 8B ?? 89")
+    /// # print(marker)
+    /// # }
     /// ```
     @intrinsic(ProcessScan)
     fn scan(
@@ -512,7 +535,12 @@ intrinsic type Process {
     /// Resolve a relative target
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let instruction: address = 0x1000
     /// let target = retry process.readRelative32(instruction.offset(3))
+    /// # print(target)
+    /// # }
     /// ```
     @intrinsic(ProcessReadRelative32)
     fn readRelative32(
@@ -532,7 +560,12 @@ intrinsic type Process {
     /// Read a native map name
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let mapAddress: address = 0x1000
     /// let map = process.readUtf8(mapAddress, 32) else "Unknown"
+    /// # print(map)
+    /// # }
     /// ```
     @intrinsic(ProcessReadUtf8)
     fn readUtf8(
@@ -555,7 +588,12 @@ intrinsic type Process {
     /// Read a native Windows string
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let chapterAddress: address = 0x1000
     /// let chapter = process.readUtf16Le(chapterAddress, 64) else "Unknown"
+    /// # print(chapter)
+    /// # }
     /// ```
     @intrinsic(ProcessReadUtf16Le)
     fn readUtf16Le(
@@ -578,7 +616,12 @@ intrinsic type Process {
     /// Read a Unity string
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let sceneAddress: address = 0x1000
     /// let scene = process.readManagedString(sceneAddress, 64) else "Unknown"
+    /// # print(scene)
+    /// # }
     /// ```
     @intrinsic(ProcessReadManagedString)
     fn readManagedString(
@@ -666,9 +709,13 @@ namespace timer {
     /// Skip a segment that does not exist in this route
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let routeOmitsCurrentSegment = true
     /// if routeOmitsCurrentSegment {
     ///     timer.skipSplit()
     /// }
+    /// # }
     /// ```
     @intrinsic(TimerSkipSplit)
     fn skipSplit() -> None;
@@ -684,9 +731,13 @@ namespace timer {
     /// Correct an automatically detected false positive
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let falsePositiveDetected = true
     /// if falsePositiveDetected {
     ///     timer.undoSplit()
     /// }
+    /// # }
     /// ```
     @intrinsic(TimerUndoSplit)
     fn undoSplit() -> None;
@@ -702,6 +753,7 @@ namespace timer {
     /// Pause game time after detaching
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
     /// onDetach {
     ///     timer.pauseGameTime()
     /// }
@@ -720,6 +772,7 @@ namespace timer {
     /// Resume game time after attaching
     ///
     /// ```splitscript
+    /// # state "game.exe" {}
     /// onAttach {
     ///     timer.resumeGameTime()
     /// }
@@ -888,7 +941,7 @@ capability Numeric<T: Equatable> {
     /// Convert a page count to bytes
     ///
     /// ```splitscript
-    /// let byteCount = pageCount * 4096
+    /// let byteCount = 12u32 * 4096
     /// ```
     @intrinsic(NumericMultiply)
     @operator(multiply)
@@ -909,7 +962,7 @@ capability Numeric<T: Equatable> {
     /// Convert milliseconds to seconds
     ///
     /// ```splitscript
-    /// let elapsedSeconds = elapsedMilliseconds / 1_000
+    /// let elapsedSeconds = 15_000u64 / 1_000
     /// ```
     @intrinsic(NumericDivide)
     @operator(divide)
@@ -929,7 +982,7 @@ capability Numeric<T: Equatable> {
     /// Square a coordinate delta
     ///
     /// ```splitscript
-    /// let squaredDistance = delta.squared()
+    /// let squaredDistance = 3.5.squared()
     /// ```
     fn squared() -> T {
         return self * self
@@ -946,7 +999,7 @@ capability Numeric<T: Equatable> {
     /// Keep the smaller value
     ///
     /// ```splitscript
-    /// let visibleStage = stage.min(7)
+    /// let visibleStage = 9u32.min(7)
     /// ```
     @intrinsic(NumericMin)
     fn min(
@@ -965,7 +1018,7 @@ capability Numeric<T: Equatable> {
     /// Keep the larger value
     ///
     /// ```splitscript
-    /// let nonNegativeScore = score.max(0)
+    /// let nonNegativeScore = (-4).max(0)
     /// ```
     @intrinsic(NumericMax)
     fn max(
@@ -982,7 +1035,7 @@ capability Numeric<T: Equatable> {
     /// Restrict a value to a range
     ///
     /// ```splitscript
-    /// let visibleStage = stage.clamp(1, 7)
+    /// let visibleStage = 9u32.clamp(1, 7)
     /// ```
     fn clamp(
         /// The inclusive lower bound.
@@ -1061,7 +1114,7 @@ capability Integer<T: Numeric + Display> {
     /// Test a frame interval
     ///
     /// ```splitscript
-    /// let isInterval = frameCount % 60 == 0
+    /// let isInterval = 120u32 % 60 == 0
     /// ```
     @intrinsic(IntegerRemainder)
     @operator(remainder)
@@ -1079,7 +1132,7 @@ capability Integer<T: Numeric + Display> {
     /// Add a flag to a mask
     ///
     /// ```splitscript
-    /// let combined = flags | 0x20
+    /// let combined = 0x10u32 | 0x20
     /// ```
     @intrinsic(IntegerBitOr)
     @operator(bitOr)
@@ -1097,7 +1150,7 @@ capability Integer<T: Numeric + Display> {
     /// Toggle a flag in a mask
     ///
     /// ```splitscript
-    /// let toggled = flags ^ 0x20
+    /// let toggled = 0x30u32 ^ 0x20
     /// ```
     @intrinsic(IntegerBitXor)
     @operator(bitXor)
@@ -1115,7 +1168,7 @@ capability Integer<T: Numeric + Display> {
     /// Isolate one flag from a mask
     ///
     /// ```splitscript
-    /// let selected = flags & 0x20
+    /// let selected = 0x30u32 & 0x20
     /// ```
     @intrinsic(IntegerBitAnd)
     @operator(bitAnd)
@@ -1136,7 +1189,7 @@ capability Integer<T: Numeric + Display> {
     /// Construct a bit mask
     ///
     /// ```splitscript
-    /// let mask = 1u32 << bitIndex
+    /// let mask = 1u32 << 5
     /// ```
     @intrinsic(IntegerShiftLeft)
     @operator(shiftLeft)
@@ -1156,7 +1209,7 @@ capability Integer<T: Numeric + Display> {
     /// Extract a packed byte
     ///
     /// ```splitscript
-    /// let highByte = packed >> 8
+    /// let highByte = 0x1234u32 >> 8
     /// ```
     @intrinsic(IntegerShiftRight)
     @operator(shiftRight)
@@ -1191,7 +1244,7 @@ capability Signed<T: Numeric> {
     /// Invert a signed offset
     ///
     /// ```splitscript
-    /// let reverseOffset = -forwardOffset
+    /// let reverseOffset = -20i32
     /// ```
     @intrinsic(SignedNegate)
     @operator(negate)
@@ -1209,7 +1262,7 @@ capability Signed<T: Numeric> {
     /// Measure the magnitude of a signed delta
     ///
     /// ```splitscript
-    /// let distance = delta.abs()
+    /// let distance = (-12i32).abs()
     /// ```
     fn abs() -> T {
         return self.max(-self)
@@ -1241,7 +1294,7 @@ capability Float<T: Signed> {
     /// Measure a two-dimensional distance
     ///
     /// ```splitscript
-    /// let distance = (x * x + y * y).sqrt()
+    /// let distance = (3.0 * 3.0 + 4.0 * 4.0).sqrt()
     /// ```
     @intrinsic(FloatSqrt)
     fn sqrt() -> T;
@@ -1256,7 +1309,7 @@ capability Float<T: Signed> {
     /// Remove the fractional part of a measured time
     ///
     /// ```splitscript
-    /// let wholeSeconds = seconds.truncate()
+    /// let wholeSeconds = 12.75.truncate()
     /// ```
     @intrinsic(FloatTruncate)
     fn truncate() -> T;
@@ -1271,7 +1324,7 @@ capability Float<T: Signed> {
     /// Round a timer down
     ///
     /// ```splitscript
-    /// let wholeSeconds = seconds.floor()
+    /// let wholeSeconds = 12.75.floor()
     /// ```
     @intrinsic(FloatFloor)
     fn floor() -> T;
@@ -1286,7 +1339,7 @@ capability Float<T: Signed> {
     /// Round a counter up
     ///
     /// ```splitscript
-    /// let requiredPages = pages.ceil()
+    /// let requiredPages = 2.25.ceil()
     /// ```
     @intrinsic(FloatCeil)
     fn ceil() -> T;
@@ -1301,7 +1354,7 @@ capability Float<T: Signed> {
     /// Round a displayed measurement
     ///
     /// ```splitscript
-    /// let visibleDistance = distance.round()
+    /// let visibleDistance = 12.5.round()
     /// ```
     @intrinsic(FloatRound)
     fn round() -> T;
@@ -1316,7 +1369,7 @@ capability Float<T: Signed> {
     /// Keep two decimal places
     ///
     /// ```splitscript
-    /// let percentage = ratio.roundTo(2)
+    /// let percentage = 0.7468.roundTo(2)
     /// ```
     fn roundTo(
         /// The number of digits to preserve after the decimal point.
@@ -1348,6 +1401,7 @@ capability Float<T: Signed> {
     /// Reject an invalid measurement
     ///
     /// ```splitscript
+    /// let measurement = "NaN".parse<f64>() else 0.0
     /// if measurement.isNaN() {
     ///     print("invalid measurement")
     /// }
@@ -1365,8 +1419,8 @@ capability Float<T: Signed> {
     /// Use a finite measurement
     ///
     /// ```splitscript
-    /// if measurement.isFinite() {
-    ///     let magnitude = measurement.abs()
+    /// if (-12.5).isFinite() {
+    ///     let magnitude = (-12.5).abs()
     /// }
     /// ```
     fn isFinite() -> bool {
@@ -1460,7 +1514,7 @@ extend bool {
     /// Invert a loading flag
     ///
     /// ```splitscript
-    /// let isPlaying = !isLoading
+    /// let isPlaying = !false
     /// ```
     @intrinsic(BoolNot)
     @operator(not)
@@ -1492,7 +1546,7 @@ capability Equatable<T> {
     /// Compare two state values
     ///
     /// ```splitscript
-    /// let unchanged = oldRoom == currentRoom
+    /// let unchanged = 4u32 == 4u32
     /// ```
     @intrinsic(EquatableEquals)
     @operator(equal)
@@ -1511,7 +1565,7 @@ capability Equatable<T> {
     /// Detect a state transition
     ///
     /// ```splitscript
-    /// let changed = oldRoom != currentRoom
+    /// let changed = 4u32 != 5u32
     /// ```
     @intrinsic(EquatableNotEquals)
     @operator(notEqual)
@@ -1573,7 +1627,7 @@ typeConstructor [T] {
     /// Count array elements
     ///
     /// ```splitscript
-    /// let fieldCount = fieldNames.length()
+    /// let fieldCount = ["health", "mana"].length()
     /// ```
     @intrinsic(ArrayLength)
     fn length() -> u32;
@@ -1588,6 +1642,7 @@ typeConstructor [T] {
     /// Check for an empty array
     ///
     /// ```splitscript
+    /// let fieldNames: [String] = []
     /// let hasNoFields = fieldNames.isEmpty()
     /// ```
     fn isEmpty() -> bool {
@@ -1658,6 +1713,7 @@ typeConstructor [T] {
     /// Replace an array element
     ///
     /// ```splitscript
+    /// let fieldNames = ["mana"]
     /// fieldNames.set(0, "health")
     /// ```
     @intrinsic(ArraySet)
@@ -1703,6 +1759,7 @@ typeConstructor [T] {
     /// Append discovered checkpoints in bulk
     ///
     /// ```splitscript
+    /// let checkpoints: [u32] = [1, 2]
     /// checkpoints.extend([4, 7, 9])
     /// ```
     fn extend(
@@ -1730,6 +1787,7 @@ typeConstructor [T] {
     /// Consume the first pending checkpoint
     ///
     /// ```splitscript
+    /// let checkpoints: [u32] = [1, 2]
     /// checkpoints.removeAt(0)
     /// ```
     @intrinsic(ArrayRemoveAt)
@@ -1751,6 +1809,7 @@ typeConstructor [T] {
     /// Consume one completed checkpoint
     ///
     /// ```splitscript
+    /// let pendingCheckpoints = ["forest", "castle"]
     /// let removed = pendingCheckpoints.remove("forest")
     /// ```
     fn remove(
@@ -1774,6 +1833,7 @@ typeConstructor [T] {
     /// Consume the most recently discovered checkpoint
     ///
     /// ```splitscript
+    /// let checkpoints: [u32] = [1, 2]
     /// let checkpoint = checkpoints.pop() else return
     /// ```
     fn pop() -> T? {
@@ -1802,6 +1862,7 @@ typeConstructor [T] {
     /// Reset discovered checkpoints
     ///
     /// ```splitscript
+    /// let checkpoints: [u32] = [1, 2]
     /// checkpoints.clear()
     /// ```
     @intrinsic(ArrayClear)
@@ -1847,6 +1908,7 @@ typeConstructor Set<T: Equatable> {
     /// Count visited rooms
     ///
     /// ```splitscript
+    /// let visited = Set.new<String>()
     /// let roomCount = visited.length()
     /// ```
     @intrinsic(SetLength)
@@ -1861,6 +1923,7 @@ typeConstructor Set<T: Equatable> {
     /// Check a new route
     ///
     /// ```splitscript
+    /// let visited = Set.new<String>()
     /// let routeIsNew = visited.isEmpty()
     /// ```
     fn isEmpty() -> bool {
@@ -1876,6 +1939,7 @@ typeConstructor Set<T: Equatable> {
     /// Check a visited room
     ///
     /// ```splitscript
+    /// let visited = Set.new<String>()
     /// let seenAtrium = visited.contains("Atrium")
     /// ```
     @intrinsic(SetContains)
@@ -1895,6 +1959,7 @@ typeConstructor Set<T: Equatable> {
     /// Record a visited room
     ///
     /// ```splitscript
+    /// let visited = Set.new<String>()
     /// let firstVisit = visited.insert("Atrium")
     /// ```
     @intrinsic(SetInsert)
@@ -1914,6 +1979,7 @@ typeConstructor Set<T: Equatable> {
     /// Forget a visited room
     ///
     /// ```splitscript
+    /// let visited = Set.new<String>()
     /// let wasVisited = visited.remove("Atrium")
     /// ```
     @intrinsic(SetRemove)
@@ -1932,6 +1998,7 @@ typeConstructor Set<T: Equatable> {
     /// Reset a route
     ///
     /// ```splitscript
+    /// let visited = Set.new<String>()
     /// visited.clear()
     /// ```
     @intrinsic(SetClear)
@@ -1977,7 +2044,7 @@ typeConstructor T! {
     /// Make one process read optional
     ///
     /// ```splitscript
-    /// let health: i32? = process.read<i32>(healthAddress).discardError()
+    /// let health: i32? = process.read<i32>(0x1000).discardError()
     /// ```
     fn discardError() -> T? {
         return match self {
@@ -1998,7 +2065,7 @@ extend address {
     /// Add a field offset
     ///
     /// ```splitscript
-    /// let healthAddress = player.offset(0x20)
+    /// let healthAddress = 0x1000.offset(0x20)
     /// ```
     fn offset<T: Integer>(
         /// The integer displacement; signed values retain their sign.
@@ -2017,7 +2084,7 @@ extend address {
     /// Add a full-width offset
     ///
     /// ```splitscript
-    /// let target = module.address.add(sectionOffset)
+    /// let target = 0x1000.add(0x200u64)
     /// ```
     @intrinsic(AddressAdd)
     fn add(
@@ -2035,7 +2102,7 @@ extend address {
     /// Describe a player health path
     ///
     /// ```splitscript
-    /// let health = module.address.memoryPath([0x100, 0x20], 0x18, pointerSize)
+    /// let health = 0x1000.memoryPath([0x100, 0x20], 0x18, PointerSize.Bit64)
     /// ```
     fn memoryPath(
         /// Signed offsets that each end in a native pointer read.
@@ -2081,7 +2148,7 @@ intrinsic type String {
     /// Measure UTF-8 text
     ///
     /// ```splitscript
-    /// let byteLength = levelName.byteLength()
+    /// let byteLength = "Bonus_01".byteLength()
     /// ```
     @intrinsic(StringLength)
     fn byteLength() -> u32;
@@ -2096,7 +2163,7 @@ intrinsic type String {
     /// Ignore an empty checkpoint name
     ///
     /// ```splitscript
-    /// let hasCheckpoint = !checkpointName.isEmpty()
+    /// let hasCheckpoint = !"Forest".isEmpty()
     /// ```
     @mustUse("The string emptiness result must be used.")
     fn isEmpty() -> bool {
@@ -2113,7 +2180,7 @@ intrinsic type String {
     /// Recognize a level-name fragment
     ///
     /// ```splitscript
-    /// let isBonusLevel = levelName.contains("Bonus")
+    /// let isBonusLevel = "Bonus_01".contains("Bonus")
     /// ```
     @intrinsic(StringContains)
     fn contains(
@@ -2131,7 +2198,7 @@ intrinsic type String {
     /// Find a separator in an ASCII scene identifier
     ///
     /// ```splitscript
-    /// let separator = sceneName.indexOf("_") else return
+    /// let separator = "chapter_room".indexOf("_") else return
     /// ```
     @intrinsic(StringIndexOf)
     fn indexOf(
@@ -2150,7 +2217,7 @@ intrinsic type String {
     /// Find the final separator in a path
     ///
     /// ```splitscript
-    /// let separator = modulePath.lastIndexOf("/") else return
+    /// let separator = "/game/bin/game.exe".lastIndexOf("/") else return
     /// ```
     @mustUse("The optional byte offset must be used.")
     @intrinsic(StringLastIndexOf)
@@ -2169,7 +2236,7 @@ intrinsic type String {
     /// Recognize challenge levels
     ///
     /// ```splitscript
-    /// let isChallenge = levelName.startsWith("Challenge_")
+    /// let isChallenge = "Challenge_01".startsWith("Challenge_")
     /// ```
     @intrinsic(StringStartsWith)
     fn startsWith(
@@ -2187,7 +2254,7 @@ intrinsic type String {
     /// Recognize completed scene names
     ///
     /// ```splitscript
-    /// let isCompleted = sceneName.endsWith("_Complete")
+    /// let isCompleted = "Forest_Complete".endsWith("_Complete")
     /// ```
     @intrinsic(StringEndsWith)
     fn endsWith(
@@ -2206,7 +2273,7 @@ intrinsic type String {
     /// Match a process name with explicit ASCII semantics
     ///
     /// ```splitscript
-    /// let isGame = processName.equalsIgnoreAsciiCase("Lunistice.exe")
+    /// let isGame = "LUNISTICE.EXE".equalsIgnoreAsciiCase("Lunistice.exe")
     /// ```
     @intrinsic(StringEqualsIgnoreAsciiCase)
     fn equalsIgnoreAsciiCase(
@@ -2226,7 +2293,7 @@ intrinsic type String {
     /// Normalize an ASCII map identifier
     ///
     /// ```splitscript
-    /// let map = mapName.toAsciiLowerCase()
+    /// let map = "FOREST".toAsciiLowerCase()
     /// ```
     @mustUse("Strings are immutable; toAsciiLowerCase returns the normalized string and does not modify its receiver.")
     @intrinsic(StringToAsciiLowerCase)
@@ -2244,7 +2311,7 @@ intrinsic type String {
     /// Normalize an ASCII mission identifier
     ///
     /// ```splitscript
-    /// let mission = missionName.toAsciiUpperCase()
+    /// let mission = "escape".toAsciiUpperCase()
     /// ```
     @mustUse("Strings are immutable; toAsciiUpperCase returns the normalized string and does not modify its receiver.")
     @intrinsic(StringToAsciiUpperCase)
@@ -2262,7 +2329,7 @@ intrinsic type String {
     /// Clean a line read from a game log
     ///
     /// ```splitscript
-    /// let eventName = line.trimAsciiWhitespace()
+    /// let eventName = "  boss defeated  ".trimAsciiWhitespace()
     /// ```
     @mustUse("Strings are immutable; trimAsciiWhitespace returns the trimmed string and does not modify its receiver.")
     @intrinsic(StringTrimAsciiWhitespace)
@@ -2324,6 +2391,7 @@ intrinsic type String {
     /// Normalize a scene-name separator
     ///
     /// ```splitscript
+    /// let sceneName = "Forest_Complete"
     /// let label = sceneName.replaceAll("_", " ") else sceneName
     /// ```
     @mustUse("Strings are immutable; replaceAll returns a new string and does not modify its receiver.")
@@ -2370,7 +2438,7 @@ intrinsic type String {
     /// Parse a percentage read from process memory
     ///
     /// ```splitscript
-    /// let percentage: f64 = percentageText.parse() else 0.0
+    /// let percentage: f64 = "87.5".parse() else 0.0
     /// ```
     @intrinsic(StringParse)
     fn parse<T: Numeric>() -> T!;
@@ -2452,7 +2520,7 @@ intrinsic type String {
     /// Join strings
     ///
     /// ```splitscript
-    /// let label = String.concat(["Stage ", stageName])
+    /// let label = String.concat(["Stage ", "Forest"])
     /// ```
     @intrinsic(StringConcat)
     static fn concat(
@@ -2583,7 +2651,7 @@ struct Duration {
     /// Convert an integer counter to game time
     ///
     /// ```splitscript
-    /// return Duration.fromWholeSeconds(elapsedSeconds)
+    /// let elapsed = Duration.fromWholeSeconds(125)
     /// ```
     static fn fromWholeSeconds(
         /// The signed number of elapsed whole seconds.
@@ -2602,7 +2670,7 @@ struct Duration {
     /// Convert milliseconds to game time
     ///
     /// ```splitscript
-    /// return Duration.fromWholeMilliseconds(elapsedMilliseconds)
+    /// let elapsed = Duration.fromWholeMilliseconds(1_250)
     /// ```
     static fn fromWholeMilliseconds(
         /// The signed number of elapsed milliseconds.
@@ -2623,7 +2691,7 @@ struct Duration {
     /// Convert an exact nanosecond counter
     ///
     /// ```splitscript
-    /// return Duration.fromNanoseconds(elapsedNanoseconds)
+    /// let elapsed = Duration.fromNanoseconds(1_250_000_000)
     /// ```
     static fn fromNanoseconds(
         /// The signed number of nanoseconds.
@@ -2644,7 +2712,7 @@ struct Duration {
     /// Convert a fractional millisecond counter to game time
     ///
     /// ```splitscript
-    /// return Duration.fromMilliseconds(elapsedMilliseconds)
+    /// let elapsed = Duration.fromMilliseconds(1_250.5)
     /// ```
     static fn fromMilliseconds<T: Float>(
         /// Floating-point milliseconds. Both f32 and f64 are accepted.
@@ -2663,7 +2731,7 @@ struct Duration {
     /// Convert a route timer measured in minutes
     ///
     /// ```splitscript
-    /// return Duration.fromMinutes(elapsedMinutes)
+    /// let elapsed = Duration.fromMinutes(2.5)
     /// ```
     static fn fromMinutes<T: Float>(
         /// Floating-point minutes. Both f32 and f64 are accepted.
@@ -2681,7 +2749,7 @@ struct Duration {
     /// Construct a one-hour timeout
     ///
     /// ```splitscript
-    /// return Duration.fromHours(1.0)
+    /// let timeout = Duration.fromHours(1.0)
     /// ```
     static fn fromHours<T: Float>(
         /// Floating-point hours. Both f32 and f64 are accepted.
@@ -2700,7 +2768,7 @@ struct Duration {
     /// Construct a multi-day sentinel
     ///
     /// ```splitscript
-    /// return Duration.fromDays(2.0)
+    /// let sentinel = Duration.fromDays(2.0)
     /// ```
     static fn fromDays<T: Float>(
         /// Floating-point 24-hour days. Both f32 and f64 are accepted.
@@ -2718,7 +2786,7 @@ struct Duration {
     /// Convert frames to game time
     ///
     /// ```splitscript
-    /// return Duration.fromFrames(frameCount, 60)
+    /// let elapsed = Duration.fromFrames(150, 60)
     /// ```
     static fn fromFrames(
         /// The elapsed frame count.
@@ -2740,7 +2808,7 @@ struct Duration {
     /// Construct an exact duration
     ///
     /// ```splitscript
-    /// return Duration.fromParts(seconds, nanoseconds)
+    /// let elapsed = Duration.fromParts(12, 500_000_000)
     /// ```
     static fn fromParts(
         /// Whole seconds.
@@ -2771,7 +2839,7 @@ struct Duration {
     /// Convert seconds to game time
     ///
     /// ```splitscript
-    /// return Duration.fromSeconds(elapsedSeconds)
+    /// let elapsed = Duration.fromSeconds(12.5)
     /// ```
     static fn fromSeconds<T: Float>(
         /// Floating-point seconds. Both f32 and f64 are accepted.
@@ -2793,7 +2861,7 @@ struct Duration {
     /// Inspect an exact duration
     ///
     /// ```splitscript
-    /// let seconds = elapsed.wholeSeconds()
+    /// let seconds = Duration.fromSeconds(12.5).wholeSeconds()
     /// ```
     fn wholeSeconds() -> i64 {
         return self.seconds
@@ -2808,7 +2876,7 @@ struct Duration {
     /// Inspect subsecond precision
     ///
     /// ```splitscript
-    /// let nanoseconds = elapsed.subsecondNanoseconds()
+    /// let nanoseconds = Duration.fromSeconds(12.5).subsecondNanoseconds()
     /// ```
     fn subsecondNanoseconds() -> i32 {
         return self.nanoseconds
@@ -2824,7 +2892,7 @@ struct Duration {
     /// Compare elapsed time in seconds
     ///
     /// ```splitscript
-    /// if elapsed.totalSeconds() >= 0.5 {
+    /// if Duration.fromMilliseconds(750.0).totalSeconds() >= 0.5 {
     ///     print("ready")
     /// }
     /// ```
@@ -2841,7 +2909,7 @@ struct Duration {
     /// Measure a debounce interval
     ///
     /// ```splitscript
-    /// if elapsed.totalMilliseconds() >= 250 {
+    /// if Duration.fromMilliseconds(300.0).totalMilliseconds() >= 250 {
     ///     print("ready")
     /// }
     /// ```
@@ -2858,6 +2926,8 @@ struct Duration {
     /// Accumulate two measured intervals
     ///
     /// ```splitscript
+    /// let first = Duration.fromMilliseconds(250.0)
+    /// let second = Duration.fromMilliseconds(500.0)
     /// let total = first.add(second)
     /// ```
     @operator(add)
@@ -2880,7 +2950,9 @@ struct Duration {
     /// Measure the difference between two durations
     ///
     /// ```splitscript
-    /// let difference = current.subtract(previous)
+    /// let currentTime = Duration.fromSeconds(5.0)
+    /// let previousTime = Duration.fromSeconds(3.0)
+    /// let difference = currentTime.subtract(previousTime)
     /// ```
     @operator(subtract)
     fn subtract(
@@ -2903,7 +2975,9 @@ struct Duration {
     /// Check whether a delay is still pending
     ///
     /// ```splitscript
-    /// return elapsed < delay
+    /// let elapsed = Duration.fromMilliseconds(200.0)
+    /// let delay = Duration.fromMilliseconds(250.0)
+    /// let pending = elapsed < delay
     /// ```
     @operator(lessThan)
     fn lessThan(
@@ -2924,7 +2998,9 @@ struct Duration {
     /// Accept a duration at an inclusive limit
     ///
     /// ```splitscript
-    /// return elapsed <= limit
+    /// let elapsed = Duration.fromMilliseconds(250.0)
+    /// let limit = Duration.fromMilliseconds(250.0)
+    /// let accepted = elapsed <= limit
     /// ```
     @operator(lessThanOrEqual)
     fn lessThanOrEqual(
@@ -2944,7 +3020,9 @@ struct Duration {
     /// Check whether a delayed split is ready
     ///
     /// ```splitscript
-    /// return elapsed > delay
+    /// let elapsed = Duration.fromMilliseconds(300.0)
+    /// let delay = Duration.fromMilliseconds(250.0)
+    /// let ready = elapsed > delay
     /// ```
     @operator(greaterThan)
     fn greaterThan(
@@ -2965,7 +3043,9 @@ struct Duration {
     /// Trigger once a delay has elapsed
     ///
     /// ```splitscript
-    /// return elapsed >= delay
+    /// let elapsed = Duration.fromMilliseconds(250.0)
+    /// let delay = Duration.fromMilliseconds(250.0)
+    /// let ready = elapsed >= delay
     /// ```
     @operator(greaterThanOrEqual)
     fn greaterThanOrEqual(
@@ -3023,7 +3103,8 @@ struct Instant {
     /// Calculate a deadline
     ///
     /// ```splitscript
-    /// let deadline = startedAt + Duration.fromMilliseconds(250)
+    /// let startedAt = Instant.now()
+    /// let deadline = startedAt + Duration.fromMilliseconds(250.0)
     /// ```
     @mustUse("Instants are immutable; add returns the offset instant and does not modify its receiver.")
     @operator(add)
@@ -3072,6 +3153,8 @@ struct Instant {
     /// Measure between two clock readings
     ///
     /// ```splitscript
+    /// let startedAt = Instant.now()
+    /// let finishedAt = Instant.now()
     /// let elapsed = finishedAt.durationSince(startedAt)
     /// ```
     fn durationSince(
@@ -3093,8 +3176,9 @@ struct Instant {
     /// Trigger after a debounce interval
     ///
     /// ```splitscript
+    /// let detectedAt = Instant.now()
     /// if detectedAt.elapsed().totalMilliseconds() >= 250 {
-    ///     return true
+    ///     print("ready")
     /// }
     /// ```
     fn elapsed() -> Duration {
@@ -3111,7 +3195,8 @@ struct Instant {
     /// Wait for a delayed split
     ///
     /// ```splitscript
-    /// return detectedAt.hasElapsed(Duration.fromMilliseconds(250))
+    /// let detectedAt = Instant.now()
+    /// let ready = detectedAt.hasElapsed(Duration.fromMilliseconds(250.0))
     /// ```
     fn hasElapsed(
         /// The minimum duration that must have elapsed.
@@ -3357,8 +3442,8 @@ struct MemoryPath {
     /// Follow a singleton to one of its fields
     ///
     /// ```splitscript
-    /// let singleton = staticTable.memoryPath([], instanceOffset, PointerSize.Bit64)
-    /// let health = singleton.dereference(healthOffset)
+    /// let singleton = 0x1000.memoryPath([], 0x20, PointerSize.Bit64)
+    /// let health = singleton.dereference(0x18)
     /// ```
     @mustUse("Pointer paths are immutable; dereference returns an extended path.")
     fn dereference(
@@ -3385,6 +3470,7 @@ struct MemoryPath {
     /// Resolve a discovered path
     ///
     /// ```splitscript
+    /// let health = 0x1000.memoryPath([0x20], 0x18, PointerSize.Bit64)
     /// let healthAddress = health.resolve() else return
     /// ```
     fn resolve() -> address! {
@@ -3471,7 +3557,7 @@ struct FileVersion {
     /// Construct a dynamically discovered version
     ///
     /// ```splitscript
-    /// let version = FileVersion.fromParts(major, minor, build, privatePart)
+    /// let version = FileVersion.fromParts(1, 2, 3, 4)
     /// ```
     static fn fromParts(
         /// Major version component.
@@ -3501,7 +3587,7 @@ struct FileVersion {
     /// Format a discovered executable version explicitly
     ///
     /// ```splitscript
-    /// let text = version.toString()
+    /// let text = v"1.2.3.4".toString()
     /// ```
     @display
     fn toString() -> String {
@@ -3625,6 +3711,7 @@ struct Module {
     /// Inspect both identities
     ///
     /// ```splitscript
+    /// let executable = await process.mainModule()
     /// let versions = executable.versionInfo() else return
     /// print(`file {versions.file}, product {versions.product}`)
     /// ```
@@ -3743,6 +3830,7 @@ struct Module {
     /// Select a known executable file version
     ///
     /// ```splitscript
+    /// let executable = await process.mainModule()
     /// let version = executable.fileVersion() else return
     /// if version == v"1.2.3.4" {
     ///     print("recognized file version 1.2.3.4")
@@ -3764,6 +3852,7 @@ struct Module {
     /// Select a known product version
     ///
     /// ```splitscript
+    /// let executable = await process.mainModule()
     /// let version = executable.productVersion() else return
     /// if version == v"2.0.0.0" {
     ///     print("recognized product version 2.0.0.0")
@@ -3884,6 +3973,7 @@ struct Module {
     /// Inspect a module's pointer width
     ///
     /// ```splitscript
+    /// let executable = await process.mainModule()
     /// let pointerSize = retry executable.pointerSize()
     /// ```
     fn pointerSize() -> PointerSize! {
@@ -3920,6 +4010,7 @@ struct Module {
     /// Scan an entire module
     ///
     /// ```splitscript
+    /// let gameAssembly = await process.module("GameAssembly.dll")
     /// let marker = await gameAssembly.scan(sig"48 8B ?? 89")
     /// ```
     @intrinsic(ModuleScan)
@@ -3940,6 +4031,8 @@ struct Module {
     /// Find the instruction that references a known string
     ///
     /// ```splitscript
+    /// let module = await process.mainModule()
+    /// let metadata: address = 0x1000
     /// let instruction = await module.scanRelative32Target(
     ///     sig"48 8D 0D",
     ///     3,
@@ -3967,6 +4060,7 @@ struct Module {
     /// Select a module-specific layout
     ///
     /// ```splitscript
+    /// let module = await process.mainModule()
     /// let layout = await module.scanAny([sig"48 8B ??", sig"A1 ?? ??"])
     /// ```
     @intrinsic(ModuleScanAny)
@@ -3985,6 +4079,7 @@ struct Module {
     /// Resolve a module-relative address
     ///
     /// ```splitscript
+    /// let gameAssembly = await process.module("GameAssembly.dll")
     /// let target = retry gameAssembly.readRelative32(0x400)
     /// ```
     fn readRelative32(
@@ -4143,6 +4238,7 @@ struct UnityModule {
     /// Find a managed assembly
     ///
     /// ```splitscript
+    /// let unity = await Unity.il2cpp(2020)
     /// let image = await unity.image("Assembly-CSharp")
     /// ```
     @intrinsic(UnityModuleImage)
@@ -4192,6 +4288,8 @@ struct UnityImage {
     /// Find a managed class
     ///
     /// ```splitscript
+    /// let unity = await Unity.il2cpp(2020)
+    /// let image = await unity.image("Assembly-CSharp")
     /// let gameManager = await image.class("GameManager")
     /// ```
     @intrinsic(UnityImageClass)
@@ -4243,6 +4341,9 @@ struct UnityClass {
     /// Find a field offset
     ///
     /// ```splitscript
+    /// let unity = await Unity.il2cpp(2020)
+    /// let image = await unity.image("Assembly-CSharp")
+    /// let gameManager = await image.class("GameManager")
     /// let healthOffset = await gameManager.field("health")
     /// ```
     @intrinsic(UnityClassField)
@@ -4260,6 +4361,9 @@ struct UnityClass {
     /// Try multiple field names
     ///
     /// ```splitscript
+    /// let unity = await Unity.il2cpp(2020)
+    /// let image = await unity.image("Assembly-CSharp")
+    /// let gameManager = await image.class("GameManager")
     /// let levelField = await gameManager.fieldAny(["currentLevel", "level"])
     /// ```
     @intrinsic(UnityClassFieldAny)
@@ -4277,6 +4381,9 @@ struct UnityClass {
     /// Find static storage
     ///
     /// ```splitscript
+    /// let unity = await Unity.il2cpp(2020)
+    /// let image = await unity.image("Assembly-CSharp")
+    /// let gameManager = await image.class("GameManager")
     /// let staticTable = await gameManager.staticTable()
     /// ```
     @intrinsic(UnityClassStaticTable)
@@ -4291,6 +4398,9 @@ struct UnityClass {
     /// Find a singleton instance
     ///
     /// ```splitscript
+    /// let unity = await Unity.il2cpp(2020)
+    /// let image = await unity.image("Assembly-CSharp")
+    /// let gameManager = await image.class("GameManager")
     /// let instance = await gameManager.staticInstance(["Instance", "_instance"])
     /// ```
     @intrinsic(UnityClassStaticInstance)
@@ -5363,7 +5473,7 @@ struct GbaEmulator {
     ///
     /// Read an emulated value
     ///
-    /// ```splitscript
+    /// ```splitscript state GBA
     /// let room: u8 = gba.read(0x03000010) else 0
     /// ```
     @intrinsic(GbaEmulatorRead)

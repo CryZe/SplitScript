@@ -201,33 +201,7 @@ impl<'a> CatalogGenerator<'a> {
         let examples = documentation
             .examples
             .iter()
-            .map(|example| {
-                if let Some(validation_source) = &example.validation_source {
-                    return format!(
-                        "Example::checked({}, {}, {})",
-                        quote(&example.title),
-                        quote(&example.source),
-                        quote(validation_source),
-                    );
-                }
-                example.state_provider.as_ref().map_or_else(
-                    || {
-                        format!(
-                            "Example::on_attach_body({}, {})",
-                            quote(&example.title),
-                            quote(&example.source)
-                        )
-                    },
-                    |provider| {
-                        format!(
-                            "Example::provider_on_attach_body({}, {}, {})",
-                            quote(&example.title),
-                            quote(&example.source),
-                            quote(provider)
-                        )
-                    },
-                )
-            })
+            .map(example_expression)
             .collect::<Vec<_>>()
             .join(",");
         format!(
@@ -512,12 +486,9 @@ impl<'a> CatalogGenerator<'a> {
             })
             .unwrap_or("None");
         let example = &function.documentation.examples[0];
-        let validation = example.validation_source.as_ref().map_or_else(
-            || format!("validation_fixture(StdlibItemId::{id})"),
-            |source| quote(source),
-        );
+        let example = example_expression(example);
         output.push_str(&format!(
-                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, unary_operator: {unary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, {validation})], related: &[] }}, implementation: {implementation} }},\n",
+                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, unary_operator: {unary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[{example}], related: &[] }}, implementation: {implementation} }},\n",
                 quote(&function.name),
                 quote(&qualified_name),
                 self.type_parameters(type_parameters, owner),
@@ -525,7 +496,6 @@ impl<'a> CatalogGenerator<'a> {
                 function.parameters.iter().map(|parameter| self.parameter(parameter, type_parameters)).collect::<Vec<_>>().join(","),
                 self.type_ref(&function.result, type_parameters),
                 quote(&function.documentation.summary), quote(&function.documentation.details),
-                quote(&example.title), quote(&example.source)
             ));
     }
 
@@ -680,6 +650,63 @@ impl<'a> CatalogGenerator<'a> {
             has("globalVariable")
         )
     }
+}
+
+fn example_expression(example: &crate::Example) -> String {
+    if let Some(validation) = &example.validation_source {
+        format!(
+            "Example::checked({}, {}, {})",
+            quote(&example.title),
+            quote(&example.source),
+            quote(validation),
+        )
+    } else if is_complete_program_example(&example.source) {
+        format!(
+            "Example::complete_program({}, {})",
+            quote(&example.title),
+            quote(&example.source),
+        )
+    } else if let Some(provider) = &example.state_provider {
+        format!(
+            "Example::provider_on_attach_body({}, {}, {})",
+            quote(&example.title),
+            quote(&example.source),
+            quote(provider),
+        )
+    } else {
+        format!(
+            "Example::on_attach_body({}, {})",
+            quote(&example.title),
+            quote(&example.source),
+        )
+    }
+}
+
+fn is_complete_program_example(source: &str) -> bool {
+    let source = source.trim_start();
+    [
+        "state",
+        "settings",
+        "tickRate",
+        "setup",
+        "onAttach",
+        "onDetach",
+        "whileAttached",
+        "start",
+        "split",
+        "reset",
+        "isLoading",
+        "gameTime",
+        "fn",
+        "record",
+        "enum",
+    ]
+    .into_iter()
+    .any(|keyword| {
+        source.strip_prefix(keyword).is_some_and(|rest| {
+            rest.starts_with(char::is_whitespace) || rest.starts_with('{') || rest.starts_with('(')
+        })
+    })
 }
 
 fn attribute_name<'a>(attributes: &'a [Attribute], name: &str) -> &'a str {
@@ -1086,6 +1113,19 @@ namespace timer {}
 /// let value: u32? = 4
 /// ```
 typeConstructor T? {}
+
+/// Lifecycle hooks.
+///
+/// # Example
+///
+/// Pause after detaching
+///
+/// ```splitscript
+/// onDetach {
+///     timer.pauseGameTime()
+/// }
+/// ```
+namespace lifecycle {}
 "#;
         let generated = generate_catalog(&parse(source).unwrap()).unwrap();
         assert!(generated.contains(
@@ -1094,6 +1134,34 @@ typeConstructor T? {}
         assert!(generated.contains(
             "Example::on_attach_body(\"Store an optional value\", \"let value: u32? = 4\")"
         ));
+        assert!(
+            generated.contains("Example::complete_program(\"Pause after detaching\", \"onDetach {")
+        );
+    }
+
+    #[test]
+    fn example_generation_preserves_authored_hidden_context_and_provider_context() {
+        let hidden = crate::Example {
+            title: "Read a value".into(),
+            source: "let value = process.read<u32>(0x1000) else 0".into(),
+            validation_source: Some(
+                "state \"game.exe\" {}\nonAttach {\nlet value = process.read<u32>(0x1000) else 0\n}"
+                    .into(),
+            ),
+            state_provider: None,
+        };
+        assert!(example_expression(&hidden).starts_with("Example::checked("));
+
+        let provider = crate::Example {
+            title: "Read GBA memory".into(),
+            source: "let value: u8 = gba.read(0x03000010) else 0".into(),
+            validation_source: None,
+            state_provider: Some("GBA".into()),
+        };
+        assert_eq!(
+            example_expression(&provider),
+            "Example::provider_on_attach_body(\"Read GBA memory\", \"let value: u8 = gba.read(0x03000010) else 0\", \"GBA\")"
+        );
     }
 
     #[test]

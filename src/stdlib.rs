@@ -822,6 +822,7 @@ impl StandardLibrary {
                 if example.title.trim().is_empty()
                     || example.source.trim().is_empty()
                     || !example.has_validation_source()
+                    || !example.validation_includes_source()
                 {
                     errors.push(format!(
                         "state provider `{}` has an incomplete example",
@@ -1043,6 +1044,7 @@ impl StandardLibrary {
                 if example.title.trim().is_empty()
                     || example.source.trim().is_empty()
                     || !example.has_validation_source()
+                    || !example.validation_includes_source()
                 {
                     errors.push(format!(
                         "`{}` has an incomplete example",
@@ -1345,6 +1347,7 @@ fn validate_named_declarations<T, I>(
             if example.title.trim().is_empty()
                 || example.source.trim().is_empty()
                 || !example.has_validation_source()
+                || !example.validation_includes_source()
             {
                 errors.push(format!(
                     "{kind} `{name}` has an incomplete documentation example"

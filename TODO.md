@@ -47,15 +47,14 @@ VS Code opens the index beside a script, supports search, breadcrumbs, links,
 and compiler-derived semantic code. Keep that working base and finish the
 missing graph rather than rebuilding the viewer.
 
-- [ ] Finish semantic code in generated reference pages. Signatures now use
-  catalog identities for syntax coloring and navigation, and examples can use
-  rustdoc-style hidden `# ` fixture lines so the compiler can map exact
-  semantic tokens and standard-library definitions back onto visible code.
-  Convert every remaining shared fixture-backed callable example to an exact
-  hidden-context fixture, then require that the visible snippet occurs in and
-  is type-checked as part of its validation program. Keep syntax highlighting
-  as the recovery presentation for incomplete examples, never as a substitute
-  for semantic identity when an example is valid.
+- [x] Finish semantic code in generated reference pages. Signatures use catalog
+  identities for syntax coloring and navigation. Every standard-library
+  example now compiles its exact visible snippet through a focused lifecycle
+  wrapper or authored rustdoc-style hidden `# ` context; unrelated shared
+  fixtures have been removed. Catalog validation rejects a validation program
+  that omits the visible snippet, and the compiler test reports every broken
+  example together. Lexical highlighting remains only a recovery presentation
+  for incomplete code.
 
 ## P0 — unblock the next representative native ports
 
@@ -518,9 +517,8 @@ remaining work is product hardening and distribution.
    setting keys, canonical missing-state guidance, and direct links from
    recognizable ASL constructs to their existing recipes.
 3. Extend the working in-editor standard-library reference with language and
-   migration topics, finish exact hidden-context examples, and link hover,
-   completion, diagnostics, and native CLI topics into the same graph. Treat
-   standalone HTML as a later renderer.
+   migration topics, and link hover, completion, diagnostics, and native CLI
+   topics into the same graph. Treat standalone HTML as a later renderer.
 4. Keep irregular nested static settings explicit until another maintained
    port demonstrates a small reusable table abstraction; select the next
    concrete provider or host-contract fixture instead of inventing a settings

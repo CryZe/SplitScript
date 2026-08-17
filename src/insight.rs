@@ -1050,7 +1050,7 @@ whileAttached {
         assert!(
             hover
                 .markdown
-                .contains("let visibleStage = stage.clamp(1, 7)")
+                .contains("let visibleStage = 9u32.clamp(1, 7)")
         );
         assert!(!hover.markdown.contains("value.min"));
         assert!(!hover.markdown.contains("value.max"));
@@ -1100,7 +1100,7 @@ whileAttached {
         assert!(
             hover
                 .markdown
-                .contains("let map = mapName.toAsciiLowerCase()")
+                .contains("let map = \"FOREST\".toAsciiLowerCase()")
         );
     }
 

@@ -520,6 +520,7 @@ fn validate_documentation<Id>(
         if example.title.trim().is_empty()
             || example.source.trim().is_empty()
             || !example.has_validation_source()
+            || !example.validation_includes_source()
         {
             errors.push(format!(
                 "{kind} `{name}` has an incomplete documentation example"

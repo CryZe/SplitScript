@@ -1244,26 +1244,38 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         );
     }
 
+    let mut broken_examples = Vec::new();
+    let summarize_errors = |errors: Vec<splitscript::Diagnostic>| {
+        errors
+            .into_iter()
+            .map(|error| error.message)
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
     for item in library.items() {
         assert!(!item.documentation.summary.is_empty());
         for example in item.documentation.examples {
-            splitscript::compile(&example.validation_program()).unwrap_or_else(|errors| {
-                panic!(
-                    "standard-library example `{}: {}` failed: {errors:#?}",
-                    item.qualified_name, example.title
-                )
-            });
+            if let Err(errors) = splitscript::compile(&example.validation_program()) {
+                broken_examples.push(format!(
+                    "standard-library example `{}: {}` failed: {}",
+                    item.qualified_name,
+                    example.title,
+                    summarize_errors(errors)
+                ));
+            }
         }
     }
     for provider in library.state_providers() {
         assert!(!provider.documentation.summary.is_empty());
         for example in provider.documentation.examples {
-            splitscript::compile(&example.validation_program()).unwrap_or_else(|errors| {
-                panic!(
-                    "state-provider example `{}: {}` failed: {errors:#?}",
-                    provider.name, example.title
-                )
-            });
+            if let Err(errors) = splitscript::compile(&example.validation_program()) {
+                broken_examples.push(format!(
+                    "state-provider example `{}: {}` failed: {}",
+                    provider.name,
+                    example.title,
+                    summarize_errors(errors)
+                ));
+            }
         }
     }
     let declaration_documentation = library
@@ -1304,14 +1316,20 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     for (name, documentation) in declaration_documentation {
         for example in documentation.examples {
             checked_declaration_examples += 1;
-            splitscript::compile(&example.validation_program()).unwrap_or_else(|errors| {
-                panic!(
-                    "standard-library declaration example `{name}: {}` failed: {errors:#?}",
-                    example.title
-                )
-            });
+            if let Err(errors) = splitscript::compile(&example.validation_program()) {
+                broken_examples.push(format!(
+                    "standard-library declaration example `{name}: {}` failed: {}",
+                    example.title,
+                    summarize_errors(errors)
+                ));
+            }
         }
     }
+    assert!(
+        broken_examples.is_empty(),
+        "{}",
+        broken_examples.join("\n\n")
+    );
     assert!(
         checked_declaration_examples >= 7,
         "representative non-callable declarations should retain checked examples"

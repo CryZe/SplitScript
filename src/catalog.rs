@@ -44,6 +44,19 @@ impl Example {
         }
     }
 
+    /// Creates an example that is already a complete SplitScript program.
+    ///
+    /// This is reserved for examples of top-level declarations and lifecycle
+    /// blocks. Statement and expression examples should use one of the body
+    /// helpers so the rendered snippet stays focused.
+    pub const fn complete_program(title: &'static str, source: &'static str) -> Self {
+        Self {
+            title,
+            source,
+            validation: ExampleValidation::CompleteProgram(source),
+        }
+    }
+
     /// Creates a focused statement snippet whose compiler fixture is generated
     /// automatically. Catalog authors do not need to pollute the visible
     /// example with an otherwise unrelated state declaration and action block.
@@ -80,11 +93,12 @@ impl Example {
                     }
                     ExampleValidation::CompleteProgram(_) => unreachable!(),
                 };
-                for line in self.source.lines() {
-                    program.push_str("    ");
-                    program.push_str(line);
-                    program.push('\n');
-                }
+                // Keep the displayed snippet byte-for-byte contiguous inside
+                // the generated program. SplitScript blocks do not require
+                // indentation, and preserving the exact bytes lets semantic
+                // spans map back to every line of a multiline example.
+                program.push_str(self.source);
+                program.push('\n');
                 program.push_str("}\n");
                 program
             }
@@ -96,5 +110,32 @@ impl Example {
             ExampleValidation::CompleteProgram(source) => !source.is_empty(),
             ExampleValidation::OnAttachBody | ExampleValidation::ProviderOnAttachBody(_) => true,
         }
+    }
+
+    /// Reports whether validation checks the exact snippet shown to readers.
+    ///
+    /// Hidden rustdoc-style context may surround the snippet, but it must not
+    /// replace it with a different program.
+    pub fn validation_includes_source(self) -> bool {
+        self.validation_program().contains(self.source)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Example;
+
+    #[test]
+    fn validation_programs_must_include_the_visible_snippet() {
+        assert!(Example::complete_program("Complete", "onDetach {}").validation_includes_source());
+        assert!(Example::on_attach_body("Body", "let value = 4").validation_includes_source());
+        assert!(
+            Example::provider_on_attach_body("Provider", "let value = 4", "GBA")
+                .validation_includes_source()
+        );
+        assert!(
+            !Example::checked("Unrelated", "let value = 4", "state \"game.exe\" {}")
+                .validation_includes_source()
+        );
     }
 }

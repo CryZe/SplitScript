@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-17: load removal and computed game time migration
+
+- Added compiler-checked recipes for `isLoading` and `gameTime`, including
+  their deliberate `None` and fallthrough behavior when a tick has no new
+  trustworthy observation.
+- Documented typed `Duration` reporting and frame conversion separately from
+  the still-unavailable ability to read LiveSplit's current host timer values.
+- Added both concepts to the compiler-owned migration catalog, generated
+  capability index, and navigable recipe map.
+
 ## 2026-08-17: static settings migration recipe
 
 - Added a self-contained compiler-checked recipe for migrating ASL runtime

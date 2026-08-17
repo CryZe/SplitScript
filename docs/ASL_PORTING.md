@@ -698,6 +698,60 @@ rewrite it automatically because the correct `None` behavior depends on the
 surrounding control flow. Use `else` for an early fallback or `match` when the
 absent state needs distinct behavior.
 
+## Load removal and computed game time
+
+Use `isLoading` when the game exposes whether its own clock should be paused.
+Return `true` while loading and `false` while gameplay is advancing. When a
+sentinel means the script has no trustworthy observation for this tick, fall
+through or return `None` so LiveSplit keeps its current pause state:
+
+```splitscript
+state "game.exe" {
+    loadingState: i32 at 0x1000;
+}
+
+isLoading {
+    if current.loadingState < 0 {
+        return None
+    }
+    return current.loadingState != 0
+}
+```
+
+This third state is intentionally different from `false`: `false` actively
+resumes game time, while `None` leaves the previous host state unchanged. A
+bare `return` and ordinary fallthrough also produce `None`. Prefer this action
+for regular load removal rather than repeatedly calling
+`timer.pauseGameTime()` and `timer.resumeGameTime()`.
+
+When the game exposes its own elapsed time, return a typed `Duration` from
+`gameTime`. Direct values automatically become the present side of the
+optional action result; no `Some(...)` constructor is needed:
+
+```splitscript
+state "game.exe" {
+    elapsedFrames: i64 at 0x1008;
+}
+
+gameTime {
+    if current.elapsedFrames < 0 {
+        return None
+    }
+    return Duration.fromFrames(current.elapsedFrames, 60)
+}
+```
+
+Use the constructor that matches the game's representation, such as
+`Duration.fromSeconds`, `fromMilliseconds`, `fromFrames`, or `fromParts`.
+Falling through from `gameTime` leaves the host's last value unchanged; it
+does not set zero. `isLoading` runs before `gameTime` on each eligible update,
+so the two actions may be combined when the game provides both an independent
+loading flag and an authoritative elapsed clock.
+
+These actions report script-owned observations to LiveSplit. They do not read
+back `timer.CurrentTime.GameTime`, which may have been changed by the host or
+another component and remains a separate host-contract requirement below.
+
 ## LiveSplit timer metadata and control
 
 Several legacy paths inspect host-owned timer data rather than the attached

@@ -142,15 +142,6 @@ General rules:
 
 ## P1 — expand migration guidance and automated fixes
 
-- [ ] Expand capability-driven diagnostics and code actions beyond the initial
-  structured entries. Emit one focused explanation and suppress predictable
-  cascades for recognizable ASL constructs, including legacy lifecycle blocks,
-  timer member chains, member casing, result recovery, and string
-  concatenation. Distinguish “supported under a
-  different spelling,” “requires a semantic rewrite,” “requires host support,”
-  and “intentionally sandboxed out.” Use machine-applicable rewrites only after
-  resolution proves equivalence and that user-defined names are not being
-  rewritten.
 - [ ] Expand the structured foreign-spelling entries beyond the existing
   declarations, option value, strings, durations, and numeric types. Add new
   entries only for corpus-proven, unambiguous spellings that are not already
@@ -158,10 +149,6 @@ General rules:
   syntax unique; do not add compatibility aliases. Do not diagnose
   JavaScript-style `${...}` because it validly means a literal dollar sign
   followed by interpolation in SplitScript.
-- [ ] Write short compiler-checked guides for authors coming from ASL/C#,
-  TypeScript/JavaScript, and Rust. Explain semantic differences—lifecycle,
-  fixed-width numbers, `Duration`, async cancellation, `T?`/`T!`,
-  settings, and process reads—not only token substitutions.
 - [ ] Include the canonical compiler identity already exposed by the compiler
   service and generated-module metadata in machine-readable port reports so
   future evidence remains reproducible.

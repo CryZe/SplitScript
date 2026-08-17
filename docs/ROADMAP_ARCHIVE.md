@@ -1,5 +1,25 @@
 # SplitScript roadmap
 
+## 2026-08-18: language-background guides
+
+- Added concise bundled guides for C#, JavaScript, and Rust authors that
+  explain SplitScript's lifecycle, fixed-width types, inference, options and
+  results, async cancellation, settings, and process-memory boundaries.
+- Made every SplitScript snippet independently compiler-checked with hidden
+  context, matching the canonical ASL cookbook's validation standard.
+- Kept the generated ASL migration map exclusive to the ASL guide while all
+  four guides remain navigable from the generated reference index.
+
+## 2026-08-18: capability-driven migration diagnostics
+
+- Completed focused migration diagnostics for legacy lifecycle blocks, timer
+  member chains, type-aware member spelling, fallible-value recovery, and
+  string concatenation without introducing compatibility aliases.
+- Kept machine-applicable rewrites limited to substitutions proven equivalent
+  by parser or type resolution; semantic choices remain explanatory fixes.
+- Preserved the support categories and canonical documentation links from the
+  compiler-owned migration catalog.
+
 ## 2026-08-17: complete compiler-checked ASL cookbook
 
 - Completed the remaining helper recipe with explicit caller-selected

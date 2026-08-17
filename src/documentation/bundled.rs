@@ -21,14 +21,39 @@ struct BundledGuide {
     title: &'static str,
     summary: &'static str,
     source: &'static str,
+    migration_overview: bool,
 }
 
-const GUIDES: &[BundledGuide] = &[BundledGuide {
-    uri: "/guides/asl-porting.md",
-    title: "Porting ASL to SplitScript",
-    summary: "Canonical compiler-checked recipes for migrating legacy ASL autosplitters.",
-    source: include_str!("../../docs/ASL_PORTING.md"),
-}];
+const GUIDES: &[BundledGuide] = &[
+    BundledGuide {
+        uri: "/guides/asl-porting.md",
+        title: "Porting ASL to SplitScript",
+        summary: "Canonical compiler-checked recipes for migrating legacy ASL autosplitters.",
+        source: include_str!("../../docs/ASL_PORTING.md"),
+        migration_overview: true,
+    },
+    BundledGuide {
+        uri: "/guides/from-csharp.md",
+        title: "SplitScript for C# authors",
+        summary: "A concise guide to SplitScript's types, control flow, errors, and autosplitter lifecycle for C# authors.",
+        source: include_str!("../../docs/FROM_CSHARP.md"),
+        migration_overview: false,
+    },
+    BundledGuide {
+        uri: "/guides/from-javascript.md",
+        title: "SplitScript for JavaScript authors",
+        summary: "A concise guide to SplitScript's static types, fixed-width numbers, errors, and autosplitter lifecycle for JavaScript authors.",
+        source: include_str!("../../docs/FROM_JAVASCRIPT.md"),
+        migration_overview: false,
+    },
+    BundledGuide {
+        uri: "/guides/from-rust.md",
+        title: "SplitScript for Rust authors",
+        summary: "A concise guide to SplitScript's inference, capabilities, error values, async behavior, and autosplitter lifecycle for Rust authors.",
+        source: include_str!("../../docs/FROM_RUST.md"),
+        migration_overview: false,
+    },
+];
 
 pub(super) fn index() -> impl Iterator<Item = DocumentationIndexEntry> {
     GUIDES.iter().map(|guide| DocumentationIndexEntry {
@@ -43,6 +68,11 @@ pub(super) fn index() -> impl Iterator<Item = DocumentationIndexEntry> {
 pub(super) fn page(uri: &str) -> Option<DocumentationPage> {
     let guide = GUIDES.iter().find(|guide| guide.uri == uri)?;
     let source = rendered_guide_source(guide.source);
+    let source = if guide.migration_overview {
+        insert_migration_overview(guide.uri, &source, guide.source)
+    } else {
+        source
+    };
     Some(DocumentationPage {
         uri: guide.uri.to_owned(),
         title: guide.title.to_owned(),
@@ -50,7 +80,7 @@ pub(super) fn page(uri: &str) -> Option<DocumentationPage> {
             "[SplitScript reference]({}) / {}\n\n{}",
             relative_document_link(guide.uri, "/index.md"),
             guide.title,
-            insert_migration_overview(guide.uri, &source, guide.source),
+            source,
         ),
     })
 }
@@ -287,6 +317,19 @@ mod tests {
             page.markdown
                 .contains("Planned: [shutdown lifecycle block](")
         );
+    }
+
+    #[test]
+    fn language_background_guides_are_bundled_without_an_asl_migration_map() {
+        for uri in [
+            "/guides/from-csharp.md",
+            "/guides/from-javascript.md",
+            "/guides/from-rust.md",
+        ] {
+            let page = page(uri).unwrap_or_else(|| panic!("missing bundled guide `{uri}`"));
+            assert!(page.markdown.starts_with("[SplitScript reference]"));
+            assert!(!page.markdown.contains("## Quick migration map"));
+        }
     }
 
     fn markdown_link_targets(markdown: &str) -> impl Iterator<Item = &str> {

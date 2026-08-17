@@ -133,16 +133,15 @@ impl StandardLibrary {
     }
 
     fn initialize_source_body_operations(&self) {
-        if self.graph.source_body_operations_are_initialized() {
-            return;
-        }
-        let operations = crate::derive_standard_library_operation_metadata(self.clone())
-            .unwrap_or_else(|diagnostics| {
-                panic!(
-                    "source-defined standard-library operation analysis failed:\n{diagnostics:#?}"
-                )
-            });
-        self.graph.initialize_source_body_operations(operations);
+        self.graph.initialize_source_body_operations_with(|| {
+            crate::derive_standard_library_operation_metadata(self.clone()).unwrap_or_else(
+                |diagnostics| {
+                    panic!(
+                        "source-defined standard-library operation analysis failed:\n{diagnostics:#?}"
+                    )
+                },
+            )
+        });
     }
 
     pub(crate) fn source_body_operations_are_initialized(&self) -> bool {

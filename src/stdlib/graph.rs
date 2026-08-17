@@ -253,11 +253,11 @@ impl StandardLibraryGraph {
             .and_then(|operations| operations.get(&item).copied())
     }
 
-    pub(super) fn initialize_source_body_operations(
+    pub(super) fn initialize_source_body_operations_with(
         &self,
-        operations: HashMap<StdlibItemId, OperationMetadata>,
+        initialize: impl FnOnce() -> HashMap<StdlibItemId, OperationMetadata>,
     ) {
-        let _ = self.source_body_operations.set(operations);
+        self.source_body_operations.get_or_init(initialize);
     }
 
     pub(super) fn source_body_operations_are_initialized(&self) -> bool {
@@ -427,4 +427,34 @@ pub(super) fn default_standard_library_graph() -> Arc<StandardLibraryGraph> {
             }))
         })
         .clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    use super::*;
+
+    #[test]
+    fn source_body_operation_initialization_runs_once_across_threads() {
+        let graph = Arc::new(StandardLibraryGraph::build().expect("bundled graph is valid"));
+        let calls = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let graph = Arc::clone(&graph);
+                let calls = &calls;
+                scope.spawn(move || {
+                    graph.initialize_source_body_operations_with(|| {
+                        calls.fetch_add(1, Ordering::Relaxed);
+                        HashMap::new()
+                    });
+                });
+            }
+        });
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert!(graph.source_body_operations_are_initialized());
+    }
 }

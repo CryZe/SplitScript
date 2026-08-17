@@ -47,11 +47,6 @@ VS Code opens the index beside a script, supports search, breadcrumbs, links,
 and compiler-derived semantic code. Keep that working base and finish the
 missing graph rather than rebuilding the viewer.
 
-- [ ] Link ordinary editor workflows into the browser. Hover and completion
-  details should offer **Open full documentation**; standard-library
-  definition navigation should reach the exact documented symbol, while a
-  separate source link may expose its privileged `standard.split` declaration
-  when that is useful. Preserve normal source definitions for user symbols.
 - [ ] Cover the documentation graph and reference contract with catalog
   validation, link checking, deterministic snapshots, native/bundled-server
   parity, and VS Code desktop/web integration tests. Missing documentation or

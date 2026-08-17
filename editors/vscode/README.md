@@ -49,6 +49,10 @@ guidance, the ASL porting guide, and the standard library in one searchable,
 hierarchical graph. Migration diagnostics link to the exact corresponding
 page. **SplitScript: Search Documentation** searches every page by symbol,
 concept, kind, signature, and summary without requiring repository files.
+Catalog-backed hover and completion details link directly to the corresponding
+full page, and go-to-definition on language or standard-library symbols opens
+that same virtual document. The client trusts only the documentation-opening
+command in language-server Markdown; unrelated command links remain disabled.
 
 ## Development
 

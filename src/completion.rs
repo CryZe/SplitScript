@@ -19,7 +19,7 @@ use crate::{
     },
     catalog::Documentation,
     database::{CompilerDatabase, SemanticQueryResult},
-    documentation::StandardLibraryDocumentation,
+    documentation::{StandardLibraryDocumentation, language_item_uri, symbol_uri},
     effects::{OperationAnalysis, action_has_attached_process, action_has_state_snapshots},
     hir::ExpressionResolution,
     language::{LanguageCatalog, LanguageItem, LanguageItemId, LanguageItemKind},
@@ -27,7 +27,7 @@ use crate::{
     semantic::ResolvedCall,
     stdlib::{
         ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibItemId, StdlibNamespace,
-        TypeRef,
+        StdlibSymbolId, TypeRef,
     },
     stdlib_semantic::StandardLibrarySemanticExt,
     types::TypeKind,
@@ -57,6 +57,8 @@ pub struct CompletionItem {
     pub kind: CompletionKind,
     pub detail: Option<String>,
     pub documentation: Option<String>,
+    /// Stable compiler-owned reference page for a catalog-backed completion.
+    pub documentation_uri: Option<String>,
     pub insert_text: String,
     pub is_snippet: bool,
 }
@@ -204,6 +206,7 @@ fn complete_setting_key(source: &str, syntax: &Program, offset: usize) -> Option
             kind: CompletionKind::Setting,
             detail: Some(format!("{kind}{direct}")),
             documentation: setting.tooltip.clone(),
+            documentation_uri: None,
             insert_text: escape_string_contents(setting.runtime_key()),
             is_snippet: false,
         });
@@ -295,6 +298,7 @@ fn complete_tick_rate_field(source: &str, offset: usize) -> Option<CompletionLis
             documentation: Some(
                 "Polling rate used while a process is attached. Defaults to 120 Hz.".to_owned(),
             ),
+            documentation_uri: Some(language_item_uri(LanguageItemId::TickRate)),
             insert_text: "attached: ${1:120},".to_owned(),
             is_snippet: true,
         });
@@ -307,6 +311,7 @@ fn complete_tick_rate_field(source: &str, offset: usize) -> Option<CompletionLis
             documentation: Some(
                 "Polling rate used while waiting for a process. Defaults to 1 Hz.".to_owned(),
             ),
+            documentation_uri: Some(language_item_uri(LanguageItemId::TickRate)),
             insert_text: "detached: ${1:1},".to_owned(),
             is_snippet: true,
         });
@@ -495,6 +500,10 @@ fn complete_root(
             kind: CompletionKind::Variable,
             detail: Some(ty.name.to_owned()),
             documentation: Some(render_documentation(&provider.documentation)),
+            documentation_uri: Some(symbol_uri(
+                StdlibSymbolId::StateProvider(provider.id),
+                &standard_library,
+            )),
             insert_text: provider.value_name.to_owned(),
             is_snippet: false,
         });
@@ -630,6 +639,7 @@ fn complete_member(
                         kind: CompletionKind::EnumMember,
                         detail: Some(format!("{}.{}", enumeration.name, variant.name)),
                         documentation: None,
+                        documentation_uri: None,
                         insert_text,
                         is_snippet,
                     });
@@ -747,6 +757,7 @@ fn catalog_language_completion(
         kind,
         detail: Some(item.form.to_owned()),
         documentation: Some(render_documentation(&item.documentation)),
+        documentation_uri: Some(language_item_uri(item.id)),
         insert_text,
         is_snippet,
     }
@@ -762,7 +773,7 @@ fn add_root_standard_library(
         .iter()
         .filter(|namespace| namespace.path.len() == 1)
     {
-        builder.add(stdlib_namespace_completion(namespace));
+        builder.add(stdlib_namespace_completion(namespace, library));
     }
     for ty in library.types() {
         builder.add(CompletionItem {
@@ -774,6 +785,7 @@ fn add_root_standard_library(
             },
             detail: Some("standard-library type".to_owned()),
             documentation: Some(render_documentation(&ty.documentation)),
+            documentation_uri: Some(symbol_uri(StdlibSymbolId::Type(ty.id), library)),
             insert_text: ty.name.to_owned(),
             is_snippet: false,
         });
@@ -800,12 +812,16 @@ fn add_root_standard_library(
     }
 }
 
-fn stdlib_namespace_completion(namespace: &StdlibNamespace) -> CompletionItem {
+fn stdlib_namespace_completion(
+    namespace: &StdlibNamespace,
+    library: &StandardLibrary,
+) -> CompletionItem {
     CompletionItem {
         label: namespace.name.to_owned(),
         kind: CompletionKind::Namespace,
         detail: Some("standard-library namespace".to_owned()),
         documentation: Some(render_documentation(&namespace.documentation)),
+        documentation_uri: Some(symbol_uri(StdlibSymbolId::Namespace(namespace.id), library)),
         insert_text: namespace.name.to_owned(),
         is_snippet: false,
     }
@@ -825,6 +841,7 @@ fn add_standard_library_path_members(
                 kind: CompletionKind::EnumMember,
                 detail: Some(format!("{}.{}", ty.name, variant.name)),
                 documentation: Some(render_documentation(&variant.documentation)),
+                documentation_uri: Some(symbol_uri(StdlibSymbolId::Variant(variant.id), library)),
                 insert_text: variant.name.to_owned(),
                 is_snippet: false,
             });
@@ -859,7 +876,7 @@ fn add_standard_library_path_members(
     for namespace in library.namespaces().iter().filter(|namespace| {
         namespace.path.len() == prefix.len() + 1 && namespace.path[..prefix.len()] == *prefix
     }) {
-        builder.add(stdlib_namespace_completion(namespace));
+        builder.add(stdlib_namespace_completion(namespace, library));
     }
 }
 
@@ -875,6 +892,7 @@ fn stdlib_completion(
         kind,
         detail: Some(documentation.signature.clone()),
         documentation: Some(documentation.summary_markdown()),
+        documentation_uri: Some(symbol_uri(StdlibSymbolId::Item(item.id), library)),
         insert_text: function_snippet(label, item),
         is_snippet: true,
     }
@@ -943,6 +961,7 @@ fn add_source_declarations(
             kind: CompletionKind::Function,
             detail: Some("user function".to_owned()),
             documentation: None,
+            documentation_uri: None,
             insert_text: format!("{}({parameters})", function.name),
             is_snippet: true,
         });
@@ -1306,6 +1325,10 @@ fn add_inferred_fields(
                         field.name
                     )),
                     documentation: Some(render_documentation(&field.documentation)),
+                    documentation_uri: Some(symbol_uri(
+                        StdlibSymbolId::Field(field.id),
+                        standard_library,
+                    )),
                     insert_text: field.name.to_owned(),
                     is_snippet: false,
                 });
@@ -1535,6 +1558,7 @@ fn add_inferred_methods(
                 kind: CompletionKind::Method,
                 detail: Some("user method".to_owned()),
                 documentation: None,
+                documentation_uri: None,
                 insert_text: format!("{}({parameters})", function.name),
                 is_snippet: true,
             });
@@ -1745,6 +1769,7 @@ fn simple_completion(label: &str, kind: CompletionKind, detail: &str) -> Complet
         kind,
         detail: Some(detail.to_owned()),
         documentation: None,
+        documentation_uri: None,
         insert_text: label.to_owned(),
         is_snippet: false,
     }

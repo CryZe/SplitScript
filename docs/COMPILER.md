@@ -1074,9 +1074,10 @@ references, and rename are caret-based and keep selecting a word whose
 half-open span ends at the caret, including before adjacent punctuation;
 semantic postfix `?`/`!` tokens retain exact precedence. Neither policy skips
 whitespace, and all remain well-defined at line endings and EOF.
-Standard-library and language-catalog definitions deliberately return no source
-location. The compiler-owned virtual documentation graph provides a separate
-navigation target without weakening source identity.
+Standard-library and language-catalog definitions navigate to their exact
+`splitscript-docs:` page rather than exposing the privileged implementation in
+`standard.split`. User declarations retain ordinary source locations, so this
+documentation target does not weaken source identity.
 
 Rename builds directly on that navigation boundary. `rename_target_at` returns
 the exact selected occurrence for LSP `prepareRename`, while `rename_at`
@@ -1157,6 +1158,12 @@ error prose. Native `splitc docs` resolves an exact catalog title, stable
 migration identity, or virtual path and renders the same Markdown. Guide links
 are intentionally self-contained: focused snippets explain individual concepts,
 while complete `.split` examples are neither bundled nor required navigation.
+
+Catalog-backed completion and hover results carry the same stable page URI and
+append an **Open full documentation** command link. The VS Code clients trust
+only that one command in language-server Markdown, and the command opens the
+exact page beside the script; other command URIs remain inert. Standard-library
+and language go-to-definition responses use the same URI directly.
 
 ## VS Code client
 

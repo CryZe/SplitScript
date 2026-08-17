@@ -585,12 +585,18 @@ impl LanguageServer {
             Some(DefinitionTarget::Source(definition)) => {
                 location_json(&uri, &source, definition.span)
             }
-            Some(
-                DefinitionTarget::StandardLibrary(_)
-                | DefinitionTarget::StandardLibrarySymbol(_)
-                | DefinitionTarget::Language(_),
-            )
-            | None => Value::Null,
+            Some(DefinitionTarget::StandardLibrary(item)) => documentation_location_json(
+                &self
+                    .documentation
+                    .standard_library_symbol_uri(crate::stdlib::StdlibSymbolId::Item(item)),
+            ),
+            Some(DefinitionTarget::StandardLibrarySymbol(symbol)) => {
+                documentation_location_json(&self.documentation.standard_library_symbol_uri(symbol))
+            }
+            Some(DefinitionTarget::Language(item)) => {
+                documentation_location_json(&self.documentation.language_item_uri(item))
+            }
+            None => Value::Null,
         };
         response(id, location)
     }
@@ -702,6 +708,16 @@ impl LanguageServer {
         let offset = offset_at_position(&source, params.position.line, params.position.character)?;
         Some((source, offset, document))
     }
+}
+
+fn documentation_location_json(path: &str) -> Value {
+    json!({
+        "uri": format!("splitscript-docs:{path}"),
+        "range": {
+            "start": { "line": 0, "character": 0 },
+            "end": { "line": 0, "character": 0 }
+        }
+    })
 }
 
 fn decode_request<T: serde::de::DeserializeOwned>(id: &Value, params: Value) -> Result<T, Value> {

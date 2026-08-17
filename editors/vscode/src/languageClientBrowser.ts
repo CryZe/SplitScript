@@ -10,6 +10,7 @@ import {
     BrowserMessageWriter,
 } from 'vscode-jsonrpc/browser';
 import { errorMessage } from './paths';
+import { documentationMarkdownTrust } from './documentationMarkdown';
 
 export class BrowserLanguageClientController implements vscode.Disposable {
     private client: LanguageClient | undefined;
@@ -28,6 +29,7 @@ export class BrowserLanguageClientController implements vscode.Disposable {
         };
         const clientOptions: LanguageClientOptions = {
             documentSelector: [{ language: 'splitscript' }],
+            markdown: documentationMarkdownTrust,
         };
         const client = new LanguageClient(
             'splitscript',

@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-17: documentation links in ordinary editor workflows
+
+- Added exact compiler-owned documentation identities to catalog-backed hover
+  and completion results. Their **Open full documentation** link opens the
+  corresponding Markdown page beside the source editor rather than returning
+  authors to the reference index.
+- Made go-to-definition on language and standard-library symbols navigate to
+  the same exact `splitscript-docs:` page while preserving ordinary source
+  definitions for user declarations.
+- Restricted trusted language-server Markdown to the single documentation
+  command; arbitrary command links remain inert in both desktop and browser
+  extension clients.
+
 ## 2026-08-17: intent-specific ASL module migration diagnostics
 
 - Added one compiler-owned `asl.process.modules` concept that distinguishes the

@@ -7,6 +7,7 @@ import {
 } from 'vscode-languageclient/node';
 import { PortMessageReader, PortMessageWriter } from 'vscode-jsonrpc/node';
 import { errorMessage } from './paths';
+import { documentationMarkdownTrust } from './documentationMarkdown';
 
 export class LanguageClientController implements vscode.Disposable {
     private client: LanguageClient | undefined;
@@ -25,6 +26,7 @@ export class LanguageClientController implements vscode.Disposable {
         };
         const clientOptions: LanguageClientOptions = {
             documentSelector: [{ language: 'splitscript' }],
+            markdown: documentationMarkdownTrust,
         };
         const client = new LanguageClient(
             'splitscript',

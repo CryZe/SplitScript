@@ -69,6 +69,16 @@ pub struct DocumentationReference {
 }
 
 impl DocumentationReference {
+    /// Returns the stable virtual page for a language-catalog item.
+    pub fn language_item_uri(&self, item: LanguageItemId) -> String {
+        language_item_uri(item)
+    }
+
+    /// Returns the stable virtual page for a standard-library symbol.
+    pub fn standard_library_symbol_uri(&self, symbol: StdlibSymbolId) -> String {
+        symbol_uri(symbol, &self.library)
+    }
+
     pub fn index(&self) -> Vec<DocumentationIndexEntry> {
         let mut entries = vec![
             DocumentationIndexEntry {
@@ -1460,7 +1470,7 @@ pub(super) fn core_type_uri(id: CoreTypeId, library: &StandardLibrary) -> String
     format!("/stdlib/types/{}/index.md", library.core_type(id).name)
 }
 
-pub(super) fn language_item_uri(id: LanguageItemId) -> String {
+pub(crate) fn language_item_uri(id: LanguageItemId) -> String {
     let language = LanguageCatalog::new();
     let item = language.item(id);
     if matches!(item.kind, LanguageItemKind::BuiltinType(_)) {
@@ -1557,7 +1567,7 @@ fn migration_target_kind(target: MigrationTarget) -> &'static str {
     }
 }
 
-pub(super) fn symbol_uri(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
+pub(crate) fn symbol_uri(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
     match symbol {
         StdlibSymbolId::StateProvider(id) => format!(
             "/stdlib/state-providers/{}.md",

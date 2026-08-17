@@ -1129,7 +1129,11 @@ fn selection_ranges_follow_recovered_syntax_and_preserve_utf16_positions() {
 
 #[test]
 fn catalog_docs_completion_and_hover_stay_in_sync() {
-    use crate::{documentation::StandardLibraryDocumentation, stdlib::StdlibItemId};
+    use crate::{
+        DocumentationReference,
+        documentation::StandardLibraryDocumentation,
+        stdlib::{StdlibItemId, StdlibSymbolId},
+    };
 
     let incomplete = concat!(
         "state \"game.exe\" {}\n",
@@ -1169,7 +1173,18 @@ fn catalog_docs_completion_and_hover_stay_in_sync() {
         .find(|item| item["label"] == "clamp")
         .expect("clamp completion");
     assert_eq!(clamp["detail"], generic.signature);
-    assert_eq!(clamp["documentation"]["value"], generic.summary_markdown());
+    let documentation_uri = DocumentationReference::default()
+        .standard_library_symbol_uri(StdlibSymbolId::Item(StdlibItemId::NumericClamp));
+    let completion_markdown = clamp["documentation"]["value"]
+        .as_str()
+        .expect("completion Markdown");
+    assert!(completion_markdown.starts_with(&generic.summary_markdown()));
+    assert!(completion_markdown.contains("Open full documentation"));
+    assert!(completion_markdown.contains("splitscript.openDocumentation"));
+    assert!(completion_markdown.contains(&format!(
+        "%5B%22{}%22%5D",
+        documentation_uri.replace('/', "%2F")
+    )));
 
     let complete = incomplete.replace("number.cl\n", "number.clamp(0, 7)\n");
     server.handle(notification(
@@ -1194,11 +1209,37 @@ fn catalog_docs_completion_and_hover_stay_in_sync() {
         StdlibItemId::NumericClamp,
         &[("T", "i32".to_owned())],
     );
-    assert_eq!(
-        hover[0]["result"]["contents"]["value"],
-        resolved.hover_markdown()
-    );
+    let hover_markdown = hover[0]["result"]["contents"]["value"]
+        .as_str()
+        .expect("hover Markdown");
+    assert!(hover_markdown.starts_with(&resolved.hover_markdown()));
+    assert!(hover_markdown.contains("Open full documentation"));
+    assert!(hover_markdown.contains(&format!(
+        "%5B%22{}%22%5D",
+        documentation_uri.replace('/', "%2F")
+    )));
     assert_eq!(generic.summary_markdown(), resolved.summary_markdown());
+
+    let definition = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 13,
+        "method": "textDocument/definition",
+        "params": {
+            "textDocument": { "uri": "file:///catalog-sync.split" },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    assert_eq!(
+        definition[0]["result"]["uri"],
+        format!("splitscript-docs:{documentation_uri}")
+    );
+    assert_eq!(
+        definition[0]["result"]["range"],
+        json!({
+            "start": { "line": 0, "character": 0 },
+            "end": { "line": 0, "character": 0 }
+        })
+    );
 }
 
 #[test]

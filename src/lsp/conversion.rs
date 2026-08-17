@@ -290,7 +290,10 @@ pub(super) fn completion_item_json(
     if let Some(documentation) = &item.documentation {
         completion["documentation"] = json!({
             "kind": "markdown",
-            "value": documentation
+            "value": markdown_with_documentation_link(
+                documentation,
+                item.documentation_uri.as_deref(),
+            )
         });
     }
     completion
@@ -317,13 +320,43 @@ pub(super) fn hover_json(source: &str, hover: &HoverInfo) -> Value {
     json!({
         "contents": {
             "kind": "markdown",
-            "value": hover.markdown
+            "value": markdown_with_documentation_link(
+                &hover.markdown,
+                hover.documentation_uri.as_deref(),
+            )
         },
         "range": {
             "start": position(source, hover.span.start),
             "end": position(source, hover.span.end)
         }
     })
+}
+
+fn markdown_with_documentation_link(markdown: &str, uri: Option<&str>) -> String {
+    let Some(uri) = uri else {
+        return markdown.to_owned();
+    };
+    let arguments = serde_json::to_string(&[uri])
+        .expect("a documentation URI always serializes as command arguments");
+    format!(
+        "{markdown}\n\n[Open full documentation](command:splitscript.openDocumentation?{})",
+        percent_encode_uri_component(arguments.as_bytes())
+    )
+}
+
+fn percent_encode_uri_component(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(bytes.len());
+    for byte in bytes.iter().copied() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('%');
+            encoded.push(char::from(HEX[(byte >> 4) as usize]));
+            encoded.push(char::from(HEX[(byte & 0x0f) as usize]));
+        }
+    }
+    encoded
 }
 
 pub(super) fn signature_help_json(help: &SignatureHelp) -> Value {

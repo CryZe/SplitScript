@@ -51,7 +51,9 @@ export class DocumentationReferenceController implements vscode.Disposable {
             ),
             vscode.commands.registerCommand(
                 'splitscript.openDocumentation',
-                async () => this.openPage(INDEX_URI),
+                async (uri?: unknown) => this.openPage(
+                    typeof uri === 'string' ? uri : INDEX_URI,
+                ),
             ),
             vscode.commands.registerCommand(
                 'splitscript.searchDocumentation',

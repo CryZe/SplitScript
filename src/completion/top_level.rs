@@ -6,9 +6,10 @@ use super::{
 };
 use crate::{
     ast::{ActionKind, Program},
+    documentation::symbol_uri,
     language::{LanguageCatalog, LanguageItemId},
     lexer::TokenKind,
-    stdlib::{StandardLibrary, StateProviderProcesses},
+    stdlib::{StandardLibrary, StateProviderProcesses, StdlibSymbolId},
 };
 
 pub(super) fn complete_top_level(source: &str, syntax: &Program, offset: usize) -> CompletionList {
@@ -156,6 +157,10 @@ pub(super) fn complete_state_header(
                 kind: CompletionKind::Snippet,
                 detail: Some("standard-library state provider".to_owned()),
                 documentation: Some(render_documentation(&provider.documentation)),
+                documentation_uri: Some(symbol_uri(
+                    StdlibSymbolId::StateProvider(provider.id),
+                    standard_library,
+                )),
                 insert_text: format!("{} {{\n\t$0\n}}", provider.name),
                 is_snippet: true,
             });
@@ -262,6 +267,7 @@ fn add_plain_snippet(
         kind: CompletionKind::Snippet,
         detail: Some(detail.to_owned()),
         documentation: Some(documentation.to_owned()),
+        documentation_uri: None,
         insert_text: insert_text.to_owned(),
         is_snippet: true,
     });

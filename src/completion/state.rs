@@ -429,6 +429,7 @@ fn add_snippet(
         kind: CompletionKind::Snippet,
         detail: Some(detail.to_owned()),
         documentation: Some(documentation.to_owned()),
+        documentation_uri: None,
         insert_text: insert_text.to_owned(),
         is_snippet: true,
     });

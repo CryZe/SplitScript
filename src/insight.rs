@@ -8,7 +8,7 @@ use crate::{
         CompilerDatabase, DefinitionTarget, SemanticQueryResult, SemanticSnapshot,
         SourceDefinition, SourceDefinitionId,
     },
-    documentation::StandardLibraryDocumentation,
+    documentation::{StandardLibraryDocumentation, language_item_uri, symbol_uri},
     effects::FunctionOperationSemantics,
     language::{LanguageCatalog, LanguageItem},
     lexer::{Token, TokenKind},
@@ -28,6 +28,8 @@ use crate::{
 pub struct HoverInfo {
     pub span: Span,
     pub markdown: String,
+    /// Stable compiler-owned reference page for the hovered catalog symbol.
+    pub documentation_uri: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +65,7 @@ pub(crate) fn hover(
         return Ok(Some(HoverInfo {
             span: token.span,
             markdown,
+            documentation_uri: None,
         }));
     }
     let target = database.definition_at_query_offset(offset)?;
@@ -80,12 +83,13 @@ pub(crate) fn hover(
         return Ok(Some(HoverInfo {
             span: token.span,
             markdown: source_markdown(&format!("{name}: {ty}"), description),
+            documentation_uri: None,
         }));
     }
     let Some(target) = target else {
         return expression_type_hover(database, offset);
     };
-    let markdown = match target {
+    let (markdown, documentation_uri) = match target {
         DefinitionTarget::StandardLibrary(item) => {
             let type_arguments = database
                 .analysis_at(offset)?
@@ -99,18 +103,23 @@ pub(crate) fn hover(
                 })
                 .unwrap_or_default();
             let semantic = semantic_context(database);
-            render_stdlib_hover(
-                standard_library,
-                item,
-                substitutions(item, &type_arguments, semantic.as_ref()),
+            (
+                render_stdlib_hover(
+                    standard_library.clone(),
+                    item,
+                    substitutions(item, &type_arguments, semantic.as_ref()),
+                ),
+                Some(symbol_uri(StdlibSymbolId::Item(item), &standard_library)),
             )
         }
-        DefinitionTarget::StandardLibrarySymbol(symbol) => {
-            render_stdlib_symbol_hover(standard_library, symbol)
-        }
-        DefinitionTarget::Language(item) => {
-            render_language_hover(LanguageCatalog::new().item(item))
-        }
+        DefinitionTarget::StandardLibrarySymbol(symbol) => (
+            render_stdlib_symbol_hover(standard_library.clone(), symbol),
+            Some(symbol_uri(symbol, &standard_library)),
+        ),
+        DefinitionTarget::Language(item) => (
+            render_language_hover(LanguageCatalog::new().item(item)),
+            Some(language_item_uri(item)),
+        ),
         DefinitionTarget::Source(definition) => {
             if definition.id == SourceDefinitionId::State
                 && let Some(provider) = database
@@ -121,9 +130,13 @@ pub(crate) fn hover(
                 return Ok(Some(HoverInfo {
                     span: token.span,
                     markdown: render_stdlib_symbol_hover(
-                        standard_library,
+                        standard_library.clone(),
                         StdlibSymbolId::StateProvider(provider),
                     ),
+                    documentation_uri: Some(symbol_uri(
+                        StdlibSymbolId::StateProvider(provider),
+                        &standard_library,
+                    )),
                 }));
             }
             let Some(context) = semantic_context(database) else {
@@ -132,12 +145,13 @@ pub(crate) fn hover(
             let Some(markdown) = render_source_hover(&definition, &context) else {
                 return Ok(None);
             };
-            markdown
+            (markdown, None)
         }
     };
     Ok(Some(HoverInfo {
         span: token.span,
         markdown,
+        documentation_uri,
     }))
 }
 
@@ -160,6 +174,7 @@ fn expression_type_hover(
             "```splitscript\n{}\n```",
             render_type(analysis.ty, &context)
         ),
+        documentation_uri: None,
     }))
 }
 

@@ -6,9 +6,10 @@ use super::{
 };
 use crate::{
     ast::{Program, Span},
+    documentation::symbol_uri,
     language::{LanguageCatalog, LanguageItemId},
     lexer::{Token, TokenKind},
-    stdlib::{StandardLibrary, StdlibTypeKind, TypeConstructorSyntax},
+    stdlib::{StandardLibrary, StdlibSymbolId, StdlibTypeKind, TypeConstructorSyntax},
 };
 
 pub(super) fn complete_type_position(
@@ -124,6 +125,7 @@ pub(super) fn add_type_completions(
             },
             detail: Some("standard-library type".to_owned()),
             documentation: Some(render_documentation(&ty.documentation)),
+            documentation_uri: Some(symbol_uri(StdlibSymbolId::Type(ty.id), library)),
             insert_text: ty.name.to_owned(),
             is_snippet: false,
         });
@@ -145,6 +147,10 @@ pub(super) fn add_type_completions(
             kind: CompletionKind::Type,
             detail: Some(library.render_type_constructor(constructor.id)),
             documentation: Some(render_documentation(&constructor.documentation)),
+            documentation_uri: Some(symbol_uri(
+                StdlibSymbolId::TypeConstructor(constructor.id),
+                library,
+            )),
             insert_text: format!("{}<{parameters}>", constructor.name),
             is_snippet: true,
         });
@@ -155,6 +161,7 @@ pub(super) fn add_type_completions(
             kind: CompletionKind::Struct,
             detail: Some("record type".to_owned()),
             documentation: record.documentation.clone(),
+            documentation_uri: None,
             insert_text: record.name.clone(),
             is_snippet: false,
         });
@@ -165,6 +172,7 @@ pub(super) fn add_type_completions(
             kind: CompletionKind::Enum,
             detail: Some("enum type".to_owned()),
             documentation: enumeration.documentation.clone(),
+            documentation_uri: None,
             insert_text: enumeration.name.clone(),
             is_snippet: false,
         });

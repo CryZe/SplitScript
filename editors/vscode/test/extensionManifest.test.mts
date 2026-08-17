@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
+import { documentationMarkdownTrust } from '../src/documentationMarkdown.ts';
+
 interface CommandContribution {
     command: string;
 }
@@ -40,5 +42,13 @@ test('the direct documentation command is available in SplitScript editor titles
         command: 'splitscript.openDocumentation',
         when: 'resourceLangId == splitscript',
         group: 'navigation@3',
+    });
+});
+
+test('language-server documentation links trust only the documentation command', () => {
+    assert.deepEqual(documentationMarkdownTrust, {
+        isTrusted: {
+            enabledCommands: ['splitscript.openDocumentation'],
+        },
     });
 });

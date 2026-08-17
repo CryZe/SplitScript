@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-18: portable toolchain architecture decision
+
+- Recorded the accepted direct core-Wasm architecture with separate compiler
+  and language workers for desktop and web extension hosts.
+- Defined the conformance boundary across shared Rust semantics, the Wasm
+  adapter, worker transports, packaged extension hosts, and native shells.
+- Retired speculative WASI-versus-component packaging alternatives while
+  preserving the Component Model as a separate possible LiveSplit host-ABI
+  concern.
+
 ## 2026-08-18: language-background guides
 
 - Added concise bundled guides for C#, JavaScript, and Rust authors that

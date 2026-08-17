@@ -265,10 +265,6 @@ debug watch without external executables. Native `splitc` and `splitls` remain
 separate first-class products. The architecture experiment is complete; the
 remaining work is product hardening and distribution.
 
-- [ ] Record the direct core-Wasm worker architecture and native/embedded
-  conformance boundary in an ADR. Remove obsolete WASI-versus-component
-  alternatives from product documentation unless a measured limitation forces
-  reconsideration.
 - [ ] Add cooperative cancellation points to expensive compiler stages so a
   superseded editor build can stop work rather than merely have its completed
   response discarded.

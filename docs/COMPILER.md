@@ -1176,10 +1176,12 @@ the same page endpoint through the compiled adapter.
 
 ## VS Code client
 
-[`editors/vscode`](../editors/vscode) is a thin TypeScript extension around the
-same stdio server while the language-server portability slice is pending.
-Activation wiring, language-client lifecycle, compiler-task management, and
-the identity-safe exclusive task state are separate modules. The language
+[`editors/vscode`](../editors/vscode) is a thin TypeScript extension around two
+isolated services from the same bundled core-Wasm compiler. The accepted
+architecture and its native/embedded conformance boundary are recorded in
+[ADR 0001](adr/0001-portable-toolchain-workers.md). Activation wiring,
+language-client lifecycle, compiler-task management, and the identity-safe
+exclusive task state are separate modules. The language
 client selects SplitScript documents from any workspace provider and starts the
 same Rust [`LanguageServer`](../src/lsp.rs) inside a dedicated worker backed by
 the bundled compiler WebAssembly. `vscode-languageclient` communicates with it

@@ -1737,6 +1737,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: NUMERIC_SPELLINGS,
     },
     MigrationConcept {
+        id: MigrationConceptId::new("asl.state.attachment"),
+        name: "Attachment state declaration",
+        sources: ASL,
+        support: MigrationSupport::TypedPattern,
+        summary: "Declare exactly one native process candidate list or typed emulator provider per autosplitter file. The declaration owns attachment and defines the fields polled into `old` and `current`.",
+        targets: &[MigrationTarget::Language("state")],
+        cookbook_anchor: Some("attachment-state-declarations"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("asl.state.string-n"),
         name: "Bounded native stringN state",
         sources: ASL,

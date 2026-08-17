@@ -1,5 +1,31 @@
 # SplitScript roadmap
 
+## 2026-08-17: exact semantic standard-library examples
+
+- Removed the shared compiler fixtures that had allowed documentation examples
+  to validate unrelated code. Every standard-library example now compiles its
+  exact visible snippet through a focused lifecycle wrapper or explicitly
+  authored rustdoc-style hidden context.
+- Kept multiline visible snippets byte-for-byte contiguous inside validation
+  programs, allowing compiler semantic spans and definition links to map back
+  to every displayed line instead of silently falling back to lexical color.
+- Made catalog validation reject fixtures that omit their visible snippet,
+  rewrote examples to be focused and self-contained, and report every broken
+  example together in repository verification.
+
+## 2026-08-17: direct guidance for attachment and snapshot mistakes
+
+- Added a compiler-owned attachment-state migration concept and a
+  self-contained recipe for native process candidates, typed emulator roots,
+  lifecycle availability, and transactional snapshots.
+- Linked the missing-state diagnostic directly to that recipe, linked attempts
+  to mutate `old` to the existing mutable-current guidance, and linked invalid
+  pre-snapshot access to the snapshot-dependent-helper guidance.
+- Reconciled the campaign audit with implemented result, string, capability,
+  literal setting-key, module-discovery, and documentation routing work, then
+  promoted the remaining compile-only Neon White rewrite to the next concrete
+  runtime-evidence goal.
+
 ## 2026-08-17: validated documentation graph across compiler products
 
 - Added one compiler-owned validation pass over all 413 reference

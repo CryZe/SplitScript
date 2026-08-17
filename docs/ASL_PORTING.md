@@ -7,6 +7,48 @@ Every required semantic distinction and canonical pattern is explained here;
 it has no source-file or repository-document prerequisites. Examples are small,
 focused snippets that explain one concept rather than complete autosplitters.
 
+## Attachment state declarations
+
+Every SplitScript file is one executable autosplitter and declares exactly one
+attachment provider. A native Windows game names the exact process candidate
+that the host must match:
+
+```splitscript
+state "game.exe" {
+    health: i32 at 0x1000;
+}
+```
+
+Use an array when editions have different executable names but share the same
+state shape:
+
+```splitscript
+state ["game.exe", "game-demo.exe"] {
+    health: i32 at 0x1000;
+}
+```
+
+These strings are host process identities, not portable paths. Do not add or
+remove `.exe` mechanically: use the exact candidate required by the target
+runtime and platform. Build-specific addresses belong in named layouts selected
+from `onAttach`, rather than in multiple ASL-style state blocks.
+
+Typed emulator support replaces the native process root. For example, a GBA
+autosplitter declares `state GBA` and reads emulated addresses through `gba`:
+
+```splitscript
+state GBA {
+    room: u8 at 0x03000010;
+}
+```
+
+The state declaration also defines the transactional snapshots. After the
+first complete poll, `current` contains the latest accepted values and `old`
+contains the preceding accepted values. `process` or the provider-specific
+root is available only during attachment-owned lifecycle phases; `old` and
+`current` are unavailable before the first complete snapshot and are not
+guaranteed during `onDetach`.
+
 ## Signed pointer offsets
 
 ASL `DeepPointer` paths commonly contain negative offsets. Preserve them

@@ -262,7 +262,8 @@ impl Parser<'_> {
             {
                 return Err(Diagnostic::new("`old` state is read-only", expr.span)
                     .with_primary_label("history cannot be changed")
-                    .with_note("assign to the corresponding `current` field instead"));
+                    .with_note("assign to the corresponding `current` field instead")
+                    .with_migration_topic("asl.state.mutable-current"));
             }
             if let Some(op) = op {
                 if !matches!(expr.kind, ExprKind::Index { .. }) {

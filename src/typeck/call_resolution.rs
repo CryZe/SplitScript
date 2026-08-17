@@ -1670,7 +1670,10 @@ impl Checker {
                 ActionKind::OnDetach => "state snapshots are not guaranteed to exist in `onDetach`",
                 _ => unreachable!("the remaining actions have committed snapshots"),
             };
-            self.error(message, span);
+            self.errors.push(
+                crate::Diagnostic::type_error(message, span)
+                    .with_migration_topic("asl.state.helper-snapshots"),
+            );
             return None;
         }
         Some(())

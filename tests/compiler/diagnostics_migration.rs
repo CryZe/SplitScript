@@ -1269,6 +1269,10 @@ fn current_state_fields_can_be_replaced_but_old_state_remains_read_only() {
             .iter()
             .any(|note| note.contains("`current`"))
     );
+    assert_eq!(
+        diagnostics[0].migration_topic.as_deref(),
+        Some("asl.state.mutable-current")
+    );
 }
 
 #[test]
@@ -1296,6 +1300,9 @@ fn current_state_assignment_uses_field_types_and_snapshot_availability() {
         diagnostic
             .message
             .contains("requires state snapshots and is unavailable in `onDetach`")
+    }));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.migration_topic.as_deref() == Some("asl.state.helper-snapshots")
     }));
 
     let wrong_type = source.replace("current.scene = 1", "current.scene = false");

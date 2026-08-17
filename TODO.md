@@ -34,27 +34,19 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — finish compiler-owned reference workflows
+## Now — turn the Neon White candidate into maintained evidence
 
-### Make compiler-owned documentation browsable inside the editor
+The external campaign produced a plausible compile-only rewrite, but no live
+game or deterministic runtime fixture proves its mutable effective-state model.
+Reconstruct the port from the source ASL and review it independently rather
+than promoting the generated candidate by inspection.
 
-Treat the in-editor reference as the primary documentation product. Use VS
-Code's built-in Markdown preview rather than building a custom HTML webview.
-Standalone HTML is a later renderer of the same model, not the next milestone.
-The compiler and both native and bundled servers already expose hierarchical
-standard-library pages through read-only `splitscript-docs:` Markdown documents;
-VS Code opens the index beside a script, supports search, breadcrumbs, links,
-and compiler-derived semantic code. Keep that working base and finish the
-missing graph rather than rebuilding the viewer.
-
-- [x] Finish semantic code in generated reference pages. Signatures use catalog
-  identities for syntax coloring and navigation. Every standard-library
-  example now compiles its exact visible snippet through a focused lifecycle
-  wrapper or authored rustdoc-style hidden `# ` context; unrelated shared
-  fixtures have been removed. Catalog validation rejects a validation program
-  that omits the visible snippet, and the compiler test reports every broken
-  example together. Lexical highlighting remains only a recovery presentation
-  for incomplete code.
+- [ ] Add a maintained Neon White port and host fixture covering first-snapshot
+  seeding, transient empty level IDs, suppressed zero rush time,
+  include/exclude transitions, scene-based start/reset, splits, game time,
+  failed reads, detach, and reattach. Record exact preserved behavior and any
+  build limitations in a conformance document before calling the port
+  runtime-verified.
 
 ## P0 — unblock the next representative native ports
 
@@ -509,27 +501,22 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Fix compound-token fission and formatter lexical boundaries, then lock in
-   parse/format/parse equivalence across nested generics and the maintained
-   corpus. No formatter may remain capable of corrupting compiling source.
-2. Close the latest campaign's self-guidance gaps: contextual result/string/
-   constraint diagnostics, compile-time checking and completion for literal
-   setting keys, canonical missing-state guidance, and direct links from
-   recognizable ASL constructs to their existing recipes.
-3. Extend the working in-editor standard-library reference with language and
-   migration topics, and link hover, completion, diagnostics, and native CLI
-   topics into the same graph. Treat standalone HTML as a later renderer.
-4. Keep irregular nested static settings explicit until another maintained
+1. Promote the Neon White effective-state rewrite only through an independently
+   reviewed port and deterministic runtime fixture.
+2. Expand the compiler-checked porting cookbook and concise source-to-target
+   capability table from maintained ports; keep diagnostics linked to those
+   canonical topics.
+3. Keep irregular nested static settings explicit until another maintained
    port demonstrates a small reusable table abstraction; select the next
    concrete provider or host-contract fixture instead of inventing a settings
    metaprogramming language.
-5. Harden and publish the bundled VSIX and native releases, then evaluate the
+4. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench.
-6. Add Unity Mono and the next emulator/engine provider from representative
+5. Add Unity Mono and the next emulator/engine provider from representative
    ports.
-7. Resume source-debugging work only after the JavaScript debugger, native
+6. Resume source-debugging work only after the JavaScript debugger, native
    Wasmtime/DWARF path, and typed-IR interpreter have been compared against the
    same GC and async fixtures.
-8. Keep physical `None` aggregate specialization and sandbox-sensitive host
+7. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

@@ -344,7 +344,8 @@ impl Parser<'_> {
                 )
                 .with_note(
                     "SplitScript currently compiles one executable autosplitter per file; a state-less helper module is not a supported compilation unit",
-                ),
+                )
+                .with_migration_topic("asl.state.attachment"),
             );
             self.recovery_nodes.push(RecoveryNode {
                 kind: RecoveryNodeKind::Missing,

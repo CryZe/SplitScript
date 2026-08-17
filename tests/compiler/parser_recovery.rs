@@ -89,6 +89,10 @@ fn missing_state_uses_canonical_attachment_syntax() {
             .iter()
             .all(|note| !note.contains("state(process"))
     );
+    assert_eq!(
+        diagnostic.migration_topic.as_deref(),
+        Some("asl.state.attachment")
+    );
 }
 
 #[test]

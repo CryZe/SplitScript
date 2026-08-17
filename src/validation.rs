@@ -144,10 +144,13 @@ pub(crate) fn validate(
             StateSnapshotContext::StateSource => "a state field expression".to_owned(),
             StateSnapshotContext::StateTransform => "a state field filter".to_owned(),
         };
-        diagnostics.push(Diagnostic::semantic(
-            format!("`{name}` requires state snapshots and is unavailable in {context}"),
-            violation.expression_span,
-        ));
+        diagnostics.push(
+            Diagnostic::semantic(
+                format!("`{name}` requires state snapshots and is unavailable in {context}"),
+                violation.expression_span,
+            )
+            .with_migration_topic("asl.state.helper-snapshots"),
+        );
     }
 
     for expression in hir.expressions() {

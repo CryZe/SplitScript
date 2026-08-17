@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-17: Neon White runtime conformance
+
+- Reconstructed the Neon White port independently from its source ASL and used
+  direct current-snapshot replacement for transient level IDs, rush-time
+  suppression, and double-count prevention.
+- Added deterministic host coverage for first-snapshot seeding, both split
+  paths, start/reset, game time, failed reads with advancing siblings,
+  detachment, and reattachment.
+- Promoted only the maintained in-tree port to runtime-verified evidence and
+  recorded its single-build offsets, exact Windows process identity, and lack
+  of live-game validation separately from the compile-only campaign candidate.
+
 ## 2026-08-17: exact semantic standard-library examples
 
 - Removed the shared compiler fixtures that had allowed documentation examples

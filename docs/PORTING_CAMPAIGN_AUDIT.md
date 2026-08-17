@@ -27,7 +27,7 @@ The status terms are deliberately strict:
 | Operation Matriarchy | **compile-only** | **runtime-verified** maintained port | The candidate has no runtime evidence and retains mutable values across attachment. The maintained port resets them in `onAttach`, validates the split filename shape, and uses the exact Windows process candidate expected by its fixture. |
 | A Plague Tale: Innocence | **behavior-limited** | **runtime-verified** maintained port for Steam, Epic, Xbox, and unsupported layouts | The candidate approximates an exact timer-start event with one game-memory transition and does not make the `APT` parent setting gate its children. The maintained port observes the timer-state transition and explicitly gates every child, but exact host timer events still require runtime support. The startup dialog and timing-method mutation remain omitted. |
 | Axiom Verge | **behavior-limited** | **runtime-verified** maintained Steam/vanilla scenario; other build branches are compile-covered | The candidate is a reduced demonstration, not a faithful port. It omits `RandomAV`, three of four distribution/process offsets, most settings, and exact timer events. It scans only the main module, omits the scan result's four-byte adjustment, passes a byte count where `readUtf16Le` expects code units, truncates fractional game ticks, and fails to advance checkpoint/item counters past known disabled settings. The maintained port corrects the memory, settings, and build-selection issues, approximates start resets through a timer-state transition, and registers all 119 boolean settings. Dialog/timing-method behavior and exact host timer events remain unavailable. |
-| Neon White | **compile-only** | No maintained in-tree runtime fixture | The mutable effective-state transcription is plausible and preserves the ASL update order, but it has not been executed against a deterministic snapshot sequence or a live game. It must not be cited as proof that the snapshot rewrite is faithful. |
+| Neon White | **compile-only** | **runtime-verified** maintained port | The candidate's shadow-global transcription remains compile-only. The independently reconstructed maintained port uses direct current-snapshot replacement and covers filtering, timing, lifecycle decisions, failed reads, and reattachment with a deterministic host fixture. Its reviewed offsets still represent only one build and have not been live-game validated. |
 
 All six candidates retain the ASL spelling of their native process name. That
 is not currently diagnosed because the portable attachment contract is
@@ -101,8 +101,8 @@ translations; a future maintained port must prove a remaining semantic need.
 ## Evidence rule
 
 The maintained host fixtures are the authoritative automated evidence for the
-five in-tree ports. The Neon White candidate should be promoted only with a
-fixture covering first-snapshot seeding, transient empty level IDs, suppressed
-zero rush time, include/exclude transitions, scene-based start/reset, splits,
-game time, failed reads, detach, and reattach. Compilation remains necessary
-but is never sufficient for behavioral parity.
+six in-tree ports. Candidate compilation is never sufficient for behavioral
+parity, and the campaign's Neon White candidate remains distinct from the
+independently reconstructed maintained port. The exact evidence and remaining
+build limitations are recorded in
+[`NEON_WHITE_PORT.md`](NEON_WHITE_PORT.md).

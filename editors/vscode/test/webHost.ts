@@ -90,7 +90,7 @@ export async function run(): Promise<void> {
     );
     assert(
         methodDocs.getText().includes(
-            '[Standard library](../../../../index.md) / [Duration](../index.md) / fromSeconds',
+            '[SplitScript reference](../../../../index.md) / [Duration](../index.md) / fromSeconds',
         ),
         'the documentation method does not follow its logical owner hierarchy',
     );

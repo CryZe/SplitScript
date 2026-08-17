@@ -34,20 +34,6 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — turn the Neon White candidate into maintained evidence
-
-The external campaign produced a plausible compile-only rewrite, but no live
-game or deterministic runtime fixture proves its mutable effective-state model.
-Reconstruct the port from the source ASL and review it independently rather
-than promoting the generated candidate by inspection.
-
-- [ ] Add a maintained Neon White port and host fixture covering first-snapshot
-  seeding, transient empty level IDs, suppressed zero rush time,
-  include/exclude transitions, scene-based start/reset, splits, game time,
-  failed reads, detach, and reattach. Record exact preserved behavior and any
-  build limitations in a conformance document before calling the port
-  runtime-verified.
-
 ## P0 — unblock the next representative native ports
 
 ### Lifecycle semantics exposed by legacy ASL

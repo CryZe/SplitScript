@@ -1,0 +1,105 @@
+// Faithful port of the Neon White ASL autosplitter. The game exposes its
+// accumulated Level Rush time, current-level time, level identifier, and scene.
+// Transient values are filtered before timer actions observe the snapshot.
+
+state "Neon White.exe" {
+    /// Elapsed microseconds in the current level playthrough.
+    levelPlaythroughMicroseconds: i64 at "UnityPlayer.dll", 0x199CDC0, 0x18, 0x40, 0x28, 0x48, 0x20;
+    /// Accumulated microseconds from completed Level Rush stages.
+    levelRushMicroseconds: i64 at "UnityPlayer.dll", 0x1930010, 0x10, 0xD0, 0x8, 0x60, 0x50, 0x0, 0x1C0, 0x10, 0x20;
+    /// Identifier of the current level.
+    levelId at "UnityPlayer.dll", 0x199CDC0, 0x18, 0x40, 0x28, 0x30, 0x20, 0x14 as utf8(255);
+    /// Identifier of the current Unity scene.
+    levelScene at "UnityPlayer.dll", 0x1A058E0, 0x48, 0x10, 0x18 as utf8(255);
+}
+
+/// Scene shown after completing or leaving a Level Rush.
+let levelRushMenuScene = "nu.unity"
+/// First stage of each Level Rush route.
+let firstLevelIds = [
+    "TUT_MOVEMENT",
+    "SIDEQUEST_DODGER",
+    "SIDEQUEST_OBSTACLE_PISTOL",
+    "SIDEQUEST_SUNSET_FLIP_POWERBOMB",
+]
+/// Whether the current playthrough time contributes to game time.
+let includeCurrentLevel = true
+
+/// Converts a game level identifier into its Unity scene identifier.
+fn levelIdToScene(levelId: String) -> String {
+    return `id/{levelId}.unity`
+}
+
+/// Returns whether an identifier denotes the first stage of a Level Rush.
+fn isFirstLevelId(levelId: String) -> bool {
+    for firstLevelId in firstLevelIds {
+        if firstLevelId == levelId {
+            return true
+        }
+    }
+    return false
+}
+
+/// Returns whether a scene denotes the first stage of a Level Rush.
+fn isFirstLevelScene(levelScene: String) -> bool {
+    for firstLevelId in firstLevelIds {
+        if levelIdToScene(firstLevelId) == levelScene {
+            return true
+        }
+    }
+    return false
+}
+
+whileAttached {
+    // The game can expose an empty level ID for one frame. Keep the last
+    // accepted identifier so this cannot cause a false split.
+    if current.levelId == "" {
+        current.levelId = old.levelId
+    }
+
+    // Loading briefly clears the accumulated rush time. Zero is genuine only
+    // on the first stage, where there is no completed stage to accumulate.
+    if current.levelRushMicroseconds == 0 && !isFirstLevelScene(current.levelScene) {
+        current.levelRushMicroseconds = old.levelRushMicroseconds
+    }
+
+    // The accumulated timer advances before the current-level timer resets.
+    // Exclude the latter during that overlap to avoid counting it twice.
+    if current.levelRushMicroseconds > old.levelRushMicroseconds
+        && current.levelPlaythroughMicroseconds > 0
+    {
+        includeCurrentLevel = false
+    }
+
+    // -1 marks the construction of a fresh LevelPlaythrough.
+    if current.levelPlaythroughMicroseconds == -1 && !includeCurrentLevel {
+        includeCurrentLevel = true
+    }
+
+    if !includeCurrentLevel {
+        current.levelPlaythroughMicroseconds = 0
+    }
+}
+
+gameTime {
+    let totalMicroseconds = current.levelRushMicroseconds
+        + current.levelPlaythroughMicroseconds
+    return Duration.fromMilliseconds((totalMicroseconds / 1000) as f64)
+}
+
+split {
+    return old.levelId != current.levelId && !isFirstLevelId(current.levelId)
+        || old.levelScene != current.levelScene && current.levelScene == levelRushMenuScene
+}
+
+start {
+    return old.levelScene != current.levelScene && isFirstLevelScene(current.levelScene)
+}
+
+reset {
+    return old.levelScene != current.levelScene && isFirstLevelScene(current.levelScene)
+}
+
+isLoading {
+    return true
+}

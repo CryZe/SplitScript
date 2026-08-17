@@ -153,7 +153,9 @@ General rules:
   compiler-checked. Add a concise source-to-target
   capability table that links to complete standard-library symbols instead of
   making authors search the language reference. Compile the owning maintained
-  examples in `cargo xtask check`.
+  examples in `cargo xtask check`. All current focused snippets now compile
+  with adjacent rustdoc-style hidden context; require the same of every new or
+  changed recipe.
 - [ ] Expand capability-driven diagnostics and code actions beyond the initial
   structured entries. Emit one focused explanation and suppress predictable
   cascades for recognizable ASL constructs, including legacy lifecycle blocks,
@@ -349,9 +351,6 @@ remaining work is product hardening and distribution.
   `timer.CurrentSplit.Name`, `timer.Run.Offset`, and timing-method ports as the
   evidence ledger; coordinate the host side through R5 in
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
-- [ ] Document and test existing lifecycle mappings before adding host APIs:
-  `isLoading`, `onDetach`, `timer.state()`, declarative `tickRate`, and dynamic
-  `setTickRate` already replace common ASL patterns.
 - [ ] Add structured async discovery combinators only as ports require them:
   timeout, race/select, bounded concurrent scans, and cancellation scopes. Do
   not expose threads or unconstrained background tasks.

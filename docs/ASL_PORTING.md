@@ -6,6 +6,10 @@ sometimes need a typed SplitScript design rather than a literal translation.
 Every required semantic distinction and canonical pattern is explained here;
 it has no source-file or repository-document prerequisites. Examples are small,
 focused snippets that explain one concept rather than complete autosplitters.
+Every SplitScript snippet is compiled as an independent focused program during
+repository verification. The rendered guide omits its rustdoc-style hidden
+setup, so visible code stays limited to the concept while types, effects,
+lifecycle availability, and current API spellings remain checked.
 
 ## Attachment state declarations
 
@@ -132,8 +136,16 @@ explicit `toAsciiLowerCase()`, while `ToUpper()` becomes
 `toAsciiUpperCase()`:
 
 ```splitscript
+# state "game.exe" {
+#     map at 0x1000 as utf8(64);
+#     mission at 0x1100 as utf8(64);
+# }
+# whileAttached {
 let normalizedMap = current.map.toAsciiLowerCase()
 let normalizedMission = current.mission.toAsciiUpperCase()
+# print(normalizedMap)
+# print(normalizedMission)
+# }
 ```
 
 These conversions change only `A` through `Z` or `a` through `z` and preserve
@@ -155,7 +167,13 @@ lines, and configuration text known to use ASCII whitespace, use the deliberatel
 explicit operation:
 
 ```splitscript
+# state "game.exe" {
+#     logLine at 0x1000 as utf8(64);
+# }
+# whileAttached {
 let eventName = current.logLine.trimAsciiWhitespace()
+# print(eventName)
+# }
 ```
 
 It removes space, tab, line feed, vertical tab, form feed, and carriage return
@@ -167,9 +185,14 @@ automatically because Unicode whitespace, character-array overloads,
 C# `PadLeft` and `PadRight` map to directionally named immutable operations:
 
 ```splitscript
+# state "game.exe" {}
+# onAttach {
+# let chapterNumber: u32 = 7
 let chapter = chapterNumber as String
 let chapterKey = chapter.padStart(2, '0')
 let column = chapterKey.padEnd(8, ' ')
+# print(column)
+# }
 ```
 
 SplitScript always requires the fill `char`; pass `' '` explicitly for C#
@@ -183,16 +206,28 @@ SplitScript keeps those concerns in the type. A required `String` cannot be
 null, so use its source-defined method directly:
 
 ```splitscript
+# state "game.exe" {
+#     checkpoint at 0x1000 as utf8(64);
+# }
+# whileAttached {
 let missingCheckpoint = current.checkpoint.isEmpty()
+# print(missingCheckpoint)
+# }
 ```
 
 When the migrated value is deliberately optional, handle both variants:
 
 ```splitscript
+# state "game.exe" {
+#     checkpoint: String? at 0x1000 as utf8(64);
+# }
+# whileAttached {
 let missingCheckpoint = match current.checkpoint {
     None => true,
     Some(text) => text.isEmpty(),
 }
+# print(missingCheckpoint)
+# }
 ```
 
 A failed process read is not automatically an empty or null string. Decide
@@ -206,9 +241,14 @@ expresses the surrounding intent. An emptiness check does not need a numeric
 unit:
 
 ```splitscript
+# state "game.exe" {
+#     map at 0x1000 as utf8(64);
+# }
+# whileAttached {
 if current.map.isEmpty() {
     return false
 }
+# }
 ```
 
 Use `byteLength()` only for text proven to be ASCII or code intentionally
@@ -222,7 +262,12 @@ variadic, and range overloads. SplitScript accepts one typed string array and
 puts the values first:
 
 ```splitscript
+# state "game.exe" {}
+# onAttach {
+# let routeParts = ["chapter", "level"]
 let routeName = String.join(routeParts, ".")
+# print(routeName)
+# }
 ```
 
 The implementation measures the complete UTF-8 result and allocates it once.
@@ -237,7 +282,13 @@ SplitScript `value.indexOf(substring)` instead returns a UTF-8 byte offset as
 text proven to be ASCII:
 
 ```splitscript
+# state "game.exe" {
+#     map at 0x1000 as utf8(64);
+# }
+# split {
 let separator = current.map.indexOf("_") else return false
+# return separator > 0
+# }
 ```
 
 Comparison-mode and start-index overloads need an explicit rewrite rather than
@@ -248,7 +299,13 @@ For exact searches over proven ASCII text, use `value.lastIndexOf(substring)`
 and handle its `u32?` result directly:
 
 ```splitscript
+# state "game.exe" {
+#     path at 0x1000 as utf8(64);
+# }
+# split {
 let separator = current.path.lastIndexOf("/") else return false
+# return separator > 0
+# }
 ```
 
 The operation searches the complete string and returns a UTF-8 byte offset.
@@ -261,7 +318,13 @@ C# `value.Replace(search, replacement)` maps to immutable
 that policy explicitly rather than discarding the result:
 
 ```splitscript
+# state "game.exe" {
+#     map at 0x1000 as utf8(64);
+# }
+# whileAttached {
 let displayName = current.map.replaceAll("_", " ") else current.map
+# print(displayName)
+# }
 ```
 
 C# permits a null replacement to mean deletion; pass `""` explicitly in
@@ -283,8 +346,13 @@ is an error. Use `byteAt(byteIndex)` only when the ASL is genuinely inspecting
 encoded bytes. Neither operation adopts C#'s or JavaScript's UTF-16 indexing:
 
 ```splitscript
+# state "game.exe" {
+#     map at 0x1000 as utf8(64);
+# }
+# split {
 let slash = current.map.charAt(7) else return false
 return slash == '/'
+# }
 ```
 
 C# `Split` maps to fallible, lower-camel-case `split`. SplitScript matches one
@@ -292,8 +360,14 @@ exact non-empty delimiter from left to right and preserves leading, adjacent,
 and trailing empty segments:
 
 ```splitscript
+# state "game.exe" {
+#     levelPicture at 0x1000 as utf8(64);
+# }
+# whileAttached {
 let fileParts = current.levelPicture.split(".") else []
 let levelParts = fileParts[0].split("_") else []
+# print(levelParts.length())
+# }
 ```
 
 The empty delimiter is an error rather than a request to split UTF-8 bytes.
@@ -305,7 +379,12 @@ C# `Int32.Parse`, `Double.Parse`, and their fixed-width relatives map to
 let inference flow backward:
 
 ```splitscript
+# state "game.exe" {
+#     percentageText at 0x1000 as utf8(16);
+# }
+# whileAttached {
 let percentage: f64 = current.percentageText.parse() else 0.0
+# }
 ```
 
 The compiler recognizes the C# static `Parse` and `TryParse` families and
@@ -329,10 +408,17 @@ C# `Convert.To*` calls do not all map to one SplitScript cast. Choose the
 operation from the source value and the behavior the script needs:
 
 ```splitscript
+# state "game.exe" {}
+# onAttach {
+# let byteValue: u8 = 7
+# let floatValue: f64 = 3.5
+# let numericFlag: i32 = 1
+# let text = "42.5"
 let widened: i32 = byteValue as i32
 let rounded: i32 = floatValue.round() as i32
 let enabled = numericFlag != 0
 let parsed: f64 = text.parse() else 0.0
+# }
 ```
 
 Fixed-width integer `as` casts use SplitScript's numeric cast rules. In
@@ -353,9 +439,14 @@ with `equalsIgnoreAsciiCase`, choosing a `T!` value or fallback for malformed te
 The ordinary one-value `Convert.ToString(value)` maps to Display:
 
 ```splitscript
+# state "game.exe" {}
+# onAttach {
+# let value: i32 = 7
 let text = value as String
 print(value)
 setVariable("Value", value)
+# print(text)
+# }
 ```
 
 Interpolation, `print`, and `setVariable` already accept Display values, so
@@ -363,8 +454,13 @@ they do not need an intermediate string cast. The integer-radix overload maps
 to the fallible `Integer.toString` method:
 
 ```splitscript
+# state "game.exe" {}
+# onAttach {
+# let cellId: u32 = 0x2a
 let hexadecimal = cellId.toString(16) else ""
 let uppercase = hexadecimal.toAsciiUpperCase()
+# print(uppercase)
+# }
 ```
 
 Radices from 2 through 36 use `0` through `9` and lowercase `a` through `z`.
@@ -384,11 +480,11 @@ selected generated variant from `onAttach`:
 state "game.exe" {
     layout Steam {
         loading: bool at "engine.dll", 0x1000;
-    }
+    },
 
     layout Epic {
         loading: bool at "engine.dll", 0x2000;
-    }
+    },
 }
 
 onAttach {
@@ -442,7 +538,14 @@ Legacy `modules.Any(...)` checks often test for one optional module rather than
 requiring full enumeration. Use the synchronous optional probe in that case:
 
 ```splitscript
-let steam = process.loadedModule("steam_api.dll") != None
+# state "game.exe" {}
+# onAttach {
+let steam = match process.loadedModule("steam_api.dll") {
+    Some(_) => true,
+    None => false,
+}
+# print(steam)
+# }
 ```
 
 Use `await process.module("GameAssembly.dll")` when attachment must wait until
@@ -453,6 +556,7 @@ The common ASL expression `modules.First()` normally refers to the executable
 itself. Discover that value once in `onAttach`, then use its typed fields:
 
 ```splitscript
+# state "game.exe" {}
 onAttach {
     let executable = await process.mainModule()
     print(`executable size: {executable.size}`)
@@ -469,9 +573,10 @@ the punctuation-dependent strings exposed by C# `FileVersionInfo`. Use
 only traversed once.
 
 ```splitscript
+# state "game.exe" {}
 onAttach {
     let executable = await process.mainModule()
-    let product = executable.productVersion() else return await process.closed()
+    let product = executable.productVersion() else return
     if product == v"1.2.3.4" {
         print("recognized build")
     }
@@ -495,6 +600,9 @@ ASL's `timer.CurrentPhase` maps directly to `timer.state()`. Compare the
 resulting exhaustive enum by name:
 
 ```splitscript
+# state "game.exe" {
+#     inMenu: bool at 0x1000;
+# }
 reset {
     return timer.state() == TimerState.NotRunning && current.inMenu
 }
@@ -519,6 +627,9 @@ ASL exposes `timer.CurrentSplitIndex` as a signed integer. SplitScript uses
 `timer.currentSplitIndex()` and makes the no-attempt state explicit as `None`:
 
 ```splitscript
+# state "game.exe" {
+#     level: u32 at 0x1000;
+# }
 split {
     let index = timer.currentSplitIndex() else return false
     return match index {
@@ -572,6 +683,9 @@ ASL scripts often use `DateTime.Now`, `DateTime.Now.TimeOfDay`, or a
 process-independent elapsed time:
 
 ```splitscript
+# state "game.exe" {
+#     inMenu: bool at 0x1000;
+# }
 let enteredMenuAt: Instant? = None
 
 whileAttached {
@@ -674,6 +788,7 @@ attached process closes.
 Choose the narrowest range justified by the source:
 
 ```splitscript
+# state "game.exe" {}
 onAttach {
     let executable = await process.mainModule()
     let code = await executable.scan(sig"48 8B 05 ?? ?? ?? ??")
@@ -698,8 +813,12 @@ resolve that exact symbol through the module instead of scanning the entire
 process:
 
 ```splitscript
+# state "game.exe" {}
+# onAttach {
 let mono = await process.module("mono-2.0-bdwgc.dll")
 let assemblyForeach = mono.peExport("mono_assembly_foreach") else return
+# print(assemblyForeach)
+# }
 ```
 
 `peExport` validates PE table bounds and rejects forwarded exports. It is
@@ -711,10 +830,14 @@ provider over copying `asl-help` callbacks or raw class-layout traversal into
 the script:
 
 ```splitscript
+# state "game.exe" {}
+# onAttach {
 let mono = await Unity.mono(MonoVersion.V2)
 let image = await mono.image("Assembly-CSharp")
 let data = await image.class("AutoSplitterData")
 let runningAddress = await data.staticField("isRunning")
+# print(runningAddress)
+# }
 ```
 
 `MonoVersion.V3` selects the Unity 2021.2-and-newer PE64 layout; `V2` selects
@@ -724,9 +847,16 @@ replaceable managed singleton, retain the slot as a path and append the
 instance field:
 
 ```splitscript
+# state "game.exe" {}
+# let valuePath: MemoryPath? = None
+# onAttach {
+# let mono = await Unity.mono(MonoVersion.V2)
+# let image = await mono.image("Assembly-CSharp")
+# let data = await image.class("AutoSplitterData")
 let singleton = await data.staticFieldPath("script")
 let valueOffset = await data.field("value")
 valuePath = singleton.dereference(valueOffset as i64)
+# }
 ```
 
 This rereads the singleton pointer whenever the state field resolves the path,
@@ -738,12 +868,15 @@ When a port needs the mapping metadata itself, take a typed snapshot rather
 than reproducing the host's numeric count/index ABI:
 
 ```splitscript
+# state "game.exe" {}
+# onAttach {
 let ranges = process.memoryRanges()
 for range in ranges {
     if range.readable && range.executable {
         debug print(`executable mapping at {range.address}`)
     }
 }
+# }
 ```
 
 `memoryRanges` is synchronous because it only copies cheap host metadata.
@@ -763,6 +896,9 @@ Some ASL `update` blocks overwrite one newly read watcher with its old value to
 filter a transient sentinel. The direct port is valid in `whileAttached`:
 
 ```splitscript
+# state "game.exe" {
+#     scene: i32 at 0x1000;
+# }
 whileAttached {
     if current.scene == 7 || current.scene == 8 {
         current.scene = old.scene
@@ -828,6 +964,9 @@ its current API happens to be mutable.
 Arrays provide `contains` and `indexOf` when their elements support equality:
 
 ```splitscript
+# state "game.exe" {
+#     level: i32 at 0x1000;
+# }
 let levelRoute = [12, 5, 6, 7, 9, 10, 11, 14]
 
 split {
@@ -843,8 +982,15 @@ assignment; the index is `u32`, aliases observe the change, and an out-of-range
 index traps just like an indexed read:
 
 ```splitscript
+# state "game.exe" {}
+# onAttach {
+# let route = [1, 2, 3]
+# let currentIndex: u32 = 1
+# let nextLevel = 7
 route[currentIndex] = nextLevel
 route[currentIndex] += 1
+# print(route[currentIndex])
+# }
 ```
 
 Plain indexed assignment evaluates the collection and index once. Compound
@@ -868,6 +1014,9 @@ Use `Set<T>` when values are discovered while the run progresses and only
 membership matters:
 
 ```splitscript
+# state "game.exe" {
+#     map at 0x1000 as utf8(64);
+# }
 let visitedMaps = Set.new<String>()
 
 onAttach {
@@ -892,6 +1041,7 @@ When membership comes from a small closed enum, a typed bit set remains more
 compact and makes the finite domain explicit:
 
 ```splitscript
+# state "game.exe" {}
 enum Chapter {
     Village,
     Farm,
@@ -934,10 +1084,19 @@ When cursor advancement depends on declaration membership rather than whether
 the split is enabled, keep the two questions separate:
 
 ```splitscript
+# state "game.exe" {}
+# settings {
+#     "Checkpoint" => checkpoint: true,
+# }
+# let checkpointIndex = 0
+# split {
+# let checkpointKey = "checkpoint"
 if settings.contains(checkpointKey) {
     checkpointIndex += 1
     return settings.enabled(checkpointKey)
 }
+# return false
+# }
 ```
 
 `contains` recognizes declared boolean, choice, and file keys, including
@@ -950,6 +1109,7 @@ time rather than expanding dozens of source members or mutating the settings
 map:
 
 ```splitscript
+# state "game.exe" {}
 settings {
     "Levels" {
         for level in 2..=36 {
@@ -1014,6 +1174,7 @@ For example, process-independent ASL startup statements belong in `setup`, not
 `onAttach`:
 
 ```splitscript
+# state "game.exe" {}
 setup {
     print("Autosplitter loaded")
 }
@@ -1029,9 +1190,15 @@ Legacy `init` combines two boundaries that SplitScript keeps explicit. Use
 `onStateReady` for synchronous initialization that needs polled state:
 
 ```splitscript
+# state "game.exe" {
+#     level: u32 at 0x1000;
+# }
+# let gameManager: address = 0x0
 onAttach {
-    let image = await Unity.i12cpp()
-    gameManager = await image.class("GameManager").staticInstance("Instance")
+    let unity = await Unity.il2cpp(2020)
+    let image = await unity.image("Assembly-CSharp")
+    let gameManagerClass = await image.class("GameManager")
+    gameManager = await gameManagerClass.staticInstance(["Instance"])
 }
 
 onStateReady {
@@ -1049,6 +1216,8 @@ snapshot has already refreshed, but the remaining timer decisions are skipped
 for that update:
 
 ```splitscript
+# state "game.exe" {}
+# let helperLoaded = true
 whileAttached {
     if !helperLoaded {
         return false
@@ -1066,6 +1235,7 @@ ASL `refreshRate` is a frequency. Migrate a stable attached cadence to the
 declarative lifecycle policy:
 
 ```splitscript
+# state "game.exe" {}
 tickRate {
     attached: 60,
 }
@@ -1085,6 +1255,7 @@ ASL commonly pauses game time in `exit`. Map that cleanup directly to
 `onDetach`:
 
 ```splitscript
+# state "game.exe" {}
 onDetach {
     timer.pauseGameTime()
 }

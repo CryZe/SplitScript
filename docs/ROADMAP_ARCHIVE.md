@@ -1,5 +1,17 @@
 # SplitScript roadmap
 
+## 2026-08-17: compiler-checked porting cookbook
+
+- Made every SplitScript fence in the bundled ASL porting guide compile as an
+  independent focused program, with rustdoc-style hidden context authored next
+  to the visible recipe and removed from rendered documentation.
+- The first validation pass caught and corrected stale Unity IL2CPP spelling,
+  singleton-call, state-layout delimiter, optional-module, and module-version
+  examples instead of allowing the bundled guide to drift from the compiler.
+- Reconciled the lifecycle roadmap item with the existing guide and maintained
+  setup, state-ready, attached-control, detach, action-default, timer-state,
+  and tick-rate runtime fixtures.
+
 ## 2026-08-17: Neon White runtime conformance
 
 - Reconstructed the Neon White port independently from its source ASL and used

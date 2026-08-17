@@ -42,6 +42,10 @@ class FakeWorkerPort implements EmbeddedCompilerWorkerPort {
     public fail(error: Error): void {
         this.failureListener?.(error);
     }
+
+    public respond(message: EmbeddedCompilerWorkerResponse): void {
+        this.messageListener?.(message);
+    }
 }
 
 test('shared worker connection initializes with a transferred module buffer', async () => {
@@ -71,5 +75,47 @@ test('shared worker connection rejects pending work after either host fails', as
     });
     port.fail(new Error('worker failed'));
     await assert.rejects(compilation, /worker failed/);
+    connection.dispose();
+});
+
+test('cancels the active staged compilation with a typed outcome', async () => {
+    const port = new FakeWorkerPort();
+    const connection = await EmbeddedCompilerWorkerConnection.create(
+        port,
+        new Uint8Array([0]),
+    );
+    const compilation = connection.compile({
+        protocolVersion: 1,
+        uri: 'file:///superseded.split',
+        revision: 3,
+        source: 'state "game.exe" {}',
+        profile: 'debug',
+    });
+    const compile = port.requests.at(-1);
+    assert.equal(compile?.kind, 'compile');
+    connection.cancelCurrentCompilation();
+    const cancel = port.requests.at(-1);
+    assert.equal(cancel?.kind, 'cancel');
+    if (compile?.kind !== 'compile' || cancel?.kind !== 'cancel') {
+        throw new Error('expected compile and cancel requests');
+    }
+    assert.equal(cancel.targetId, compile.id);
+    port.respond({ id: cancel.id, ok: true });
+    port.respond({
+        id: compile.id,
+        ok: false,
+        error: {
+            name: 'EmbeddedCompilerProtocolError',
+            message: 'superseded',
+            code: 'cancelled',
+        },
+    });
+    await assert.rejects(
+        compilation,
+        (error: unknown) => typeof error === 'object'
+            && error !== null
+            && 'code' in error
+            && error.code === 'cancelled',
+    );
     connection.dispose();
 });

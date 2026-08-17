@@ -15,7 +15,16 @@ export interface CompileWorkerRequest {
     request: EmbeddedCompileRequest;
 }
 
-export type EmbeddedCompilerWorkerRequest = InitializeWorkerRequest | CompileWorkerRequest;
+export interface CancelWorkerRequest {
+    id: number;
+    kind: 'cancel';
+    targetId: number;
+}
+
+export type EmbeddedCompilerWorkerRequest =
+    | InitializeWorkerRequest
+    | CompileWorkerRequest
+    | CancelWorkerRequest;
 
 export interface EmbeddedCompilerWorkerSuccess {
     id: number;

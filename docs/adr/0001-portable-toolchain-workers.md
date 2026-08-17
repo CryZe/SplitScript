@@ -91,8 +91,9 @@ optional Git revision so results can be compared across these layers.
   and Wasm instance.
 - Worker startup and duplicate Wasm instances cost memory; packaging and
   performance audits must measure that cost.
-- Expensive compiler stages still need cooperative cancellation. Revision
-  checks prevent stale publication today but do not stop superseded work.
+- Compiler requests yield between analysis, Wasm-IR lowering, and encoding.
+  Debug watch cancels superseded staged products while revision checks remain
+  the final guard against stale publication.
 - Native releases and the VSIX are packaged separately, but must run the same
   conformance corpus and expose the same compiler identity.
 - WASI or components should be reconsidered only after a measured requirement

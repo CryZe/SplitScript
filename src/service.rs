@@ -10,10 +10,11 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BuildProfile, CompilationCancellation, CompilationFailure, CompilerContext, CompilerIdentity,
-    CompilerOptions, Diagnostic, DiagnosticFix, DiagnosticLabel, DiagnosticLabelStyle,
-    DiagnosticSeverity, FixApplicability, TextEdit, WarningPolicy,
-    compile_named_with_context_and_options_cancellable, compiler_identity,
+    AnalyzedCompilation, BuildProfile, CompilationCancellation, CompilationFailure,
+    CompilerContext, CompilerIdentity, CompilerOptions, Diagnostic, DiagnosticFix, DiagnosticLabel,
+    DiagnosticLabelStyle, DiagnosticSeverity, FixApplicability, LoweredCompilation, TextEdit,
+    WarningPolicy, analyze_named_with_context_and_options_cancellable, compiler_identity,
+    encode_lowered_compilation_cancellable, lower_analyzed_compilation_cancellable,
 };
 
 pub const COMPILER_SERVICE_PROTOCOL_VERSION: u32 = 1;
@@ -158,6 +159,33 @@ pub struct CompilerService {
     context: CompilerContext,
 }
 
+/// Result of the analysis stage. Invalid source is already a complete response;
+/// valid source retains an opaque semantic product for Wasm lowering.
+#[derive(Debug)]
+pub enum CompileAnalysis {
+    Complete(CompileResponse),
+    Pending(AnalyzedCompile),
+}
+
+#[derive(Debug)]
+pub struct AnalyzedCompile {
+    request: CompileResponseIdentity,
+    compilation: AnalyzedCompilation,
+}
+
+#[derive(Debug)]
+pub struct LoweredCompile {
+    request: CompileResponseIdentity,
+    compilation: LoweredCompilation,
+}
+
+#[derive(Debug)]
+struct CompileResponseIdentity {
+    protocol_version: u32,
+    uri: String,
+    revision: u64,
+}
+
 impl Default for CompilerService {
     fn default() -> Self {
         Self::new()
@@ -184,6 +212,20 @@ impl CompilerService {
         request: CompileRequest,
         cancellation: &CompilationCancellation,
     ) -> Result<CompileResponse, CompileServiceError> {
+        let analyzed = match self.analyze(request, cancellation)? {
+            CompileAnalysis::Complete(response) => return Ok(response),
+            CompileAnalysis::Pending(analyzed) => analyzed,
+        };
+        let lowered = self.lower(analyzed, cancellation)?;
+        self.encode(lowered, cancellation)
+    }
+
+    /// Validates the service request and runs strict source analysis.
+    pub fn analyze(
+        &self,
+        request: CompileRequest,
+        cancellation: &CompilationCancellation,
+    ) -> Result<CompileAnalysis, CompileServiceError> {
         if request.protocol_version != COMPILER_SERVICE_PROTOCOL_VERSION {
             return Err(CompileServiceError {
                 code: CompileServiceErrorCode::UnsupportedProtocol,
@@ -213,44 +255,91 @@ impl CompilerService {
             profile,
             warnings,
         } = request;
-        let source_name = source_path.as_deref().unwrap_or(&uri);
-        let (diagnostics, artifact) = match compile_named_with_context_and_options_cancellable(
+        let source_name = source_path.unwrap_or_else(|| uri.clone());
+        let request = CompileResponseIdentity {
+            protocol_version,
+            uri,
+            revision,
+        };
+        match analyze_named_with_context_and_options_cancellable(
             self.context.clone(),
             source_name,
             &source,
             CompilerOptions { profile, warnings },
             cancellation,
         ) {
-            Ok((artifact, diagnostics)) => (
-                diagnostics
-                    .into_iter()
-                    .map(ServiceDiagnostic::from)
-                    .collect(),
-                Some(artifact),
-            ),
-            Err(CompilationFailure::Diagnostics(diagnostics)) => (
-                diagnostics
-                    .into_iter()
-                    .map(ServiceDiagnostic::from)
-                    .collect(),
-                None,
-            ),
+            Ok(compilation) => Ok(CompileAnalysis::Pending(AnalyzedCompile {
+                request,
+                compilation,
+            })),
+            Err(CompilationFailure::Diagnostics(diagnostics)) => Ok(CompileAnalysis::Complete(
+                request.complete(diagnostics, None),
+            )),
             Err(CompilationFailure::Cancelled(cancelled)) => {
-                return Err(CompileServiceError::new(
-                    CompileServiceErrorCode::Cancelled,
-                    format!("compilation was cancelled during {:?}", cancelled.phase),
-                ));
+                Err(cancelled_service_error(cancelled))
             }
-        };
-        Ok(CompileResponse {
-            protocol_version,
-            compiler: compiler_identity(),
-            uri,
-            revision,
-            diagnostics,
-            artifact,
+        }
+    }
+
+    /// Lowers a retained analysis product without rechecking its source.
+    pub fn lower(
+        &self,
+        analyzed: AnalyzedCompile,
+        cancellation: &CompilationCancellation,
+    ) -> Result<LoweredCompile, CompileServiceError> {
+        let compilation =
+            lower_analyzed_compilation_cancellable(analyzed.compilation, cancellation)
+                .map_err(compilation_failure_service_error)?;
+        Ok(LoweredCompile {
+            request: analyzed.request,
+            compilation,
         })
     }
+
+    /// Encodes and publishes a retained lowering product.
+    pub fn encode(
+        &self,
+        lowered: LoweredCompile,
+        cancellation: &CompilationCancellation,
+    ) -> Result<CompileResponse, CompileServiceError> {
+        let (artifact, diagnostics) =
+            encode_lowered_compilation_cancellable(lowered.compilation, cancellation)
+                .map_err(compilation_failure_service_error)?;
+        Ok(lowered.request.complete(diagnostics, Some(artifact)))
+    }
+}
+
+impl CompileResponseIdentity {
+    fn complete(self, diagnostics: Vec<Diagnostic>, artifact: Option<Vec<u8>>) -> CompileResponse {
+        CompileResponse {
+            protocol_version: self.protocol_version,
+            compiler: compiler_identity(),
+            uri: self.uri,
+            revision: self.revision,
+            diagnostics: diagnostics
+                .into_iter()
+                .map(ServiceDiagnostic::from)
+                .collect(),
+            artifact,
+        }
+    }
+}
+
+fn compilation_failure_service_error(failure: CompilationFailure) -> CompileServiceError {
+    match failure {
+        CompilationFailure::Cancelled(cancelled) => cancelled_service_error(cancelled),
+        CompilationFailure::Diagnostics(_) => CompileServiceError::new(
+            CompileServiceErrorCode::Internal,
+            "a compiler stage after analysis unexpectedly produced source diagnostics",
+        ),
+    }
+}
+
+fn cancelled_service_error(cancelled: crate::CompilationCancelled) -> CompileServiceError {
+    CompileServiceError::new(
+        CompileServiceErrorCode::Cancelled,
+        format!("compilation was cancelled during {:?}", cancelled.phase),
+    )
 }
 
 impl From<Diagnostic> for ServiceDiagnostic {
@@ -449,5 +538,68 @@ mod tests {
             .expect_err("a cancelled request must not continue into source analysis");
         assert_eq!(error.code, CompileServiceErrorCode::Cancelled);
         assert!(error.message.contains("Analysis"));
+    }
+
+    #[test]
+    fn staged_compilation_can_be_cancelled_between_analysis_and_lowering() {
+        let service = CompilerService::new();
+        let cancellation = CompilationCancellation::new();
+        let analyzed = match service
+            .analyze(request("state \"game.exe\" {}"), &cancellation)
+            .expect("analysis should succeed")
+        {
+            CompileAnalysis::Pending(analyzed) => analyzed,
+            CompileAnalysis::Complete(_) => panic!("valid source must retain an analysis product"),
+        };
+        cancellation.cancel();
+        let error = service
+            .lower(analyzed, &cancellation)
+            .expect_err("cancellation must discard the retained analysis product");
+        assert_eq!(error.code, CompileServiceErrorCode::Cancelled);
+        assert!(error.message.contains("WasmLowering"));
+    }
+
+    #[test]
+    fn staged_compilation_preserves_the_one_shot_response_contract() {
+        let service = CompilerService::new();
+        let cancellation = CompilationCancellation::new();
+        let analyzed = match service
+            .analyze(request("state \"game.exe\" {}"), &cancellation)
+            .expect("analysis should succeed")
+        {
+            CompileAnalysis::Pending(analyzed) => analyzed,
+            CompileAnalysis::Complete(_) => panic!("valid source must retain an analysis product"),
+        };
+        let lowered = service
+            .lower(analyzed, &cancellation)
+            .expect("lowering should succeed");
+        let response = service
+            .encode(lowered, &cancellation)
+            .expect("encoding should succeed");
+        assert!(response.succeeded());
+        assert_eq!(response.uri, "file:///example.split");
+        assert_eq!(response.revision, 42);
+    }
+
+    #[test]
+    fn staged_compilation_can_be_cancelled_before_encoding() {
+        let service = CompilerService::new();
+        let cancellation = CompilationCancellation::new();
+        let analyzed = match service
+            .analyze(request("state \"game.exe\" {}"), &cancellation)
+            .expect("analysis should succeed")
+        {
+            CompileAnalysis::Pending(analyzed) => analyzed,
+            CompileAnalysis::Complete(_) => panic!("valid source must retain an analysis product"),
+        };
+        let lowered = service
+            .lower(analyzed, &cancellation)
+            .expect("lowering should succeed");
+        cancellation.cancel();
+        let error = service
+            .encode(lowered, &cancellation)
+            .expect_err("cancellation must discard retained Wasm IR before encoding");
+        assert_eq!(error.code, CompileServiceErrorCode::Cancelled);
+        assert!(error.message.contains("WasmEncoding"));
     }
 }

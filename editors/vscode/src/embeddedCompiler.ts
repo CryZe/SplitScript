@@ -74,6 +74,10 @@ interface EmbeddedCompilerExports extends WebAssembly.Exports {
     splitscript_service_alloc(length: number): number;
     splitscript_service_dealloc(pointer: number, length: number): void;
     splitscript_service_compile(pointer: number, length: number): void;
+    splitscript_service_compile_start(pointer: number, length: number): number;
+    splitscript_service_compile_lower(): number;
+    splitscript_service_compile_finish(): void;
+    splitscript_service_compile_discard(): void;
     splitscript_service_response_pointer(): number;
     splitscript_service_response_length(): number;
 }
@@ -122,16 +126,47 @@ export class EmbeddedCompiler {
     }
 
     public compile(request: EmbeddedCompileRequest): EmbeddedCompileResponse {
+        if (this.startCompile(request) === 'complete') {
+            return this.readResponse();
+        }
+        if (this.lowerCompile() === 'complete') {
+            return this.readResponse();
+        }
+        this.finishCompile();
+        return this.readResponse();
+    }
+
+    /** Runs analysis and retains valid semantic state inside the Wasm service. */
+    public startCompile(request: EmbeddedCompileRequest): 'pending' | 'complete' {
         const requestBytes = this.encoder.encode(JSON.stringify(request));
         const pointer = this.exports.splitscript_service_alloc(requestBytes.length);
+        let status: number;
         try {
             new Uint8Array(this.exports.memory.buffer, pointer, requestBytes.length)
                 .set(requestBytes);
-            this.exports.splitscript_service_compile(pointer, requestBytes.length);
+            status = this.exports.splitscript_service_compile_start(pointer, requestBytes.length);
         } finally {
             this.exports.splitscript_service_dealloc(pointer, requestBytes.length);
         }
+        return compileStageStatus(status);
+    }
 
+    /** Lowers retained semantics into owned Wasm IR. */
+    public lowerCompile(): 'pending' | 'complete' {
+        return compileStageStatus(this.exports.splitscript_service_compile_lower());
+    }
+
+    /** Encodes retained Wasm IR and makes the response available. */
+    public finishCompile(): void {
+        this.exports.splitscript_service_compile_finish();
+    }
+
+    /** Drops retained products when the host supersedes a build. */
+    public discardCompile(): void {
+        this.exports.splitscript_service_compile_discard();
+    }
+
+    public readResponse(): EmbeddedCompileResponse {
         const responsePointer = this.exports.splitscript_service_response_pointer();
         const responseLength = this.exports.splitscript_service_response_length();
         const response = new Uint8Array(
@@ -141,6 +176,19 @@ export class EmbeddedCompiler {
         ).slice();
         return decodeEmbeddedCompileResponse(response);
     }
+}
+
+function compileStageStatus(status: number): 'pending' | 'complete' {
+    if (status === 0) {
+        return 'pending';
+    }
+    if (status === 1) {
+        return 'complete';
+    }
+    throw new EmbeddedCompilerProtocolError(
+        'invalidResponse',
+        `embedded compiler returned unknown stage status ${status}`,
+    );
 }
 
 export function decodeEmbeddedCompileResponse(

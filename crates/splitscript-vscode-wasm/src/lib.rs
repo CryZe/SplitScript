@@ -14,17 +14,26 @@ use std::{cell::RefCell, ptr, slice};
 use serde::Serialize;
 use serde_json::{Value, json};
 use splitscript::compiler::service::{
-    COMPILER_SERVICE_PROTOCOL_VERSION, CompileRequest, CompileServiceError,
-    CompileServiceErrorCode, CompilerService, ServiceDiagnostic,
+    AnalyzedCompile, COMPILER_SERVICE_PROTOCOL_VERSION, CompileAnalysis, CompileRequest,
+    CompileResponse, CompileServiceError, CompileServiceErrorCode, CompilerService, LoweredCompile,
+    ServiceDiagnostic,
 };
 use splitscript::tooling::lsp::LanguageServer;
-use splitscript::{CompilerIdentity, compiler_identity};
+use splitscript::{CompilationCancellation, CompilerIdentity, compiler_identity};
 
 const RESPONSE_MAGIC: &[u8; 4] = b"SSCR";
 const LSP_PROTOCOL_VERSION: u32 = 1;
+const COMPILE_PENDING: u32 = 0;
+const COMPILE_COMPLETE: u32 = 1;
+
+enum PendingCompilation {
+    Analyzed(AnalyzedCompile),
+    Lowered(LoweredCompile),
+}
 
 thread_local! {
     static SERVICE: CompilerService = CompilerService::new();
+    static PENDING_COMPILATION: RefCell<Option<PendingCompilation>> = const { RefCell::new(None) };
     static RESPONSE: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static LANGUAGE_SERVER: RefCell<LanguageServer> = RefCell::new(LanguageServer::default());
     static LSP_RESPONSE: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
@@ -63,34 +72,123 @@ pub extern "C" fn splitscript_service_dealloc(pointer: u32, length: u32) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn splitscript_service_compile(pointer: u32, length: u32) {
+    if splitscript_service_compile_start(pointer, length) == COMPILE_PENDING
+        && splitscript_service_compile_lower() == COMPILE_PENDING
+    {
+        splitscript_service_compile_finish();
+    }
+}
+
+/// Runs source analysis and retains valid semantic state for a later lowering
+/// call. Returning `COMPILE_PENDING` means no response is available yet.
+#[unsafe(no_mangle)]
+pub extern "C" fn splitscript_service_compile_start(pointer: u32, length: u32) -> u32 {
     // SAFETY: The editor adapter writes exactly `length` initialized bytes to
     // an allocation returned by `splitscript_service_alloc` before this call.
     let request_bytes = unsafe { slice::from_raw_parts(pointer as *const u8, length as usize) };
-    let response = match serde_json::from_slice::<CompileRequest>(request_bytes) {
-        Ok(request) => SERVICE.with(|service| match service.compile(request) {
-            Ok(response) => {
-                let artifact = response.artifact.unwrap_or_default();
-                encode_response(
-                    ResponseMetadata {
-                        protocol_version: response.protocol_version,
-                        compiler: response.compiler,
-                        uri: response.uri,
-                        revision: response.revision,
-                        diagnostics: response.diagnostics,
-                        artifact_length: artifact.len(),
-                        error: None,
-                    },
-                    &artifact,
-                )
+    PENDING_COMPILATION.with(|pending| *pending.borrow_mut() = None);
+    match serde_json::from_slice::<CompileRequest>(request_bytes) {
+        Ok(request) => SERVICE.with(|service| {
+            match service.analyze(request, &CompilationCancellation::new()) {
+                Ok(CompileAnalysis::Pending(analyzed)) => {
+                    PENDING_COMPILATION.with(|pending| {
+                        *pending.borrow_mut() = Some(PendingCompilation::Analyzed(analyzed));
+                    });
+                    COMPILE_PENDING
+                }
+                Ok(CompileAnalysis::Complete(response)) => {
+                    store_response(encode_compile_response(response));
+                    COMPILE_COMPLETE
+                }
+                Err(error) => {
+                    store_response(encode_error(error));
+                    COMPILE_COMPLETE
+                }
             }
-            Err(error) => encode_error(error),
         }),
-        Err(error) => encode_error(CompileServiceError::new(
+        Err(error) => {
+            store_response(encode_error(CompileServiceError::new(
+                CompileServiceErrorCode::InvalidRequest,
+                format!("invalid compiler-service request: {error}"),
+            )));
+            COMPILE_COMPLETE
+        }
+    }
+}
+
+/// Lowers a retained semantic product and yields another pending stage.
+#[unsafe(no_mangle)]
+pub extern "C" fn splitscript_service_compile_lower() -> u32 {
+    let analyzed = PENDING_COMPILATION.with(|pending| {
+        let current = pending.borrow_mut().take();
+        match current {
+            Some(PendingCompilation::Analyzed(analyzed)) => Ok(analyzed),
+            Some(PendingCompilation::Lowered(lowered)) => {
+                *pending.borrow_mut() = Some(PendingCompilation::Lowered(lowered));
+                Err("the embedded compilation was already lowered")
+            }
+            None => Err("there is no analyzed embedded compilation"),
+        }
+    });
+    let analyzed = match analyzed {
+        Ok(analyzed) => analyzed,
+        Err(message) => {
+            store_response(encode_error(CompileServiceError::new(
+                CompileServiceErrorCode::InvalidRequest,
+                message,
+            )));
+            return COMPILE_COMPLETE;
+        }
+    };
+    SERVICE.with(
+        |service| match service.lower(analyzed, &CompilationCancellation::new()) {
+            Ok(lowered) => {
+                PENDING_COMPILATION.with(|pending| {
+                    *pending.borrow_mut() = Some(PendingCompilation::Lowered(lowered));
+                });
+                COMPILE_PENDING
+            }
+            Err(error) => {
+                store_response(encode_error(error));
+                COMPILE_COMPLETE
+            }
+        },
+    )
+}
+
+/// Encodes the retained Wasm IR and publishes the completed response.
+#[unsafe(no_mangle)]
+pub extern "C" fn splitscript_service_compile_finish() {
+    let lowered = PENDING_COMPILATION.with(|pending| {
+        let current = pending.borrow_mut().take();
+        match current {
+            Some(PendingCompilation::Lowered(lowered)) => Ok(lowered),
+            Some(PendingCompilation::Analyzed(analyzed)) => {
+                *pending.borrow_mut() = Some(PendingCompilation::Analyzed(analyzed));
+                Err("the embedded compilation has not been lowered")
+            }
+            None => Err("there is no lowered embedded compilation"),
+        }
+    });
+    let response = match lowered {
+        Ok(lowered) => SERVICE.with(|service| {
+            service
+                .encode(lowered, &CompilationCancellation::new())
+                .map(encode_compile_response)
+                .unwrap_or_else(encode_error)
+        }),
+        Err(message) => encode_error(CompileServiceError::new(
             CompileServiceErrorCode::InvalidRequest,
-            format!("invalid compiler-service request: {error}"),
+            message,
         )),
     };
-    RESPONSE.with(|slot| *slot.borrow_mut() = response);
+    store_response(response);
+}
+
+/// Drops any retained semantic or Wasm-IR product for a superseded request.
+#[unsafe(no_mangle)]
+pub extern "C" fn splitscript_service_compile_discard() {
+    PENDING_COMPILATION.with(|pending| *pending.borrow_mut() = None);
 }
 
 #[unsafe(no_mangle)]
@@ -164,6 +262,26 @@ fn encode_error(error: CompileServiceError) -> Vec<u8> {
         },
         &[],
     )
+}
+
+fn encode_compile_response(response: CompileResponse) -> Vec<u8> {
+    let artifact = response.artifact.unwrap_or_default();
+    encode_response(
+        ResponseMetadata {
+            protocol_version: response.protocol_version,
+            compiler: response.compiler,
+            uri: response.uri,
+            revision: response.revision,
+            diagnostics: response.diagnostics,
+            artifact_length: artifact.len(),
+            error: None,
+        },
+        &artifact,
+    )
+}
+
+fn store_response(response: Vec<u8>) {
+    RESPONSE.with(|slot| *slot.borrow_mut() = response);
 }
 
 fn encode_response(metadata: ResponseMetadata, artifact: &[u8]) -> Vec<u8> {

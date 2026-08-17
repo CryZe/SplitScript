@@ -46,6 +46,25 @@ assert.deepEqual(
     [...compilation.response.artifact.subarray(0, 4)],
     [0, 0x61, 0x73, 0x6d],
 );
+compiler.dispatch({
+    id: 3,
+    kind: "compile",
+    request: {
+        protocolVersion: 1,
+        uri: "file:///browser-worker.split",
+        revision: 10,
+        source: 'state "game.exe" {}',
+        profile: "debug",
+    },
+});
+compiler.dispatch({ id: 4, kind: "cancel", targetId: 3 });
+const cancellationAcknowledgement = await compiler.nextMessage();
+assert.equal(cancellationAcknowledgement.id, 4);
+assert.equal(cancellationAcknowledgement.ok, true);
+const cancelledCompilation = await compiler.nextMessage();
+assert.equal(cancelledCompilation.id, 3);
+assert.equal(cancelledCompilation.ok, false);
+assert.equal(cancelledCompilation.error.code, "cancelled");
 
 const language = workerRuntime(languageWorkerPath);
 language.dispatch({

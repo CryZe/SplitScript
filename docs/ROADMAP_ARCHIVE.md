@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-18: staged embedded compilation
+
+- Split the portable compiler service into owned analysis, Wasm-lowering, and
+  encoding products without exposing or serializing compiler-internal IR.
+- Made Node and browser compiler workers yield between stages, discard a
+  superseded debug-watch revision, and return a typed cancellation outcome.
+- Kept source diagnostics revisioned, prevented discarded stages from
+  publishing artifacts, and covered cancellation through shared connection
+  tests and both generated worker runtimes.
+
 ## 2026-08-18: cooperative compilation boundary
 
 - Added a thread-safe compilation cancellation token and typed cancellation

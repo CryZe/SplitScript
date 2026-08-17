@@ -856,6 +856,47 @@ pub fn compile_named_with_context_and_options_cancellable(
     options: CompilerOptions,
     cancellation: &CompilationCancellation,
 ) -> Result<(Vec<u8>, Vec<Diagnostic>), CompilationFailure> {
+    let analyzed = analyze_named_with_context_and_options_cancellable(
+        context,
+        source_name,
+        source,
+        options,
+        cancellation,
+    )?;
+    let lowered = lower_analyzed_compilation_cancellable(analyzed, cancellation)?;
+    encode_lowered_compilation_cancellable(lowered, cancellation)
+}
+
+/// Owned result of strict source analysis, ready for Wasm lowering.
+///
+/// Its representation is intentionally opaque so hosts can retain it across a
+/// scheduler yield without depending on compiler-internal semantic data.
+#[derive(Debug)]
+pub struct AnalyzedCompilation {
+    checked: std::sync::Arc<CheckedProgram>,
+    diagnostics: Vec<Diagnostic>,
+    options: CompilerOptions,
+}
+
+/// Owned Wasm IR and semantic input, ready for binary encoding.
+///
+/// Keeping the checked program beside the IR avoids serializing either product
+/// when an embedded host yields between compiler phases.
+#[derive(Debug)]
+pub struct LoweredCompilation {
+    checked: std::sync::Arc<CheckedProgram>,
+    diagnostics: Vec<Diagnostic>,
+    wasm_ir: wasm_ir::Program,
+}
+
+/// Performs strict analysis and retains its owned semantic product.
+pub fn analyze_named_with_context_and_options_cancellable(
+    context: CompilerContext,
+    source_name: impl Into<String>,
+    source: &str,
+    options: CompilerOptions,
+    cancellation: &CompilationCancellation,
+) -> Result<AnalyzedCompilation, CompilationFailure> {
     cancellation
         .checkpoint(CompilationPhase::Analysis)
         .map_err(CompilationFailure::Cancelled)?;
@@ -869,21 +910,51 @@ pub fn compile_named_with_context_and_options_cancellable(
     {
         return Err(CompilationFailure::Diagnostics(diagnostics));
     }
-    cancellation
-        .checkpoint(CompilationPhase::WasmLowering)
-        .map_err(CompilationFailure::Cancelled)?;
     let checked = database
         .check()
         .expect("an error-free diagnostic set has a strictly checked program");
-    let backend = lower_wasm_with_options(&checked, options);
+    Ok(AnalyzedCompilation {
+        checked,
+        diagnostics,
+        options,
+    })
+}
+
+/// Lowers one analyzed product into owned Wasm IR.
+pub fn lower_analyzed_compilation_cancellable(
+    analyzed: AnalyzedCompilation,
+    cancellation: &CompilationCancellation,
+) -> Result<LoweredCompilation, CompilationFailure> {
+    cancellation
+        .checkpoint(CompilationPhase::WasmLowering)
+        .map_err(CompilationFailure::Cancelled)?;
+    let wasm_ir = wasm_ir::Program::lower(
+        analyzed.checked.typed_hir(),
+        analyzed.checked.semantics(),
+        analyzed.checked.effects(),
+        analyzed.options.profile,
+    );
+    Ok(LoweredCompilation {
+        checked: analyzed.checked,
+        diagnostics: analyzed.diagnostics,
+        wasm_ir,
+    })
+}
+
+/// Encodes owned Wasm IR and checks cancellation before publication.
+pub fn encode_lowered_compilation_cancellable(
+    lowered: LoweredCompilation,
+    cancellation: &CompilationCancellation,
+) -> Result<(Vec<u8>, Vec<Diagnostic>), CompilationFailure> {
     cancellation
         .checkpoint(CompilationPhase::WasmEncoding)
         .map_err(CompilationFailure::Cancelled)?;
+    let backend = codegen::BackendProgram::new(&lowered.checked, lowered.wasm_ir);
     let artifact = codegen::compile(backend);
     cancellation
         .checkpoint(CompilationPhase::Publication)
         .map_err(CompilationFailure::Cancelled)?;
-    Ok((artifact, diagnostics))
+    Ok((artifact, lowered.diagnostics))
 }
 
 #[cfg(test)]

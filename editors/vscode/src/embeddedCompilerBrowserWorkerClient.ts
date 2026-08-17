@@ -40,6 +40,10 @@ export class EmbeddedCompilerBrowserWorkerClient {
         return this.connection.compile(request);
     }
 
+    public cancelCurrentCompilation(): void {
+        this.connection.cancelCurrentCompilation();
+    }
+
     public dispose(): void {
         this.connection.dispose();
     }

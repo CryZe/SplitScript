@@ -1224,9 +1224,11 @@ token and a typed `CompilationFailure::Cancelled` outcome. Stable checkpoints
 separate analysis, Wasm-IR lowering, binary encoding, and publication; a
 cancelled request never masquerades as a source diagnostic or publishes an
 artifact completed after cancellation. The compiler service maps this to a
-distinct `cancelled` service error. The current worker call remains monolithic,
-so the next embedded step is a staged request protocol that yields between
-these checkpoints and can observe a superseding worker message.
+distinct `cancelled` service error. The embedded adapter retains opaque
+analysis and Wasm-IR products across worker event-loop yields. Debug watch can
+therefore discard a superseded revision before lowering or encoding, report a
+typed cancellation outcome, and immediately compile the newest queued save.
+No partial response or artifact is published by a discarded stage.
 
 [`crates/splitscript-vscode-wasm`](../crates/splitscript-vscode-wasm) is the
 first direct-WebAssembly adapter for that service. It is a separate unpublished

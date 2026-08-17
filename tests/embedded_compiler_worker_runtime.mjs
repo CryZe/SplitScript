@@ -34,14 +34,27 @@ try {
         new Uint8Array([0, 0x61, 0x73, 0x6d]),
     );
 
-    const failed = await client.compile({
+    const cancelled = client.compile({
         protocolVersion: 1,
         uri: "file:///worker-test.split",
         revision: 22,
+        source: 'state "game.exe" {}',
+        profile: "debug",
+    });
+    client.cancelCurrentCompilation();
+    await assert.rejects(
+        cancelled,
+        error => error?.code === "cancelled",
+    );
+
+    const failed = await client.compile({
+        protocolVersion: 1,
+        uri: "file:///worker-test.split",
+        revision: 23,
         source: "fn broken( {",
         profile: "debug",
     });
-    assert.equal(failed.revision, 22);
+    assert.equal(failed.revision, 23);
     assert.equal(failed.artifact, undefined);
     assert.ok(failed.diagnostics.length > 0);
 } finally {

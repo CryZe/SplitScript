@@ -10,6 +10,7 @@ import { ExclusiveTaskState } from './taskState';
 
 export interface EmbeddedCompilerClient {
     compile(request: import('./embeddedCompiler').EmbeddedCompileRequest): Promise<EmbeddedCompileResponse>;
+    cancelCurrentCompilation(): void;
     dispose(): void;
 }
 
@@ -227,6 +228,9 @@ export class CompilerTaskController implements vscode.Disposable {
             return;
         }
         active.pending = undefined;
+        if (active.compiling) {
+            this.compiler?.cancelCurrentCompilation();
+        }
         await this.clearWatch(active);
         this.outputChannel.appendLine('Debug watch stopped.');
         if (showNotification) {
@@ -250,7 +254,9 @@ export class CompilerTaskController implements vscode.Disposable {
             return;
         }
         task.pending = snapshot;
-        if (!task.compiling) {
+        if (task.compiling) {
+            this.compiler?.cancelCurrentCompilation();
+        } else {
             void this.drainWatchBuilds(task);
         }
     }
@@ -262,7 +268,22 @@ export class CompilerTaskController implements vscode.Disposable {
                 const snapshot = task.pending;
                 task.pending = undefined;
                 this.watchStatus.text = `$(sync~spin) Debug watch: ${task.inputName}`;
-                const response = await this.compile(snapshot, 'debug');
+                let response: EmbeddedCompileResponse;
+                try {
+                    response = await this.compile(snapshot, 'debug');
+                } catch (error) {
+                    if (
+                        compilerErrorCode(error) === 'cancelled'
+                        && this.tasks.current === task
+                        && task.pending !== undefined
+                    ) {
+                        this.outputChannel.appendLine(
+                            `Cancelled revision ${snapshot.revision}; a newer save is queued.`,
+                        );
+                        continue;
+                    }
+                    throw error;
+                }
                 if (this.tasks.current !== task) {
                     return;
                 }
@@ -428,4 +449,13 @@ function outputUri(input: vscode.Uri): vscode.Uri {
         query: '',
         fragment: '',
     });
+}
+
+function compilerErrorCode(error: unknown): string | undefined {
+    return typeof error === 'object'
+        && error !== null
+        && 'code' in error
+        && typeof error.code === 'string'
+        ? error.code
+        : undefined;
 }

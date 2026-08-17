@@ -66,6 +66,7 @@ pub(crate) fn augment_program_with_library_bodies(
     library: &StandardLibrary,
 ) -> Result<Option<Program>, Vec<Diagnostic>> {
     let mut combined = String::new();
+    let mut body_ranges = Vec::new();
     for item in library.items() {
         if !matches!(item.implementation, Implementation::LibraryBody { .. }) {
             continue;
@@ -76,7 +77,9 @@ pub(crate) fn augment_program_with_library_bodies(
             combined.push_str(user_source);
             combined.push('\n');
         }
+        let start = combined.len();
         combined.push_str(&source);
+        body_ranges.push((start..combined.len(), item.qualified_name));
         combined.push('\n');
     }
     if combined.is_empty() {
@@ -87,6 +90,68 @@ pub(crate) fn augment_program_with_library_bodies(
     if output.diagnostics.is_empty() {
         Ok(Some(output.program))
     } else {
-        Err(output.diagnostics)
+        Err(output
+            .diagnostics
+            .into_iter()
+            .map(|mut diagnostic| {
+                let origin = if diagnostic.span.start <= user_source.len() {
+                    "the already-parsed user program"
+                } else {
+                    body_ranges
+                        .iter()
+                        .find(|(range, _)| range.contains(&diagnostic.span.start))
+                        .map_or("a generated standard-library boundary", |(_, name)| *name)
+                };
+                diagnostic.notes.push(format!(
+                    "combined standard-library parsing failed inside {origin}"
+                ));
+                diagnostic
+            })
+            .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    #[test]
+    fn source_body_analysis_initializes_safely_from_parallel_callers() {
+        let library = Arc::new(StandardLibrary {
+            graph: Arc::new(
+                crate::stdlib::graph::StandardLibraryGraph::build()
+                    .expect("bundled graph is valid"),
+            ),
+        });
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let library = Arc::clone(&library);
+                scope.spawn(move || library.initialize_source_body_operations());
+            }
+        });
+        assert!(library.source_body_operations_are_initialized());
+    }
+
+    #[test]
+    fn augmentation_parses_deterministically_under_parallel_load() {
+        let library = Arc::new(StandardLibrary::new());
+        std::thread::scope(|scope| {
+            for worker in 0..8 {
+                let library = Arc::clone(&library);
+                scope.spawn(move || {
+                    for iteration in 0..16 {
+                        augment_program_with_library_bodies(
+                            "state \"parallel-probe.exe\" {}",
+                            &library,
+                        )
+                        .unwrap_or_else(|diagnostics| {
+                            panic!("worker {worker} iteration {iteration} failed: {diagnostics:#?}")
+                        });
+                    }
+                });
+            }
+        });
     }
 }

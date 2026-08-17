@@ -407,10 +407,40 @@ Use `await process.module("GameAssembly.dll")` when attachment must wait until
 a required module loads. Do not use that waiting form for optional platform or
 mod-loader detection: an absent module would keep `onAttach` pending forever.
 
+The common ASL expression `modules.First()` normally refers to the executable
+itself. Discover that value once in `onAttach`, then use its typed fields:
+
+```splitscript
+onAttach {
+    let executable = await process.mainModule()
+    print(`executable size: {executable.size}`)
+}
+```
+
+This replaces `ModuleMemorySize` with `size` and `BaseAddress` with `address`.
+It also makes the suspension visible: module discovery happens before polling,
+not implicitly whenever a property is read.
+
 The two version methods return typed four-part `FileVersion` values rather than
 the punctuation-dependent strings exposed by C# `FileVersionInfo`. Use
 `Module.versionInfo()` when both identities are needed, so the PE resource is
 only traversed once.
+
+```splitscript
+onAttach {
+    let executable = await process.mainModule()
+    let product = executable.productVersion() else return await process.closed()
+    if product == v"1.2.3.4" {
+        print("recognized build")
+    }
+}
+```
+
+Only preserve full enumeration when the source genuinely needs to inspect
+unknown module names. SplitScript does not currently expose that host operation.
+Do not replace it with `process.memoryRanges()`: mapped memory ranges and loaded
+modules have different identities and lifetime semantics. Record such a port as
+host-limited instead of silently changing its behavior.
 
 The compiler recognizes the exact legacy path `game.ProcessName` and offers a
 machine-applicable `process.name()` rewrite where the native `process` value is

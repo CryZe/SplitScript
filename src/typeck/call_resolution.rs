@@ -501,7 +501,7 @@ impl Checker {
         if callee
             .first()
             .is_some_and(|receiver| self.binding(receiver).is_none())
-            && let Some(id) = legacy_static_call_diagnostic(callee)
+            && let Some(id) = legacy_static_call_diagnostic(callee, args.len())
         {
             let metadata =
                 migration_diagnostic(id).expect("type checker migration diagnostic IDs must exist");

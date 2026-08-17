@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-17: intent-specific ASL module migration diagnostics
+
+- Added one compiler-owned `asl.process.modules` concept that distinguishes the
+  main executable, a known optional module, a required waiting module, typed
+  executable identity, and genuine unknown-name enumeration.
+- Recognizable `modules.First()`, module-list query, and plain enumeration
+  shapes now produce focused diagnostics linked to the exact migration page.
+  They deliberately avoid automatic rewrites because suspension, optionality,
+  and predicate intent must be selected by the author.
+- Expanded the self-contained porting guide with focused main-module size and
+  typed product-version snippets. Full module enumeration remains an explicit
+  host-runtime gap and is not approximated with mapped memory ranges.
+
 ## 2026-08-17: self-contained documentation in every compiler product
 
 - Added native `splitc docs`, which renders the same compiler-owned Markdown as

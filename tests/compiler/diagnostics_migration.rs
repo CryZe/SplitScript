@@ -2284,6 +2284,120 @@ fn legacy_process_identity_is_not_rewritten_outside_attachment_context() {
 }
 
 #[test]
+fn legacy_main_module_query_points_to_explicit_executable_discovery() {
+    let source = r#"
+        state "game.exe" {}
+
+        onAttach {
+            let executable = modules.First()
+        }
+    "#;
+    let errors = splitscript::compile(source)
+        .expect_err("the legacy main-module query should need migration guidance");
+    assert_eq!(errors.len(), 1, "unexpected cascade: {errors:#?}");
+    let diagnostic = &errors[0];
+    assert_eq!(
+        diagnostic.message,
+        "ASL `modules.First()` usually means the attached executable module"
+    );
+    assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "First");
+    assert!(diagnostic.fixes.is_empty());
+    assert_eq!(
+        diagnostic.migration_topic.as_deref(),
+        Some("asl.process.modules")
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("await process.mainModule()"))
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("versionInfo()"))
+    );
+}
+
+#[test]
+fn legacy_named_module_queries_distinguish_optional_required_and_enumerated_modules() {
+    let query = r#"
+        state "game.exe" {}
+
+        onAttach {
+            let steam = modules.Any("steam_api.dll")
+        }
+    "#;
+    let errors = splitscript::compile(query)
+        .expect_err("a module-list query should lead to typed module discovery");
+    assert_eq!(errors.len(), 1, "unexpected cascade: {errors:#?}");
+    let diagnostic = &errors[0];
+    assert_eq!(
+        diagnostic.message,
+        "ASL module-list queries need an intent-specific SplitScript probe"
+    );
+    assert!(diagnostic.fixes.is_empty());
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("process.loadedModule(name)"))
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("await process.module(name)"))
+    );
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("full module enumeration"))
+    );
+
+    let enumeration = r#"
+        state "game.exe" {}
+
+        onAttach {
+            for module in modules {
+                print(module)
+            }
+        }
+    "#;
+    let errors = splitscript::compile(enumeration)
+        .expect_err("plain ASL module enumeration is not a native collection");
+    assert_eq!(errors.len(), 1, "unexpected cascade: {errors:#?}");
+    assert_eq!(
+        errors[0].message,
+        "ASL's enumerable `modules` collection has no direct SplitScript value"
+    );
+    assert!(
+        errors[0]
+            .notes
+            .iter()
+            .any(|note| note.contains("mapped memory ranges"))
+    );
+
+    let user_defined = r#"
+        state "game.exe" {}
+
+        record ModuleBag {}
+
+        fn ModuleBag.First() -> u32 {
+            return 1
+        }
+
+        fn first(modules: ModuleBag) -> u32 {
+            return modules.First()
+        }
+    "#;
+    splitscript::compile(user_defined)
+        .expect("a resolved user value named `modules` must keep its ordinary methods");
+}
+
+#[test]
 fn legacy_timer_split_index_requires_explicit_none_handling() {
     let source = r#"
         state "game.exe" {

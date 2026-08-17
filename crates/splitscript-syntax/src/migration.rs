@@ -183,6 +183,12 @@ pub const ASL_LIST_TYPE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.collection.list-type");
 pub const ASL_SETTINGS_ADD_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.settings.add-call");
+pub const ASL_MODULES_MAIN_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.process.modules-main-call");
+pub const ASL_MODULES_QUERY_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.process.modules-query-call");
+pub const ASL_MODULES_ENUMERATION_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.process.modules-enumeration");
 pub const CSHARP_STRING_EQUALS_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("csharp.string.equals-call");
 pub const CSHARP_STRING_SUBSTRING_DIAGNOSTIC: MigrationDiagnosticId =
@@ -424,6 +430,40 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "for a bounded numbered family, use `for value in start..=end { `Label {value}` key `{value}`: true, }` instead of expanding every member by hand",
             "read a statically named setting through `settings.name`; use `settings.enabled(key)` only when a data-driven string selects among declared boolean settings",
             "there is no automatic rewrite because `settings.Add` overloads encode labels, parents, defaults, and runtime control flow differently",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_MODULES_MAIN_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.process.modules"),
+        message: "ASL `modules.First()` usually means the attached executable module",
+        primary_label: "discover the main module explicitly in `onAttach`",
+        notes: &[
+            "use `let executable = await process.mainModule()` and then read `executable.address` or `executable.size`",
+            "use `executable.fileVersion()`, `productVersion()`, or `versionInfo()` for typed Windows executable identity",
+            "if the source intentionally selects a named non-main module, use `process.loadedModule(name)` for an optional probe or await `process.module(name)` when attachment must wait for it",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_MODULES_QUERY_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.process.modules"),
+        message: "ASL module-list queries need an intent-specific SplitScript probe",
+        primary_label: "replace the collection query with explicit module discovery",
+        notes: &[
+            "for a known optional name, use `process.loadedModule(name) != None`; this synchronous probe does not wait for an absent platform or mod-loader module",
+            "for a known required name, use `await process.module(name)` in `onAttach`; the operation suspends until that module is loaded",
+            "use `await process.mainModule()` for the executable itself, including size, path, signature, and typed version checks",
+            "a query whose predicate cannot be reduced to a known name genuinely requires full module enumeration, which is tracked as a host-runtime requirement and is not currently exposed",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_MODULES_ENUMERATION_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.process.modules"),
+        message: "ASL's enumerable `modules` collection has no direct SplitScript value",
+        primary_label: "choose a typed module probe from the source code's actual intent",
+        notes: &[
+            "use `await process.mainModule()` for the executable, `process.loadedModule(name)` for a known optional module, or `await process.module(name)` for a known required module",
+            "use typed module size, path, version, or signature evidence when the source is identifying a build rather than enumerating modules for its own sake",
+            "full unknown-name module enumeration remains a host-runtime requirement; do not substitute mapped memory ranges because mappings and loaded modules have different semantics",
         ],
     },
     MigrationDiagnostic {
@@ -797,7 +837,28 @@ pub fn legacy_set_field_diagnostic(name: &str) -> Option<MigrationDiagnosticId> 
     (name == "Count").then_some(CSHARP_COLLECTION_COUNT_DIAGNOSTIC)
 }
 
-pub fn legacy_static_call_diagnostic(path: &[String]) -> Option<MigrationDiagnosticId> {
+pub fn legacy_static_call_diagnostic(
+    path: &[String],
+    argument_count: usize,
+) -> Option<MigrationDiagnosticId> {
+    if matches!(path, [modules, method] if modules == "modules" && method == "First") {
+        return Some(if argument_count == 0 {
+            ASL_MODULES_MAIN_DIAGNOSTIC
+        } else {
+            ASL_MODULES_QUERY_DIAGNOSTIC
+        });
+    }
+    if matches!(
+        path,
+        [modules, method]
+            if modules == "modules"
+                && matches!(
+                    method.as_str(),
+                    "Any" | "FirstOrDefault" | "Single" | "SingleOrDefault" | "Where"
+                )
+    ) {
+        return Some(ASL_MODULES_QUERY_DIAGNOSTIC);
+    }
     let (owner, method) = match path {
         [owner, method] => (owner, method),
         [system, owner, method]
@@ -898,6 +959,9 @@ pub fn legacy_lifecycle_diagnostic(name: &str) -> Option<MigrationDiagnosticId> 
 }
 
 pub fn legacy_value_path_diagnostic(path: &str) -> Option<MigrationDiagnosticId> {
+    if path == "modules" {
+        return Some(ASL_MODULES_ENUMERATION_DIAGNOSTIC);
+    }
     if path == "timer.CurrentSplitIndex" {
         return Some(ASL_CURRENT_SPLIT_INDEX_DIAGNOSTIC);
     }
@@ -1744,6 +1808,23 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         targets: &[MigrationTarget::StandardLibraryItem("Process.name")],
         cookbook_anchor: Some("attached-process-identity"),
         spellings: ASL_PROCESS_IDENTITY_SPELLINGS,
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.process.modules"),
+        name: "Loaded module discovery",
+        sources: ASL,
+        support: MigrationSupport::TypedPattern,
+        summary: "Replace the enumerable ASL module bag with the narrow typed probe that matches the source intent: main executable discovery, a known optional module, a required module, or typed build identity. Preserve genuine unknown-name enumeration as an explicit host-runtime gap.",
+        targets: &[
+            MigrationTarget::StandardLibraryItem("Process.mainModule"),
+            MigrationTarget::StandardLibraryItem("Process.loadedModule"),
+            MigrationTarget::StandardLibraryItem("Process.module"),
+            MigrationTarget::StandardLibraryItem("Module.fileVersion"),
+            MigrationTarget::StandardLibraryItem("Module.productVersion"),
+            MigrationTarget::StandardLibraryItem("Module.versionInfo"),
+        ],
+        cookbook_anchor: Some("attached-process-identity"),
+        spellings: &[],
     },
     MigrationConcept {
         id: MigrationConceptId::new("asl.state.memory-watcher"),

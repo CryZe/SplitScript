@@ -24,6 +24,9 @@ General rules:
   representations, validated intrinsics, runtime helpers, and ABI boundaries.
 - Add compiler, runtime, formatter, and editor coverage in the same change when
   a feature crosses those surfaces.
+- Treat reports about an already-supported facility as discoverability and
+  diagnostic evidence. Lead authors to the canonical typed pattern instead of
+  adding compatibility aliases or duplicate abstractions.
 - Record host-runtime gaps found during ports in
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md), with evidence and
   semantic requirements before proposing import spellings. Keep compiler-only
@@ -31,32 +34,7 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
-## Now — turn current ASL porting feedback into self-guiding workflows
-
-The latest six-script campaign used compiler revision `69f2bd9`, so reports of
-already-implemented facilities are discoverability evidence, not stale-compiler
-evidence. The candidates compile but have not been checked against games or
-deterministic host fixtures; compilation success is not behavioral parity. The
-completed source/compiler/fixture review and per-candidate classifications are
-recorded in [`docs/PORTING_CAMPAIGN_AUDIT.md`](docs/PORTING_CAMPAIGN_AUDIT.md).
-
-- [ ] Connect recognizable legacy constructs directly to the existing solution.
-  Direct `current.field` assignment is now supported, while the porting guide
-  distinguishes it from transactional candidate rejection. Legacy lifecycle
-  diagnostics now carry stable topics that open their exact compiler-owned
-  migration pages. Finish module-list probes that distinguish
-  `loadedModule(name)`, waiting `module(name)`, executable version/fingerprint
-  checks, and genuinely required full enumeration. This campaign missed these
-  features despite compiler-owned migration entries, so merely adding more prose
-  is insufficient.
-- [ ] Do not reintroduce already-rejected compatibility surface. Growable `[T]`
-  is the ordered `List<T>` replacement; named typed functions cover the audited
-  captured-lambda cases; state fields may use constants and candidate rejection;
-  `process.loadedModule` and typed executable versions cover known edition
-  probes; `scan` plus `readRelative32` covers the reviewed `OnFound` transforms;
-  and `onAttach` plus `retry` replaces background retry tasks without exposing
-  threads. Add new syntax only after a maintained port proves one of these is
-  still semantically insufficient.
+## Now — finish compiler-owned reference workflows
 
 ### Make compiler-owned documentation browsable inside the editor
 

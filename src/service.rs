@@ -10,9 +10,10 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BuildProfile, CompilerContext, CompilerIdentity, CompilerOptions, Diagnostic, DiagnosticFix,
-    DiagnosticLabel, DiagnosticLabelStyle, DiagnosticSeverity, FixApplicability, TextEdit,
-    WarningPolicy, compile_named_with_context_and_options_diagnostics, compiler_identity,
+    BuildProfile, CompilationCancellation, CompilationFailure, CompilerContext, CompilerIdentity,
+    CompilerOptions, Diagnostic, DiagnosticFix, DiagnosticLabel, DiagnosticLabelStyle,
+    DiagnosticSeverity, FixApplicability, TextEdit, WarningPolicy,
+    compile_named_with_context_and_options_cancellable, compiler_identity,
 };
 
 pub const COMPILER_SERVICE_PROTOCOL_VERSION: u32 = 1;
@@ -56,6 +57,7 @@ pub enum CompileServiceErrorCode {
     UnsupportedProtocol,
     SourceTooLarge,
     InvalidRequest,
+    Cancelled,
     Internal,
 }
 
@@ -174,6 +176,14 @@ impl CompilerService {
     }
 
     pub fn compile(&self, request: CompileRequest) -> Result<CompileResponse, CompileServiceError> {
+        self.compile_with_cancellation(request, &CompilationCancellation::new())
+    }
+
+    pub fn compile_with_cancellation(
+        &self,
+        request: CompileRequest,
+        cancellation: &CompilationCancellation,
+    ) -> Result<CompileResponse, CompileServiceError> {
         if request.protocol_version != COMPILER_SERVICE_PROTOCOL_VERSION {
             return Err(CompileServiceError {
                 code: CompileServiceErrorCode::UnsupportedProtocol,
@@ -204,11 +214,12 @@ impl CompilerService {
             warnings,
         } = request;
         let source_name = source_path.as_deref().unwrap_or(&uri);
-        let (diagnostics, artifact) = match compile_named_with_context_and_options_diagnostics(
+        let (diagnostics, artifact) = match compile_named_with_context_and_options_cancellable(
             self.context.clone(),
             source_name,
             &source,
             CompilerOptions { profile, warnings },
+            cancellation,
         ) {
             Ok((artifact, diagnostics)) => (
                 diagnostics
@@ -217,13 +228,19 @@ impl CompilerService {
                     .collect(),
                 Some(artifact),
             ),
-            Err(diagnostics) => (
+            Err(CompilationFailure::Diagnostics(diagnostics)) => (
                 diagnostics
                     .into_iter()
                     .map(ServiceDiagnostic::from)
                     .collect(),
                 None,
             ),
+            Err(CompilationFailure::Cancelled(cancelled)) => {
+                return Err(CompileServiceError::new(
+                    CompileServiceErrorCode::Cancelled,
+                    format!("compilation was cancelled during {:?}", cancelled.phase),
+                ));
+            }
         };
         Ok(CompileResponse {
             protocol_version,
@@ -421,5 +438,16 @@ mod tests {
         request.protocol_version += 1;
         let error = CompilerService::new().compile(request).unwrap_err();
         assert_eq!(error.code, CompileServiceErrorCode::UnsupportedProtocol);
+    }
+
+    #[test]
+    fn cancellation_is_a_typed_service_outcome_not_a_source_diagnostic() {
+        let cancellation = CompilationCancellation::new();
+        cancellation.cancel();
+        let error = CompilerService::new()
+            .compile_with_cancellation(request("fn broken( {"), &cancellation)
+            .expect_err("a cancelled request must not continue into source analysis");
+        assert_eq!(error.code, CompileServiceErrorCode::Cancelled);
+        assert!(error.message.contains("Analysis"));
     }
 }

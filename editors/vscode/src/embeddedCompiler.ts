@@ -45,7 +45,7 @@ export interface EmbeddedServiceDiagnostic {
 }
 
 interface EmbeddedServiceError {
-    code: 'unsupportedProtocol' | 'sourceTooLarge' | 'invalidRequest' | 'internal';
+    code: 'unsupportedProtocol' | 'sourceTooLarge' | 'invalidRequest' | 'cancelled' | 'internal';
     message: string;
 }
 

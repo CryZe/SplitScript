@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-18: cooperative compilation boundary
+
+- Added a thread-safe compilation cancellation token and typed cancellation
+  outcome shared by native and embedded compiler products.
+- Established safe checkpoints around analysis, Wasm lowering, encoding, and
+  publication so cancellation cannot become a source diagnostic or publish a
+  superseded artifact.
+- Extended the compiler service with a distinct cancellation result and
+  recorded the remaining staged-worker protocol needed to observe new requests
+  while core Wasm compilation is running.
+
 ## 2026-08-18: portable toolchain architecture decision
 
 - Recorded the accepted direct core-Wasm architecture with separate compiler

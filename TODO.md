@@ -267,7 +267,12 @@ remaining work is product hardening and distribution.
 
 - [ ] Add cooperative cancellation points to expensive compiler stages so a
   superseded editor build can stop work rather than merely have its completed
-  response discarded.
+  response discarded. The shared compiler and service now distinguish typed
+  cancellation from diagnostics and check it before analysis, Wasm lowering,
+  encoding, and publication. Replace the monolithic embedded call with a
+  staged worker protocol that yields between those boundaries, then add
+  finer-grained checks inside whichever measured pass still blocks for too
+  long.
 - [ ] Measure repeated full-size builds, warm language queries, memory recovery,
   and worker restarts in desktop, web, and virtual workspaces. Keep the language
   worker responsive while the separate compiler worker builds.

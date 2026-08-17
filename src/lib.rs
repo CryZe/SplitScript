@@ -9,6 +9,7 @@ mod build_identity;
 mod capabilities;
 mod catalog;
 mod codegen;
+mod compilation_cancellation;
 pub mod compiler;
 mod completion;
 mod database;
@@ -51,6 +52,9 @@ mod wasm_ir;
 pub use build_identity::{
     COMPILER_GIT_REVISION, COMPILER_VERSION, COMPILER_VERSION_TEXT, CompilerIdentity,
     compiler_identity,
+};
+pub use compilation_cancellation::{
+    CompilationCancellation, CompilationCancelled, CompilationFailure, CompilationPhase,
 };
 pub use diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticFix, DiagnosticFixes, DiagnosticLabel,
@@ -824,6 +828,37 @@ pub fn compile_named_with_context_and_options_diagnostics(
     source: &str,
     options: CompilerOptions,
 ) -> Result<(Vec<u8>, Vec<Diagnostic>), Vec<Diagnostic>> {
+    match compile_named_with_context_and_options_cancellable(
+        context,
+        source_name,
+        source,
+        options,
+        &CompilationCancellation::new(),
+    ) {
+        Ok(output) => Ok(output),
+        Err(CompilationFailure::Diagnostics(diagnostics)) => Err(diagnostics),
+        Err(CompilationFailure::Cancelled(_)) => {
+            unreachable!("a private uncancelled token cannot be cancelled")
+        }
+    }
+}
+
+/// Runs the complete compiler pipeline with cooperative cancellation at stable
+/// phase boundaries.
+///
+/// Cancellation is a host-control outcome, not a source diagnostic. Existing
+/// one-shot entry points use a private uncancelled token and retain their
+/// original result types.
+pub fn compile_named_with_context_and_options_cancellable(
+    context: CompilerContext,
+    source_name: impl Into<String>,
+    source: &str,
+    options: CompilerOptions,
+    cancellation: &CompilationCancellation,
+) -> Result<(Vec<u8>, Vec<Diagnostic>), CompilationFailure> {
+    cancellation
+        .checkpoint(CompilationPhase::Analysis)
+        .map_err(CompilationFailure::Cancelled)?;
     let mut database =
         database::CompilerDatabase::with_context_and_source_name(context, source_name, source);
     database.set_warning_policy(options.warnings);
@@ -832,12 +867,23 @@ pub fn compile_named_with_context_and_options_diagnostics(
         .iter()
         .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
     {
-        return Err(diagnostics);
+        return Err(CompilationFailure::Diagnostics(diagnostics));
     }
+    cancellation
+        .checkpoint(CompilationPhase::WasmLowering)
+        .map_err(CompilationFailure::Cancelled)?;
     let checked = database
         .check()
         .expect("an error-free diagnostic set has a strictly checked program");
-    Ok((codegen_with_options(&checked, options), diagnostics))
+    let backend = lower_wasm_with_options(&checked, options);
+    cancellation
+        .checkpoint(CompilationPhase::WasmEncoding)
+        .map_err(CompilationFailure::Cancelled)?;
+    let artifact = codegen::compile(backend);
+    cancellation
+        .checkpoint(CompilationPhase::Publication)
+        .map_err(CompilationFailure::Cancelled)?;
+    Ok((artifact, diagnostics))
 }
 
 #[cfg(test)]

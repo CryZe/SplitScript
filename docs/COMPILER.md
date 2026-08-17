@@ -1219,6 +1219,15 @@ full Git revision. Generated autosplitters embed that identity in their
 `splitscript` custom section as JSON, while native version output and LSP server
 information use the same build-time source.
 
+The shared compiler now also exposes a cloneable `CompilationCancellation`
+token and a typed `CompilationFailure::Cancelled` outcome. Stable checkpoints
+separate analysis, Wasm-IR lowering, binary encoding, and publication; a
+cancelled request never masquerades as a source diagnostic or publishes an
+artifact completed after cancellation. The compiler service maps this to a
+distinct `cancelled` service error. The current worker call remains monolithic,
+so the next embedded step is a staged request protocol that yields between
+these checkpoints and can observe a superseding worker message.
+
 [`crates/splitscript-vscode-wasm`](../crates/splitscript-vscode-wasm) is the
 first direct-WebAssembly adapter for that service. It is a separate unpublished
 `cdylib`, so the main compiler library remains an ordinary Rust `rlib` for

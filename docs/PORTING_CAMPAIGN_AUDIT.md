@@ -153,6 +153,14 @@ Audit result: mostly a false aggregate blocker with two narrower host gaps.
   values with version literals, and return the matching `StateLayout` variant.
   The exact Windows process candidate must be `AoE2DE_s.exe` under the current
   host contract.
+- Probe finding: the fallible file-version read has no clean unsupported-build
+  path in this context. `else { await process.closed() }` is rejected by the
+  parser, while `else await process.closed()` reports `None` where
+  `FileVersion` is expected even though the continuation is cancelled before
+  that await can resume. Bare `else return` is correctly rejected because a
+  layout-selecting `onAttach` must return `StateLayout`, and postfix `?` has no
+  result-returning function or state-field boundary here. A fake version value
+  compiles but is not an acceptable canonical workaround.
 - Source: map and lost-time logic reads `timer.CurrentPhase` and
   `timer.CurrentSplitIndex`.
 - Campaign claim: timer phase and split index are unavailable.
@@ -171,9 +179,11 @@ Audit result: mostly a false aggregate blocker with two narrower host gaps.
   `await process.closed()`.
 
 This source is suitable for a behavior-limited port today. The ordinary map
-timer, win split, cumulative game time, version selection, and most timer-state
-logic do not need new APIs. Only last-segment detection and exact reset-event
-semantics remain unavailable.
+timer, win split, cumulative game time, version comparison, and most timer-state
+logic do not need new APIs. Cleanly composing failed version discovery with the
+unsupported-build suspension needs the planned divergent-expression work.
+Last-segment detection and exact reset-event semantics remain unavailable host
+behavior.
 
 The following audit tranche should cover fixed and growable array behavior and
 one genuinely unsupported host case. It should continue to separate static

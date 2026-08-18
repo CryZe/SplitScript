@@ -46,6 +46,15 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Correct false gaps before adding adjacent features
 
+- [x] Extend the campaign behavior ledger with the first high-risk tranche
+  against the ASL sources.
+  [`docs/PORTING_CAMPAIGN_AUDIT.md`](docs/PORTING_CAMPAIGN_AUDIT.md)
+  records exact-name attachment, alternate process names, named layouts,
+  polling rate, timer state, managed strings, changed timer accumulation, and
+  the remaining Unity scene and lifecycle questions for Arietta of Spirits,
+  TUNIC, A Proof of Concept, Aim Climb, and 25 To Life. The audit confirmed the
+  existing facilities together with a compiler probe; it did not treat clean
+  compilation as fidelity or choose APIs for unresolved gaps.
 - [ ] Audit every campaign output against its ASL source and classify each
   difference as preserved behavior, an intentional policy choice, an existing
   but undiscovered SplitScript facility, a genuine language/library gap, or a
@@ -67,8 +76,10 @@ semantic-review evidence, not as a conformance corpus.
 - [ ] Promote a small corrected subset to reviewed fixtures: one exact-name
   native process, one process-name array, one multi-version named layout, one
   timer-state/split-index script, one `tickRate` script, one managed-string or
-  Mono singleton path, and one genuinely unsupported host case. Require an
-  explicit behavior ledger and live runtime test where the game is available.
+  Mono singleton path, and one genuinely unsupported host case. The first audit
+  tranche identifies candidates for all but split-index behavior; correct and
+  runtime-test them before promotion. Require an explicit behavior ledger and
+  live runtime test where the game is available.
 
 ### Make the existing model discoverable from `splitc docs`
 

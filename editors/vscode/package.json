@@ -157,6 +157,13 @@
         "icon": "$(search)"
       },
       {
+        "command": "splitscript.openSymbolDocumentation",
+        "title": "SplitScript: Open Documentation for Current Symbol",
+        "shortTitle": "Open Symbol Documentation",
+        "enablement": "editorLangId == splitscript",
+        "icon": "$(book)"
+      },
+      {
         "command": "splitscript.buildRelease",
         "title": "SplitScript: Build Release",
         "shortTitle": "Build Release",
@@ -199,6 +206,11 @@
         }
       ],
       "editor/context": [
+        {
+          "command": "splitscript.openSymbolDocumentation",
+          "when": "editorLangId == splitscript",
+          "group": "navigation@3"
+        },
         {
           "command": "splitscript.buildRelease",
           "when": "resourceLangId == splitscript",

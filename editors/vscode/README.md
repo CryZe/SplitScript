@@ -47,8 +47,11 @@ VS Code URIs and `workspace.fs`, including in virtual workspaces.
 the current script. It includes the language, lifecycle blocks, migration
 guidance, the ASL porting guide, and the standard library in one searchable,
 hierarchical graph. Migration diagnostics link to the exact corresponding
-page. **SplitScript: Search Documentation** searches every page by symbol,
-concept, kind, signature, and summary without requiring repository files.
+page. **SplitScript: Open Documentation for Current Symbol** opens the exact
+reference page for the language or standard-library symbol at the active caret
+and can be assigned a preferred shortcut through VS Code's Keyboard Shortcuts editor.
+**SplitScript: Search Documentation** searches every page by symbol, concept,
+kind, signature, and summary without requiring repository files.
 Catalog-backed hover and completion details link directly to the corresponding
 full page, and go-to-definition on language or standard-library symbols opens
 that same virtual document. The client trusts only the documentation-opening

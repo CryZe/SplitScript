@@ -59,6 +59,10 @@ export class DocumentationReferenceController implements vscode.Disposable {
                 'splitscript.searchDocumentation',
                 async () => this.search(),
             ),
+            vscode.commands.registerCommand(
+                'splitscript.openSymbolDocumentation',
+                async () => this.openCurrentSymbol(),
+            ),
         );
     }
 
@@ -75,6 +79,35 @@ export class DocumentationReferenceController implements vscode.Disposable {
         }
 
         await this.openPage(uri);
+    }
+
+    private async openCurrentSymbol(): Promise<void> {
+        const editor = vscode.window.activeTextEditor;
+        if (editor === undefined || editor.document.languageId !== 'splitscript') {
+            await vscode.window.showInformationMessage(
+                'Open a SplitScript source file to look up documentation.',
+            );
+            return;
+        }
+
+        const definitions = await vscode.commands.executeCommand<
+            readonly (vscode.Location | vscode.LocationLink)[]
+        >(
+            'vscode.executeDefinitionProvider',
+            editor.document.uri,
+            editor.selection.active,
+        );
+        const documentation = definitions
+            ?.map(definitionUri)
+            .find(uri => uri.scheme === DOCUMENTATION_SCHEME);
+        if (documentation === undefined) {
+            await vscode.window.showInformationMessage(
+                'No SplitScript documentation is available here.',
+            );
+            return;
+        }
+
+        await this.openPage(documentation.path);
     }
 
     private async openPage(uri: string): Promise<void> {
@@ -121,4 +154,8 @@ export class DocumentationReferenceController implements vscode.Disposable {
 
 function normalizePageUri(uri: string): string {
     return uri.startsWith('/') ? uri : `/${uri}`;
+}
+
+function definitionUri(definition: vscode.Location | vscode.LocationLink): vscode.Uri {
+    return 'targetUri' in definition ? definition.targetUri : definition.uri;
 }

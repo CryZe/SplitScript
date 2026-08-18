@@ -16,7 +16,7 @@ export async function run(): Promise<void> {
 
     const script = vscode.Uri.joinPath(workspace.uri, 'web.split');
     const document = await vscode.workspace.openTextDocument(script);
-    await vscode.window.showTextDocument(document);
+    const sourceEditor = await vscode.window.showTextDocument(document);
 
     const hoverPosition = document.positionAt(document.getText().indexOf('double') + 1);
     await hoverAt(script, hoverPosition);
@@ -39,12 +39,29 @@ export async function run(): Promise<void> {
         ),
         'catalog hover does not link to its exact compiler-owned documentation page',
     );
+    const printDocumentationUri = vscode.Uri.parse(
+        'splitscript-docs:/stdlib/functions/print.md',
+    );
+    assert(
+        !vscode.workspace.textDocuments.some(
+            candidate => candidate.uri.toString() === printDocumentationUri.toString(),
+        ),
+        'print documentation was unexpectedly open before the contextual command',
+    );
+    sourceEditor.selection = new vscode.Selection(printPosition, printPosition);
+    await vscode.commands.executeCommand('splitscript.openSymbolDocumentation');
+    await waitFor(
+        async () => vscode.workspace.textDocuments.some(
+            candidate => candidate.uri.toString() === printDocumentationUri.toString(),
+        ) ? true : undefined,
+        'the contextual documentation command did not open the symbol page',
+    );
     await vscode.commands.executeCommand(
         'splitscript.openDocumentation',
         '/stdlib/functions/print.md',
     );
     const printDocumentation = await vscode.workspace.openTextDocument(
-        vscode.Uri.parse('splitscript-docs:/stdlib/functions/print.md'),
+        printDocumentationUri,
     );
     assert(
         printDocumentation.getText().includes('# print'),

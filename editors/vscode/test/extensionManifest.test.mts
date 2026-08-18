@@ -20,6 +20,7 @@ interface ExtensionManifest {
         commands: CommandContribution[];
         menus: {
             'editor/title': MenuContribution[];
+            'editor/context': MenuContribution[];
         };
     };
 }
@@ -28,10 +29,22 @@ const manifest = JSON.parse(
     readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
 ) as ExtensionManifest;
 
-test('documentation has direct and searchable commands', () => {
+test('documentation has direct, contextual, and searchable commands', () => {
     const commands = new Set(manifest.contributes.commands.map(command => command.command));
     assert(commands.has('splitscript.openDocumentation'));
+    assert(commands.has('splitscript.openSymbolDocumentation'));
     assert(commands.has('splitscript.searchDocumentation'));
+});
+
+test('symbol documentation is available from the SplitScript editor context', () => {
+    const contribution = manifest.contributes.menus['editor/context'].find(
+        item => item.command === 'splitscript.openSymbolDocumentation',
+    );
+    assert.deepEqual(contribution, {
+        command: 'splitscript.openSymbolDocumentation',
+        when: 'editorLangId == splitscript',
+        group: 'navigation@3',
+    });
 });
 
 test('the direct documentation command is available in SplitScript editor titles', () => {

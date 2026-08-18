@@ -72,14 +72,14 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Make the existing model discoverable from `splitc docs`
 
-- [ ] Put the current attachment-name contract in the generated `state`,
+- [x] Put the current attachment-name contract in the generated `state`,
   Native-provider, and ASL-porting pages: state strings are exact host process
   identities, and a Windows executable candidate currently includes `.exe`.
   Show a process-name array next to the single-name form and explain that it
   handles alternate executable names in one autosplitter. Keep the separate
   cross-platform identity design deferred; documentation must describe the
   runtime that exists today without implying extension inference.
-- [ ] Front-load a complete multi-version example in the generated `state` and
+- [x] Front-load a complete multi-version example in the generated `state` and
   `layout` documentation and the ASL guide. It must show two named layouts,
   attach-time evidence, returning `StateLayout.*`, the common field interface,
   layout-specific refinement, and the unsupported-build

@@ -1941,6 +1941,40 @@ mod tests {
     }
 
     #[test]
+    fn attachment_and_layout_pages_explain_exact_names_and_version_selection() {
+        let reference = DocumentationReference::default();
+        let state = reference
+            .page("/language/state.md")
+            .expect("state has a language page");
+        assert!(
+            state
+                .markdown
+                .contains("Windows candidate must include that extension")
+        );
+        assert!(state.markdown.contains("Try alternate executable names"));
+        assert!(state.markdown.contains("Support multiple game builds"));
+
+        let layout = reference
+            .page("/language/layout.md")
+            .expect("layout has a language page");
+        assert!(
+            layout
+                .markdown
+                .contains("Select and refine a supported build")
+        );
+        assert!(layout.markdown.contains("unsupported build"));
+
+        let native = reference
+            .index()
+            .into_iter()
+            .find(|entry| entry.title == "Native" && entry.kind == "state provider")
+            .expect("Native state provider is indexed");
+        let native = reference.page(&native.uri).expect("Native has a page");
+        assert!(native.markdown.contains("Windows candidates must"));
+        assert!(native.markdown.contains("Try alternate executable names"));
+    }
+
+    #[test]
     fn every_searchable_documentation_identity_has_one_page() {
         let reference = DocumentationReference::default();
         let index = reference.index();

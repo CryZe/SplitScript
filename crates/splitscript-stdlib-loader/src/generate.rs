@@ -79,7 +79,7 @@ impl<'a> CatalogGenerator<'a> {
                     format!("StateProviderAttachment::Callable(StdlibItemId::{attachment})")
                 };
                 output.push_str(&format!(
-                    "StdlibStateProvider {{ id: StdlibStateProviderId::{}, name: {}, value_name: {}, processes: {}, process_type: StdlibTypeId::{}, attachment: {}, direct_read: StdlibItemId::{}, documentation: Documentation {{ summary: {}, details: {}, examples: &[Example::checked({}, {}, {})], related: &[] }} }},\n",
+                    "StdlibStateProvider {{ id: StdlibStateProviderId::{}, name: {}, value_name: {}, processes: {}, process_type: StdlibTypeId::{}, attachment: {}, direct_read: StdlibItemId::{}, documentation: {} }},\n",
                     ident(&provider.name),
                     quote(&provider.name),
                     quote(&provider.value_name),
@@ -87,11 +87,7 @@ impl<'a> CatalogGenerator<'a> {
                     process_type,
                     attachment,
                     direct_read,
-                    quote(&provider.documentation.summary),
-                    quote(&provider.documentation.details),
-                    quote(&provider.documentation.examples[0].title),
-                    quote(&provider.documentation.examples[0].source),
-                    quote(&provider.documentation.examples[0].source),
+                    self.documentation(&provider.documentation),
                 ));
             }
         }

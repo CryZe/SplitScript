@@ -2,10 +2,12 @@ state "LayoutGame.exe" {
     /// Steam build memory layout.
     layout Steam {
         value: u32 at 0x1000;
+        checkpoint: u8 at 0x1100;
     },
     /// GOG build memory layout.
     layout GOG {
         value: u32 at 0x2000;
+        checkpoint: u16 at 0x2100;
     },
 }
 
@@ -24,6 +26,10 @@ whileAttached {
     setVariable("Layout", match layout {
         StateLayout.Steam => "Steam",
         StateLayout.GOG => "GOG",
+    })
+    setVariable("Checkpoint", match layout {
+        StateLayout.Steam => current.checkpoint,
+        StateLayout.GOG => current.checkpoint,
     })
 }
 

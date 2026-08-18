@@ -1,5 +1,10 @@
 /// Attaches to one of the native processes named by the state declaration.
 ///
+/// Each candidate is an exact host process identity. The current Windows host
+/// reports executable filenames including `.exe`, so Windows candidates must
+/// include that extension. Use an array for alternate executable names; the
+/// provider tries them in order and attaches to one matching process.
+///
 /// The read-only value has type [`Process`] and is a handle to the attached game
 /// process.
 ///
@@ -11,6 +16,17 @@
 /// state "game.exe" {}
 /// whileAttached {
 ///     let health = process.read<i32>(0x1234) else 0
+/// }
+/// ```
+///
+/// # Example
+///
+/// Try alternate executable names
+///
+/// ```splitscript
+/// state ["game.exe", "game-demo.exe"] {}
+/// onAttach {
+///     print(process.name())
 /// }
 /// ```
 @processType(Process)

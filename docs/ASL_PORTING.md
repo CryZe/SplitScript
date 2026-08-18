@@ -32,9 +32,12 @@ state ["game.exe", "game-demo.exe"] {
 }
 ```
 
-These strings are host process identities, not portable paths. Do not add or
-remove `.exe` mechanically: use the exact candidate required by the target
-runtime and platform. Build-specific addresses belong in named layouts selected
+These strings are exact host process identities, not portable paths. The
+current Windows host reports the executable filename including `.exe`, so a
+Windows candidate must include that extension; `state "game"` will not attach
+to `game.exe`. Other host platforms use their exact runtime identity. The array
+contains alternate names for one attachment, not several processes to attach
+to concurrently. Build-specific addresses belong in named layouts selected
 from [`onAttach`], rather than in multiple ASL-style state blocks.
 
 Typed emulator support replaces the native process root. For example, a GBA
@@ -526,10 +529,12 @@ selected generated variant from [`onAttach`]:
 state "game.exe" {
     layout Steam {
         loading: bool at "engine.dll", 0x1000;
+        checkpoint: u8 at "engine.dll", 0x1100;
     },
 
     layout Epic {
         loading: bool at "engine.dll", 0x2000;
+        checkpoint: u16 at "engine.dll", 0x2100;
     },
 }
 
@@ -541,6 +546,13 @@ onAttach {
         return StateLayout.Epic
     }
     await process.closed()
+}
+
+split {
+    return match layout {
+        StateLayout.Steam => old.checkpoint != current.checkpoint,
+        StateLayout.Epic => old.checkpoint != current.checkpoint,
+    }
 }
 ```
 

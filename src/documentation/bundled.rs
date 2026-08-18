@@ -4,7 +4,9 @@ use std::collections::HashSet;
 
 use crate::{
     CompilerContext,
-    migration::{MigrationCatalog, MigrationConcept, MigrationTarget, markdown_anchor},
+    migration::{
+        MigrationCatalog, MigrationConcept, MigrationConceptId, MigrationTarget, markdown_anchor,
+    },
 };
 
 use super::{
@@ -53,6 +55,23 @@ const GUIDES: &[BundledGuide] = &[
         source: include_str!("../../docs/FROM_RUST.md"),
         migration_overview: false,
     },
+];
+
+/// High-frequency ASL concepts that porters should be able to discover before
+/// reading the cookbook linearly. Identities, summaries, targets, and links
+/// still come from the migration and public-symbol catalogs.
+const COMMON_ASL_CONCEPTS: &[MigrationConceptId] = &[
+    MigrationConceptId::new("asl.state.attachment"),
+    MigrationConceptId::new("asl.state.version-label"),
+    MigrationConceptId::new("asl.timer.state"),
+    MigrationConceptId::new("asl.timer.current-split-index"),
+    MigrationConceptId::new("asl.lifecycle.exit-game-time-cleanup"),
+    MigrationConceptId::new("asl.runtime.refresh-rate"),
+    MigrationConceptId::new("type.fixed-width-number"),
+    MigrationConceptId::new("asl.process.modules"),
+    MigrationConceptId::new("asl.settings.dynamic-lookup"),
+    MigrationConceptId::new("asl.settings.finite-family"),
+    MigrationConceptId::new("asl.collection.list"),
 ];
 
 pub(super) fn index() -> impl Iterator<Item = DocumentationIndexEntry> {
@@ -124,6 +143,29 @@ fn migration_overview(uri: &str, source: &str) -> String {
         let recipe = format!("[{}](#{anchor})", escape_markdown_table_cell(&heading),);
         let targets = overview_targets(uri, &migration, &library, &concepts);
         markdown.push_str(&format!("\n| {recipe} | {targets} |"));
+    }
+
+    markdown.push_str(
+        "\n\n### Common ASL concepts\n\n\
+         Use this checklist before concluding that a familiar ASL facility is missing.\n",
+    );
+    append_reference_table_header(&mut markdown, &["ASL concept", "Canonical SplitScript"]);
+    for id in COMMON_ASL_CONCEPTS {
+        let concept = migration
+            .concept(*id)
+            .unwrap_or_else(|| panic!("missing common ASL concept `{}`", id.as_str()));
+        let concept_link = concept.cookbook_anchor.map_or_else(
+            || {
+                format!(
+                    "[{}]({})",
+                    escape_markdown_table_cell(concept.name),
+                    relative_document_link(uri, &migration_concept_uri(concept.id)),
+                )
+            },
+            |anchor| format!("[{}](#{anchor})", escape_markdown_table_cell(concept.name),),
+        );
+        let targets = overview_targets(uri, &migration, &library, &[concept]);
+        markdown.push_str(&format!("\n| {concept_link} | {targets} |"));
     }
     markdown
 }
@@ -305,6 +347,7 @@ mod tests {
     fn asl_guide_has_a_catalog_owned_migration_map() {
         let page = page("/guides/asl-porting.md").expect("ASL guide exists");
         assert!(page.markdown.contains("## Quick migration map"));
+        assert!(page.markdown.contains("### Common ASL concepts"));
         assert!(
             page.markdown
                 .contains("[Attachment state declarations](#attachment-state-declarations)")
@@ -317,6 +360,10 @@ mod tests {
         assert!(
             page.markdown
                 .contains("Planned: [shutdown lifecycle block](")
+        );
+        assert!(
+            page.markdown
+                .contains("[refreshRate](../migration/asl/runtime/refresh-rate.md)")
         );
     }
 

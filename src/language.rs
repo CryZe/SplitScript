@@ -71,6 +71,45 @@ split {
     return current.score > old.score
 }"#;
 
+const ALTERNATE_PROCESS_STATE_SOURCE: &str = r#"state ["game.exe", "game-demo.exe"] {
+    score: i32 at 0x1000;
+}
+
+split {
+    return current.score > old.score
+}"#;
+
+const MULTI_LAYOUT_STATE_SOURCE: &str = r#"state "game.exe" {
+    layout Steam {
+        level: u32 at 0x1000;
+        checkpoint: u8 at 0x1100;
+    },
+
+    layout GOG {
+        level: u32 at 0x2000;
+        checkpoint: u16 at 0x2100;
+    },
+}
+
+onAttach {
+    let module = await process.mainModule()
+    if module.size == 10_000 {
+        return StateLayout.Steam
+    }
+    if module.size == 20_000 {
+        return StateLayout.GOG
+    }
+    await process.closed()
+}
+
+whileAttached {
+    setVariable("Level", current.level)
+    setVariable("Checkpoint", match layout {
+        StateLayout.Steam => current.checkpoint,
+        StateLayout.GOG => current.checkpoint,
+    })
+}"#;
+
 const GBA_STATE_SOURCE: &str = r#"state GBA {
     room: u8 at 0x03000010;
 }"#;
@@ -349,17 +388,26 @@ const STATE_DECL_EXAMPLES: &[Example] = &[
         STATE_SOURCE,
     ),
     Example::checked(
+        "Try alternate executable names",
+        "state [\"game.exe\", \"game-demo.exe\"] {\n    score: i32 at 0x1000;\n}",
+        ALTERNATE_PROCESS_STATE_SOURCE,
+    ),
+    Example::checked(
+        "Support multiple game builds",
+        MULTI_LAYOUT_STATE_SOURCE,
+        MULTI_LAYOUT_STATE_SOURCE,
+    ),
+    Example::checked(
         "Read state from a GBA emulator",
         "state GBA {\n    room: u8 at 0x03000010;\n}",
         GBA_STATE_SOURCE,
     ),
 ];
-focused_example!(
-    STATE_LAYOUT_EXAMPLE,
-    "Select a supported build",
-    "layout Steam {\n    value: u32 at 0x1000;\n}",
-    STATE_LAYOUT_SOURCE
-);
+const STATE_LAYOUT_EXAMPLE: &[Example] = &[Example::checked(
+    "Select and refine a supported build",
+    STATE_LAYOUT_SOURCE,
+    STATE_LAYOUT_SOURCE,
+)];
 focused_example!(
     STATE_POINTER_EXAMPLE,
     "Read a pointer-backed field",
@@ -749,9 +797,9 @@ define_language_catalog! {
         State,
         "state",
         LanguageItemKind::Declaration,
-        "state \"game.exe\" { field = expression; } | state GBA { field at address; }",
+        "state \"game.exe\" { ... } | state [\"game.exe\", \"demo.exe\"] { ... } | state GBA { ... }",
         "Declares process attachment and persistent watched state.",
-        "Every state expression produces a fallible value ([`T!`]). Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
+        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. Every state expression produces a fallible value ([`T!`]). Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
         STATE_DECL_EXAMPLES
     ),
     language_item!(
@@ -773,7 +821,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "layout Name { field at address }",
         "Declares one named memory layout for a supported game build.",
-        "Fields with the same compatible type in every named layout form the common state snapshot interface. Missing fields and conflicting same-named types are available after a direct [`match`] on the generated read-only layout value refines the selected layout variant. The implicitly suspending [`onAttach`] block returns that variant before polling begins; [`await`] [`Process.closed`] represents an unsupported build without falling back.",
+        "Declare all build layouts inside one [`state`] block. Fields with the same compatible type in every named layout form the common state snapshot interface. Missing fields and conflicting same-named types are available after a direct [`match`] on the generated read-only [`layout`] value refines the selected `StateLayout` variant. The implicitly suspending [`onAttach`] block uses module metadata, signatures, or other typed evidence and returns that variant before polling begins; [`await`] [`Process.closed`] represents an unsupported build without falling back or repeatedly reattaching.",
         STATE_LAYOUT_EXAMPLE
     ),
     language_item!(

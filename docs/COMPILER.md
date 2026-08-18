@@ -1150,7 +1150,14 @@ virtual paths identify language constructs, migration concepts, cookbook
 anchors, namespaces, types, capabilities, members, variants, and operators.
 Migration pages resolve their canonical targets back through the same language
 and standard-library catalogs, while catalog examples retain semantic tokens
-and exact definition links. The LSP serves both the searchable index and pages;
+and exact definition links, including links from language keywords such as
+`fn`, `let`, `await`, and `return`. Documentation prose supports rustdoc-style
+intra-doc links such as ``[`Process.read`]`` and ``[`await`]``. Resolution is
+exact and ambiguity-safe: qualified catalog identities and unique short names
+become page-relative links, while an unknown or ambiguous spelling remains
+visible for validation instead of silently choosing a destination. Compact
+hover and completion Markdown reduces this reference-only markup to ordinary
+code spans. The LSP serves both the searchable index and pages;
 the VS Code client only presents those Markdown documents. Structured migration
 diagnostics carry their concept identity through native CLI, LSP, and embedded
 compiler responses, so frontends do not infer a documentation destination from

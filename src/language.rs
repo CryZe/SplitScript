@@ -894,7 +894,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "fn name() -> async T { ... }",
         "Marks an explicitly typed function result as asynchronous.",
-        "A function containing await or retry has an async result. Write `async T` when its result type is explicit; when the result type is omitted, both `async` and `T` are inferred. Calling a source-defined async function creates a process-lifetime future value without polling it. That `async T` value can be stored in locals and aggregates, passed to functions, and awaited later. Its typed continuation frame retains parameters, live locals, nested futures, and the completed T. Futures cannot escape into globals because process closure owns their cancellation.",
+        "A function containing [`await`] or [`retry`] has an async result. Write `async T` when its result type is explicit; when the result type is omitted, both `async` and `T` are inferred. Calling a source-defined async function creates a process-lifetime future value without polling it. That `async T` value can be stored in locals and aggregates, passed to functions, and awaited later. Its typed continuation frame retains parameters, live locals, nested futures, and the completed T. Futures cannot escape into globals because process closure owns their cancellation.",
         ASYNC_RESULT_EXAMPLE
     ),
     language_item!(

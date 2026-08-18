@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::{language::LanguageCatalog, migration::MigrationCatalog, stdlib::StandardLibrary};
 
-use super::{DocumentationPage, DocumentationReference};
+use super::{DocumentationPage, DocumentationReference, intra_doc};
 
 pub(super) fn validate(
     reference: &DocumentationReference,
@@ -112,6 +112,12 @@ fn validate_page_links(
     pages: &BTreeMap<String, DocumentationPage>,
     errors: &mut Vec<String>,
 ) {
+    for label in intra_doc::unresolved_links(&page.markdown) {
+        errors.push(format!(
+            "documentation page `{}` has unresolved intra-doc link `[`{label}`]`",
+            page.uri
+        ));
+    }
     for target in link_targets(&page.markdown) {
         if is_external_target(&target) {
             continue;

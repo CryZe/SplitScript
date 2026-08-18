@@ -71,12 +71,24 @@ impl StandardLibraryDocumentation {
 
     /// Compact documentation used beside completion candidates.
     pub fn summary_markdown(&self) -> String {
-        format!("{}\n\n{}", self.summary, self.details)
+        super::intra_doc::strip_links(&self.raw_summary_markdown())
     }
 
     /// Documentation body shared by hover and signature help.
     pub fn details_markdown(&self) -> String {
-        let mut markdown = self.summary_markdown();
+        super::intra_doc::strip_links(&self.raw_details_markdown())
+    }
+
+    pub(crate) fn reference_details_markdown(&self) -> String {
+        self.raw_details_markdown()
+    }
+
+    fn raw_summary_markdown(&self) -> String {
+        format!("{}\n\n{}", self.summary, self.details)
+    }
+
+    fn raw_details_markdown(&self) -> String {
+        let mut markdown = self.raw_summary_markdown();
         if !self.substitutions.is_empty() {
             markdown.push_str("\n\n**Inferred types:** ");
             for (index, (name, ty)) in self.substitutions.iter().enumerate() {

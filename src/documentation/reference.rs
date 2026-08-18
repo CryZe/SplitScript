@@ -10,7 +10,7 @@ use crate::{
     },
 };
 
-use super::{StandardLibraryDocumentation, bundled, code};
+use super::{StandardLibraryDocumentation, bundled, code, intra_doc};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -565,6 +565,11 @@ impl DocumentationReference {
                             value.id,
                             &[],
                         );
+                        let details = intra_doc::render_links(
+                            &documentation.reference_details_markdown(),
+                            uri,
+                            &self.library,
+                        );
                         let mut markdown = format!(
                             "{}\n\n# {}\n\n_{}_\n\n{}\n\n{}",
                             self.symbol_breadcrumb(StdlibSymbolId::Item(value.id), uri),
@@ -583,7 +588,7 @@ impl DocumentationReference {
                                 Some(StdlibSymbolId::Item(value.id)),
                                 &self.library,
                             ),
-                            documentation.details_markdown(),
+                            details,
                         );
                         append_examples(&mut markdown, uri, &self.library, documentation.examples);
                         append_related(
@@ -821,6 +826,8 @@ impl DocumentationReference {
 
     fn language_item_page(&self, item: &LanguageItem) -> DocumentationPage {
         let uri = language_item_uri(item.id);
+        let summary = intra_doc::render_links(item.documentation.summary, &uri, &self.library);
+        let details = intra_doc::render_links(item.documentation.details, &uri, &self.library);
         let mut markdown = format!(
             "{}\n\n# {}\n\n_{}_\n\n{}\n\n{}\n\n{}",
             reference_breadcrumb(
@@ -831,8 +838,8 @@ impl DocumentationReference {
             item.name,
             language_item_kind_label(item.kind),
             code::signature(item.form, &uri, None, &self.library),
-            item.documentation.summary,
-            item.documentation.details,
+            summary,
+            details,
         );
         append_examples(
             &mut markdown,
@@ -1233,10 +1240,9 @@ fn append_documentation<Id>(
     library: &StandardLibrary,
     documentation: &Documentation<Id>,
 ) {
-    markdown.push_str(&format!(
-        "\n\n{}\n\n{}",
-        documentation.summary, documentation.details
-    ));
+    let summary = intra_doc::render_links(documentation.summary, current_uri, library);
+    let details = intra_doc::render_links(documentation.details, current_uri, library);
+    markdown.push_str(&format!("\n\n{}\n\n{}", summary, details));
     append_examples(markdown, current_uri, library, documentation.examples);
 }
 
@@ -1807,6 +1813,20 @@ mod tests {
                 .markdown
                 .contains("<pre class=\"hljs splitscript-code\">")
         );
+
+        let async_page = reference
+            .page("/language/async.md")
+            .expect("async has a language page");
+        assert!(async_page.markdown.contains("[`await`](await.md)"));
+        assert!(async_page.markdown.contains("[`retry`](retry.md)"));
+        for keyword in ["fn", "async", "let", "await", "return"] {
+            assert!(
+                async_page
+                    .markdown
+                    .contains(&format!("href=\"{keyword}.md\"")),
+                "missing semantic example link for `{keyword}`"
+            );
+        }
 
         let update = index
             .iter()

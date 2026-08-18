@@ -94,6 +94,21 @@ export async function run(): Promise<void> {
         ),
         'the documentation method does not follow its logical owner hierarchy',
     );
+    const asyncDocs = await vscode.workspace.openTextDocument(
+        vscode.Uri.parse('splitscript-docs:/language/async.md'),
+    );
+    const asyncMarkdown = asyncDocs.getText();
+    for (const keyword of ['fn', 'async', 'let', 'await', 'return']) {
+        assert(
+            asyncMarkdown.includes(`href="${keyword}.md"`),
+            `the async example does not link the ${keyword} keyword`,
+        );
+    }
+    assert(
+        asyncMarkdown.includes('[`await`](await.md)')
+            && asyncMarkdown.includes('[`retry`](retry.md)'),
+        'rustdoc-style prose links did not resolve to language pages',
+    );
 
     const output = script.with({ path: script.path.replace(/\.split$/, '.wasm') });
     await vscode.commands.executeCommand('splitscript.buildRelease');

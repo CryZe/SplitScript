@@ -1,5 +1,14 @@
 # SplitScript roadmap
 
+## 2026-08-18: semantic links throughout generated documentation
+
+- Made language keywords in compiler-checked examples navigate through the
+  same definition identities already used by types, methods, and fields.
+- Added ambiguity-safe rustdoc-style intra-doc links for explanatory prose,
+  with exact language and standard-library resolution relative to each page.
+- Kept compact hover and completion text readable by presenting intra-doc
+  references as ordinary code spans outside the full documentation viewer.
+
 ## 2026-08-18: staged embedded compilation
 
 - Split the portable compiler service into owned analysis, Wasm-lowering, and

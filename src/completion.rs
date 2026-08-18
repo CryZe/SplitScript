@@ -1776,7 +1776,10 @@ fn simple_completion(label: &str, kind: CompletionKind, detail: &str) -> Complet
 }
 
 fn render_documentation<Id>(documentation: &Documentation<Id>) -> String {
-    format!("{}\n\n{}", documentation.summary, documentation.details)
+    crate::documentation::strip_intra_doc_links(&format!(
+        "{}\n\n{}",
+        documentation.summary, documentation.details
+    ))
 }
 
 #[cfg(test)]

@@ -746,7 +746,8 @@ fn render_stdlib_symbol_hover(library: StandardLibrary, symbol: StdlibSymbolId) 
     };
     let mut markdown = format!(
         "```splitscript\n{form}\n```\n\n{}\n\n{}",
-        documentation.summary, documentation.details
+        crate::documentation::strip_intra_doc_links(documentation.summary),
+        crate::documentation::strip_intra_doc_links(documentation.details)
     );
     append_examples(&mut markdown, documentation.examples);
     markdown
@@ -755,7 +756,9 @@ fn render_stdlib_symbol_hover(library: StandardLibrary, symbol: StdlibSymbolId) 
 fn render_language_hover(item: &LanguageItem) -> String {
     let mut markdown = format!(
         "```splitscript\n{}\n```\n\n{}\n\n{}",
-        item.form, item.documentation.summary, item.documentation.details
+        item.form,
+        crate::documentation::strip_intra_doc_links(item.documentation.summary),
+        crate::documentation::strip_intra_doc_links(item.documentation.details)
     );
     append_examples(&mut markdown, item.documentation.examples);
     markdown

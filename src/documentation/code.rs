@@ -193,7 +193,8 @@ fn lexical_kind(
 fn is_linkable(kind: SemanticTokenKind) -> bool {
     matches!(
         kind,
-        SemanticTokenKind::Type
+        SemanticTokenKind::Keyword
+            | SemanticTokenKind::Type
             | SemanticTokenKind::Struct
             | SemanticTokenKind::Enum
             | SemanticTokenKind::EnumMember
@@ -497,5 +498,21 @@ mod tests {
         assert!(html.contains("href=\"read.md"), "{html}");
         assert!(html.contains("address/methods/offset.md"), "{html}");
         assert!(!html.contains("href=\"player"));
+    }
+
+    #[test]
+    fn semantic_examples_link_language_keywords() {
+        let library = StandardLibrary::new();
+        let documentation_example = Example::complete_program(
+            "Load asynchronously",
+            "fn load() -> async Module {\n    let module = await process.module(\"game.dll\")\n    return module\n}",
+        );
+        let html = example(documentation_example, "/language/async.md", &library);
+        for keyword in ["fn", "async", "let", "await", "return"] {
+            assert!(
+                html.contains(&format!("href=\"{keyword}.md\"")),
+                "missing link for `{keyword}` in {html}"
+            );
+        }
     }
 }

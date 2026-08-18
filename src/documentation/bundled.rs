@@ -60,7 +60,8 @@ pub(super) fn index() -> impl Iterator<Item = DocumentationIndexEntry> {
         uri: guide.uri.to_owned(),
         title: guide.title.to_owned(),
         kind: "guide",
-        summary: guide.summary,
+        summary: guide.summary.to_owned(),
+        raw_summary: guide.summary,
         signature: None,
     })
 }

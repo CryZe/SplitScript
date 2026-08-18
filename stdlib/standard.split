@@ -87,7 +87,7 @@ root {
     ///
     /// The value is a frequency in updates per second. It takes effect for the
     /// wait after the current update and remains active until another call or
-    /// attachment-state transition. Prefer the top-level `tickRate` policy for
+    /// attachment-state transition. Prefer the top-level [`tickRate`] policy for
     /// stable attached and detached rates; this function is for temporary
     /// dynamic changes.
     ///
@@ -167,7 +167,7 @@ namespace runtime {
 
 /// Selects either the current or previous values of the script's declared settings.
 ///
-/// The compiler supplies `settings` and `oldSettings`; copying either value is
+/// The compiler supplies [`settings`] and [`oldSettings`]; copying either value is
 /// allocation-free because the value only identifies one of the two snapshots.
 ///
 /// # Example
@@ -304,7 +304,7 @@ intrinsic type Process {
     ///
     /// This suspension never closes or detaches the process itself and never
     /// completes normally. When the process closes, the automatic process
-    /// lifetime boundary cancels `onAttach` before it can resume.
+    /// lifetime boundary cancels [`onAttach`] before it can resume.
     ///
     /// # Example
     ///
@@ -342,7 +342,7 @@ intrinsic type Process {
 
     /// Returns a module only when it is already loaded.
     ///
-    /// Unlike `module`, this probe is synchronous and does not wait for a
+    /// Unlike [`module`], this probe is synchronous and does not wait for a
     /// missing optional module to appear. It is useful for selecting layouts
     /// that depend on optional platform or mod-loader modules.
     ///
@@ -367,7 +367,7 @@ intrinsic type Process {
     /// Searches mapped memory ranges cooperatively.
     ///
     /// At most one host memory-range entry is inspected per update. The
-    /// operation completes with `None` after one full traversal when no range
+    /// operation completes with [`None`] after one full traversal when no range
     /// has the requested size and permissions.
     ///
     /// # Example
@@ -552,7 +552,7 @@ intrinsic type Process {
     /// At most `maxBytes` are read in one host operation. Decoding stops at
     /// the first NUL byte. Failed memory access, an excessive bound, or invalid
     /// UTF-8 returns an error. After decoding, the result is an ordinary
-    /// garbage-collected `String`; the bound belongs to this read operation and
+    /// garbage-collected [`String`]; the bound belongs to this read operation and
     /// is not part of the result's type.
     ///
     /// # Example
@@ -581,7 +581,7 @@ intrinsic type Process {
     /// host operation. Decoding stops at the first NUL code unit. Memory-access
     /// failure, a zero or excessive bound returns an error. Unpaired surrogate
     /// code units decode as the Unicode replacement character. The result is an
-    /// ordinary immutable SplitScript `String`.
+    /// ordinary immutable SplitScript [`String`].
     ///
     /// # Example
     ///
@@ -607,7 +607,7 @@ intrinsic type Process {
     ///
     /// The address identifies a Unity managed string object rather than its text
     /// bytes. Its bounded UTF-16 payload is decoded into an ordinary immutable
-    /// SplitScript `String`. Memory-access failure or an excessive bound returns
+    /// SplitScript [`String`]. Memory-access failure or an excessive bound returns
     /// an error; malformed surrogate sequences decode as the Unicode replacement
     /// character.
     ///
@@ -660,9 +660,9 @@ namespace timer {
 
     /// Returns the index of the split the current attempt is on.
     ///
-    /// `None` means that no attempt is in progress. The signed host ABI uses a
+    /// [`None`] means that no attempt is in progress. The signed host ABI uses a
     /// negative value for that state; all nonnegative values are exposed as
-    /// `u64`. The index equals the segment count after the final split. An
+    /// [`u64`]. The index equals the segment count after the final split. An
     /// increased index means that the timer advanced, including through a skip.
     /// If an undo and another split both happen between updates, the unchanged
     /// index cannot reveal that sequence; an exact timer-event API would require
@@ -681,9 +681,9 @@ namespace timer {
     /// Reports how an earlier segment was advanced during this attempt.
     ///
     /// Returns `Some(true)` when the segment was split, `Some(false)` when it
-    /// was skipped, and `None` when the index has not been reached in the
+    /// was skipped, and [`None`] when the index has not been reached in the
     /// current attempt. This is historical attempt data; the current and later
-    /// segment indices therefore return `None`.
+    /// segment indices therefore return [`None`].
     ///
     /// # Example
     ///
@@ -702,7 +702,7 @@ namespace timer {
     ///
     /// This directly advances the timer without recording the current segment
     /// as split. Use it only when the autosplitter intentionally controls timer
-    /// history rather than merely deciding whether its `split` block fires.
+    /// history rather than merely deciding whether its [`split`] block fires.
     ///
     /// # Example
     ///
@@ -744,7 +744,7 @@ namespace timer {
 
     /// Pauses LiveSplit's game-time clock.
     ///
-    /// `isLoading` should remain the normal way to remove loads. This explicit
+    /// [`isLoading`] should remain the normal way to remove loads. This explicit
     /// operation is intended for lifecycle transitions such as ensuring game
     /// time does not advance after the attached process closes.
     ///
@@ -763,7 +763,7 @@ namespace timer {
 
     /// Resumes LiveSplit's game-time clock.
     ///
-    /// Prefer returning `false` from `isLoading` for ordinary load removal.
+    /// Prefer returning `false` from [`isLoading`] for ordinary load removal.
     /// Use this operation only when lifecycle logic explicitly paused game
     /// time outside that action.
     ///
@@ -1067,7 +1067,7 @@ capability Integer<T: Numeric + Display> {
     /// Radices from 2 through 36 are supported. Digits above nine use
     /// lowercase ASCII letters. Signed values keep a leading minus sign and
     /// format their mathematical magnitude, including the minimum value of a
-    /// signed integer type. Use `toAsciiUpperCase` on the result when uppercase
+    /// signed integer type. Use [`toAsciiUpperCase`] on the result when uppercase
     /// digits are desired. An unsupported radix returns an error.
     ///
     /// # Example
@@ -1087,10 +1087,10 @@ capability Integer<T: Numeric + Display> {
 
     /// Returns the width-preserving bitwise complement of this integer.
     ///
-    /// This method is also the integer implementation of the `!` operator.
+    /// This method is also the integer implementation of the [`!`] operator.
     /// Every bit in the receiver's declared integer representation is flipped;
-    /// for example, complementing a `u8` never affects bits outside that byte.
-    /// Boolean `!` remains logical negation and is selected by type.
+    /// for example, complementing a [`u8`] never affects bits outside that byte.
+    /// Boolean [`!`] remains logical negation and is selected by type.
     ///
     /// # Example
     ///
@@ -1202,7 +1202,7 @@ capability Integer<T: Numeric + Display> {
     ///
     /// This method is also the implementation of the `>>` operator. Signed
     /// values copy the sign bit; unsigned and address values shift in zeroes.
-    /// Shift counts use the same low-five or low-six-bit rule as `shiftLeft`.
+    /// Shift counts use the same low-five or low-six-bit rule as [`shiftLeft`].
     ///
     /// # Example
     ///
@@ -1507,7 +1507,7 @@ extend f64 {
 extend bool {
     /// Inverts a boolean value.
     ///
-    /// This method is also the implementation of the `!` operator.
+    /// This method is also the implementation of the [`!`] operator.
     ///
     /// # Example
     ///
@@ -1536,7 +1536,7 @@ extend bool {
 capability Equatable<T> {
     /// Reports whether this value and another value are equal.
     ///
-    /// This method is also the implementation of the `==` operator. Records,
+    /// This method is also the implementation of the [`==`] operator. Records,
     /// enums, options, and results compare their complete structure; strings
     /// compare UTF-8 contents. Floating-point equality follows IEEE 754, so
     /// NaN is not equal to itself.
@@ -1557,8 +1557,8 @@ capability Equatable<T> {
 
     /// Reports whether this value and another value differ.
     ///
-    /// This method is also the implementation of the `!=` operator and is the
-    /// logical inverse of `equals` for every Equatable type.
+    /// This method is also the implementation of the [`!=`] operator and is the
+    /// logical inverse of [`equals`] for every Equatable type.
     ///
     /// # Example
     ///
@@ -1577,7 +1577,7 @@ capability Equatable<T> {
 
 /// Supports conversion to a user-facing textual representation.
 ///
-/// An `as String` cast, string interpolation, `print`, and `setVariable` all
+/// An `as String` cast, string interpolation, [`print`], and [`setVariable`] all
 /// display values through this single capability.
 ///
 /// # Example
@@ -1606,7 +1606,7 @@ capability MemoryReadable<T> {}
 
 /// Stores an indexed sequence of values.
 ///
-/// `[T]` accepts any length, while `[T; N]` carries an exact length and can
+/// [`[T]`] accepts any length, while [`[T; N]`] carries an exact length and can
 /// provide a fixed process-memory layout. Both forms use WebAssembly GC storage
 /// and expose the same generic length, access, and mutation operations.
 ///
@@ -1676,7 +1676,7 @@ typeConstructor [T] {
 
     /// Finds the first index containing an equal element.
     ///
-    /// Returns `None` when the value is absent. The index is a `u32`, matching
+    /// Returns [`None`] when the value is absent. The index is a [`u32`], matching
     /// the array indexing and length APIs, and the element type must support
     /// equality.
     ///
@@ -1728,7 +1728,7 @@ typeConstructor [T] {
     ///
     /// Capacity grows geometrically when needed, while the array value keeps
     /// the same identity so every alias observes the appended element.
-    /// Exact `[T; N]` arrays cannot change length and do not support `push`.
+    /// Exact [`[T; N]`] arrays cannot change length and do not support [`push`].
     /// Appending through any alias invalidates active iteration of this array.
     ///
     /// # Example
@@ -1750,8 +1750,8 @@ typeConstructor [T] {
     /// The source length is captured before appending, so extending an array
     /// with itself duplicates its original elements exactly once. The receiver
     /// keeps its identity and grows with the same amortized behavior as
-    /// `push`. Exact `[T; N]` arrays cannot change length and do not support
-    /// `extend`. Extending through any alias invalidates active iteration of
+    /// [`push`]. Exact [`[T; N]`] arrays cannot change length and do not support
+    /// [`extend`]. Extending through any alias invalidates active iteration of
     /// the receiver.
     ///
     /// # Example
@@ -1779,8 +1779,8 @@ typeConstructor [T] {
     /// The array keeps its identity and capacity, so aliases observe the
     /// removal. An index greater than or equal to `length()` traps, matching
     /// indexed access. Stored references in the vacated final slot are
-    /// released for garbage collection. Exact `[T; N]` arrays cannot change
-    /// length and do not support `removeAt`.
+    /// released for garbage collection. Exact [`[T; N]`] arrays cannot change
+    /// length and do not support [`removeAt`].
     ///
     /// # Example
     ///
@@ -1801,7 +1801,7 @@ typeConstructor [T] {
     /// Returns whether an element was removed. Elements are searched from the
     /// beginning, duplicates after the first match remain in place, and an
     /// absent value leaves the array unchanged. The receiver keeps its identity
-    /// and capacity. Exact `[T; N]` arrays cannot change length and do not
+    /// and capacity. Exact [`[T; N]`] arrays cannot change length and do not
     /// support `remove`.
     ///
     /// # Example
@@ -1823,10 +1823,10 @@ typeConstructor [T] {
 
     /// Removes and returns the final element when one exists.
     ///
-    /// An empty array returns `None` without changing its structural version.
+    /// An empty array returns [`None`] without changing its structural version.
     /// Otherwise the array keeps its identity and capacity, aliases observe
-    /// the shorter length, and active iteration is invalidated. Exact `[T; N]`
-    /// arrays cannot change length and do not support `pop`.
+    /// the shorter length, and active iteration is invalidated. Exact [`[T; N]`]
+    /// arrays cannot change length and do not support [`pop`].
     ///
     /// # Example
     ///
@@ -1853,7 +1853,7 @@ typeConstructor [T] {
     ///
     /// The array keeps its identity and capacity, so aliases observe the empty
     /// result and later appends can reuse its storage. Stored references are
-    /// released for garbage collection. Exact `[T; N]` arrays cannot change
+    /// released for garbage collection. Exact [`[T; N]`] arrays cannot change
     /// length and do not support `clear`.
     /// Clearing through any alias invalidates active iteration of this array.
     ///
@@ -2007,7 +2007,7 @@ typeConstructor Set<T: Equatable> {
 
 /// Represents a value that may be absent.
 ///
-/// Write `T?` to make any value type optional.
+/// Write [`T?`] to make any value type optional.
 ///
 /// # Example
 ///
@@ -2021,7 +2021,7 @@ typeConstructor T? {}
 
 /// Represents a value or an error.
 ///
-/// Write `T!` to make any value type fallible.
+/// Write [`T!`] to make any value type fallible.
 ///
 /// # Example
 ///
@@ -2035,9 +2035,9 @@ typeConstructor T! {
     /// Converts a fallible value into an optional value.
     ///
     /// A success becomes the present optional value. An error becomes
-    /// `None`, discarding its diagnostic text. This is useful for state fields
+    /// [`None`], discarding its diagnostic text. This is useful for state fields
     /// that are deliberately unavailable on some ticks; required fields should
-    /// keep their `T!` so a failed read retains the last accepted field value.
+    /// keep their [`T!`] so a failed read retains the last accepted field value.
     ///
     /// # Example
     ///
@@ -2077,7 +2077,7 @@ extend address {
     /// Adds a full-width offset to an address.
     ///
     /// This is useful for unsigned sizes and offsets already represented as
-    /// `u64`. Arithmetic wraps modulo the 64-bit address space.
+    /// [`u64`]. Arithmetic wraps modulo the 64-bit address space.
     ///
     /// # Example
     ///
@@ -2126,7 +2126,7 @@ extend address {
 /// String literals, interpolation, process decoders, and timer variables all
 /// produce this same type. A decoded string owns its GC storage and is not a
 /// view into target-process memory. Decoder bounds such as `utf8(64)` describe
-/// the memory operation, not distinct `String` types.
+/// the memory operation, not distinct [`String`] types.
 ///
 /// # Example
 ///
@@ -2155,7 +2155,7 @@ intrinsic type String {
 
     /// Reports whether this string contains no UTF-8 bytes.
     ///
-    /// `String` itself is never absent. Use ordinary `match` on `String?` when
+    /// [`String`] itself is never absent. Use ordinary [`match`] on `String?` when
     /// absence and emptiness should both satisfy a condition.
     ///
     /// # Example
@@ -2190,7 +2190,7 @@ intrinsic type String {
 
     /// Finds the first exact substring and returns its UTF-8 byte offset.
     ///
-    /// Returns `None` when the substring is absent. An empty substring is found
+    /// Returns [`None`] when the substring is absent. An empty substring is found
     /// at byte offset zero. Searching is allocation-free and case-sensitive.
     ///
     /// # Example
@@ -2208,7 +2208,7 @@ intrinsic type String {
 
     /// Finds the last exact substring and returns its UTF-8 byte offset.
     ///
-    /// Returns `None` when the substring is absent. An empty substring is found
+    /// Returns [`None`] when the substring is absent. An empty substring is found
     /// at the string's final byte boundary. Searching is allocation-free and
     /// case-sensitive.
     ///
@@ -2445,8 +2445,8 @@ intrinsic type String {
 
     /// Returns the raw UTF-8 byte at an offset.
     ///
-    /// The index uses the same zero-based byte offsets as `byteLength` and
-    /// `slice`. Every in-range byte is observable, including a continuation
+    /// The index uses the same zero-based byte offsets as [`byteLength`] and
+    /// [`slice`]. Every in-range byte is observable, including a continuation
     /// byte within a multibyte code point. An out-of-range index returns an
     /// error.
     ///
@@ -2468,8 +2468,8 @@ intrinsic type String {
 
     /// Returns the Unicode character beginning at a UTF-8 byte offset.
     ///
-    /// The index uses the same zero-based byte offsets as `byteLength` and
-    /// `slice`, not JavaScript's UTF-16 code-unit indexes. The index must point
+    /// The index uses the same zero-based byte offsets as [`byteLength`] and
+    /// [`slice`], not JavaScript's UTF-16 code-unit indexes. The index must point
     /// to the first byte of a character. An out-of-range index or a
     /// continuation-byte index returns an error.
     ///
@@ -2704,7 +2704,7 @@ struct Duration {
 
     /// Constructs a duration from floating-point milliseconds.
     ///
-    /// Both f32 and f64 inputs are accepted. Use `fromWholeMilliseconds` when
+    /// Both f32 and f64 inputs are accepted. Use [`fromWholeMilliseconds`] when
     /// the source value is an integer and must not pass through floating point.
     ///
     /// # Example
@@ -2724,7 +2724,7 @@ struct Duration {
     /// Constructs a duration from floating-point minutes.
     ///
     /// Both f32 and f64 inputs are accepted. Exact integer counters can be
-    /// converted to whole seconds before calling `fromWholeSeconds`.
+    /// converted to whole seconds before calling [`fromWholeSeconds`].
     ///
     /// # Example
     ///
@@ -3169,7 +3169,7 @@ struct Instant {
 
     /// Returns the duration elapsed since this instant.
     ///
-    /// This is shorthand for reading the clock and calling `durationSince`.
+    /// This is shorthand for reading the clock and calling [`durationSince`].
     ///
     /// # Example
     ///
@@ -3463,7 +3463,7 @@ struct MemoryPath {
 
     /// Resolves the path against the attached process.
     ///
-    /// Failed and null intermediate pointer reads propagate as a `T!` error.
+    /// Failed and null intermediate pointer reads propagate as a [`T!`] error.
     ///
     /// # Example
     ///
@@ -3579,8 +3579,8 @@ struct FileVersion {
 
     /// Formats the version as `major.minor.build.private`.
     ///
-    /// This is the standard-library implementation of `Display`, so casts,
-    /// interpolation, `print`, and `setVariable` all use the same spelling.
+    /// This is the standard-library implementation of [`Display`], so casts,
+    /// interpolation, [`print`], and [`setVariable`] all use the same spelling.
     ///
     /// # Example
     ///
@@ -3822,7 +3822,7 @@ struct Module {
     /// Reads the file identity from a Windows PE version resource.
     ///
     /// This is the version of the individual executable or library. Use
-    /// `productVersion()` when a game identifies releases by product version.
+    /// [`productVersion()`] when a game identifies releases by product version.
     /// Missing resources, malformed images, and failed reads are errors.
     ///
     /// # Example
@@ -4499,7 +4499,7 @@ enum MonoVersion {
 
 /// Stores one validated Unity Mono target-memory layout.
 ///
-/// The owning `MonoModule` keeps this descriptor private so every metadata
+/// The owning [`MonoModule`] keeps this descriptor private so every metadata
 /// operation consumes the same centralized layout facts.
 ///
 /// # Example
@@ -4549,8 +4549,8 @@ struct MonoLayout {
 
     /// Selects the centralized PE64 layout for a Mono version.
     ///
-    /// The selected descriptor is retained by `MonoModule`; scripts normally
-    /// choose it indirectly through `Unity.mono`.
+    /// The selected descriptor is retained by [`MonoModule`]; scripts normally
+    /// choose it indirectly through [`Unity.mono`].
     ///
     /// # Example
     ///
@@ -4788,7 +4788,7 @@ struct MonoModule {
 
     /// Finds a managed class inside an image address.
     ///
-    /// Most scripts should call `MonoImage.class`; this lower-level operation
+    /// Most scripts should call [`MonoImage.class`]; this lower-level operation
     /// keeps the shared traversal with its owning runtime.
     ///
     /// # Example
@@ -4874,7 +4874,7 @@ struct MonoModule {
 
     /// Finds a field offset in a class hierarchy.
     ///
-    /// Most scripts should call `MonoClass.field`; this operation owns the
+    /// Most scripts should call [`MonoClass.field`]; this operation owns the
     /// shared target-layout traversal.
     ///
     /// # Example
@@ -4934,7 +4934,7 @@ struct MonoModule {
 
     /// Finds the static-field table for a class address.
     ///
-    /// Most scripts should call `MonoClass.staticTable`; this operation keeps
+    /// Most scripts should call [`MonoClass.staticTable`]; this operation keeps
     /// version-specific vtable traversal in the owning runtime.
     ///
     /// # Example
@@ -5150,7 +5150,7 @@ struct MonoClass {
 
     /// Builds a reusable path to one static field.
     ///
-    /// Unlike `staticField`, this keeps the field as a `MemoryPath` so further
+    /// Unlike [`staticField`], this keeps the field as a [`MemoryPath`] so further
     /// managed-object pointer dereferences can be appended. Resolving the path
     /// on every poll observes a singleton pointer that changes at runtime.
     ///
@@ -5595,7 +5595,7 @@ struct CatalogConstructedFieldProbe {
 /// Exercises fixed-array fields in structural process-memory layouts.
 ///
 /// This declaration exists only in tests and verifies that catalog records
-/// preserve an exact array length while deriving `MemoryReadable`.
+/// preserve an exact array length while deriving [`MemoryReadable`].
 ///
 /// # Example
 ///
@@ -5624,7 +5624,7 @@ struct CatalogFixedMemoryProbe {
 /// Exercises derived suspension metadata for catalog-owned source bodies.
 ///
 /// This declaration exists only in tests and verifies direct and transitive
-/// suspension without adding an authored `async` marker.
+/// suspension without adding an authored [`async`] marker.
 ///
 /// # Example
 ///

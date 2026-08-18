@@ -99,6 +99,7 @@ This index maps common source-language concepts to canonical SplitScript APIs an
 | --- | --- | --- | --- |\n",
         );
         for concept in self.concepts() {
+            let summary = crate::documentation::strip_intra_doc_links(concept.summary);
             let sources = concept
                 .sources
                 .iter()
@@ -113,16 +114,16 @@ This index maps common source-language concepts to canonical SplitScript APIs an
                 .join(", ");
             let direction = if concept.targets.is_empty() {
                 concept.cookbook_anchor.map_or_else(
-                    || concept.summary.to_owned(),
-                    |anchor| format!("{} [Recipe](ASL_PORTING.md#{anchor}).", concept.summary),
+                    || summary.clone(),
+                    |anchor| format!("{summary} [Recipe](ASL_PORTING.md#{anchor})."),
                 )
             } else if let Some(anchor) = concept.cookbook_anchor {
                 format!(
                     "{} Canonical targets: {}. [Recipe](ASL_PORTING.md#{anchor}).",
-                    concept.summary, targets
+                    summary, targets
                 )
             } else {
-                format!("{} Canonical targets: {}.", concept.summary, targets)
+                format!("{} Canonical targets: {}.", summary, targets)
             };
             output.push_str(&format!(
                 "| `{}` — {} | {} | {} | {} |\n",

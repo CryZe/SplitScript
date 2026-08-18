@@ -1157,10 +1157,16 @@ exact and ambiguity-safe: qualified catalog identities and unique short names
 become page-relative links, while an unknown or ambiguous spelling remains
 visible for validation instead of silently choosing a destination. Compact
 hover and completion Markdown reduces this reference-only markup to ordinary
-code spans. The LSP serves both the searchable index and pages;
-the VS Code client only presents those Markdown documents. Structured migration
-diagnostics carry their concept identity through native CLI, LSP, and embedded
-compiler responses, so frontends do not infer a documentation destination from
+code spans. Standard-library declarations, language entries, migration
+concepts, and bundled guides author every exact known-symbol mention this way.
+Graph validation rejects both unresolved intra-doc links and plain code spans
+whose text has an unambiguous documentation identity, preventing new inert
+mentions from accumulating. Parameter names and code fences remain ordinary
+code because they are not prose references. The LSP serves both the searchable
+index and pages; the VS Code client only presents those Markdown documents.
+Structured migration diagnostics carry their concept identity through native
+CLI, LSP, and embedded compiler responses, so frontends do not infer a
+documentation destination from
 error prose. Native `splitc docs` resolves an exact catalog title, stable
 migration identity, or virtual path and renders the same Markdown. Guide links
 are intentionally self-contained: focused snippets explain individual concepts,

@@ -701,7 +701,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "state \"game.exe\" { field = expression; } | state GBA { field at address; }",
         "Declares process attachment and persistent watched state.",
-        "Every state expression produces a fallible value (`T!`). Initialization requires all required fields to succeed in one poll and seeds old and current equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into `T?` with `discardError()`.",
+        "Every state expression produces a fallible value ([`T!`]). Initialization requires all required fields to succeed in one poll and seeds old and current equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError()`].",
         STATE_DECL_EXAMPLE
     ),
     language_item!(
@@ -732,7 +732,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "field: T at module?, offset, ... | field: T? at module?, offset, ...",
         "Reads a persistent state field through a pointer path.",
-        "The optional module name selects the pointer base and each following integer is an address offset. A required T field is a `T!` boundary: initialization waits for it, while a later failed read retains its last accepted value. An explicitly optional T? field instead accepts read failure as None and a successful read as Some(T), so absence is observable in current and old. The exact memory representation must be explicit or inferred from an exact use; optional read semantics require the T? annotation.",
+        "The optional module name selects the pointer base and each following integer is an address offset. A required T field is a [`T!`] boundary: initialization waits for it, while a later failed read retains its last accepted value. An explicitly optional T? field instead accepts read failure as None and a successful read as Some(T), so absence is observable in current and old. The exact memory representation must be explicit or inferred from an exact use; optional read semantics require the T? annotation.",
         STATE_POINTER_EXAMPLE
     ),
     language_item!(
@@ -884,7 +884,7 @@ define_language_catalog! {
         "throw",
         LanguageItemKind::Keyword,
         "throw error",
-        "Transfers an error to the nearest `T!` boundary.",
+        "Transfers an error to the nearest [`T!`] boundary.",
         "Without a future catch boundary, throw returns an error from a T! function. The error expression must be a String.",
         THROW_EXAMPLE
     ),
@@ -894,7 +894,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "fn name() -> async T { ... }",
         "Marks an explicitly typed function result as asynchronous.",
-        "A function containing [`await`] or [`retry`] has an async result. Write `async T` when its result type is explicit; when the result type is omitted, both `async` and `T` are inferred. Calling a source-defined async function creates a process-lifetime future value without polling it. That `async T` value can be stored in locals and aggregates, passed to functions, and awaited later. Its typed continuation frame retains parameters, live locals, nested futures, and the completed T. Futures cannot escape into globals because process closure owns their cancellation.",
+        "A function containing [`await`] or [`retry`] has an async result. Write `async T` when its result type is explicit; when the result type is omitted, both [`async`] and `T` are inferred. Calling a source-defined async function creates a process-lifetime future value without polling it. That `async T` value can be stored in locals and aggregates, passed to functions, and awaited later. Its typed continuation frame retains parameters, live locals, nested futures, and the completed T. Futures cannot escape into globals because process closure owns their cancellation.",
         ASYNC_RESULT_EXAMPLE
     ),
     language_item!(
@@ -911,7 +911,7 @@ define_language_catalog! {
         "retry",
         LanguageItemKind::Keyword,
         "let value = retry resultExpression",
-        "Retries a `T!` expression until it succeeds.",
+        "Retries a [`T!`] expression until it succeeds.",
         "The T! expression is evaluated once per attached update. An error stays pending; success yields T. A containing function infers an async result unless it has an explicit result type, in which case write `-> async T`.",
         RETRY_EXAMPLE
     ),
@@ -920,7 +920,7 @@ define_language_catalog! {
         "?",
         LanguageItemKind::Syntax,
         "resultExpression?",
-        "Propagates a `T!` error.",
+        "Propagates a [`T!`] error.",
         "Postfix question mark unwraps success or transfers the original error to the nearest T! function or state-field assignment boundary.",
         PROPAGATE_EXAMPLE
     ),
@@ -956,7 +956,7 @@ define_language_catalog! {
         "Err",
         LanguageItemKind::Syntax,
         "Err(message)",
-        "Constructs a `T!` error.",
+        "Constructs a [`T!`] error.",
         "Err takes a String and obtains its successful T type from surrounding T! context.",
         ERR_EXAMPLE
     ),
@@ -1028,7 +1028,7 @@ define_language_catalog! {
     builtin_type_item!(
         None,
         "None",
-        "Stores the single unit value `None`.",
+        "Stores the single unit value [`None`].",
         "None is the ordinary return type for procedures and functions without a returned data value. Plain unit parameters, results, locals, globals, and async completions are erased from the physical Wasm representation. The same value converts to the empty side of T?, while Some(None) remains a present unit value.",
         "let unit: None = None"
     ),
@@ -1043,7 +1043,7 @@ define_language_catalog! {
         Char,
         "char",
         "Stores one Unicode scalar value.",
-        "Character literals use single quotes and contain exactly one Unicode scalar value. A char is distinct from u32, implements Display and equality, converts losslessly to u32 with `as`, and has no implicit process-memory encoding.",
+        "Character literals use single quotes and contain exactly one Unicode scalar value. A char is distinct from u32, implements Display and equality, converts losslessly to u32 with [`as`], and has no implicit process-memory encoding.",
         "let marker: char = 'ß'"
     ),
     builtin_type_item!(
@@ -1172,7 +1172,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "/// documentation text",
         "Documents a source declaration, state field, setting, or heading.",
-        "On functions and methods, global variables, state fields, records and their fields, and enums and their variants, the documentation appears in editor hovers. On settings and headings, it becomes a tooltip in the settings UI. Consecutive documentation-comment lines form paragraphs; use an empty `///` line to start a new paragraph.",
+        "On functions and methods, global variables, state fields, records and their fields, and enums and their variants, the documentation appears in editor hovers. On settings and headings, it becomes a tooltip in the settings UI. Consecutive documentation-comment lines form paragraphs; use an empty [`///`] line to start a new paragraph.",
         DOCUMENTATION_COMMENT_EXAMPLES
     ),
     language_item!(
@@ -1208,7 +1208,7 @@ define_language_catalog! {
         OnDetach,
         "onDetach",
         "Handles closure of a previously attached process.",
-        "Runs synchronously once when an attached process closes, after its unusable handle, provider state, selected layout, and pending continuations are cleared. It never runs for the initial detached state; use `setup` for one-time script initialization. Process and state snapshots are unavailable because closure may happen before initialization finishes.",
+        "Runs synchronously once when an attached process closes, after its unusable handle, provider state, selected layout, and pending continuations are cleared. It never runs for the initial detached state; use [`setup`] for one-time script initialization. Process and state snapshots are unavailable because closure may happen before initialization finishes.",
         "onDetach {\n    timer.pauseGameTime()\n}"
     ),
     action_item!(
@@ -1224,7 +1224,7 @@ define_language_catalog! {
         OnStateReady,
         "onStateReady",
         "Initializes one committed state snapshot.",
-        "Runs synchronously once per attachment, immediately after the first complete state poll. Both `old` and `current` are available and equal. The attached process is available, but suspension is not. `whileAttached` and timer-decision actions begin on the following update.",
+        "Runs synchronously once per attachment, immediately after the first complete state poll. Both [`old`] and [`current`] are available and equal. The attached process is available, but suspension is not. [`whileAttached`] and timer-decision actions begin on the following update.",
         "onStateReady {\n    print(`Initial level: {current.level}`)\n}"
     ),
     action_item!(

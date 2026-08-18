@@ -67,7 +67,7 @@ pub(super) fn validate(
     }
 
     for page in pages.values() {
-        validate_page_links(page, &pages, &mut errors);
+        validate_page_links(page, &pages, library, &mut errors);
     }
     errors
 }
@@ -110,11 +110,18 @@ fn insert_page(
 fn validate_page_links(
     page: &DocumentationPage,
     pages: &BTreeMap<String, DocumentationPage>,
+    library: &StandardLibrary,
     errors: &mut Vec<String>,
 ) {
     for label in intra_doc::unresolved_links(&page.markdown) {
         errors.push(format!(
             "documentation page `{}` has unresolved intra-doc link `[`{label}`]`",
+            page.uri
+        ));
+    }
+    for label in intra_doc::resolvable_plain_code_spans(&page.markdown, library) {
+        errors.push(format!(
+            "documentation page `{}` uses plain code span `` `{label}` `` for a known symbol; write `` [`{label}`] ``",
             page.uri
         ));
     }
@@ -347,7 +354,7 @@ mod tests {
             (target.uri.clone(), target),
         ]);
         let mut errors = Vec::new();
-        validate_page_links(&source, &pages, &mut errors);
+        validate_page_links(&source, &pages, &StandardLibrary::new(), &mut errors);
         assert_eq!(errors.len(), 2, "{errors:#?}");
         assert!(errors[0].contains("missing page `/missing.md`"));
         assert!(errors[1].contains("missing heading `#missing-heading`"));
@@ -358,7 +365,7 @@ mod tests {
         let reference = DocumentationReference::default();
         let snapshot = reference_snapshot(&reference);
         assert_eq!(snapshot.page_count, 420);
-        assert_eq!(snapshot.fingerprint, 3_246_814_262_124_544_272);
+        assert_eq!(snapshot.fingerprint, 1_450_394_762_706_873_640);
     }
 
     #[derive(Debug)]

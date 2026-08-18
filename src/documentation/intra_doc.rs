@@ -43,6 +43,44 @@ pub(super) fn unresolved_links(source: &str) -> Vec<&str> {
     unresolved
 }
 
+pub(super) fn resolvable_plain_code_spans<'a>(
+    source: &'a str,
+    library: &StandardLibrary,
+) -> Vec<&'a str> {
+    let mut spans = Vec::new();
+    let mut fenced = false;
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced || line.contains("<pre class=\"hljs splitscript-code\">") {
+            continue;
+        }
+
+        let mut rest = line;
+        while let Some(start) = rest.find('`') {
+            let candidate = &rest[start + 1..];
+            let Some(end) = candidate.find('`') else {
+                break;
+            };
+            let label = &candidate[..end];
+            let parameter_name = rest[..start].trim_start().starts_with("- ")
+                && candidate[end + 1..].starts_with(':');
+            if !parameter_name
+                && !rest[..start].ends_with('[')
+                && !rest[..start].ends_with('\\')
+                && target_uri(label, library).is_some()
+            {
+                spans.push(label);
+            }
+            rest = &candidate[end + 1..];
+        }
+    }
+    spans
+}
+
 fn rewrite_links(source: &str, mut replacement: impl FnMut(&str) -> Option<String>) -> String {
     let mut output = String::with_capacity(source.len());
     let mut rest = source;
@@ -190,6 +228,15 @@ mod tests {
         assert_eq!(
             unresolved_links("[`await`](await.md), then [`missing`]."),
             ["missing"]
+        );
+    }
+
+    #[test]
+    fn finds_only_plain_code_spans_with_exact_documentation_targets() {
+        let source = "Use `await`, [`retry`](retry.md), and `not a symbol`.\n```splitscript\nawait task\n```";
+        assert_eq!(
+            resolvable_plain_code_spans(source, &StandardLibrary::new()),
+            ["await"]
         );
     }
 }

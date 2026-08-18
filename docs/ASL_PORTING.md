@@ -35,7 +35,7 @@ state ["game.exe", "game-demo.exe"] {
 These strings are host process identities, not portable paths. Do not add or
 remove `.exe` mechanically: use the exact candidate required by the target
 runtime and platform. Build-specific addresses belong in named layouts selected
-from `onAttach`, rather than in multiple ASL-style state blocks.
+from [`onAttach`], rather than in multiple ASL-style state blocks.
 
 Typed emulator support replaces the native process root. For example, a GBA
 autosplitter declares `state GBA` and reads emulated addresses through `gba`:
@@ -47,16 +47,16 @@ state GBA {
 ```
 
 The state declaration also defines the transactional snapshots. After the
-first complete poll, `current` contains the latest accepted values and `old`
+first complete poll, [`current`] contains the latest accepted values and [`old`]
 contains the preceding accepted values. `process` or the provider-specific
-root is available only during attachment-owned lifecycle phases; `old` and
-`current` are unavailable before the first complete snapshot and are not
-guaranteed during `onDetach`.
+root is available only during attachment-owned lifecycle phases; [`old`] and
+[`current`] are unavailable before the first complete snapshot and are not
+guaranteed during [`onDetach`].
 
 ## Signed pointer offsets
 
 ASL `DeepPointer` paths commonly contain negative offsets. Preserve them
-directly; do not cast them through `u64`:
+directly; do not cast them through [`u64`]:
 
 ```splitscript
 state "game.exe" {
@@ -66,10 +66,10 @@ state "game.exe" {
 
 The absolute root in `at 0xffff_ffff_ffff_fff0` remains an unsigned 64-bit
 address. Module-relative roots and every offset after a dereference are signed
-`i64`, and arithmetic wraps modulo the address space. The equivalent dynamic
+[`i64`], and arithmetic wraps modulo the address space. The equivalent dynamic
 APIs are `process.follow(base, offsets: [i64])`,
 `address.offset(displacement)`, which accepts any integer width, and signed
-`MemoryPath` offsets.
+[`MemoryPath`] offsets.
 
 ## Bounded native `stringN` state
 
@@ -92,7 +92,7 @@ state "game.exe" {
 ```
 
 The number is a maximum byte count, not part of the field's type. The result is
-an ordinary immutable `String`. SplitScript resolves every pointer offset first,
+an ordinary immutable [`String`]. SplitScript resolves every pointer offset first,
 performs one bounded final read, stops at the first NUL byte, and rejects that
 field's candidate when UTF-8 is invalid. It deliberately does not expose
 `string50` as a type.
@@ -119,7 +119,7 @@ machine-applicable because only the autosplitter author can verify the target
 encoding. The UTF-16LE action is available only for an even ASL byte bound.
 
 The stricter UTF-8 malformed-input policy is equivalent for A Plague Tale's
-ASCII map identifiers. Do not use `readManagedString` for a native buffer: that
+ASCII map identifiers. Do not use [`readManagedString`] for a native buffer: that
 method reads the object layout of a Unity managed string rather than text bytes
 at the supplied address.
 
@@ -155,7 +155,7 @@ for a packed, explicitly padded, or differently endian target layout; exact
 layout controls remain intentionally deferred until maintained-port evidence
 requires them.
 
-For a contiguous homogeneous region, `[T; N]` carries the physical element
+For a contiguous homogeneous region, [`[T; N]`] carries the physical element
 count in the type and also performs one host read:
 
 ```splitscript
@@ -168,18 +168,18 @@ split {
 }
 ```
 
-Use `[T; N]`, not growable `[T]`, for process-memory layout. The fixed array
+Use [`[T; N]`], not growable [`[T]`], for process-memory layout. The fixed array
 still supports indexing and iteration, while its exact length prevents a port
 from silently reading a different number of bytes. A record or fixed array is
-`MemoryReadable` only when every contained field or element has a fixed
+[`MemoryReadable`] only when every contained field or element has a fixed
 readable layout.
 
 ## C# string operations
 
 SplitScript methods use lower camel case, so C# `StartsWith` becomes
-`startsWith`. For ASCII game identifiers, C# `ToLower()` becomes the more
-explicit `toAsciiLowerCase()`, while `ToUpper()` becomes
-`toAsciiUpperCase()`:
+[`startsWith`]. For ASCII game identifiers, C# `ToLower()` becomes the more
+explicit [`toAsciiLowerCase()`], while `ToUpper()` becomes
+[`toAsciiUpperCase()`]:
 
 ```splitscript
 # state "game.exe" {
@@ -196,7 +196,7 @@ let normalizedMission = current.mission.toAsciiUpperCase()
 
 These conversions change only `A` through `Z` or `a` through `z` and preserve
 all other UTF-8 bytes. They are not culture-sensitive or full Unicode case
-conversion. `slice` uses
+conversion. [`slice`] uses
 UTF-8 byte offsets rather than .NET UTF-16 indices and fails when an offset is
 out of range or inside a multibyte code point, so do not mechanically translate
 `Substring` without checking the target data.
@@ -241,14 +241,14 @@ let column = chapterKey.padEnd(8, ' ')
 # }
 ```
 
-SplitScript always requires the fill `char`; pass `' '` explicitly for C#
+SplitScript always requires the fill [`char`]; pass `' '` explicitly for C#
 overloads that omit it. Width counts Unicode scalar values rather than .NET
 UTF-16 code units or terminal display columns, so copied widths are directly
 equivalent only for text proven to be ASCII. An already-wide string is reused;
 otherwise the result is allocated once at its exact UTF-8 byte length.
 
 C# combines nullability and emptiness in `String.IsNullOrEmpty(value)`.
-SplitScript keeps those concerns in the type. A required `String` cannot be
+SplitScript keeps those concerns in the type. A required [`String`] cannot be
 null, so use its source-defined method directly:
 
 ```splitscript
@@ -277,7 +277,7 @@ let missingCheckpoint = match current.checkpoint {
 ```
 
 A failed process read is not automatically an empty or null string. Decide
-first whether that boundary should remain fallible (`T!`), become a `String?`, or
+first whether that boundary should remain fallible ([`T!`]), become a `String?`, or
 retain the last accepted state value. The compiler therefore gives
 `String.IsNullOrEmpty` focused guidance without guessing an automatic rewrite.
 
@@ -297,9 +297,9 @@ if current.map.isEmpty() {
 # }
 ```
 
-Use `byteLength()` only for text proven to be ASCII or code intentionally
-working with the UTF-8 byte offsets returned by `indexOf`, `lastIndexOf`, and
-accepted by `slice`, `byteAt`, and `charAt`. Non-ASCII text can have different
+Use [`byteLength()`] only for text proven to be ASCII or code intentionally
+working with the UTF-8 byte offsets returned by `indexOf`, [`lastIndexOf`], and
+accepted by [`slice`], [`byteAt`], and [`charAt`]. Non-ASCII text can have different
 UTF-16 code-unit and UTF-8 byte counts, so the compiler diagnoses `.Length`
 without applying a speculative fix.
 
@@ -324,7 +324,7 @@ overload already contains a `[String]`.
 
 C# `value.IndexOf(substring)` returns a UTF-16 code-unit index or `-1`.
 SplitScript `value.indexOf(substring)` instead returns a UTF-8 byte offset as
-`u32?`; handle `None` directly. The numeric offsets are equivalent only for
+`u32?`; handle [`None`] directly. The numeric offsets are equivalent only for
 text proven to be ASCII:
 
 ```splitscript
@@ -377,7 +377,7 @@ C# permits a null replacement to mean deletion; pass `""` explicitly in
 SplitScript only when that was the source's intent. An empty search is an error,
 as is a result whose byte length cannot be represented. The compiler therefore
 explains `.Replace(...)` but does not offer a blind rename that would leave
-`T!` handling unresolved.
+[`T!`] handling unresolved.
 
 C# `left.Equals(right)` normally becomes `left == right`; SplitScript compares
 strings by exact UTF-8 text rather than GC reference identity. If the source
@@ -386,7 +386,7 @@ intentionally ignores ASCII letter case, write
 `Equals` automatically because C#'s static and comparison-mode overloads need
 semantic review.
 
-Use `charAt(byteIndex)` for textual character checks. It returns a `char` and
+Use `charAt(byteIndex)` for textual character checks. It returns a [`char`] and
 still takes a UTF-8 byte offset; an offset into the middle of a multibyte scalar
 is an error. Use `byteAt(byteIndex)` only when the ASL is genuinely inspecting
 encoded bytes. Neither operation adopts C#'s or JavaScript's UTF-16 indexing:
@@ -401,7 +401,7 @@ return slash == '/'
 # }
 ```
 
-C# `Split` maps to fallible, lower-camel-case `split`. SplitScript matches one
+C# `Split` maps to fallible, lower-camel-case [`String.split`]. SplitScript matches one
 exact non-empty delimiter from left to right and preserves leading, adjacent,
 and trailing empty segments:
 
@@ -435,17 +435,17 @@ let percentage: f64 = current.percentageText.parse() else 0.0
 
 The compiler recognizes the C# static `Parse` and `TryParse` families and
 points to this pattern. It intentionally does not rewrite them: `TryParse`
-output parameters become ordinary `T!` control flow, and the receiving
+output parameters become ordinary [`T!`] control flow, and the receiving
 declaration or fallback determines the target type.
 
-Unlike an exception-catching `Parse` call, failure is an ordinary `T!` value.
-Use `else` for a fallback, `?` to propagate the error from a function or state
-field, or `match` when failure needs its own behavior. C# `TryParse` therefore
+Unlike an exception-catching `Parse` call, failure is an ordinary [`T!`] value.
+Use [`else`] for a fallback, [`?`] to propagate the error from a function or state
+field, or [`match`] when failure needs its own behavior. C# `TryParse` therefore
 does not need an output parameter. Parsing consumes the complete ASCII decimal
 string and rejects whitespace, separators, and trailing text. Float targets
 accept case-insensitive `NaN`, `inf`, and `Infinity`; decimal overflow produces
 infinity and underflow produces zero, while integer overflow remains an error.
-Float conversion is correctly rounded directly to `f32` or `f64` and does not
+Float conversion is correctly rounded directly to [`f32`] or [`f64`] and does not
 inherit C# culture settings.
 
 ## C# `Convert` operations
@@ -467,20 +467,20 @@ let parsed: f64 = text.parse() else 0.0
 # }
 ```
 
-Fixed-width integer `as` casts use SplitScript's numeric cast rules. In
+Fixed-width integer [`as`] casts use SplitScript's numeric cast rules. In
 particular, narrowing integers retain their low bits, while C# `Convert` throws
-when a narrowing conversion is out of range. A floating-point `as` cast
+when a narrowing conversion is out of range. A floating-point [`as`] cast
 truncates toward zero, saturates at an integer boundary, and maps NaN to zero.
 For a finite, in-range value, `value.round() as i32` preserves the
 midpoint-to-even rounding of `Convert.ToInt32`; it still does not reproduce C#
 overflow and NaN exceptions.
 
 For strings, infer the intended fixed-width number from the receiving boundary
-and use fallible `parse()`. SplitScript parsing is strict, locale-independent
+and use fallible [`parse()`]. SplitScript parsing is strict, locale-independent
 ASCII decimal parsing, unlike C# conversions that may accept surrounding
 whitespace and current-culture formatting. A numeric `Convert.ToBoolean(value)`
 becomes `value != 0`. For text, trim and compare `true` and `false` explicitly
-with `equalsIgnoreAsciiCase`, choosing a `T!` value or fallback for malformed text.
+with [`equalsIgnoreAsciiCase`], choosing a [`T!`] value or fallback for malformed text.
 
 The ordinary one-value `Convert.ToString(value)` maps to Display:
 
@@ -495,9 +495,9 @@ setVariable("Value", value)
 # }
 ```
 
-Interpolation, `print`, and `setVariable` already accept Display values, so
+Interpolation, [`print`], and [`setVariable`] already accept Display values, so
 they do not need an intermediate string cast. The integer-radix overload maps
-to the fallible `Integer.toString` method:
+to the fallible [`Integer.toString`] method:
 
 ```splitscript
 # state "game.exe" {}
@@ -520,7 +520,7 @@ overloads remain separate policies and are not ordinary Display conversions.
 
 The second argument in `state("game.exe", "Steam")` is a layout label, not
 another executable candidate. Co-locate layouts in one state and return the
-selected generated variant from `onAttach`:
+selected generated variant from [`onAttach`]:
 
 ```splitscript
 state "game.exe" {
@@ -544,14 +544,14 @@ onAttach {
 }
 ```
 
-Detection is ordinary typed code and may use module size, `FileVersion`,
+Detection is ordinary typed code and may use module size, [`FileVersion`],
 signatures, process identity, or discovered memory. `await process.closed()`
 keeps an unsupported attachment inert without detaching and immediately
 reattaching to the same process.
 
 Compatible fields declared by every named layout expose one common interface.
 When a field is missing or the same name has a conflicting type, match the
-generated `layout` value and access the field only in the corresponding arm.
+generated [`layout`] value and access the field only in the corresponding arm.
 The compiler gives each incompatible declaration its real physical type rather
 than turning it into an option or inventing a default. An honest typed default
 is still appropriate when consumers already define that value as unavailable;
@@ -573,12 +573,12 @@ onAttach {
 }
 ```
 
-The returned string is the exact candidate from the `state` declaration that
+The returned string is the exact candidate from the [`state`] declaration that
 matched during attachment. It is not the executable path and does not perform
 another host lookup. Use it when multiple executable names genuinely select
 different behavior or layouts. When several builds share a name, discriminate
 with reliable evidence such as `process.mainModule().size`, `process.path()`,
-`Module.fileVersion()`, `Module.productVersion()`, or a signature instead.
+[`Module.fileVersion()`], [`Module.productVersion()`], or a signature instead.
 
 Legacy `modules.Any(...)` checks often test for one optional module rather than
 requiring full enumeration. Use the synchronous optional probe in that case:
@@ -596,10 +596,10 @@ let steam = match process.loadedModule("steam_api.dll") {
 
 Use `await process.module("GameAssembly.dll")` when attachment must wait until
 a required module loads. Do not use that waiting form for optional platform or
-mod-loader detection: an absent module would keep `onAttach` pending forever.
+mod-loader detection: an absent module would keep [`onAttach`] pending forever.
 
 The common ASL expression `modules.First()` normally refers to the executable
-itself. Discover that value once in `onAttach`, then use its typed fields:
+itself. Discover that value once in [`onAttach`], then use its typed fields:
 
 ```splitscript
 # state "game.exe" {}
@@ -609,13 +609,13 @@ onAttach {
 }
 ```
 
-This replaces `ModuleMemorySize` with `size` and `BaseAddress` with `address`.
+This replaces `ModuleMemorySize` with `size` and `BaseAddress` with [`address`].
 It also makes the suspension visible: module discovery happens before polling,
 not implicitly whenever a property is read.
 
-The two version methods return typed four-part `FileVersion` values rather than
+The two version methods return typed four-part [`FileVersion`] values rather than
 the punctuation-dependent strings exposed by C# `FileVersionInfo`. Use
-`Module.versionInfo()` when both identities are needed, so the PE resource is
+[`Module.versionInfo()`] when both identities are needed, so the PE resource is
 only traversed once.
 
 ```splitscript
@@ -642,7 +642,7 @@ name as a parameter when helper logic needs it.
 
 ## Timer state
 
-ASL's `timer.CurrentPhase` maps directly to `timer.state()`. Compare the
+ASL's `timer.CurrentPhase` maps directly to [`timer.state()`]. Compare the
 resulting exhaustive enum by name:
 
 ```splitscript
@@ -654,14 +654,14 @@ reset {
 }
 ```
 
-The familiar variants retain their meanings as `TimerState.NotRunning`,
+The familiar variants retain their meanings as [`TimerState.NotRunning`],
 `Running`, `Paused`, and `Ended`. SplitScript additionally exposes
-`TimerState.Unknown`; the runtime maps an unrecognized future host value there
+[`TimerState.Unknown`]; the runtime maps an unrecognized future host value there
 instead of fabricating a known state. Use an explicit wildcard or `Unknown`
 arm when matching according to the behavior the script needs.
 
 Do not preserve integer comparisons such as `timer.CurrentPhase > 0`.
-`TimerState` is an enum, not an ordered number. Compare or match the named
+[`TimerState`] is an enum, not an ordered number. Compare or match the named
 states that made the original condition true. The compiler offers
 machine-applicable rewrites for `timer.CurrentPhase` and the four legacy
 `TimerPhase` variants. A legacy enum name in a type or match pattern receives
@@ -670,7 +670,7 @@ focused guidance without reserving `TimerPhase` as a source identifier.
 ## Timer split index
 
 ASL exposes `timer.CurrentSplitIndex` as a signed integer. SplitScript uses
-`timer.currentSplitIndex()` and makes the no-attempt state explicit as `None`:
+[`timer.currentSplitIndex()`] and makes the no-attempt state explicit as [`None`]:
 
 ```splitscript
 # state "game.exe" {
@@ -687,23 +687,23 @@ split {
 ```
 
 The result type is `u64?`. Every negative value from the host ABI maps to
-`None`; nonnegative values map to the corresponding `u64`. Do not cast the
+[`None`]; nonnegative values map to the corresponding [`u64`]. Do not cast the
 signed sentinel into an unsigned index. A skipped segment advances the index,
 and after the final split the index equals the route's segment count. The index
 is therefore authoritative route progress, not a count of splits requested by
 this autosplitter.
 
 The compiler recognizes `timer.CurrentSplitIndex`, but deliberately does not
-rewrite it automatically because the correct `None` behavior depends on the
-surrounding control flow. Use `else` for an early fallback or `match` when the
+rewrite it automatically because the correct [`None`] behavior depends on the
+surrounding control flow. Use [`else`] for an early fallback or [`match`] when the
 absent state needs distinct behavior.
 
 ## Load removal and computed game time
 
-Use `isLoading` when the game exposes whether its own clock should be paused.
+Use [`isLoading`] when the game exposes whether its own clock should be paused.
 Return `true` while loading and `false` while gameplay is advancing. When a
 sentinel means the script has no trustworthy observation for this tick, fall
-through or return `None` so LiveSplit keeps its current pause state:
+through or return [`None`] so LiveSplit keeps its current pause state:
 
 ```splitscript
 state "game.exe" {
@@ -719,13 +719,13 @@ isLoading {
 ```
 
 This third state is intentionally different from `false`: `false` actively
-resumes game time, while `None` leaves the previous host state unchanged. A
-bare `return` and ordinary fallthrough also produce `None`. Prefer this action
+resumes game time, while [`None`] leaves the previous host state unchanged. A
+bare [`return`] and ordinary fallthrough also produce [`None`]. Prefer this action
 for regular load removal rather than repeatedly calling
-`timer.pauseGameTime()` and `timer.resumeGameTime()`.
+[`timer.pauseGameTime()`] and [`timer.resumeGameTime()`].
 
-When the game exposes its own elapsed time, return a typed `Duration` from
-`gameTime`. Direct values automatically become the present side of the
+When the game exposes its own elapsed time, return a typed [`Duration`] from
+[`gameTime`]. Direct values automatically become the present side of the
 optional action result; no `Some(...)` constructor is needed:
 
 ```splitscript
@@ -742,9 +742,9 @@ gameTime {
 ```
 
 Use the constructor that matches the game's representation, such as
-`Duration.fromSeconds`, `fromMilliseconds`, `fromFrames`, or `fromParts`.
-Falling through from `gameTime` leaves the host's last value unchanged; it
-does not set zero. `isLoading` runs before `gameTime` on each eligible update,
+[`Duration.fromSeconds`], [`fromMilliseconds`], [`fromFrames`], or `fromParts`.
+Falling through from [`gameTime`] leaves the host's last value unchanged; it
+does not set zero. [`isLoading`] runs before [`gameTime`] on each eligible update,
 so the two actions may be combined when the game provides both an independent
 loading flag and an authoritative elapsed clock.
 
@@ -758,8 +758,8 @@ Several legacy paths inspect host-owned timer data rather than the attached
 game. They do not currently have faithful SplitScript replacements:
 
 - `timer.CurrentTime.GameTime` reads LiveSplit's optional game-time clock. If
-  this autosplitter computes the value, keep that `Duration` in script-owned
-  state and also return it from `gameTime`; the host's possibly externally
+  this autosplitter computes the value, keep that [`Duration`] in script-owned
+  state and also return it from [`gameTime`]; the host's possibly externally
   changed value cannot yet be read back.
 - `timer.CurrentSplit.Name`, indexed `timer.Run[...]` segments,
   `timer.Run.Count`, `CategoryName`, `GameName`, and `FilePath` require a typed
@@ -779,7 +779,7 @@ will keep read-only metadata separate from controlled mutation authority.
 ## Monotonic delays and debouncing
 
 ASL scripts often use `DateTime.Now`, `DateTime.Now.TimeOfDay`, or a
-`Stopwatch` only to measure time since a game event. Use `Instant` for that
+`Stopwatch` only to measure time since a game event. Use [`Instant`] for that
 process-independent elapsed time:
 
 ```splitscript
@@ -802,25 +802,25 @@ reset {
 }
 ```
 
-`Instant.now()` reads a monotonic host clock. It never moves backwards during
+[`Instant.now()`] reads a monotonic host clock. It never moves backwards during
 one autosplitter instance and has no meaningful absolute or calendar value.
-`elapsed()`, `durationSince(...)`, and `hasElapsed(...)` produce or compare
-exact `Duration` values, making them appropriate for cooldowns, debouncing,
+[`elapsed()`], `durationSince(...)`, and `hasElapsed(...)` produce or compare
+exact [`Duration`] values, making them appropriate for cooldowns, debouncing,
 delayed splits, and retry deadlines. They continue advancing independently of
 LiveSplit's loading and pause state.
 
 Do not mechanically replace `timer.CurrentTime.RealTime`. That ASL expression
 may mean the current LiveSplit attempt's run-relative time rather than an
 independent delay. If the original logic starts its measurement at a game event,
-capture an `Instant` there. If it needs the actual timer phase for an offset,
+capture an [`Instant`] there. If it needs the actual timer phase for an offset,
 run-age check, or custom game-time calculation, the current host contract does
 not expose equivalent metadata. The compiler diagnoses these paths separately
 so this distinction is not hidden by a convenient but incorrect rewrite.
 
 ## Attach-time-discovered addresses
 
-Keep discovery in `onAttach` and polling in the state declaration. Polling does
-not begin until `onAttach` completes, so a global address initializer is never
+Keep discovery in [`onAttach`] and polling in the state declaration. Polling does
+not begin until [`onAttach`] completes, so a global address initializer is never
 observed when every completing path assigns the discovered address. An
 unsupported build should await process closure instead of completing:
 
@@ -843,11 +843,11 @@ onAttach {
 ```
 
 Expression-backed fields are persistent watcher values. The initial snapshot
-waits for every required field to succeed together. Afterwards, a failed `T!`
+waits for every required field to succeed together. Afterwards, a failed [`T!`]
 retains that field's last accepted value while successful siblings advance. If
 several values must advance atomically, read them as one record- or array-valued
 state field. For a field that is semantically absent on some ticks, declare
-`T?` and convert just that read:
+[`T?`] and convert just that read:
 
 ```splitscript
 state "game.exe" {
@@ -856,9 +856,9 @@ state "game.exe" {
 }
 ```
 
-For a static pointer path, the explicit `T?` annotation maps a failed module
+For a static pointer path, the explicit [`T?`] annotation maps a failed module
 lookup, pointer traversal, final read, or decoder to a successfully accepted
-`None`; success produces `Some(T)`. This differs from a required `T` field,
+[`None`]; success produces `Some(T)`. This differs from a required `T` field,
 whose failed result retains the last accepted value after initialization. The
 maintained Aquanox port uses `String? at ... as utf8(32)` because the original
 ASL watcher becoming `null` is itself the manual level-end signal.
@@ -901,10 +901,10 @@ onAttach {
 }
 ```
 
-Use `Module.scan` when a pattern belongs to one known image and `process.scan`
+Use [`Module.scan`] when a pattern belongs to one known image and `process.scan`
 for another explicit address range. Use `process.scanMemory` only when the
 legacy source genuinely enumerates readable mappings or the target may live
-outside known modules. `scanAny` and `scanMemoryAny` accept an array of
+outside known modules. [`scanAny`] and [`scanMemoryAny`] accept an array of
 signatures and return both the address and selected index, which keeps fallback
 layout selection in one cooperative pass.
 
@@ -921,7 +921,7 @@ let assemblyForeach = mono.peExport("mono_assembly_foreach") else return
 # }
 ```
 
-`peExport` validates PE table bounds and rejects forwarded exports. It is
+[`peExport`] validates PE table bounds and rejects forwarded exports. It is
 deliberately PE-specific; ELF and Mach-O symbols need their own proven parser or
 a future portable host contract rather than being mislabeled as PE exports.
 
@@ -940,7 +940,7 @@ let runningAddress = await data.staticField("isRunning")
 # }
 ```
 
-`MonoVersion.V3` selects the Unity 2021.2-and-newer PE64 layout; `V2` selects
+[`MonoVersion.V3`] selects the Unity 2021.2-and-newer PE64 layout; `V2` selects
 the preceding modern layout. These are explicit target-memory contracts, not
 automatically detected marketing versions. When a static field holds a
 replaceable managed singleton, retain the slot as a path and append the
@@ -979,7 +979,7 @@ for range in ranges {
 # }
 ```
 
-`memoryRanges` is synchronous because it only copies cheap host metadata.
+[`memoryRanges`] is synchronous because it only copies cheap host metadata.
 Searching the contents of those ranges should still use the suspending scan
 APIs so large reads yield between bounded windows.
 
@@ -993,7 +993,7 @@ turn a retrying scan into a one-shot result.
 ## Retaining the last accepted field value
 
 Some ASL `update` blocks overwrite one newly read watcher with its old value to
-filter a transient sentinel. The direct port is valid in `whileAttached`:
+filter a transient sentinel. The direct port is valid in [`whileAttached`]:
 
 ```splitscript
 # state "game.exe" {
@@ -1006,9 +1006,9 @@ whileAttached {
 }
 ```
 
-`current` is the one mutable snapshot root; `old` remains read-only history.
+[`current`] is the one mutable snapshot root; [`old`] remains read-only history.
 An assignment is visible to later code and later lifecycle actions in the same
-tick, and the mutated snapshot naturally becomes `old` on the next successful
+tick, and the mutated snapshot naturally becomes [`old`] on the next successful
 poll. Compound forms such as `current.count += 1` use the field's ordinary
 typed operator.
 
@@ -1016,7 +1016,7 @@ Use a state-field filter instead when the candidate itself is invalid. This is
 the stronger transactional form: it can reject the first candidate before any
 snapshot is published, and it keeps the acceptance rule beside the read.
 
-Add an ordinary trailing `if` to that pointer-path field:
+Add an ordinary trailing [`if`] to that pointer-path field:
 
 ```splitscript
 state "game.exe" {
@@ -1040,24 +1040,24 @@ an independently read entity count continues to advance. By contrast, an ASL
 `update` block that returns `false` does not roll back state at all; it skips
 lifecycle decisions after the refresh. SplitScript does not add a separate
 lifecycle concept for that behavior until a maintained port demonstrates that
-ordinary field expressions and `whileAttached` cannot represent the required
+ordinary field expressions and [`whileAttached`] cannot represent the required
 result clearly.
 
 ## Collection search and run-scoped sets
 
 C# array `.Length` maps directly to the SplitScript method `.length()`. It
-returns the `u32` element count for both `[T]` and fixed `[T; N]` arrays. The
+returns the [`u32`] element count for both [`[T]`] and fixed [`[T; N]`] arrays. The
 compiler can apply this rename automatically, after which signed C# index
 arithmetic may still need an explicit width cast.
 
 After choosing a SplitScript collection shape, C# `.Count` also becomes
-`.length()`. For an array this is the element count; for `Set<T>` it is the
+`.length()`. For an array this is the element count; for [`Set<T>`] it is the
 number of unique stored values.
 
-C# `List<T>` maps to SplitScript's `[T]` array type. SplitScript will not add a
-separate compatibility-shaped `List<T>`. `[T]` is the variable-length ordered
-sequence, while `[T; N]` carries an exact fixed length for layouts and other
-code where the size is part of the type. Use `Set<T>` only when the original
+C# `List<T>` maps to SplitScript's [`[T]`] array type. SplitScript will not add a
+separate compatibility-shaped `List<T>`. [`[T]`] is the variable-length ordered
+sequence, while [`[T; N]`] carries an exact fixed length for layouts and other
+code where the size is part of the type. Use [`Set<T>`] only when the original
 data is genuinely an unordered collection of unique values, not merely because
 its current API happens to be mutable.
 
@@ -1076,9 +1076,9 @@ split {
 }
 ```
 
-Unlike C# `List<T>.IndexOf`, `indexOf` returns `u32?`; absence is `None`, never
+Unlike C# `List<T>.IndexOf`, `indexOf` returns `u32?`; absence is [`None`], never
 a signed `-1` sentinel. Replace an existing element with ordinary indexed
-assignment; the index is `u32`, aliases observe the change, and an out-of-range
+assignment; the index is [`u32`], aliases observe the change, and an out-of-range
 index traps just like an indexed read:
 
 ```splitscript
@@ -1096,21 +1096,21 @@ route[currentIndex] += 1
 Plain indexed assignment evaluates the collection and index once. Compound
 forms such as `route[nextIndex()] += 1` additionally evaluate the right operand
 once and use the same typed operator as an ordinary `+=`; `nextIndex()` is not
-called twice. Growable `[T]` supports `push`, `extend`, indexed `removeAt`,
-optional `pop`, first-match `remove(value)`, and capacity-preserving `clear`. C#
+called twice. Growable [`[T]`] supports [`push`], [`extend`], indexed [`removeAt`],
+optional [`pop`], first-match `remove(value)`, and capacity-preserving `clear`. C#
 `list.AddRange(values)` becomes
 `list.extend(values)` once both collections are represented as typed arrays;
 self-extension duplicates the original elements once. Successful structural
 operations invalidate active iteration. C# `RemoveAt(index)` maps directly to
-`removeAt(index)`; an out-of-range `u32` index traps just like array indexing.
+`removeAt(index)`; an out-of-range [`u32`] index traps just like array indexing.
 Use `let last = values.pop() else ...` where C# removes a final list or stack
-element: SplitScript returns `None` for an empty array instead of throwing.
+element: SplitScript returns [`None`] for an empty array instead of throwing.
 `List<T>.Remove(value)` maps to `remove(value)`, removes only the first equal
 element, and returns whether a match existed. Ignoring that boolean is valid
 when the source does not distinguish absence.
-`[T; N]` remains fixed-length and supports none of these operations.
+[`[T; N]`] remains fixed-length and supports none of these operations.
 
-Use `Set<T>` when values are discovered while the run progresses and only
+Use [`Set<T>`] when values are discovered while the run progresses and only
 membership matters:
 
 ```splitscript
@@ -1131,10 +1131,10 @@ split {
 }
 ```
 
-`insert` returns true only for a new value. The set object and its contents
+[`insert`] returns true only for a new value. The set object and its contents
 persist across ticks and detachments until explicitly cleared or the script is
 unloaded. Clear it at the lifecycle boundary that matches the original source:
-`onAttach` for per-process state, or a detected timer-start transition for
+[`onAttach`] for per-process state, or a detected timer-start transition for
 per-attempt state. The maintained OpenJK-Speed port exercises the former.
 
 When membership comes from a small closed enum, a typed bit set remains more
@@ -1157,20 +1157,20 @@ fn chapterMask(chapter: Chapter) -> u32 {
 }
 ```
 
-Detect the timer transition in `whileAttached`, clear the bit set, and mark the
-starting map before `split` is evaluated. This reproduces an ASL `timer.OnStart`
+Detect the timer transition in [`whileAttached`], clear the bit set, and mark the
+starting map before [`split`] is evaluated. This reproduces an ASL `timer.OnStart`
 handler without a separate event API. The generated update loop runs
-`whileAttached` before timer-decision actions.
+[`whileAttached`] before timer-decision actions.
 
 Growable ordered storage, insertion order, and repeated equal values all belong
-to `[T]`. They do not justify another collection type. Record any still-missing
+to [`[T]`]. They do not justify another collection type. Record any still-missing
 specific operation rather than describing `List<T>` itself as missing. Indexed
 insertion remains deferred until a maintained port demonstrates that it is
 needed.
 
 ## Static settings declarations
 
-Move ASL `settings.Add(...)` registration into the declarative `settings`
+Move ASL `settings.Add(...)` registration into the declarative [`settings`]
 block. The quoted text before `=>` is the user-facing label, the identifier is
 the statically typed source member, and an optional `key "..."` preserves the
 exact stable string stored in the host settings map:
@@ -1203,14 +1203,14 @@ split {
 }
 ```
 
-Consecutive `///` documentation comments become the setting tooltip. The
+Consecutive [`///`] documentation comments become the setting tooltip. The
 legacy comma-separated tooltip string is deliberately not accepted. Boolean
-settings are `bool`; a `choice` is the source enum named by its variants. One
+settings are [`bool`]; a `choice` is the source enum named by its variants. One
 choice entry must carry `default`. Quoted groups add visual hierarchy only:
 they do not disable their children, so preserve an ASL parent checkbox by
 testing that boolean explicitly in the split condition.
 
-File selectors produce a `String` path and can declare extension globs, a
+File selectors produce a [`String`] path and can declare extension globs, a
 catch-all `_`, and MIME filters. They remain typed settings rather than direct
 filesystem access:
 
@@ -1238,7 +1238,7 @@ whileAttached {
 }
 ```
 
-`settings` and `oldSettings` are complete current and previous views refreshed
+[`settings`] and [`oldSettings`] are complete current and previous views refreshed
 once per update, so a comparison detects user changes without caching a second
 copy. Statically known values should use their typed members. When a data table
 selects among boolean keys, use `settings.enabled(key)`; use
@@ -1306,7 +1306,7 @@ Simulator port for registration and runtime evidence.
 
 ## Snapshot-dependent helper functions
 
-Ordinary helper functions may refer to `old` and `current` directly, just as a
+Ordinary helper functions may refer to [`old`] and [`current`] directly, just as a
 process-dependent helper may refer to `process`:
 
 ```splitscript
@@ -1325,8 +1325,8 @@ split {
 
 The compiler derives a state-snapshot requirement from the helper body and
 propagates it through every calling helper. Such functions are offered only in
-contexts where a complete pair of snapshots exists: `whileAttached` and the
-timer-decision actions. Calling one from `setup`, `onAttach`, `onDetach`, a
+contexts where a complete pair of snapshots exists: [`whileAttached`] and the
+timer-decision actions. Calling one from [`setup`], [`onAttach`], [`onDetach`], a
 state source, or a state filter produces a focused diagnostic. This keeps the
 concise ASL helper shape without exposing default-initialized or stale state.
 
@@ -1355,7 +1355,7 @@ The field accesses and calls infer `before` and `after` as the generated
 `StateSnapshot` type. They are ordinary read-only values, so the caller may
 choose which available snapshots represent each role and may forward them
 through more helpers. Passing snapshots removes the helper's implicit snapshot
-dependency; only evaluating `old` and `current` at the call site requires a
+dependency; only evaluating [`old`] and [`current`] at the call site requires a
 committed pair. Direct access remains the concise choice when a helper always
 means this tick's transition.
 
@@ -1366,15 +1366,15 @@ LiveSplit component invokes them at different boundaries:
 
 | ASL construct | Exact legacy timing | SplitScript direction |
 | --- | --- | --- |
-| `startup` | Once when the script is loaded, before process attachment | Put settings in `settings`, constant data in global initializers, and remaining process-independent statements in `setup`. |
-| `init` | Once for each found process, after one legacy state refresh; a failure retries attachment initialization | Put suspending discovery and layout selection in `onAttach`. Put synchronous work that consumes the first complete snapshot in `onStateReady`. |
-| `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put ordinary per-tick work in `whileAttached`. An explicit `return false` preserves the legacy control result exactly. |
-| `exit` | When the attached process exits | Use `onDetach`. It runs exactly once for a real process closure and never at initial detached startup. |
-| `shutdown` | When the script is disabled, reloaded, dropped, or LiveSplit exits | No exact host callback exists yet; do not approximate it with `onDetach`. |
-| `timer.OnStart`, `timer.OnSplit`, `timer.OnReset` | LiveSplit timer events, which may be raised independently of this script's decision blocks | Reconstruct only simple observable transitions in `whileAttached`. Exact lossless events require the planned host contract. |
+| `startup` | Once when the script is loaded, before process attachment | Put settings in [`settings`], constant data in global initializers, and remaining process-independent statements in [`setup`]. |
+| `init` | Once for each found process, after one legacy state refresh; a failure retries attachment initialization | Put suspending discovery and layout selection in [`onAttach`]. Put synchronous work that consumes the first complete snapshot in [`onStateReady`]. |
+| `update` | After each refresh and before all timer decisions; `false` skips the remaining decisions for that tick | Put ordinary per-tick work in [`whileAttached`]. An explicit `return false` preserves the legacy control result exactly. |
+| `exit` | When the attached process exits | Use [`onDetach`]. It runs exactly once for a real process closure and never at initial detached startup. |
+| `shutdown` | When the script is disabled, reloaded, dropped, or LiveSplit exits | No exact host callback exists yet; do not approximate it with [`onDetach`]. |
+| `timer.OnStart`, `timer.OnSplit`, `timer.OnReset` | LiveSplit timer events, which may be raised independently of this script's decision blocks | Reconstruct only simple observable transitions in [`whileAttached`]. Exact lossless events require the planned host contract. |
 
-For example, process-independent ASL startup statements belong in `setup`, not
-`onAttach`:
+For example, process-independent ASL startup statements belong in [`setup`], not
+[`onAttach`]:
 
 ```splitscript
 # state "game.exe" {}
@@ -1383,14 +1383,14 @@ setup {
 }
 ```
 
-`setup` runs at the beginning of the module's first interruptible host update,
-after settings are available, but cannot use `process`, `gba`, `current`,
-`old`, `await`, or `retry`. A debug-watch replacement loads a new module and
+[`setup`] runs at the beginning of the module's first interruptible host update,
+after settings are available, but cannot use `process`, `gba`, [`current`],
+[`old`], [`await`], or [`retry`]. A debug-watch replacement loads a new module and
 therefore runs it again on that module's first update.
 
 Legacy `init` combines two boundaries that SplitScript keeps explicit. Use
-`onAttach` for discovery that may suspend and for layout selection. Use
-`onStateReady` for synchronous initialization that needs polled state:
+[`onAttach`] for discovery that may suspend and for layout selection. Use
+[`onStateReady`] for synchronous initialization that needs polled state:
 
 ```splitscript
 # state "game.exe" {
@@ -1409,12 +1409,12 @@ onStateReady {
 }
 ```
 
-`onStateReady` runs once per attachment only after every field in the first
-snapshot was read and accepted. `old` and `current` are both that snapshot, so
+[`onStateReady`] runs once per attachment only after every field in the first
+snapshot was read and accepted. [`old`] and [`current`] are both that snapshot, so
 initialization cannot look like a transition from default values. It cannot
-suspend. `whileAttached` and timer-decision actions begin on the next update.
+suspend. [`whileAttached`] and timer-decision actions begin on the next update.
 
-Legacy `update { return false; }` maps directly to `whileAttached`. The state
+Legacy `update { return false; }` maps directly to [`whileAttached`]. The state
 snapshot has already refreshed, but the remaining timer decisions are skipped
 for that update:
 
@@ -1430,8 +1430,8 @@ whileAttached {
 }
 ```
 
-Falling through, a bare `return`, or `return true` continues to `start`,
-`isLoading`, `gameTime`, `reset`, and `split` as applicable. This control result
+Falling through, a bare [`return`], or `return true` continues to [`start`],
+[`isLoading`], [`gameTime`], [`reset`], and [`split`] as applicable. This control result
 does not reject or roll back the refreshed snapshot.
 
 ASL `refreshRate` is a frequency. Migrate a stable attached cadence to the
@@ -1445,17 +1445,17 @@ tickRate {
 ```
 
 SplitScript defaults to 120 Hz while attached and 1 Hz while detached. It
-applies the attached rate before `onAttach` begins, which is important when
+applies the attached rate before [`onAttach`] begins, which is important when
 module or signature discovery suspends across updates, and restores the
-detached rate before `onDetach`. Add `detached: value` only when the 1 Hz
-default is unsuitable. Use `setTickRate` only when the rate must change
+detached rate before [`onDetach`]. Add `detached: value` only when the 1 Hz
+default is unsuitable. Use [`setTickRate`] only when the rate must change
 dynamically within one attachment; the next lifecycle transition reapplies the
 declaration.
 
 ## Process-exit game-time cleanup
 
 ASL commonly pauses game time in `exit`. Map that cleanup directly to
-`onDetach`:
+[`onDetach`]:
 
 ```splitscript
 # state "game.exe" {}
@@ -1466,10 +1466,10 @@ onDetach {
 
 The compiler invokes this block once after clearing the closed handle, provider
 state, selected layout, and pending process-lifetime continuations. Neither
-`process` nor state snapshots are available in `onDetach`: a process may close
+`process` nor state snapshots are available in [`onDetach`]: a process may close
 before attachment initialization or the
 first state poll completes.
 
-Use `isLoading` for ordinary load removal. `timer.pauseGameTime()` and
-`timer.resumeGameTime()` are explicit lifecycle tools, not a replacement for
+Use [`isLoading`] for ordinary load removal. [`timer.pauseGameTime()`] and
+[`timer.resumeGameTime()`] are explicit lifecycle tools, not a replacement for
 that declarative action.

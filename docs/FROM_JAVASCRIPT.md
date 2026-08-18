@@ -7,8 +7,8 @@ memory remains explicit enough to preserve exact layouts.
 
 ## One declaration style, static types
 
-Use `let` for mutable locals and globals and `fn` for functions. There is no
-`const`/`let` split, no `var`, and no implicit coercion. Typed `==` and `!=`
+Use [`let`] for mutable locals and globals and [`fn`] for functions. There is no
+`const`/[`let`] split, no `var`, and no implicit coercion. Typed [`==`] and [`!=`]
 replace `===` and `!==`; logical and bitwise operators remain distinct.
 
 ```splitscript
@@ -30,8 +30,8 @@ followed by the formatted score.
 ## Numbers describe memory
 
 Numbers are not all one floating-point type. SplitScript has signed and
-unsigned 8-, 16-, 32-, and 64-bit integers plus `f32` and `f64`. Unsuffixed
-integer and floating-point literals normally default to `i32` and `f64`, but
+unsigned 8-, 16-, 32-, and 64-bit integers plus [`f32`] and [`f64`]. Unsuffixed
+integer and floating-point literals normally default to [`i32`] and [`f64`], but
 memory reads require an unambiguous layout.
 
 ```splitscript
@@ -45,14 +45,14 @@ split {
 }
 ```
 
-Use `as` for deliberate numeric casts. Narrow integer arithmetic wraps to the
+Use [`as`] for deliberate numeric casts. Narrow integer arithmetic wraps to the
 declared width, so addresses, masks, and counters keep their intended shape.
 
 ## None, options, and errors
 
-`None` replaces `null` for absence. `T?` means an optional `T`; `T!` means a
+[`None`] replaces `null` for absence. [`T?`] means an optional `T`; [`T!`] means a
 `T` or an error. Plain values assign directly to their present/success cases.
-Match with `Some(value)`/`None` or `Ok(value)`/`Err(message)` when both states
+Match with `Some(value)`/[`None`] or `Ok(value)`/`Err(message)` when both states
 matter.
 
 ```splitscript
@@ -69,14 +69,14 @@ print(optionalScore(None))
 # }
 ```
 
-Recover a `T!` with `else fallback`, propagate it from another `T!` function
-with postfix `?`, or use `match`. Errors are explicit values rather than thrown
+Recover a [`T!`] with `else fallback`, propagate it from another [`T!`] function
+with postfix [`?`], or use [`match`]. Errors are explicit values rather than thrown
 JavaScript exceptions.
 
 ## Arrays, records, and control flow
 
-`[T]` is a growable array and `[T; N]` is an exact fixed-length array. Records
-replace object literals when a stable named shape matters. `if` and `match`
+[`[T]`] is a growable array and [`[T; N]`] is an exact fixed-length array. Records
+replace object literals when a stable named shape matters. [`if`] and [`match`]
 are expressions, and `for value in values` plus `while condition` provide
 loops without callback allocation.
 
@@ -98,10 +98,10 @@ print(containsLevel([1u32, 3u32, 7u32], 3u32))
 
 ## Attachment-aware async work
 
-One `state` declaration owns process attachment. `onAttach` may use `await`
-without an `async` keyword; waiting operations yield back to the runtime and
-are cancelled when that process closes. Poll memory in `state`, then use
-`old` and `current` in the timer actions.
+One [`state`] declaration owns process attachment. [`onAttach`] may use [`await`]
+without an [`async`] keyword; waiting operations yield back to the runtime and
+are cancelled when that process closes. Poll memory in [`state`], then use
+[`old`] and [`current`] in the timer actions.
 
 ```splitscript
 state "game.exe" {}
@@ -112,5 +112,5 @@ onAttach {
 }
 ```
 
-Use `settings` declarations rather than dynamic JavaScript objects. They
+Use [`settings`] declarations rather than dynamic JavaScript objects. They
 produce typed members, stable host keys, and documentation tooltips.

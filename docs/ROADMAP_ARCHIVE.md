@@ -5,9 +5,11 @@
 - Made language keywords in compiler-checked examples navigate through the
   same definition identities already used by types, methods, and fields.
 - Added ambiguity-safe rustdoc-style intra-doc links for explanatory prose,
-  with exact language and standard-library resolution relative to each page.
+  then applied them throughout the standard library, language catalog,
+  migration catalog, and bundled author guides.
 - Kept compact hover and completion text readable by presenting intra-doc
-  references as ordinary code spans outside the full documentation viewer.
+  references as ordinary code spans outside the full documentation viewer,
+  and made graph validation reject future known-symbol prose that is not linked.
 
 ## 2026-08-18: staged embedded compilation
 

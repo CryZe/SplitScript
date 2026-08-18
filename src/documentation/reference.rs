@@ -19,7 +19,9 @@ pub struct DocumentationIndexEntry {
     pub uri: String,
     pub title: String,
     pub kind: &'static str,
-    pub summary: &'static str,
+    pub summary: String,
+    #[serde(skip)]
+    pub(crate) raw_summary: &'static str,
     pub signature: Option<String>,
 }
 
@@ -93,14 +95,18 @@ impl DocumentationReference {
                 uri: "/language/index.md".to_owned(),
                 title: "Language".to_owned(),
                 kind: "guide",
-                summary: "Syntax, declarations, lifecycle blocks, and contextual values.",
+                summary: "Syntax, declarations, lifecycle blocks, and contextual values."
+                    .to_owned(),
+                raw_summary: "Syntax, declarations, lifecycle blocks, and contextual values.",
                 signature: None,
             },
             DocumentationIndexEntry {
                 uri: "/migration/index.md".to_owned(),
                 title: "Migration".to_owned(),
                 kind: "guide",
-                summary: "Guidance from ASL and familiar languages to canonical SplitScript.",
+                summary: "Guidance from ASL and familiar languages to canonical SplitScript."
+                    .to_owned(),
+                raw_summary: "Guidance from ASL and familiar languages to canonical SplitScript.",
                 signature: None,
             },
         ];
@@ -113,7 +119,8 @@ impl DocumentationReference {
                     uri: language_item_uri(item.id),
                     title: item.name.to_owned(),
                     kind: language_item_kind_label(item.kind),
-                    summary: item.documentation.summary,
+                    summary: compact_prose(item.documentation.summary),
+                    raw_summary: item.documentation.summary,
                     signature: Some(item.form.to_owned()),
                 }),
         );
@@ -126,7 +133,8 @@ impl DocumentationReference {
                     uri: migration_concept_uri(concept.id),
                     title: concept.name.to_owned(),
                     kind: "migration concept",
-                    summary: concept.summary,
+                    summary: compact_prose(concept.summary),
+                    raw_summary: concept.summary,
                     signature: Some(concept.id.as_str().to_owned()),
                 }),
         );
@@ -140,7 +148,8 @@ impl DocumentationReference {
                     uri: symbol_uri(StdlibSymbolId::Namespace(namespace.id), &self.library),
                     title: namespace.path.join("."),
                     kind: "namespace",
-                    summary: namespace.documentation.summary,
+                    summary: compact_prose(namespace.documentation.summary),
+                    raw_summary: namespace.documentation.summary,
                     signature: None,
                 }),
         );
@@ -150,7 +159,8 @@ impl DocumentationReference {
                 uri: core_type_uri(ty.id, &self.library),
                 title: ty.name.to_owned(),
                 kind: "built-in type",
-                summary: language.documentation.summary,
+                summary: compact_prose(language.documentation.summary),
+                raw_summary: language.documentation.summary,
                 signature: Some(ty.name.to_owned()),
             })
         }));
@@ -159,7 +169,8 @@ impl DocumentationReference {
                 uri: symbol_uri(StdlibSymbolId::Capability(capability.id), &self.library),
                 title: capability.name.to_owned(),
                 kind: "capability",
-                summary: capability.documentation.summary,
+                summary: compact_prose(capability.documentation.summary),
+                raw_summary: capability.documentation.summary,
                 signature: Some(format!("capability {}", capability.name)),
             }
         }));
@@ -172,7 +183,8 @@ impl DocumentationReference {
                 ),
                 title: signature.clone(),
                 kind: "type constructor",
-                summary: constructor.documentation.summary,
+                summary: compact_prose(constructor.documentation.summary),
+                raw_summary: constructor.documentation.summary,
                 signature: Some(signature),
             }
         }));
@@ -188,7 +200,8 @@ impl DocumentationReference {
                         StdlibTypeKind::Struct => "record",
                         StdlibTypeKind::Enum => "enum",
                     },
-                    summary: ty.documentation.summary,
+                    summary: compact_prose(ty.documentation.summary),
+                    raw_summary: ty.documentation.summary,
                     signature: Some(render_type_declaration(ty)),
                 }),
         );
@@ -203,7 +216,8 @@ impl DocumentationReference {
                         uri: symbol_uri(StdlibSymbolId::Field(field.id), &self.library),
                         title: format!("{}.{}", owner.name, field.name),
                         kind: "field",
-                        summary: field.documentation.summary,
+                        summary: compact_prose(field.documentation.summary),
+                        raw_summary: field.documentation.summary,
                         signature: Some(format!(
                             "{}.{}: {}",
                             owner.name,
@@ -219,7 +233,8 @@ impl DocumentationReference {
                 uri: symbol_uri(StdlibSymbolId::Variant(variant.id), &self.library),
                 title: format!("{}.{}", owner.name, variant.name),
                 kind: "enum variant",
-                summary: variant.documentation.summary,
+                summary: compact_prose(variant.documentation.summary),
+                raw_summary: variant.documentation.summary,
                 signature: Some(format!("{}.{}", owner.name, variant.name)),
             }
         }));
@@ -228,7 +243,8 @@ impl DocumentationReference {
                 uri: symbol_uri(StdlibSymbolId::StateProvider(provider.id), &self.library),
                 title: provider.name.to_owned(),
                 kind: "state provider",
-                summary: provider.documentation.summary,
+                summary: compact_prose(provider.documentation.summary),
+                raw_summary: provider.documentation.summary,
                 signature: Some(format!("state {}", provider.name)),
             }
         }));
@@ -247,7 +263,8 @@ impl DocumentationReference {
                             ItemKind::Method { .. } => "method",
                         }
                     },
-                    summary: item.documentation.summary,
+                    summary: compact_prose(item.documentation.summary),
+                    raw_summary: item.documentation.summary,
                     signature: Some(self.library.render_signature(item.id)),
                 }),
         );
@@ -314,7 +331,8 @@ impl DocumentationReference {
             return Some(self.migration_index_page());
         }
 
-        if let Some(page) = bundled::page(uri) {
+        if let Some(mut page) = bundled::page(uri) {
+            page.markdown = intra_doc::render_links(&page.markdown, uri, &self.library);
             return Some(page);
         }
 
@@ -813,7 +831,7 @@ impl DocumentationReference {
                     "\n| [{}]({}) | {} |",
                     escape_markdown_table_cell(item.name),
                     relative_document_link(uri, &language_item_uri(item.id)),
-                    escape_markdown_table_cell(item.documentation.summary),
+                    table_prose(item.documentation.summary, uri, &self.library),
                 ));
             }
         }
@@ -856,7 +874,7 @@ impl DocumentationReference {
                     "\n| [{}]({}) | {} |",
                     escape_markdown_table_cell(related.name),
                     relative_document_link(&uri, &language_item_uri(related.id)),
-                    escape_markdown_table_cell(related.documentation.summary),
+                    table_prose(related.documentation.summary, &uri, &self.library),
                 ));
             }
         }
@@ -882,7 +900,7 @@ impl DocumentationReference {
                 "\n| [{}]({}) | {} |",
                 escape_markdown_table_cell(concept.name),
                 relative_document_link(uri, &migration_concept_uri(concept.id)),
-                escape_markdown_table_cell(concept.summary),
+                table_prose(concept.summary, uri, &self.library),
             ));
         }
         DocumentationPage {
@@ -904,6 +922,7 @@ impl DocumentationReference {
             .map(|source| source.name())
             .collect::<Vec<_>>()
             .join(", ");
+        let summary = intra_doc::render_links(concept.summary, &uri, &self.library);
         let mut markdown = format!(
             "{}\n\n# {}\n\n_Migration from {sources}_\n\n**Status:** {}\n\n{}",
             reference_breadcrumb(
@@ -913,7 +932,7 @@ impl DocumentationReference {
             ),
             concept.name,
             concept.support.label(),
-            concept.summary,
+            summary,
         );
         if !concept.targets.is_empty() {
             markdown.push_str("\n\n## Canonical SplitScript\n");
@@ -1050,7 +1069,7 @@ impl DocumentationReference {
                     "\n| [{}]({}) | {} |",
                     escape_markdown_table_cell(&entry.title),
                     relative_document_link("/index.md", &entry.uri),
-                    escape_markdown_table_cell(entry.summary)
+                    table_prose(entry.raw_summary, "/index.md", &self.library)
                 ));
             }
         }
@@ -1336,7 +1355,7 @@ fn member_markdown(
     });
     (
         member_link,
-        escape_markdown_table_cell(member_summary(member, library)),
+        table_prose(member_summary(member, library), current_uri, library),
         available_through,
     )
 }
@@ -1363,6 +1382,14 @@ fn member_summary(member: DocumentationMember, library: &StandardLibrary) -> &'s
         StdlibSymbolId::Variant(id) => library.variant(id).documentation.summary,
         StdlibSymbolId::Item(id) => library.item(id).documentation.summary,
     }
+}
+
+fn table_prose(value: &str, current_uri: &str, library: &StandardLibrary) -> String {
+    escape_markdown_table_cell(&intra_doc::render_links(value, current_uri, library))
+}
+
+fn compact_prose(value: &str) -> String {
+    intra_doc::strip_links(value)
 }
 
 pub(super) fn append_reference_table_header(markdown: &mut String, columns: &[&str]) {
@@ -1683,6 +1710,12 @@ mod tests {
     fn reference_indexes_and_renders_all_standard_library_symbol_kinds() {
         let reference = DocumentationReference::default();
         let index = reference.index();
+        assert!(
+            index
+                .iter()
+                .all(|entry| !entry.summary.contains("[`") && !entry.summary.contains("`]")),
+            "searchable index summaries must not expose intra-doc authoring markup"
+        );
         for kind in [
             "namespace",
             "built-in type",
@@ -1715,6 +1748,15 @@ mod tests {
         assert!(
             page.markdown
                 .contains("[fromSeconds](methods/fromSeconds.md)")
+        );
+        let from_milliseconds = reference
+            .page("/stdlib/types/Duration/methods/fromMilliseconds.md")
+            .expect("Duration.fromMilliseconds has a page");
+        assert!(
+            from_milliseconds
+                .markdown
+                .contains("[`fromWholeMilliseconds`](fromWholeMilliseconds.md)"),
+            "standard-library prose should render navigable intra-doc references"
         );
         assert!(!page.markdown.contains("splitscript-docs:"));
     }
@@ -1851,6 +1893,12 @@ mod tests {
             .expect("the canonical porting guide is bundled");
         assert!(guide.markdown.contains("# Porting ASL to SplitScript"));
         assert!(guide.markdown.contains("## Legacy ASL lifecycle blocks"));
+        assert!(
+            guide
+                .markdown
+                .contains("[`onAttach`](../language/on-attach.md)"),
+            "bundled guide prose should render intra-doc references"
+        );
         assert!(!guide.markdown.contains("examples/"));
         assert!(!guide.markdown.contains("AXIOM_VERGE_PORT.md"));
         assert!(

@@ -578,18 +578,28 @@ pub fn parse_recovering_named_with_context(
 
 /// Lowers parsed declarations into the inspectable pre-type-check HIR.
 pub fn lower(parsed: ParsedProgram) -> LoweredProgram {
+    lower_for_tooling(parsed).unwrap_or_else(|diagnostics| {
+        panic!(
+            "validated standard-library bodies must parse as ordinary SplitScript: {diagnostics:#?}"
+        )
+    })
+}
+
+/// Lowers a strictly parsed source while keeping compiler-owned augmentation
+/// failures as data for resilient editor queries.
+///
+/// Batch compilation calls [`lower`] and retains the invariant panic because
+/// generated standard-library source is compiler-owned. The editor database
+/// uses this boundary to fall back to recovered semantics rather than letting
+/// an internal augmentation failure terminate the language server.
+pub(crate) fn lower_for_tooling(parsed: ParsedProgram) -> Result<LoweredProgram, Vec<Diagnostic>> {
     let syntax = parsed.syntax;
     let mut compilation_syntax = syntax.clone();
     let mut resolution_diagnostics = parsed.resolution_diagnostics;
     if let Some(augmented) = stdlib::augment_program_with_library_bodies(
         parsed.document.source(),
         &parsed.context.standard_library(),
-    )
-    .unwrap_or_else(|diagnostics| {
-        panic!(
-            "validated standard-library bodies must parse as ordinary SplitScript: {diagnostics:#?}"
-        )
-    }) {
+    )? {
         compilation_syntax = augmented;
     }
     let mut resolutions = resolution::ProgramResolutions::default();
@@ -599,7 +609,7 @@ pub fn lower(parsed: ParsedProgram) -> LoweredProgram {
         &mut resolutions,
     ));
     let hir = hir::DeclarationIndex::lower(&syntax);
-    LoweredProgram {
+    Ok(LoweredProgram {
         context: parsed.context,
         source_name: parsed.source_name,
         document: parsed.document,
@@ -609,7 +619,7 @@ pub fn lower(parsed: ParsedProgram) -> LoweredProgram {
         resolutions,
         syntax_diagnostics: Vec::new(),
         resolution_diagnostics,
-    }
+    })
 }
 
 /// Resolves and type-checks a parsed program without invoking the Wasm backend.

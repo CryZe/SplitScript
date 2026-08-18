@@ -218,14 +218,23 @@ impl CompilerDatabase {
                 Ok(recovered) => {
                     let syntax = recovered.syntax().clone();
                     let mut compilation_syntax = syntax.clone();
-                    if recovered.diagnostics().is_empty()
-                        && let Some(augmented) = crate::stdlib::augment_program_with_library_bodies(
-                            recovered.source_document().source(),
-                            &recovered.context().standard_library(),
-                        )
-                        .expect("validated standard-library bodies parse in valid user source")
-                    {
-                        compilation_syntax = augmented;
+                    if recovered.diagnostics().is_empty() {
+                        // Editor recovery must remain available even if the
+                        // compiler-owned augmentation boundary itself fails.
+                        // Those generated diagnostics cannot be repaired in
+                        // the user's document, and strict compilation still
+                        // enforces the invariant in `lower`. Keeping the
+                        // already-recovered source syntax here lets lexical and
+                        // partial semantic tooling continue instead of taking
+                        // down every LSP feature through an `expect` panic.
+                        if let Ok(Some(augmented)) =
+                            crate::stdlib::augment_program_with_library_bodies(
+                                recovered.source_document().source(),
+                                &recovered.context().standard_library(),
+                            )
+                        {
+                            compilation_syntax = augmented;
+                        }
                     }
                     let mut resolution_diagnostics = recovered.resolution_diagnostics().to_vec();
                     let mut resolutions = crate::resolution::ProgramResolutions::default();
@@ -255,7 +264,9 @@ impl CompilerDatabase {
     pub fn lower(&mut self) -> QueryResult<LoweredProgram> {
         if self.cache.lowered.is_none() {
             self.cache.lowered = Some(match self.parse() {
-                Ok(parsed) => Ok(Arc::new(crate::lower((*parsed).clone()))),
+                Ok(parsed) => crate::lower_for_tooling((*parsed).clone())
+                    .map(Arc::new)
+                    .map_err(Arc::from),
                 Err(errors) => Err(errors),
             });
         }

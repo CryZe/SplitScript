@@ -34,6 +34,115 @@ General rules:
 - Remove completed work from this file during the next roadmap update and
   summarize the milestone in the archive.
 
+## Now — make docs-first ASL porting semantically reliable
+
+The fresh docs-only campaign at compiler revision `87d3650` produced 75
+compiling `.split` files across 39 entries marked ported and 34 marked
+ported-limited, plus 20 blocked and 3 source-missing entries. A clean compile
+did not establish a faithful port: every native output used an extensionless
+Windows process name, none used named state layouts, and several reports
+declared existing APIs missing. Treat this campaign as discoverability and
+semantic-review evidence, not as a conformance corpus.
+
+### Correct false gaps before adding adjacent features
+
+- [ ] Audit every campaign output against its ASL source and classify each
+  difference as preserved behavior, an intentional policy choice, an existing
+  but undiscovered SplitScript facility, a genuine language/library gap, or a
+  host-runtime gap. Do not accept `PORTED` from compiler success alone. Start
+  with the high-risk silent mismatches already found: all native state names
+  omit the `.exe` required by the current Windows host; no output uses a named
+  `layout`; no output calls the existing `timer` namespace; `refreshRate` was
+  dropped instead of using `tickRate`; `ulong` was incorrectly narrowed to
+  `i64`; fixed/growable array operations were reported missing; and TUNIC
+  manually decodes a managed string instead of using
+  `process.readManagedString`.
+- [ ] Re-review entries currently marked blocked before designing host work.
+  `timer.state()`, `timer.currentSplitIndex()`, game-time pause/resume,
+  `Module.fileVersion()` / `productVersion()`, process-name arrays, named
+  layouts, settings families, growable `[T]`, and Mono static-singleton paths
+  already cover parts of AoE2DE, COTM, Castle of Illusion, Borderlands, TUNIC,
+  Circuit Superstars, and other reported blockers. Preserve the residual host
+  gap only after removing these false premises.
+- [ ] Promote a small corrected subset to reviewed fixtures: one exact-name
+  native process, one process-name array, one multi-version named layout, one
+  timer-state/split-index script, one `tickRate` script, one managed-string or
+  Mono singleton path, and one genuinely unsupported host case. Require an
+  explicit behavior ledger and live runtime test where the game is available.
+
+### Make the existing model discoverable from `splitc docs`
+
+- [ ] Put the current attachment-name contract in the generated `state`,
+  Native-provider, and ASL-porting pages: state strings are exact host process
+  identities, and a Windows executable candidate currently includes `.exe`.
+  Show a process-name array next to the single-name form and explain that it
+  handles alternate executable names in one autosplitter. Keep the separate
+  cross-platform identity design deferred; documentation must describe the
+  runtime that exists today without implying extension inference.
+- [ ] Front-load a complete multi-version example in the generated `state` and
+  `layout` documentation and the ASL guide. It must show two named layouts,
+  attach-time evidence, returning `StateLayout.*`, the common field interface,
+  layout-specific refinement, and the unsupported-build
+  `await process.closed()` path. The fact that none of the campaign outputs used
+  layouts despite many multi-state sources proves that the current isolated
+  `layout Name { ... }` example is insufficient.
+- [ ] Add a concise ASL-concept index/checklist near the beginning of the
+  porting guide. Link exact legacy concepts to canonical pages for versioned
+  states, multiple process names, timer phase and split index, exit-time game
+  time cleanup, `refreshRate`, numeric type spellings, module/file versions,
+  settings families versus dynamic lookup, array length/growth, managed
+  strings, and Unity static-singleton/object paths. Keep the detailed recipes,
+  but make them reachable without reading the guide linearly.
+- [ ] Design CLI documentation discovery before implementing it. Decide whether
+  `splitc docs QUERY` should fall back to ranked search or whether an explicit
+  `splitc docs search QUERY` is clearer; either way, reuse the compiler-owned
+  documentation index and expose the same symbol, summary, kind, migration,
+  and foreign-spelling search used by the editor. Queries such as
+  `timer.CurrentPhase`, `TimeSpan.FromMilliseconds`, `modules.First`,
+  `refreshRate`, `multiple processes`, and `.exe` must lead to the canonical
+  topic instead of requiring the user to know its exact SplitScript name.
+- [ ] Give `splitc docs` a real terminal renderer instead of printing the
+  Markdown/HTML representation used by the editor preview. Render headings,
+  paragraphs, lists, borderless aligned tables, signatures, and examples as
+  readable terminal text; collapse intra-document links to their visible labels
+  because virtual reference paths are not useful in a terminal. Apply ANSI
+  styling and SplitScript code highlighting only when stdout is a TTY, using
+  the CLI's shared automatic color policy; redirected output must be stable
+  plain text with no escape sequences or HTML tags. Keep this as another
+  renderer over the compiler-owned documentation graph rather than parsing or
+  maintaining a second documentation source.
+
+### Close feedback loops without papering over language design
+
+- [ ] Decide how a fallible state expression composes internal postfix `?` with
+  a fallible final call. The natural expression
+  `process.read<T>(process.follow(base, path)?)` currently reports that a state
+  expression using `?` must not produce another result, forcing a helper
+  function. Evaluate flattening the final `T!` into the state-field failure
+  boundary, explicit propagation on both operations, and the effect on nested
+  calls before changing the checker. Add parser, inference, diagnostic, and
+  runtime-retention fixtures for the chosen rule.
+- [ ] Review the `Duration` constructor surface with integer and floating-point
+  inputs before adding migration-only guidance. Decide whether
+  `fromMilliseconds` and the other unit constructors should accept a numeric
+  capability while preserving exact integer conversion, whether overload-like
+  source declarations are needed, or whether distinct whole/fractional names
+  remain clearer. Include large signed values, inference, and precision in the
+  decision; do not merely redirect integral arguments after type checking.
+- [ ] Design semantic lints from failures that compiled cleanly. Evaluate an
+  unused-setting warning (the campaign declared `allSkullsMode` but read an
+  unrelated always-false global), a suggestion from literal
+  `settings.enabled("key")` to the typed `settings.name` member, and checks for
+  declared settings or state fields that never influence reachable behavior.
+  Account for settings families, host-visible declarations, dynamic keys, and
+  intentional display-only state before enabling warnings by default.
+- [ ] Evaluate ordinary runtime ranges from the repeated bounded-index ports.
+  Compare `for index in 0..count` with a source-defined range value and the
+  existing `while` loop; keep settings-family ranges a compile-time DSL. Do not
+  force index arrays merely to express iteration, but do not add a range concept
+  until its inference, endpoint types, overflow, and inclusive/exclusive
+  semantics are settled.
+
 ## P0 — unblock the next representative native ports
 
 ### Lifecycle semantics exposed by legacy ASL
@@ -88,6 +197,13 @@ General rules:
   document that headings are visual and parent boolean settings must gate child
   behavior in source; do not let a compiling hierarchy imply behavior the host
   does not provide.
+- [ ] Distinguish compile-time settings generation from genuinely runtime-named
+  settings in port reviews. Bounded level and boss tables should use settings
+  families, and statically known entries should use typed `settings.name`
+  access. Consider runtime registration only for data discovered from the game
+  itself, such as A Short Hike's dynamic tag dictionary, and specify
+  persistence, ordering, duplicate keys, live UI updates, and typed value access
+  before proposing a host API.
 - [ ] Continue `[T]` as the growable ordered sequence instead of adding a
   separate `List<T>` type. Stable wrapper identity, replaceable capacity-backed
   storage, logical length, amortized `push`, and capacity-preserving `clear`
@@ -128,12 +244,22 @@ General rules:
 
 ### Engine and emulator providers
 
-- [ ] Extend Unity Mono beyond the maintained ARTIFICIAL static-field and Himno
-  static-singleton/object-path cases only when another representative port
-  proves the next surface: managed strings, typed cross-class object chains,
-  scene-manager access, V1 layouts, 32-bit PE, or ELF/Mach-O discovery. Keep
-  each target family explicit and source-defined; do not add reflection-shaped
-  compiler exceptions or silently guess offsets.
+- [ ] Treat Unity scene snapshots as a now-proven provider gap. TUNIC,
+  Anemoiapolis, Building 71, Cannibal Abduction, Chop Goblins, Assemble with
+  Care, and Beeny need active/loaded scene names or indices and well-defined
+  previous/current/loading semantics. First document and exercise the existing
+  ARTIFICIAL static-field, Himno static-singleton/`MemoryPath`, and
+  `readManagedString` surface so those are not mistaken for missing instance or
+  string support; then design one typed scene API rather than reproducing
+  `asl-help` callbacks.
+- [ ] Extend Unity Mono managed-object support from corpus-proven residual
+  needs: typed cross-class object paths, managed list/dictionary traversal, and
+  dynamic typed tag values for Alba, A Short Hike, AER, Bzzzt, Circuit
+  Superstars, and Assemble with Care. Separate stable singleton/field chains
+  already expressible through `staticFieldPath` and `field` from collection
+  enumeration that genuinely needs new library/runtime support. Keep target
+  families explicit (V1, PE32, ELF, Mach-O) and source-defined; do not add
+  reflection-shaped compiler exceptions or silently guess offsets.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
 - [ ] Add the next emulator provider from a real port—such as Dolphin, PCSX2,
@@ -316,17 +442,25 @@ remaining work is product hardening and distribution.
   upstream host contract before any event export may be implemented. R2 in
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md) is the canonical
   runtime-side requirement.
-- [ ] Design a typed least-privilege timer/run API for timing method, category,
-  attempt metadata, current segment/history, real time, game time, and run
+- [ ] Design the remaining typed least-privilege timer/run API without
+  redeclaring facilities that already exist. `timer.state()`, optional
+  `currentSplitIndex()`, segment history, skip/undo, and explicit game-time
+  pause/resume are available now and first need better porting discovery. The
+  residual host surface is timing method, category/game/attempt metadata,
+  current segment name and run count, timer real/game-time snapshots, and run
   offset. Separate read-only snapshots from mutations, distinguish the
   monotonic `Instant` clock from timer real time, and add ABI support only where
-  LiveSplit can expose stable semantics. Use the repeated `timer.CurrentTime`,
-  `timer.CurrentSplit.Name`, `timer.Run.Offset`, and timing-method ports as the
-  evidence ledger; coordinate the host side through R5 in
+  the host can expose stable semantics. Use the repeated `timer.CurrentTime`,
+  `timer.CurrentSplit.Name`, `timer.Run.Offset`, category, and timing-method
+  ports as the evidence ledger; coordinate the host side through R5 in
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md).
 - [ ] Add structured async discovery combinators only as ports require them:
-  timeout, race/select, bounded concurrent scans, and cancellation scopes. Do
-  not expose threads or unconstrained background tasks.
+  timeout, race/select, bounded concurrent scans, and cancellation scopes.
+  Hades provides an immediate small case: wait for the first of several known
+  module names without an infinite hand-written polling loop. Decide whether a
+  source-defined `process.moduleAny(names)` is sufficient before introducing
+  general future selection. Do not expose threads or unconstrained background
+  tasks.
 - [ ] Broaden suspending control flow incrementally from real ports and add a
   host-executed conformance fixture for each new shape.
 - [ ] Port one callback-heavy splitter such as Axiom Verge before designing
@@ -356,8 +490,11 @@ remaining work is product hardening and distribution.
   (the current single-receiver capability graph has no associated types), then
   make its declarations, documentation, completion, and lowering catalog
   driven rather than disguising the operation as a callable method.
-- [ ] Explore Unity managed strings as a readable wrapper/derived layout while
-  preserving their pointer chasing, length validation, and UTF-16 conversion.
+- [ ] Explore Unity managed strings as a readable wrapper/derived layout only
+  beyond the existing `process.readManagedString(address, maxUtf16Units)`
+  helper. Preserve pointer chasing, length validation, and UTF-16 conversion,
+  and make the wrapper worthwhile through typed object-path composition rather
+  than adding another spelling for the same read.
 - [ ] Add structural anonymous records only after named records prove materially
   noisy. Decide explicitly whether anonymous records are memory-readable.
 
@@ -399,13 +536,14 @@ remaining work is product hardening and distribution.
   default value. Add focused ambiguity/unsupported-type diagnostics, hover,
   completion, formatting, and source-defined capability documentation when the
   feature is implemented.
-- [ ] Settle cross-platform process-name semantics with the host runtime before
-  warning about extensionless native `state` names. ASL commonly omits
-  Windows' `.exe`, but extensionless names are valid on Linux and macOS, so a
-  compiler warning would create false positives without a target-aware
-  contract. Decide whether the runtime should match executable identity
-  portably, expose target-specific aliases, or retain exact names; only then
-  add documentation, diagnostics, and attachment fixtures for all three hosts.
+- [ ] After the immediate exact-name documentation work, settle cross-platform
+  process identity with the host runtime before warning about extensionless
+  native `state` names. ASL commonly omits Windows' `.exe`, but extensionless
+  names are valid on Linux and macOS, so a compiler warning would create false
+  positives without target knowledge. Decide whether the language should state
+  a target/platform policy, the runtime should normalize executable identity,
+  or declarations should provide target-specific candidates. Only then add a
+  warning or migration rewrite, with attachment fixtures on all three hosts.
 - [ ] Specialize physical aggregate layouts around zero-sized `None` only when
   measured size or allocation pressure justifies it. Records may omit unit
   fields; `None?` still needs distinct empty/present states; `None!` retains
@@ -430,6 +568,12 @@ remaining work is product hardening and distribution.
 
 - [ ] Treat hand-reviewed ports as authoritative migration evidence. Generated
   candidates estimate frequency but do not prove semantic parity.
+- [ ] Treat compiler-clean generated ports as hypotheses rather than successful
+  ports. Audit attachment identity, selected builds, lifecycle/timer behavior,
+  settings reachability, integer signedness/width, failure behavior, and omitted
+  source branches even when no diagnostic fired. Record both false blockers
+  (existing features reported missing) and false successes (compiling scripts
+  that cannot attach or silently disable behavior).
 - [ ] Keep a structured record per port: source, target build, preserved
   behavior, omissions, blockers, workaround quality, compiler revision, and
   runtime status. Distinguish complete, variant-limited, and behavior-limited
@@ -459,22 +603,25 @@ remaining work is product hardening and distribution.
 
 ## Recommended execution order
 
-1. Promote the Neon White effective-state rewrite only through an independently
-   reviewed port and deterministic runtime fixture.
-2. Expand the compiler-checked porting cookbook and concise source-to-target
-   capability table from maintained ports; keep diagnostics linked to those
-   canonical topics.
-3. Keep irregular nested static settings explicit until another maintained
-   port demonstrates a small reusable table abstraction; select the next
-   concrete provider or host-contract fixture instead of inventing a settings
-   metaprogramming language.
-4. Harden and publish the bundled VSIX and native releases, then evaluate the
+1. Correct the current attachment-name, process-array, named-layout, timer,
+   tick-rate, numeric, array, managed-string, and Unity object-path
+   discoverability failures in compiler-owned documentation.
+2. Choose the CLI documentation-search interaction and terminal renderer, then
+   make foreign ASL/C# spellings and conceptual queries reach the same canonical
+   graph as VS Code without printing Markdown, HTML, or virtual intra-doc links.
+3. Semantically audit the fresh campaign and promote a small corrected,
+   runtime-tested subset instead of treating all compiler-clean outputs as a
+   corpus.
+4. Review the state-field `?` boundary and numeric `Duration` constructor
+   ergonomics with the user before implementing either design; then add the
+   chosen diagnostics, documentation, and tests together.
+5. Reclassify blocked ports after subtracting existing features, then design
+   the proven Unity scene/managed-collection and remaining timer host surfaces.
+6. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench.
-5. Add Unity Mono and the next emulator/engine provider from representative
-   ports.
-6. Resume source-debugging work only after the JavaScript debugger, native
+7. Resume source-debugging work only after the JavaScript debugger, native
    Wasmtime/DWARF path, and typed-IR interpreter have been compared against the
    same GC and async fixtures.
-7. Keep physical `None` aggregate specialization and sandbox-sensitive host
+8. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

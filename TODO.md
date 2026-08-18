@@ -101,7 +101,7 @@ semantic-review evidence, not as a conformance corpus.
   `timer.CurrentPhase`, `TimeSpan.FromMilliseconds`, `modules.First`,
   `refreshRate`, `multiple processes`, and `.exe` must lead to the canonical
   topic instead of requiring the user to know its exact SplitScript name.
-- [ ] Give `splitc docs` a real terminal renderer instead of printing the
+- [x] Give `splitc docs` a real terminal renderer instead of printing the
   Markdown/HTML representation used by the editor preview. Render headings,
   paragraphs, lists, borderless aligned tables, signatures, and examples as
   readable terminal text; collapse intra-document links to their visible labels

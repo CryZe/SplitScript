@@ -35,6 +35,16 @@ pub(super) fn example(example: Example, current_uri: &str, library: &StandardLib
     render(example.source, &annotations)
 }
 
+/// Renders source as ordinary fenced Markdown for non-HTML consumers.
+///
+/// The editor reference deliberately uses semantic HTML so every token can be
+/// styled and linked. Native terminal frontends instead need the original
+/// source to remain a Markdown code block that a normal event parser can
+/// consume without understanding that editor-only HTML dialect.
+pub(super) fn fenced(source: &str) -> String {
+    format!("```splitscript\n{source}\n```")
+}
+
 fn semantic_example_annotations(
     example: Example,
     current_uri: &str,

@@ -2,6 +2,7 @@ use std::{
     env,
     ffi::OsString,
     fs,
+    io::IsTerminal as _,
     path::{Path, PathBuf},
     process::{self, ExitCode},
     thread,
@@ -12,6 +13,7 @@ use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use codespan_reporting::term::termcolor::{ColorChoice, StandardStream};
 
 mod cli_diagnostics;
+mod cli_documentation;
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(150);
 
@@ -324,12 +326,18 @@ fn main() -> ExitCode {
 }
 
 fn render_documentation(topic: Option<&str>) -> ExitCode {
-    let reference = splitscript::DocumentationReference::default();
+    let reference = splitscript::DocumentationReference::for_terminal();
     let requested = topic.unwrap_or("");
     if let Some(page) = reference.topic(requested) {
-        print!("{}", page.markdown);
-        if !page.markdown.ends_with('\n') {
-            println!();
+        let width = if std::io::stdout().is_terminal() {
+            textwrap::termwidth()
+        } else {
+            80
+        };
+        let writer = StandardStream::stdout(ColorChoice::Auto);
+        if let Err(error) = cli_documentation::emit(&mut writer.lock(), &page.markdown, width) {
+            eprintln!("splitc: could not render documentation: {error}");
+            return ExitCode::FAILURE;
         }
         return ExitCode::SUCCESS;
     }

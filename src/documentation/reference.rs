@@ -65,12 +65,29 @@ enum DocumentationMember {
 /// The reference deliberately returns Markdown rather than VS Code-specific
 /// HTML. Editors can render it with their native Markdown UI, expose it as
 /// plain read-only text, or transform the same pages for another frontend.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum CodeRendering {
+    #[default]
+    SemanticHtml,
+    FencedMarkdown,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DocumentationReference {
     library: StandardLibrary,
+    code_rendering: CodeRendering,
 }
 
 impl DocumentationReference {
+    /// Creates a reference whose code fragments remain ordinary fenced
+    /// Markdown for native text renderers.
+    pub fn for_terminal() -> Self {
+        Self {
+            library: StandardLibrary::new(),
+            code_rendering: CodeRendering::FencedMarkdown,
+        }
+    }
+
     /// Validates catalogs and every rendered page in the documentation graph.
     ///
     /// This checks the same graph consumed by native tools and editor clients,
@@ -600,15 +617,20 @@ impl DocumentationReference {
                                     ItemKind::Method { .. } => "Method",
                                 }
                             },
-                            code::signature(
+                            self.render_signature(
                                 &documentation.signature,
                                 uri,
                                 Some(StdlibSymbolId::Item(value.id)),
-                                &self.library,
                             ),
                             details,
                         );
-                        append_examples(&mut markdown, uri, &self.library, documentation.examples);
+                        append_examples(
+                            &mut markdown,
+                            uri,
+                            &self.library,
+                            documentation.examples,
+                            self.code_rendering,
+                        );
                         append_related(
                             &mut markdown,
                             uri,
@@ -711,9 +733,15 @@ impl DocumentationReference {
             "{}\n\n# {}\n\n_Built-in type_\n\n{}",
             breadcrumb(&uri, Vec::new(), ty.name),
             ty.name,
-            code::signature(ty.name, &uri, None, &self.library),
+            self.render_signature(ty.name, &uri, None),
         );
-        append_documentation(&mut markdown, &uri, &self.library, documentation);
+        append_documentation(
+            &mut markdown,
+            &uri,
+            &self.library,
+            documentation,
+            self.code_rendering,
+        );
         self.append_member_groups(
             &mut markdown,
             &uri,
@@ -765,14 +793,15 @@ impl DocumentationReference {
         );
         if let Some(signature) = signature {
             markdown.push_str("\n\n");
-            markdown.push_str(&code::signature(
-                &signature,
-                &uri,
-                Some(symbol),
-                &self.library,
-            ));
+            markdown.push_str(&self.render_signature(&signature, &uri, Some(symbol)));
         }
-        append_documentation(&mut markdown, &uri, &self.library, documentation);
+        append_documentation(
+            &mut markdown,
+            &uri,
+            &self.library,
+            documentation,
+            self.code_rendering,
+        );
         self.append_member_groups(&mut markdown, &uri, member_groups);
         append_related(&mut markdown, &uri, &self.library, documentation.related);
         DocumentationPage {
@@ -855,7 +884,7 @@ impl DocumentationReference {
             ),
             item.name,
             language_item_kind_label(item.kind),
-            code::signature(item.form, &uri, None, &self.library),
+            self.render_signature(item.form, &uri, None),
             summary,
             details,
         );
@@ -864,6 +893,7 @@ impl DocumentationReference {
             &uri,
             &self.library,
             item.documentation.examples,
+            self.code_rendering,
         );
         if !item.documentation.related.is_empty() {
             markdown.push_str("\n\n## Related\n");
@@ -882,6 +912,20 @@ impl DocumentationReference {
             uri,
             title: item.name.to_owned(),
             markdown,
+        }
+    }
+
+    fn render_signature(
+        &self,
+        source: &str,
+        current_uri: &str,
+        primary: Option<StdlibSymbolId>,
+    ) -> String {
+        match self.code_rendering {
+            CodeRendering::SemanticHtml => {
+                code::signature(source, current_uri, primary, &self.library)
+            }
+            CodeRendering::FencedMarkdown => code::fenced(source),
         }
     }
 
@@ -1258,11 +1302,18 @@ fn append_documentation<Id>(
     current_uri: &str,
     library: &StandardLibrary,
     documentation: &Documentation<Id>,
+    code_rendering: CodeRendering,
 ) {
     let summary = intra_doc::render_links(documentation.summary, current_uri, library);
     let details = intra_doc::render_links(documentation.details, current_uri, library);
     markdown.push_str(&format!("\n\n{}\n\n{}", summary, details));
-    append_examples(markdown, current_uri, library, documentation.examples);
+    append_examples(
+        markdown,
+        current_uri,
+        library,
+        documentation.examples,
+        code_rendering,
+    );
 }
 
 fn append_examples(
@@ -1270,6 +1321,7 @@ fn append_examples(
     current_uri: &str,
     library: &StandardLibrary,
     examples: &[crate::catalog::Example],
+    code_rendering: CodeRendering,
 ) {
     if examples.is_empty() {
         return;
@@ -1277,7 +1329,10 @@ fn append_examples(
     markdown.push_str("\n\n## Examples");
     for example in examples {
         markdown.push_str(&format!("\n\n_{}_\n\n", example.title));
-        markdown.push_str(&code::example(*example, current_uri, library));
+        markdown.push_str(&match code_rendering {
+            CodeRendering::SemanticHtml => code::example(*example, current_uri, library),
+            CodeRendering::FencedMarkdown => code::fenced(example.source),
+        });
     }
 }
 
@@ -1972,6 +2027,22 @@ mod tests {
         let native = reference.page(&native.uri).expect("Native has a page");
         assert!(native.markdown.contains("Windows candidates must"));
         assert!(native.markdown.contains("Try alternate executable names"));
+    }
+
+    #[test]
+    fn terminal_reference_uses_plain_markdown_code_blocks() {
+        let reference = DocumentationReference::for_terminal();
+        let page = reference
+            .page("/stdlib/types/Process/methods/read.md")
+            .expect("Process.read has a terminal page");
+
+        assert!(page.markdown.contains("```splitscript\nProcess.read<T>"));
+        assert!(page.markdown.contains("```splitscript\nlet health"));
+        assert!(
+            !page
+                .markdown
+                .contains("<pre class=\"hljs splitscript-code\">")
+        );
     }
 
     #[test]

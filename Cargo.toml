@@ -22,6 +22,8 @@ wasm-encoder = "0.254.0"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clap = { version = "4.6", features = ["derive"] }
 codespan-reporting = "0.13.1"
+pulldown-cmark = { version = "0.13.4", default-features = false }
+textwrap = { version = "0.16.2", default-features = false, features = ["terminal_size"] }
 
 [build-dependencies]
 splitscript-stdlib-loader = { path = "crates/splitscript-stdlib-loader" }

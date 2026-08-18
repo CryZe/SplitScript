@@ -414,10 +414,10 @@ impl Lexer<'_> {
                 {
                     self.pos += 1;
                 }
+                let content = &self.source[content_start..self.pos];
+                let content = content.strip_prefix(' ').unwrap_or(content).trim_end();
                 return Ok(Some(Token {
-                    kind: TokenKind::DocComment(
-                        self.source[content_start..self.pos].trim().to_owned(),
-                    ),
+                    kind: TokenKind::DocComment(content.to_owned()),
                     span: Span {
                         start,
                         end: self.pos,
@@ -970,6 +970,25 @@ mod tests {
             tokens
                 .iter()
                 .any(|token| matches!(&token.kind, TokenKind::Ident(value) if value == "value"))
+        );
+    }
+
+    #[test]
+    fn doc_comments_remove_only_the_conventional_single_leading_space() {
+        let tokens = lex(
+            "/// ```splitscript\n/// if true {\n///     print(\"nested\")\n/// }\nvalue",
+            SyntaxMode::Program,
+        )
+        .unwrap();
+        assert_eq!(
+            tokens
+                .iter()
+                .filter_map(|token| match &token.kind {
+                    TokenKind::DocComment(value) => Some(value.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            ["```splitscript", "if true {", "    print(\"nested\")", "}"]
         );
     }
 

@@ -891,6 +891,37 @@ namespace process {}
     }
 
     #[test]
+    fn preserves_visible_and_hidden_example_indentation() {
+        let source = r#"
+/// Reads a value.
+///
+/// # Example
+///
+/// Read health
+///
+/// ```splitscript
+/// # onAttach {
+/// if ready {
+///     print("ready")
+/// }
+/// #     print("validated")
+/// # }
+/// ```
+namespace process {}
+"#;
+        let library = parse(source).expect("indented example should parse");
+        let Declaration::Namespace(process) = &library.declarations[0] else {
+            panic!("expected a namespace")
+        };
+        let example = &process.documentation.examples[0];
+        assert_eq!(example.source, "if ready {\n    print(\"ready\")\n}");
+        assert_eq!(
+            example.validation_source.as_deref(),
+            Some("onAttach {\nif ready {\n    print(\"ready\")\n}\n    print(\"validated\")\n}")
+        );
+    }
+
+    #[test]
     fn preserves_exact_array_lengths_in_privileged_types() {
         let source = r#"
 /// Fixed memory block.

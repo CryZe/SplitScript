@@ -1830,6 +1830,15 @@ mod tests {
         );
         assert!(!page.markdown.contains("# state \"game.exe\""));
         assert!(!page.markdown.contains("# let player"));
+
+        let byte_at = reference
+            .page("/stdlib/types/String/methods/byteAt.md")
+            .expect("String.byteAt has a page");
+        assert!(
+            byte_at
+                .markdown
+                .contains("\n    <a href=\"../../../functions/print.md\">")
+        );
     }
 
     #[test]

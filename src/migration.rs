@@ -35,6 +35,10 @@ impl MigrationCatalog {
         splitscript_syntax::migration::concept(id)
     }
 
+    pub fn diagnostics(&self) -> &'static [MigrationDiagnostic] {
+        splitscript_syntax::migration::DIAGNOSTICS
+    }
+
     /// Validates that migration metadata points into the active compiler
     /// catalogs instead of forming a stale parallel API inventory.
     pub fn validate(&self) -> Vec<String> {

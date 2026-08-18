@@ -93,14 +93,14 @@ semantic-review evidence, not as a conformance corpus.
   settings families versus dynamic lookup, array length/growth, managed
   strings, and Unity static-singleton/object paths. Keep the detailed recipes,
   but make them reachable without reading the guide linearly.
-- [ ] Design CLI documentation discovery before implementing it. Decide whether
-  `splitc docs QUERY` should fall back to ranked search or whether an explicit
-  `splitc docs search QUERY` is clearer; either way, reuse the compiler-owned
-  documentation index and expose the same symbol, summary, kind, migration,
-  and foreign-spelling search used by the editor. Queries such as
-  `timer.CurrentPhase`, `TimeSpan.FromMilliseconds`, `modules.First`,
-  `refreshRate`, `multiple processes`, and `.exe` must lead to the canonical
-  topic instead of requiring the user to know its exact SplitScript name.
+- [x] Make `splitc docs QUERY` resolve exact canonical names and unambiguous
+  foreign spellings directly, then render ranked results for broader queries
+  instead of silently choosing one. Multiword queries do not need quoting. The
+  compiler-owned ranking is also used by the editor and covers symbol names,
+  summaries, details, migration diagnostics, and foreign spellings. Queries
+  such as `timer.CurrentPhase`, `TimeSpan.FromMilliseconds`, `modules.First`,
+  `refreshRate`, `multiple processes`, and `.exe` lead to the relevant
+  canonical topics without requiring their SplitScript names first.
 - [x] Give `splitc docs` a real terminal renderer instead of printing the
   Markdown/HTML representation used by the editor preview. Render headings,
   paragraphs, lists, borderless aligned tables, signatures, and examples as

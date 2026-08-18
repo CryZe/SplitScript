@@ -54,6 +54,11 @@ pub(super) struct DocumentationPageParams {
 }
 
 #[derive(Debug, Deserialize)]
+pub(super) struct DocumentationSearchParams {
+    pub query: String,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct TextDocumentItem {
     pub uri: String,

@@ -17,9 +17,9 @@ use conversion::{
 };
 use documents::{Document, DocumentStore};
 use protocol::{
-    CodeActionParams, DidChangeParams, DidOpenParams, DocumentationPageParams, IncomingMessage,
-    InlayHintParams, ReferenceParams, RenameParams, SelectionRangeParams, TextDocumentParams,
-    TextDocumentPositionParams, decode,
+    CodeActionParams, DidChangeParams, DidOpenParams, DocumentationPageParams,
+    DocumentationSearchParams, IncomingMessage, InlayHintParams, ReferenceParams, RenameParams,
+    SelectionRangeParams, TextDocumentParams, TextDocumentPositionParams, decode,
 };
 
 use crate::{
@@ -172,6 +172,9 @@ impl LanguageServer {
             "splitscript/documentation/index" => id.map_or_else(Vec::new, |id| {
                 vec![response(id, json!(self.documentation.index()))]
             }),
+            "splitscript/documentation/search" => id.map_or_else(Vec::new, |id| {
+                vec![self.documentation_search_response(id, params)]
+            }),
             "splitscript/documentation/page" => id.map_or_else(Vec::new, |id| {
                 vec![self.documentation_page_response(id, params)]
             }),
@@ -201,6 +204,14 @@ impl LanguageServer {
                 format!("unknown SplitScript documentation page `{}`", params.uri),
             ),
         }
+    }
+
+    fn documentation_search_response(&self, id: Value, params: Value) -> Value {
+        let params = match decode_request::<DocumentationSearchParams>(&id, params) {
+            Ok(params) => params,
+            Err(response) => return response,
+        };
+        response(id, json!(self.documentation.search(&params.query)))
     }
 
     fn did_open(&mut self, params: Value) -> Vec<Value> {

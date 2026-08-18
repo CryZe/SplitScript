@@ -1741,7 +1741,7 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "Attachment state declaration",
         sources: ASL,
         support: MigrationSupport::TypedPattern,
-        summary: "Declare exactly one native process candidate list or typed emulator provider per autosplitter file. The declaration owns attachment and defines the fields polled into [`old`] and [`current`].",
+        summary: "Declare one native process name, an array of alternate process names, or a typed emulator provider per autosplitter file. An ASL declaration listing multiple processes becomes alternate names for one attachment, not concurrent attachments. Names are exact host identities, so Windows executable candidates currently include `.exe`. The declaration owns attachment and defines the fields polled into [`old`] and [`current`].",
         targets: &[MigrationTarget::Language("state")],
         cookbook_anchor: Some("attachment-state-declarations"),
         spellings: &[],

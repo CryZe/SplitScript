@@ -73,7 +73,7 @@ enum CliCommand {
     /// Render compiler-owned language, migration, and standard-library documentation.
     #[command(
         name = "docs",
-        after_help = "TOPIC may be an exact symbol such as Process.read, a migration identity printed by a diagnostic, or a virtual reference path. With no topic, renders the reference index."
+        after_help = "QUERY may be an exact symbol such as Process.read, a migration identity printed by a diagnostic, a foreign spelling, or ordinary search terms. Exact matches open directly; broader queries show ranked results. With no query, renders the reference index."
     )]
     Documentation(DocumentationArgs),
 }
@@ -101,9 +101,9 @@ struct FormatArgs {
 
 #[derive(Debug, Args)]
 struct DocumentationArgs {
-    /// Exact symbol, migration identity, or virtual reference path to render.
-    #[arg(value_name = "TOPIC")]
-    topic: Option<String>,
+    /// Exact documentation topic or search terms.
+    #[arg(value_name = "QUERY", num_args = 0..)]
+    query: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -192,7 +192,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Command, clap:
             check: arguments.check,
         }),
         Some(CliCommand::Documentation(arguments)) => Ok(Command::Documentation {
-            topic: arguments.topic,
+            topic: (!arguments.query.is_empty()).then(|| arguments.query.join(" ")),
         }),
         None => {
             let Some(input) = cli.input else {
@@ -328,41 +328,27 @@ fn main() -> ExitCode {
 fn render_documentation(topic: Option<&str>) -> ExitCode {
     let reference = splitscript::DocumentationReference::for_terminal();
     let requested = topic.unwrap_or("");
-    if let Some(page) = reference.topic(requested) {
-        let width = if std::io::stdout().is_terminal() {
-            textwrap::termwidth()
-        } else {
-            80
-        };
-        let writer = StandardStream::stdout(ColorChoice::Auto);
-        if let Err(error) = cli_documentation::emit(&mut writer.lock(), &page.markdown, width) {
-            eprintln!("splitc: could not render documentation: {error}");
+    let markdown = if let Some(page) = reference.topic(requested) {
+        page.markdown
+    } else {
+        let results = reference.search(requested);
+        if results.is_empty() {
+            eprintln!("splitc: no documentation matches `{requested}`");
             return ExitCode::FAILURE;
         }
-        return ExitCode::SUCCESS;
+        cli_documentation::search_results_markdown(requested, &results)
+    };
+    let width = if std::io::stdout().is_terminal() {
+        textwrap::termwidth()
+    } else {
+        80
+    };
+    let writer = StandardStream::stdout(ColorChoice::Auto);
+    if let Err(error) = cli_documentation::emit(&mut writer.lock(), &markdown, width) {
+        eprintln!("splitc: could not render documentation: {error}");
+        return ExitCode::FAILURE;
     }
-
-    eprintln!("splitc: unknown documentation topic `{requested}`");
-    let needle = requested.to_ascii_lowercase();
-    let suggestions = reference
-        .index()
-        .into_iter()
-        .filter(|entry| {
-            entry.title.to_ascii_lowercase().contains(&needle)
-                || entry
-                    .signature
-                    .as_deref()
-                    .is_some_and(|signature| signature.to_ascii_lowercase().contains(&needle))
-        })
-        .take(5)
-        .collect::<Vec<_>>();
-    if !suggestions.is_empty() {
-        eprintln!("matching topics:");
-        for suggestion in suggestions {
-            eprintln!("  {} ({})", suggestion.title, suggestion.uri);
-        }
-    }
-    ExitCode::FAILURE
+    ExitCode::SUCCESS
 }
 
 fn format_file(input: &Path, check: bool) -> bool {
@@ -567,6 +553,18 @@ mod tests {
             .unwrap(),
             Command::Documentation {
                 topic: Some("asl.lifecycle.update".to_owned()),
+            }
+        );
+        assert_eq!(
+            parse_args([
+                "splitc".into(),
+                "docs".into(),
+                "multiple".into(),
+                "processes".into(),
+            ])
+            .unwrap(),
+            Command::Documentation {
+                topic: Some("multiple processes".to_owned()),
             }
         );
 

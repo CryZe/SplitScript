@@ -44,6 +44,18 @@ fn serves_compiler_owned_documentation_index_and_markdown_pages() {
             && entry["kind"] == "migration concept"
     }));
 
+    let search = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 44,
+        "method": "splitscript/documentation/search",
+        "params": { "query": "multiple processes" }
+    }));
+    assert_eq!(
+        search[0]["result"][0]["uri"],
+        "/migration/asl/state/attachment.md"
+    );
+    assert_eq!(search[0]["result"][0]["kind"], "migration concept");
+
     let page = server.handle(json!({
         "jsonrpc": "2.0",
         "id": 41,

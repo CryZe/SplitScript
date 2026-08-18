@@ -22,6 +22,8 @@ pub struct DocumentationIndexEntry {
     pub summary: String,
     #[serde(skip)]
     pub(crate) raw_summary: &'static str,
+    #[serde(skip)]
+    pub(crate) search_text: String,
     pub signature: Option<String>,
 }
 
@@ -115,6 +117,7 @@ impl DocumentationReference {
                 summary: "Syntax, declarations, lifecycle blocks, and contextual values."
                     .to_owned(),
                 raw_summary: "Syntax, declarations, lifecycle blocks, and contextual values.",
+                search_text: "syntax declarations lifecycle blocks contextual values".to_owned(),
                 signature: None,
             },
             DocumentationIndexEntry {
@@ -124,6 +127,7 @@ impl DocumentationReference {
                 summary: "Guidance from ASL and familiar languages to canonical SplitScript."
                     .to_owned(),
                 raw_summary: "Guidance from ASL and familiar languages to canonical SplitScript.",
+                search_text: "ASL C# JavaScript Rust porting migration guidance".to_owned(),
                 signature: None,
             },
         ];
@@ -138,12 +142,17 @@ impl DocumentationReference {
                     kind: language_item_kind_label(item.kind),
                     summary: compact_prose(item.documentation.summary),
                     raw_summary: item.documentation.summary,
+                    search_text: format!(
+                        "{} {} {}",
+                        item.documentation.summary, item.documentation.details, item.form
+                    ),
                     signature: Some(item.form.to_owned()),
                 }),
         );
 
+        let migration = MigrationCatalog::default();
         entries.extend(
-            MigrationCatalog::default()
+            migration
                 .concepts()
                 .iter()
                 .map(|concept| DocumentationIndexEntry {
@@ -152,6 +161,7 @@ impl DocumentationReference {
                     kind: "migration concept",
                     summary: compact_prose(concept.summary),
                     raw_summary: concept.summary,
+                    search_text: migration_search_text(concept, &migration),
                     signature: Some(concept.id.as_str().to_owned()),
                 }),
         );
@@ -167,6 +177,10 @@ impl DocumentationReference {
                     kind: "namespace",
                     summary: compact_prose(namespace.documentation.summary),
                     raw_summary: namespace.documentation.summary,
+                    search_text: format!(
+                        "{} {}",
+                        namespace.documentation.summary, namespace.documentation.details
+                    ),
                     signature: None,
                 }),
         );
@@ -178,6 +192,10 @@ impl DocumentationReference {
                 kind: "built-in type",
                 summary: compact_prose(language.documentation.summary),
                 raw_summary: language.documentation.summary,
+                search_text: format!(
+                    "{} {}",
+                    language.documentation.summary, language.documentation.details
+                ),
                 signature: Some(ty.name.to_owned()),
             })
         }));
@@ -188,6 +206,10 @@ impl DocumentationReference {
                 kind: "capability",
                 summary: compact_prose(capability.documentation.summary),
                 raw_summary: capability.documentation.summary,
+                search_text: format!(
+                    "{} {}",
+                    capability.documentation.summary, capability.documentation.details
+                ),
                 signature: Some(format!("capability {}", capability.name)),
             }
         }));
@@ -202,6 +224,10 @@ impl DocumentationReference {
                 kind: "type constructor",
                 summary: compact_prose(constructor.documentation.summary),
                 raw_summary: constructor.documentation.summary,
+                search_text: format!(
+                    "{} {}",
+                    constructor.documentation.summary, constructor.documentation.details
+                ),
                 signature: Some(signature),
             }
         }));
@@ -219,6 +245,10 @@ impl DocumentationReference {
                     },
                     summary: compact_prose(ty.documentation.summary),
                     raw_summary: ty.documentation.summary,
+                    search_text: format!(
+                        "{} {}",
+                        ty.documentation.summary, ty.documentation.details
+                    ),
                     signature: Some(render_type_declaration(ty)),
                 }),
         );
@@ -235,6 +265,10 @@ impl DocumentationReference {
                         kind: "field",
                         summary: compact_prose(field.documentation.summary),
                         raw_summary: field.documentation.summary,
+                        search_text: format!(
+                            "{} {}",
+                            field.documentation.summary, field.documentation.details
+                        ),
                         signature: Some(format!(
                             "{}.{}: {}",
                             owner.name,
@@ -252,6 +286,10 @@ impl DocumentationReference {
                 kind: "enum variant",
                 summary: compact_prose(variant.documentation.summary),
                 raw_summary: variant.documentation.summary,
+                search_text: format!(
+                    "{} {}",
+                    variant.documentation.summary, variant.documentation.details
+                ),
                 signature: Some(format!("{}.{}", owner.name, variant.name)),
             }
         }));
@@ -262,6 +300,10 @@ impl DocumentationReference {
                 kind: "state provider",
                 summary: compact_prose(provider.documentation.summary),
                 raw_summary: provider.documentation.summary,
+                search_text: format!(
+                    "{} {}",
+                    provider.documentation.summary, provider.documentation.details
+                ),
                 signature: Some(format!("state {}", provider.name)),
             }
         }));
@@ -282,6 +324,10 @@ impl DocumentationReference {
                     },
                     summary: compact_prose(item.documentation.summary),
                     raw_summary: item.documentation.summary,
+                    search_text: format!(
+                        "{} {}",
+                        item.documentation.summary, item.documentation.details
+                    ),
                     signature: Some(self.library.render_signature(item.id)),
                 }),
         );
@@ -295,12 +341,46 @@ impl DocumentationReference {
         entries
     }
 
+    /// Searches the complete compiler-owned documentation index.
+    ///
+    /// Ranking considers canonical titles and signatures first, then migration
+    /// identities, foreign spellings, summaries, details, and guide prose. The
+    /// returned entries remain the same stable identities consumed by editor
+    /// navigation and [`Self::page`].
+    pub fn search(&self, query: &str) -> Vec<DocumentationIndexEntry> {
+        let query = SearchText::new(query);
+        if query.original.is_empty() {
+            return self.index();
+        }
+
+        let exact_aliases = self.exact_migration_aliases(&query.original);
+        let mut matches = self
+            .index()
+            .into_iter()
+            .filter_map(|entry| {
+                let alias = exact_aliases.iter().any(|uri| uri == &entry.uri);
+                search_score(&entry, &query, alias).map(|score| (score, entry))
+            })
+            .collect::<Vec<_>>();
+        matches.sort_by(|(left_score, left), (right_score, right)| {
+            right_score
+                .cmp(left_score)
+                .then_with(|| {
+                    left.title
+                        .to_ascii_lowercase()
+                        .cmp(&right.title.to_ascii_lowercase())
+                })
+                .then_with(|| left.kind.cmp(right.kind))
+        });
+        matches.into_iter().map(|(_, entry)| entry).collect()
+    }
+
     /// Resolves a user-facing documentation topic to its canonical page.
     ///
     /// Native tools accept the stable migration identity printed by a
-    /// diagnostic, an exact reference title such as `Process.read`, or a
-    /// virtual document path. Fuzzy searching remains an editor concern so a
-    /// command never silently chooses the wrong similarly named symbol.
+    /// diagnostic, an exact reference title such as `Process.read`, a virtual
+    /// document path, or one unambiguous catalogued foreign spelling. Broader
+    /// queries remain search results rather than silently selected pages.
     pub fn topic(&self, topic: &str) -> Option<DocumentationPage> {
         let topic = topic.trim();
         if topic.is_empty() {
@@ -320,19 +400,45 @@ impl DocumentationReference {
             return Some(page);
         }
 
-        let mut exact = self.index().into_iter().filter(|entry| {
-            entry.title.eq_ignore_ascii_case(topic)
-                || entry
-                    .signature
-                    .as_deref()
-                    .is_some_and(|signature| signature.eq_ignore_ascii_case(topic))
-        });
-        let entry = exact.next()?;
-        exact
-            .next()
-            .is_none()
-            .then(|| self.page(&entry.uri))
-            .flatten()
+        let exact = self
+            .index()
+            .into_iter()
+            .filter(|entry| {
+                entry.title.eq_ignore_ascii_case(topic)
+                    || entry
+                        .signature
+                        .as_deref()
+                        .is_some_and(|signature| signature.eq_ignore_ascii_case(topic))
+            })
+            .collect::<Vec<_>>();
+        if let [entry] = exact.as_slice() {
+            return self.page(&entry.uri);
+        }
+
+        let aliases = self.exact_migration_aliases(topic);
+        if let [uri] = aliases.as_slice() {
+            return self.page(uri);
+        }
+        None
+    }
+
+    fn exact_migration_aliases(&self, query: &str) -> Vec<String> {
+        let query = query.trim();
+        let migration = MigrationCatalog::default();
+        let mut uris = migration
+            .concepts()
+            .iter()
+            .filter(|concept| {
+                concept
+                    .spellings
+                    .iter()
+                    .any(|spelling| spelling.spelling.eq_ignore_ascii_case(query))
+            })
+            .map(|concept| migration_concept_uri(concept.id))
+            .collect::<Vec<_>>();
+        uris.sort();
+        uris.dedup();
+        uris
     }
 
     pub fn page(&self, uri: &str) -> Option<DocumentationPage> {
@@ -1447,6 +1553,203 @@ fn compact_prose(value: &str) -> String {
     intra_doc::strip_links(value)
 }
 
+fn migration_search_text(concept: &MigrationConcept, migration: &MigrationCatalog) -> String {
+    let mut parts = vec![
+        concept.id.as_str().to_owned(),
+        concept.name.to_owned(),
+        concept.summary.to_owned(),
+        concept.support.label().to_owned(),
+    ];
+    parts.extend(
+        concept
+            .sources
+            .iter()
+            .map(|source| source.name().to_owned()),
+    );
+    parts.extend(
+        concept
+            .targets
+            .iter()
+            .map(|target| migration.target_display(*target)),
+    );
+    for spelling in concept.spellings {
+        parts.push(spelling.spelling.to_owned());
+        parts.push(spelling.message.to_owned());
+        parts.push(spelling.primary_label.to_owned());
+    }
+    for diagnostic in migration
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.concept == concept.id)
+    {
+        parts.push(diagnostic.id.as_str().to_owned());
+        parts.push(diagnostic.message.to_owned());
+        parts.push(diagnostic.primary_label.to_owned());
+        parts.extend(diagnostic.notes.iter().map(|note| (*note).to_owned()));
+    }
+    parts.join(" ")
+}
+
+#[derive(Debug)]
+struct SearchText {
+    original: String,
+    lowercase: String,
+    normalized: String,
+    compact: String,
+    words: Vec<String>,
+}
+
+impl SearchText {
+    fn new(value: &str) -> Self {
+        let original = value.trim().to_owned();
+        let lowercase = original.to_lowercase();
+        let normalized = normalize_search_text(&original);
+        let words = normalized.split_whitespace().map(str::to_owned).collect();
+        let compact = normalized
+            .chars()
+            .filter(|character| *character != ' ')
+            .collect();
+        Self {
+            original,
+            lowercase,
+            normalized,
+            compact,
+            words,
+        }
+    }
+}
+
+fn normalize_search_text(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut separator = false;
+    for character in value.chars().flat_map(char::to_lowercase) {
+        if character.is_alphanumeric() {
+            if separator && !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            separator = false;
+            normalized.push(character);
+        } else {
+            separator = true;
+        }
+    }
+    normalized
+}
+
+fn search_score(
+    entry: &DocumentationIndexEntry,
+    query: &SearchText,
+    exact_alias: bool,
+) -> Option<u32> {
+    if exact_alias {
+        return Some(20_000);
+    }
+
+    let title = normalize_search_text(&entry.title);
+    let signature = entry
+        .signature
+        .as_deref()
+        .map(normalize_search_text)
+        .unwrap_or_default();
+    let body = normalize_search_text(&format!("{} {}", entry.summary, entry.search_text));
+    let raw_title = entry.title.to_lowercase();
+    let raw_signature = entry
+        .signature
+        .as_deref()
+        .unwrap_or_default()
+        .to_lowercase();
+    let raw_body = format!("{} {}", entry.summary, entry.search_text).to_lowercase();
+    let title_compact = title.replace(' ', "");
+    let signature_compact = signature.replace(' ', "");
+    let body_compact = body.replace(' ', "");
+
+    if raw_title == query.lowercase || raw_signature == query.lowercase {
+        return Some(19_000);
+    }
+    if !query.normalized.is_empty() && (title == query.normalized || signature == query.normalized)
+    {
+        return Some(19_000);
+    }
+    if !query.compact.is_empty()
+        && (title_compact == query.compact || signature_compact == query.compact)
+    {
+        return Some(18_000);
+    }
+
+    let mut score = 0;
+    if contains_search_literal(&raw_title, &query.lowercase)
+        || contains_search_literal(&raw_signature, &query.lowercase)
+        || contains_search_literal(&raw_body, &query.lowercase)
+    {
+        score += 9_000;
+    }
+    if !query.normalized.is_empty() && title.starts_with(&query.normalized) {
+        score += 8_000;
+    } else if !query.normalized.is_empty()
+        && (title.contains(&query.normalized) || title_compact.contains(&query.compact))
+    {
+        score += 6_000;
+    }
+    if !query.normalized.is_empty() && signature.starts_with(&query.normalized) {
+        score += 5_000;
+    } else if !query.normalized.is_empty()
+        && (signature.contains(&query.normalized) || signature_compact.contains(&query.compact))
+    {
+        score += 4_000;
+    }
+    if !query.normalized.is_empty()
+        && (body.contains(&query.normalized) || body_compact.contains(&query.compact))
+    {
+        score += 2_000;
+    }
+
+    let mut matched_words = 0;
+    for word in &query.words {
+        if title.split_whitespace().any(|candidate| candidate == word) {
+            score += 500;
+            matched_words += 1;
+        } else if title.contains(word) {
+            score += 350;
+            matched_words += 1;
+        } else if signature.contains(word) {
+            score += 250;
+            matched_words += 1;
+        } else if body.contains(word) {
+            score += 100;
+            matched_words += 1;
+        }
+    }
+    if matched_words == query.words.len() {
+        score += 1_000;
+    }
+    (score != 0).then_some(score)
+}
+
+fn contains_search_literal(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    haystack.match_indices(needle).any(|(start, _)| {
+        let end = start + needle.len();
+        let starts_with_word = needle.chars().next().is_some_and(char::is_alphanumeric);
+        let ends_with_word = needle
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric);
+        let left_boundary = !starts_with_word
+            || haystack[..start]
+                .chars()
+                .next_back()
+                .is_none_or(|character| !character.is_alphanumeric());
+        let right_boundary = !ends_with_word
+            || haystack[end..]
+                .chars()
+                .next()
+                .is_none_or(|character| !character.is_alphanumeric());
+        left_boundary && right_boundary
+    })
+}
+
 pub(super) fn append_reference_table_header(markdown: &mut String, columns: &[&str]) {
     markdown.push_str("\n<div class=\"splitscript-reference-table\"></div>\n\n|");
     for column in columns {
@@ -2043,6 +2346,34 @@ mod tests {
                 .markdown
                 .contains("<pre class=\"hljs splitscript-code\">")
         );
+    }
+
+    #[test]
+    fn documentation_search_covers_canonical_and_migration_vocabulary() {
+        let reference = DocumentationReference::default();
+
+        let timer = reference
+            .topic("timer.CurrentPhase")
+            .expect("an unambiguous foreign spelling resolves directly");
+        assert_eq!(timer.uri, "/migration/asl/timer/state.md");
+
+        for (query, expected_uri) in [
+            ("modules.First()", "/migration/asl/process/modules.md"),
+            ("multiple processes", "/migration/asl/state/attachment.md"),
+            (".exe", "/language/state.md"),
+            ("refreshRate", "/migration/asl/runtime/refresh-rate.md"),
+            (
+                "TimeSpan.FromMilliseconds",
+                "/stdlib/types/Duration/methods/fromMilliseconds.md",
+            ),
+        ] {
+            let results = reference.search(query);
+            assert_eq!(
+                results.first().map(|entry| entry.uri.as_str()),
+                Some(expected_uri),
+                "{query}"
+            );
+        }
     }
 
     #[test]

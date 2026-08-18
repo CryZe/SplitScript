@@ -3,6 +3,8 @@ use std::io;
 use codespan_reporting::term::termcolor::{Color, ColorSpec, WriteColor};
 use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
+const SEARCH_RESULT_LIMIT: usize = 12;
+
 #[derive(Debug)]
 enum Block {
     Heading {
@@ -287,6 +289,39 @@ pub(crate) fn emit(writer: &mut dyn WriteColor, markdown: &str, width: usize) ->
     Ok(())
 }
 
+pub(crate) fn search_results_markdown(
+    query: &str,
+    results: &[splitscript::DocumentationIndexEntry],
+) -> String {
+    let mut markdown = format!(
+        "# Documentation results for `{}`\n\n\
+         Open a result with `splitc docs` followed by its exact topic.\n\n\
+         <div class=\"splitscript-reference-table\"></div>\n\n\
+         | Topic | Kind | Description |\n\
+         | --- | --- | --- |",
+        escape_table_cell(query),
+    );
+    for result in results.iter().take(SEARCH_RESULT_LIMIT) {
+        markdown.push_str(&format!(
+            "\n| {} | {} | {} |",
+            escape_table_cell(&result.title),
+            escape_table_cell(result.kind),
+            escape_table_cell(&result.summary),
+        ));
+    }
+    if results.len() > SEARCH_RESULT_LIMIT {
+        markdown.push_str(&format!(
+            "\n\nShowing the first {SEARCH_RESULT_LIMIT} of {} matches. Add more search terms to narrow the results.",
+            results.len(),
+        ));
+    }
+    markdown
+}
+
+fn escape_table_cell(value: &str) -> String {
+    value.replace('|', "\\|").replace(['\r', '\n'], " ")
+}
+
 fn render_block(writer: &mut dyn WriteColor, block: &Block, width: usize) -> io::Result<()> {
     match block {
         Block::Heading { level, text } => {
@@ -461,5 +496,20 @@ mod tests {
         let mut ansi = Buffer::ansi();
         emit(&mut ansi, "# Heading\n", 80).unwrap();
         assert!(ansi.into_inner().contains(&0x1b));
+    }
+
+    #[test]
+    fn renders_ranked_search_results_as_a_compact_borderless_table() {
+        let reference = splitscript::DocumentationReference::for_terminal();
+        let results = reference.search("multiple processes");
+        let markdown = search_results_markdown("multiple processes", &results);
+        let mut buffer = Buffer::no_color();
+        emit(&mut buffer, &markdown, 100).unwrap();
+        let rendered = String::from_utf8(buffer.into_inner()).unwrap();
+
+        assert!(rendered.contains("Documentation results for multiple processes"));
+        assert!(rendered.contains("Attachment state declaration"));
+        assert!(!rendered.contains("Topic | Kind"));
+        assert!(!rendered.contains("splitscript-reference-table"));
     }
 }

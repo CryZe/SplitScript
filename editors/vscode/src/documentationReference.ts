@@ -127,29 +127,80 @@ export class DocumentationReferenceController implements vscode.Disposable {
             'splitscript/documentation/index',
             {},
         );
-        const items: DocumentationQuickPickItem[] = [
-            {
-                label: '$(book) SplitScript reference',
-                description: 'reference',
-                detail: 'Browse the language, migration guidance, and standard library.',
-                uri: INDEX_URI,
-                alwaysShow: true,
-            },
-            ...entries.map(entry => ({
-                label: entry.title,
-                description: entry.kind,
-                detail: entry.signature ?? entry.summary,
-                uri: entry.uri,
-            })),
-        ];
-        const selected = await vscode.window.showQuickPick(items, {
-            title: 'SplitScript documentation',
-            placeHolder: 'Search language, migration, and standard-library documentation',
-            matchOnDescription: true,
-            matchOnDetail: true,
+        const picker = vscode.window.createQuickPick<DocumentationQuickPickItem>();
+        picker.title = 'SplitScript documentation';
+        picker.placeholder = 'Search language, migration, and standard-library documentation';
+        picker.matchOnDescription = false;
+        picker.matchOnDetail = false;
+        picker.items = documentationItems(entries, true);
+
+        let request = 0;
+        const selection = new Promise<string | undefined>(resolve => {
+            picker.onDidChangeValue(value => {
+                const currentRequest = ++request;
+                const query = value.trim();
+                if (query.length === 0) {
+                    picker.busy = false;
+                    picker.items = documentationItems(entries, true);
+                    return;
+                }
+
+                picker.busy = true;
+                void this.client.sendRequest<DocumentationIndexEntry[]>(
+                    'splitscript/documentation/search',
+                    { query },
+                ).then(results => {
+                    if (currentRequest === request) {
+                        picker.items = documentationItems(results, false);
+                        picker.busy = false;
+                    }
+                }, async error => {
+                    if (currentRequest === request) {
+                        picker.busy = false;
+                        await vscode.window.showErrorMessage(
+                            `Could not search SplitScript documentation: ${String(error)}`,
+                        );
+                    }
+                });
+            });
+            picker.onDidAccept(() => {
+                resolve(picker.activeItems[0]?.uri);
+                picker.hide();
+            });
+            picker.onDidHide(() => resolve(undefined));
         });
-        return selected?.uri;
+        picker.show();
+        try {
+            return await selection;
+        } finally {
+            picker.dispose();
+        }
     }
+}
+
+function documentationItems(
+    entries: readonly DocumentationIndexEntry[],
+    includeIndex: boolean,
+): DocumentationQuickPickItem[] {
+    const items = entries.map(entry => ({
+        label: entry.title,
+        description: entry.kind,
+        detail: entry.signature ?? entry.summary,
+        uri: entry.uri,
+        // The compiler already filtered and ranked these entries, so VS Code's
+        // label-only fuzzy matcher must not hide foreign-spelling matches.
+        alwaysShow: true,
+    }));
+    if (includeIndex) {
+        items.unshift({
+            label: '$(book) SplitScript reference',
+            description: 'reference',
+            detail: 'Browse the language, migration guidance, and standard library.',
+            uri: INDEX_URI,
+            alwaysShow: true,
+        });
+    }
+    return items;
 }
 
 function normalizePageUri(uri: string): string {

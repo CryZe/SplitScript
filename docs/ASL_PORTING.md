@@ -703,7 +703,7 @@ absent state needs distinct behavior.
 Use [`isLoading`] when the game exposes whether its own clock should be paused.
 Return `true` while loading and `false` while gameplay is advancing. When a
 sentinel means the script has no trustworthy observation for this tick, fall
-through or return [`None`] so LiveSplit keeps its current pause state:
+through or return [`None`] so the timer keeps its current pause state:
 
 ```splitscript
 state "game.exe" {
@@ -748,7 +748,7 @@ does not set zero. [`isLoading`] runs before [`gameTime`] on each eligible updat
 so the two actions may be combined when the game provides both an independent
 loading flag and an authoritative elapsed clock.
 
-These actions report script-owned observations to LiveSplit. They do not read
+These actions report script-owned observations to the timer host. They do not read
 back `timer.CurrentTime.GameTime`, which may have been changed by the host or
 another component and remains a separate host-contract requirement below.
 
@@ -879,7 +879,7 @@ discovery and PE32 forms.
 ## Background signature scans
 
 Legacy ASL often starts a C# `Thread` or task for signature discovery so a
-large scan does not block LiveSplit's update loop. Do not translate that worker
+large scan does not block the autosplitting runtime's update loop. Do not translate that worker
 or its cancellation token. SplitScript scans are already asynchronous: they
 inspect only a bounded memory window per tick, yield to the host between
 windows, preserve their cursor, and are discarded automatically if the

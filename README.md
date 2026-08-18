@@ -1,7 +1,7 @@
 # SplitScript
 
-SplitScript is a statically typed scripting language for LiveSplit auto
-splitters. It combines a compact domain-specific syntax with a familiar
+SplitScript is a statically typed scripting language for autosplitters. It
+combines a compact domain-specific syntax with a familiar
 JavaScript/C#-style expression language, compiles directly to WebAssembly GC,
 and uses the sandboxed Auto Splitting Runtime ABI.
 
@@ -350,7 +350,7 @@ numbered-settings case in [`docs/DDS_PORT.md`](docs/DDS_PORT.md).
   tick snapshots.
 - `whileAttached`, `start`, `split`, `reset`, `isLoading`, and `gameTime`
   actions, plus one-shot `onAttach` and `onDetach` lifecycle blocks.
-- LiveSplit timer-state ordering matching the ASL v2 prototype.
+- Timer-state ordering matching the ASL v2 prototype.
 - Source spans and concise diagnostics.
 - Tooling-facing standard-library and language catalogs with stable IDs,
   shared documentation metadata, and compiler-checked examples.
@@ -364,5 +364,5 @@ language-library work.
 
 The emitted module requires a WebAssembly engine with the GC proposal enabled.
 The host calls themselves match the existing Auto Splitting Runtime ABI, but an
-older LiveSplit/runtime build that disables WebAssembly GC cannot instantiate the
+older host runtime that disables WebAssembly GC cannot instantiate the
 module.

@@ -552,4 +552,4 @@ another call or attachment-state transition.
 `timer.state()` returns the exhaustive `TimerState` enum with
 `NotRunning`, `Running`, `Paused`, `Ended`, and `Unknown`; raw host integers are
 normalized only at the ABI boundary. `Duration.fromSeconds` converts Unity's
-floating-point level clock into LiveSplit game time.
+floating-point level clock into timer game time.

@@ -1,6 +1,7 @@
 /// Attaches to one of the native processes named by the state declaration.
 ///
-/// The read-only `process` value is a typed handle to the attached game process.
+/// The read-only value has type [`Process`] and is a handle to the attached game
+/// process.
 ///
 /// # Example
 ///
@@ -20,7 +21,8 @@ stateProvider Native as process {}
 
 /// Attaches to a supported Game Boy Advance emulator.
 ///
-/// The provider discovers emulated EWRAM and IWRAM and exposes original GBA hardware addresses through its read-only `gba` value.
+/// The provider discovers emulated EWRAM and IWRAM and exposes original GBA
+/// hardware addresses through the read-only value introduced by [`GBA`].
 ///
 /// # Example
 ///
@@ -63,7 +65,7 @@ root {
         message: T,
     ) -> None;
 
-    /// Sets a LiveSplit custom variable.
+    /// Sets a custom variable in the timer runtime.
     ///
     /// The value is visible to layouts that display autosplitter variables.
     ///
@@ -121,7 +123,7 @@ root {
 
 /// Reads metadata about the autosplitting runtime host.
 ///
-/// These values describe the system running LiveSplit, not necessarily the
+/// These values describe the system running the autosplitting runtime, not necessarily the
 /// architecture of the attached game process.
 ///
 /// # Example
@@ -408,7 +410,10 @@ intrinsic type Process {
 
     /// Reads a fixed-layout value from process memory.
     ///
-    /// The expected MemoryReadable type selects a fixed-size primitive or record layout. A synchronous read returns T!; retry polls until a value is available and yields T. Use an explicit type argument such as process.read<i32> when context cannot determine the type.
+    /// The expected [`MemoryReadable`] type selects a fixed-size primitive or
+    /// record layout. A synchronous read returns [`T!`]; [`retry`] polls until a
+    /// value is available and yields `T`. Use an explicit type argument such as
+    /// `process.read<i32>` when context cannot determine the type.
     ///
     /// # Example
     ///
@@ -420,6 +425,19 @@ intrinsic type Process {
     /// # let player: address = 0x1000
     /// let health = process.read<i32>(player.offset(0x20)) else 0
     /// # print(health)
+    /// # }
+    /// ```
+    ///
+    /// # Example
+    ///
+    /// Infer the memory layout from an expected type
+    ///
+    /// ```splitscript
+    /// # state "game.exe" {}
+    /// # onAttach {
+    /// # let player: address = 0x1000
+    /// let level: u32 = process.read(player.offset(0x24)) else 0
+    /// # print(level)
     /// # }
     /// ```
     @intrinsic(ProcessRead)
@@ -632,7 +650,7 @@ intrinsic type Process {
     ) -> String!;
 }
 
-/// Reads information from the LiveSplit timer.
+/// Reads information from the timer.
 ///
 /// Timer operations expose runtime state used by autosplitter decisions.
 ///
@@ -680,8 +698,8 @@ namespace timer {
 
     /// Reports how an earlier segment was advanced during this attempt.
     ///
-    /// Returns `Some(true)` when the segment was split, `Some(false)` when it
-    /// was skipped, and [`None`] when the index has not been reached in the
+    /// Returns [`Some`]`(true)` when the segment was split, [`Some`]`(false)`
+    /// when it was skipped, and [`None`] when the index has not been reached in the
     /// current attempt. This is historical attempt data; the current and later
     /// segment indices therefore return [`None`].
     ///
@@ -742,7 +760,7 @@ namespace timer {
     @intrinsic(TimerUndoSplit)
     fn undoSplit() -> None;
 
-    /// Pauses LiveSplit's game-time clock.
+    /// Pauses the timer's game-time clock.
     ///
     /// [`isLoading`] should remain the normal way to remove loads. This explicit
     /// operation is intended for lifecycle transitions such as ensuring game
@@ -761,7 +779,7 @@ namespace timer {
     @intrinsic(TimerPauseGameTime)
     fn pauseGameTime() -> None;
 
-    /// Resumes LiveSplit's game-time clock.
+    /// Resumes the timer's game-time clock.
     ///
     /// Prefer returning `false` from [`isLoading`] for ordinary load removal.
     /// Use this operation only when lifecycle logic explicitly paused game
@@ -780,7 +798,7 @@ namespace timer {
     @intrinsic(TimerResumeGameTime)
     fn resumeGameTime() -> None;
 
-    /// Reports whether the LiveSplit timer is currently running.
+    /// Reports whether the timer is currently running.
     ///
     /// This is a convenience check over the exhaustive timer state.
     ///
@@ -895,7 +913,8 @@ namespace Unity {
 capability Numeric<T: Equatable> {
     /// Adds another value of the same numeric type.
     ///
-    /// This method is also the implementation of the `+` operator. Integer
+    /// This method is also the implementation of the
+    /// [`+`](operator@Numeric.add) operator. Integer
     /// overflow wraps modulo the receiver's declared bit width.
     ///
     /// # Example
@@ -914,7 +933,8 @@ capability Numeric<T: Equatable> {
 
     /// Subtracts another value of the same numeric type.
     ///
-    /// This method is also the implementation of the `-` operator. Integer
+    /// This method is also the implementation of the
+    /// [`-`](operator@Numeric.subtract) operator. Integer
     /// overflow wraps modulo the receiver's declared bit width.
     ///
     /// # Example
@@ -933,7 +953,8 @@ capability Numeric<T: Equatable> {
 
     /// Multiplies by another value of the same numeric type.
     ///
-    /// This method is also the implementation of the `*` operator. Integer
+    /// This method is also the implementation of the
+    /// [`*`](operator@Numeric.multiply) operator. Integer
     /// overflow wraps modulo the receiver's declared bit width.
     ///
     /// # Example
@@ -952,7 +973,8 @@ capability Numeric<T: Equatable> {
 
     /// Divides by another value of the same numeric type.
     ///
-    /// This method is also the implementation of the `/` operator. Integer
+    /// This method is also the implementation of the
+    /// [`/`](operator@Numeric.divide) operator. Integer
     /// division truncates toward zero. Integer division by zero and the signed
     /// minimum divided by negative one trap, matching WebAssembly arithmetic;
     /// floating-point division follows IEEE 754.
@@ -1087,7 +1109,8 @@ capability Integer<T: Numeric + Display> {
 
     /// Returns the width-preserving bitwise complement of this integer.
     ///
-    /// This method is also the integer implementation of the [`!`] operator.
+    /// This method is also the integer implementation of the
+    /// [`!`](operator@Integer.bitNot) operator.
     /// Every bit in the receiver's declared integer representation is flipped;
     /// for example, complementing a [`u8`] never affects bits outside that byte.
     /// Boolean [`!`] remains logical negation and is selected by type.
@@ -1105,7 +1128,8 @@ capability Integer<T: Numeric + Display> {
 
     /// Returns the remainder after integer division.
     ///
-    /// This method is also the implementation of the `%` operator. The result
+    /// This method is also the implementation of the
+    /// [`%`](operator@Integer.remainder) operator. The result
     /// has the same sign as the receiver. A zero divisor traps, matching
     /// WebAssembly integer arithmetic.
     ///
@@ -1125,7 +1149,8 @@ capability Integer<T: Numeric + Display> {
 
     /// Combines two integers with a bitwise OR.
     ///
-    /// This method is also the implementation of the `|` operator.
+    /// This method is also the implementation of the
+    /// [`|`](operator@Integer.bitOr) operator.
     ///
     /// # Example
     ///
@@ -1143,7 +1168,8 @@ capability Integer<T: Numeric + Display> {
 
     /// Combines two integers with a bitwise exclusive OR.
     ///
-    /// This method is also the implementation of the `^` operator.
+    /// This method is also the implementation of the
+    /// [`^`](operator@Integer.bitXor) operator.
     ///
     /// # Example
     ///
@@ -1161,7 +1187,8 @@ capability Integer<T: Numeric + Display> {
 
     /// Combines two integers with a bitwise AND.
     ///
-    /// This method is also the implementation of the `&` operator.
+    /// This method is also the implementation of the
+    /// [`&`](operator@Integer.bitAnd) operator.
     ///
     /// # Example
     ///
@@ -1179,7 +1206,8 @@ capability Integer<T: Numeric + Display> {
 
     /// Shifts bits to the left.
     ///
-    /// This method is also the implementation of the `<<` operator. Only the
+    /// This method is also the implementation of the
+    /// [`<<`](operator@Integer.shiftLeft) operator. Only the
     /// low five bits of the shift count are used for values represented as
     /// i32, including 8- and 16-bit integers; i64, u64, and address values use
     /// the low six bits. Bits shifted out of the representation are discarded.
@@ -1200,7 +1228,8 @@ capability Integer<T: Numeric + Display> {
 
     /// Shifts bits to the right.
     ///
-    /// This method is also the implementation of the `>>` operator. Signed
+    /// This method is also the implementation of the
+    /// [`>>`](operator@Integer.shiftRight) operator. Signed
     /// values copy the sign bit; unsigned and address values shift in zeroes.
     /// Shift counts use the same low-five or low-six-bit rule as [`shiftLeft`].
     ///
@@ -1235,7 +1264,8 @@ capability Integer<T: Numeric + Display> {
 capability Signed<T: Numeric> {
     /// Returns this value with its sign inverted.
     ///
-    /// This method is also the implementation of unary `-`. Integer minimum
+    /// This method is also the implementation of unary
+    /// [`-`](operator@Signed.negate). Integer minimum
     /// values wrap to themselves, matching WebAssembly integer subtraction;
     /// floating-point values toggle their sign bit, including zero and NaN.
     ///
@@ -1507,7 +1537,8 @@ extend f64 {
 extend bool {
     /// Inverts a boolean value.
     ///
-    /// This method is also the implementation of the [`!`] operator.
+    /// This method is also the implementation of the
+    /// [`!`](operator@bool.not) operator.
     ///
     /// # Example
     ///
@@ -1536,7 +1567,8 @@ extend bool {
 capability Equatable<T> {
     /// Reports whether this value and another value are equal.
     ///
-    /// This method is also the implementation of the [`==`] operator. Records,
+    /// This method is also the implementation of the
+    /// [`==`](operator@Equatable.equals) operator. Records,
     /// enums, options, and results compare their complete structure; strings
     /// compare UTF-8 contents. Floating-point equality follows IEEE 754, so
     /// NaN is not equal to itself.
@@ -1557,8 +1589,9 @@ capability Equatable<T> {
 
     /// Reports whether this value and another value differ.
     ///
-    /// This method is also the implementation of the [`!=`] operator and is the
-    /// logical inverse of [`equals`] for every Equatable type.
+    /// This method is also the implementation of the
+    /// [`!=`](operator@Equatable.notEquals) operator and is the logical inverse
+    /// of [`Equatable.equals`] for every [`Equatable`] type.
     ///
     /// # Example
     ///
@@ -1577,8 +1610,8 @@ capability Equatable<T> {
 
 /// Supports conversion to a user-facing textual representation.
 ///
-/// An `as String` cast, string interpolation, [`print`], and [`setVariable`] all
-/// display values through this single capability.
+/// An [`as`] [`String`] cast, string interpolation, [`print`], and
+/// [`setVariable`] all display values through this single capability.
 ///
 /// # Example
 ///
@@ -1592,7 +1625,8 @@ capability Display<T> {}
 
 /// Supports deserialization from process memory.
 ///
-/// Primitive and record layouts with this capability can be selected by `process.read`.
+/// Primitive and record layouts with this capability can be selected by
+/// [`Process.read`].
 ///
 /// # Example
 ///
@@ -1634,8 +1668,9 @@ typeConstructor [T] {
 
     /// Reports whether the array contains no elements.
     ///
-    /// This is ordinary library composition over `length`; it does not require
-    /// a separate runtime intrinsic.
+    /// This is ordinary library composition over
+    /// [`[T].length`](method@Array.length); it does not require a separate
+    /// runtime intrinsic.
     ///
     /// # Example
     ///
@@ -1704,7 +1739,8 @@ typeConstructor [T] {
 
     /// Updates an array element.
     ///
-    /// This is the standard-library operation behind `array[index] = value`.
+    /// This is the standard-library operation behind an [`array indexing`]
+    /// assignment.
     /// The array and index are evaluated once and the element is updated in
     /// place without structurally invalidating active iteration.
     ///
@@ -1777,8 +1813,9 @@ typeConstructor [T] {
     /// Removes the element at an index and shifts later elements left.
     ///
     /// The array keeps its identity and capacity, so aliases observe the
-    /// removal. An index greater than or equal to `length()` traps, matching
-    /// indexed access. Stored references in the vacated final slot are
+    /// removal. An index greater than or equal to
+    /// [`[T].length`](method@Array.length) traps, matching indexed access. Stored
+    /// references in the vacated final slot are
     /// released for garbage collection. Exact [`[T; N]`] arrays cannot change
     /// length and do not support [`removeAt`].
     ///
@@ -1802,7 +1839,7 @@ typeConstructor [T] {
     /// beginning, duplicates after the first match remain in place, and an
     /// absent value leaves the array unchanged. The receiver keeps its identity
     /// and capacity. Exact [`[T; N]`] arrays cannot change length and do not
-    /// support `remove`.
+    /// support [`[T].remove`](method@Array.remove).
     ///
     /// # Example
     ///
@@ -1854,7 +1891,7 @@ typeConstructor [T] {
     /// The array keeps its identity and capacity, so aliases observe the empty
     /// result and later appends can reuse its storage. Stored references are
     /// released for garbage collection. Exact [`[T; N]`] arrays cannot change
-    /// length and do not support `clear`.
+    /// length and do not support [`[T].clear`](method@Array.clear).
     /// Clearing through any alias invalidates active iteration of this array.
     ///
     /// # Example
@@ -1916,7 +1953,7 @@ typeConstructor Set<T: Equatable> {
 
     /// Reports whether the set contains no values.
     ///
-    /// This composes the source-defined result from `length`.
+    /// This composes the source-defined result from [`Set.length`].
     ///
     /// # Example
     ///
@@ -2155,8 +2192,8 @@ intrinsic type String {
 
     /// Reports whether this string contains no UTF-8 bytes.
     ///
-    /// [`String`] itself is never absent. Use ordinary [`match`] on `String?` when
-    /// absence and emptiness should both satisfy a condition.
+    /// [`String`] itself is never absent. Use ordinary [`match`] on an optional
+    /// string ([`T?`]) when absence and emptiness should both satisfy a condition.
     ///
     /// # Example
     ///
@@ -2440,6 +2477,14 @@ intrinsic type String {
     /// ```splitscript
     /// let percentage: f64 = "87.5".parse() else 0.0
     /// ```
+    ///
+    /// # Example
+    ///
+    /// Parse a special floating-point value
+    ///
+    /// ```splitscript
+    /// let positiveInfinity: f64 = "Infinity".parse() else 0.0
+    /// ```
     @intrinsic(StringParse)
     fn parse<T: Numeric>() -> T!;
 
@@ -2606,7 +2651,7 @@ struct SignatureMatch {
 /// Represents a precise span of time.
 ///
 /// Durations carry normalized whole seconds and nanoseconds and are used for
-/// LiveSplit game time. The nanosecond component is always between zero and
+/// timer game time. The nanosecond component is always between zero and
 /// 999,999,999, including for negative durations.
 ///
 /// # Example
@@ -2967,8 +3012,9 @@ struct Duration {
 
     /// Reports whether this duration is shorter than another duration.
     ///
-    /// This method implements the `<` operator using the normalized whole and
-    /// fractional components without converting to floating point.
+    /// This method implements the [`<`](operator@Duration.lessThan) operator
+    /// using the normalized whole and fractional components without converting
+    /// to floating point.
     ///
     /// # Example
     ///
@@ -2990,8 +3036,8 @@ struct Duration {
 
     /// Reports whether this duration is no longer than another duration.
     ///
-    /// This method implements the `<=` operator without converting to floating
-    /// point.
+    /// This method implements the [`<=`](operator@Duration.lessThanOrEqual)
+    /// operator without converting to floating point.
     ///
     /// # Example
     ///
@@ -3012,8 +3058,9 @@ struct Duration {
 
     /// Reports whether this duration is longer than another duration.
     ///
-    /// This method implements the `>` operator using the normalized whole and
-    /// fractional components without converting to floating point.
+    /// This method implements the [`>`](operator@Duration.greaterThan) operator
+    /// using the normalized whole and fractional components without converting
+    /// to floating point.
     ///
     /// # Example
     ///
@@ -3035,8 +3082,8 @@ struct Duration {
 
     /// Reports whether this duration is at least another duration.
     ///
-    /// This method implements the `>=` operator without converting to floating
-    /// point.
+    /// This method implements the [`>=`](operator@Duration.greaterThanOrEqual)
+    /// operator without converting to floating point.
     ///
     /// # Example
     ///
@@ -3093,7 +3140,7 @@ struct Instant {
 
     /// Offsets this instant by a duration.
     ///
-    /// This method implements `Instant + Duration`. Results before the
+    /// This method implements [`Instant.add`]. Results before the
     /// monotonic clock's zero point clamp to zero, and results beyond the
     /// largest representable instant clamp to that maximum. The calculation
     /// preserves nanosecond precision and does not wrap.
@@ -3549,8 +3596,8 @@ struct FileVersion {
 
     /// Constructs a numeric Windows file version from its four components.
     ///
-    /// The `v"major.minor.build.private"` literal is the concise spelling for
-    /// calls with constant components.
+    /// The [`v`] literal is the concise spelling for calls with constant
+    /// components.
     ///
     /// # Example
     ///
@@ -4090,9 +4137,9 @@ struct Module {
     }
 }
 
-/// Describes the current LiveSplit timer state.
+/// Describes the current timer state.
 ///
-/// Timer state is an exhaustive enum returned by timer.state().
+/// Timer state is an exhaustive enum returned by [`timer.state`].
 ///
 /// # Example
 ///
@@ -5211,8 +5258,8 @@ struct GbaEmulator {
 
     /// Discovers the emulator's GBA memory mapping.
     ///
-    /// `state GBA` invokes this automatically after attaching to one of the
-    /// provider's supported processes.
+    /// A [`state`] declaration using [`GBA`] invokes this automatically after
+    /// attaching to one of the provider's supported processes.
     ///
     /// # Example
     ///

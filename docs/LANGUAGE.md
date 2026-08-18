@@ -1136,7 +1136,7 @@ setup {
 ```
 
 `setup` cannot access `process`, `gba`, `current`, `old`, or suspend. The body
-is emitted in `_start`; the LiveSplit runtime deliberately defers that export
+is emitted in `_start`; the autosplitting runtime deliberately defers that export
 until the first controlled update so arbitrary startup code can be interrupted.
 A debug watch reload creates a new module instance, so its `setup` block runs
 again on that instance's first update.
@@ -1157,7 +1157,7 @@ the block runs. `process`, `gba`, `current`, and
 `old` are unavailable because closure may happen before initialization or the
 first snapshot completes.
 
-`setTickRate(hz)` uses updates per second. The LiveSplit runner reads the
+`setTickRate(hz)` uses updates per second. The runtime reads the
 resulting interval after the current `update` returns, so a call affects the
 wait before the following update rather than the invocation already in
 progress. It is the dynamic escape hatch from the top-level `tickRate` policy:

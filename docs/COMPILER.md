@@ -1152,10 +1152,14 @@ Migration pages resolve their canonical targets back through the same language
 and standard-library catalogs, while catalog examples retain semantic tokens
 and exact definition links, including links from language keywords such as
 `fn`, `let`, `await`, and `return`. Documentation prose supports rustdoc-style
-intra-doc links such as ``[`Process.read`]`` and ``[`await`]``. Resolution is
-exact and ambiguity-safe: qualified catalog identities and unique short names
-become page-relative links, while an unknown or ambiguous spelling remains
-visible for validation instead of silently choosing a destination. Compact
+intra-doc links such as ``[`Process.read`]`` and ``[`await`]``. A custom label
+can name a different target with ``[`*`](operator@Numeric.multiply)``, while optional
+Rustdoc-style disambiguators such as `keyword@await`, `method@Process.read`,
+`operator@Numeric.multiply`, and `type@Duration` make the intended symbol kind
+explicit. Resolution is exact and ambiguity-safe: qualified catalog identities
+and unique short names become page-relative links, while an unknown or
+ambiguous spelling remains visible for validation instead of silently choosing
+a destination. Compact
 hover and completion Markdown reduces this reference-only markup to ordinary
 code spans. Standard-library declarations, language entries, migration
 concepts, and bundled guides author every exact known-symbol mention this way.

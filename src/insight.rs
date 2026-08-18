@@ -1199,11 +1199,7 @@ whileAttached {
             }
         );
         assert!(hover.markdown.contains("```splitscript\ntimer\n```"));
-        assert!(
-            hover
-                .markdown
-                .contains("Reads information from the LiveSplit timer")
-        );
+        assert!(hover.markdown.contains("Reads information from the timer"));
         assert!(
             hover
                 .markdown
@@ -1238,7 +1234,7 @@ whileAttached {
         assert!(
             version
                 .markdown
-                .contains("exactly four decimal u16 components")
+                .contains("exactly four decimal `u16` components")
         );
     }
 
@@ -1349,7 +1345,7 @@ whileAttached {
             .expect("process provider hover");
         assert!(hover.markdown.contains("state \"game.exe\" { ... }"));
         assert!(hover.markdown.contains("process: Process"));
-        assert!(hover.markdown.contains("typed handle"));
+        assert!(hover.markdown.contains("has type `Process`"));
     }
 
     #[test]

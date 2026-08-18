@@ -681,13 +681,9 @@ impl<'a> Validator<'a> {
         if docs.summary.trim().is_empty() || (require_details && docs.details.trim().is_empty()) {
             self.error(format!("`{owner}` has incomplete documentation"));
         }
-        if require_example && docs.examples.len() != 1 {
+        if require_example && docs.examples.is_empty() {
             self.error(format!(
-                "`{owner}` must have exactly one focused documentation example"
-            ));
-        } else if !require_example && docs.examples.len() > 1 {
-            self.error(format!(
-                "`{owner}` must not have more than one focused documentation example"
+                "`{owner}` must have at least one focused documentation example"
             ));
         }
         for value in &docs.examples {
@@ -950,7 +946,7 @@ root {
         assert!(
             errors
                 .iter()
-                .any(|error| error.message.contains("exactly one focused")),
+                .any(|error| error.message.contains("at least one focused")),
             "{errors:#?}"
         );
     }
@@ -974,13 +970,40 @@ struct Value {
         assert!(errors.iter().any(|error| {
             error
                 .message
-                .contains("`Value` must have exactly one focused")
+                .contains("`Value` must have at least one focused")
         }));
         assert!(errors.iter().any(|error| {
             error
                 .message
-                .contains("`Value.field` must have exactly one focused")
+                .contains("`Value.field` must have at least one focused")
         }));
+    }
+
+    #[test]
+    fn declarations_may_have_multiple_focused_examples() {
+        let source = r#"
+/// Values.
+///
+/// Provides documented values.
+///
+/// # Example
+///
+/// Read one value
+///
+/// ```splitscript
+/// let first = 1
+/// ```
+///
+/// # Example
+///
+/// Read another value
+///
+/// ```splitscript
+/// let second = 2
+/// ```
+namespace values {}
+"#;
+        generate_catalog(&parse(source).unwrap()).unwrap();
     }
 
     #[test]

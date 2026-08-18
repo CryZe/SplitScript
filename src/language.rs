@@ -71,6 +71,10 @@ split {
     return current.score > old.score
 }"#;
 
+const GBA_STATE_SOURCE: &str = r#"state GBA {
+    room: u8 at 0x03000010;
+}"#;
+
 const TICK_RATE_SOURCE: &str = r#"state "game.exe" {}
 
 tickRate {
@@ -175,6 +179,34 @@ whileAttached {
     for label in ["one", "two"] {
         print(label)
     }
+}"#;
+
+const FOR_SOURCE: &str = r#"state "game.exe" {}
+
+settings {
+/// Controls each generated level split.
+for level in 2..=36 {
+    `Level {level}` key `{level}`: true,
+}
+}
+
+whileAttached {
+for label in ["one", "two"] {
+    print(label)
+}
+}"#;
+
+const IF_SOURCE: &str = r#"state "game.exe" {}
+
+fn levelKind(isBoss: bool) -> String {
+let label = if isBoss { "Boss" } else { "Level" }
+return label
+}
+
+whileAttached {
+if timer.state() == TimerState.Running {
+    print("Timer is running")
+}
 }"#;
 
 const EQUALITY_SOURCE: &str = r#"state "game.exe" {}
@@ -310,12 +342,18 @@ focused_example!(
     "enum Mode {\n    Menu,\n    Playing,\n}",
     DECLARATIONS_SOURCE
 );
-focused_example!(
-    STATE_DECL_EXAMPLE,
-    "Read watched state",
-    "state \"game.exe\" {\n    score = process.read<i32>(0x1000);\n}",
-    STATE_SOURCE
-);
+const STATE_DECL_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Read state from a native process",
+        "state \"game.exe\" {\n    score = process.read<i32>(0x1000);\n}",
+        STATE_SOURCE,
+    ),
+    Example::checked(
+        "Read state from a GBA emulator",
+        "state GBA {\n    room: u8 at 0x03000010;\n}",
+        GBA_STATE_SOURCE,
+    ),
+];
 focused_example!(
     STATE_LAYOUT_EXAMPLE,
     "Select a supported build",
@@ -352,12 +390,18 @@ focused_example!(
     "\"Enable Auto Splitting\" => enableAutoSplitting key \"auto-splitting\": true",
     SETTINGS_SOURCE
 );
-focused_example!(
-    IF_EXAMPLE,
-    "Choose a value",
-    "let label = if isBoss { \"Boss\" } else { \"Level\" }",
-    CONTROL_FLOW_SOURCE
-);
+const IF_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Run a conditional statement",
+        "if timer.state() == TimerState.Running {\n    print(\"Timer is running\")\n}",
+        IF_SOURCE,
+    ),
+    Example::checked(
+        "Choose a value",
+        "let label = if isBoss { \"Boss\" } else { \"Level\" }",
+        IF_SOURCE,
+    ),
+];
 focused_example!(
     ELSE_EXAMPLE,
     "Provide a read fallback",
@@ -370,12 +414,18 @@ focused_example!(
     "while index < values.length() {\n    index += 1\n}",
     CONTROL_FLOW_SOURCE
 );
-focused_example!(
-    FOR_EXAMPLE,
-    "Iterate over an array",
-    "for level in levels {\n    inspect(level)\n}",
-    CONTROL_FLOW_SOURCE
-);
+const FOR_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Iterate over an array",
+        "for label in [\"one\", \"two\"] {\n    print(label)\n}",
+        FOR_SOURCE,
+    ),
+    Example::checked(
+        "Declare a family of settings",
+        "/// Controls each generated level split.\nfor level in 2..=36 {\n    `Level {level}` key `{level}`: true,\n}",
+        FOR_SOURCE,
+    ),
+];
 focused_example!(
     BREAK_EXAMPLE,
     "Exit a loop",
@@ -701,8 +751,8 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "state \"game.exe\" { field = expression; } | state GBA { field at address; }",
         "Declares process attachment and persistent watched state.",
-        "Every state expression produces a fallible value ([`T!`]). Initialization requires all required fields to succeed in one poll and seeds old and current equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError()`].",
-        STATE_DECL_EXAMPLE
+        "Every state expression produces a fallible value ([`T!`]). Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
+        STATE_DECL_EXAMPLES
     ),
     language_item!(
         TickRate,
@@ -710,7 +760,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "tickRate { attached: 60, detached: 2 }",
         "Overrides the lifecycle-owned polling rates.",
-        "SplitScript defaults to 120 Hz while a process is attached and 1 Hz while detached. The attached rate is applied immediately after acquiring a process, before onAttach and its cooperative discovery run. The detached rate is applied during module startup and immediately when a process closes. Either field may be omitted to retain its default; setTickRate remains available for temporary dynamic changes until the next lifecycle transition.",
+        "SplitScript defaults to 120 Hz while a process is attached and 1 Hz while detached. The attached rate is applied immediately after acquiring a process, before [`onAttach`] and its cooperative discovery run. The detached rate is applied during module startup and immediately when a process closes. Either field may be omitted to retain its default; [`setTickRate`] remains available for temporary dynamic changes until the next lifecycle transition.",
         &[Example::checked(
             "Override lifecycle polling rates",
             "tickRate {\n    attached: 60,\n    detached: 2,\n}",
@@ -723,7 +773,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "layout Name { field at address }",
         "Declares one named memory layout for a supported game build.",
-        "Fields with the same compatible type in every named layout form the common StateSnapshot interface. Missing fields and conflicting same-named types are available after a direct match on the generated read-only layout value refines the selected StateLayout variant. The implicitly suspending onAttach block returns that variant before polling begins; await process.closed() represents an unsupported build without falling back.",
+        "Fields with the same compatible type in every named layout form the common state snapshot interface. Missing fields and conflicting same-named types are available after a direct [`match`] on the generated read-only layout value refines the selected layout variant. The implicitly suspending [`onAttach`] block returns that variant before polling begins; [`await`] [`Process.closed`] represents an unsupported build without falling back.",
         STATE_LAYOUT_EXAMPLE
     ),
     language_item!(
@@ -732,7 +782,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "field: T at module?, offset, ... | field: T? at module?, offset, ...",
         "Reads a persistent state field through a pointer path.",
-        "The optional module name selects the pointer base and each following integer is an address offset. A required T field is a [`T!`] boundary: initialization waits for it, while a later failed read retains its last accepted value. An explicitly optional T? field instead accepts read failure as None and a successful read as Some(T), so absence is observable in current and old. The exact memory representation must be explicit or inferred from an exact use; optional read semantics require the T? annotation.",
+        "The optional module name selects the pointer base and each following integer is an address offset. A required `T` field is a [`T!`] boundary: initialization waits for it, while a later failed read retains its last accepted value. An explicitly optional [`T?`] field instead accepts read failure as [`None`] and a successful read as [`Some`]`(T)`, so absence is observable in [`current`] and [`old`]. The exact memory representation must be explicit or inferred from an exact use; optional read semantics require the [`T?`] annotation.",
         STATE_POINTER_EXAMPLE
     ),
     language_item!(
@@ -741,7 +791,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "field at address as utf8(maxBytes)",
         "Decodes a bounded native UTF-8 string state field.",
-        "This is state-layout sugar for a bounded read-and-decode operation, not a string-size type. It follows the complete pointer path, reads at most 4096 bytes once, and stops at the first NUL byte. A required field rejects its candidate when memory cannot be read or the bytes are not valid UTF-8; an explicitly annotated String? field observes that failure as None. Without the optional annotation, the field type is inferred as String.",
+        "This is state-layout sugar for a bounded read-and-decode operation, not a string-size type. It follows the complete pointer path, reads at most 4096 bytes once, and stops at the first NUL byte. A required field rejects its candidate when memory cannot be read or the bytes are not valid UTF-8; an explicitly annotated optional [`String`] ([`T?`]) field observes that failure as [`None`]. Without the optional annotation, the field type is inferred as [`String`].",
         NATIVE_STRING_DECODER_EXAMPLE
     ),
     language_item!(
@@ -750,7 +800,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "field at address as utf16le(maxUtf16Units)",
         "Decodes a bounded native UTF-16LE string state field.",
-        "This state-layout sugar follows the complete pointer path, reads at most 2048 little-endian UTF-16 code units once, and stops at the first NUL code unit. Unpaired surrogate code units become the Unicode replacement character. A required field rejects its candidate when memory cannot be read; an explicitly annotated String? field observes that failure as None. Without the optional annotation, the field type is inferred as String.",
+        "This state-layout sugar follows the complete pointer path, reads at most 2048 little-endian UTF-16 code units once, and stops at the first NUL code unit. Unpaired surrogate code units become the Unicode replacement character. A required field rejects its candidate when memory cannot be read; an explicitly annotated optional [`String`] ([`T?`]) field observes that failure as [`None`]. Without the optional annotation, the field type is inferred as [`String`].",
         NATIVE_UTF16LE_DECODER_EXAMPLE
     ),
     language_item!(
@@ -759,7 +809,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "settings { \"Group\" { \"Label\" => name key \"host-key\": value } }",
         "Declares live user settings.",
-        "Settings support nested headings, documentation-comment tooltips, booleans, choices, and file selectors. An optional quoted key is the exact stable string stored in the host settings map; otherwise the source identifier is used. Current and previous values refresh every update.",
+        "Settings support nested headings, [`///`] tooltips, booleans, [`choice setting`] values, and [`file setting`] selectors. An optional [`stable setting key`] is the exact string stored in the host settings map; otherwise the source identifier is used. [`settings`] and [`oldSettings`] refresh every update.",
         SETTINGS_DECL_EXAMPLE
     ),
     language_item!(
@@ -768,7 +818,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "for value in start..=end { `label {value}` key `{value}`: default }",
         "Declares a finite family of boolean settings at compile time.",
-        "The inclusive u32 range is expanded during compilation into ordinary host settings. Label and key templates may interpolate only the loop binding. Generated entries deliberately have no statically named settings member; query them with settings.enabled(key). A documentation comment on the family becomes every generated setting's tooltip, and nesting it in a quoted group preserves the normal heading structure.",
+        "The inclusive [`u32`] range is expanded during compilation into ordinary host settings. Label and key templates may interpolate only the loop binding. Generated entries deliberately have no statically named settings member; query them with [`SettingsView.enabled`]. A [`///`] comment on the family becomes every generated setting's tooltip, and nesting it in a quoted group preserves the normal heading structure.",
         SETTINGS_FAMILY_EXAMPLE
     ),
     language_item!(
@@ -777,7 +827,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "\"Label\" => name key \"host-key\": value",
         "Assigns an explicit stable key in the host settings map.",
-        "The quoted key is used for persistent host storage and dynamic settings.enabled(key) lookups. The source identifier remains the statically typed member exposed through settings and oldSettings. Without key, the source identifier is also the host key.",
+        "The quoted key is used for persistent host storage and dynamic [`SettingsView.enabled`] lookups. The source identifier remains the statically typed member exposed through [`settings`] and [`oldSettings`]. Without [`key`](syntax@stable setting key), the source identifier is also the host key.",
         SETTING_KEY_EXAMPLE
     ),
     language_item!(
@@ -786,8 +836,8 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "if condition { ... } else { ... }",
         "Branches as a statement or expression.",
-        "Expression-valued if requires an else branch and infers both branch values against one result type.",
-        IF_EXAMPLE
+        "Expression-valued [`if`] requires an [`else`] branch and infers both branch values against one result type.",
+        IF_EXAMPLES
     ),
     language_item!(
         Equality,
@@ -795,7 +845,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "left == right",
         "Compares two values for equality.",
-        "Equality is typed and never coerces between unrelated representations. Strings compare by text content, while records and enums compare structurally when their contents are equatable.",
+        "Equality is typed and never coerces between unrelated representations. [`String`] values compare by text content, while records and enums compare structurally when their contents satisfy [`Equatable`].",
         EQUALITY_EXAMPLE
     ),
     language_item!(
@@ -804,7 +854,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "left != right",
         "Compares two values for inequality.",
-        "Inequality is the typed negation of equality and supports the same exact types and structural comparisons.",
+        "Inequality is the typed negation of [`==`] and supports the same exact types and structural comparisons through [`Equatable`].",
         INEQUALITY_EXAMPLE
     ),
     language_item!(
@@ -813,7 +863,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "value else fallback",
         "Provides a branch or unwrap fallback.",
-        "After if, else selects the alternate branch. After a T? or T! expression, it unwraps success and evaluates a value fallback or transfers control with return, break, or continue on absence or error.",
+        "After [`if`], [`else`] selects the alternate branch. After a [`T?`] or [`T!`] expression, it unwraps success and evaluates a value fallback or transfers control with [`return`], [`break`], or [`continue`] on absence or error.",
         ELSE_EXAMPLE
     ),
     language_item!(
@@ -822,17 +872,17 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "while condition { ... }",
         "Repeats a block while its condition is true.",
-        "The condition must be Bool and is evaluated before every iteration. The loop body has its own lexical scope. In onAttach, await and retry resume through explicit loop-header and exit states without replaying completed iterations.",
+        "The condition must be [`bool`] and is evaluated before every iteration. The loop body has its own lexical scope. In [`onAttach`], [`await`] and [`retry`] resume through explicit loop-header and exit states without replaying completed iterations.",
         WHILE_EXAMPLE
     ),
     language_item!(
         For,
         "for",
         LanguageItemKind::Keyword,
-        "for value in array { ... }",
-        "Iterates over every element of an array.",
-        "The array expression is evaluated exactly once. The element binding is read-only, lexically scoped to the body, and inferred from [T] or [T; N]. Break and continue target the nearest loop. In onAttach, a body containing await or retry preserves the array, index, and current binding across suspension.",
-        FOR_EXAMPLE
+        "for value in array { ... } | for value in start..=end { setting }",
+        "Iterates over an array or declares a finite settings family.",
+        "In runtime code, the array expression is evaluated exactly once. The element binding is read-only, lexically scoped to the body, and inferred from [`[T]`] or [`[T; N]`]. [`break`] and [`continue`] target the nearest loop. In [`onAttach`], a body containing [`await`] or [`retry`] preserves the array, index, and current binding across suspension. Inside [`settings`], the inclusive range form expands a [`settings family`] at compile time instead of creating a runtime loop.",
+        FOR_EXAMPLES
     ),
     language_item!(
         Break,
@@ -840,7 +890,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "break",
         "Exits the nearest enclosing loop.",
-        "Break may be written as a statement or as the diverging branch in `value else break`. It may only appear inside a loop and always targets the innermost loop.",
+        "[`break`] may be written as a statement or as the diverging branch in `value else break`. It may only appear inside a loop and always targets the innermost loop.",
         BREAK_EXAMPLE
     ),
     language_item!(
@@ -849,7 +899,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "continue",
         "Starts the next iteration of the nearest enclosing loop.",
-        "Continue may be written as a statement or as the diverging branch in `value else continue`. It may only appear inside a loop; the condition is evaluated again before the next iteration.",
+        "[`continue`] may be written as a statement or as the diverging branch in `value else continue`. It may only appear inside a loop; the condition is evaluated again before the next iteration.",
         CONTINUE_EXAMPLE
     ),
     language_item!(
@@ -867,7 +917,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "match value { pattern => expression }",
         "Exhaustively matches a value.",
-        "Match supports enum payloads, optional None/Some(value) patterns, fallible Err(error)/Ok(value) patterns, literals, guards, and a wildcard. Enum and wrapper matches must cover every state; guarded arms do not establish coverage.",
+        "[`match`] supports enum payloads, optional [`None`]/[`Some`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, literals, guards, and a wildcard. Enum and wrapper matches must cover every state; guarded arms do not establish coverage.",
         MATCH_EXAMPLE
     ),
     language_item!(
@@ -885,7 +935,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "throw error",
         "Transfers an error to the nearest [`T!`] boundary.",
-        "Without a future catch boundary, throw returns an error from a T! function. The error expression must be a String.",
+        "Without a future catch boundary, [`throw`] returns an error from a [`T!`] function. The error expression must be a [`String`].",
         THROW_EXAMPLE
     ),
     language_item!(
@@ -894,7 +944,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "fn name() -> async T { ... }",
         "Marks an explicitly typed function result as asynchronous.",
-        "A function containing [`await`] or [`retry`] has an async result. Write `async T` when its result type is explicit; when the result type is omitted, both [`async`] and `T` are inferred. Calling a source-defined async function creates a process-lifetime future value without polling it. That `async T` value can be stored in locals and aggregates, passed to functions, and awaited later. Its typed continuation frame retains parameters, live locals, nested futures, and the completed T. Futures cannot escape into globals because process closure owns their cancellation.",
+        "A function containing [`await`] or [`retry`] has an async result. Write [`async`] `T` when its result type is explicit; when the result type is omitted, both [`async`] and `T` are inferred. Calling a source-defined async function creates a process-lifetime future value without polling it. That [`async`] `T` value can be stored in locals and aggregates, passed to functions, and awaited later. Its typed continuation frame retains parameters, live locals, nested futures, and the completed `T`. Futures cannot escape into globals because process closure owns their cancellation.",
         ASYNC_RESULT_EXAMPLE
     ),
     language_item!(
@@ -903,7 +953,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "let value = await operation",
         "Waits for an asynchronous value and yields its result.",
-        "Await is an ordinary prefix expression available in onAttach and source-defined async helpers. It accepts any async T expression, yields T, and can be nested in calls, operators, member access, conditionals, matches, fallbacks, and loop conditions. Source future values may be stored and awaited repeatedly; an already completed future yields its retained result without rerunning its body. The process-lifetime continuation tree is cancelled when the attached process closes.",
+        "[`await`] is an ordinary prefix expression available in [`onAttach`] and source-defined [`async`] helpers. It accepts any [`async`] `T` expression, yields `T`, and can be nested in calls, operators, member access, conditionals, matches, fallbacks, and loop conditions. Source future values may be stored and awaited repeatedly; an already completed future yields its retained result without rerunning its body. The process-lifetime continuation tree is cancelled when the attached process closes.",
         AWAIT_EXAMPLE
     ),
     language_item!(
@@ -912,7 +962,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "let value = retry resultExpression",
         "Retries a [`T!`] expression until it succeeds.",
-        "The T! expression is evaluated once per attached update. An error stays pending; success yields T. A containing function infers an async result unless it has an explicit result type, in which case write `-> async T`.",
+        "The [`T!`] expression is evaluated once per attached update. An error stays pending; success yields `T`. A containing function infers an [`async`] result unless it has an explicit result type, in which case write `-> async T`.",
         RETRY_EXAMPLE
     ),
     language_item!(
@@ -921,7 +971,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "resultExpression?",
         "Propagates a [`T!`] error.",
-        "Postfix question mark unwraps success or transfers the original error to the nearest T! function or state-field assignment boundary.",
+        "Postfix [`?`] unwraps success or transfers the original error to the nearest [`T!`] function or state-field assignment boundary.",
         PROPAGATE_EXAMPLE
     ),
     language_item!(
@@ -930,7 +980,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "expression as Type",
         "Explicitly converts a value.",
-        "Casts are checked statically. String interpolation uses the same conversion capabilities as an explicit as String cast.",
+        "Casts are checked statically. String interpolation uses the same [`Display`] conversion as an explicit [`as`] [`String`] cast.",
         CAST_EXAMPLE
     ),
     language_item!(
@@ -939,7 +989,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "Some(value)",
         "Explicitly constructs a present optional value.",
-        "Some infers T from its value and constructs T?. Plain T values still lift automatically whenever T? is expected.",
+        "[`Some`] infers `T` from its value and constructs [`T?`]. Plain `T` values still lift automatically whenever [`T?`] is expected.",
         SOME_EXAMPLE
     ),
     language_item!(
@@ -948,7 +998,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "Ok(value)",
         "Explicitly constructs a successful result value.",
-        "Ok infers T from its value and constructs T!. Plain T values still lift automatically whenever T! is expected.",
+        "[`Ok`] infers `T` from its value and constructs [`T!`]. Plain `T` values still lift automatically whenever [`T!`] is expected.",
         OK_EXAMPLE
     ),
     language_item!(
@@ -957,7 +1007,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "Err(message)",
         "Constructs a [`T!`] error.",
-        "Err takes a String and obtains its successful T type from surrounding T! context.",
+        "[`Err`] takes a [`String`] and obtains its successful `T` type from surrounding [`T!`] context.",
         ERR_EXAMPLE
     ),
     language_item!(
@@ -966,7 +1016,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "self",
         "Refers to the current method receiver.",
-        "A function declared as fn Type.name receives an implicit, precisely typed self value.",
+        "A function declared as [`fn`] `Type.name` receives an implicit, precisely typed [`self`] value.",
         SELF_EXAMPLE
     ),
     language_item!(
@@ -984,7 +1034,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "v\"major.minor.build.private\"",
         "Constructs a checked Windows file-version literal.",
-        "A version literal contains exactly four decimal u16 components and has type FileVersion. The quoted boundary keeps malformed versions from being parsed as unrelated numeric or member expressions.",
+        "A version literal contains exactly four decimal [`u16`] components and has type [`FileVersion`]. The quoted boundary keeps malformed versions from being parsed as unrelated numeric or member expressions.",
         VERSION_EXAMPLE
     ),
     language_item!(
@@ -993,7 +1043,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "`text {expression}`",
         "Interpolates values into a String.",
-        "Backtick strings use braces without JavaScript's dollar marker. A dollar sign is ordinary text, so `${value}` emits `$` followed by the interpolated value rather than being treated as a typo. Non-String values use the same conversion rules as an as String cast.",
+        "Backtick strings use braces without JavaScript's dollar marker. A dollar sign is ordinary text, so `${value}` emits `$` followed by the interpolated value rather than being treated as a typo. Non-[`String`] values use the same [`Display`] conversion as an [`as`] [`String`] cast.",
         TEMPLATE_EXAMPLE
     ),
     language_item!(
@@ -1002,7 +1052,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "[Element] or [Element; Length]",
         "Names a garbage-collected array type.",
-        "[T] accepts any length. [T; N] carries an exact compile-time length, can be used wherever [T] is expected, and has a fixed process-memory layout when T is MemoryReadable.",
+        "[`[T]`] accepts any length. [`[T; N]`] carries an exact compile-time length, can be used wherever [`[T]`] is expected, and has a fixed process-memory layout when `T` satisfies [`MemoryReadable`].",
         ARRAY_TYPE_EXAMPLE
     ),
     language_item!(
@@ -1011,7 +1061,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "array[index]",
         "Reads an array element.",
-        "The receiver may be [T] or [T; N], the index is inferred as u32, and the result has type T. WebAssembly performs the bounds check.",
+        "The receiver may be [`[T]`] or [`[T; N]`], the index is inferred as [`u32`], and the result has type `T`. WebAssembly performs the bounds check.",
         ARRAY_INDEX_EXAMPLE
     ),
     language_item!(
@@ -1020,7 +1070,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "Type?",
         "Names an optional type.",
-        "A T? contains either Some(T) or None. Plain values lift to Some, and match uses Some(value) plus None.",
+        "A [`T?`] contains either [`Some`]`(T)` or [`None`]. Plain values lift to [`Some`], and [`match`] uses [`Some`]`(value)` plus [`None`].",
         OPTION_TYPE_EXAMPLE
     ),
     }
@@ -1131,7 +1181,7 @@ define_language_catalog! {
         LanguageItemKind::SnapshotRoot,
         "current.stateField",
         "Accesses the current committed state snapshot.",
-        "State fields refresh before whileAttached and timer-decision actions run. Direct assignment replaces a field for the remainder of this tick and the resulting snapshot becomes old on the next successful poll. A failed field retains its last accepted value.",
+        "State fields refresh before [`whileAttached`] and timer-decision actions run. Direct assignment replaces a field for the remainder of this tick and the resulting snapshot becomes [`old`] on the next successful poll. A failed field retains its last accepted value.",
         "current.level = 1",
         STATE_SOURCE
     ),
@@ -1141,7 +1191,7 @@ define_language_catalog! {
         LanguageItemKind::SnapshotRoot,
         "old.stateField",
         "Accesses the previous committed state snapshot.",
-        "Old state contains the preceding emitted snapshot. A rejected field remains unchanged while successful sibling fields can advance.",
+        "[`old`] contains the preceding emitted snapshot. A rejected field remains unchanged while successful sibling fields can advance into [`current`].",
         "return current.level != old.level",
         STATE_SOURCE
     ),
@@ -1151,7 +1201,7 @@ define_language_catalog! {
         LanguageItemKind::SnapshotRoot,
         "oldSettings.settingName",
         "Accesses the previous settings view.",
-        "Settings are refreshed on every update; oldSettings retains the preceding values for change detection.",
+        "[`settings`] refreshes on every update; [`oldSettings`] retains the preceding values for change detection.",
         "let changed = settings.enabled != oldSettings.enabled",
         SETTINGS_SOURCE
     ),
@@ -1163,7 +1213,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "Type!",
         "Names a fallible result type.",
-        "A T! contains either Ok(T) or a String error. Plain values lift to Ok, and match uses Ok(value) plus Err(error).",
+        "A [`T!`] contains either [`Ok`]`(T)` or a [`String`] error. Plain values lift to [`Ok`], and [`match`] uses [`Ok`]`(value)` plus [`Err`]`(error)`.",
         RESULT_TYPE_EXAMPLE
     ),
     language_item!(
@@ -1181,7 +1231,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "\"Label\" => name: choice { \"Option\" => Enum.Variant default }",
         "Declares an enum-backed setting choice.",
-        "Exactly one option may carry default; every option maps to a variant of one inferred enum type.",
+        "Exactly one option may carry `default`; every option maps to a variant of one inferred [`enum`] type.",
         CHOICE_EXAMPLE
     ),
     language_item!(
@@ -1200,7 +1250,7 @@ define_language_catalog! {
         Setup,
         "setup",
         "Initializes one loaded script instance.",
-        "Runs once from the module start entry point, after globals and settings are initialized and refreshed. The LiveSplit runtime defers that entry point until the beginning of the first interruptible update. Settings and process-independent operations are available, but process providers, state snapshots, and suspension are not.",
+        "Runs once from the module start entry point, after globals and [`settings`] are initialized and refreshed. The autosplitting runtime defers that entry point until the beginning of the first interruptible update. Settings and process-independent operations are available, but process providers, [`current`], [`old`], and suspension are not.",
         "setup {\n    print(\"Autosplitter loaded\")\n}"
     ),
     action_item!(
@@ -1216,7 +1266,7 @@ define_language_catalog! {
         OnAttach,
         "onAttach",
         "Initializes one attached process.",
-        "This action is implicitly suspending and owns process-lifetime cancellation for await and retry continuations. When the state declaration contains named layouts, it returns the generated StateLayout variant that should be polled.",
+        "This action is implicitly suspending and owns process-lifetime cancellation for [`await`] and [`retry`] continuations. When the [`state`] declaration contains named [`layout`] declarations, it returns the generated layout variant that should be polled.",
         "onAttach {\n    let module = await process.module(\"GameAssembly.dll\")\n}"
     ),
     action_item!(
@@ -1232,7 +1282,7 @@ define_language_catalog! {
         WhileAttached,
         "whileAttached",
         "Runs on every initialized attached update.",
-        "State and settings data has already refreshed when this action runs. The initialization poll is deliberately skipped. Falling through or returning true continues to the timer-decision actions; returning false skips all of them for this update.",
+        "State and [`settings`] data has already refreshed when this action runs. The initialization poll is deliberately skipped. Falling through or returning `true` continues to the timer-decision actions; returning `false` skips all of them for this update.",
         "whileAttached {\n    if !dataReady {\n        return false\n    }\n}"
     ),
     action_item!(
@@ -1240,7 +1290,7 @@ define_language_catalog! {
         Start,
         "start",
         "Decides whether to start the timer.",
-        "Falling through returns false.",
+        "Falling through returns `false`.",
         "start {\n    return current.inGame && !old.inGame\n}"
     ),
     action_item!(
@@ -1248,7 +1298,7 @@ define_language_catalog! {
         Split,
         "split",
         "Decides whether to advance the current split.",
-        "Falling through returns false.",
+        "Falling through returns `false`.",
         "split {\n    return current.level != old.level\n}"
     ),
     action_item!(
@@ -1256,7 +1306,7 @@ define_language_catalog! {
         Reset,
         "reset",
         "Decides whether to reset the timer.",
-        "Falling through returns false.",
+        "Falling through returns `false`.",
         "reset {\n    return current.newGame && !old.newGame\n}"
     ),
     action_item!(
@@ -1264,7 +1314,7 @@ define_language_catalog! {
         IsLoading,
         "isLoading",
         "Reports loading state when known.",
-        "Falling through returns None so the runtime leaves the current loading state unchanged.",
+        "Falling through returns [`None`] so the runtime leaves the current loading state unchanged.",
         "isLoading {\n    return current.scene == \"Loading\"\n}"
     ),
     action_item!(
@@ -1272,7 +1322,7 @@ define_language_catalog! {
         GameTime,
         "gameTime",
         "Reports the current game time when known.",
-        "Falling through returns None so the runtime leaves the current game time unchanged.",
+        "Falling through returns [`None`] so the runtime leaves the current game time unchanged.",
         "gameTime {\n    return Duration.fromSeconds(current.gameTime)\n}"
     ),
     }

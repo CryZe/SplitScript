@@ -138,10 +138,46 @@ be harmful: the required timer-phase API already exists.
 
 ### Next audit tranche
 
-The next tranche should cover a timer split-index source, module/file-version
-selection, fixed and growable array behavior, and one genuinely unsupported
-host case. It should continue to separate static compilation, deterministic
-host-fixture coverage, and live-game validation.
+#### Age of Empires II: Definitive Edition
+
+Campaign status: `BLOCKED`
+
+Audit result: mostly a false aggregate blocker with two narrower host gaps.
+
+- Source: four version-labelled layouts selected from the main executable's PE
+  file version.
+- Campaign claim: executable file-version metadata and alternate layout
+  selection are unavailable.
+- Existing translation: declare four named layouts, read
+  `process.mainModule().fileVersion()` in `onAttach`, compare `FileVersion`
+  values with version literals, and return the matching `StateLayout` variant.
+  The exact Windows process candidate must be `AoE2DE_s.exe` under the current
+  host contract.
+- Source: map and lost-time logic reads `timer.CurrentPhase` and
+  `timer.CurrentSplitIndex`.
+- Campaign claim: timer phase and split index are unavailable.
+- Existing translation: use `timer.state()` and the optional
+  `timer.currentSplitIndex()`. The absent split index needs explicit control
+  flow and must not be cast from the host's signed sentinel.
+- Residual host gap: the final lost-time split compares the current index with
+  `timer.Run.Count - 1`. SplitScript does not expose the configured segment
+  count, so the script cannot know that the current segment is the last one.
+- Residual host gap: `onReset` clears five run-scoped values at the exact timer
+  reset event. Polling `TimerState.NotRunning` can reconstruct the stable state
+  in ordinary cases, but it is not an ordered lossless reset notification.
+- Policy requiring review: the ASL source falls back to its newest layout for
+  an unknown executable version. A maintained port must explicitly choose
+  whether to preserve that risky fallback or reject the unsupported build with
+  `await process.closed()`.
+
+This source is suitable for a behavior-limited port today. The ordinary map
+timer, win split, cumulative game time, version selection, and most timer-state
+logic do not need new APIs. Only last-segment detection and exact reset-event
+semantics remain unavailable.
+
+The following audit tranche should cover fixed and growable array behavior and
+one genuinely unsupported host case. It should continue to separate static
+compilation, deterministic host-fixture coverage, and live-game validation.
 
 ## Cross-cutting findings
 

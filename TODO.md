@@ -55,6 +55,11 @@ semantic-review evidence, not as a conformance corpus.
   TUNIC, A Proof of Concept, Aim Climb, and 25 To Life. The audit confirmed the
   existing facilities together with a compiler probe; it did not treat clean
   compilation as fidelity or choose APIs for unresolved gaps.
+- [x] Reclassify AoE2DE's aggregate blocker using its source. PE file versions,
+  named layouts, timer state, and optional split index already cover most of
+  the script. The residual host requirements are configured segment count and
+  exact ordered reset notification; unknown-version fallback remains an
+  explicit port policy choice rather than a compiler limitation.
 - [ ] Audit every campaign output against its ASL source and classify each
   difference as preserved behavior, an intentional policy choice, an existing
   but undiscovered SplitScript facility, a genuine language/library gap, or a
@@ -77,9 +82,9 @@ semantic-review evidence, not as a conformance corpus.
   native process, one process-name array, one multi-version named layout, one
   timer-state/split-index script, one `tickRate` script, one managed-string or
   Mono singleton path, and one genuinely unsupported host case. The first audit
-  tranche identifies candidates for all but split-index behavior; correct and
-  runtime-test them before promotion. Require an explicit behavior ledger and
-  live runtime test where the game is available.
+  tranche and AoE2DE review identify candidates across all of these categories;
+  correct and runtime-test them before promotion. Require an explicit behavior
+  ledger and live runtime test where the game is available.
 
 ### Make the existing model discoverable from `splitc docs`
 

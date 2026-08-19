@@ -367,6 +367,37 @@ exact build selection retains one narrow host requirement.
   behavior-limited port can explicitly support only one verified build today;
   a complete two-build port remains fingerprint-limited.
 
+### Existing managed-instance paths: Circuit Superstars
+
+Campaign status: `BLOCKED`
+
+Audit result: managed instance traversal is already expressible; exact timer
+start notification is the only active behavior that remains host-limited.
+
+- Source: UnityASL finds `RaceManager.Instance`, reads two fields on that
+  replaceable singleton, and follows its `localStage` reference to
+  `RaceStage.State`. This is not unstructured runtime reflection after
+  attachment; every class and field name is statically known.
+- Existing translation: discover `RaceManager` and `RaceStage` through the
+  explicit `MonoVersion` layout, retain `RaceManager.staticFieldPath("Instance")`,
+  append instance offsets with `MemoryPath.dereference`, and resolve those paths
+  for typed expression-backed state fields. The singleton slot is reread on
+  every poll, so replacing the manager or stage object does not leave a stale
+  cached address.
+- A focused current-compiler probe covers both singleton fields, the nested
+  `localStage -> State` path, fallible path resolution at the state boundary,
+  start/split decisions, accumulated game time, and the always-paused loading
+  clock. It compiles without a new instance-binding API or dynamic state field.
+- The source's `onStart` callback clears accumulated time and rearms splitting.
+  A SplitScript `start` block can do the same for starts initiated by that
+  script, but it cannot observe an external timer start exactly. R2 remains the
+  faithful gap for that event; it is independent of Unity traversal.
+- Attachment must use the exact current Windows identity
+  `circuit-superstars.exe`. The correct Mono layout family and managed field
+  behavior still require live-game validation. Attachment-owned paths are
+  replaced on every successful `onAttach`, so the helper's explicit reset does
+  not require a guest-visible managed-object lifetime API.
+
 The next audit tranche should continue with another reported blocker likely to
 be a false gap. It must continue to separate static compilation, deterministic
 host-fixture coverage, and live-game validation.

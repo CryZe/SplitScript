@@ -75,9 +75,9 @@ semantic-review evidence, not as a conformance corpus.
   `timer.state()`, `timer.currentSplitIndex()`, game-time pause/resume,
   `Module.fileVersion()` / `productVersion()`, process-name arrays, named
   layouts, settings families, growable `[T]`, and Mono static-singleton paths
-  already cover parts of AoE2DE, Borderlands, TUNIC, Circuit Superstars, and
-  other reported blockers. Preserve the residual host gap only after removing
-  these false premises.
+  already cover parts of AoE2DE, Borderlands, TUNIC, and other reported
+  blockers. Preserve the residual host gap only after removing these false
+  premises.
 - [ ] Promote a small corrected subset to reviewed fixtures: one exact-name
   native process, one process-name array, one multi-version named layout, one
   timer-state/split-index script, one `tickRate` script, one managed-string or

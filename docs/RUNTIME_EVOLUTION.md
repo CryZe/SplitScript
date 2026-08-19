@@ -128,7 +128,9 @@ cannot provide exact `onStart`, `onSplit`, and `onReset` events while detached.
 The maintained Axiom Verge port can clear its event cursors after an attached
 `NotRunning` transition, but cannot reproduce the legacy `OnStart` callback
 when the timer starts before process attachment. Its diagnostic-only `OnSplit`
-callback is intentionally omitted rather than approximated.
+callback is intentionally omitted rather than approximated. Circuit Superstars
+likewise rearms accumulated game time in `onStart`; moving that reset into its
+game-driven `start` predicate would miss externally initiated starts.
 
 The runtime should eventually expose an ordered, lossless timer-event contract.
 This could be callback exports or a sequenced event queue consumed during

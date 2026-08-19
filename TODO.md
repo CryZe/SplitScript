@@ -60,18 +60,19 @@ semantic-review evidence, not as a conformance corpus.
   the script. The residual host requirements are configured segment count and
   exact ordered reset notification; unknown-version fallback remains an
   explicit port policy choice rather than a compiler limitation.
-- [ ] Audit every campaign output against its ASL source and classify each
-  difference as preserved behavior, an intentional policy choice, an existing
-  but undiscovered SplitScript facility, a genuine language/library gap, or a
-  host-runtime gap. Do not accept `PORTED` from compiler success alone. Start
-  with the high-risk silent mismatches already found: all native state names
-  omit the `.exe` required by the current Windows host; no output uses a named
-  `layout`; no output calls the existing `timer` namespace; `refreshRate` was
-  dropped instead of using `tickRate`; `ulong` was incorrectly narrowed to
-  `i64`; fixed/growable array operations were reported missing; and TUNIC
-  manually decodes a managed string instead of using
-  `process.readManagedString`.
-- [ ] Re-review entries currently marked blocked before designing host work.
+- [ ] Turn campaign feedback into targeted, minimized reproducers rather than
+  exhaustively auditing every generated port. Classify each reported friction
+  point as an existing but undiscovered facility, a compiler or diagnostic bug,
+  a documentation/migration gap, a genuine language/library gap, or a
+  host-runtime gap. Inspect the corresponding ASL and `.split` files only when
+  the report does not establish the intended behavior or when a clean compile
+  may hide a semantic mismatch. The known high-risk examples include omitted
+  `.exe` identities and named layouts, dropped `refreshRate`, incorrect
+  `ulong` narrowing, missed fixed/growable array operations, and manual managed
+  string decoding.
+- [ ] Re-check entries reported as blocked before designing adjacent host work,
+  using a focused source comparison and compiler probe rather than a full-file
+  audit.
   `timer.state()`, `timer.currentSplitIndex()`, game-time pause/resume,
   `Module.fileVersion()` / `productVersion()`, process-name arrays, named
   layouts, settings families, growable `[T]`, and Mono static-singleton paths
@@ -271,8 +272,8 @@ semantic-review evidence, not as a conformance corpus.
   `asl-help` callbacks.
 - [ ] Extend Unity Mono managed-object support from corpus-proven residual
   needs: typed cross-class object paths, managed list/dictionary traversal, and
-  dynamic typed tag values for Alba, A Short Hike, AER, Bzzzt, Circuit
-  Superstars, and Assemble with Care. Separate stable singleton/field chains
+  dynamic typed tag values for Alba, A Short Hike, AER, Bzzzt, and Assemble
+  with Care. Separate stable singleton/field chains
   already expressible through `staticFieldPath` and `field` from collection
   enumeration that genuinely needs new library/runtime support. Alba does not
   require runtime-created state fields: growable arrays can retain discovered

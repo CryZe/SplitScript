@@ -398,9 +398,11 @@ start notification is the only active behavior that remains host-limited.
   replaced on every successful `onAttach`, so the helper's explicit reset does
   not require a guest-visible managed-object lifetime API.
 
-The next audit tranche should continue with another reported blocker likely to
-be a false gap. It must continue to separate static compilation, deterministic
-host-fixture coverage, and live-game validation.
+Further campaign work should begin with a concrete friction report and reduce it
+to a focused source comparison or compiler probe. The generated ports are
+supporting evidence, not an exhaustive conformance corpus. Every resulting
+change must still separate static compilation, deterministic host-fixture
+coverage, and live-game validation.
 
 ## Cross-cutting findings
 

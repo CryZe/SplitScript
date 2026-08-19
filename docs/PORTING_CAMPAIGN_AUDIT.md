@@ -255,10 +255,58 @@ an ordinary SplitScript memory helper.
 - AMFP additionally mutates run offset and timing method. Those are independent
   host gaps and should not be bundled into the loading-state design.
 
-The next audit tranche should continue with one candidate that exercises
-ordinary growable-array mutation and one blocked report likely to be a false
-gap. It must continue to separate static compilation, deterministic host-fixture
-coverage, and live-game validation.
+### Growable pointer-path composition: Ato
+
+Campaign status: `PORTED-LIMITED`
+
+Audit result: the candidate's path-length branching is an undiscovered existing
+array facility, not a static-array limitation.
+
+- Source: `Array.Copy` copies a selected version-specific offset path and adds
+  one boss, arena, scroll, or rune offset before constructing a `DeepPointer`.
+- Candidate: `readDynamic` branches separately for path lengths 4, 5, 6, and 9
+  and reconstructs a fixed literal in every branch. Its feedback claims array
+  construction is static and asks for slice/append support.
+- Existing translation: create `let fullPath: [i64] = []`, call
+  `fullPath.extend(path)`, call `fullPath.push(lastOffset)`, and pass the result
+  to `process.follow(base, fullPath)`. A focused current-compiler probe validates
+  that exact generic function and state-field call.
+- The branch explosion is therefore **undiscovered**, not a language gap. The
+  porting guide now puts growable-array composition next to dynamic
+  `DeepPointer` migration rather than expecting authors to connect separate
+  pointer and collection chapters.
+- Ato's timer event and mutation omissions remain independent host gaps; the
+  array correction does not improve their fidelity.
+
+### False version-selection blocker: Borderlands
+
+Campaign status: `BLOCKED`
+
+Audit result: the complete active loading behavior is supported by the current
+language and standard library.
+
+- Source: two labelled layouts contain the same two boolean fields at different
+  addresses. `modules.First().FileVersionInfo.FileVersion` selects patch 1.0 for
+  `1.0.0.0` and patch 1.4.1 for `1.5.0.0`; loading is the OR of both fields.
+- Existing translation: attach to exact `Borderlands.exe`, declare two named
+  layouts, read `process.mainModule().fileVersion()` in `onAttach`, return the
+  matching `StateLayout` variant, and use `await process.closed()` for read
+  failure or an unsupported version. A focused current-compiler probe validates
+  this complete shape.
+- The report's claim that executable file-version dispatch is unavailable is
+  **undiscovered**. No module-size approximation or new host selector is needed.
+- Probe friction: `FileVersion` literals work in equality expressions but not
+  in match patterns. Writing `v"1.0.0.0" => ...` currently produces misleading
+  bare-binding guidance, so the roadmap records a separate constant-pattern
+  design decision. Two `if` comparisons are clear and fully supported today.
+- The source's `doStart` value is initialized but unused. There are no active
+  start, split, reset, settings, or timer-event behaviors hidden behind the
+  version blocker. Runtime verification is still required for both address
+  layouts and exact PE version values.
+
+The next audit tranche should continue with another reported blocker likely to
+be a false gap. It must continue to separate static compilation, deterministic
+host-fixture coverage, and live-game validation.
 
 ## Cross-cutting findings
 

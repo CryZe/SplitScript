@@ -74,6 +74,33 @@ APIs are `process.follow(base, offsets: [i64])`,
 `address.offset(displacement)`, which accepts any integer width, and signed
 [`MemoryPath`] offsets.
 
+## Composing dynamic pointer paths
+
+ASL scripts often copy a selected `DeepPointer` offset array and append one
+runtime-specific final offset. SplitScript's growable [`[T]`] arrays support
+that operation directly; do not branch over every possible path length. Create
+a fresh array, [`extend`] it with the selected path, [`push`] the final offset,
+then pass the complete path to [`Process.follow`]:
+
+```splitscript
+fn readDynamic(base: address, path: [i64], finalOffset: i64) -> f64! {
+    let fullPath: [i64] = []
+    fullPath.extend(path)
+    fullPath.push(finalOffset)
+    let target = process.follow(base, fullPath)?
+    return process.read<f64>(target)
+}
+
+state "game.exe" {
+    value: f64 = readDynamic(0x1000, [0x10, 0x20], 0x30);
+}
+```
+
+[`extend`] copies the elements into the new array, so the selected source path
+is not mutated. [`push`] adds one element and keeps the resulting value an
+ordinary `[i64]`; [`Process.follow`] therefore handles every source length with
+the same function.
+
 ## Bounded native `stringN` state
 
 The original ASL runtime implements `stringN` by:

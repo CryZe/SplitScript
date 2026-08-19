@@ -13,6 +13,89 @@ fn semantic_statements(
     })
 }
 
+#[test]
+fn never_completions_join_with_values_and_erase_from_wasm_storage() {
+    let source = r#"
+        state "game.exe" {
+            layout Steam { level: u32 at 0x100; },
+            layout GOG { level: u32 at 0x200; },
+        }
+
+        fn ignoreUnsupportedBuild(flag: bool) -> async never {
+            let result = if flag {
+                await process.closed()
+            } else {
+                await process.closed()
+            }
+            return result
+        }
+
+        onAttach {
+            let path = process.path() else await ignoreUnsupportedBuild(true)
+            let conditional = if path == "game.exe" {
+                1
+            } else {
+                await ignoreUnsupportedBuild(true)
+            }
+            let selected = match conditional {
+                0 => await ignoreUnsupportedBuild(true),
+                1 => StateLayout.Steam,
+                _ => StateLayout.GOG,
+            }
+            return selected
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("never should inhabit fallback, conditional, and match result types");
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("never values should not create invalid Wasm locals or frame fields");
+}
+
+#[test]
+fn ordinary_values_do_not_flow_into_never() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn returnsNormally() -> never {
+                return 1
+            }
+        "#,
+    )
+    .expect_err("a normal integer value is not a never value");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("expected `never`")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn never_can_appear_as_an_uninhabited_aggregate_payload() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn absentBottom() -> never? {
+                return None
+            }
+
+            whileAttached {
+                absentBottom()
+            }
+        "#,
+    )
+    .expect("an optional bottom type should have a valid aggregate representation");
+
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("an uninhabited payload slot should still produce valid Wasm GC");
+}
+
 #[derive(Default)]
 struct AsyncTestHost {
     process_open: bool,

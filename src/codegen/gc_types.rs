@@ -146,6 +146,10 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         mutable: true,
     });
     if let Some(frame_layout) = &async_layout {
+        debug_assert!(
+            frame_layout.types.iter().all(|ty| *ty != Type::Never),
+            "async frame contains a `never` field: {frame_layout:?}"
+        );
         fields.extend(frame_layout.types.iter().map(|ty| FieldType {
             element_type: layout.storage_type(*ty),
             mutable: true,

@@ -3695,3 +3695,17 @@ language catalog document the refinement rule.
   declarations and calls; option/result postfixes; privileged standard-library
   source; ordinary comparison/shift operators; multiline trailing commas; and
   parse/format/parse idempotence coverage alongside the maintained examples.
+
+# 2026-08-19: first-class `never` type
+
+- Added the source-level `never` bottom type and directional bottom coercion,
+  allowing divergent branches to join with ordinary values in fallback,
+  conditional, and match expressions without manufacturing a unit value.
+- Declared `Process.closed()` as `async never`, replaced the intrinsic-specific
+  return-path exception with semantic terminal-flow analysis, and exposed the
+  completion type consistently through generated documentation, hover, and
+  inlay hints.
+- Erased standalone bottom values from Wasm parameters, results, locals,
+  globals, and async frames while retaining legal uninhabited payload storage
+  for constructed forms such as `never?`; added synchronous and async
+  validation coverage for named-layout attachment and bottom/value joins.

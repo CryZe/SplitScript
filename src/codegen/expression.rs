@@ -452,13 +452,13 @@ fn compile_block_with_loop(
                 discard_result,
             } => {
                 let ty = context.expression_type(*expression);
-                let expression_context = if *discard_result && ty == Type::None {
+                let expression_context = if *discard_result && !ty.has_runtime_value() {
                     context.erasing_none()
                 } else {
                     *context
                 };
                 compile_expr(function, *expression, &expression_context);
-                if *discard_result && ty != Type::None {
+                if *discard_result && ty.has_runtime_value() {
                     function.instruction(&Instruction::Drop);
                 }
             }
@@ -798,8 +798,13 @@ pub(super) fn compile_assignment(
     match context.locals {
         LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&target) => {
             let (field, ty) = frame_values[&target];
-            if ty == Type::None {
-                compile_expr(function, value, &context.erasing_none());
+            if !ty.has_runtime_value() {
+                let expression_context = if ty == Type::None {
+                    context.erasing_none()
+                } else {
+                    *context
+                };
+                compile_expr(function, value, &expression_context);
                 return;
             }
             let frame = context.locals.frame();
@@ -815,8 +820,13 @@ pub(super) fn compile_assignment(
         }
         LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&target) => {
             let (local, ty) = wasm_values[&target];
-            if ty == Type::None {
-                compile_expr(function, value, &context.erasing_none());
+            if !ty.has_runtime_value() {
+                let expression_context = if ty == Type::None {
+                    context.erasing_none()
+                } else {
+                    *context
+                };
+                compile_expr(function, value, &expression_context);
                 return;
             }
             compile_assignment_value(function, operation, value, ty, context, |function| {
@@ -826,8 +836,13 @@ pub(super) fn compile_assignment(
         }
         LocalStorage::Wasm { values, .. } if values.contains_key(&target) => {
             let (local, ty) = values[&target];
-            if ty == Type::None {
-                compile_expr(function, value, &context.erasing_none());
+            if !ty.has_runtime_value() {
+                let expression_context = if ty == Type::None {
+                    context.erasing_none()
+                } else {
+                    *context
+                };
+                compile_expr(function, value, &expression_context);
                 return;
             }
             compile_assignment_value(function, operation, value, ty, context, |function| {
@@ -837,8 +852,13 @@ pub(super) fn compile_assignment(
         }
         _ => {
             let ty = context.global_types[&target];
-            if ty == Type::None {
-                compile_expr(function, value, &context.erasing_none());
+            if !ty.has_runtime_value() {
+                let expression_context = if ty == Type::None {
+                    context.erasing_none()
+                } else {
+                    *context
+                };
+                compile_expr(function, value, &expression_context);
                 return;
             }
             let global = context.globals[&target];
@@ -923,7 +943,11 @@ pub(super) fn compile_temporary_set(
         LocalStorage::Hybrid {
             frame_temporaries, ..
         } if frame_temporaries.contains_key(&target) => {
-            let (field, _) = frame_temporaries[&target];
+            let (field, ty) = frame_temporaries[&target];
+            if !ty.has_runtime_value() {
+                compile_expr(function, value, context);
+                return;
+            }
             let frame = context.locals.frame();
             frame.emit(function);
             compile_expr(function, value, context);
@@ -935,10 +959,19 @@ pub(super) fn compile_temporary_set(
         LocalStorage::Hybrid {
             wasm_temporaries, ..
         } if wasm_temporaries.contains_key(&target) => {
+            if !wasm_temporaries[&target].1.has_runtime_value() {
+                compile_expr(function, value, context);
+                return;
+            }
             compile_expr(function, value, context);
+            debug_assert_ne!(wasm_temporaries[&target].0, u32::MAX);
             function.instruction(&Instruction::LocalSet(wasm_temporaries[&target].0));
         }
         LocalStorage::Wasm { temporaries, .. } => {
+            if !temporaries[&target].1.has_runtime_value() {
+                compile_expr(function, value, context);
+                return;
+            }
             compile_expr(function, value, context);
             function.instruction(&Instruction::LocalSet(temporaries[&target].0));
         }
@@ -1147,9 +1180,11 @@ fn compile_resolved_path(
         ResolvedValue::Variable(value) => match context.locals {
             LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&value) => {
                 let (field, ty) = frame_values[&value];
-                if ty == Type::None {
+                if !ty.has_runtime_value() {
                     if context.materialize_none {
-                        emit_default(function, Type::None, context.gc);
+                        if ty == Type::None {
+                            emit_default(function, Type::None, context.gc);
+                        }
                     }
                 } else {
                     let frame = context.locals.frame();
@@ -1160,9 +1195,11 @@ fn compile_resolved_path(
             }
             LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&value) => {
                 let (local, ty) = wasm_values[&value];
-                if ty == Type::None {
+                if !ty.has_runtime_value() {
                     if context.materialize_none {
-                        emit_default(function, Type::None, context.gc);
+                        if ty == Type::None {
+                            emit_default(function, Type::None, context.gc);
+                        }
                     }
                 } else {
                     function.instruction(&Instruction::LocalGet(local));
@@ -1171,9 +1208,11 @@ fn compile_resolved_path(
             }
             LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
                 let (local, ty) = values[&value];
-                if ty == Type::None {
+                if !ty.has_runtime_value() {
                     if context.materialize_none {
-                        emit_default(function, Type::None, context.gc);
+                        if ty == Type::None {
+                            emit_default(function, Type::None, context.gc);
+                        }
                     }
                 } else {
                     function.instruction(&Instruction::LocalGet(local));
@@ -1182,9 +1221,9 @@ fn compile_resolved_path(
             }
             _ => {
                 let ty = context.global_types[&value];
-                if ty != Type::None {
+                if ty.has_runtime_value() {
                     function.instruction(&Instruction::GlobalGet(context.globals[&value]));
-                } else if context.materialize_none {
+                } else if ty == Type::None && context.materialize_none {
                     emit_default(function, Type::None, context.gc);
                 }
                 ty
@@ -1211,9 +1250,11 @@ fn compile_value_set(
     match context.locals {
         LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&value) => {
             let (field, ty) = frame_values[&value];
-            if ty == Type::None {
+            if !ty.has_runtime_value() {
                 emit_value(function);
-                function.instruction(&Instruction::Drop);
+                if ty == Type::None {
+                    function.instruction(&Instruction::Drop);
+                }
                 return;
             }
             let frame = context.locals.frame();
@@ -1225,21 +1266,29 @@ fn compile_value_set(
             });
         }
         LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&value) => {
-            if wasm_values[&value].1 == Type::None {
+            let ty = wasm_values[&value].1;
+            if !ty.has_runtime_value() {
                 emit_value(function);
-                function.instruction(&Instruction::Drop);
+                if ty == Type::None {
+                    function.instruction(&Instruction::Drop);
+                }
                 return;
             }
             emit_value(function);
+            debug_assert_ne!(wasm_values[&value].0, u32::MAX);
             function.instruction(&Instruction::LocalSet(wasm_values[&value].0));
         }
         LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
-            if values[&value].1 == Type::None {
+            let ty = values[&value].1;
+            if !ty.has_runtime_value() {
                 emit_value(function);
-                function.instruction(&Instruction::Drop);
+                if ty == Type::None {
+                    function.instruction(&Instruction::Drop);
+                }
                 return;
             }
             emit_value(function);
+            debug_assert_ne!(values[&value].0, u32::MAX);
             function.instruction(&Instruction::LocalSet(values[&value].0));
         }
         _ => unreachable!("compiler-owned for-loop values are local"),
@@ -1555,6 +1604,12 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
         return;
     }
     compile_expr_unconverted(function, expression_ir, ty, context);
+    // A `never` expression has no physical result and cannot reach its
+    // continuation. Mark that fact in Wasm as well, so code emitted for a
+    // structurally present but unreachable continuation remains stack-valid.
+    if ty == Type::Never {
+        function.instruction(&Instruction::Unreachable);
+    }
 }
 
 fn compile_expr_unconverted(
@@ -1566,12 +1621,12 @@ fn compile_expr_unconverted(
     let expression = expression_ir.id;
     match &expression_ir.kind {
         wasm_ir::ExpressionKind::Suspend { destination, .. } => {
-            if ty != Type::None || context.materialize_none {
+            if ty.has_runtime_value() || (ty == Type::None && context.materialize_none) {
                 compile_value_get(function, *destination, context);
             }
         }
         wasm_ir::ExpressionKind::Temporary(temporary) => {
-            if ty != Type::None || context.materialize_none {
+            if ty.has_runtime_value() || (ty == Type::None && context.materialize_none) {
                 compile_temporary_get(function, *temporary, context);
             }
         }

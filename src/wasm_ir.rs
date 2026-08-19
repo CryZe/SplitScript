@@ -538,6 +538,7 @@ pub struct Program {
     state_expressions: Vec<StateExpression>,
     state_transforms: Vec<StateTransform>,
     expressions: Vec<Expression>,
+    temporary_types: std::collections::HashMap<TemporaryId, TypeId>,
     next_generated_expression: u32,
     next_temporary: u32,
 }
@@ -571,6 +572,7 @@ impl Program {
             state_expressions: Vec::new(),
             state_transforms: Vec::new(),
             expressions,
+            temporary_types: std::collections::HashMap::new(),
             next_generated_expression,
             next_temporary: 0,
         };
@@ -729,6 +731,8 @@ impl Program {
     ) -> (TemporaryId, ExprId) {
         let temporary = TemporaryId(self.next_temporary);
         self.next_temporary += 1;
+        let previous = self.temporary_types.insert(temporary, storage_ty);
+        debug_assert!(previous.is_none(), "temporary identities are unique");
         let expression = self.push_generated_expression(
             expression_ty,
             ExpressionKind::Temporary(temporary),
@@ -749,6 +753,10 @@ impl Program {
         expression
             .conversion
             .map_or(expression.ty, |conversion| conversion.target)
+    }
+
+    fn temporary_type(&self, temporary: TemporaryId) -> TypeId {
+        self.temporary_types[&temporary]
     }
 }
 
@@ -3357,8 +3365,8 @@ pub(crate) fn intrinsic_future_locals(
 impl Visitor for LocalPlanner<'_> {
     fn visit_statement(&mut self, statement: &Statement, program: &Program) {
         match statement {
-            Statement::StoreTemporary { target, value } => {
-                let ty = program.effective_expression_type(*value);
+            Statement::StoreTemporary { target, .. } => {
+                let ty = program.temporary_type(*target);
                 self.push(ty, LocalPurpose::Temporary(*target));
             }
             Statement::Store {

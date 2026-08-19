@@ -29,12 +29,12 @@ fn help_is_successful_and_uses_stdout() {
 #[test]
 fn documentation_topics_render_without_a_source_checkout() {
     for (arguments, expected) in [
-        (&["docs"][..], "# SplitScript reference"),
+        (&["docs"][..], "SplitScript reference"),
         (
             &["docs", "asl.lifecycle.update"][..],
-            "# update lifecycle block",
+            "update lifecycle block",
         ),
-        (&["docs", "Process.read"][..], "# Process.read"),
+        (&["docs", "Process.read"][..], "Process.read"),
     ] {
         let output = splitc(arguments);
         assert!(output.status.success(), "arguments: {arguments:?}");
@@ -45,12 +45,12 @@ fn documentation_topics_render_without_a_source_checkout() {
         );
     }
 
-    let unknown = splitc(&["docs", "Process.r"]);
-    assert_eq!(unknown.status.code(), Some(1));
-    assert!(unknown.stdout.is_empty());
-    let stderr = String::from_utf8(unknown.stderr).unwrap();
-    assert!(stderr.contains("unknown documentation topic"));
-    assert!(stderr.contains("Process.read"));
+    let search = splitc(&["docs", "Process.r"]);
+    assert!(search.status.success());
+    assert!(search.stderr.is_empty());
+    let stdout = String::from_utf8(search.stdout).unwrap();
+    assert!(stdout.contains("Documentation results for Process.r"));
+    assert!(stdout.contains("Process.read"));
 }
 
 #[test]

@@ -489,6 +489,7 @@ const NEXT_TICK: EffectSet = EffectSet::one(Effect::RequiresAttachedProcess)
     .with(Effect::CancelsOnProcessClose);
 
 const NONE: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::None);
+const NEVER: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Never);
 const BOOL: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Bool);
 const CHAR: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::Char);
 const U8: ContractTypeRef = ContractTypeRef::Core(CoreTypeId::U8);
@@ -1072,7 +1073,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::ProcessClosed => contract!(
             ProcessClosed,
             Method,
-            signature(NO_TYPE_PARAMETERS, Some(PROCESS_TYPE), params![], NONE,),
+            signature(NO_TYPE_PARAMETERS, Some(PROCESS_TYPE), params![], NEVER,),
             NEXT_TICK,
             OnAttach,
             Suspension

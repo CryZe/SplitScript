@@ -28,7 +28,7 @@ whileAttached {
         StateLayout.GOG => "GOG",
     })
     setVariable("Checkpoint", match layout {
-        StateLayout.Steam => current.checkpoint,
+        StateLayout.Steam => current.checkpoint as u16,
         StateLayout.GOG => current.checkpoint,
     })
 }

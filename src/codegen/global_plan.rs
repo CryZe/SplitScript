@@ -213,7 +213,7 @@ pub(super) fn encode(
         .filter(|variable| wasm_ir.contains_global(variable.id))
     {
         let ty = value_type(variable.id, semantics);
-        if ty == Type::None {
+        if !ty.has_runtime_value() {
             variables.insert(variable.id, u32::MAX);
             variable_types.insert(variable.id, ty);
             continue;

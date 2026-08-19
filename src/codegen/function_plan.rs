@@ -308,7 +308,7 @@ pub(super) fn encode<'a>(
                     ),
                     semantics,
                 );
-                (ty != Type::None).then(|| gc.val_type(ty))
+                ty.has_runtime_value().then(|| gc.val_type(ty))
             })
             .collect::<Vec<_>>();
         let body = wasm_ir
@@ -340,7 +340,8 @@ pub(super) fn encode<'a>(
                 call: declare(
                     source_name,
                     params,
-                    (result != Type::None)
+                    result
+                        .has_runtime_value()
                         .then(|| gc.val_type(result))
                         .into_iter()
                         .collect(),

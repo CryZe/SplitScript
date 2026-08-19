@@ -390,6 +390,7 @@ impl GcLayout {
 
     pub(super) fn val_type(&self, ty: Type) -> ValType {
         match ty {
+            Type::Never => unreachable!("the never type has no WebAssembly value representation"),
             Type::None => ValType::Ref(RefType {
                 nullable: true,
                 heap_type: HeapType::Abstract {
@@ -444,6 +445,17 @@ impl GcLayout {
         match ty {
             Type::Bool | Type::I8 | Type::U8 => StorageType::I8,
             Type::I16 | Type::U16 => StorageType::I16,
+            // Standalone `never` values are erased, but aggregate shapes such
+            // as `never?` still need a legal, uninhabited payload field. Wasm's
+            // bottom reference type is an exact physical representation for
+            // that unreachable slot.
+            Type::Never => StorageType::Val(ValType::Ref(RefType {
+                nullable: true,
+                heap_type: HeapType::Abstract {
+                    shared: false,
+                    ty: AbstractHeapType::None,
+                },
+            })),
             _ => StorageType::Val(self.val_type(ty)),
         }
     }

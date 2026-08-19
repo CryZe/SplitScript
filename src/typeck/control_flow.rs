@@ -28,19 +28,6 @@ pub(super) fn is_constant(expression: &Expr, resolutions: &ProgramResolutions) -
     }
 }
 
-pub(super) fn definitely_returns(block: &Block) -> bool {
-    block.statements.iter().any(|statement| match statement {
-        Stmt::Return { .. } | Stmt::Throw { .. } | Stmt::Suspend { returns: true, .. } => true,
-        Stmt::If {
-            then_block,
-            else_block: Some(else_block),
-            ..
-        } => definitely_returns(then_block) && definitely_returns(else_block),
-        Stmt::Suspend { .. } => false,
-        _ => false,
-    })
-}
-
 pub(super) fn contains_value_return(block: &Block) -> bool {
     let mut finder = ValueReturnFinder(false);
     finder.visit_block(block);

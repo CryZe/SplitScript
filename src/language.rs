@@ -105,7 +105,7 @@ onAttach {
 whileAttached {
     setVariable("Level", current.level)
     setVariable("Checkpoint", match layout {
-        StateLayout.Steam => current.checkpoint,
+        StateLayout.Steam => current.checkpoint as u16,
         StateLayout.GOG => current.checkpoint,
     })
 }"#;
@@ -326,6 +326,10 @@ fn maybe(value) -> i32? {
 
 fn result() -> i32! {
     return 42
+}
+
+fn ignoreUnsupportedBuild() -> async never {
+    await process.closed()
 }
 
 onAttach {
@@ -1124,6 +1128,13 @@ define_language_catalog! {
     }
     builtins {
     builtin_type_item!(
+        Never,
+        "never",
+        "Describes an expression that cannot produce a value.",
+        "The never type is the bottom of SplitScript's type hierarchy and can flow into any expected value type. It is inferred for genuinely divergent control flow and is erased from WebAssembly. [`Process.closed`] returns [`async`] [`never`] because process-lifetime cancellation prevents its await from resuming.",
+        "fn ignoreUnsupportedBuild() -> async never {\n    await process.closed()\n}"
+    ),
+    builtin_type_item!(
         None,
         "None",
         "Stores the single unit value [`None`].",
@@ -1505,6 +1516,7 @@ impl LanguageCatalog {
             }
         }
         for builtin in [
+            BuiltinType::Never,
             BuiltinType::None,
             BuiltinType::Bool,
             BuiltinType::I8,

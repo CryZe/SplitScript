@@ -48,6 +48,7 @@ pub enum SyntaxMode {
 /// resolver assigns it a semantic identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PrimitiveType {
+    Never,
     None,
     Bool,
     Char,
@@ -66,6 +67,7 @@ pub enum PrimitiveType {
 
 impl PrimitiveType {
     pub const ALL: &'static [Self] = &[
+        Self::Never,
         Self::None,
         Self::Bool,
         Self::Char,
@@ -84,6 +86,7 @@ impl PrimitiveType {
 
     pub const fn name(self) -> &'static str {
         match self {
+            Self::Never => "never",
             Self::None => "None",
             Self::Bool => "bool",
             Self::Char => "char",

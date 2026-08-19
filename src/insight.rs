@@ -1391,7 +1391,7 @@ whileAttached {
             .hover(offset)
             .unwrap()
             .expect("process.closed hover");
-        assert!(hover.markdown.contains("Process.closed() -> async None"));
+        assert!(hover.markdown.contains("Process.closed() -> async never"));
         assert!(
             hover
                 .markdown
@@ -1886,6 +1886,25 @@ onAttach {
             hover.markdown
         );
         assert!(hover.markdown.contains("Local variable"));
+    }
+
+    #[test]
+    fn bottom_future_hover_preserves_the_never_completion_type() {
+        let source = r#"
+state "game.exe" {}
+onAttach {
+    let pending = process.closed()
+    await pending
+}
+"#;
+        let offset = source.rfind("pending").unwrap();
+        let mut database = CompilerDatabase::new(source);
+        let hover = database.hover(offset).unwrap().expect("future hover");
+        assert!(
+            hover.markdown.contains("let pending: async never"),
+            "{}",
+            hover.markdown
+        );
     }
 
     #[test]

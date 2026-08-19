@@ -2824,7 +2824,7 @@ fn compile_async_flow(
                 discard_result,
             } => {
                 compile_expr(function, *expression, context);
-                if *discard_result {
+                if *discard_result && context.expression_type(*expression) != Type::Never {
                     function.instruction(&Instruction::Drop);
                 }
             }

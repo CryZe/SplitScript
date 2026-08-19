@@ -229,6 +229,25 @@ onAttach {
     }
 
     #[test]
+    fn reports_never_as_the_completion_of_a_stored_process_wait() {
+        let source = r#"state "game.exe" {}
+onAttach {
+    let pending = process.closed()
+    await pending
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let snapshot = database.semantic_snapshot().unwrap();
+        let hints = inferred_type_hints(
+            &snapshot,
+            Span {
+                start: 0,
+                end: source.len(),
+            },
+        );
+        assert!(hints.iter().any(|hint| hint.label == ": async never"));
+    }
+
+    #[test]
     fn shows_options_inferred_from_none_initialized_global_assignments() {
         let source = r#"let pending = None
 let unit = None

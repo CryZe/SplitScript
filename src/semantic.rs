@@ -981,6 +981,10 @@ pub(crate) struct ResolvedConstructedTypes<'a> {
 }
 
 impl SemanticBuilder {
+    pub(crate) fn inferred_expression_type(&self, expression: ExprId) -> Option<Type> {
+        self.expression_types.get(&expression).copied()
+    }
+
     pub(crate) fn call_is_provisionally_awaitable(
         &self,
         expression: ExprId,

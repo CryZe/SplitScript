@@ -309,6 +309,7 @@ impl Checker {
                 let mut unguarded_patterns = HashSet::new();
                 let mut has_unguarded_wildcard = false;
                 let mut result_type = expected;
+                let mut never_arm_type = None;
                 for arm in arms {
                     if has_unguarded_wildcard {
                         self.error("unreachable match arm after `_`", arm.span);
@@ -515,8 +516,16 @@ impl Checker {
                         checker.expr(&arm.value, result_type)
                     });
                     self.scopes.pop();
-                    if result_type.is_none() {
-                        result_type = arm_type;
+                    if expected.is_none()
+                        && let Some(arm_type) = arm_type
+                    {
+                        if self.is_never_type(arm_type) {
+                            never_arm_type.get_or_insert(arm_type);
+                        } else if result_type.is_none()
+                            || result_type.is_some_and(|ty| self.is_never_type(ty))
+                        {
+                            result_type = Some(arm_type);
+                        }
                     }
 
                     if arm.guard.is_none() {
@@ -602,7 +611,7 @@ impl Checker {
                         }
                     }
                 }
-                let Some(result_type) = result_type else {
+                let Some(result_type) = result_type.or(never_arm_type) else {
                     self.error("a match needs at least one arm", expr.span);
                     return None;
                 };
@@ -624,17 +633,28 @@ impl Checker {
                 // expected type, let the value-bearing branch establish the
                 // result before checking a bare `None`. This keeps inference
                 // independent of which branch happens to be written first.
-                if expected.is_none()
+                let (then_type, else_type) = if expected.is_none()
                     && matches!(then_expr.kind, ExprKind::None)
                     && !matches!(else_expr.kind, ExprKind::None)
                 {
-                    self.expr(else_expr, Some(result_type));
-                    self.expr(then_expr, Some(result_type));
+                    let else_type = self.expr(else_expr, Some(result_type));
+                    let then_type = self.expr(then_expr, Some(result_type));
+                    (then_type, else_type)
                 } else {
-                    self.expr(then_expr, Some(result_type));
-                    self.expr(else_expr, Some(result_type));
+                    let then_type = self.expr(then_expr, Some(result_type));
+                    let else_type = self.expr(else_expr, Some(result_type));
+                    (then_type, else_type)
+                };
+                if expected.is_none()
+                    && then_type.is_some_and(|ty| self.is_never_type(ty))
+                    && else_type.is_some_and(|ty| self.is_never_type(ty))
+                {
+                    let never = self.core_type(crate::stdlib::CoreTypeId::Never);
+                    self.unify(result_type, never, expr.span);
+                    never
+                } else {
+                    self.expect_expression(expr.id, result_type, expected, expr.span)?
                 }
-                self.expect_expression(expr.id, result_type, expected, expr.span)?
             }
             ExprKind::Fallback { value, fallback } => {
                 let wrapper = self.expr(value, None)?;

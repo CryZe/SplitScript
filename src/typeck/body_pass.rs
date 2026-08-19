@@ -13,7 +13,7 @@ use crate::{
 use super::{
     Checker,
     context::{CallableContext, DebugContext, ExpressionMode, FailureContext},
-    control_flow::{contains_propagation, definitely_returns, is_constant},
+    control_flow::{contains_propagation, is_constant},
     declarations::Binding,
 };
 
@@ -404,7 +404,7 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
                     }
                     checker.block(&function.body, false);
                     if signature.completion != checker.core_type(crate::stdlib::CoreTypeId::None)
-                        && !definitely_returns(&function.body)
+                        && !block_is_terminal(checker, &function.body)
                     {
                         let result = checker.type_name(signature.completion);
                         let mut diagnostic = Diagnostic::type_error(
@@ -491,7 +491,7 @@ fn check_action_bodies(checker: &mut Checker, program: &Program) {
                 .state
                 .as_ref()
                 .is_some_and(|state| !state.layouts.is_empty())
-            && !layout_selection_is_terminal(checker, &action.body)
+            && !block_is_terminal(checker, &action.body)
         {
             let mut diagnostic = Diagnostic::type_error(
                 "`onAttach` must return a layout on every completing path",
@@ -578,40 +578,64 @@ fn missing_layout_selector_diagnostic(state: &StateDecl) -> Diagnostic {
         .with_fix(fix)
 }
 
-fn layout_selection_is_terminal(checker: &Checker, block: &crate::ast::Block) -> bool {
-    block.statements.iter().any(|statement| match statement {
+fn block_is_terminal(checker: &mut Checker, block: &crate::ast::Block) -> bool {
+    block
+        .statements
+        .iter()
+        .any(|statement| statement_is_terminal(checker, statement))
+}
+
+fn statement_is_terminal(checker: &mut Checker, statement: &crate::ast::Stmt) -> bool {
+    match statement {
         crate::ast::Stmt::Return { .. } | crate::ast::Stmt::Throw { .. } => true,
+        // A debug statement is removed from release builds, so control flow
+        // outside it must remain valid without relying on its body diverging.
+        crate::ast::Stmt::Debug { .. } => false,
         crate::ast::Stmt::If {
+            condition,
             then_block,
-            else_block: Some(else_block),
+            else_block,
             ..
         } => {
-            layout_selection_is_terminal(checker, then_block)
-                && layout_selection_is_terminal(checker, else_block)
+            expression_is_never(checker, condition)
+                || else_block.as_ref().is_some_and(|else_block| {
+                    block_is_terminal(checker, then_block) && block_is_terminal(checker, else_block)
+                })
         }
-        crate::ast::Stmt::Suspend { value, .. } => checker
-            .semantics
-            .standard_library_item(value.id)
-            .is_some_and(|item| {
-                checker.standard_library.item(item).implementation
-                    == crate::stdlib::Implementation::Intrinsic(
-                        crate::stdlib::IntrinsicId::ProcessClosed,
-                    )
-            }),
-        crate::ast::Stmt::Expression(crate::ast::Expr {
-            kind: crate::ast::ExprKind::Suspend { value, .. },
-            ..
-        }) => checker
-            .semantics
-            .standard_library_item(value.id)
-            .is_some_and(|item| {
-                checker.standard_library.item(item).implementation
-                    == crate::stdlib::Implementation::Intrinsic(
-                        crate::stdlib::IntrinsicId::ProcessClosed,
-                    )
-            }),
-        _ => false,
-    })
+        crate::ast::Stmt::Variable(variable) => expression_is_never(checker, &variable.value),
+        crate::ast::Stmt::Assign { value, .. }
+        | crate::ast::Stmt::StateAssign { value, .. }
+        | crate::ast::Stmt::IndexAssign { value, .. } => expression_is_never(checker, value),
+        crate::ast::Stmt::While { condition, .. } => expression_is_never(checker, condition),
+        crate::ast::Stmt::For { iterable, .. } => expression_is_never(checker, iterable),
+        crate::ast::Stmt::Suspend { returns: true, .. } => true,
+        crate::ast::Stmt::Suspend { mode, value, .. } => {
+            let Some(mut ty) = checker.semantics.inferred_expression_type(value.id) else {
+                return false;
+            };
+            ty = checker.shallow_type(ty);
+            let completion = match (mode, ty) {
+                (crate::ast::SuspensionMode::Await, Type::Async(future)) => {
+                    checker.inference.async_value(future)
+                }
+                (crate::ast::SuspensionMode::Await, Type::Result(result))
+                | (crate::ast::SuspensionMode::Retry, Type::Result(result)) => {
+                    checker.inference.result_value(result)
+                }
+                _ => ty,
+            };
+            checker.is_never_type(completion)
+        }
+        crate::ast::Stmt::Expression(expression) => expression_is_never(checker, expression),
+        crate::ast::Stmt::Break { .. } | crate::ast::Stmt::Continue { .. } => true,
+    }
+}
+
+fn expression_is_never(checker: &mut Checker, expression: &crate::ast::Expr) -> bool {
+    checker
+        .semantics
+        .inferred_expression_type(expression.id)
+        .is_some_and(|ty| checker.is_never_type(ty))
 }
 
 fn action_return_type(checker: &Checker, program: &Program, action: ActionKind) -> Type {

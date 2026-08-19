@@ -176,7 +176,7 @@ impl DebugRecorder {
         ty: Type,
         parameter: bool,
     ) {
-        if ty == Type::None {
+        if !ty.has_runtime_value() {
             return;
         }
         let mut variables = self.variables.borrow_mut();
@@ -482,7 +482,7 @@ impl DebugArtifactPlan {
                     ty: global_types[&value],
                 })
             })
-            .filter(|global| global.index != u32::MAX && global.ty != Type::None)
+            .filter(|global| global.index != u32::MAX && global.ty.has_runtime_value())
             .collect::<Vec<_>>();
         debug_globals.sort_unstable_by_key(|global| global.index);
         let mut global_names = NameMap::new();
@@ -796,7 +796,8 @@ fn scalar_type_entry(
         Type::Address => ("address", 8, gimli::DW_ATE_unsigned),
         Type::F32 => ("f32", 4, gimli::DW_ATE_float),
         Type::F64 => ("f64", 8, gimli::DW_ATE_float),
-        Type::None
+        Type::Never
+        | Type::None
         | Type::Standard(_)
         | Type::StateSnapshot
         | Type::SettingsView

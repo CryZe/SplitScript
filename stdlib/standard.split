@@ -338,7 +338,7 @@ intrinsic type Process {
     /// # }
     /// ```
     @intrinsic(ProcessClosed)
-    fn closed() -> None;
+    fn closed() -> never;
 
     /// Waits for a process module.
     ///

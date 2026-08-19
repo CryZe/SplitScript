@@ -43,7 +43,7 @@ impl AsyncFrameRef {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(super) struct AsyncFrameLayout {
     pub fields: HashMap<ValueId, (u32, Type)>,
     pub temporaries: HashMap<TemporaryId, (u32, Type)>,
@@ -103,7 +103,7 @@ impl AsyncFrameLayout {
             wasm_ir::BodyAbi::AsyncFunction(wasm_ir::AsyncFunctionAbi { completion }) => {
                 let completion =
                     semantic_type(semantics.specialize_type(instance, completion), semantics);
-                (completion != Type::None).then_some(completion)
+                completion.has_runtime_value().then_some(completion)
             }
             wasm_ir::BodyAbi::Direct | wasm_ir::BodyAbi::AttachPoll => {
                 unreachable!("only suspending functions receive typed future frames")
@@ -161,6 +161,10 @@ impl AsyncFrameLayout {
                         layout.push_value(value, ty);
                     }
                     Err(temporary) => {
+                        if ty == Type::Never {
+                            layout.temporaries.insert(temporary, (u32::MAX, ty));
+                            continue;
+                        }
                         let field = layout.base_fields + layout.types.len() as u32;
                         layout.temporaries.insert(temporary, (field, ty));
                         layout.types.push(ty);
@@ -222,7 +226,7 @@ impl AsyncFrameLayout {
         if self.fields.contains_key(&value) {
             return;
         }
-        if ty == Type::None {
+        if !ty.has_runtime_value() {
             self.fields.insert(value, (u32::MAX, ty));
             return;
         }
@@ -436,7 +440,7 @@ impl AsyncFrameLayouts {
                 }
             }
             let completion_type = semantic_type(specialize(*value), semantics);
-            let completion = (completion_type != Type::None).then(|| {
+            let completion = completion_type.has_runtime_value().then(|| {
                 let field = 2 + types.len() as u32;
                 types.push(completion_type);
                 (field, completion_type)

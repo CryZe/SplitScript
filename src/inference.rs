@@ -314,6 +314,17 @@ impl InferenceContext {
         )
     }
 
+    pub(crate) fn is_never_type(&mut self, ty: Type) -> bool {
+        matches!(
+            self.shallow(ty),
+            Type::Known(id)
+                if matches!(
+                    self.types.kind(id),
+                    TypeKind::Builtin(CoreTypeId::Never)
+                )
+        )
+    }
+
     pub(crate) fn standard_type(&self, ty: Type) -> Option<StdlibTypeId> {
         let Type::Known(id) = ty else {
             return None;

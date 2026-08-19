@@ -130,30 +130,6 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Close feedback loops without papering over language design
 
-- [ ] Design and implement a first-class bottom or never type for expressions
-  that cannot produce a value. The AoE2DE audit probe showed the immediate
-  failure: `process.closed()` is documented and implemented as never resuming
-  inside the current attachment, but `await process.closed()` is typed as
-  `None`, so `value else await process.closed()` cannot satisfy a required
-  `FileVersion`. Decide the surface spelling separately because standalone
-  Rust-style `!` overlaps visually with SplitScript's `T!` result syntax;
-  `never` is the clearer candidate but is not yet chosen. The implementation
-  must:
-  - type `return`, `break`, `continue`, future `throw`, and trusted
-    non-returning standard-library calls as bottom expressions while retaining
-    each construct's own legality checks;
-  - declare `Process.closed()` as `async never` so awaiting it can inhabit any
-    expected value type without manufacturing `None`;
-  - integrate bottom into unification, branch joins, reverse inference,
-    generic constraints, and diagnostics without treating a bare `return` as a
-    valid value return from a layout-selecting `onAttach`;
-  - erase bottom values in Wasm and terminate the corresponding control-flow
-    path without an ABI result or GC allocation;
-  - expose the inferred type consistently in hover, inlay hints, generated
-    documentation, and source-defined standard-library validation;
-  - cover synchronous and async divergence, nested `if`/`match`/`else`
-    expressions, dead code, state-field failure boundaries, and named-layout
-    `onAttach` with parser, inference, codegen, and runtime tests.
 - [ ] Decide separately whether fallback syntax should accept a braced value or
   divergent block, such as `value else { log(error); await process.closed() }`.
   SplitScript currently accepts only an expression after fallback `else`, and

@@ -490,7 +490,7 @@ pub(super) fn compile_user_function(
             ),
             lowering.semantics,
         );
-        let index = if ty == Type::None {
+        let index = if !ty.has_runtime_value() {
             u32::MAX
         } else {
             let index = physical_parameter_count;
@@ -581,7 +581,7 @@ pub(super) fn compile_user_function(
         ),
         lowering.semantics,
     );
-    if result != Type::None {
+    if result.has_runtime_value() {
         function.instruction(&Instruction::Unreachable);
     }
     function.instruction(&Instruction::End);
@@ -717,6 +717,33 @@ pub(super) fn plan_wasm_locals(
             }),
             options.semantics,
         );
+        if ty == Type::Never {
+            match local.purpose {
+                LocalPurpose::Value(value) => {
+                    locals.insert(value, (u32::MAX, ty));
+                }
+                LocalPurpose::Temporary(temporary) => {
+                    matches.temporaries.insert(temporary, (u32::MAX, ty));
+                }
+                LocalPurpose::MatchValue(expression) => {
+                    matches.values.insert(expression, u32::MAX);
+                }
+                LocalPurpose::FallbackValue(expression) => {
+                    matches.fallback_values.insert(expression, u32::MAX);
+                }
+                LocalPurpose::IntrinsicScratch { expression, .. } => {
+                    matches
+                        .intrinsic_temps
+                        .entry(expression)
+                        .or_default()
+                        .push(u32::MAX);
+                }
+                LocalPurpose::SuspensionScratch(expression) => {
+                    matches.suspension_temps.insert(expression, u32::MAX);
+                }
+            }
+            continue;
+        }
         if ty == Type::None
             && let LocalPurpose::Value(value) = local.purpose
         {
@@ -795,7 +822,7 @@ pub(super) fn compile_async_function_init(
                 ),
                 lowering.semantics,
             );
-            let local = (ty != Type::None).then(|| {
+            let local = ty.has_runtime_value().then(|| {
                 let local = next_parameter;
                 next_parameter += 1;
                 local

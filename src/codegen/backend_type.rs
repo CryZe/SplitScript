@@ -66,6 +66,12 @@ impl Type {
         matches!(self, Self::I8 | Self::I16 | Self::I32 | Self::I64)
     }
 
+    /// Whether this semantic type is represented by a value on the Wasm
+    /// operand stack, in locals, or in ordinary frame fields.
+    pub(super) fn has_runtime_value(self) -> bool {
+        !matches!(self, Self::None | Self::Never)
+    }
+
     pub(super) fn is_enum(self, standard_library: &StandardLibrary) -> bool {
         matches!(self, Self::Enum(_))
             || matches!(

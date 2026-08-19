@@ -295,10 +295,10 @@ language and standard library.
   this complete shape.
 - The report's claim that executable file-version dispatch is unavailable is
   **undiscovered**. No module-size approximation or new host selector is needed.
-- Probe friction: `FileVersion` literals work in equality expressions but not
-  in match patterns. Writing `v"1.0.0.0" => ...` currently produces misleading
-  bare-binding guidance, so the roadmap records a separate constant-pattern
-  design decision. Two `if` comparisons are clear and fully supported today.
+- `FileVersion` literals are first-class match patterns, so version selection
+  maps directly to `v"1.0.0.0" => StateLayout.Patch100` arms. Because executable
+  versions form an open value space, the match must include `_` for unsupported
+  builds; no string parsing or chained comparison workaround is required.
 - The source's `doStart` value is initialized but unused. There are no active
   start, split, reset, settings, or timer-event behaviors hidden behind the
   version blocker. Runtime verification is still required for both address

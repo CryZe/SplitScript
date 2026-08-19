@@ -3713,3 +3713,13 @@ language catalog document the refinement rule.
   globals, and async frames while retaining legal uninhabited payload storage
   for constructed forms such as `never?`; added synchronous and async
   validation coverage for named-layout attachment and bottom/value joins.
+
+# 2026-08-19: file-version match patterns
+
+- Made checked `v"major.minor.build.private"` literals first-class [`match`]
+  patterns, with ordinary `FileVersion` typing, duplicate-arm detection, guards,
+  and direct four-component Wasm comparisons.
+- Kept exhaustiveness honest for the open executable-version space by requiring
+  a wildcard arm, and replaced the Borderlands port's chained-comparison
+  workaround with direct typed version dispatch in the language and porting
+  documentation.

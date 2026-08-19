@@ -428,6 +428,17 @@ impl Checker {
                             self.unify(value_type, pattern_type, arm.span);
                             format!("int:{value}")
                         }
+                        MatchPattern::FileVersion(components) => {
+                            self.unify(
+                                value_type,
+                                self.standard_type(StdlibTypeId::FileVersion),
+                                arm.span,
+                            );
+                            format!(
+                                "version:{}:{}:{}:{}",
+                                components[0], components[1], components[2], components[3]
+                            )
+                        }
                         MatchPattern::None => {
                             if let Some(option) = self.infer_option_pattern(
                                 value_type,
@@ -582,6 +593,10 @@ impl Checker {
                         ty if ty == self.core_type(crate::stdlib::CoreTypeId::Char) => {
                             self.error("non-exhaustive character match: add a `_` arm", expr.span)
                         }
+                        ty if ty == self.standard_type(StdlibTypeId::FileVersion) => self.error(
+                            "non-exhaustive file-version match: add a `_` arm",
+                            expr.span,
+                        ),
                         ty @ Type::Known(_) => {
                             if let Some((enum_key, declaration)) = self.enum_info_for_type(ty) {
                                 for variant in &declaration.variants {

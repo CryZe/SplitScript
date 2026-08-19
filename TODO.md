@@ -131,14 +131,6 @@ semantic-review evidence, not as a conformance corpus.
   expressions. Either support a scoped block with a well-defined final value
   and divergence rule, or emit a focused diagnostic that shows the supported
   spelling.
-- [ ] Decide whether [`match`] should accept `FileVersion` and other typed
-  constant literals as patterns. The Borderlands audit probe naturally wrote
-  `v"1.0.0.0" => StateLayout.Patch100`, but the parser currently treats `v` as
-  a bare binding and emits irrelevant wrapper-payload guidance. Either define
-  equality-backed constant-pattern semantics, beginning with version literals,
-  or emit a focused diagnostic that recommends the already-supported
-  `if version == v"..."` selection. Do not merely special-case the diagnostic
-  before deciding which source form the language should support.
 - [ ] Decide how a fallible state expression composes internal postfix `?` with
   a fallible final call. The natural expression
   `process.read<T>(process.follow(base, path)?)` currently reports that a state

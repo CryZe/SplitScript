@@ -253,6 +253,7 @@ pub enum LoweredPattern {
     Bool(bool),
     Char(char),
     Int(u64),
+    FileVersion([u16; 4]),
     OptionNone(OptionTypeId),
     OptionSome {
         option: OptionTypeId,
@@ -276,9 +277,12 @@ impl LoweredPattern {
             | Self::OptionSome { binding, .. }
             | Self::ResultSuccess { binding, .. }
             | Self::ResultError { binding, .. } => *binding,
-            Self::Bool(_) | Self::Char(_) | Self::Int(_) | Self::OptionNone(_) | Self::Wildcard => {
-                None
-            }
+            Self::Bool(_)
+            | Self::Char(_)
+            | Self::Int(_)
+            | Self::FileVersion(_)
+            | Self::OptionNone(_)
+            | Self::Wildcard => None,
         }
     }
 }
@@ -943,6 +947,9 @@ fn lower_expression(
                         TypedPattern::Bool(value) => LoweredPattern::Bool(*value),
                         TypedPattern::Char(value) => LoweredPattern::Char(*value),
                         TypedPattern::Int { value, .. } => LoweredPattern::Int(*value),
+                        TypedPattern::FileVersion(components) => {
+                            LoweredPattern::FileVersion(*components)
+                        }
                         TypedPattern::None => {
                             let Some(ResolvedWrapperPattern::OptionNone(option)) =
                                 arm.resolution.wrapper

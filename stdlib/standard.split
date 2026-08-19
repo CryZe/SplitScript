@@ -3562,6 +3562,15 @@ struct MemoryPath {
 /// ```splitscript
 /// let supported = v"1.2.3.4" == v"1.2.3.4"
 /// ```
+///
+/// Select behavior for a known build
+///
+/// ```splitscript
+/// let label = match v"1.2.3.4" {
+///     v"1.2.3.4" => "supported",
+///     _ => "unknown",
+/// }
+/// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
 @capabilities(Equatable, Display)

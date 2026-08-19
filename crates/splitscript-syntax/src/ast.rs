@@ -1140,6 +1140,7 @@ pub enum MatchPattern {
         value: u64,
         suffix: Option<TypeRef>,
     },
+    FileVersion([u16; 4]),
     None,
     OptionSome(Option<PatternBinding>),
     ResultSuccess(Option<PatternBinding>),

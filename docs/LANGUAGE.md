@@ -1410,13 +1410,24 @@ and retries on the next tick; process closure cancels the whole initializer.
 Windows executable versions have their own checked `FileVersion` value and
 `v"major.minor.build.private"` literal. The literal requires exactly four
 decimal components, each within the `u16` range. It is therefore safe to use in
-typed build selection without parsing host-formatted version strings.
+typed build selection without parsing host-formatted version strings. Version
+literals may also be used directly as [`match`] patterns. A wildcard is
+required because new executable versions may exist beyond the versions listed
+by the script.
 
 ```text
 let executable = await process.mainModule()
 let version = executable.fileVersion() else v"0.0.0.0"
 if version == v"1.5.0.0" {
     return StateLayout.V1500
+}
+```
+
+```text
+return match version {
+    v"1.0.0.0" => StateLayout.V1000,
+    v"1.5.0.0" => StateLayout.V1500,
+    _ => await process.closed(),
 }
 ```
 

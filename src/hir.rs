@@ -194,6 +194,7 @@ pub enum TypedPattern {
         value: u64,
         suffix: Option<TypeRef>,
     },
+    FileVersion([u16; 4]),
     None,
     OptionSome(Option<PatternBinding>),
     ResultSuccess(Option<PatternBinding>),
@@ -1179,6 +1180,9 @@ fn lower_expression_kind(
                             value: *value,
                             suffix: *suffix,
                         },
+                        MatchPattern::FileVersion(components) => {
+                            TypedPattern::FileVersion(*components)
+                        }
                         MatchPattern::None => TypedPattern::None,
                         MatchPattern::OptionSome(binding) => {
                             TypedPattern::OptionSome(binding.clone())

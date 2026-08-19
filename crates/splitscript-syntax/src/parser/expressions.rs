@@ -880,6 +880,15 @@ impl Parser<'_> {
                 self.bump();
                 MatchPattern::None
             }
+            TokenKind::Ident(name) if name == "v" => {
+                self.bump();
+                let version_span = self.current().span;
+                let value = self.expect_string("expected a quoted version after `v`")?;
+                MatchPattern::FileVersion(
+                    parse_file_version(&value)
+                        .map_err(|message| Diagnostic::new(message, version_span))?,
+                )
+            }
             TokenKind::Ident(name) if name == "null" => {
                 self.record_foreign_spelling_diagnostic(
                     token.span,
@@ -955,7 +964,7 @@ impl Parser<'_> {
             }
             _ => {
                 return Err(Diagnostic::new(
-                    "expected an enum variant, character, integer, boolean, `None`, `Some(value)`, `Ok(value)`, `Err(error)`, or `_` pattern",
+                    "expected an enum variant, character, integer, file-version, boolean, `None`, `Some(value)`, `Ok(value)`, `Err(error)`, or `_` pattern",
                     pattern_start,
                 ));
             }

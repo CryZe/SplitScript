@@ -1958,6 +1958,24 @@ fn describe(value) {
     }
 
     #[test]
+    fn formats_file_version_match_patterns_as_literals() {
+        let source = r#"state "game.exe"{}
+fn supported(version:FileVersion)->bool{return match version{v"1.2.3.4"=>true,_=>false}}"#;
+        let expected = r#"state "game.exe" {}
+fn supported(version: FileVersion) -> bool {
+    return match version {
+        v"1.2.3.4" => true,
+        _ => false,
+    }
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn preserves_binary_integer_literals_and_their_suffixes() {
         let source = r#"state GBA{flags:u8 at 0b0010_0000;mask:u16 at 0B1111u16}split{return current.flags&0b10!=0}"#;
         let expected = r#"state GBA {

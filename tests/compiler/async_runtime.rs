@@ -1481,6 +1481,108 @@ fn file_version_literals_are_typed_and_checked_at_parse_time() {
 }
 
 #[test]
+fn file_version_literals_are_first_class_match_patterns() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn versionName(version: FileVersion) -> String {
+            return match version {
+                v"1.5.0.0" => "supported",
+                v"2.0.0.0" if version.major == 2 => "preview",
+                _ => "unknown",
+            }
+        }
+
+        onAttach {
+            let module = match v"1.5.0.0" {
+                v"1.5.0.0" => await process.mainModule(),
+                _ => await process.mainModule(),
+            }
+            print(module.address)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("file-version patterns should type check");
+    assert!(checked.typed_hir().expressions().any(|expression| {
+        let splitscript::compiler::hir::TypedExpressionKind::Match { arms, .. } = &expression.kind
+        else {
+            return false;
+        };
+        arms.iter().any(|arm| {
+            matches!(
+                arm.pattern,
+                splitscript::compiler::hir::TypedPattern::FileVersion([1, 5, 0, 0])
+            )
+        })
+    }));
+
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("file-version pattern comparisons should produce valid Wasm");
+}
+
+#[test]
+fn file_version_matches_require_a_wildcard_and_reject_invalid_patterns() {
+    let non_exhaustive = r#"
+        state "game.exe" {}
+        fn supported(version: FileVersion) -> bool {
+            return match version { v"1.5.0.0" => true }
+        }
+    "#;
+    let diagnostics =
+        splitscript::compile(non_exhaustive).expect_err("file-version matches are open-ended");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("non-exhaustive file-version match")
+    }));
+
+    let wrong_type = r#"
+        state "game.exe" {}
+        fn classify(value: u32) -> bool {
+            return match value { v"1.5.0.0" => true, _ => false }
+        }
+    "#;
+    let diagnostics =
+        splitscript::compile(wrong_type).expect_err("version patterns require FileVersion");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("FileVersion") && diagnostic.message.contains("u32")
+    }));
+
+    let malformed = r#"
+        state "game.exe" {}
+        fn classify(value: FileVersion) -> bool {
+            return match value { v"1.5.0" => true, _ => false }
+        }
+    "#;
+    let diagnostics = splitscript::compile(malformed).expect_err("malformed versions must fail");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("file-version literals require exactly four decimal components")
+    }));
+
+    let duplicate = r#"
+        state "game.exe" {}
+        fn classify(value: FileVersion) -> bool {
+            return match value {
+                v"1.5.0.0" => true,
+                v"1.5.0.0" => false,
+                _ => false,
+            }
+        }
+    "#;
+    let diagnostics =
+        splitscript::compile(duplicate).expect_err("duplicate version arms must fail");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("duplicate match arm"))
+    );
+}
+
+#[test]
 fn explicit_process_reads_and_pointer_following_work_in_sync_and_async_code() {
     let source = r#"
         state "game.exe" {}

@@ -662,11 +662,16 @@ only traversed once.
 onAttach {
     let executable = await process.mainModule()
     let product = executable.productVersion() else return
-    if product == v"1.2.3.4" {
-        print("recognized build")
+    let label = match product {
+        v"1.2.3.4" => "recognized build",
+        _ => "unsupported build",
     }
+    print(label)
 }
 ```
+
+[`FileVersion`] literals are also first-class [`match`] patterns. Always add a
+wildcard arm because executable versions are an open set.
 
 Only preserve full enumeration when the source genuinely needs to inspect
 unknown module names. SplitScript does not currently expose that host operation.

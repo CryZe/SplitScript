@@ -1086,7 +1086,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "v\"major.minor.build.private\"",
         "Constructs a checked Windows file-version literal.",
-        "A version literal contains exactly four decimal [`u16`] components and has type [`FileVersion`]. The quoted boundary keeps malformed versions from being parsed as unrelated numeric or member expressions.",
+        "A version literal contains exactly four decimal [`u16`] components and has type [`FileVersion`]. It may also be used directly as a [`match`] pattern; an open-ended version match requires a wildcard arm. The quoted boundary keeps malformed versions from being parsed as unrelated numeric or member expressions.",
         VERSION_EXAMPLE
     ),
     language_item!(

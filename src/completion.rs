@@ -1236,6 +1236,7 @@ fn add_pattern_binding(builder: &mut CompletionBuilder, pattern: &MatchPattern) 
         MatchPattern::Bool(_)
         | MatchPattern::Char(_)
         | MatchPattern::Int { .. }
+        | MatchPattern::FileVersion(_)
         | MatchPattern::None
         | MatchPattern::Wildcard => None,
     };

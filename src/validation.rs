@@ -664,6 +664,7 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
             | ast::MatchPattern::Bool(_)
             | ast::MatchPattern::Char(_)
             | ast::MatchPattern::Int { .. }
+            | ast::MatchPattern::FileVersion(_)
             | ast::MatchPattern::None
             | ast::MatchPattern::OptionSome(None)
             | ast::MatchPattern::ResultSuccess(None)

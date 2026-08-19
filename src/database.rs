@@ -868,6 +868,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             | MatchPattern::Bool(_)
             | MatchPattern::Char(_)
             | MatchPattern::Int { .. }
+            | MatchPattern::FileVersion(_)
             | MatchPattern::None
             | MatchPattern::OptionSome(None)
             | MatchPattern::ResultSuccess(None)

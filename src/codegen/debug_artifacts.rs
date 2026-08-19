@@ -366,6 +366,7 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
                 MatchPattern::Bool(_)
                 | MatchPattern::Char(_)
                 | MatchPattern::Int { .. }
+                | MatchPattern::FileVersion(_)
                 | MatchPattern::None
                 | MatchPattern::Wildcard => None,
             };

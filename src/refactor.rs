@@ -834,6 +834,7 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
             MatchPattern::Bool(_)
             | MatchPattern::Char(_)
             | MatchPattern::Int { .. }
+            | MatchPattern::FileVersion(_)
             | MatchPattern::None
             | MatchPattern::Wildcard => None,
         };

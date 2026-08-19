@@ -587,6 +587,40 @@ pub(super) struct MatchPatternBinding {
     field_index: u32,
 }
 
+fn compile_file_version_pattern(
+    function: &mut Function,
+    components: &[u16; 4],
+    value_local: u32,
+    value_type: Type,
+    context: &ExprContext<'_>,
+) {
+    // Keep the literal syntax coupled to the catalog's named components, not
+    // to the physical field order of FileVersion's GC representation.
+    let fields = [
+        StdlibFieldId::FileVersionMajor,
+        StdlibFieldId::FileVersionMinor,
+        StdlibFieldId::FileVersionBuild,
+        StdlibFieldId::FileVersionPrivatePart,
+    ];
+    for (component_index, (field, component)) in fields.iter().zip(components).enumerate() {
+        function
+            .instruction(&Instruction::LocalGet(value_local))
+            .instruction(&Instruction::RefAsNonNull);
+        emit_typed_struct_get(
+            function,
+            context.gc.index(value_type),
+            context.gc.standard_field_index(*field),
+            Type::U16,
+        );
+        function
+            .instruction(&Instruction::I32Const(i32::from(*component)))
+            .instruction(&Instruction::I32Eq);
+        if component_index != 0 {
+            function.instruction(&Instruction::I32And);
+        }
+    }
+}
+
 pub(super) fn compile_statement_pattern(
     function: &mut Function,
     pattern: &wasm_ir::LoweredPattern,
@@ -671,6 +705,9 @@ pub(super) fn compile_statement_pattern(
                     Instruction::I32Eq
                 },
             );
+        }
+        wasm_ir::LoweredPattern::FileVersion(components) => {
+            compile_file_version_pattern(function, components, value_local, value_type, context);
         }
         wasm_ir::LoweredPattern::OptionNone(_) => {
             function
@@ -2088,6 +2125,15 @@ fn compile_expr_unconverted(
                         } else {
                             Instruction::I32Eq
                         });
+                    }
+                    wasm_ir::LoweredPattern::FileVersion(components) => {
+                        compile_file_version_pattern(
+                            function,
+                            components,
+                            value_local,
+                            value_type,
+                            context,
+                        );
                     }
                     wasm_ir::LoweredPattern::OptionNone(_) => {
                         function

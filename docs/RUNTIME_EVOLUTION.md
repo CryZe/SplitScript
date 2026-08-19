@@ -164,7 +164,9 @@ cases. Candidate host-owned facilities are:
   existing address/size imports;
 - product/file version metadata;
 - a deterministic executable or module fingerprint that does not require
-  hashing an entire image inside one guest update;
+  hashing an entire image inside one guest update. COTM 1.1.0/1.1.2 and COTM2
+  1.2.2/1.3.1 are concrete evidence: their ASL sources select same-name layouts
+  by known whole-file MD5 values, and COTM documents identical module sizes;
 - path/name metadata for mapped memory ranges. SplitScript now snapshots the
   existing count/index ABI synchronously into GC-owned `MemoryRange` values
   with readable, writable, and executable flags; enumerating this cheap host

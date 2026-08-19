@@ -334,6 +334,39 @@ language and standard library.
   validation is still required for the bounded level-name encoding, pointer
   paths, and route transitions; successful compilation is not runtime proof.
 
+### Fingerprint-limited layouts: COTM and COTM2
+
+Campaign status: both `BLOCKED`
+
+Audit result: the timer and layout claims are false aggregate blockers, but
+exact build selection retains one narrow host requirement.
+
+- Both sources declare two named physical layouts for one Windows executable.
+  SplitScript can represent those layouts directly, expose their common state
+  fields, and return the selected `StateLayout` from `onAttach`. Their exact
+  current attachment candidates are `COTM.exe` and `game.exe`.
+- COTM's reset logic uses `timer.CurrentPhase`, and its stage and boss-rush
+  routes use `timer.CurrentSplitIndex`. These map to the existing exhaustive
+  `timer.state()` and optional `timer.currentSplitIndex()` APIs. COTM2 does not
+  read either timer value at all, despite the campaign report naming both as
+  blockers.
+- COTM2's save-slot-dependent `DeepPointer` values do not require dynamic state
+  declarations. A selected version-specific base, ordinary address arithmetic,
+  `process.follow`, typed globals for the one-tick-old derived values, and
+  process reads in `whileAttached` preserve that update shape. Its settings are
+  statically known and fit the existing settings DSL.
+- The residual gap is exact layout evidence. Both ASL sources hash the complete
+  executable and compare known MD5 values; COTM explicitly notes that module
+  size is identical between its builds. The corpus provides no equivalent PE
+  file-version or stable signature evidence, so silently choosing by size,
+  always selecting the newest layout, or inventing an address-validity probe
+  would change the source's build policy.
+- R3 therefore retains a deterministic host-owned executable fingerprint as
+  the faithful remaining requirement. This does not justify filesystem access
+  or hashing the entire module synchronously inside one guest tick. A
+  behavior-limited port can explicitly support only one verified build today;
+  a complete two-build port remains fingerprint-limited.
+
 The next audit tranche should continue with another reported blocker likely to
 be a false gap. It must continue to separate static compilation, deterministic
 host-fixture coverage, and live-game validation.

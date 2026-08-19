@@ -304,6 +304,36 @@ language and standard library.
   version blocker. Runtime verification is still required for both address
   layouts and exact PE version values.
 
+### False timer-metadata blocker: Castle of Illusion HD
+
+Campaign status: `BLOCKED`
+
+Audit result: every active timer decision is expressible with the current
+language and standard library.
+
+- Source: three ordinary memory watchers drive start, loading, boss history,
+  cutscene history, and 23 route-position split predicates. Under the current
+  exact-name contract the attachment candidate is `COI.exe`, not the source's
+  extensionless ASL process identity `COI`.
+- Campaign claim: the port requires both current split metadata and arbitrary
+  mutation of fields on the current sample. The source does assign
+  `timer.CurrentSplit.Name`, but never reads that local; no segment-name API is
+  part of its active behavior. Its route dispatch only needs the existing
+  optional `timer.currentSplitIndex()`.
+- The source-created `previousBossHP` and `cutsceneCount` sample properties are
+  run-owned history rather than process memory. Typed globals can hold them,
+  while locals captured before each update preserve the source's `old` view
+  before the globals are mutated. Resetting them for route index zero and at
+  the same post-split boundaries preserves the source decisions. The assigned
+  `previousCutsceneStatus` property is never read and can be omitted.
+- A focused current-compiler probe covers the exact process and pointer paths,
+  optional split-index fallback, all 23 expected-level arms, boss and cutscene
+  history, final split, start, and loading behavior. It compiles without a new
+  timer, snapshot-mutation, or dynamic-field facility.
+- The empty ASL `gameTime` block has no behavior to preserve. Live-game
+  validation is still required for the bounded level-name encoding, pointer
+  paths, and route transitions; successful compilation is not runtime proof.
+
 The next audit tranche should continue with another reported blocker likely to
 be a false gap. It must continue to separate static compilation, deterministic
 host-fixture coverage, and live-game validation.

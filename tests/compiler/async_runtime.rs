@@ -1995,6 +1995,69 @@ fn expression_backed_state_fields_use_discovered_addresses_and_rotate_snapshots(
 }
 
 #[test]
+fn state_expression_propagation_and_final_results_share_one_failure_boundary() {
+    let source = r#"
+        let rejectSceneAddress = false
+
+        fn sceneAddress() -> address! {
+            if rejectSceneAddress {
+                return Err("scene address is temporarily unavailable")
+            }
+            return 0x7fff0000
+        }
+
+        state "game.exe" {
+            scene: i32 = process.read(sceneAddress()?);
+            entities: i32 = process.read(process.follow(0x7fff0004, [])?)
+        }
+
+        whileAttached {
+            print(`{current.scene}:{current.entities}`)
+            rejectSceneAddress = !rejectSceneAddress
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("internal propagation and a final result should share the field boundary");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("flattened state-field failure boundaries should produce valid Wasm GC");
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    assert!(store.data().messages.is_empty());
+
+    store.data_mut().raw_scene = 2;
+    store.data_mut().raw_entities = 6;
+    update.call(&mut store, ()).unwrap();
+
+    store.data_mut().raw_scene = 3;
+    store.data_mut().raw_entities = 5;
+    update.call(&mut store, ()).unwrap();
+
+    store.data_mut().raw_scene = 4;
+    store.data_mut().raw_entities = 4;
+    store.data_mut().fail_entities_read = true;
+    update.call(&mut store, ()).unwrap();
+    store.data_mut().fail_entities_read = false;
+
+    store.data_mut().raw_scene = 5;
+    store.data_mut().raw_entities = 3;
+    update.call(&mut store, ()).unwrap();
+
+    store.data_mut().raw_scene = 6;
+    store.data_mut().raw_entities = 2;
+    store.data_mut().fail_scene_read = true;
+    update.call(&mut store, ()).unwrap();
+    store.data_mut().fail_scene_read = false;
+
+    assert_eq!(store.data().messages, ["2:6", "2:5", "4:5", "4:3", "4:2"]);
+}
+
+#[test]
 fn state_field_filters_retain_one_field_without_rejecting_the_snapshot() {
     splitscript::compile(
         r#"

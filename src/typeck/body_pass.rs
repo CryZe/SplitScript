@@ -183,9 +183,19 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
                     let poll_result = if used_propagation {
                         let boundary =
                             boundary.expect("propagation syntax creates a failure boundary");
-                        if matches!(actual, Type::Result(_)) {
-                            checker.error(
-                                "a state expression using `?` must produce the field value, not another result",
+                        if let Type::Result(result) = actual {
+                            let value = checker.inference.result_value(result);
+                            unify_state_field_value(
+                                checker,
+                                value,
+                                field_type,
+                                field,
+                                expression.span,
+                            );
+                            checker.expect_expression(
+                                expression.id,
+                                actual,
+                                Some(boundary),
                                 expression.span,
                             );
                         } else {

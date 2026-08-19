@@ -71,6 +71,10 @@ split {
     return current.score > old.score
 }"#;
 
+const FALLIBLE_STATE_SOURCE: &str = r#"state "game.exe" {
+    score: i32 = process.read(process.follow(0x1000, [0x20])?);
+}"#;
+
 const ALTERNATE_PROCESS_STATE_SOURCE: &str = r#"state ["game.exe", "game-demo.exe"] {
     score: i32 at 0x1000;
 }
@@ -390,6 +394,11 @@ const STATE_DECL_EXAMPLES: &[Example] = &[
         "Read state from a native process",
         "state \"game.exe\" {\n    score = process.read<i32>(0x1000);\n}",
         STATE_SOURCE,
+    ),
+    Example::checked(
+        "Compose fallible address discovery with a read",
+        FALLIBLE_STATE_SOURCE,
+        FALLIBLE_STATE_SOURCE,
     ),
     Example::checked(
         "Try alternate executable names",
@@ -803,7 +812,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "state \"game.exe\" { ... } | state [\"game.exe\", \"demo.exe\"] { ... } | state GBA { ... }",
         "Declares process attachment and persistent watched state.",
-        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. Every state expression produces a fallible value ([`T!`]). Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
+        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
         STATE_DECL_EXAMPLES
     ),
     language_item!(

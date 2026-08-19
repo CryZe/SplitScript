@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-19: composable state-field failure propagation
+
+- Defined one implicit `T!` boundary for every expression-backed state field,
+  allowing internal postfix `?` and a fallible final call to propagate into the
+  same transactional field update without a helper or nested result.
+- Preserved per-field retention for both intermediate discovery failures and
+  final read failures while successful sibling fields continue to advance.
+- Added compiler-checked reference guidance and an executable Wasm regression
+  covering inference, code generation, initialization, and retained values.
+
 ## 2026-08-18: semantic links throughout generated documentation
 
 - Made language keywords in compiler-checked examples navigate through the

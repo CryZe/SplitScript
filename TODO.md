@@ -132,14 +132,6 @@ semantic-review evidence, not as a conformance corpus.
   expressions. Either support a scoped block with a well-defined final value
   and divergence rule, or emit a focused diagnostic that shows the supported
   spelling.
-- [ ] Decide how a fallible state expression composes internal postfix `?` with
-  a fallible final call. The natural expression
-  `process.read<T>(process.follow(base, path)?)` currently reports that a state
-  expression using `?` must not produce another result, forcing a helper
-  function. Evaluate flattening the final `T!` into the state-field failure
-  boundary, explicit propagation on both operations, and the effect on nested
-  calls before changing the checker. Add parser, inference, diagnostic, and
-  runtime-retention fixtures for the chosen rule.
 - [ ] Review the `Duration` constructor surface with integer and floating-point
   inputs before adding migration-only guidance. Decide whether
   `fromMilliseconds` and the other unit constructors should accept a numeric

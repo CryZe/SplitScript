@@ -1246,13 +1246,24 @@ state "game.exe" {
 }
 ```
 
-Every state expression produces a `T!`: a plain value is lifted automatically,
-while a process read already returns a result. The first snapshot requires all
-required fields to succeed together and initializes `old` and `current` to the
-same value. On later polls, an error keeps that field's accepted value while
-successful fields advance. Put values that must advance atomically into one
-record- or array-valued state field; the whole aggregate is then one acceptance
-unit.
+Every state expression has one implicit `T!` failure boundary: a plain value is
+lifted automatically, while a process read already returns a result. Postfix `?`
+inside the expression propagates into that same boundary, including when the
+final operation is itself fallible:
+
+```text
+state "game.exe" {
+    score: i32 = process.read(process.follow(base, offsets)?);
+}
+```
+
+There is no nested result and no helper-function boundary in this form. A
+failure from either `follow` or `read` rejects this field's candidate value. The
+first snapshot requires all required fields to succeed together and initializes
+`old` and `current` to the same value. On later polls, an error keeps that
+field's accepted value while successful fields advance. Put values that must
+advance atomically into one record- or array-valued state field; the whole
+aggregate is then one acceptance unit.
 
 When one field is genuinely optional, make its value type optional and convert
 that read's error with the source-defined `discardError()` method:

@@ -153,14 +153,12 @@ Audit result: mostly a false aggregate blocker with two narrower host gaps.
   values with version literals, and return the matching `StateLayout` variant.
   The exact Windows process candidate must be `AoE2DE_s.exe` under the current
   host contract.
-- Probe finding: the fallible file-version read has no clean unsupported-build
-  path in this context. `else { await process.closed() }` is rejected by the
-  parser, while `else await process.closed()` reports `None` where
-  `FileVersion` is expected even though the continuation is cancelled before
-  that await can resume. Bare `else return` is correctly rejected because a
-  layout-selecting `onAttach` must return `StateLayout`, and postfix `?` has no
-  result-returning function or state-field boundary here. A fake version value
-  compiles but is not an acceptable canonical workaround.
+- Current compiler result: `Process.closed()` now completes as `async never`,
+  so `module.fileVersion() else await process.closed()` has type
+  `FileVersion` and provides a clean unsupported-build path without a fake
+  version value. A braced fallback block remains separate syntax work; bare
+  `else return` is still correctly rejected because a layout-selecting
+  `onAttach` must return `StateLayout`.
 - Source: map and lost-time logic reads `timer.CurrentPhase` and
   `timer.CurrentSplitIndex`.
 - Campaign claim: timer phase and split index are unavailable.
@@ -179,15 +177,88 @@ Audit result: mostly a false aggregate blocker with two narrower host gaps.
   `await process.closed()`.
 
 This source is suitable for a behavior-limited port today. The ordinary map
-timer, win split, cumulative game time, version comparison, and most timer-state
-logic do not need new APIs. Cleanly composing failed version discovery with the
-unsupported-build suspension needs the planned divergent-expression work.
-Last-segment detection and exact reset-event semantics remain unavailable host
-behavior.
+timer, win split, cumulative game time, version comparison, timer-state logic,
+and unsupported-build suspension do not need new APIs. Last-segment detection
+and exact reset-event semantics remain unavailable host behavior.
 
-The following audit tranche should cover fixed and growable array behavior and
-one genuinely unsupported host case. It should continue to separate static
-compilation, deterministic host-fixture coverage, and live-game validation.
+### Fixed memory arrays: 1001 Spikes Ukampa
+
+Campaign status: `PORTED-LIMITED`
+
+Audit result: the fixed array is supported directly, but the candidate silently
+disables one of its two modes.
+
+- Source: `byte35 levelFlags` is one contiguous 35-byte memory watcher. The
+  candidate's `[u8; 35] at 0x12BEC0` is the exact typed state representation;
+  indexing with `u32` and the bounded level counter preserve its memory shape.
+- Source: the timer category selects Any% Ukampa or All Skulls Ukampa. Timer run
+  metadata is a real host gap, so replacing that selection with an explicit
+  setting is a defensible policy only when the setting actually controls the
+  branch.
+- Port bug: the candidate declares `allSkullsMode key "allSkulls"` but tests a
+  separate `allSkulls` global that is initialized to `false` and never assigned.
+  The All Skulls branch can therefore never execute despite a clean compile.
+  This is direct evidence for the planned unused-setting and behavior-influence
+  lints; it is not evidence for another collection type.
+- Policy requiring review: the source's death count is host-visible auxiliary
+  output. The candidate drops the `lives` watcher and both display values. That
+  does not alter split timing, but a fidelity ledger must record the omitted
+  custom-variable behavior rather than silently calling the port complete.
+- Attachment remains compile-only. The extensionless Windows process candidate
+  must be replaced with and live-verified against the exact `.exe` identity.
+
+### Managed growable collections: Alba
+
+Campaign status: `BLOCKED`
+
+Audit result: the report identifies a real Unity library gap but overstates the
+required language feature.
+
+- Source: the settings hierarchy and every task identifier are statically
+  authored in `startup`; no runtime settings declaration is required. The
+  existing settings DSL can declare them, and `settings.enabled(name)` can
+  query a discovered task name when exact static keys are preserved.
+- Existing language support: growable arrays and loops can retain discovered
+  task addresses, names, required values, and previous readings. Ordinary
+  process reads in `whileAttached` can update those arrays and reproduce the
+  `MemoryWatcherList` changed-value test. Runtime-created state fields are not
+  necessary.
+- Existing Mono support provides class discovery, named field offsets, static
+  field paths, typed process reads, and managed-string decoding. The unresolved
+  boundary is typed traversal of managed `List<T>` and its backing managed
+  array without scripts guessing object-header and element-data offsets.
+- Design remains open: this audit does not choose a Unity API, target layout,
+  or runtime intrinsic. The residual need belongs to the existing managed-list
+  roadmap item and must keep Mono versions and target families explicit.
+
+### Genuine host boundary: Amnesia AMFP and TDD
+
+Campaign status: `BLOCKED`
+
+Audit result: the loading-state blocker is genuine and must not be disguised as
+an ordinary SplitScript memory helper.
+
+- Source: both scripts locate executable instructions, allocate executable
+  process memory, copy and replace instructions, install jumps, suspend and
+  resume the game around patching, and restore every modification during
+  shutdown. The injected code publishes a synthetic loading flag that the
+  scripts combine with readable game state.
+- Existing support covers version layouts, alternate exact process identities,
+  signatures, pointer resolution, bounded strings, and all ordinary reads. It
+  cannot provide the synthetic flag because the host ABI intentionally exposes
+  no allocation, arbitrary writes, process suspension, or code-patch lifetime.
+- Required host semantics are safe observation of the transient load events,
+  cancellation and cleanup when attachment ends or traps, and restoration that
+  cannot leave the game patched. This evidence does not justify exposing raw
+  executable-memory mutation to scripts; a native loading signal or a tightly
+  constrained host-owned instrumentation contract must be evaluated separately.
+- AMFP additionally mutates run offset and timing method. Those are independent
+  host gaps and should not be bundled into the loading-state design.
+
+The next audit tranche should continue with one candidate that exercises
+ordinary growable-array mutation and one blocked report likely to be a false
+gap. It must continue to separate static compilation, deterministic host-fixture
+coverage, and live-game validation.
 
 ## Cross-cutting findings
 

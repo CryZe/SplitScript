@@ -398,6 +398,48 @@ Until that host validation is tightened, SplitScript documents a positive,
 finite source contract and emits ordinary calls without duplicating scheduler
 policy in generated Wasm.
 
+## R9: safe observation of instrumented loading events
+
+**Priority:** P2 / blocked-port evidence
+
+**Status:** Semantic requirement recorded; no raw process-mutation API is
+proposed.
+
+The Amnesia: A Machine for Pigs and Amnesia: The Dark Descent ASL scripts
+derive loading state by modifying the game process. They scan executable code,
+allocate an executable buffer, copy displaced instructions, install jumps that
+write a synthetic flag, suspend and resume the process around modification,
+and restore all bytes and allocations during shutdown. Ordinary signatures,
+reads, layouts, and lifecycle state cover the rest of these scripts but cannot
+observe the transient events captured by that instrumentation.
+
+A future host solution must provide the loading information without allowing an
+autosplitter instance to leave the game patched. Its semantic requirements are:
+
+- event observation must preserve the load-begin and load-end transitions that
+  the injected flag currently records, rather than sampling an unrelated
+  approximation;
+- ownership must remain attachment-scoped, with deterministic cancellation and
+  cleanup on normal detach, rejected attachment, trap, hot reload, and host
+  shutdown;
+- setup and teardown must not block ordinary autosplitter ticks for an
+  unbounded duration;
+- partial setup must roll back safely, and cleanup must be idempotent even when
+  the game closes during instrumentation;
+- the runtime must define which executable versions and architectures are
+  supported instead of accepting unchecked script-provided machine code; and
+- conformance coverage must prove transition ordering, failed setup, process
+  closure at every stage, trap cleanup, reattachment, and byte-for-byte process
+  restoration if code patching remains part of the host implementation.
+
+No temporary SplitScript workaround preserves the synthetic loading signal.
+The scripts can port their readable fields and other lifecycle decisions, but
+load removal remains blocked. Exposing arbitrary allocation, memory writes,
+process suspension, or jump installation directly to untrusted scripts would
+expand the security and lifecycle surface substantially; a native game-specific
+loading signal or tightly constrained host-owned instrumentation contract must
+be evaluated before any ABI spelling is chosen.
+
 ## Recording requirements from ports
 
 When an ASL port exposes a possible runtime gap, add it here before designing a

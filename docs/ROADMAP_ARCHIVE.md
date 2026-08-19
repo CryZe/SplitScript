@@ -123,6 +123,10 @@
 - Linked canonical targets directly into the generated language and
   standard-library reference, while keeping target-less planned host features
   visible through their detailed migration pages.
+- Added a front-loaded checklist for high-frequency ASL concepts such as exact
+  attachment names, named layouts, timer state and split index, polling rates,
+  numeric widths, module versions, settings families, arrays, and managed
+  strings so authors do not need to read the cookbook linearly.
 - Validated the generated recipe anchors and symbol links as part of the
   complete documentation graph.
 

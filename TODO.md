@@ -102,13 +102,6 @@ semantic-review evidence, not as a conformance corpus.
   `await process.closed()` path. The fact that none of the campaign outputs used
   layouts despite many multi-state sources proves that the current isolated
   `layout Name { ... }` example is insufficient.
-- [ ] Add a concise ASL-concept index/checklist near the beginning of the
-  porting guide. Link exact legacy concepts to canonical pages for versioned
-  states, multiple process names, timer phase and split index, exit-time game
-  time cleanup, `refreshRate`, numeric type spellings, module/file versions,
-  settings families versus dynamic lookup, array length/growth, managed
-  strings, and Unity static-singleton/object paths. Keep the detailed recipes,
-  but make them reachable without reading the guide linearly.
 - [x] Make `splitc docs QUERY` resolve exact canonical names and unambiguous
   foreign spellings directly, then render ranked results for broader queries
   instead of silently choosing one. Multiword queries do not need quoting. The
@@ -281,9 +274,12 @@ semantic-review evidence, not as a conformance corpus.
   dynamic typed tag values for Alba, A Short Hike, AER, Bzzzt, Circuit
   Superstars, and Assemble with Care. Separate stable singleton/field chains
   already expressible through `staticFieldPath` and `field` from collection
-  enumeration that genuinely needs new library/runtime support. Keep target
-  families explicit (V1, PE32, ELF, Mach-O) and source-defined; do not add
-  reflection-shaped compiler exceptions or silently guess offsets.
+  enumeration that genuinely needs new library/runtime support. Alba does not
+  require runtime-created state fields: growable arrays can retain discovered
+  task addresses, names, required values, and previous readings once typed
+  managed-list traversal exists. Keep target families explicit (V1, PE32, ELF,
+  Mach-O) and source-defined; do not add reflection-shaped compiler exceptions
+  or silently guess offsets.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
 - [ ] Add the next emulator provider from a real port—such as Dolphin, PCSX2,

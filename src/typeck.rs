@@ -360,11 +360,11 @@ impl Checker {
         if self.is_error_type(actual_shallow) || self.is_error_type(expected) {
             return Some(self.error_type());
         }
-        // `never` is the bottom type: an expression which cannot complete can
+        // `Never` is the bottom type: an expression which cannot complete can
         // appear wherever a value is expected. Keep its semantic type intact
         // so control-flow and code generation still know that this edge has no
         // runtime value. This conversion is deliberately directional; normal
-        // values must not unify with an explicitly required `never` type.
+        // values must not unify with an explicitly required `Never` type.
         if self.is_never_type(actual_shallow) {
             return Some(actual_shallow);
         }

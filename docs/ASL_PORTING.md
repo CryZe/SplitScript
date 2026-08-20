@@ -56,6 +56,35 @@ root is available only during attachment-owned lifecycle phases; [`old`] and
 [`current`] are unavailable before the first complete snapshot and are not
 guaranteed during [`onDetach`].
 
+## Translating statement-heavy expressions
+
+ASL and C# helpers often need several statements to choose one value. In an
+expression position, SplitScript braces form a value block: local statements
+run first and the final expression supplies the value. This works in [`if`]
+branches, [`match`] arms, fallback [`else`] expressions, arguments, and state
+initializers:
+
+```splitscript
+# state "game.exe" {}
+fn category(isBoss: bool) -> String {
+    let label = if isBoss {
+        let kind = "Boss"
+        `{kind} level`
+    } else {
+        "Level"
+    }
+    return label
+}
+# setup { print(category(true)) }
+```
+
+The final expression is local to the nested block and has no [`return`] keyword.
+Functions and lifecycle actions remain statement bodies and require explicit
+[`return`]. A value block with no final expression yields [`None`]; a block that
+always returns, throws, breaks, or continues has type [`Never`]. A trailing
+semicolon after the final expression is accepted, but the compiler warns and
+the formatter removes it because it is still the block's value.
+
 ## Signed pointer offsets
 
 ASL `DeepPointer` paths commonly contain negative offsets. Preserve them

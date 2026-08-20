@@ -427,6 +427,23 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
     }
 }
 
+#[derive(Default)]
+struct ValueBlockSemicolonCollector {
+    spans: HashSet<usize>,
+}
+
+impl<'ast> Visitor<'ast> for ValueBlockSemicolonCollector {
+    fn visit_expr(&mut self, expression: &'ast Expr) {
+        if let ExprKind::Block(block) = &expression.kind
+            && let Some(semicolon) = block.trailing_semicolon
+            && matches!(block.statements.last(), Some(Stmt::Expression(_)))
+        {
+            self.spans.insert(semicolon.start);
+        }
+        visit::walk_expr(self, expression);
+    }
+}
+
 struct Formatter<'a> {
     document: &'a SourceDocument,
     lexemes: Vec<Lexeme>,
@@ -451,6 +468,7 @@ struct Formatter<'a> {
     trailing_comma_before: HashSet<usize>,
     trailing_semicolon_before: HashSet<usize>,
     omitted_commas: HashSet<usize>,
+    omitted_semicolons: HashSet<usize>,
     brace_stack: Vec<BraceFrame>,
     current_line_indentation: usize,
 }
@@ -498,6 +516,8 @@ impl<'a> Formatter<'a> {
             &layout.generic_opens,
             &layout.generic_closes,
         );
+        let mut value_block_semicolons = ValueBlockSemicolonCollector::default();
+        value_block_semicolons.visit_program(syntax);
         Self {
             document,
             lexemes,
@@ -522,6 +542,7 @@ impl<'a> Formatter<'a> {
             trailing_comma_before: trailing_punctuation.commas,
             trailing_semicolon_before: trailing_punctuation.semicolons,
             omitted_commas: trailing_punctuation.omitted_commas,
+            omitted_semicolons: value_block_semicolons.spans,
             brace_stack: Vec::new(),
             current_line_indentation: 0,
         }
@@ -551,6 +572,11 @@ impl<'a> Formatter<'a> {
         let current_token = token_kind(current);
         if matches!(current_token, Some(TokenKind::Comma))
             && self.omitted_commas.contains(&current.span().start)
+        {
+            return;
+        }
+        if matches!(current_token, Some(TokenKind::Semicolon))
+            && self.omitted_semicolons.contains(&current.span().start)
         {
             return;
         }

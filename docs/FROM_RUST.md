@@ -29,6 +29,34 @@ Arrays use [`[T]`] and [`[T; N]`], records are GC product types, and enums suppo
 payload variants. There are no lifetimes, moves, borrows, or explicit memory
 management in source.
 
+## Blocks yield values, functions use return
+
+Nested blocks are expression-oriented much like Rust. Their final expression
+is their value, so an [`if`] branch, [`match`] arm, fallback, or argument can
+perform local setup before producing a result:
+
+```splitscript
+# state "game.exe" {}
+fn levelLabel(isBoss: bool) -> String {
+    let label = if isBoss {
+        let kind = "Boss"
+        `{kind} level`
+    } else {
+        "Level"
+    }
+    return label
+}
+# setup { print(levelLabel(true)) }
+```
+
+Unlike Rust, a function body does not implicitly return its tail expression.
+Write [`return`] explicitly. This also applies to methods and lifecycle actions;
+falling through an action uses that action's documented default. The compiler
+recognizes the common Rust spelling, explains the distinction, and offers to
+insert [`return`]. A semicolon on a value block's final expression is accepted
+but warned about and removed by the formatter; it never silently changes the
+block to [`None`].
+
 ## None is the unit type
 
 [`None`] is both the language's zero-sized unit value and the absent side of

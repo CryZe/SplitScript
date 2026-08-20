@@ -242,14 +242,38 @@ for label in ["one", "two"] {
 const IF_SOURCE: &str = r#"state "game.exe" {}
 
 fn levelKind(isBoss: bool) -> String {
-let label = if isBoss { "Boss" } else { "Level" }
-return label
+    let label = if isBoss {
+        let kind = "Boss"
+        `{kind} level`
+    } else {
+        "Level"
+    }
+    return label
 }
 
 whileAttached {
 if timer.state() == TimerState.Running {
     print("Timer is running")
 }
+}"#;
+
+const VALUE_BLOCK_SOURCE: &str = r#"state "game.exe" {}
+
+fn levelKind(isBoss: bool) -> String {
+    let label = if isBoss {
+        let kind = "Boss"
+        `{kind} level`
+    } else {
+        "Level"
+    }
+    return label
+}
+
+setup {
+    print({
+        let level = 7
+        `Level {level}`
+    })
 }"#;
 
 const EQUALITY_SOURCE: &str = r#"state "game.exe" {}
@@ -332,7 +356,7 @@ fn result() -> i32! {
     return 42
 }
 
-fn ignoreUnsupportedBuild() -> async never {
+fn ignoreUnsupportedBuild() -> async Never {
     await process.closed()
 }
 
@@ -461,6 +485,23 @@ const IF_EXAMPLES: &[Example] = &[
         "Choose a value",
         "let label = if isBoss { \"Boss\" } else { \"Level\" }",
         IF_SOURCE,
+    ),
+    Example::checked(
+        "Prepare a branch value",
+        "let label = if isBoss {\n    let kind = \"Boss\"\n    `{kind} level`\n} else {\n    \"Level\"\n}",
+        IF_SOURCE,
+    ),
+];
+const VALUE_BLOCK_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Compute a value with local steps",
+        "let label = {\n    let level = 7\n    `Level {level}`\n}",
+        VALUE_BLOCK_SOURCE,
+    ),
+    Example::checked(
+        "Prepare an argument locally",
+        "print({\n    let level = 7\n    `Level {level}`\n})",
+        VALUE_BLOCK_SOURCE,
     ),
 ];
 focused_example!(
@@ -897,8 +938,17 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "if condition { ... } else { ... }",
         "Branches as a statement or expression.",
-        "Expression-valued [`if`] requires an [`else`] branch and infers both branch values against one result type.",
+        "Expression-valued [`if`] requires an [`else`] branch and infers both branch values against one result type. A branch may be a [`value block`] when it needs local steps before producing its value.",
         IF_EXAMPLES
+    ),
+    language_item!(
+        ValueBlock,
+        "value block",
+        LanguageItemKind::Syntax,
+        "{ statements; finalExpression }",
+        "Runs scoped statements and yields its final expression.",
+        "A value block may appear anywhere an expression is accepted, including an [`if`] branch, [`match`] arm, fallback [`else`], function argument, or state-field initializer. Its bindings are local to the block. The final expression supplies the block's value; a block without one yields [`None`], unless control always leaves through [`return`], [`break`], [`continue`], [`throw`], or another [`Never`] expression. A semicolon after the final expression is accepted for familiarity but warned about and removed by the formatter because the expression is still the value. Function and lifecycle bodies are statement blocks, not value blocks: use [`return`] explicitly when they return a value.",
+        VALUE_BLOCK_EXAMPLES
     ),
     language_item!(
         Equality,
@@ -987,7 +1037,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "return expression",
         "Returns from the current function or action.",
-        "Functions infer their result from returns and call-site constraints. Lifecycle actions apply their domain default when control falls through.",
+        "Functions infer their result from explicit [`return`] expressions and call-site constraints. Unlike a nested [`value block`], a function or lifecycle body never returns its final expression implicitly. Lifecycle actions apply their domain default when control falls through.",
         RETURN_EXAMPLE
     ),
     language_item!(
@@ -1138,10 +1188,10 @@ define_language_catalog! {
     builtins {
     builtin_type_item!(
         Never,
-        "never",
+        "Never",
         "Describes an expression that cannot produce a value.",
-        "The never type is the bottom of SplitScript's type hierarchy and can flow into any expected value type. It is inferred for genuinely divergent control flow and is erased from WebAssembly. [`Process.closed`] returns [`async`] [`never`] because process-lifetime cancellation prevents its await from resuming.",
-        "fn ignoreUnsupportedBuild() -> async never {\n    await process.closed()\n}"
+        "The [`Never`] type is the bottom of SplitScript's type hierarchy and can flow into any expected value type. It is inferred for genuinely divergent control flow and is erased from WebAssembly. [`Process.closed`] returns [`async`] [`Never`] because process-lifetime cancellation prevents its await from resuming.",
+        "fn ignoreUnsupportedBuild() -> async Never {\n    await process.closed()\n}"
     ),
     builtin_type_item!(
         None,

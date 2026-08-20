@@ -14,6 +14,7 @@ impl Parser<'_> {
             .start;
         let block_depth = self.brace_depth_before(self.cursor.position());
         let mut statements = Vec::new();
+        let mut trailing_semicolon = None;
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
                 let error = self.error("unterminated block");
@@ -28,6 +29,7 @@ impl Parser<'_> {
                         start,
                         end: self.current().span.end,
                     },
+                    trailing_semicolon,
                 });
             }
             let statement_start = self.cursor.position();
@@ -51,6 +53,8 @@ impl Parser<'_> {
                         }
                         self.record_error_region(skipped_start, self.current().span.start);
                     }
+                    trailing_semicolon = (self.previous().kind == TokenKind::Semicolon)
+                        .then_some(self.previous().span);
                     statements.push(statement);
                 }
                 Err(error) => {
@@ -83,6 +87,7 @@ impl Parser<'_> {
         Ok(Block {
             statements,
             span: Span { start, end },
+            trailing_semicolon,
         })
     }
 
@@ -324,6 +329,7 @@ impl Parser<'_> {
                 Some(Block {
                     statements: vec![nested],
                     span,
+                    trailing_semicolon: None,
                 })
             } else {
                 Some(self.block()?)

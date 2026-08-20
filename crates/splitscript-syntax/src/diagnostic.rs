@@ -14,14 +14,16 @@ pub enum DiagnosticCode {
     UnusedBinding,
     UnusedDeclaration,
     UnusedMember,
+    ValueBlockSemicolon,
 }
 
 impl DiagnosticCode {
-    pub const WARNINGS: [Self; 4] = [
+    pub const WARNINGS: [Self; 5] = [
         Self::MustUse,
         Self::UnusedBinding,
         Self::UnusedDeclaration,
         Self::UnusedMember,
+        Self::ValueBlockSemicolon,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -34,13 +36,18 @@ impl DiagnosticCode {
             Self::UnusedBinding => "SS1002",
             Self::UnusedDeclaration => "SS1003",
             Self::UnusedMember => "SS1004",
+            Self::ValueBlockSemicolon => "SS1005",
         }
     }
 
     pub const fn is_warning(self) -> bool {
         matches!(
             self,
-            Self::MustUse | Self::UnusedBinding | Self::UnusedDeclaration | Self::UnusedMember
+            Self::MustUse
+                | Self::UnusedBinding
+                | Self::UnusedDeclaration
+                | Self::UnusedMember
+                | Self::ValueBlockSemicolon
         )
     }
 }
@@ -58,6 +65,7 @@ impl FromStr for DiagnosticCode {
             "SS1002" => Ok(Self::UnusedBinding),
             "SS1003" => Ok(Self::UnusedDeclaration),
             "SS1004" => Ok(Self::UnusedMember),
+            "SS1005" => Ok(Self::ValueBlockSemicolon),
             _ => Err(()),
         }
     }

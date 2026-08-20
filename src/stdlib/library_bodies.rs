@@ -87,7 +87,11 @@ pub(crate) fn augment_program_with_library_bodies(
     }
     let lexed = lexer::lex_lossless(&combined).map_err(|error| vec![error])?;
     let output = parser::parse_recovering(&combined, lexed.tokens().cloned().collect());
-    if output.diagnostics.is_empty() {
+    if !output
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == crate::DiagnosticSeverity::Error)
+    {
         Ok(Some(output.program))
     } else {
         Err(output

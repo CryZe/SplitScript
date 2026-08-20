@@ -1159,6 +1159,7 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
             }
         }
         ExprKind::Array(values) => add_child_expression_bindings(builder, values, offset),
+        ExprKind::Block(block) => add_block_bindings(builder, block, offset),
         ExprKind::Record { fields, .. } => {
             for (_, value) in fields {
                 add_expression_bindings(builder, value, offset);

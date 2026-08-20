@@ -162,6 +162,84 @@ impl Checker {
                 }
                 self.expect_expression(expr.id, Type::Array(id), expected, expr.span)?
             }
+            ExprKind::Block(block) => {
+                if let Some(boundary) = self.failure.result() {
+                    self.semantics
+                        .resolve_value_block_failure_target(expr.id, boundary);
+                }
+                self.scopes.push(HashMap::new());
+                let tail = block
+                    .statements
+                    .last()
+                    .and_then(|statement| match statement {
+                        crate::ast::Stmt::Expression(expression) => Some(expression),
+                        _ => None,
+                    });
+                let prefix_len = block.statements.len() - usize::from(tail.is_some());
+                for statement in &block.statements[..prefix_len] {
+                    self.statement(statement);
+                }
+                let prefix_is_terminal = block.statements[..prefix_len]
+                    .iter()
+                    .any(|statement| super::body_pass::statement_is_terminal(self, statement));
+                let ty = if prefix_is_terminal {
+                    if let Some(tail) = tail {
+                        self.expr(tail, None);
+                    }
+                    Some(self.core_type(crate::stdlib::CoreTypeId::Never))
+                } else if let Some(tail) = tail {
+                    self.expr(tail, expected)
+                } else if super::body_pass::block_is_terminal(self, block) {
+                    Some(self.core_type(crate::stdlib::CoreTypeId::Never))
+                } else {
+                    let none = self.core_type(crate::stdlib::CoreTypeId::None);
+                    match expected.map(|expected| self.shallow_type(expected)) {
+                        Some(expected @ Type::Option(_)) => {
+                            self.semantics.resolve_value_conversion(
+                                expr.id,
+                                crate::semantic::ValueConversionKind::NoneToOptional,
+                                none,
+                                expected,
+                            );
+                            Some(expected)
+                        }
+                        Some(expected) if self.none_policy == NonePolicy::DomainNullable => {
+                            self.semantics.resolve_value_conversion(
+                                expr.id,
+                                crate::semantic::ValueConversionKind::NoneToDomainNullable,
+                                none,
+                                expected,
+                            );
+                            Some(expected)
+                        }
+                        Some(expected)
+                            if !matches!(expected, Type::Variable(_)) && expected != none =>
+                        {
+                            let expected_name = self.type_name(expected);
+                            let closing = Span {
+                                start: block.span.end.saturating_sub(1),
+                                end: block.span.end,
+                            };
+                            self.errors.push(
+                                Diagnostic::type_error(
+                                    format!(
+                                        "this value block needs a final `{expected_name}` expression"
+                                    ),
+                                    closing,
+                                )
+                                .with_primary_label("the block reaches its end without a value")
+                                .with_note(
+                                    "write the value as the block's final expression; `return` exits the enclosing function instead",
+                                ),
+                            );
+                            None
+                        }
+                        expected => self.expect_expression(expr.id, none, expected, expr.span),
+                    }
+                };
+                self.scopes.pop();
+                ty?
+            }
             ExprKind::Record { name, fields, .. } => {
                 let declaration = self
                     .declarations
@@ -649,8 +727,8 @@ impl Checker {
                 // result before checking a bare `None`. This keeps inference
                 // independent of which branch happens to be written first.
                 let (then_type, else_type) = if expected.is_none()
-                    && matches!(then_expr.kind, ExprKind::None)
-                    && !matches!(else_expr.kind, ExprKind::None)
+                    && expression_is_bare_none(then_expr)
+                    && !expression_is_bare_none(else_expr)
                 {
                     let else_type = self.expr(else_expr, Some(result_type));
                     let then_type = self.expr(then_expr, Some(result_type));
@@ -1277,5 +1355,19 @@ impl Checker {
         let u32_type = self.core_type(crate::stdlib::CoreTypeId::U32);
         self.expr(index, Some(u32_type));
         Some(element)
+    }
+}
+
+fn expression_is_bare_none(expression: &Expr) -> bool {
+    match &expression.kind {
+        ExprKind::None => true,
+        ExprKind::Block(block) => block
+            .statements
+            .last()
+            .is_none_or(|statement| match statement {
+                crate::ast::Stmt::Expression(value) => expression_is_bare_none(value),
+                _ => true,
+            }),
+        _ => false,
     }
 }

@@ -125,6 +125,10 @@ pub enum ExpressionKind {
     InterpolatedString(Vec<InterpolatedPart>),
     Signature(String),
     Array(Vec<ExprId>),
+    /// Marker lowered through statement-aware expression normalization before
+    /// code generation. Its body remains in typed HIR so it can preserve
+    /// lexical control-flow and suspension boundaries.
+    ValueBlock,
     Record {
         record: ResolvedRecordId,
         fields: Vec<(ResolvedRecordFieldId, ExprId)>,
@@ -521,7 +525,7 @@ pub enum Terminator {
 #[derive(Debug, Clone)]
 pub struct StateExpression {
     pub field: ValueId,
-    pub expression: ExprId,
+    pub entry: Block,
     pub locals: Vec<Local>,
 }
 
@@ -529,7 +533,7 @@ pub struct StateExpression {
 pub struct StateTransform {
     pub field: ValueId,
     pub value: ValueId,
-    pub expression: ExprId,
+    pub entry: Block,
     pub locals: Vec<Local>,
 }
 
@@ -614,23 +618,45 @@ impl Program {
             );
             program.bodies.push(body);
         }
-        program.state_expressions = typed_hir
-            .state_sources()
-            .map(|(field, expression)| StateExpression {
-                field,
+        let state_sources = typed_hir.state_sources().collect::<Vec<_>>();
+        for (field, expression) in state_sources {
+            let entry = lower_expression_body(
                 expression,
-                locals: plan_expression(expression, &program, semantics),
-            })
-            .collect();
-        program.state_transforms = typed_hir
-            .state_transforms()
-            .map(|transform| StateTransform {
+                typed_hir,
+                semantics,
+                SourceProvenance {
+                    profile,
+                    visible: true,
+                },
+                &mut program,
+            );
+            let locals = plan_block(&entry, &program, semantics);
+            program.state_expressions.push(StateExpression {
+                field,
+                entry,
+                locals,
+            });
+        }
+        let state_transforms = typed_hir.state_transforms().collect::<Vec<_>>();
+        for transform in state_transforms {
+            let entry = lower_expression_body(
+                transform.expression,
+                typed_hir,
+                semantics,
+                SourceProvenance {
+                    profile,
+                    visible: true,
+                },
+                &mut program,
+            );
+            let locals = plan_block(&entry, &program, semantics);
+            program.state_transforms.push(StateTransform {
                 field: transform.field,
                 value: transform.value,
-                expression: transform.expression,
-                locals: plan_expression(transform.expression, &program, semantics),
-            })
-            .collect();
+                entry,
+                locals,
+            });
+        }
         program
     }
 
@@ -795,6 +821,7 @@ fn lower_expression(
         ),
         TypedExpressionKind::Signature(value) => ExpressionKind::Signature(value.clone()),
         TypedExpressionKind::Array(elements) => ExpressionKind::Array(elements.clone()),
+        TypedExpressionKind::Block { .. } => ExpressionKind::ValueBlock,
         TypedExpressionKind::Record { record, fields } => {
             let Some(ExpressionResolution::RecordLiteral {
                 record: resolved_record,
@@ -1174,6 +1201,27 @@ fn lower_body(
         cancellation_region,
         async_state_count: next_async_state,
     }
+}
+
+fn lower_expression_body(
+    expression: ExprId,
+    typed_hir: &TypedProgram,
+    semantics: &SemanticModel,
+    source: SourceProvenance,
+    wasm_ir: &mut Program,
+) -> Block {
+    let normalized = normalize_expression_suspensions(expression, typed_hir, semantics, wasm_ir);
+    wrap_async_expression_steps(
+        normalized.steps,
+        Block {
+            statements: Vec::new(),
+            terminator: Terminator::Return(Some(normalized.value)),
+        },
+        typed_hir,
+        semantics,
+        source,
+        wasm_ir,
+    )
 }
 
 fn plan_frame_values(entry: &mut Block, locals: &[Local], program: &Program) -> Vec<ValueId> {
@@ -1569,7 +1617,17 @@ fn lower_block(
     source: SourceProvenance,
     wasm_ir: &mut Program,
 ) -> Block {
-    lower_statements(&block.statements, typed_hir, semantics, source, wasm_ir)
+    // The expression normalizer is also responsible for statement-bearing
+    // value blocks. Running it for direct bodies keeps synchronous and
+    // suspending value blocks on one lowering path.
+    lower_async_statements(
+        &block.statements,
+        Block::default(),
+        typed_hir,
+        semantics,
+        source,
+        wasm_ir,
+    )
 }
 
 fn lower_async_block(
@@ -1621,6 +1679,11 @@ enum AsyncExpressionStep {
         arms: Vec<NormalizedMatchArm>,
         destination: Option<TemporaryId>,
     },
+    ValueBlock {
+        statements: hir::TypedBlock,
+        tail: Box<NormalizedExpression>,
+        destination: TemporaryId,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -1655,6 +1718,10 @@ impl AsyncExpressionStep {
                 })
                 .any(Self::suspends),
             Self::Fallback { fallback, .. } => fallback.steps.iter().any(Self::suspends),
+            // A value block is statement-aware lowering work even when it has
+            // no suspension. Treat it conservatively when deciding whether a
+            // parent expression must capture its other operands.
+            Self::ValueBlock { .. } => true,
         }
     }
 }
@@ -1686,6 +1753,47 @@ fn normalize_expression_suspensions_with(
     expression: ExprId,
     context: &mut AsyncNormalizationContext<'_>,
 ) -> NormalizedExpression {
+    if let Some(TypedExpression {
+        kind: TypedExpressionKind::Block { statements, value },
+        ..
+    }) = context.typed_hir.expression(expression)
+    {
+        let original = context
+            .wasm_ir
+            .expression(expression)
+            .expect("normalized expression belongs to Wasm IR")
+            .clone();
+        let tail = if let Some(value) = value {
+            normalize_expression_suspensions_with(*value, context)
+        } else {
+            let value = context.wasm_ir.push_generated_expression(
+                original.ty,
+                ExpressionKind::None,
+                None,
+                original.source,
+            );
+            NormalizedExpression {
+                value,
+                steps: Vec::new(),
+            }
+        };
+        let storage_ty = original
+            .conversion
+            .map_or(original.ty, |conversion| conversion.source);
+        let (destination, value) =
+            context
+                .wasm_ir
+                .temporary_read(storage_ty, original.ty, original.conversion);
+        return NormalizedExpression {
+            value,
+            steps: vec![AsyncExpressionStep::ValueBlock {
+                statements: statements.clone(),
+                tail: Box::new(tail),
+                destination,
+            }],
+        };
+    }
+
     let original = context
         .wasm_ir
         .expression(expression)
@@ -2125,6 +2233,7 @@ fn map_expression_children(
         | ExpressionKind::Temporary(_)
         | ExpressionKind::FallbackSuccess { .. }
         | ExpressionKind::Path { .. } => kind,
+        ExpressionKind::ValueBlock => kind,
         ExpressionKind::InterpolatedString(parts) => ExpressionKind::InterpolatedString(
             parts
                 .into_iter()
@@ -2252,6 +2361,10 @@ fn lower_normalized_match_arms(
     arms: &[NormalizedMatchArm],
     destination: Option<TemporaryId>,
     continuation: &Block,
+    typed_hir: &TypedProgram,
+    semantics: &SemanticModel,
+    source: SourceProvenance,
+    wasm_ir: &mut Program,
 ) -> Vec<MatchStatementArm> {
     arms.iter()
         .enumerate()
@@ -2270,7 +2383,14 @@ fn lower_normalized_match_arms(
                     },
                 ),
             );
-            let value_block = wrap_async_expression_steps(arm.value.steps.clone(), value_tail);
+            let value_block = wrap_async_expression_steps(
+                arm.value.steps.clone(),
+                value_tail,
+                typed_hir,
+                semantics,
+                source,
+                wasm_ir,
+            );
             let (guard, block) = match &arm.guard {
                 Some(guard) if !guard.steps.is_empty() => {
                     let remaining = Block {
@@ -2283,6 +2403,10 @@ fn lower_normalized_match_arms(
                                 &arms[index + 1..],
                                 destination,
                                 continuation,
+                                typed_hir,
+                                semantics,
+                                source,
+                                wasm_ir,
                             ),
                         }],
                         terminator: Terminator::Fallthrough,
@@ -2297,7 +2421,14 @@ fn lower_normalized_match_arms(
                     };
                     (
                         None,
-                        wrap_async_expression_steps(guard.steps.clone(), guarded),
+                        wrap_async_expression_steps(
+                            guard.steps.clone(),
+                            guarded,
+                            typed_hir,
+                            semantics,
+                            source,
+                            wasm_ir,
+                        ),
                     )
                 }
                 Some(guard) => (Some(guard.value), value_block),
@@ -2313,7 +2444,14 @@ fn lower_normalized_match_arms(
         .collect()
 }
 
-fn wrap_async_expression_steps(steps: Vec<AsyncExpressionStep>, mut continuation: Block) -> Block {
+fn wrap_async_expression_steps(
+    steps: Vec<AsyncExpressionStep>,
+    mut continuation: Block,
+    typed_hir: &TypedProgram,
+    semantics: &SemanticModel,
+    source: SourceProvenance,
+    wasm_ir: &mut Program,
+) -> Block {
     for step in steps.into_iter().rev() {
         match step {
             AsyncExpressionStep::Store { target, value } => continuation
@@ -2366,10 +2504,18 @@ fn wrap_async_expression_steps(steps: Vec<AsyncExpressionStep>, mut continuation
                 let then_block = wrap_async_expression_steps(
                     then_expression.steps,
                     branch_tail(then_expression.value, continuation.clone()),
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
                 );
                 let else_block = wrap_async_expression_steps(
                     else_expression.steps,
                     branch_tail(else_expression.value, continuation),
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
                 );
                 continuation = Block {
                     statements: vec![Statement::If {
@@ -2396,6 +2542,10 @@ fn wrap_async_expression_steps(steps: Vec<AsyncExpressionStep>, mut continuation
                             &arms,
                             destination,
                             &continuation,
+                            typed_hir,
+                            semantics,
+                            source,
+                            wasm_ir,
                         ),
                     }],
                     terminator: Terminator::Fallthrough,
@@ -2416,7 +2566,14 @@ fn wrap_async_expression_steps(steps: Vec<AsyncExpressionStep>, mut continuation
                         value: fallback.value,
                     },
                 );
-                let fallback_block = wrap_async_expression_steps(fallback.steps, fallback_tail);
+                let fallback_block = wrap_async_expression_steps(
+                    fallback.steps,
+                    fallback_tail,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
                 let mut success_block = continuation;
                 success_block.statements.insert(
                     0,
@@ -2434,6 +2591,35 @@ fn wrap_async_expression_steps(steps: Vec<AsyncExpressionStep>, mut continuation
                     }],
                     terminator: Terminator::Fallthrough,
                 };
+            }
+            AsyncExpressionStep::ValueBlock {
+                statements,
+                tail,
+                destination,
+            } => {
+                continuation.statements.insert(
+                    0,
+                    Statement::StoreTemporary {
+                        target: destination,
+                        value: tail.value,
+                    },
+                );
+                continuation = wrap_async_expression_steps(
+                    tail.steps,
+                    continuation,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
+                continuation = lower_async_statements(
+                    &statements.statements,
+                    continuation,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
             }
         }
     }
@@ -2466,7 +2652,14 @@ fn lower_async_statements(
                         value: normalized.value,
                     },
                 );
-                result = wrap_async_expression_steps(normalized.steps, result);
+                result = wrap_async_expression_steps(
+                    normalized.steps,
+                    result,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
             }
             TypedStatementKind::Assign {
                 assignment,
@@ -2486,7 +2679,14 @@ fn lower_async_statements(
                         value: normalized.value,
                     },
                 );
-                result = wrap_async_expression_steps(normalized.steps, result);
+                result = wrap_async_expression_steps(
+                    normalized.steps,
+                    result,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
             }
             TypedStatementKind::StateAssign {
                 assignment,
@@ -2506,7 +2706,14 @@ fn lower_async_statements(
                         value: normalized.value,
                     },
                 );
-                result = wrap_async_expression_steps(normalized.steps, result);
+                result = wrap_async_expression_steps(
+                    normalized.steps,
+                    result,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
             }
             TypedStatementKind::IndexAssign {
                 assignment,
@@ -2558,7 +2765,14 @@ fn lower_async_statements(
                         value: normalized_value.value,
                     },
                 );
-                result = wrap_async_expression_steps(normalized_value.steps, result);
+                result = wrap_async_expression_steps(
+                    normalized_value.steps,
+                    result,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
                 result.statements.insert(
                     0,
                     Statement::StoreTemporary {
@@ -2566,7 +2780,14 @@ fn lower_async_statements(
                         value: normalized_index.value,
                     },
                 );
-                result = wrap_async_expression_steps(normalized_index.steps, result);
+                result = wrap_async_expression_steps(
+                    normalized_index.steps,
+                    result,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
                 result.statements.insert(
                     0,
                     Statement::StoreTemporary {
@@ -2574,7 +2795,14 @@ fn lower_async_statements(
                         value: normalized_receiver.value,
                     },
                 );
-                result = wrap_async_expression_steps(normalized_receiver.steps, result);
+                result = wrap_async_expression_steps(
+                    normalized_receiver.steps,
+                    result,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
             }
             TypedStatementKind::If {
                 condition,
@@ -2616,7 +2844,14 @@ fn lower_async_statements(
                     }],
                     terminator: Terminator::Fallthrough,
                 };
-                result = wrap_async_expression_steps(normalized.steps, result);
+                result = wrap_async_expression_steps(
+                    normalized.steps,
+                    result,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
             }
             TypedStatementKind::If {
                 condition,
@@ -2635,7 +2870,14 @@ fn lower_async_statements(
                         }),
                     },
                 );
-                result = wrap_async_expression_steps(normalized.steps, result);
+                result = wrap_async_expression_steps(
+                    normalized.steps,
+                    result,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
             }
             TypedStatementKind::While { condition, body } => {
                 if typed_expression_contains_suspension(*condition, typed_hir)
@@ -2665,6 +2907,10 @@ fn lower_async_statements(
                                 exit_state: AsyncStateId::ENTRY,
                             },
                         },
+                        typed_hir,
+                        semantics,
+                        source,
+                        wasm_ir,
                     );
                     result = Block {
                         statements: Vec::new(),
@@ -2731,7 +2977,14 @@ fn lower_async_statements(
                             exit_state: AsyncStateId::ENTRY,
                         },
                     };
-                    result = wrap_async_expression_steps(normalized.steps, result);
+                    result = wrap_async_expression_steps(
+                        normalized.steps,
+                        result,
+                        typed_hir,
+                        semantics,
+                        source,
+                        wasm_ir,
+                    );
                     if source.emits_debug_locations() {
                         result
                             .statements
@@ -2752,7 +3005,14 @@ fn lower_async_statements(
                         body: lower_block(body, typed_hir, semantics, source, wasm_ir),
                     },
                 );
-                result = wrap_async_expression_steps(normalized.steps, result);
+                result = wrap_async_expression_steps(
+                    normalized.steps,
+                    result,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
             }
             TypedStatementKind::Break => {
                 result = Block {
@@ -2777,7 +3037,14 @@ fn lower_async_statements(
                     ),
                 };
                 if let Some(normalized) = normalized {
-                    result = wrap_async_expression_steps(normalized.steps, result);
+                    result = wrap_async_expression_steps(
+                        normalized.steps,
+                        result,
+                        typed_hir,
+                        semantics,
+                        source,
+                        wasm_ir,
+                    );
                 }
             }
             TypedStatementKind::Throw { error, target } => {
@@ -2790,7 +3057,14 @@ fn lower_async_statements(
                         target: *target,
                     },
                 };
-                result = wrap_async_expression_steps(normalized.steps, result);
+                result = wrap_async_expression_steps(
+                    normalized.steps,
+                    result,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
             }
             TypedStatementKind::Suspend {
                 mode,
@@ -2830,7 +3104,14 @@ fn lower_async_statements(
                         discard_result: true,
                     },
                 );
-                result = wrap_async_expression_steps(normalized.steps, result);
+                result = wrap_async_expression_steps(
+                    normalized.steps,
+                    result,
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
             }
         }
         if source.emits_debug_locations() {
@@ -3057,205 +3338,6 @@ fn set_async_while_targets(
     }
 }
 
-fn lower_statements(
-    statements: &[hir::TypedStatement],
-    typed_hir: &TypedProgram,
-    semantics: &SemanticModel,
-    source: SourceProvenance,
-    wasm_ir: &mut Program,
-) -> Block {
-    let mut block = Block::default();
-    for (index, statement) in statements.iter().enumerate() {
-        if statement.debug_only && source.profile == crate::BuildProfile::Release {
-            continue;
-        }
-        if source.emits_debug_locations() {
-            block
-                .statements
-                .push(Statement::DebugLocation(statement.span));
-        }
-        match &statement.kind {
-            TypedStatementKind::Variable { value, initializer } => {
-                block.statements.push(Statement::Store {
-                    target: *value,
-                    declaration: true,
-                    operation: None,
-                    value: *initializer,
-                });
-            }
-            TypedStatementKind::Assign {
-                assignment,
-                op,
-                value,
-            } => {
-                block.statements.push(Statement::Store {
-                    target: assignment.target,
-                    declaration: false,
-                    operation: lower_assignment_operation(assignment, *op, typed_hir, semantics),
-                    value: *value,
-                });
-            }
-            TypedStatementKind::StateAssign {
-                assignment,
-                op,
-                value,
-                ..
-            } => {
-                block.statements.push(Statement::StateStore {
-                    target: assignment.target,
-                    operation: lower_assignment_operation(assignment, *op, typed_hir, semantics),
-                    value: *value,
-                });
-            }
-            TypedStatementKind::IndexAssign {
-                assignment,
-                target,
-                value,
-                ..
-            } => {
-                let TypedExpressionKind::Index { receiver, index } = &typed_hir
-                    .expression(*target)
-                    .expect("indexed assignment target belongs to typed HIR")
-                    .kind
-                else {
-                    unreachable!("checked indexed assignments retain an index target")
-                };
-                let receiver_type = wasm_ir.effective_expression_type(*receiver);
-                let index_type = wasm_ir.effective_expression_type(*index);
-                let target_type = wasm_ir.effective_expression_type(*target);
-                let target_source = wasm_ir.expression(*target).and_then(|target| target.source);
-                let (receiver_temporary, receiver_read) = wasm_ir.temporary(receiver_type);
-                let (index_temporary, index_read) = wasm_ir.temporary(index_type);
-                let lowered_target = wasm_ir.push_generated_expression(
-                    target_type,
-                    ExpressionKind::Index {
-                        receiver: receiver_read,
-                        index: index_read,
-                    },
-                    None,
-                    target_source,
-                );
-                block.statements.extend([
-                    Statement::StoreTemporary {
-                        target: receiver_temporary,
-                        value: *receiver,
-                    },
-                    Statement::StoreTemporary {
-                        target: index_temporary,
-                        value: *index,
-                    },
-                    Statement::IndexStore {
-                        target: lowered_target,
-                        operation: lower_index_assignment_operation(
-                            assignment,
-                            lowered_target,
-                            typed_hir,
-                            semantics,
-                        ),
-                        value: *value,
-                    },
-                ]);
-            }
-            TypedStatementKind::If {
-                condition,
-                then_block,
-                else_block,
-            } => block.statements.push(Statement::If {
-                condition: *condition,
-                then_block: lower_block(then_block, typed_hir, semantics, source, wasm_ir),
-                else_block: else_block.as_ref().map_or_else(Block::default, |block| {
-                    lower_block(block, typed_hir, semantics, source, wasm_ir)
-                }),
-            }),
-            TypedStatementKind::While { condition, body } => {
-                block.statements.push(Statement::While {
-                    condition: *condition,
-                    body: lower_block(body, typed_hir, semantics, source, wasm_ir),
-                });
-            }
-            TypedStatementKind::For {
-                binding,
-                iterable_value,
-                index_value,
-                version_value,
-                iterable,
-                body,
-            } => {
-                block.statements.push(Statement::For {
-                    binding: *binding,
-                    iterable_value: *iterable_value,
-                    index_value: *index_value,
-                    version_value: *version_value,
-                    iterable: *iterable,
-                    body: lower_block(body, typed_hir, semantics, source, wasm_ir),
-                });
-            }
-            TypedStatementKind::Break => {
-                block.terminator = Terminator::Break;
-                return block;
-            }
-            TypedStatementKind::Continue => {
-                block.terminator = Terminator::Continue;
-                return block;
-            }
-            TypedStatementKind::Return(value) => {
-                block.terminator = Terminator::Return(*value);
-                return block;
-            }
-            TypedStatementKind::Throw { error, target } => {
-                block.terminator = Terminator::Throw {
-                    error: *error,
-                    target: *target,
-                };
-                return block;
-            }
-            TypedStatementKind::Suspend {
-                mode,
-                binding,
-                returns,
-                value,
-            } => {
-                block.terminator = Terminator::Suspend {
-                    mode: *mode,
-                    destination: if *returns {
-                        SuspensionDestination::BodyResult
-                    } else {
-                        binding.map_or(
-                            SuspensionDestination::Discard,
-                            SuspensionDestination::SourceValue,
-                        )
-                    },
-                    value: *value,
-                    source: source.emits_debug_locations().then_some(statement.span),
-                    poll_state: AsyncStateId::ENTRY,
-                    resume_state: AsyncStateId::ENTRY,
-                    cancellation: suspension_cancellation(*mode, *value, typed_hir),
-                    live_values: Vec::new(),
-                    continuation: Box::new(if *returns {
-                        Block::default()
-                    } else {
-                        lower_statements(
-                            &statements[index + 1..],
-                            typed_hir,
-                            semantics,
-                            source,
-                            wasm_ir,
-                        )
-                    }),
-                };
-                return block;
-            }
-            TypedStatementKind::Expression(expression) => {
-                block.statements.push(Statement::Evaluate {
-                    expression: *expression,
-                    discard_result: true,
-                });
-            }
-        }
-    }
-    block
-}
-
 fn suspension_cancellation(
     mode: SuspensionMode,
     expression: ExprId,
@@ -3278,12 +3360,6 @@ fn suspension_cancellation(
 fn plan_block(block: &Block, program: &Program, semantics: &SemanticModel) -> Vec<Local> {
     let mut planner = LocalPlanner::new(semantics);
     Visitor::visit_block(&mut planner, block, program);
-    planner.locals
-}
-
-fn plan_expression(expression: ExprId, program: &Program, semantics: &SemanticModel) -> Vec<Local> {
-    let mut planner = LocalPlanner::new(semantics);
-    planner.visit_expression_id(expression, program);
     planner.locals
 }
 

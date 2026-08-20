@@ -86,7 +86,7 @@ impl PrimitiveType {
 
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Never => "never",
+            Self::Never => "Never",
             Self::None => "None",
             Self::Bool => "bool",
             Self::Char => "char",

@@ -153,7 +153,7 @@ Audit result: mostly a false aggregate blocker with two narrower host gaps.
   values with version literals, and return the matching `StateLayout` variant.
   The exact Windows process candidate must be `AoE2DE_s.exe` under the current
   host contract.
-- Current compiler result: `Process.closed()` now completes as `async never`,
+- Current compiler result: `Process.closed()` now completes as `async Never`,
   so `module.fileVersion() else await process.closed()` has type
   `FileVersion` and provides a clean unsupported-build path without a fake
   version value. A braced fallback block remains separate syntax work; bare

@@ -3710,18 +3710,18 @@ language catalog document the refinement rule.
   source; ordinary comparison/shift operators; multiline trailing commas; and
   parse/format/parse idempotence coverage alongside the maintained examples.
 
-# 2026-08-19: first-class `never` type
+# 2026-08-19: first-class `Never` type
 
-- Added the source-level `never` bottom type and directional bottom coercion,
+- Added the source-level `Never` bottom type and directional bottom coercion,
   allowing divergent branches to join with ordinary values in fallback,
   conditional, and match expressions without manufacturing a unit value.
-- Declared `Process.closed()` as `async never`, replaced the intrinsic-specific
+- Declared `Process.closed()` as `async Never`, replaced the intrinsic-specific
   return-path exception with semantic terminal-flow analysis, and exposed the
   completion type consistently through generated documentation, hover, and
   inlay hints.
 - Erased standalone bottom values from Wasm parameters, results, locals,
   globals, and async frames while retaining legal uninhabited payload storage
-  for constructed forms such as `never?`; added synchronous and async
+  for constructed forms such as `Never?`; added synchronous and async
   validation coverage for named-layout attachment and bottom/value joins.
 
 # 2026-08-19: file-version match patterns
@@ -3733,3 +3733,18 @@ language catalog document the refinement rule.
   a wildcard arm, and replaced the Borderlands port's chained-comparison
   workaround with direct typed version dispatch in the language and porting
   documentation.
+
+# 2026-08-19: scoped value blocks
+
+- Made brace-delimited blocks first-class expressions in conditional branches,
+  match arms, fallbacks, arguments, and state initializers, with lexical locals
+  and the final expression supplying the value.
+- Preserved explicit `return` for function, method, and lifecycle bodies, with
+  a focused diagnostic and machine-applicable insertion for Rust-style omitted
+  returns.
+- Accepted a trailing tail semicolon without changing semantics, while warning
+  about it, offering removal, and making the formatter emit the canonical
+  semicolon-free value form.
+- Unified synchronous and suspending block lowering so `await`, `retry`, and
+  divergent control flow retain their enclosing function, loop, or state-field
+  boundary inside nested expressions.

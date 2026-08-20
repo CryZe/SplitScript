@@ -120,6 +120,7 @@ fn diagnostics_expose_stable_stage_codes_and_severity() {
     assert_eq!(DiagnosticCode::UnusedBinding.as_str(), "SS1002");
     assert_eq!(DiagnosticCode::UnusedDeclaration.as_str(), "SS1003");
     assert_eq!(DiagnosticCode::UnusedMember.as_str(), "SS1004");
+    assert_eq!(DiagnosticCode::ValueBlockSemicolon.as_str(), "SS1005");
 }
 
 #[test]
@@ -439,6 +440,10 @@ fn snapshot_expression_kind(
         ),
         TypedExpressionKind::Signature(value) => format!("signature {value:?}"),
         TypedExpressionKind::Array(values) => format!("array {values:?}"),
+        TypedExpressionKind::Block { statements, value } => format!(
+            "block statements={} value={value:?}",
+            statements.statements.len()
+        ),
         TypedExpressionKind::Record { record, fields } => {
             format!("record {record} fields={fields:?}")
         }

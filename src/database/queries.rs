@@ -144,12 +144,17 @@ impl CompilerDatabase {
     pub fn parse(&mut self) -> QueryResult<ParsedProgram> {
         if self.cache.parsed.is_none() {
             let parsed = match self.recovering_parse() {
-                Ok(recovered) if recovered.diagnostics().is_empty() => {
+                Ok(recovered)
+                    if !recovered.diagnostics().iter().any(|diagnostic| {
+                        diagnostic.severity == crate::DiagnosticSeverity::Error
+                    }) =>
+                {
                     Ok(Arc::new(ParsedProgram {
                         context: recovered.context(),
                         source_name: recovered.source_name().to_owned(),
                         document: recovered.source_document().clone(),
                         syntax: recovered.syntax().clone(),
+                        syntax_diagnostics: recovered.diagnostics().to_vec(),
                         resolution_diagnostics: recovered.resolution_diagnostics().to_vec(),
                     }))
                 }

@@ -1045,7 +1045,7 @@ fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
         .expect("Process.closed should be catalog-backed");
     assert_eq!(
         library.render_signature(process_closed.id),
-        "Process.closed() -> async never"
+        "Process.closed() -> async Never"
     );
     assert_eq!(
         library.render_operation_semantics(process_closed.id),

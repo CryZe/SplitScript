@@ -872,6 +872,11 @@ pub struct Action {
 pub struct Block {
     pub statements: Vec<Stmt>,
     pub span: Span,
+    /// The explicit terminator on the final statement, when present.
+    ///
+    /// Value blocks retain this so the compiler can explain that a trailing
+    /// semicolon is accepted but does not change the block's value.
+    pub trailing_semicolon: Option<Span>,
 }
 
 #[derive(Debug, Clone)]
@@ -1007,6 +1012,8 @@ pub enum ExprKind {
     InterpolatedString(Vec<InterpolatedPart>),
     Signature(String),
     Array(Vec<Expr>),
+    /// A lexically scoped sequence whose final expression supplies its value.
+    Block(Block),
     Record {
         name: String,
         name_span: Span,

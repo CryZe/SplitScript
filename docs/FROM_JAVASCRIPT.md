@@ -27,6 +27,32 @@ Interpolation is `{expression}`, not `${expression}`. A literal dollar sign
 before an interpolation stays literal, so `${score}` produces a dollar sign
 followed by the formatted score.
 
+## Blocks can produce values
+
+When braces occur where an expression is expected, the block's final
+expression becomes its value. This provides a readable alternative to an
+immediately invoked function when a branch or argument needs local steps:
+
+```splitscript
+# state "game.exe" {}
+fn levelLabel(isBoss: bool) -> String {
+    let label = if isBoss {
+        let kind = "Boss"
+        `{kind} level`
+    } else {
+        "Level"
+    }
+    return label
+}
+# setup { print(levelLabel(true)) }
+```
+
+The final expression does not use [`return`], because it returns from the
+nested value block rather than from the function. Function, method, and
+lifecycle bodies still require explicit [`return`]. A value block with no final
+expression yields [`None`]. A trailing semicolon on the final value is accepted
+but warned about and removed by the formatter.
+
 ## Numbers describe memory
 
 Numbers are not all one floating-point type. SplitScript has signed and

@@ -7,6 +7,7 @@ use super::{
     InterpolatedPart, MatchArm, MatchPattern, Parser, PatternBinding, Span, TokenKind, TypeRef,
     UnaryOp, assignment_operator, parse_integer,
 };
+use crate::diagnostic::DiagnosticCode;
 
 impl Parser<'_> {
     pub(super) fn expression(&mut self, min_precedence: u8) -> Result<Expr, Diagnostic> {
@@ -254,6 +255,10 @@ impl Parser<'_> {
                 },
                 start.join(end),
             ));
+        }
+        if self.at(&TokenKind::LBrace) {
+            let block = self.block()?;
+            return Ok(self.value_block(block));
         }
         if self.eat(&TokenKind::Bang).is_some() {
             let start = self.previous().span;
@@ -1123,7 +1128,7 @@ impl Parser<'_> {
 
     pub(super) fn if_expression(&mut self, start: Span) -> Result<Expr, Diagnostic> {
         let condition = self.required_expression(0)?;
-        let then_expr = self.braced_expression("expected `{` after the `if` condition")?;
+        let then_expr = self.value_block_expression("expected `{` after the `if` condition")?;
         let else_expr = if self.eat_ident("else").is_none() {
             let error = Diagnostic::new(
                 "an `if` expression needs an `else` branch",
@@ -1139,7 +1144,7 @@ impl Parser<'_> {
             let nested_start = self.previous().span;
             self.if_expression(nested_start)?
         } else {
-            self.braced_expression("expected `{` after `else`")?
+            self.value_block_expression("expected `{` after `else`")?
         };
         let span = start.join(else_expr.span);
         Ok(self.new_expr(
@@ -1152,8 +1157,11 @@ impl Parser<'_> {
         ))
     }
 
-    pub(super) fn braced_expression(&mut self, message: &'static str) -> Result<Expr, Diagnostic> {
-        let Some(start) = self.eat(&TokenKind::LBrace) else {
+    pub(super) fn value_block_expression(
+        &mut self,
+        message: &'static str,
+    ) -> Result<Expr, Diagnostic> {
+        if !self.at(&TokenKind::LBrace) {
             let error = self.error(message);
             let span = Span {
                 start: error.span.start,
@@ -1161,45 +1169,42 @@ impl Parser<'_> {
             };
             self.record_missing(error);
             return Ok(self.new_expr(ExprKind::Error, span));
-        };
-        let target_depth = self.delimiter_depth_before(self.cursor.position());
-        let expression_start = self.cursor.position();
-        let parsed = self.expression(0);
-        let mut expression = match parsed {
-            Ok(expression) => expression,
-            Err(error) => {
-                let error_span = error.span;
-                self.record_recovery_diagnostic(error);
-                let skipped_start = self.cursor.tokens()[expression_start].span.start;
-                self.synchronize_delimited_expression(&TokenKind::RBrace, target_depth);
-                let skipped_end = self.current().span.start.max(skipped_start);
-                self.record_error_region(skipped_start, skipped_end);
-                let span = if skipped_end == skipped_start {
-                    Span {
-                        start: error_span.start,
-                        end: error_span.start,
-                    }
-                } else {
-                    Span {
-                        start: skipped_start,
-                        end: skipped_end,
-                    }
-                };
-                self.new_expr(ExprKind::Error, span)
-            }
-        };
-        let end = if let Some(end) = self.eat(&TokenKind::RBrace) {
-            end
+        }
+        let block = self.block()?;
+        let span = block.span;
+        if block.trailing_semicolon.is_none()
+            && let [crate::ast::Stmt::Expression(expression)] = block.statements.as_slice()
+        {
+            let mut expression = expression.clone();
+            expression.span = span;
+            Ok(expression)
         } else {
-            let error = self.error("expected `}` after the branch expression");
-            self.record_missing(error);
-            let skipped_start = self.current().span.start;
-            self.synchronize_delimited_expression(&TokenKind::RBrace, target_depth);
-            self.record_error_region(skipped_start, self.current().span.start);
-            self.eat(&TokenKind::RBrace).unwrap_or(expression.span)
-        };
-        expression.span = start.join(end);
-        Ok(expression)
+            Ok(self.value_block(block))
+        }
+    }
+
+    fn value_block(&mut self, block: crate::ast::Block) -> Expr {
+        if let Some(semicolon) = block.trailing_semicolon
+            && matches!(
+                block.statements.last(),
+                Some(crate::ast::Stmt::Expression(_))
+            )
+        {
+            self.diagnostics.push(
+                Diagnostic::warning(
+                    DiagnosticCode::ValueBlockSemicolon,
+                    "a trailing semicolon does not discard a value block's final expression",
+                    semicolon,
+                )
+                .with_primary_label("this expression still supplies the block's value")
+                .with_note(
+                    "value blocks use their final expression even when it has a semicolon; ordinary function bodies still require `return`",
+                )
+                .with_machine_applicable_fix("remove the trailing semicolon", semicolon, ""),
+            );
+        }
+        let span = block.span;
+        self.new_expr(ExprKind::Block(block), span)
     }
 
     pub(super) fn binary_operator(&self) -> Option<(u8, BinaryOp)> {

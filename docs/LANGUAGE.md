@@ -716,6 +716,43 @@ to the right. Consequently, `optional else result else fallback` means
 annotation, argument type, return type, or other expected-type context to
 determine its contained `T`.
 
+## Value blocks
+
+A brace-delimited block in an expression position may perform scoped work and
+then yield its final expression. This is useful in [`if`] branches, [`match`]
+arms, fallback [`else`] expressions, arguments, and state-field initializers:
+
+```text
+let label = if isBoss {
+    let kind = "Boss"
+    `{kind} level`
+} else {
+    "Level"
+}
+
+print({
+    let level = 7
+    `Level {level}`
+})
+```
+
+The final expression has no special keyword. Its value becomes the value of
+the entire block, and local bindings disappear when the block ends. A block
+without a final expression yields [`None`]. A block which always transfers
+control through [`return`], [`break`], [`continue`], [`throw`], or another
+[`Never`] expression instead has type [`Never`] and can satisfy any surrounding
+result type.
+
+A trailing semicolon after the final expression is accepted, but it does not
+discard the value. The compiler warns and offers to remove it, and the
+formatter removes it automatically. This keeps a stray semicolon from silently
+changing a block's type.
+
+Function, method, lifecycle, and loop bodies are statement blocks rather than
+value blocks. They do not implicitly return their final expression. Write
+[`return`] explicitly from a function or action; the compiler diagnoses a
+Rust-style omitted `return` and offers the insertion when it is unambiguous.
+
 ## Casts
 
 Conversions use the Rust- and TypeScript-style `as` operator:
@@ -762,7 +799,9 @@ as documentation.
 Function parameter and return annotations are optional. Their constraints are
 solved together with every function body and call site, including forward
 calls. A function with no value-returning `return` is inferred as returning
-nothing. Explicit annotations can still be added at API boundaries.
+[`None`]. Explicit annotations can still be added at API boundaries. Function
+bodies always use explicit [`return`]; only a nested [value block](#value-blocks)
+yields its final expression.
 
 ```text
 fn isFinalLevel(level) {
@@ -776,8 +815,8 @@ fn stage(level) {
 
 Functions are independent of a particular action snapshot. Values from
 `current` or `old` are passed explicitly, keeping helpers reusable and making
-their dependencies visible. Suspending functions will be added with the async
-standard-library layer; currently `await` remains specific to `onAttach`.
+their dependencies visible. Suspending functions return [`async`] values and
+may use [`await`] where their process-lifetime effect permits it.
 
 ## Records
 

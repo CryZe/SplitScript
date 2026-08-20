@@ -825,6 +825,170 @@ fn if_expressions_require_an_else_and_matching_branch_types() {
 }
 
 #[test]
+fn nested_value_blocks_typecheck_lower_and_preserve_statement_control_flow() {
+    let source = r#"
+        state "game.exe" {
+            computed: u32 = {
+                let base = 4
+                base + 1
+            };
+        }
+
+        fn choose(flag: bool) -> u32 {
+            let value = if flag {
+                let left = 10
+                left + 1
+            } else {
+                let right = 20
+                right + 2
+            }
+            return value
+        }
+
+        fn recover(value: u32!) -> u32 {
+            return value else {
+                let fallback = 7
+                fallback
+            }
+        }
+
+        fn describe(flag: bool) -> String {
+            return match flag {
+                true => {
+                    let label = "enabled"
+                    label
+                },
+                false => {
+                    let label = "disabled"
+                    label
+                },
+            }
+        }
+
+        fn early(flag: bool) -> u32 {
+            let value = if flag {
+                return 1
+            } else {
+                2
+            }
+            return value
+        }
+
+        fn optional(flag: bool) -> u32? {
+            return if flag {
+                3
+            } else {
+                let unavailable = None
+            }
+        }
+
+        fn later() -> async u32 {
+            let value = {
+                await nextTick()
+                choose(true)
+            }
+            return value
+        }
+
+        setup {
+            print(choose(false))
+            print({
+                let status = describe(true)
+                status
+            })
+        }
+    "#;
+    let wasm = splitscript::compile(source)
+        .expect("value blocks should compile in every expression context");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("value blocks should produce valid WebAssembly GC");
+
+    let out_of_scope = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            setup {
+                let value = { let hidden = 1; hidden }
+                print(hidden)
+            }
+        "#,
+    )
+    .expect_err("value-block bindings must remain scoped to the block");
+    assert!(
+        out_of_scope
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unknown variable `hidden`")),
+        "{out_of_scope:#?}"
+    );
+}
+
+#[test]
+fn value_blocks_explain_missing_values_function_returns_and_tail_semicolons() {
+    let missing_value = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn value() -> u32 {
+                return {
+                    let temporary = 1
+                }
+            }
+        "#,
+    )
+    .expect_err("a value-bearing block needs a tail expression");
+    assert!(
+        missing_value.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("needs a final `u32` expression")),
+        "{missing_value:#?}"
+    );
+
+    let implicit_return = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn value() -> u32 {
+                42
+            }
+        "#,
+    )
+    .expect_err("function bodies require an explicit return");
+    let diagnostic = implicit_return
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("do not implicitly return"))
+        .expect("the diagnostic should distinguish function bodies from value blocks");
+    assert_eq!(diagnostic.fixes.len(), 1, "{diagnostic:#?}");
+    assert_eq!(diagnostic.fixes[0].edits[0].replacement, "return ");
+
+    let checked = splitscript::check(splitscript::lower(
+        splitscript::parse(
+            r#"
+                state "game.exe" {}
+                setup {
+                    let value: u32 = {
+                        let base = 1
+                        base + 1;
+                    }
+                    print(value)
+                }
+            "#,
+        )
+        .expect("a tail semicolon remains accepted syntax"),
+    ))
+    .expect("the tail semicolon is a warning, not an error");
+    let warning = checked
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::ValueBlockSemicolon)
+        .expect("the accepted tail semicolon should be explained");
+    assert_eq!(warning.fixes.len(), 1, "{warning:#?}");
+    assert_eq!(warning.fixes[0].edits[0].replacement, "");
+    let formatted = splitscript::format_source(
+        r#"state "game.exe" {} setup { let value: u32 = { 1; }; print(value) }"#,
+    )
+    .expect("formatting accepts warning-bearing source");
+    assert!(formatted.contains("{\n        1\n    }"), "{formatted}");
+}
+
+#[test]
 fn while_loops_typecheck_lower_and_validate() {
     let source = include_str!("../while_loop.split");
     let checked = splitscript::check(splitscript::parse(source).unwrap())

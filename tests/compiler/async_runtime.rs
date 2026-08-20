@@ -21,7 +21,7 @@ fn never_completions_join_with_values_and_erase_from_wasm_storage() {
             layout GOG { level: u32 at 0x200; },
         }
 
-        fn ignoreUnsupportedBuild(flag: bool) -> async never {
+        fn ignoreUnsupportedBuild(flag: bool) -> async Never {
             let result = if flag {
                 await process.closed()
             } else {
@@ -59,7 +59,7 @@ fn ordinary_values_do_not_flow_into_never() {
         r#"
             state "game.exe" {}
 
-            fn returnsNormally() -> never {
+            fn returnsNormally() -> Never {
                 return 1
             }
         "#,
@@ -69,7 +69,28 @@ fn ordinary_values_do_not_flow_into_never() {
     assert!(
         diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.message.contains("expected `never`")),
+            .any(|diagnostic| diagnostic.message.contains("expected `Never`")),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn lowercase_never_is_not_a_type_alias() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn oldSpelling() -> never {
+                await process.closed()
+            }
+        "#,
+    )
+    .expect_err("the bottom type has exactly one source spelling");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("unknown type `never`")),
         "{diagnostics:#?}"
     );
 }
@@ -80,7 +101,7 @@ fn never_can_appear_as_an_uninhabited_aggregate_payload() {
         r#"
             state "game.exe" {}
 
-            fn absentBottom() -> never? {
+            fn absentBottom() -> Never? {
                 return None
             }
 

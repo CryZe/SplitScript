@@ -63,11 +63,24 @@ impl Reachability {
                 );
             }
         }
-        pending.extend(
-            wasm_ir
-                .state_expressions()
-                .map(|expression| (None, expression.expression)),
-        );
+        for expression in wasm_ir.state_expressions() {
+            collect_block_expression_roots(&expression.entry, wasm_ir, None, &mut pending);
+            collect_assignment_function_roots(
+                &expression.entry,
+                wasm_ir,
+                None,
+                &mut pending_functions,
+            );
+        }
+        for transform in wasm_ir.state_transforms() {
+            collect_block_expression_roots(&transform.entry, wasm_ir, None, &mut pending);
+            collect_assignment_function_roots(
+                &transform.entry,
+                wasm_ir,
+                None,
+                &mut pending_functions,
+            );
+        }
         pending.extend(
             wasm_ir
                 .global_initializers()

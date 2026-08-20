@@ -27,7 +27,7 @@ impl Checker {
         }
     }
 
-    fn statement(&mut self, statement: &Stmt) {
+    pub(super) fn statement(&mut self, statement: &Stmt) {
         match statement {
             Stmt::Debug {
                 statement: inner,

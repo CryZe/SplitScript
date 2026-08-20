@@ -216,6 +216,10 @@ pub enum TypedExpressionKind {
     InterpolatedString(Vec<TypedInterpolatedPart>),
     Signature(String),
     Array(Vec<ExprId>),
+    Block {
+        statements: TypedBlock,
+        value: Option<ExprId>,
+    },
     Record {
         record: ResolvedRecordId,
         fields: Vec<(String, ExprId)>,
@@ -979,6 +983,17 @@ pub fn walk_typed_expression<V: TypedVisitor>(
                 visit_expression(*element);
             }
         }
+        TypedExpressionKind::Block { statements, value } => {
+            visitor.visit_block(statements, program);
+            if let Some(value) = value {
+                visitor.visit_expression(
+                    program
+                        .expression(*value)
+                        .expect("value-block tail belongs to typed HIR"),
+                    program,
+                );
+            }
+        }
         TypedExpressionKind::Record { fields, .. } => {
             for (_, value) in fields {
                 visit_expression(*value);
@@ -1145,6 +1160,29 @@ fn lower_expression_kind(
         ExprKind::Signature(value) => TypedExpressionKind::Signature(value.clone()),
         ExprKind::Array(elements) => {
             TypedExpressionKind::Array(elements.iter().map(|element| element.id).collect())
+        }
+        ExprKind::Block(block) => {
+            let value = block
+                .statements
+                .last()
+                .and_then(|statement| match statement {
+                    Stmt::Expression(expression) => Some(expression.id),
+                    _ => None,
+                });
+            let prefix_len = block.statements.len() - usize::from(value.is_some());
+            let statements = Block {
+                statements: block.statements[..prefix_len].to_vec(),
+                span: block.span,
+                trailing_semicolon: None,
+            };
+            TypedExpressionKind::Block {
+                statements: lower_block(
+                    &statements,
+                    semantics,
+                    semantics.value_block_failure_target(expression.id),
+                ),
+                value,
+            }
         }
         ExprKind::Record { fields, .. } => TypedExpressionKind::Record {
             record: semantics

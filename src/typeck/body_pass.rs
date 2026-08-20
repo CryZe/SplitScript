@@ -216,13 +216,7 @@ fn check_state_expressions(checker: &mut Checker, program: &Program) {
                         boundary
                     } else if let Type::Result(result) = actual {
                         let value = checker.inference.result_value(result);
-                        unify_state_field_value(
-                            checker,
-                            value,
-                            field_type,
-                            field,
-                            expression.span,
-                        );
+                        unify_state_field_value(checker, value, field_type, field, expression.span);
                         actual
                     } else {
                         unify_state_field_value(
@@ -417,14 +411,41 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
                         && !block_is_terminal(checker, &function.body)
                     {
                         let result = checker.type_name(signature.completion);
-                        let mut diagnostic = Diagnostic::type_error(
-                            format!(
-                                "function `{}` must return `{}` on every path",
-                                function.name, result
-                            ),
-                            function.body.span,
-                        )
-                        .with_primary_label("this body can reach its end without returning");
+                        let tail = function.body.statements.last().and_then(|statement| {
+                            match statement {
+                                Stmt::Expression(expression) => Some(expression),
+                                _ => None,
+                            }
+                        });
+                        let mut diagnostic = if let Some(tail) = tail {
+                            Diagnostic::type_error(
+                                "functions do not implicitly return their final expression",
+                                tail.span,
+                            )
+                            .with_primary_label(format!(
+                                "this `{result}` value is currently discarded"
+                            ))
+                            .with_note(
+                                "add `return` in a function body; only nested value blocks use their final expression as a value",
+                            )
+                            .with_machine_applicable_fix(
+                                "return the final expression",
+                                Span {
+                                    start: tail.span.start,
+                                    end: tail.span.start,
+                                },
+                                "return ",
+                            )
+                        } else {
+                            Diagnostic::type_error(
+                                format!(
+                                    "function `{}` must return `{}` on every path",
+                                    function.name, result
+                                ),
+                                function.body.span,
+                            )
+                            .with_primary_label("this body can reach its end without returning")
+                        };
                         if let Some(source) = checker.return_type_source.clone() {
                             diagnostic = diagnostic.with_secondary_label(source.span, source.label);
                         }
@@ -588,14 +609,14 @@ fn missing_layout_selector_diagnostic(state: &StateDecl) -> Diagnostic {
         .with_fix(fix)
 }
 
-fn block_is_terminal(checker: &mut Checker, block: &crate::ast::Block) -> bool {
+pub(super) fn block_is_terminal(checker: &mut Checker, block: &crate::ast::Block) -> bool {
     block
         .statements
         .iter()
         .any(|statement| statement_is_terminal(checker, statement))
 }
 
-fn statement_is_terminal(checker: &mut Checker, statement: &crate::ast::Stmt) -> bool {
+pub(super) fn statement_is_terminal(checker: &mut Checker, statement: &crate::ast::Stmt) -> bool {
     match statement {
         crate::ast::Stmt::Return { .. } | crate::ast::Stmt::Throw { .. } => true,
         // A debug statement is removed from release builds, so control flow

@@ -616,6 +616,50 @@ fn publishes_unused_binding_warnings_without_rejecting_the_document() {
 }
 
 #[test]
+fn value_block_tail_warning_survives_analysis_and_offers_its_parser_fix() {
+    let source = "state \"game.exe\" {} setup { let value: u32 = { 1; }; print(value) }";
+    let uri = "file:///value-block-warning.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    let diagnostics = server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    let published = diagnostics[0]["params"]["diagnostics"].as_array().unwrap();
+    assert_eq!(published.len(), 1, "{published:#?}");
+    assert_eq!(published[0]["code"], "SS1005");
+    assert_eq!(published[0]["severity"], 2);
+
+    let actions = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 24,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": position(source, source.len())
+            },
+            "context": {
+                "diagnostics": published,
+                "only": ["quickfix"]
+            }
+        }
+    }));
+    let quick_fixes = actions[0]["result"].as_array().unwrap();
+    assert_eq!(quick_fixes.len(), 1, "{quick_fixes:#?}");
+    assert_eq!(quick_fixes[0]["title"], "remove the trailing semicolon");
+    assert_eq!(quick_fixes[0]["isPreferred"], true);
+    assert_eq!(quick_fixes[0]["edit"]["changes"][uri][0]["newText"], "");
+}
+
+#[test]
 fn positions_use_utf16_code_units_and_close_clears_diagnostics() {
     assert_eq!(
         position("🦊x", "🦊".len()),

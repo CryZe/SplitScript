@@ -98,6 +98,7 @@ pub struct WarningPolicy {
     unused_binding: WarningLevel,
     unused_declaration: WarningLevel,
     unused_member: WarningLevel,
+    value_block_semicolon: WarningLevel,
 }
 
 impl WarningPolicy {
@@ -107,6 +108,7 @@ impl WarningPolicy {
             DiagnosticCode::UnusedBinding => Some(self.unused_binding),
             DiagnosticCode::UnusedDeclaration => Some(self.unused_declaration),
             DiagnosticCode::UnusedMember => Some(self.unused_member),
+            DiagnosticCode::ValueBlockSemicolon => Some(self.value_block_semicolon),
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type
@@ -121,6 +123,7 @@ impl WarningPolicy {
             DiagnosticCode::UnusedBinding => &mut self.unused_binding,
             DiagnosticCode::UnusedDeclaration => &mut self.unused_declaration,
             DiagnosticCode::UnusedMember => &mut self.unused_member,
+            DiagnosticCode::ValueBlockSemicolon => &mut self.value_block_semicolon,
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type
@@ -236,6 +239,7 @@ pub struct ParsedProgram {
     source_name: String,
     document: syntax::SourceDocument,
     syntax: ast::Program,
+    syntax_diagnostics: Vec<Diagnostic>,
     resolution_diagnostics: Vec<Diagnostic>,
 }
 
@@ -521,7 +525,11 @@ pub fn parse_named_with_context(
     source: &str,
 ) -> Result<ParsedProgram, Vec<Diagnostic>> {
     let recovered = parse_recovering_named_with_context(context.clone(), source_name, source)?;
-    if !recovered.diagnostics.is_empty() {
+    if recovered
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    {
         return Err(recovered.diagnostics);
     }
     Ok(ParsedProgram {
@@ -529,6 +537,7 @@ pub fn parse_named_with_context(
         source_name: recovered.source_name,
         document: recovered.document,
         syntax: recovered.syntax,
+        syntax_diagnostics: recovered.diagnostics,
         resolution_diagnostics: recovered.resolution_diagnostics,
     })
 }
@@ -594,6 +603,7 @@ pub fn lower(parsed: ParsedProgram) -> LoweredProgram {
 /// an internal augmentation failure terminate the language server.
 pub(crate) fn lower_for_tooling(parsed: ParsedProgram) -> Result<LoweredProgram, Vec<Diagnostic>> {
     let syntax = parsed.syntax;
+    let syntax_diagnostics = parsed.syntax_diagnostics;
     let mut compilation_syntax = syntax.clone();
     let mut resolution_diagnostics = parsed.resolution_diagnostics;
     if let Some(augmented) = stdlib::augment_program_with_library_bodies(
@@ -617,7 +627,7 @@ pub(crate) fn lower_for_tooling(parsed: ParsedProgram) -> Result<LoweredProgram,
         compilation_syntax,
         hir,
         resolutions,
-        syntax_diagnostics: Vec::new(),
+        syntax_diagnostics,
         resolution_diagnostics,
     })
 }
@@ -635,16 +645,27 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         syntax_diagnostics,
         resolution_diagnostics,
     } = lowered.into();
-    if !syntax_diagnostics.is_empty() || !resolution_diagnostics.is_empty() {
+    if syntax_diagnostics
+        .iter()
+        .chain(&resolution_diagnostics)
+        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    {
         let mut diagnostics = syntax_diagnostics;
         diagnostics.extend(resolution_diagnostics);
         return Err(diagnostics);
     }
-    let mut output = typeck::check_with_library(
+    let mut output = match typeck::check_with_library(
         &compilation_syntax,
         &resolutions,
         context.standard_library(),
-    )?;
+    ) {
+        Ok(output) => output,
+        Err(mut diagnostics) => {
+            diagnostics.extend(syntax_diagnostics);
+            diagnostics.sort_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
+            return Err(diagnostics);
+        }
+    };
     let typed_hir = hir::TypedProgram::build(
         hir,
         &compilation_syntax,
@@ -668,9 +689,12 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         .iter()
         .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
     {
-        return Err(validation.diagnostics);
+        let mut diagnostics = syntax_diagnostics;
+        diagnostics.extend(validation.diagnostics);
+        return Err(diagnostics);
     }
-    let diagnostics = validation.diagnostics;
+    let mut diagnostics = syntax_diagnostics;
+    diagnostics.extend(validation.diagnostics);
     Ok(CheckedProgram {
         context,
         source_name,
@@ -710,7 +734,9 @@ pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
         &resolutions,
         context.standard_library(),
     );
-    let validation = (syntax_diagnostics.is_empty()
+    let validation = (!syntax_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
         && resolution_diagnostics.is_empty()
         && recovered.diagnostics.is_empty())
     .then(|| {

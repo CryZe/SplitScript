@@ -36,6 +36,32 @@ Backtick strings interpolate with `{expression}` without C#'s leading `$`.
 Use arrays as [`[T]`], fixed memory arrays as [`[T; N]`], records for named product
 types, and enums with exhaustive [`match`].
 
+## Value-producing blocks
+
+A block used in an expression can declare local values and then yield its final
+expression. This avoids a temporary helper or immediately invoked delegate when
+an [`if`] branch, [`match`] arm, fallback, or argument needs multiple steps:
+
+```splitscript
+# state "game.exe" {}
+fn levelLabel(isBoss: bool) -> String {
+    let label = if isBoss {
+        let kind = "Boss"
+        `{kind} level`
+    } else {
+        "Level"
+    }
+    return label
+}
+# setup { print(levelLabel(true)) }
+```
+
+The final expression yields from the nested block; it does not return from the
+function. Function, method, and lifecycle bodies continue to use explicit
+[`return`]. A block without a final expression yields [`None`]. A trailing
+semicolon on the final value is accepted for familiarity, but the compiler
+warns because it does not discard that value, and the formatter removes it.
+
 ## Optional and fallible values
 
 [`T?`] is an optional value and [`T!`] is a value or an error. [`None`] is both the

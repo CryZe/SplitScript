@@ -124,14 +124,6 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Close feedback loops without papering over language design
 
-- [ ] Decide separately whether fallback syntax should accept a braced value or
-  divergent block, such as `value else { log(error); await process.closed() }`.
-  SplitScript currently accepts only an expression after fallback `else`, and
-  reports the generic `expected an expression` at `{`. A never type fixes the
-  useful single-expression spelling but does not by itself introduce block
-  expressions. Either support a scoped block with a well-defined final value
-  and divergence rule, or emit a focused diagnostic that shows the supported
-  spelling.
 - [ ] Review the `Duration` constructor surface with integer and floating-point
   inputs before adding migration-only guidance. Decide whether
   `fromMilliseconds` and the other unit constructors should accept a numeric

@@ -244,7 +244,7 @@ onAttach {
                 end: source.len(),
             },
         );
-        assert!(hints.iter().any(|hint| hint.label == ": async never"));
+        assert!(hints.iter().any(|hint| hint.label == ": async Never"));
     }
 
     #[test]

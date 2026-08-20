@@ -27,7 +27,7 @@ pub(super) fn compile_read(
                 parameter_count: 1,
                 semantics: lowering.semantics,
                 instance: None,
-                include_values: false,
+                include_values: true,
             },
         );
         let mut function = Function::new(
@@ -35,7 +35,7 @@ pub(super) fn compile_read(
                 .into_iter()
                 .map(|ty| (1, lowering.gc.val_type(ty))),
         );
-        let locals = HashMap::new();
+        let locals = planned_locals;
         let context = ExprContext {
             standard_library: lowering.standard_library,
             abi: lowering.abi,
@@ -73,7 +73,7 @@ pub(super) fn compile_read(
             bare_return: BareReturn::None,
             materialize_none: true,
         };
-        compile_expr(&mut function, planned.expression, &context);
+        compile_block(&mut function, &planned.entry, &context, None);
         function.instruction(&Instruction::End);
         return function;
     };
@@ -330,7 +330,7 @@ pub(super) fn compile_state_transform(
         bare_return: BareReturn::None,
         materialize_none: true,
     };
-    compile_expr(&mut function, planned.expression, &context);
+    compile_block(&mut function, &planned.entry, &context, None);
     function.instruction(&Instruction::End);
     function
 }
@@ -796,7 +796,7 @@ use super::{
     context::EmissionContext,
     data_plan::StringPool,
     emit_default, emit_memory_value, emit_result_error, emit_result_success,
-    expression::{BareReturn, ExprContext, LocalStorage, MatchLayout, compile_block, compile_expr},
+    expression::{BareReturn, ExprContext, LocalStorage, MatchLayout, compile_block},
     imports::Abi,
     memarg, memory_plan, semantic_type, value_type,
 };

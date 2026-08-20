@@ -44,10 +44,10 @@ pub fn walk_program(visitor: &mut (impl Visitor + ?Sized), program: &Program) {
         visitor.visit_expression_id(expression, program);
     }
     for state in program.state_expressions() {
-        visitor.visit_expression_id(state.expression, program);
+        visitor.visit_block(&state.entry, program);
     }
     for transform in program.state_transforms() {
-        visitor.visit_expression_id(transform.expression, program);
+        visitor.visit_block(&transform.entry, program);
     }
 }
 
@@ -177,6 +177,7 @@ pub fn walk_expression(
 pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(ExprId)) {
     match kind {
         ExpressionKind::None
+        | ExpressionKind::ValueBlock
         | ExpressionKind::Bool(_)
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)

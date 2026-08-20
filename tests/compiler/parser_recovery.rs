@@ -214,12 +214,11 @@ fn recovering_parse_keeps_later_statements_in_the_same_block() {
 }
 
 #[test]
-fn recovering_parse_makes_progress_at_a_stray_standalone_block() {
+fn standalone_value_blocks_parse_without_recovery() {
     use splitscript::compiler::ast::{ExprKind, Stmt};
 
-    // Legacy ASL permits an extra nested block here. SplitScript does not,
-    // but recovery must consume it instead of repeatedly producing the same
-    // zero-width error expression and growing memory without bound.
+    // A block in statement position is an ordinary expression statement. Its
+    // internal return still targets the enclosing action.
     let source = r#"
         state "game.exe" {}
         split {
@@ -232,12 +231,11 @@ fn recovering_parse_makes_progress_at_a_stray_standalone_block() {
     "#;
     let recovered = splitscript::parse_recovering(source).unwrap();
 
-    assert_eq!(recovered.diagnostics().len(), 1);
-    assert_eq!(recovered.diagnostics()[0].message, "expected an expression");
+    assert!(recovered.diagnostics().is_empty());
     assert_eq!(recovered.syntax().actions.len(), 2);
     assert!(matches!(
         recovered.syntax().actions[0].body.statements.as_slice(),
-        [Stmt::Expression(expression)] if matches!(expression.kind, ExprKind::Error)
+        [Stmt::Expression(expression)] if matches!(expression.kind, ExprKind::Block(_))
     ));
     assert_eq!(recovered.syntax().actions[1].kind.name(), "reset");
     assert_eq!(recovered.source_document().reconstruct(), source);
@@ -987,21 +985,25 @@ fn recovering_parse_preserves_malformed_if_expressions() {
     "#;
     let recovered = splitscript::parse_recovering(source).unwrap();
 
-    assert_eq!(recovered.diagnostics().len(), 5);
+    assert_eq!(recovered.diagnostics().len(), 4);
     let statements = &recovered.syntax().actions[0].body.statements;
     assert_eq!(statements.len(), 6);
 
     assert!(matches!(
         conditional(&statements[0]).0.kind,
+        ExprKind::Fallback { .. }
+    ));
+    assert!(matches!(
+        conditional(&statements[0]).1.kind,
         ExprKind::Error
     ));
     assert!(matches!(
         conditional(&statements[1]).1.kind,
-        ExprKind::Error
+        ExprKind::Block(_)
     ));
     assert!(matches!(
         conditional(&statements[2]).2.kind,
-        ExprKind::Error
+        ExprKind::Block(_)
     ));
     assert!(matches!(
         conditional(&statements[3]).2.kind,
@@ -1009,7 +1011,7 @@ fn recovering_parse_preserves_malformed_if_expressions() {
     ));
     assert!(matches!(
         conditional(&statements[4]).1.kind,
-        ExprKind::Int { value: 6, .. }
+        ExprKind::Block(_)
     ));
 
     assert_eq!(
@@ -1018,7 +1020,7 @@ fn recovering_parse_preserves_malformed_if_expressions() {
             .iter()
             .filter(|node| node.kind == RecoveryNodeKind::Missing)
             .count(),
-        5
+        4
     );
     assert!(
         recovered
@@ -1038,7 +1040,7 @@ fn recovering_parse_preserves_malformed_if_expressions() {
     assert_eq!(recovered.source_document().reconstruct(), source);
 
     let strict_errors = splitscript::parse(source).expect_err("batch parsing remains strict");
-    assert_eq!(strict_errors.len(), 5);
+    assert_eq!(strict_errors.len(), 4);
 }
 
 #[test]
@@ -1072,7 +1074,7 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
 
     assert_eq!(
         recovered.diagnostics().len(),
-        10,
+        11,
         "{:#?}",
         recovered.diagnostics()
     );
@@ -1129,9 +1131,7 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
     ));
     assert!(matches!(
         statements[7],
-        Stmt::Variable(ref variable)
-            if matches!(variable.value.kind, ExprKind::Match { ref value, .. }
-                if matches!(value.kind, ExprKind::Error))
+        Stmt::Variable(ref variable) if matches!(variable.value.kind, ExprKind::Error)
     ));
     assert!(matches!(statements[8], Stmt::Return { .. }));
     assert_eq!(recovered.syntax().actions.len(), 1);
@@ -1142,7 +1142,7 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
             .iter()
             .filter(|node| node.kind == RecoveryNodeKind::Missing)
             .count(),
-        10
+        11
     );
     assert_eq!(
         recovered
@@ -1150,12 +1150,12 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
             .iter()
             .filter(|node| node.kind == RecoveryNodeKind::Error)
             .count(),
-        8
+        10
     );
     assert_eq!(recovered.source_document().reconstruct(), source);
 
     let strict_errors = splitscript::parse(source).expect_err("batch parsing remains strict");
-    assert_eq!(strict_errors.len(), 10);
+    assert_eq!(strict_errors.len(), 11);
 }
 
 #[test]

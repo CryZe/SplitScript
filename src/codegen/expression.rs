@@ -1641,7 +1641,7 @@ pub(super) fn compile_expr(function: &mut Function, expression: ExprId, context:
         return;
     }
     compile_expr_unconverted(function, expression_ir, ty, context);
-    // A `never` expression has no physical result and cannot reach its
+    // A `Never` expression has no physical result and cannot reach its
     // continuation. Mark that fact in Wasm as well, so code emitted for a
     // structurally present but unreachable continuation remains stack-valid.
     if ty == Type::Never {
@@ -1657,6 +1657,9 @@ fn compile_expr_unconverted(
 ) {
     let expression = expression_ir.id;
     match &expression_ir.kind {
+        wasm_ir::ExpressionKind::ValueBlock => {
+            unreachable!("value blocks are lowered before expression code generation")
+        }
         wasm_ir::ExpressionKind::Suspend { destination, .. } => {
             if ty.has_runtime_value() || (ty == Type::None && context.materialize_none) {
                 compile_value_get(function, *destination, context);

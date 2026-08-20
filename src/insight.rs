@@ -1391,7 +1391,7 @@ whileAttached {
             .hover(offset)
             .unwrap()
             .expect("process.closed hover");
-        assert!(hover.markdown.contains("Process.closed() -> async never"));
+        assert!(hover.markdown.contains("Process.closed() -> async Never"));
         assert!(
             hover
                 .markdown
@@ -1901,7 +1901,7 @@ onAttach {
         let mut database = CompilerDatabase::new(source);
         let hover = database.hover(offset).unwrap().expect("future hover");
         assert!(
-            hover.markdown.contains("let pending: async never"),
+            hover.markdown.contains("let pending: async Never"),
             "{}",
             hover.markdown
         );

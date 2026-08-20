@@ -283,6 +283,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
                 visitor.visit_expr(element);
             }
         }
+        ExprKind::Block(block) => visitor.visit_block(block),
         ExprKind::Record { fields, .. } => {
             for (_, value) in fields {
                 visitor.visit_expr(value);
@@ -637,6 +638,7 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
                 folder.fold_expr(element);
             }
         }
+        ExprKind::Block(block) => folder.fold_block(block),
         ExprKind::Record { fields, .. } => {
             for (_, value) in fields {
                 folder.fold_expr(value);

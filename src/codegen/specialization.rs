@@ -102,14 +102,14 @@ fn expression_owners(wasm: &wasm_ir::Program) -> HashMap<ExprId, Option<crate::a
             owner: None,
             owners: &mut owners,
         }
-        .visit_expression_id(expression.expression, wasm);
+        .visit_block(&expression.entry, wasm);
     }
     for transform in wasm.state_transforms() {
         Collector {
             owner: None,
             owners: &mut owners,
         }
-        .visit_expression_id(transform.expression, wasm);
+        .visit_block(&transform.entry, wasm);
     }
     for (_, expression) in wasm.global_initializers() {
         Collector {

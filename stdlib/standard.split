@@ -2675,7 +2675,7 @@ struct SignatureMatch {
 /// Represent an exact delay
 ///
 /// ```splitscript
-/// let delay = Duration.fromWholeSeconds(2)
+/// let delay = Duration.fromSeconds(2)
 /// ```
 @representation(gcStruct)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
@@ -2702,90 +2702,88 @@ struct Duration {
         return Duration.fromParts(0, 0)
     }
 
-    /// Constructs a duration from whole seconds.
+    /// Constructs a duration from seconds.
     ///
-    /// The signed value is preserved exactly without a floating-point
-    /// conversion.
+    /// Every integer and floating-point type is accepted. Integer inputs use
+    /// an exact conversion without passing through floating point; fractional
+    /// inputs retain nanosecond precision.
     ///
     /// # Example
     ///
     /// Convert an integer counter to game time
     ///
     /// ```splitscript
-    /// let elapsed = Duration.fromWholeSeconds(125)
+    /// let elapsed = Duration.fromSeconds(125)
     /// ```
-    static fn fromWholeSeconds(
-        /// The signed number of elapsed whole seconds.
-        seconds: i64,
+    static fn fromSeconds<T: Integer>(
+        /// The number of elapsed seconds.
+        seconds: T,
     ) -> Duration {
-        return Duration.fromParts(seconds, 0)
+        if seconds < 0 {
+            return Duration.fromParts(seconds as i64, 0)
+        }
+        let unsigned = seconds as u64
+        if unsigned > 9_223_372_036_854_775_807 {
+            return Duration.fromParts(9_223_372_036_854_775_807, 999_999_999)
+        }
+        return Duration.fromParts(unsigned as i64, 0)
     }
 
-    /// Constructs a duration from whole milliseconds without floating-point conversion.
+    static fn fromSeconds<T: Float>(
+        /// The number of elapsed seconds.
+        seconds: T,
+    ) -> Duration {
+        let integralSeconds = seconds.floor()
+        let wholeSeconds = integralSeconds as i64
+        let nanoseconds = ((seconds - integralSeconds) * 1_000_000_000) as i32
+        return Duration.fromParts(wholeSeconds, nanoseconds)
+    }
+
+    /// Constructs a duration from milliseconds.
     ///
-    /// Negative values are preserved and the remainder is represented as
-    /// nanoseconds without losing sub-second precision.
+    /// Every integer and floating-point type is accepted. Integer inputs are
+    /// converted exactly, including negative values; floating-point inputs may
+    /// include fractional milliseconds and are converted through
+    /// [`fromSeconds`]. When porting C#, this is the direct replacement for
+    /// `TimeSpan.FromMilliseconds`.
     ///
     /// # Example
     ///
     /// Convert milliseconds to game time
     ///
     /// ```splitscript
-    /// let elapsed = Duration.fromWholeMilliseconds(1_250)
+    /// let elapsed = Duration.fromMilliseconds(1_250)
     /// ```
-    static fn fromWholeMilliseconds(
-        /// The signed number of elapsed milliseconds.
-        milliseconds: i64,
+    static fn fromMilliseconds<T: Integer>(
+        /// The number of elapsed milliseconds.
+        milliseconds: T,
     ) -> Duration {
-        let seconds = milliseconds / 1_000
-        let nanoseconds = ((milliseconds % 1_000) * 1_000_000) as i32
-        return Duration.fromParts(seconds, nanoseconds)
+        if milliseconds < 0 {
+            let signed = milliseconds as i64
+            return Duration.fromParts(
+                signed / 1_000,
+                ((signed % 1_000) * 1_000_000) as i32,
+            )
+        }
+        let unsigned = milliseconds as u64
+        return Duration.fromParts(
+            (unsigned / 1_000) as i64,
+            ((unsigned % 1_000) * 1_000_000) as i32,
+        )
     }
 
-    /// Constructs a duration from a signed number of nanoseconds.
-    ///
-    /// Negative values retain their fractional component without passing
-    /// through floating point.
-    ///
-    /// # Example
-    ///
-    /// Convert an exact nanosecond counter
-    ///
-    /// ```splitscript
-    /// let elapsed = Duration.fromNanoseconds(1_250_000_000)
-    /// ```
-    static fn fromNanoseconds(
-        /// The signed number of nanoseconds.
-        nanoseconds: i64,
-    ) -> Duration {
-        let seconds = nanoseconds / 1_000_000_000
-        let subsecondNanoseconds = (nanoseconds % 1_000_000_000) as i32
-        return Duration.fromParts(seconds, subsecondNanoseconds)
-    }
-
-    /// Constructs a duration from floating-point milliseconds.
-    ///
-    /// Both f32 and f64 inputs are accepted. Use [`fromWholeMilliseconds`] when
-    /// the source value is an integer and must not pass through floating point.
-    ///
-    /// # Example
-    ///
-    /// Convert a fractional millisecond counter to game time
-    ///
-    /// ```splitscript
-    /// let elapsed = Duration.fromMilliseconds(1_250.5)
-    /// ```
     static fn fromMilliseconds<T: Float>(
-        /// Floating-point milliseconds. Both f32 and f64 are accepted.
+        /// The number of elapsed milliseconds.
         milliseconds: T,
     ) -> Duration {
         return Duration.fromSeconds(milliseconds / 1_000)
     }
 
-    /// Constructs a duration from floating-point minutes.
+    /// Constructs a duration from minutes.
     ///
-    /// Both f32 and f64 inputs are accepted. Exact integer counters can be
-    /// converted to whole seconds before calling [`fromWholeSeconds`].
+    /// Every integer and floating-point type is accepted. Integer inputs are
+    /// scaled exactly and saturate only when the duration representation cannot
+    /// contain the result.
     ///
     /// # Example
     ///
@@ -2794,16 +2792,37 @@ struct Duration {
     /// ```splitscript
     /// let elapsed = Duration.fromMinutes(2.5)
     /// ```
+    static fn fromMinutes<T: Integer>(
+        /// The number of elapsed minutes.
+        minutes: T,
+    ) -> Duration {
+        let signed = minutes as i64
+        if minutes < 0 {
+            if signed > 153_722_867_280_912_930 {
+                return Duration.fromParts(9_223_372_036_854_775_807, 999_999_999)
+            }
+            if signed < -153_722_867_280_912_930 {
+                return Duration.fromParts(-9_223_372_036_854_775_807 - 1, 0)
+            }
+            return Duration.fromParts(signed * 60, 0)
+        }
+        let unsigned = minutes as u64
+        if unsigned > 153_722_867_280_912_930 {
+            return Duration.fromParts(9_223_372_036_854_775_807, 999_999_999)
+        }
+        return Duration.fromParts((unsigned as i64) * 60, 0)
+    }
+
     static fn fromMinutes<T: Float>(
-        /// Floating-point minutes. Both f32 and f64 are accepted.
+        /// The number of elapsed minutes.
         minutes: T,
     ) -> Duration {
         return Duration.fromSeconds(minutes * 60)
     }
 
-    /// Constructs a duration from floating-point hours.
+    /// Constructs a duration from hours.
     ///
-    /// Both f32 and f64 inputs are accepted.
+    /// Every integer and floating-point type is accepted.
     ///
     /// # Example
     ///
@@ -2812,17 +2831,39 @@ struct Duration {
     /// ```splitscript
     /// let timeout = Duration.fromHours(1.0)
     /// ```
+    static fn fromHours<T: Integer>(
+        /// The number of elapsed hours.
+        hours: T,
+    ) -> Duration {
+        let signed = hours as i64
+        if hours < 0 {
+            if signed > 2_562_047_788_015_215 {
+                return Duration.fromParts(9_223_372_036_854_775_807, 999_999_999)
+            }
+            if signed < -2_562_047_788_015_215 {
+                return Duration.fromParts(-9_223_372_036_854_775_807 - 1, 0)
+            }
+            return Duration.fromParts(signed * 3_600, 0)
+        }
+        let unsigned = hours as u64
+        if unsigned > 2_562_047_788_015_215 {
+            return Duration.fromParts(9_223_372_036_854_775_807, 999_999_999)
+        }
+        return Duration.fromParts((unsigned as i64) * 3_600, 0)
+    }
+
     static fn fromHours<T: Float>(
-        /// Floating-point hours. Both f32 and f64 are accepted.
+        /// The number of elapsed hours.
         hours: T,
     ) -> Duration {
         return Duration.fromSeconds(hours * 3_600)
     }
 
-    /// Constructs a duration from floating-point days.
+    /// Constructs a duration from days.
     ///
-    /// Both f32 and f64 inputs are accepted. A day is exactly 86,400 seconds;
-    /// calendar and time-zone rules are intentionally not involved.
+    /// Every integer and floating-point type is accepted. A day is exactly
+    /// 86,400 seconds; calendar and time-zone rules are intentionally not
+    /// involved.
     ///
     /// # Example
     ///
@@ -2831,11 +2872,70 @@ struct Duration {
     /// ```splitscript
     /// let sentinel = Duration.fromDays(2.0)
     /// ```
+    static fn fromDays<T: Integer>(
+        /// The number of elapsed 24-hour days.
+        days: T,
+    ) -> Duration {
+        let signed = days as i64
+        if days < 0 {
+            if signed > 106_751_991_167_300 {
+                return Duration.fromParts(9_223_372_036_854_775_807, 999_999_999)
+            }
+            if signed < -106_751_991_167_300 {
+                return Duration.fromParts(-9_223_372_036_854_775_807 - 1, 0)
+            }
+            return Duration.fromParts(signed * 86_400, 0)
+        }
+        let unsigned = days as u64
+        if unsigned > 106_751_991_167_300 {
+            return Duration.fromParts(9_223_372_036_854_775_807, 999_999_999)
+        }
+        return Duration.fromParts((unsigned as i64) * 86_400, 0)
+    }
+
     static fn fromDays<T: Float>(
-        /// Floating-point 24-hour days. Both f32 and f64 are accepted.
+        /// The number of elapsed 24-hour days.
         days: T,
     ) -> Duration {
         return Duration.fromSeconds(days * 86_400)
+    }
+
+    /// Constructs a duration from nanoseconds.
+    ///
+    /// Every integer and floating-point type is accepted. Integer inputs retain
+    /// their exact value; floating-point inputs may include sub-nanosecond data,
+    /// which is truncated to the duration's nanosecond resolution.
+    ///
+    /// # Example
+    ///
+    /// Convert an exact nanosecond counter
+    ///
+    /// ```splitscript
+    /// let elapsed = Duration.fromNanoseconds(1_250_000_000)
+    /// ```
+    static fn fromNanoseconds<T: Integer>(
+        /// The number of elapsed nanoseconds.
+        nanoseconds: T,
+    ) -> Duration {
+        if nanoseconds < 0 {
+            let signed = nanoseconds as i64
+            return Duration.fromParts(
+                signed / 1_000_000_000,
+                (signed % 1_000_000_000) as i32,
+            )
+        }
+        let unsigned = nanoseconds as u64
+        return Duration.fromParts(
+            (unsigned / 1_000_000_000) as i64,
+            (unsigned % 1_000_000_000) as i32,
+        )
+    }
+
+    static fn fromNanoseconds<T: Float>(
+        /// The number of elapsed nanoseconds.
+        nanoseconds: T,
+    ) -> Duration {
+        return Duration.fromSeconds(nanoseconds / 1_000_000_000)
     }
 
     /// Constructs a duration from frames.
@@ -2889,27 +2989,6 @@ struct Duration {
             seconds: normalizedSeconds,
             nanoseconds: normalizedNanoseconds,
         }
-    }
-
-    /// Constructs a duration from floating-point seconds.
-    ///
-    /// Finite values are converted to the runtime duration representation; values outside its range are safely clamped.
-    ///
-    /// # Example
-    ///
-    /// Convert seconds to game time
-    ///
-    /// ```splitscript
-    /// let elapsed = Duration.fromSeconds(12.5)
-    /// ```
-    static fn fromSeconds<T: Float>(
-        /// Floating-point seconds. Both f32 and f64 are accepted.
-        seconds: T,
-    ) -> Duration {
-        let integralSeconds = seconds.floor()
-        let wholeSeconds = integralSeconds as i64
-        let nanoseconds = ((seconds - integralSeconds) * 1_000_000_000) as i32
-        return Duration.fromParts(wholeSeconds, nanoseconds)
     }
 
     /// Returns the normalized whole-second component.

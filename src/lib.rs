@@ -216,17 +216,16 @@ fn derive_standard_library_operation_metadata(
     )?))?;
     let mut operations = std::collections::HashMap::new();
     for item in standard_library.items() {
-        if !matches!(
-            item.implementation,
-            stdlib::Implementation::LibraryBody { .. }
-        ) {
+        let mut functions = checked.hir.library_functions(item.id);
+        let Some(first) = functions.next() else {
             continue;
-        }
-        let function = checked
-            .hir
-            .library_function(item.id)
-            .expect("checked standard-library bodies have function identities");
-        let metadata = checked.effects.function(function).metadata();
+        };
+        let metadata = functions.fold(
+            checked.effects.function(first).metadata(),
+            |combined, function| {
+                combined.conservative_union(checked.effects.function(function).metadata())
+            },
+        );
         operations.insert(item.id, metadata);
     }
     Ok(operations)

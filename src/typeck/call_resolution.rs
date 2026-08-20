@@ -1125,6 +1125,9 @@ impl Checker {
                     .map(|signature| signature.result);
                 result.is_some_and(|result| matches!(self.shallow_type(result), Type::Async(_)))
             }
+            crate::stdlib::Implementation::LibraryOverloads { .. } => {
+                operation.suspension.is_awaitable()
+            }
             crate::stdlib::Implementation::Intrinsic(_) => false,
         };
         let expected_result = expected.map(|ty| self.shallow_type(ty));

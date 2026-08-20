@@ -6,32 +6,31 @@
 
 use crate::{Diagnostic, ast::Program, lexer, parser};
 
-use super::{Implementation, ItemKind, StandardLibrary, StdlibItem, TypeRef};
+use super::{Implementation, ItemKind, Signature, StandardLibrary, StdlibItem, TypeRef};
 
 pub(crate) const RESERVED_FUNCTION_PREFIX: &str = "__splitscript_stdlib_";
 
-fn body_source(item: &StdlibItem, library: &StandardLibrary) -> String {
-    let Implementation::LibraryBody {
-        function_name,
-        body,
-    } = item.implementation
-    else {
-        unreachable!("body source is only generated for source-defined library items")
-    };
+fn body_source(
+    item: &StdlibItem,
+    signature: Signature,
+    function_name: &str,
+    body: &str,
+    library: &StandardLibrary,
+) -> String {
     let mut parameters = Vec::new();
     if let ItemKind::Method { receiver } = item.kind {
         parameters.push(render_parameter("self", receiver, library));
     }
     parameters.extend(
-        item.signature
+        signature
             .parameters
             .iter()
             .map(|parameter| render_parameter(parameter.name, parameter.ty, library)),
     );
-    let result = if contains_type_parameter(item.signature.result) {
+    let result = if contains_type_parameter(signature.result) {
         String::new()
     } else {
-        format!(" -> {}", item.signature.result.render(library))
+        format!(" -> {}", signature.result.render(library))
     };
     format!(
         "fn {}({}){} {}",
@@ -68,19 +67,29 @@ pub(crate) fn augment_program_with_library_bodies(
     let mut combined = String::new();
     let mut body_ranges = Vec::new();
     for item in library.items() {
-        if !matches!(item.implementation, Implementation::LibraryBody { .. }) {
-            continue;
-        }
-        let source = body_source(item, library);
-        if combined.is_empty() {
-            combined.reserve(user_source.len() + source.len() + 2);
-            combined.push_str(user_source);
+        let bodies = match item.implementation {
+            Implementation::Intrinsic(_) => Vec::new(),
+            Implementation::LibraryBody {
+                function_name,
+                body,
+            } => vec![(item.signature, function_name, body)],
+            Implementation::LibraryOverloads { cases, .. } => cases
+                .iter()
+                .map(|case| (case.signature, case.function_name, case.body))
+                .collect(),
+        };
+        for (signature, function_name, body) in bodies {
+            let source = body_source(item, signature, function_name, body, library);
+            if combined.is_empty() {
+                combined.reserve(user_source.len() + source.len() + 2);
+                combined.push_str(user_source);
+                combined.push('\n');
+            }
+            let start = combined.len();
+            combined.push_str(&source);
+            body_ranges.push((start..combined.len(), item.qualified_name));
             combined.push('\n');
         }
-        let start = combined.len();
-        combined.push_str(&source);
-        body_ranges.push((start..combined.len(), item.qualified_name));
-        combined.push('\n');
     }
     if combined.is_empty() {
         return Ok(None);

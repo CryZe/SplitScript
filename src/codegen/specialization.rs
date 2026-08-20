@@ -36,7 +36,14 @@ pub(super) fn materialize(
     let mut pending = owners
         .iter()
         .filter(|(_, owner)| owner.is_none())
-        .filter_map(|(expression, _)| called_function(&wasm.expression(*expression)?.kind))
+        .filter_map(|(expression, _)| {
+            called_function(
+                &wasm.expression(*expression)?.kind,
+                None,
+                semantics,
+                wasm.standard_library(),
+            )
+        })
         .collect::<Vec<_>>();
     let mut visited = BTreeSet::new();
 
@@ -62,7 +69,12 @@ pub(super) fn materialize(
             materialize_expression_types(
                 expression, &instance, semantics, &mut ids, arrays, options, results, asyncs, sets,
             );
-            if let Some(called) = called_function(&expression.kind) {
+            if let Some(called) = called_function(
+                &expression.kind,
+                Some(&instance),
+                semantics,
+                wasm.standard_library(),
+            ) {
                 pending.push(semantics.specialize_function_instance(&instance, &called));
             }
         }
@@ -121,13 +133,21 @@ fn expression_owners(wasm: &wasm_ir::Program) -> HashMap<ExprId, Option<crate::a
     owners
 }
 
-fn called_function(kind: &wasm_ir::ExpressionKind) -> Option<FunctionInstance> {
+fn called_function(
+    kind: &wasm_ir::ExpressionKind,
+    owner: Option<&FunctionInstance>,
+    semantics: &SemanticModel,
+    library: &crate::stdlib::StandardLibrary,
+) -> Option<FunctionInstance> {
     let wasm_ir::ExpressionKind::Call { target, .. } = kind else {
         return None;
     };
     match target {
         wasm_ir::CallTarget::UserFunction { function }
         | wasm_ir::CallTarget::UserMethod { function, .. } => Some(function.clone()),
+        target @ wasm_ir::CallTarget::LibraryOverload { .. } => {
+            wasm_ir::resolve_library_overload(target, owner, semantics, library)
+        }
         wasm_ir::CallTarget::Intrinsic { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }
@@ -199,6 +219,17 @@ fn materialize_expression_types(
                 ..
             } => {
                 for ty in type_arguments.iter().copied().chain(*receiver_type) {
+                    materialize_type(
+                        semantics, instance, ty, ids, arrays, options, results, asyncs, sets,
+                    );
+                }
+            }
+            wasm_ir::CallTarget::LibraryOverload {
+                dispatch_type,
+                receiver_type,
+                ..
+            } => {
+                for ty in std::iter::once(*dispatch_type).chain(*receiver_type) {
                     materialize_type(
                         semantics, instance, ty, ids, arrays, options, results, asyncs, sets,
                     );

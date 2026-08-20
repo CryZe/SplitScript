@@ -308,6 +308,7 @@ impl Checker {
                             if matches!(
                                 self.standard_library.item(*item).implementation,
                                 Implementation::LibraryBody { .. }
+                                    | Implementation::LibraryOverloads { .. }
                             )
                     );
                     if !privileged_library_body

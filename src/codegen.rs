@@ -594,6 +594,7 @@ fn resolved_intrinsic(target: &wasm_ir::CallTarget) -> Option<IntrinsicId> {
         wasm_ir::CallTarget::Intrinsic { intrinsic, .. } => Some(*intrinsic),
         wasm_ir::CallTarget::UserFunction { .. }
         | wasm_ir::CallTarget::UserMethod { .. }
+        | wasm_ir::CallTarget::LibraryOverload { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }
         | wasm_ir::CallTarget::ResultSuccess { .. } => None,

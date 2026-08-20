@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-20: exact numeric Duration constructors
+
+- Unified the public unit constructors under `T: Numeric`, accepting every
+  built-in integer and floating-point type without retaining parallel
+  whole-number names.
+- Added compiler-owned, capability-directed standard-library implementation
+  cases: one public operation selects an `Integer` or `Float` source body only
+  after concrete generic specialization, without introducing general overload
+  resolution or a public sealed-capability concept.
+- Preserved negative durations and exact full-width integer milliseconds and
+  nanoseconds, added representable-range saturation for scaled units, and
+  covered direct and generic calls through executable Wasm runtime tests.
+
 ## 2026-08-19: composable state-field failure propagation
 
 - Defined one implicit `T!` boundary for every expression-backed state field,

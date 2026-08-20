@@ -1252,11 +1252,12 @@ domain default:
 represents a real third state. It is deliberately rejected in `start`, `split`,
 and `reset`; those blocks are simply boolean and default to `false`.
 `gameTime` otherwise returns a `Duration`. Source-defined constructors include
-`Duration.zero()`, exact whole-unit and nanosecond constructors,
+`Duration.zero()`, exact integer unit and nanosecond constructors,
 `Duration.fromFrames(i64, i64)`, and `Duration.fromParts(i64, i32)`.
-`Duration.fromMilliseconds`, `fromSeconds`, `fromMinutes`, `fromHours`, and
-`fromDays` accept either floating-point type. A day is always exactly 86,400
-seconds; these are elapsed durations, not calendar values. `setup`,
+`Duration.fromMilliseconds`, `fromSeconds`, `fromMinutes`, `fromHours`,
+`fromDays`, and `fromNanoseconds` accept every integer and floating-point type.
+Integer inputs stay exact without passing through floating point. A day is
+always exactly 86,400 seconds; these are elapsed durations, not calendar values. `setup`,
 `onDetach` and `onStateReady` return nothing.
 `whileAttached` runs before timer actions on every initialized attached tick.
 It may explicitly return a boolean control result: `false` skips all timer

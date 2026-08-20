@@ -133,11 +133,12 @@ fn collect_call_facts(
     }
     match call {
         ResolvedCall::StandardLibrary { item, .. } => {
-            if let Some(function) = program.library_function(*item) {
+            let functions = program.library_functions(*item).collect::<Vec<_>>();
+            if !functions.is_empty() {
                 if creates_future {
-                    facts.future_callees.push(function);
+                    facts.future_callees.extend(functions);
                 } else {
-                    facts.callees.push(function);
+                    facts.callees.extend(functions);
                 }
             } else {
                 let metadata = program.standard_library().operation_metadata(*item);
@@ -296,17 +297,17 @@ impl OperationAnalysis {
                 match call {
                     ResolvedCall::StandardLibrary { item, .. } => {
                         let item = program.standard_library().item(*item);
-                        let requires_attached_process = program
-                            .library_function(item.id)
-                            .map(|function| {
+                        let mut functions = program.library_functions(item.id).peekable();
+                        let requires_attached_process = if functions.peek().is_some() {
+                            functions.any(|function| {
                                 self.analysis.function(function).requires_attached_process
                             })
-                            .unwrap_or_else(|| {
-                                program
-                                    .standard_library()
-                                    .operation_semantics(item.id)
-                                    .requires_attached_process
-                            });
+                        } else {
+                            program
+                                .standard_library()
+                                .operation_semantics(item.id)
+                                .requires_attached_process
+                        };
                         requires_attached_process.then_some(AttachedProcessViolation {
                             action: self.action,
                             expression_span: span,
@@ -391,7 +392,7 @@ impl OperationAnalysis {
                 let (requires_state_snapshots, function, standard_library_name) = match call {
                     ResolvedCall::StandardLibrary { item, .. } => {
                         let item = program.standard_library().item(*item);
-                        let requires = program.library_function(item.id).is_some_and(|function| {
+                        let requires = program.library_functions(item.id).any(|function| {
                             self.analysis.function(function).requires_state_snapshots
                         });
                         (requires, None, Some(item.qualified_name))

@@ -788,7 +788,7 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
         message: "C# `TimeSpan.Parse` needs an explicit duration migration",
         primary_label: "review whether this text is data or a serialized timer value",
         notes: &[
-            "for a fixed literal, construct the exact value with `Duration.fromWholeSeconds`, `Duration.fromWholeMilliseconds`, or `Duration.fromParts` rather than preserving a runtime parser",
+            "for a fixed literal, construct the exact value with `Duration.fromSeconds`, `Duration.fromMilliseconds`, or `Duration.fromParts` rather than preserving a runtime parser",
             "when the input came from `timer.CurrentTime` or another duration converted to text, keep the value typed instead of serializing and reparsing it",
             "C# parsing is culture-sensitive and accepts a broad grammar; SplitScript does not provide a compatibility parser whose meaning could vary by host locale",
             "there is no automatic rewrite because the call does not reveal the input format or whether the surrounding timer API itself needs redesign",
@@ -1683,8 +1683,8 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         support: MigrationSupport::TypedPattern,
         summary: "Replace `TimeSpan.Parse` according to whether the input is fixed data or an already-typed timer value; do not preserve culture-sensitive parsing by default.",
         targets: &[
-            MigrationTarget::StandardLibraryItem("Duration.fromWholeSeconds"),
-            MigrationTarget::StandardLibraryItem("Duration.fromWholeMilliseconds"),
+            MigrationTarget::StandardLibraryItem("Duration.fromSeconds"),
+            MigrationTarget::StandardLibraryItem("Duration.fromMilliseconds"),
             MigrationTarget::StandardLibraryItem("Duration.fromParts"),
         ],
         cookbook_anchor: None,

@@ -195,12 +195,9 @@ though the language supports the exact unsigned representation.
 - Candidate: every watcher is declared as `i64` based on the false premise that
   it is the compiler's only 64-bit integer. Clean compilation therefore hides a
   semantic narrowing for values above `i64::MAX`.
-- Residual library question: `Duration.fromWholeMilliseconds` accepts `i64`,
-  while the candidate casts its timer to `f64` for `fromMilliseconds`. That cast
-  cannot exactly represent every `u64` value. A faithful port must either prove
-  the game's counter range before converting or use a future exact unsigned
-  constructor; this is evidence for the separate Duration constructor review,
-  not evidence for narrowing the memory read.
+- `Duration.fromMilliseconds` now accepts the `u64` watcher directly and uses
+  its exact integer implementation. The candidate's intermediate `f64` cast is
+  unnecessary and should be removed; this no longer blocks faithful timing.
 - Attachment is independently incorrect: the provider candidate is
   extensionless even though module-qualified fields name `Alkali.exe`. Under
   the current exact host contract, the state candidate itself must be

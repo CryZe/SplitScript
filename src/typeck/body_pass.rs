@@ -361,6 +361,13 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
                     {
                         Some(CallableContext::LibraryFunction(item.id))
                     }
+                    crate::stdlib::Implementation::LibraryOverloads { cases, .. }
+                        if cases
+                            .iter()
+                            .any(|case| case.function_name == function.name) =>
+                    {
+                        Some(CallableContext::LibraryFunction(item.id))
+                    }
                     _ => None,
                 })
                 .unwrap_or(CallableContext::Function);

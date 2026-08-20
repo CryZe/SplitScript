@@ -1113,17 +1113,15 @@ impl Parser<'_> {
     }
 
     pub(super) fn delimiter_depth_before(&self, position: usize) -> DelimiterDepth {
-        self.cursor.tokens()[..position].iter().fold(
-            DelimiterDepth {
-                parentheses: 0,
-                brackets: 0,
-                braces: 0,
-            },
-            |mut depth, token| {
-                depth.update(&token.kind);
-                depth
-            },
-        )
+        let mut depth = DelimiterDepth {
+            parentheses: 0,
+            brackets: 0,
+            braces: 0,
+        };
+        for token in &self.cursor.tokens()[..position] {
+            depth.update(&token.kind);
+        }
+        depth
     }
 
     pub(super) fn if_expression(&mut self, start: Span) -> Result<Expr, Diagnostic> {

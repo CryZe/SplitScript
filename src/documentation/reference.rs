@@ -2061,7 +2061,7 @@ mod tests {
         assert!(
             from_milliseconds
                 .markdown
-                .contains("[`fromWholeMilliseconds`](fromWholeMilliseconds.md)"),
+                .contains("[`fromSeconds`](fromSeconds.md)"),
             "standard-library prose should render navigable intra-doc references"
         );
         assert!(!page.markdown.contains("splitscript-docs:"));

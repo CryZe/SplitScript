@@ -435,7 +435,7 @@ pub struct TypedProgram {
     setting_choice_options: HashMap<SettingChoiceOptionId, EnumVariantId>,
     visible_expression_count: usize,
     visible_function_count: usize,
-    library_functions: HashMap<StdlibItemId, FunctionId>,
+    library_functions: HashMap<StdlibItemId, Vec<FunctionId>>,
 }
 
 pub(crate) fn visible_expression_count(program: &SyntaxProgram) -> usize {
@@ -559,14 +559,25 @@ impl TypedProgram {
             .items()
             .iter()
             .filter_map(|item| {
-                let Implementation::LibraryBody { function_name, .. } = item.implementation else {
-                    return None;
+                let function_names = match item.implementation {
+                    Implementation::Intrinsic(_) => return None,
+                    Implementation::LibraryBody { function_name, .. } => vec![function_name],
+                    Implementation::LibraryOverloads { cases, .. } => {
+                        cases.iter().map(|case| case.function_name).collect()
+                    }
                 };
-                let function = syntax
-                    .functions
-                    .iter()
-                    .find(|function| function.name == function_name)?;
-                Some((item.id, function.id))
+                let functions = function_names
+                    .into_iter()
+                    .map(|function_name| {
+                        syntax
+                            .functions
+                            .iter()
+                            .find(|function| function.name == function_name)
+                            .expect("injected library bodies have parsed declarations")
+                            .id
+                    })
+                    .collect();
+                Some((item.id, functions))
             })
             .collect();
 
@@ -601,7 +612,23 @@ impl TypedProgram {
     /// function template. Concrete calls instantiate this declaration through
     /// the same `FunctionInstance` path as user-authored generic functions.
     pub fn library_function(&self, item: StdlibItemId) -> Option<FunctionId> {
-        self.library_functions.get(&item).copied()
+        self.library_functions
+            .get(&item)
+            .and_then(|functions| (functions.len() == 1).then_some(functions[0]))
+    }
+
+    pub fn library_overload_function(&self, item: StdlibItemId, case: usize) -> Option<FunctionId> {
+        self.library_functions
+            .get(&item)
+            .and_then(|functions| functions.get(case))
+            .copied()
+    }
+
+    pub fn library_functions(&self, item: StdlibItemId) -> impl Iterator<Item = FunctionId> + '_ {
+        self.library_functions
+            .get(&item)
+            .into_iter()
+            .flat_map(|functions| functions.iter().copied())
     }
 
     pub fn expression(&self, id: ExprId) -> Option<&TypedExpression> {

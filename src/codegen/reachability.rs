@@ -214,12 +214,23 @@ impl Reachability {
                 let function = match target {
                     wasm_ir::CallTarget::UserFunction { function }
                     | wasm_ir::CallTarget::UserMethod { function, .. } => Some(function.clone()),
+                    wasm_ir::CallTarget::LibraryOverload { .. } => {
+                        wasm_ir::resolve_library_overload(
+                            target,
+                            owner.as_ref(),
+                            semantics,
+                            standard_library,
+                        )
+                    }
                     wasm_ir::CallTarget::Intrinsic { .. }
                     | wasm_ir::CallTarget::ResultError { .. }
                     | wasm_ir::CallTarget::OptionSome { .. }
                     | wasm_ir::CallTarget::ResultSuccess { .. } => None,
                 };
                 let function = function.map(|function| {
+                    if matches!(target, wasm_ir::CallTarget::LibraryOverload { .. }) {
+                        return function;
+                    }
                     owner.as_ref().map_or(function.clone(), |owner| {
                         semantics.specialize_function_instance(owner, &function)
                     })
@@ -399,6 +410,14 @@ impl Reachability {
                         ..
                     } => {
                         type_roots.extend(type_arguments.iter().copied().map(specialize));
+                        type_roots.extend(receiver_type.map(specialize));
+                    }
+                    wasm_ir::CallTarget::LibraryOverload {
+                        dispatch_type,
+                        receiver_type,
+                        ..
+                    } => {
+                        type_roots.push(specialize(*dispatch_type));
                         type_roots.extend(receiver_type.map(specialize));
                     }
                     wasm_ir::CallTarget::UserFunction { .. }

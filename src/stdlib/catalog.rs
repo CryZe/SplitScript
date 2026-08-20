@@ -19,8 +19,8 @@ use super::{
         StdlibStateProviderId, StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
     },
     schema::{
-        Implementation, ItemKind, Parameter, ParameterRule, Signature, StandardBinaryOperator,
-        StandardUnaryOperator, StdlibItem, TypeParameter, TypeRef,
+        Implementation, ItemKind, LibraryOverloadCase, Parameter, ParameterRule, Signature,
+        StandardBinaryOperator, StandardUnaryOperator, StdlibItem, TypeParameter, TypeRef,
     },
 };
 
@@ -181,7 +181,7 @@ mod tests {
                         item.name
                     );
                 }
-                Implementation::LibraryBody { .. } => {
+                Implementation::LibraryBody { .. } | Implementation::LibraryOverloads { .. } => {
                     let declaration = format!("fn {}", item.name);
                     let authored = source.match_indices(&declaration).any(|(position, _)| {
                         matches!(

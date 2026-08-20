@@ -27,10 +27,22 @@ pub(super) fn validate_signatures(
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for item in library.items() {
-        if !matches!(item.implementation, Implementation::LibraryBody { .. }) {
-            continue;
-        }
-        let Some(function) = hir.library_function(item.id) else {
+        let bodies = match item.implementation {
+            Implementation::Intrinsic(_) => continue,
+            Implementation::LibraryBody { .. } => hir
+                .library_function(item.id)
+                .map(|function| vec![(function, item.signature)])
+                .unwrap_or_default(),
+            Implementation::LibraryOverloads { cases, .. } => cases
+                .iter()
+                .enumerate()
+                .filter_map(|(index, case)| {
+                    hir.library_overload_function(item.id, index)
+                        .map(|function| (function, case.signature))
+                })
+                .collect(),
+        };
+        if bodies.is_empty() {
             diagnostics.push(Diagnostic::semantic(
                 format!(
                     "standard-library body `{}` has no inferred function template",
@@ -39,26 +51,28 @@ pub(super) fn validate_signatures(
                 Span::default(),
             ));
             continue;
-        };
-        let span = syntax
-            .functions
-            .iter()
-            .find(|declaration| declaration.id == function)
-            .map(|declaration| declaration.span)
-            .unwrap_or_default();
-        if let Err(reason) =
-            validate_signature(library, item.kind, item.signature, function, semantics)
-        {
-            diagnostics.push(
-                Diagnostic::semantic(
-                    format!(
-                        "standard-library body `{}` does not match its declared signature: {reason}",
-                        item.qualified_name
-                    ),
-                    span,
-                )
-                .with_primary_label("this privileged body inferred a different type scheme"),
-            );
+        }
+        for (function, signature) in bodies {
+            let span = syntax
+                .functions
+                .iter()
+                .find(|declaration| declaration.id == function)
+                .map(|declaration| declaration.span)
+                .unwrap_or_default();
+            if let Err(reason) =
+                validate_signature(library, item.kind, signature, function, semantics)
+            {
+                diagnostics.push(
+                    Diagnostic::semantic(
+                        format!(
+                            "standard-library body `{}` does not match its declared signature: {reason}",
+                            item.qualified_name
+                        ),
+                        span,
+                    )
+                    .with_primary_label("this privileged body inferred a different type scheme"),
+                );
+            }
         }
     }
     diagnostics

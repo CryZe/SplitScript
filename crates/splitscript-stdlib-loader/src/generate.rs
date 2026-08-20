@@ -369,7 +369,16 @@ impl<'a> CatalogGenerator<'a> {
         receiver: &str,
         inherited: Option<&[TypeParameter]>,
     ) {
+        let mut emitted = HashSet::new();
         for function in &owner.functions {
+            if !emitted.insert(function.name.as_str()) {
+                continue;
+            }
+            let overloads = owner
+                .functions
+                .iter()
+                .filter(|candidate| candidate.name == function.name)
+                .collect::<Vec<_>>();
             let id_prefix = if prefix.is_empty() {
                 String::new()
             } else {
@@ -399,18 +408,97 @@ impl<'a> CatalogGenerator<'a> {
             if has_attribute(&owner.attributes, "testOnly") {
                 output.push_str("#[cfg(test)] ");
             }
-            self.emit_item(
-                output,
-                function,
-                owner,
-                &id,
-                intrinsic,
-                &type_parameters,
-                owner_expression,
-                prefix,
-                &kind,
-            );
+            if overloads.len() == 1 {
+                self.emit_item(
+                    output,
+                    function,
+                    owner,
+                    &id,
+                    intrinsic,
+                    &type_parameters,
+                    owner_expression,
+                    prefix,
+                    &kind,
+                );
+            } else {
+                self.emit_capability_overload(
+                    output,
+                    function,
+                    owner,
+                    &id,
+                    &overloads,
+                    owner_expression,
+                    prefix,
+                    &kind,
+                );
+            }
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_capability_overload(
+        &self,
+        output: &mut String,
+        public: &FunctionDeclaration,
+        owner: &CallableOwnerDeclaration,
+        id: &str,
+        cases: &[&FunctionDeclaration],
+        owner_expression: &str,
+        prefix: &str,
+        kind: &str,
+    ) {
+        let mut public_parameters = public.type_parameters.clone();
+        public_parameters[0].constraints = vec!["Numeric".to_owned()];
+        let case_values = cases
+            .iter()
+            .map(|case| {
+                let mut parameters = case.type_parameters.clone();
+                for constrained in &case.where_constraints {
+                    parameters
+                        .iter_mut()
+                        .find(|parameter| parameter.name == constrained.name)
+                        .expect("validated overload constraints name a parameter")
+                        .constraints
+                        .extend(constrained.constraints.clone());
+                }
+                let capability = &parameters[0].constraints[0];
+                let function_name = format!(
+                    "__splitscript_stdlib_{id}{}",
+                    ident(capability)
+                );
+                format!(
+                    "LibraryOverloadCase {{ capability: StdlibCapabilityId::{}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, function_name: {}, body: {} }}",
+                    ident(capability),
+                    self.type_parameters(&parameters, owner),
+                    case.type_parameters.len(),
+                    case.parameters.iter().map(|parameter| self.parameter(parameter, &parameters)).collect::<Vec<_>>().join(","),
+                    self.type_ref(&case.result, &parameters),
+                    quote(&function_name),
+                    quote(case.body.as_deref().expect("validated overload cases have bodies")),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let qualified_name = if prefix.is_empty() {
+            public.name.clone()
+        } else {
+            format!("{prefix}.{}", public.name)
+        };
+        let must_use = optional_attribute_name(&public.attributes, "mustUse")
+            .map(|reason| format!("Some({})", quote(reason)))
+            .unwrap_or_else(|| "None".to_owned());
+        let example = example_expression(&public.documentation.examples[0]);
+        output.push_str(&format!(
+            "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: None, unary_operator: None, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[{example}], related: &[] }}, implementation: Implementation::LibraryOverloads {{ dispatch_parameter: 0, cases: &[{case_values}] }} }},\n",
+            quote(&public.name),
+            quote(&qualified_name),
+            self.type_parameters(&public_parameters, owner),
+            public.type_parameters.len(),
+            public.parameters.iter().map(|parameter| self.parameter(parameter, &public_parameters)).collect::<Vec<_>>().join(","),
+            self.type_ref(&public.result, &public_parameters),
+            quote(&public.documentation.summary),
+            quote(&public.documentation.details),
+        ));
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -761,47 +849,27 @@ pub fn generate_ids(library: &Library) -> Result<String, Vec<Error>> {
     for declaration in &library.declarations {
         match declaration {
             Declaration::Root(owner) => {
-                items.extend(owner.functions.iter().map(|function| ident(&function.name)));
+                items.extend(unique_function_idents(&owner.functions, ""));
             }
             Declaration::StateProvider(provider) => providers.push(ident(&provider.name)),
             Declaration::Namespace(owner) => {
                 let owner_id = path_ident(&owner.name);
                 namespaces.push(owner_id.clone());
-                items.extend(
-                    owner
-                        .functions
-                        .iter()
-                        .map(|function| format!("{owner_id}{}", ident(&function.name))),
-                );
+                items.extend(unique_function_idents(&owner.functions, &owner_id));
             }
             Declaration::Capability(owner) => {
                 let owner_id = ident(&owner.name);
                 capabilities.push(owner_id.clone());
-                items.extend(
-                    owner
-                        .functions
-                        .iter()
-                        .map(|function| format!("{owner_id}{}", ident(&function.name))),
-                );
+                items.extend(unique_function_idents(&owner.functions, &owner_id));
             }
             Declaration::TypeConstructor(owner) => {
                 let owner_id = ident(&owner.name);
                 constructors.push(owner_id.clone());
-                items.extend(
-                    owner
-                        .functions
-                        .iter()
-                        .map(|function| format!("{owner_id}{}", ident(&function.name))),
-                );
+                items.extend(unique_function_idents(&owner.functions, &owner_id));
             }
             Declaration::CoreExtension(owner) => {
                 let owner_id = ident(&owner.name);
-                items.extend(
-                    owner
-                        .functions
-                        .iter()
-                        .map(|function| format!("{owner_id}{}", ident(&function.name))),
-                );
+                items.extend(unique_function_idents(&owner.functions, &owner_id));
             }
             Declaration::Struct(declaration) | Declaration::IntrinsicType(declaration) => {
                 let owner_id = ident(&declaration.name);
@@ -812,12 +880,7 @@ pub fn generate_ids(library: &Library) -> Result<String, Vec<Error>> {
                         .iter()
                         .map(|field| format!("{owner_id}{}", ident(&field.name))),
                 );
-                items.extend(
-                    declaration
-                        .functions
-                        .iter()
-                        .map(|function| format!("{owner_id}{}", ident(&function.name))),
-                );
+                items.extend(unique_function_idents(&declaration.functions, &owner_id));
             }
             Declaration::Enum(declaration) => {
                 let owner_id = ident(&declaration.name);
@@ -869,6 +932,15 @@ pub fn generate_ids(library: &Library) -> Result<String, Vec<Error>> {
     emit_group(&mut output, "StdlibVariantId", &variants);
     emit_group(&mut output, "StdlibItemId", &items);
     Ok(output)
+}
+
+fn unique_function_idents(functions: &[FunctionDeclaration], prefix: &str) -> Vec<String> {
+    let mut names = HashSet::new();
+    functions
+        .iter()
+        .filter(|function| names.insert(function.name.as_str()))
+        .map(|function| format!("{prefix}{}", ident(&function.name)))
+        .collect()
 }
 
 fn emit_group(output: &mut String, name: &str, values: &[String]) {
@@ -1007,6 +1079,90 @@ struct Duration {
         assert!(generated.contains("__splitscript_stdlib_DurationFromFrames"));
         assert!(generated.contains("return Duration.fromParts(frames / fps, 0)"));
         assert!(!generated.contains("IntrinsicId::DurationFromFrames"));
+    }
+
+    #[test]
+    fn integer_and_float_source_cases_generate_one_numeric_operation() {
+        let source = r#"
+/// Numeric values.
+///
+/// # Example
+///
+/// Use a numeric value
+///
+/// ```splitscript
+/// let numericValue = 1
+/// ```
+@behavior(declared)
+capability Numeric<T> {}
+/// Integer values.
+///
+/// # Example
+///
+/// Use an integer
+///
+/// ```splitscript
+/// let integerValue = 2
+/// ```
+@behavior(declared)
+capability Integer<T: Numeric> {}
+/// Floating-point values.
+///
+/// # Example
+///
+/// Use a floating-point value
+///
+/// ```splitscript
+/// let floatValue = 1.5
+/// ```
+@behavior(declared)
+capability Float<T: Numeric> {}
+
+root {
+    /// Preserves a numeric value.
+    ///
+    /// Selects the implementation for the caller's concrete numeric type.
+    ///
+    /// # Example
+    ///
+    /// Preserve a value
+    ///
+    /// ```splitscript
+    /// let value = preserve(2)
+    /// ```
+    fn preserve<T: Integer>(
+        /// The value to preserve.
+        value: T,
+    ) -> T {
+        return value
+    }
+
+    fn preserve<T: Float>(
+        /// The value to preserve.
+        value: T,
+    ) -> T {
+        return value
+    }
+}
+"#;
+        let generated = generate_catalog(&parse(source).unwrap()).unwrap();
+        assert!(generated.contains("Implementation::LibraryOverloads"));
+        assert!(generated.contains(
+            "TypeParameter { name: \"T\", constraints: &[StdlibCapabilityId::Numeric] }"
+        ));
+        assert!(generated.contains("capability: StdlibCapabilityId::Integer"));
+        assert!(generated.contains("capability: StdlibCapabilityId::Float"));
+        assert!(generated.contains("__splitscript_stdlib_PreserveInteger"));
+        assert!(generated.contains("__splitscript_stdlib_PreserveFloat"));
+
+        let invalid = source.replace("fn preserve<T: Float>", "fn preserve<T: Integer>");
+        let errors = generate_catalog(&parse(&invalid).unwrap()).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("cover both `Integer` and `Float`")),
+            "{errors:#?}"
+        );
     }
 
     #[test]

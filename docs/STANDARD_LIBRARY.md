@@ -122,8 +122,11 @@ lowering.
 Bodies may perform any operation reachable through their permitted intrinsic
 leaves. All `Duration` constructors are source-defined: their arithmetic and
 physical GC-record construction live in `standard.split`, so the type has no
-intrinsic operations. This includes zero, signed integer milliseconds, frames,
-parts, and floating-point seconds. A catalog-owned body may construct its
+intrinsic operations. This includes zero, exact integer and fractional unit
+constructors, frames, and parts. Capability-directed implementation cases let
+one public `T: Numeric` constructor retain separate `Integer` and `Float`
+source bodies; selection occurs only after generic specialization and is not a
+general user-visible overload system. A catalog-owned body may construct its
 owning GC struct, including runtime-private fields, without making that
 constructor syntax available to user code or unrelated library functions.
 `address.offset` widens its argument and delegates to primitive full-width

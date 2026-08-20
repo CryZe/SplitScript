@@ -262,6 +262,20 @@ impl<'a> Validator<'a> {
         inherited: &[TypeParameter],
     ) {
         let mut names = HashSet::new();
+        let mut overload_names = HashSet::new();
+        for function in functions {
+            if !names.insert(function.name.as_str()) {
+                overload_names.insert(function.name.as_str());
+            }
+        }
+        names.clear();
+        for name in &overload_names {
+            let cases = functions
+                .iter()
+                .filter(|function| function.name == **name)
+                .collect::<Vec<_>>();
+            self.validate_capability_overload(owner, name, &cases, inherited);
+        }
         let mut operator_bindings = HashSet::new();
         for function in functions {
             let qualified = if owner == "root" {
@@ -269,10 +283,14 @@ impl<'a> Validator<'a> {
             } else {
                 format!("{owner}.{}", function.name)
             };
-            if !names.insert(function.name.as_str()) {
-                self.error(format!("`{owner}` repeats function `{}`", function.name));
+            let first_declaration = names.insert(function.name.as_str());
+            if first_declaration || !overload_names.contains(function.name.as_str()) {
+                self.validate_documentation(&qualified, &function.documentation, true, true);
+            } else if function.documentation != Documentation::default() {
+                self.error(format!(
+                    "`{qualified}` implementation cases must document the public operation only once"
+                ));
             }
-            self.validate_documentation(&qualified, &function.documentation, true, true);
             self.validate_attributes(
                 &qualified,
                 &function.attributes,
@@ -408,6 +426,106 @@ impl<'a> Validator<'a> {
                 &function.result,
                 &parameters,
             );
+        }
+    }
+
+    fn validate_capability_overload(
+        &mut self,
+        owner: &str,
+        name: &str,
+        cases: &[&FunctionDeclaration],
+        inherited: &[TypeParameter],
+    ) {
+        let qualified = if owner == "root" {
+            name.to_owned()
+        } else {
+            format!("{owner}.{name}")
+        };
+        if cases.len() != 2 {
+            self.error(format!(
+                "`{qualified}` capability-directed implementation must have exactly an `Integer` and a `Float` case"
+            ));
+            return;
+        }
+        let first = cases[0];
+        let same_shape = cases[1..].iter().all(|case| {
+            case.is_static == first.is_static
+                && case.parameters.len() == first.parameters.len()
+                && case
+                    .parameters
+                    .iter()
+                    .zip(&first.parameters)
+                    .all(|(left, right)| {
+                        left.name == right.name
+                            && left.ty == right.ty
+                            && left.attributes == right.attributes
+                    })
+                && case.result == first.result
+                && case.type_parameters.len() == first.type_parameters.len()
+                && case
+                    .type_parameters
+                    .iter()
+                    .zip(&first.type_parameters)
+                    .all(|(left, right)| left.name == right.name)
+        });
+        if !same_shape {
+            self.error(format!(
+                "`{qualified}` implementation cases must have identical value parameters, result type, and type-parameter names"
+            ));
+        }
+        if first.type_parameters.len() != 1 || !inherited.is_empty() {
+            self.error(format!(
+                "`{qualified}` capability-directed implementation currently requires exactly one callable type parameter"
+            ));
+        }
+        let mut dispatch = HashSet::new();
+        for (index, case) in cases.iter().enumerate() {
+            if case.body.is_none()
+                || case
+                    .attributes
+                    .iter()
+                    .any(|attribute| attribute.name == "intrinsic")
+            {
+                self.error(format!(
+                    "`{qualified}` implementation cases must be source-defined"
+                ));
+            }
+            let invalid_attribute = case
+                .attributes
+                .iter()
+                .any(|attribute| attribute.name != "mustUse" || index != 0);
+            if invalid_attribute {
+                self.error(format!(
+                    "`{qualified}` capability-directed implementations only allow `@mustUse` on the documented public case"
+                ));
+            }
+            let mut parameters = case.type_parameters.clone();
+            for constrained in &case.where_constraints {
+                if let Some(parameter) = parameters
+                    .iter_mut()
+                    .find(|parameter| parameter.name == constrained.name)
+                {
+                    parameter
+                        .constraints
+                        .extend(constrained.constraints.clone());
+                }
+            }
+            let constraints = parameters
+                .first()
+                .map(|parameter| parameter.constraints.as_slice())
+                .unwrap_or_default();
+            if constraints.len() != 1 || !matches!(constraints[0].as_str(), "Integer" | "Float") {
+                self.error(format!(
+                    "`{qualified}` implementation cases must dispatch directly on `Integer` and `Float`"
+                ));
+            } else {
+                dispatch.insert(constraints[0].clone());
+            }
+        }
+        if dispatch.len() != 2 {
+            self.error(format!(
+                "`{qualified}` capability-directed implementation must cover both `Integer` and `Float`"
+            ));
         }
     }
 

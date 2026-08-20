@@ -1,5 +1,9 @@
 let sample = 0
 
+fn genericSeconds(value) -> Duration {
+    return Duration.fromSeconds(value)
+}
+
 state "game.exe" {}
 
 whileAttached {
@@ -25,12 +29,15 @@ gameTime {
         2 => Duration.fromSeconds(-1.25),
         3 => Duration.fromMilliseconds(1_500.0),
         4 => Duration.fromMilliseconds(2_250.0 as f32),
-        5 => Duration.fromWholeMilliseconds(-1_501),
+        5 => Duration.fromMilliseconds(-1_501),
         6 => Duration.fromSeconds(1.75) + Duration.fromMilliseconds(500.0),
         7 => Duration.fromSeconds(1.25) - Duration.fromSeconds(2.5),
         8 => Duration.fromMinutes(1.5),
         9 => Duration.fromHours(1.25),
         10 => Duration.fromDays(1.5),
+        11 => Duration.fromMilliseconds(18_446_744_073_709_551_615u64),
+        12 => genericSeconds(7),
+        13 => genericSeconds(2.5),
         _ => Duration.fromNanoseconds(-1_250_000_100),
     }
 }

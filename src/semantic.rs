@@ -1006,6 +1006,7 @@ impl SemanticBuilder {
                     || matches!(
                         standard_library.item(*item).implementation,
                         crate::stdlib::Implementation::LibraryBody { .. }
+                            | crate::stdlib::Implementation::LibraryOverloads { .. }
                     )
             }
             // Function effects are derived only after every body has been

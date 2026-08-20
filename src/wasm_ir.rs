@@ -211,6 +211,13 @@ pub enum CallTarget {
         receiver: Option<ResolvedReceiver>,
         receiver_type: Option<TypeId>,
     },
+    LibraryOverload {
+        item: crate::stdlib::StdlibItemId,
+        dispatch_type: TypeId,
+        cases: Vec<(crate::stdlib::StdlibCapabilityId, FunctionInstance)>,
+        receiver: Option<ResolvedReceiver>,
+        receiver_type: Option<TypeId>,
+    },
     ResultError {
         result: ResultTypeId,
     },
@@ -1097,11 +1104,76 @@ fn lower_call_target(
                     CallTarget::UserFunction { function }
                 }
             }
+            Implementation::LibraryOverloads {
+                dispatch_parameter,
+                cases,
+            } => {
+                let dispatch_type = type_arguments[dispatch_parameter];
+                let cases = cases
+                    .iter()
+                    .enumerate()
+                    .map(|(index, case)| {
+                        let function = typed_hir
+                            .library_overload_function(*item, index)
+                            .expect("catalog overload cases have injected functions");
+                        (
+                            case.capability,
+                            semantics.function_instance(function, signature.clone()),
+                        )
+                    })
+                    .collect();
+                CallTarget::LibraryOverload {
+                    item: *item,
+                    dispatch_type,
+                    cases,
+                    receiver: receiver.clone(),
+                    receiver_type: *receiver_type,
+                }
+            }
         },
         ResolvedCall::ResultError { result } => CallTarget::ResultError { result: *result },
         ResolvedCall::OptionSome { option } => CallTarget::OptionSome { option: *option },
         ResolvedCall::ResultSuccess { result } => CallTarget::ResultSuccess { result: *result },
     }
+}
+
+pub(crate) fn resolve_library_overload(
+    target: &CallTarget,
+    owner: Option<&FunctionInstance>,
+    semantics: &SemanticModel,
+    library: &crate::stdlib::StandardLibrary,
+) -> Option<FunctionInstance> {
+    let CallTarget::LibraryOverload {
+        dispatch_type,
+        cases,
+        ..
+    } = target
+    else {
+        return None;
+    };
+    let dispatch_type = owner.map_or(*dispatch_type, |owner| {
+        semantics.specialize_type(owner, *dispatch_type)
+    });
+    let satisfies = |capability| match semantics.types().kind(dispatch_type) {
+        crate::types::TypeKind::Builtin(core) => {
+            library.core_type_has_capability(*core, capability)
+        }
+        crate::types::TypeKind::Standard(ty) => library.type_has_capability(*ty, capability),
+        _ => false,
+    };
+    let (_, function) = cases
+        .iter()
+        .find(|(capability, _)| satisfies(*capability))
+        .unwrap_or_else(|| {
+            panic!(
+                "checked library overload has no implementation for concrete type {:?}",
+                semantics.types().kind(dispatch_type)
+            )
+        });
+    Some(owner.map_or_else(
+        || function.clone(),
+        |owner| semantics.specialize_function_instance(owner, function),
+    ))
 }
 
 fn lower_assignment_operation(

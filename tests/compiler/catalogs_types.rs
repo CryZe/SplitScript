@@ -11,8 +11,6 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::DurationFromParts,
         StdlibItemId::DurationFromSeconds,
         StdlibItemId::DurationFromNanoseconds,
-        StdlibItemId::DurationFromWholeMilliseconds,
-        StdlibItemId::DurationFromWholeSeconds,
         StdlibItemId::DurationWholeSeconds,
         StdlibItemId::DurationSubsecondNanoseconds,
         StdlibItemId::DurationTotalSeconds,
@@ -47,7 +45,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
     ] {
         assert!(matches!(
             library.item(item).implementation,
-            Implementation::LibraryBody { .. }
+            Implementation::LibraryBody { .. } | Implementation::LibraryOverloads { .. }
         ));
     }
 
@@ -155,31 +153,23 @@ fn duration_convenience_constructors_are_source_defined() {
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromMilliseconds),
-        "Duration.fromMilliseconds<T>(milliseconds: T) -> Duration where T: Float"
+        "Duration.fromMilliseconds<T>(milliseconds: T) -> Duration where T: Numeric"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromMinutes),
-        "Duration.fromMinutes<T>(minutes: T) -> Duration where T: Float"
+        "Duration.fromMinutes<T>(minutes: T) -> Duration where T: Numeric"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromHours),
-        "Duration.fromHours<T>(hours: T) -> Duration where T: Float"
+        "Duration.fromHours<T>(hours: T) -> Duration where T: Numeric"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromDays),
-        "Duration.fromDays<T>(days: T) -> Duration where T: Float"
-    );
-    assert_eq!(
-        library.render_signature(StdlibItemId::DurationFromWholeMilliseconds),
-        "Duration.fromWholeMilliseconds(milliseconds: i64) -> Duration"
-    );
-    assert_eq!(
-        library.render_signature(StdlibItemId::DurationFromWholeSeconds),
-        "Duration.fromWholeSeconds(seconds: i64) -> Duration"
+        "Duration.fromDays<T>(days: T) -> Duration where T: Numeric"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromNanoseconds),
-        "Duration.fromNanoseconds(nanoseconds: i64) -> Duration"
+        "Duration.fromNanoseconds<T>(nanoseconds: T) -> Duration where T: Numeric"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationAdd),
@@ -196,8 +186,8 @@ fn duration_convenience_constructors_are_source_defined() {
 
     for expression in [
         "Duration.zero()",
-        "Duration.fromWholeSeconds(-12)",
-        "Duration.fromWholeMilliseconds(1_500)",
+        "Duration.fromSeconds(-12)",
+        "Duration.fromMilliseconds(1_500)",
         "Duration.fromNanoseconds(-1_250_000_100)",
         "Duration.fromMilliseconds(1_500.25)",
         "Duration.fromMilliseconds(1_500.25 as f32)",
@@ -354,7 +344,7 @@ fn binary_syntax_resolves_through_catalog_declared_methods() {
             let different = number.notEquals(41)
             let unitEqual = None.equals(None)
             let duration = Duration.fromSeconds(1.5) + Duration.fromSeconds(0.5)
-            let difference = duration - Duration.fromWholeSeconds(1)
+            let difference = duration - Duration.fromSeconds(1)
             let ordered = difference < duration && duration >= difference
             print(number)
             print(remainder)
@@ -490,7 +480,7 @@ fn compound_assignment_resolves_through_the_same_catalog_method() {
         state "game.exe" {}
         whileAttached {
             let elapsed = Duration.zero()
-            elapsed += Duration.fromWholeSeconds(1)
+            elapsed += Duration.fromSeconds(1)
             print(elapsed.wholeSeconds())
         }
     "#;
@@ -1107,7 +1097,7 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromSeconds),
-        "Duration.fromSeconds<T>(seconds: T) -> Duration where T: Float"
+        "Duration.fromSeconds<T>(seconds: T) -> Duration where T: Numeric"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::StringContains),

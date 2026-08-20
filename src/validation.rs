@@ -78,14 +78,23 @@ pub(crate) fn validate(
     // cached, user-independent result.
     if standard_library.source_body_operations_are_initialized() {
         for item in standard_library.items() {
-            if !matches!(item.implementation, Implementation::LibraryBody { .. }) {
+            if !matches!(
+                item.implementation,
+                Implementation::LibraryBody { .. } | Implementation::LibraryOverloads { .. }
+            ) {
                 continue;
             }
             let cataloged = standard_library.operation_metadata(item.id);
-            let function = hir
-                .library_function(item.id)
+            let mut functions = hir.library_functions(item.id);
+            let function = functions
+                .next()
                 .expect("validated source bodies have function identities");
-            let inferred = effects.function(function).metadata();
+            let inferred = functions.fold(
+                effects.function(function).metadata(),
+                |combined, function| {
+                    combined.conservative_union(effects.function(function).metadata())
+                },
+            );
             if inferred != cataloged {
                 let span = syntax
                     .functions
@@ -242,7 +251,7 @@ fn validate_async_recursion(
                         self.values.insert(*function);
                     }
                     ResolvedCall::StandardLibrary { item, .. } => {
-                        if let Some(function) = program.library_function(*item) {
+                        for function in program.library_functions(*item) {
                             self.values.insert(function);
                         }
                     }
@@ -388,7 +397,7 @@ fn validate_async_function_results(
     let library_functions = standard_library
         .items()
         .iter()
-        .filter_map(|item| hir.library_function(item.id))
+        .flat_map(|item| hir.library_functions(item.id))
         .collect::<HashSet<_>>();
     let mut diagnostics = Vec::new();
     for function in &syntax.functions {
@@ -491,10 +500,15 @@ fn validate_suspending_calls(
         match call {
             ResolvedCall::StandardLibrary { item, .. } => {
                 let declaration = standard_library.item(*item);
-                let suspension = hir.library_function(*item).map_or_else(
-                    || standard_library.operation_semantics(*item).suspension,
-                    |function| effects.function(function).suspension,
-                );
+                let suspension = hir
+                    .library_functions(*item)
+                    .map(|function| effects.function(function).suspension)
+                    .max_by_key(|suspension| match suspension {
+                        crate::stdlib::SuspensionKind::None => 0,
+                        crate::stdlib::SuspensionKind::Retryable => 1,
+                        crate::stdlib::SuspensionKind::Suspends => 2,
+                    })
+                    .unwrap_or_else(|| standard_library.operation_semantics(*item).suspension);
                 Some((suspension, declaration.qualified_name.to_owned()))
             }
             ResolvedCall::UserFunction { function, .. }

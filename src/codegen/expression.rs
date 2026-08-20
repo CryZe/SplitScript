@@ -1112,6 +1112,11 @@ fn resolved_receiver<'a>(
             receiver_type: Some(receiver_type),
             ..
         } => (receiver, *receiver_type),
+        wasm_ir::CallTarget::LibraryOverload {
+            receiver: Some(receiver),
+            receiver_type: Some(receiver_type),
+            ..
+        } => (receiver, *receiver_type),
         _ => unreachable!("only method calls have receivers"),
     };
     (receiver, context.ty(receiver_type))
@@ -2288,6 +2293,22 @@ fn compile_expr_unconverted(
                     compile_user_argument(function, *argument, context);
                 }
                 let target = context.called_instance(target);
+                function.instruction(&Instruction::Call(context.functions[&target].call));
+            }
+            wasm_ir::CallTarget::LibraryOverload { receiver, .. } => {
+                if receiver.is_some() {
+                    compile_receiver(function, target, context);
+                }
+                for argument in args {
+                    compile_user_argument(function, *argument, context);
+                }
+                let target = wasm_ir::resolve_library_overload(
+                    target,
+                    context.function_instance,
+                    context.semantics,
+                    context.wasm_ir.standard_library(),
+                )
+                .expect("library overload calls resolve a hidden function");
                 function.instruction(&Instruction::Call(context.functions[&target].call));
             }
             wasm_ir::CallTarget::Intrinsic { .. } => {

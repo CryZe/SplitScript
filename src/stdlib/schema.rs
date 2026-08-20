@@ -25,6 +25,22 @@ pub enum Implementation {
         /// demand-driven specialization.
         body: &'static str,
     },
+    /// Alternative source bodies selected from the concrete capabilities of
+    /// one type argument during backend specialization. The callable remains
+    /// one public operation with one signature; these are implementation
+    /// cases, not general-purpose user-visible overloads.
+    LibraryOverloads {
+        dispatch_parameter: usize,
+        cases: &'static [LibraryOverloadCase],
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LibraryOverloadCase {
+    pub capability: StdlibCapabilityId,
+    pub signature: Signature,
+    pub function_name: &'static str,
+    pub body: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

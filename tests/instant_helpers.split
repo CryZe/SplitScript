@@ -15,7 +15,7 @@ whileAttached {
     let quarterSecond = Duration.fromMilliseconds(250)
     let halfSecond = Duration.fromMilliseconds(500)
     let deadline: Instant = startedAt + quarterSecond
-    let clampedLow = startedAt + Duration.fromWholeSeconds(-2)
+    let clampedLow = startedAt + Duration.fromSeconds(-2)
     let nearMaximum = Instant.now()
     let clampedHigh = nearMaximum + Duration.fromNanoseconds(200)
 
@@ -26,7 +26,7 @@ whileAttached {
         && backwards < measured
         && backwards == Duration.zero()
         && deadline.durationSince(startedAt) == quarterSecond
-        && startedAt.durationSince(clampedLow) == Duration.fromWholeSeconds(1)
+        && startedAt.durationSince(clampedLow) == Duration.fromSeconds(1)
         && clampedHigh.durationSince(nearMaximum) == Duration.fromNanoseconds(100)
         && startedAt.hasElapsed(halfSecond)
     {

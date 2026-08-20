@@ -18,7 +18,7 @@ const env = {
     timer_get_state: () => 1,
     runtime_set_tick_rate() {},
     timer_set_game_time(seconds, nanoseconds) {
-        gameTimes.push([Number(seconds), nanoseconds]);
+        gameTimes.push([seconds.toString(), nanoseconds]);
     },
     timer_set_variable(keyPointer, keyLength, valuePointer, valueLength) {
         if (text(keyPointer, keyLength) === "Duration Helpers") {
@@ -32,23 +32,26 @@ const env = {
 
 ({ instance } = await WebAssembly.instantiate(fs.readFileSync(wasmPath), { env }));
 instance.exports._start();
-// One initialization poll followed by the eleven observable helper steps.
-for (let index = 0; index < 12; index += 1) {
+// One initialization poll followed by the fourteen observable helper steps.
+for (let index = 0; index < 15; index += 1) {
     instance.exports.update();
 }
 
 const expected = [
-    [1, 250_000_000],
-    [-2, 750_000_000],
-    [1, 500_000_000],
-    [2, 250_000_000],
-    [-2, 499_000_000],
-    [2, 250_000_000],
-    [-2, 750_000_000],
-    [90, 0],
-    [4_500, 0],
-    [129_600, 0],
-    [-2, 749_999_900],
+    ["1", 250_000_000],
+    ["-2", 750_000_000],
+    ["1", 500_000_000],
+    ["2", 250_000_000],
+    ["-2", 499_000_000],
+    ["2", 250_000_000],
+    ["-2", 750_000_000],
+    ["90", 0],
+    ["4500", 0],
+    ["129600", 0],
+    ["18446744073709551", 615_000_000],
+    ["7", 0],
+    ["2", 500_000_000],
+    ["-2", 749_999_900],
 ];
 if (helperStatus !== "ok" || JSON.stringify(gameTimes) !== JSON.stringify(expected)) {
     throw new Error(`unexpected duration-helper output: ${JSON.stringify({ expected, gameTimes, helperStatus })}`);

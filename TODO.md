@@ -139,13 +139,6 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Close feedback loops without papering over language design
 
-- [ ] Review the `Duration` constructor surface with integer and floating-point
-  inputs before adding migration-only guidance. Decide whether
-  `fromMilliseconds` and the other unit constructors should accept a numeric
-  capability while preserving exact integer conversion, whether overload-like
-  source declarations are needed, or whether distinct whole/fractional names
-  remain clearer. Include large signed values, inference, and precision in the
-  decision; do not merely redirect integral arguments after type checking.
 - [ ] Design semantic lints from failures that compiled cleanly. Evaluate an
   unused-setting warning (the campaign declared `allSkullsMode` but read an
   unrelated always-false global), a suggestion from literal

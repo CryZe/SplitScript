@@ -1542,16 +1542,9 @@ fn capability_failures_name_requirements_and_finite_accepted_types() {
                 }}
             "#
         );
-        let errors = splitscript::compile(&source)
-            .expect_err("integer milliseconds must not satisfy the Float capability");
-        assert!(
-            errors.iter().any(|diagnostic| {
-                diagnostic.message.contains("type `i64`")
-                    && diagnostic.message.contains("`Float` capability")
-                    && diagnostic.message.contains("f32 or f64")
-            }),
-            "missing concrete capability guidance for `{expression}`: {errors:#?}"
-        );
+        splitscript::compile(&source).unwrap_or_else(|errors| {
+            panic!("numeric duration input `{expression}` failed: {errors:#?}")
+        });
     }
 
     let structural = splitscript::compile(

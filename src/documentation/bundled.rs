@@ -288,7 +288,19 @@ mod tests {
         for guide in GUIDES {
             for target in markdown_link_targets(guide.source) {
                 assert!(
-                    target.contains("://") || target.starts_with('#'),
+                    target.contains("://")
+                        || target.starts_with('#')
+                        || target.starts_with("method@")
+                        || target.starts_with("fn@")
+                        || target.starts_with("keyword@")
+                        || target.starts_with("operator@")
+                        || target.starts_with("type@")
+                        || target.starts_with("syntax@")
+                        || target.starts_with("field@")
+                        || target.starts_with("variant@")
+                        || target.starts_with("capability@")
+                        || target.starts_with("namespace@")
+                        || target.starts_with("provider@"),
                     "bundled guide {} depends on local resource `{target}`",
                     guide.uri,
                 );

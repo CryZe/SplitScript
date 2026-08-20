@@ -478,7 +478,7 @@ impl StandardLibrary {
                     availability: contract.availability,
                 }
             }
-            Implementation::LibraryBody { .. } => self
+            Implementation::LibraryBody { .. } | Implementation::LibraryOverloads { .. } => self
                 .graph
                 .source_body_operation(id)
                 // During one-time bootstrap, calls to other source bodies are
@@ -937,6 +937,65 @@ impl StandardLibrary {
                             "`{}` has an empty source implementation",
                             item.qualified_name
                         ));
+                    }
+                    if self.graph.source_body_operation(item.id).is_none() {
+                        errors.push(format!(
+                            "`{}` has no compiler-derived operation metadata",
+                            item.qualified_name
+                        ));
+                    }
+                }
+                Implementation::LibraryOverloads {
+                    dispatch_parameter,
+                    cases,
+                } => {
+                    if cases.is_empty() {
+                        errors.push(format!(
+                            "`{}` has no source implementation cases",
+                            item.qualified_name
+                        ));
+                    }
+                    for case in cases {
+                        if !case.function_name.starts_with("__splitscript_stdlib_") {
+                            errors.push(format!(
+                                "`{}` has an invalid generated overload-function name",
+                                item.qualified_name
+                            ));
+                        }
+                        if case.body.trim().is_empty() {
+                            errors.push(format!(
+                                "`{}` has an empty overload implementation",
+                                item.qualified_name
+                            ));
+                        }
+                    }
+                    let Some(parameter) = item.signature.type_parameters.get(dispatch_parameter)
+                    else {
+                        errors.push(format!(
+                            "`{}` dispatches on a missing type parameter",
+                            item.qualified_name
+                        ));
+                        continue;
+                    };
+                    if parameter.constraints != [StdlibCapabilityId::Numeric] {
+                        errors.push(format!(
+                            "`{}` capability-directed implementation must expose one `Numeric` dispatch parameter",
+                            item.qualified_name
+                        ));
+                    }
+                    for core in self.core_types().iter().filter(|core| {
+                        self.core_type_has_capability(core.id, StdlibCapabilityId::Numeric)
+                    }) {
+                        let matching = cases
+                            .iter()
+                            .filter(|case| self.core_type_has_capability(core.id, case.capability))
+                            .count();
+                        if matching != 1 {
+                            errors.push(format!(
+                                "`{}` has {matching} implementation cases for numeric type `{}`; exactly one is required",
+                                item.qualified_name, core.name
+                            ));
+                        }
                     }
                     if self.graph.source_body_operation(item.id).is_none() {
                         errors.push(format!(

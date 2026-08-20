@@ -457,6 +457,36 @@ already expressible.
   width, offsets, and flag timing still require live-game verification; the
   compiler probe proves representability, not runtime correctness.
 
+### Finite settings and static singleton paths: Bzzzt
+
+Campaign status: `BLOCKED`
+
+Audit result: both reported blockers are existing facilities. The active timer
+behavior is representable without runtime settings registration or a new
+managed-object bridge.
+
+- Source: `startup` registers the fixed keys `"1"` through `"51"`; only levels
+  13, 26, and 39 default to enabled. This is bounded declaration data despite
+  being written as a C# loop. Compile-time settings families cover each uniform
+  range, while three ordinary declarations preserve the exceptional defaults.
+  `settings.enabled(current.level as String)` performs the same dynamic lookup,
+  gated by the source's `levels` parent setting.
+- Source: UnityASL follows the static `Main.instance` singleton and reads four
+  fields declared on `Main`. Existing Mono metadata can retain
+  `Main.staticFieldPath("instance")`, discover each offset with `Main.field`, and
+  append it with `MemoryPath.dereference`. Resolving those paths from state
+  expressions observes a replaced singleton rather than caching one object
+  address at attachment time.
+- A focused current-compiler probe covers all four paths, the partitioned level
+  settings, computed string-key lookup, and the original start, split, and reset
+  predicates. The source's `Log` watcher and scene-helper opt-in do not feed any
+  active timer decision.
+- Attachment under the current exact-name contract is `Bzzzt.exe`. The correct
+  Mono layout family, class and field spellings, and runtime behavior still
+  require live-game validation. The uniform-default limitation makes this
+  particular family verbose, but it is an ergonomics question rather than a
+  runtime-registration blocker.
+
 Further campaign work should begin with a concrete friction report and reduce it
 to a focused source comparison or compiler probe. The generated ports are
 supporting evidence, not an exhaustive conformance corpus. Every resulting

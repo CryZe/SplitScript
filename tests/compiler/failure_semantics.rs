@@ -984,6 +984,87 @@ fn replaceable_deep_pointer_flags_do_not_require_background_watcher_registration
 }
 
 #[test]
+fn bounded_settings_and_static_singleton_paths_do_not_require_runtime_registration() {
+    let source = r#"
+        let levelPath: MemoryPath? = None
+        let clickPath: MemoryPath? = None
+        let mainMenuPath: MemoryPath? = None
+        let pausePath: MemoryPath? = None
+
+        state "Bzzzt.exe" {
+            level: i32 = readLevel(levelPath);
+            click: bool = readFlag(clickPath);
+            mainMenu: bool = readFlag(mainMenuPath);
+            pause: bool = readFlag(pausePath);
+        }
+
+        settings {
+            "Split by Level" => levels key "levels": true,
+            "Levels" {
+                for level in 1..=12 {
+                    `Level {level}` key `{level}`: false,
+                },
+                "Level 13" => level13 key "13": true,
+                for level in 14..=25 {
+                    `Level {level}` key `{level}`: false,
+                },
+                "Level 26" => level26 key "26": true,
+                for level in 27..=38 {
+                    `Level {level}` key `{level}`: false,
+                },
+                "Level 39" => level39 key "39": true,
+                for level in 40..=51 {
+                    `Level {level}` key `{level}`: false,
+                },
+            },
+        }
+
+        fn readLevel(path: MemoryPath?) -> i32! {
+            let initialized = path else return Err("path not initialized")
+            let address = initialized.resolve()?
+            return process.read<i32>(address)
+        }
+
+        fn readFlag(path: MemoryPath?) -> bool! {
+            let initialized = path else return Err("path not initialized")
+            let address = initialized.resolve()?
+            return process.read<bool>(address)
+        }
+
+        onAttach {
+            let mono = await Unity.mono(MonoVersion.V2)
+            let image = await mono.image("Assembly-CSharp")
+            let main = await image.class("Main")
+            let instance = await main.staticFieldPath("instance")
+            levelPath = instance.dereference((await main.field("ActualLevelId")) as i64)
+            clickPath = instance.dereference((await main.field("ButtonClicked")) as i64)
+            mainMenuPath = instance.dereference((await main.field("IsInMainMenu")) as i64)
+            pausePath = instance.dereference((await main.field("Pause")) as i64)
+        }
+
+        start {
+            return current.mainMenu != old.mainMenu && !current.mainMenu
+        }
+
+        split {
+            return current.click
+                && current.click != old.click
+                && !current.pause
+                && (current.level == 52
+                    || (settings.levels && settings.enabled(current.level as String)))
+        }
+
+        reset {
+            return current.mainMenu != old.mainMenu && current.mainMenu
+        }
+    "#;
+
+    splitscript::compile(source).expect(
+        "finite setting families and static singleton paths should cover bounded helper setup",
+    );
+}
+
+#[test]
 fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
     let library = StandardLibrary::new();
     let process_type = library

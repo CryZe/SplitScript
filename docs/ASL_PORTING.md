@@ -1410,6 +1410,30 @@ templates may interpolate only the range binding, and a documentation comment
 on the family becomes every generated tooltip. See the maintained Drug Dealer
 Simulator port for registration and runtime evidence.
 
+A source loop with a small number of exceptional defaults is still finite
+declaration data, not runtime settings registration. Partition the uniform
+ranges and declare each exception directly:
+
+```splitscript
+# state "game.exe" {}
+settings {
+    "Levels" {
+        for level in 1..=2 {
+            `Level {level}` key `{level}`: false,
+        },
+        "Level 3" => level3 key "3": true,
+        for level in 4..=5 {
+            `Level {level}` key `{level}`: false,
+        },
+    },
+}
+```
+
+All five host keys remain stable and available to
+[`SettingsView.enabled`](method@SettingsView.enabled). Runtime registration is
+needed only when the set of keys itself is discovered after compilation, not
+merely because the ASL source used a [`for`] loop to declare a bounded table.
+
 ## Snapshot-dependent helper functions
 
 Ordinary helper functions may refer to [`old`] and [`current`] directly, just as a

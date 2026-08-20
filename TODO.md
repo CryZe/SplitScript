@@ -86,7 +86,12 @@ semantic-review evidence, not as a conformance corpus.
   explicit `SetZeroOrNull` fallback, one `tickRate` declaration, and automatic
   attachment cancellation cover its timer-critical loading behavior without a
   managed-object bridge or dynamic watcher registration; its auxiliary sound
-  and modal UI remain fidelity-ledger omissions.
+  and modal UI remain fidelity-ledger omissions. Bzzzt is likewise a focused
+  false-blocker: partitioned compile-time settings families preserve its 51
+  bounded keys and exceptional defaults, while `staticFieldPath` plus
+  `dereference` follows its replaceable `Main.instance` fields. Its family is
+  verbose under the current uniform-default rule, but it does not require
+  runtime settings registration.
 - [ ] Promote a small corrected subset to reviewed fixtures: one exact-name
   native process, one process-name array, one multi-version named layout, one
   timer-state/split-index script, one `tickRate` script, one managed-string or
@@ -263,9 +268,9 @@ semantic-review evidence, not as a conformance corpus.
   string support; then design one typed scene API rather than reproducing
   `asl-help` callbacks.
 - [ ] Extend Unity Mono managed-object support from corpus-proven residual
-  needs: typed cross-class object paths, managed list/dictionary traversal, and
-  dynamic typed tag values for Alba, A Short Hike, Bzzzt, and Assemble with
-  Care. Separate stable singleton/field chains
+  needs: confirm the typed cross-class object path needed by Assemble with Care,
+  add managed list/dictionary traversal for Alba and A Short Hike, and represent
+  A Short Hike's dynamic typed tag values. Separate stable singleton/field chains
   already expressible through `staticFieldPath` and `field` from collection
   enumeration that genuinely needs new library/runtime support. Alba does not
   require runtime-created state fields: growable arrays can retain discovered

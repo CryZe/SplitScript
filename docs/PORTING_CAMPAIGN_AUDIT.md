@@ -487,6 +487,33 @@ managed-object bridge.
   particular family verbose, but it is an ergonomics question rather than a
   runtime-registration blocker.
 
+### Cross-class paths and scene snapshots: Assemble with Care
+
+Campaign status: `BLOCKED`
+
+Audit result: the managed-object half is already expressible. Unity loading
+scene snapshots are the one timer-critical provider gap.
+
+- Source: the generic `Service` base class declares `_instance`, the concrete
+  `LevelFlowService` class supplies the static storage and `_state` instance
+  field, and `GameStart.forceReloadGame` is an ordinary static boolean. The
+  metadata comes from multiple classes, but the resulting reads are still one
+  static slot followed by one managed pointer dereference.
+- Existing translation: obtain the concrete class's `staticTable`, use
+  `field("_instance")` from the generic base and `field("_state")` from the
+  concrete class, then compose them with `memoryPath(...).dereference(...)`.
+  `GameStart.staticFieldPath("forceReloadGame")` covers the second value. A
+  focused current-compiler probe validates this cross-class composition and the
+  original start/reset edge predicate.
+- Residual gap: every split condition branches on
+  `vars.Unity.Scenes.Loading[0].Index`. No process-memory substitute in the
+  source identifies that value, and SplitScript does not yet expose a typed
+  Unity active/loading scene snapshot. A faithful port remains blocked on the
+  existing scene-provider roadmap item, not on a generic managed-instance API.
+- Attachment under the current exact-name contract is `AWC.exe`. Mono layout,
+  class names, offsets, scene semantics, and lifecycle timing still require
+  live-game validation once the scene provider exists.
+
 Further campaign work should begin with a concrete friction report and reduce it
 to a focused source comparison or compiler probe. The generated ports are
 supporting evidence, not an exhaustive conformance corpus. Every resulting

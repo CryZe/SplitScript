@@ -1065,6 +1065,58 @@ fn bounded_settings_and_static_singleton_paths_do_not_require_runtime_registrati
 }
 
 #[test]
+fn managed_paths_can_compose_static_and_instance_offsets_from_different_classes() {
+    let source = r#"
+        let levelStatePath: MemoryPath? = None
+        let reloadPath: MemoryPath? = None
+
+        state "AWC.exe" {
+            levelState: i32 = readLevelState(levelStatePath);
+            reload: bool = readReload(reloadPath);
+        }
+
+        fn readLevelState(path: MemoryPath?) -> i32! {
+            let initialized = path else return Err("path not initialized")
+            return process.read<i32>(initialized.resolve()?)
+        }
+
+        fn readReload(path: MemoryPath?) -> bool! {
+            let initialized = path else return Err("path not initialized")
+            return process.read<bool>(initialized.resolve()?)
+        }
+
+        onAttach {
+            let mono = await Unity.mono(MonoVersion.V2)
+            let core = await mono.image("com.unity-common.core")
+            let service = await core.class("Service`1")
+            let game = await mono.image("Assembly-CSharp")
+            let levelFlow = await game.class("LevelFlowService")
+            let levelFlowTable = await levelFlow.staticTable()
+            let instanceOffset = await service.field("_instance")
+            let stateOffset = await levelFlow.field("_state")
+            levelStatePath = levelFlowTable
+                .memoryPath([], instanceOffset as i64, mono.pointerSize)
+                .dereference(stateOffset as i64)
+
+            let gameStart = await game.class("GameStart")
+            reloadPath = await gameStart.staticFieldPath("forceReloadGame")
+        }
+
+        start {
+            return !old.reload && current.reload
+        }
+
+        reset {
+            return !old.reload && current.reload
+        }
+    "#;
+
+    splitscript::compile(source).expect(
+        "managed paths should compose a derived static table with base and derived offsets",
+    );
+}
+
+#[test]
 fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
     let library = StandardLibrary::new();
     let process_type = library

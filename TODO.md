@@ -91,7 +91,9 @@ semantic-review evidence, not as a conformance corpus.
   bounded keys and exceptional defaults, while `staticFieldPath` plus
   `dereference` follows its replaceable `Main.instance` fields. Its family is
   verbose under the current uniform-default rule, but it does not require
-  runtime settings registration.
+  runtime settings registration. Assemble with Care's base/derived metadata is
+  also composable through `staticTable`, `field`, and `MemoryPath`; only its
+  loading-scene snapshot remains a timer-critical provider gap.
 - [ ] Promote a small corrected subset to reviewed fixtures: one exact-name
   native process, one process-name array, one multi-version named layout, one
   timer-state/split-index script, one `tickRate` script, one managed-string or
@@ -268,9 +270,9 @@ semantic-review evidence, not as a conformance corpus.
   string support; then design one typed scene API rather than reproducing
   `asl-help` callbacks.
 - [ ] Extend Unity Mono managed-object support from corpus-proven residual
-  needs: confirm the typed cross-class object path needed by Assemble with Care,
-  add managed list/dictionary traversal for Alba and A Short Hike, and represent
-  A Short Hike's dynamic typed tag values. Separate stable singleton/field chains
+  needs: add managed list/dictionary traversal for Alba and A Short Hike, and
+  represent A Short Hike's dynamic typed tag values. Separate stable
+  singleton/field chains
   already expressible through `staticFieldPath` and `field` from collection
   enumeration that genuinely needs new library/runtime support. Alba does not
   require runtime-created state fields: growable arrays can retain discovered

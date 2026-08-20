@@ -1066,9 +1066,37 @@ valuePath = singleton.dereference(valueOffset as i64)
 ```
 
 This rereads the singleton pointer whenever the state field resolves the path,
-rather than caching an attachment-time object address. Older V1, 32-bit, ELF,
-and Mach-O Mono targets remain future layout families rather than falling back
-to a guessed offset set.
+rather than caching an attachment-time object address.
+
+Metadata offsets may come from different classes. For example, a generic base
+class can declare a static singleton slot while the concrete derived class owns
+the static storage and declares the instance value. Compose those facts
+explicitly instead of requiring one class wrapper to hide the inheritance:
+
+```splitscript
+# state "game.exe" {}
+# let levelStatePath: MemoryPath? = None
+# onAttach {
+let mono = await Unity.mono(MonoVersion.V2)
+let core = await mono.image("com.unity-common.core")
+let service = await core.class("Service`1")
+let game = await mono.image("Assembly-CSharp")
+let levelFlow = await game.class("LevelFlowService")
+let staticTable = await levelFlow.staticTable()
+let instanceOffset = await service.field("_instance")
+let stateOffset = await levelFlow.field("_state")
+levelStatePath = staticTable
+    .memoryPath([], instanceOffset as i64, mono.pointerSize)
+    .dereference(stateOffset as i64)
+# }
+```
+
+[`MonoClass.staticTable`](method@MonoClass.staticTable) selects the concrete
+class's storage, [`MonoClass.field`](method@MonoClass.field) supplies each
+declaring class's offset, and
+[`MemoryPath.dereference`](method@MemoryPath.dereference) performs the managed
+reference read. Older V1, 32-bit, ELF, and Mach-O Mono targets remain future
+layout families rather than falling back to a guessed offset set.
 
 When a port needs the mapping metadata itself, take a typed snapshot rather
 than reproducing the host's numeric count/index ABI:

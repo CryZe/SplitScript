@@ -1,5 +1,13 @@
 # SplitScript roadmap
 
+## 2026-08-20: numeric tick rates and frame durations
+
+- Generalized dynamic `setTickRate` calls over `Numeric` while retaining the
+  runtime's stable `f64` ABI boundary.
+- Generalized `Duration.fromFrames` over every integer representation, keeping
+  whole-frame division type-directed and avoiding overflow in fractional-frame
+  scaling.
+
 ## 2026-08-20: exact numeric Duration constructors
 
 - Unified the public unit constructors under `T: Numeric`, accepting every

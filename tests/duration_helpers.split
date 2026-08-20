@@ -38,6 +38,8 @@ gameTime {
         11 => Duration.fromMilliseconds(18_446_744_073_709_551_615u64),
         12 => genericSeconds(7),
         13 => genericSeconds(2.5),
-        _ => Duration.fromNanoseconds(-1_250_000_100),
+        14 => Duration.fromNanoseconds(-1_250_000_100),
+        15 => Duration.fromFrames(150u8, 60),
+        _ => Duration.fromFrames(-75i16, 60),
     }
 }

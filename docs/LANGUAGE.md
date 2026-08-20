@@ -1253,7 +1253,7 @@ represents a real third state. It is deliberately rejected in `start`, `split`,
 and `reset`; those blocks are simply boolean and default to `false`.
 `gameTime` otherwise returns a `Duration`. Source-defined constructors include
 `Duration.zero()`, exact integer unit and nanosecond constructors,
-`Duration.fromFrames(i64, i64)`, and `Duration.fromParts(i64, i32)`.
+`Duration.fromFrames<T: Integer>(T, T)`, and `Duration.fromParts(i64, i32)`.
 `Duration.fromMilliseconds`, `fromSeconds`, `fromMinutes`, `fromHours`,
 `fromDays`, and `fromNanoseconds` accept every integer and floating-point type.
 Integer inputs stay exact without passing through floating point. A day is
@@ -1721,7 +1721,7 @@ tag an ordinary source-defined method with `@display`; that one implementation
 then powers all four conversion entry points without a type-specific backend
 branch. `FileVersion` uses this mechanism to render
 `major.minor.build.private`. `timer.state()` and
-`setTickRate(f64)` expose the corresponding ASR facilities without
+`setTickRate<T: Numeric>(T)` expose the corresponding ASR facilities without
 linear-memory pointers in source code.
 `timer.state()` returns `TimerState`, a
 compiler-provided enum with `NotRunning`, `Running`, `Paused`, `Ended`, and

@@ -551,7 +551,8 @@ exit cleanup. The language-level `tickRate` policy defaults to 120 Hz attached
 and 1 Hz detached and reapplies those rates at lifecycle transitions.
 `setTickRate(hz)` is the dynamic escape hatch: it is measured in updates per
 second, affects the next host wait after the current update, and persists until
-another call or attachment-state transition.
+another call or attachment-state transition. It accepts every integer and
+floating-point type and converts the value only at the host's `f64` ABI boundary.
 `timer.state()` returns the exhaustive `TimerState` enum with
 `NotRunning`, `Running`, `Paused`, `Ended`, and `Unknown`; raw host integers are
 normalized only at the ABI boundary. `Duration.fromSeconds` converts Unity's

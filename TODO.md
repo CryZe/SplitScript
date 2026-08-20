@@ -625,9 +625,8 @@ remaining work is product hardening and distribution.
 3. Semantically audit the fresh campaign and promote a small corrected,
    runtime-tested subset instead of treating all compiler-clean outputs as a
    corpus.
-4. Review the state-field `?` boundary and numeric `Duration` constructor
-   ergonomics with the user before implementing either design; then add the
-   chosen diagnostics, documentation, and tests together.
+4. Review the state-field `?` boundary with the user before implementing a
+   design; then add the chosen diagnostics, documentation, and tests together.
 5. Reclassify blocked ports after subtracting existing features, then design
    the proven Unity scene/managed-collection and remaining timer host surfaces.
 6. Harden and publish the bundled VSIX and native releases, then evaluate the

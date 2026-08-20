@@ -1093,11 +1093,15 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
     );
     assert_eq!(
         library.render_signature(StdlibItemId::SetTickRate),
-        "setTickRate(hz: f64) -> None"
+        "setTickRate<T>(hz: T) -> None where T: Numeric"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::DurationFromSeconds),
         "Duration.fromSeconds<T>(seconds: T) -> Duration where T: Numeric"
+    );
+    assert_eq!(
+        library.render_signature(StdlibItemId::DurationFromFrames),
+        "Duration.fromFrames<T>(frames: T, framesPerSecond: T) -> Duration where T: Integer"
     );
     assert_eq!(
         library.render_signature(StdlibItemId::StringContains),

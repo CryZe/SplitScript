@@ -2776,7 +2776,9 @@ fn compile_expr_unconverted(
                 ));
             }
             IntrinsicId::RuntimeSetTickRate => {
-                compile_expr(function, args[0], context);
+                // The public API accepts every Numeric representation while the
+                // host ABI deliberately stays one stable f64 function.
+                emit_cast(function, args[0], Type::F64, context);
                 function.instruction(&Instruction::Call(
                     context.abi.function(AbiImportId::RuntimeSetTickRate),
                 ));

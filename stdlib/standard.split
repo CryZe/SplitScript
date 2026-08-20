@@ -114,12 +114,12 @@ root {
     /// Poll more frequently
     ///
     /// ```splitscript
-    /// setTickRate(120.0)
+    /// setTickRate(120)
     /// ```
     @intrinsic(RuntimeSetTickRate)
-    fn setTickRate(
+    fn setTickRate<T: Numeric>(
         /// The positive, finite number of requested updates per second.
-        hz: f64,
+        hz: T,
     ) -> None;
 
     /// Continues attachment on the next runtime update.
@@ -2940,7 +2940,10 @@ struct Duration {
 
     /// Constructs a duration from frames.
     ///
-    /// The conversion preserves whole seconds and nanoseconds.
+    /// Every integer type is accepted. The frame count and rate use the same
+    /// inferred type, so ordinary integer literals adopt the counter's type.
+    /// Whole seconds are converted exactly; only the subsecond remainder passes
+    /// through floating point to avoid overflowing narrow and 64-bit counters.
     ///
     /// # Example
     ///
@@ -2949,15 +2952,27 @@ struct Duration {
     /// ```splitscript
     /// let elapsed = Duration.fromFrames(150, 60)
     /// ```
-    static fn fromFrames(
+    static fn fromFrames<T: Integer>(
         /// The elapsed frame count.
-        frames: i64,
+        frames: T,
         /// The frame rate.
-        framesPerSecond: i64,
+        framesPerSecond: T,
     ) -> Duration {
-        let seconds = frames / framesPerSecond
-        let nanoseconds = ((frames % framesPerSecond) * 1_000_000_000 / framesPerSecond) as i32
-        return Duration.fromParts(seconds, nanoseconds)
+        let wholeFrames = frames / framesPerSecond
+        let remainingFrames = frames % framesPerSecond
+        let whole = Duration.fromSeconds(wholeFrames)
+        if remainingFrames == 0 {
+            return whole
+        }
+        if whole.seconds == 9_223_372_036_854_775_807
+            || whole.seconds == -9_223_372_036_854_775_807 - 1
+        {
+            return whole
+        }
+        let fractional = Duration.fromSeconds(
+            remainingFrames as f64 / framesPerSecond as f64,
+        )
+        return whole + fractional
     }
 
     /// Constructs a duration from seconds and nanoseconds.

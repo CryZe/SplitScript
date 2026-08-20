@@ -670,7 +670,7 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
         IntrinsicId::RuntimeSetTickRate => contract!(
             RuntimeSetTickRate,
             Function,
-            signature(NO_TYPE_PARAMETERS, None, params![value(F64)], NONE),
+            signature(NUMERIC_T, None, params![value(T)], NONE),
             RUNTIME_WRITE,
             Everywhere,
             HostBoundary

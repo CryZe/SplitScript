@@ -7,8 +7,9 @@ tickRate {
 
 onAttach {
     if process.name() == "hundred.exe" {
-        setTickRate(100)
+        let requestedRate: u16 = 100
+        setTickRate(requestedRate)
     } else {
-        setTickRate(120)
+        setTickRate(120.0 as f32)
     }
 }

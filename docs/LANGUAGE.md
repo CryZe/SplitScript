@@ -1427,11 +1427,18 @@ attached process. This is the language-level counterpart to ASR's
 `until_closes`, without requiring scripts to manually write the outer
 attach/cancellation loops.
 
-`retry expression` is separate from `await`: it accepts any ordinary `T!`
-expression, evaluates it once per update, and yields the contained `T` when it
-succeeds. An error keeps the suspension pending. Because `retry` is control
-flow rather than a standard-library function, it works equally well through a
-user helper whose `T!` type and value type are inferred:
+[`retry`] is the dual of [`await`]. [`await`] polls one already-asynchronous
+value without evaluating its source expression again. `retry expression`
+instead places a local failure boundary around synchronous work, evaluates the
+complete operand once per attached update, and starts that operand from the
+beginning after a failure. A direct [`T!`] error, postfix [`?`], or [`throw`]
+reaching the boundary keeps the retry pending. Success yields `T`.
+
+The operand can be any ordinary expression. In particular, `retry { ... }`
+does not use a special retry-block grammar: braces are the same value-producing
+block expression accepted in arguments, branches, casts, and other expression
+positions. This lets one attempt contain several dependent reads while keeping
+one local failure boundary:
 
 ```text
 fn readMarker() {
@@ -1440,9 +1447,27 @@ fn readMarker() {
 
 onAttach {
     let marker = retry readMarker()
-    print(`marker {marker}`)
+    let playerHealth = retry {
+        let player = process.follow(marker as address, [0x10, 0x20])?
+        process.read<i32>(player)?
+    }
+    print(`marker {marker}, health {playerHealth}`)
 }
 ```
+
+Every statement in the value block is evaluated again on the next attempt;
+locals from a failed attempt are not retained. The final successful expression
+is lifted into the retry result, so it can be a plain `T` after earlier `?`
+operations. [`return`] still exits the enclosing function, while [`break`] and
+[`continue`] still target the nearest lexical loop. [`throw`] is different only
+because the retry boundary deliberately catches errors.
+
+One attempt must be synchronous and bounded so an attached update cannot hang.
+Evaluating [`await`] or another [`retry`] anywhere inside the operand is an
+error. Calling an async function is allowed because that synchronously creates
+an `async T` value; polling it with [`await`] is what is prohibited. Put
+intrinsically asynchronous discovery outside the retry and await it normally.
+Process closure cancels the whole retry boundary.
 
 `await nextTick()` is the basic scheduling primitive. It always suspends once
 and resumes on the following attached-process update. It is useful when a game

@@ -125,9 +125,30 @@ onAttach {
 }
 ```
 
-Use `retry expression` for an operation that should be attempted again on
-later ticks until it succeeds; use ordinary [`await`] when one asynchronous
-operation already owns its retry policy.
+Use `retry expression` for synchronous fallible work that should be evaluated
+again on later ticks until it succeeds. Unlike Rust's function-scoped [`?`],
+[`retry`] establishes a local failure boundary, so a block can describe one
+complete transaction:
+
+```splitscript
+# state "game.exe" {}
+onAttach {
+    let health = retry {
+        let player = process.read<address>(0x1000)?
+        process.read<i32>(player)?
+    }
+    print(health)
+}
+```
+
+The braces are an ordinary value block, not special retry syntax. [`?`], a
+final `Err(...)`, or [`throw`] ends the current attempt and starts the complete
+operand again on the next attached update. [`return`], [`break`], and
+[`continue`] keep their lexical targets. One attempt must be synchronous and
+bounded: it cannot evaluate [`await`] or another [`retry`]. Calling an async
+function is allowed because it only constructs an `async T`; awaiting that
+value is not. Use ordinary [`await`] when one asynchronous operation already
+owns its polling policy.
 
 ## Autosplitter domains
 

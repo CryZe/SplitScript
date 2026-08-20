@@ -368,6 +368,7 @@ impl Checker {
         };
         let expected = self.shallow_type(expected);
         let actual_shallow = self.shallow_type(actual);
+        self.failure.observe_result(expected, actual_shallow);
         if self.is_error_type(actual_shallow) || self.is_error_type(expected) {
             return Some(self.error_type());
         }

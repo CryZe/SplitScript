@@ -107,8 +107,32 @@ print(livesOrZero("3"))
 # }
 ```
 
-These are typed values, not exceptions. A later [`throw`]/`catch` model is not
-part of the language today.
+These are typed values, not CLR exceptions. [`throw`] constructs and transfers
+the same error value; there is no general `try`/`catch` construct.
+
+## Retrying synchronous fallible work
+
+Use [`retry`] when attachment should re-run a synchronous read transaction on
+later ticks until every required value is available. A value block is an
+ordinary expression, so several reads can share one local failure boundary:
+
+```splitscript
+# state "game.exe" {}
+onAttach {
+    let health = retry {
+        let player = process.read<address>(0x1000)?
+        process.read<i32>(player)?
+    }
+    print(health)
+}
+```
+
+This is not a C# exception retry loop. A [`T!`] error, [`?`], or [`throw`] ends
+the current attempt, and the complete operand begins again on the next attached
+update. [`return`] still returns from the enclosing function; [`break`] and
+[`continue`] keep their lexical loop targets. The attempt must be synchronous
+and bounded, so [`await`] and nested [`retry`] are rejected inside it. Await
+asynchronous discovery before entering the retry block.
 
 ## Autosplitter lifecycle
 

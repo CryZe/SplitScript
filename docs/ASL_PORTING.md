@@ -957,6 +957,34 @@ run-age check, or custom game-time calculation, the current host contract does
 not expose equivalent metadata. The compiler diagnoses these paths separately
 so this distinction is not hidden by a convenient but incorrect rewrite.
 
+## Retrying an attach-time read transaction
+
+ASL ports sometimes use a hand-written `while (true)` loop to repeat several
+dependent reads until a complete pointer chain or metadata group becomes
+available. In SplitScript, use one [`retry`] expression instead. Braces are an
+ordinary value-producing expression, so the block naturally creates one local
+failure boundary for every [`?`] inside it:
+
+```splitscript
+# state "game.exe" {}
+onAttach {
+    let healthAddress = retry {
+        let manager = process.read<address>(0x1000)?
+        let player = process.read<address>(manager.add(0x20))?
+        player.add(0x18)
+    }
+    print(`health address {healthAddress}`)
+}
+```
+
+A failed read starts the complete block again on the next attached update; no
+locals from the failed attempt survive. A final [`T!`] error or [`throw`] has
+the same retry behavior. [`return`] still exits the surrounding function, and
+[`break`] or [`continue`] still target their lexical loop. Keep one attempt
+synchronous and bounded: [`await`] and nested [`retry`] are rejected inside the
+operand. Await scans, module discovery, and other intrinsically asynchronous
+operations before entering the retry block.
+
 ## Attach-time-discovered addresses
 
 Keep discovery in [`onAttach`] and polling in the state declaration. Polling does

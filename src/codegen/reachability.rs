@@ -433,7 +433,7 @@ impl Reachability {
                     | wasm_ir::CallTarget::ResultSuccess { .. } => {}
                 },
                 wasm_ir::ExpressionKind::Propagate { target, .. } => {
-                    type_roots.push(specialize(*target));
+                    type_roots.push(specialize(target.result()));
                 }
                 _ => {}
             }

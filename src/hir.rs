@@ -254,7 +254,7 @@ pub enum TypedExpressionKind {
     /// Unwraps a result or transfers its error to the nearest failure boundary.
     Propagate {
         value: ExprId,
-        target: TypeId,
+        target: FailureTarget,
     },
     Path(Vec<String>),
     Member {
@@ -284,6 +284,25 @@ pub enum TypedExpressionKind {
         receiver: Option<ExprId>,
         arguments: Vec<ExprId>,
     },
+}
+
+/// The control-flow destination selected for postfix `?` and `throw`.
+///
+/// Return boundaries complete a function or state poll with an error. Retry
+/// boundaries instead abort only the current synchronous attempt and leave its
+/// enclosing async poll pending for the next tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureTarget {
+    Return(TypeId),
+    Retry { expression: ExprId, result: TypeId },
+}
+
+impl FailureTarget {
+    pub fn result(self) -> TypeId {
+        match self {
+            Self::Return(result) | Self::Retry { result, .. } => result,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -372,7 +391,7 @@ pub enum TypedStatementKind {
     Return(Option<ExprId>),
     Throw {
         error: ExprId,
-        target: TypeId,
+        target: FailureTarget,
     },
     Suspend {
         mode: SuspensionMode,
@@ -493,9 +512,12 @@ impl TypedProgram {
                 body: lower_block(
                     &function.body,
                     semantics,
-                    semantics.function_completion(function.id).filter(|result| {
-                        matches!(semantics.types().kind(*result), TypeKind::Result { .. })
-                    }),
+                    semantics
+                        .function_completion(function.id)
+                        .filter(|result| {
+                            matches!(semantics.types().kind(*result), TypeKind::Result { .. })
+                        })
+                        .map(FailureTarget::Return),
                 ),
             })
             .collect();
@@ -1216,7 +1238,7 @@ fn lower_expression_kind(
                 statements: lower_block(
                     &statements,
                     semantics,
-                    semantics.value_block_failure_target(expression.id),
+                    failure_target_for_value_block(semantics, expression.id),
                 ),
                 value,
             }
@@ -1225,7 +1247,7 @@ fn lower_expression_kind(
             body: lower_block(
                 block,
                 semantics,
-                semantics.value_block_failure_target(expression.id),
+                failure_target_for_value_block(semantics, expression.id),
             ),
         },
         ExprKind::Record { fields, .. } => TypedExpressionKind::Record {
@@ -1321,9 +1343,7 @@ fn lower_expression_kind(
         },
         ExprKind::Propagate(value) => TypedExpressionKind::Propagate {
             value: value.id,
-            target: semantics
-                .propagation_target(expression.id)
-                .expect("checked propagation expressions have a failure boundary"),
+            target: failure_target_for_propagation(semantics, expression.id),
         },
         ExprKind::Path(path) => TypedExpressionKind::Path(path.clone()),
         ExprKind::Member {
@@ -1394,7 +1414,7 @@ fn enum_type_for_variant(
 fn lower_block(
     block: &Block,
     semantics: &SemanticModel,
-    failure_boundary: Option<TypeId>,
+    failure_boundary: Option<FailureTarget>,
 ) -> TypedBlock {
     TypedBlock {
         statements: block
@@ -1561,4 +1581,31 @@ fn lower_block(
             .collect(),
         span: block.span,
     }
+}
+
+fn failure_target_for_propagation(semantics: &SemanticModel, expression: ExprId) -> FailureTarget {
+    let result = semantics
+        .propagation_target(expression)
+        .expect("checked propagation expressions have a failure boundary");
+    semantics.propagation_retry_boundary(expression).map_or(
+        FailureTarget::Return(result),
+        |retry| FailureTarget::Retry {
+            expression: retry,
+            result,
+        },
+    )
+}
+
+fn failure_target_for_value_block(
+    semantics: &SemanticModel,
+    expression: ExprId,
+) -> Option<FailureTarget> {
+    let result = semantics.value_block_failure_target(expression)?;
+    Some(semantics.value_block_retry_boundary(expression).map_or(
+        FailureTarget::Return(result),
+        |retry| FailureTarget::Retry {
+            expression: retry,
+            result,
+        },
+    ))
 }

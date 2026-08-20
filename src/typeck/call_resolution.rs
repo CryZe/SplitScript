@@ -446,6 +446,9 @@ impl Checker {
                 expression,
                 PendingResolvedCall::ResultError { result: result_id },
             );
+            if let Some(expected) = expected {
+                self.failure.observe_result(expected, result);
+            }
             return Some(result);
         }
 

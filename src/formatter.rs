@@ -2104,6 +2104,31 @@ split {
     }
 
     #[test]
+    fn formats_retry_blocks_as_ordinary_prefix_expression_operands() {
+        let source = r#"state "game.exe"{}
+onAttach{
+let health=retry{
+let player=process.read<address>(0x1000)?
+process.read<i32>(player)?
+}
+print(health)
+}"#;
+        let expected = r#"state "game.exe" {}
+onAttach {
+    let health = retry {
+        let player = process.read<address>(0x1000)?
+        process.read<i32>(player)?
+    }
+    print(health)
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn indents_match_arm_values_and_calls_nested_in_continued_expressions() {
         let source = r#"state "game.exe" {}
 fn riftEnabled(rift) {

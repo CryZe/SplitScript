@@ -375,9 +375,9 @@ fn render_typed_block(
             TypedStatementKind::Throw { error, target } => {
                 writeln!(
                     output,
-                    "{indent}throw e{} -> t{}",
+                    "{indent}throw e{} -> {}",
                     error.index(),
-                    target.index()
+                    render_failure_target(*target)
                 )
                 .unwrap();
             }
@@ -498,7 +498,11 @@ fn snapshot_expression_kind(
             format!("{mode:?} e{}", value.index())
         }
         TypedExpressionKind::Propagate { value, target } => {
-            format!("propagate e{} -> t{}", value.index(), target.index())
+            format!(
+                "propagate e{} -> {}",
+                value.index(),
+                render_failure_target(*target)
+            )
         }
         TypedExpressionKind::Path(path) => format!("path {}", path.join(".")),
         TypedExpressionKind::Member { receiver, name, .. } => {
@@ -521,6 +525,17 @@ fn snapshot_expression_kind(
             arguments,
             ..
         } => format!("call {} args={arguments:?}", source_path.join(".")),
+    }
+}
+
+fn render_failure_target(target: splitscript::compiler::hir::FailureTarget) -> String {
+    match target {
+        splitscript::compiler::hir::FailureTarget::Return(result) => {
+            format!("t{}", result.index())
+        }
+        splitscript::compiler::hir::FailureTarget::Retry { expression, result } => {
+            format!("retry e{} t{}", expression.index(), result.index())
+        }
     }
 }
 

@@ -130,14 +130,30 @@ pub(super) enum NonePolicy {
 #[derive(Debug, Clone, Copy)]
 pub(super) enum FailureContext {
     None,
-    Boundary { result: Type, propagated: bool },
+    Boundary {
+        result: Type,
+        retry: Option<crate::ast::ExprId>,
+        propagated: bool,
+        observed_result: bool,
+    },
 }
 
 impl FailureContext {
     pub(super) fn boundary(result: Type) -> Self {
         Self::Boundary {
             result,
+            retry: None,
             propagated: false,
+            observed_result: false,
+        }
+    }
+
+    pub(super) fn retry(result: Type, expression: crate::ast::ExprId) -> Self {
+        Self::Boundary {
+            result,
+            retry: Some(expression),
+            propagated: false,
+            observed_result: false,
         }
     }
 
@@ -148,10 +164,19 @@ impl FailureContext {
         }
     }
 
+    pub(super) fn retry_expression(self) -> Option<crate::ast::ExprId> {
+        match self {
+            Self::None => None,
+            Self::Boundary { retry, .. } => retry,
+        }
+    }
+
     pub(super) fn propagate(&mut self) -> Option<Type> {
         match self {
             Self::None => None,
-            Self::Boundary { result, propagated } => {
+            Self::Boundary {
+                result, propagated, ..
+            } => {
                 *propagated = true;
                 Some(*result)
             }
@@ -163,6 +188,32 @@ impl FailureContext {
             self,
             Self::Boundary {
                 propagated: true,
+                ..
+            }
+        )
+    }
+
+    /// Records that the retry operand's value-producing path supplied a
+    /// result directly instead of being implicitly lifted into the boundary.
+    pub(super) fn observe_result(&mut self, expected: Type, actual: Type) {
+        if let Self::Boundary {
+            result,
+            retry: Some(_),
+            observed_result,
+            ..
+        } = self
+            && *result == expected
+            && matches!(actual, Type::Result(_))
+        {
+            *observed_result = true;
+        }
+    }
+
+    pub(super) fn observed_result(self) -> bool {
+        matches!(
+            self,
+            Self::Boundary {
+                observed_result: true,
                 ..
             }
         )

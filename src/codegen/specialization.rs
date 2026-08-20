@@ -242,7 +242,15 @@ fn materialize_expression_types(
         },
         wasm_ir::ExpressionKind::Propagate { target, .. } => {
             materialize_type(
-                semantics, instance, *target, ids, arrays, options, results, asyncs, sets,
+                semantics,
+                instance,
+                target.result(),
+                ids,
+                arrays,
+                options,
+                results,
+                asyncs,
+                sets,
             );
         }
         _ => {}

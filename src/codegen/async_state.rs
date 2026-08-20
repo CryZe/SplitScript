@@ -2477,6 +2477,27 @@ fn collect_async_states<'a>(
             });
             collect_async_states(continuation, states, loop_targets);
         }
+        wasm_ir::Terminator::Retry {
+            attempt,
+            continuation,
+            source,
+            poll_state,
+            resume_state,
+            ..
+        } => {
+            states[poll_state.index() as usize] = Some(AsyncState::Block {
+                block: attempt,
+                loop_targets,
+                resume_source: *source,
+            });
+            states[resume_state.index() as usize] = Some(AsyncState::Block {
+                block: continuation,
+                loop_targets,
+                resume_source: *source,
+            });
+            collect_async_states(attempt, states, loop_targets);
+            collect_async_states(continuation, states, loop_targets);
+        }
         wasm_ir::Terminator::AsyncWhile {
             header,
             continuation,
@@ -2541,6 +2562,7 @@ fn collect_async_states<'a>(
         | wasm_ir::Terminator::Break(_)
         | wasm_ir::Terminator::Continue
         | wasm_ir::Terminator::Return(_)
+        | wasm_ir::Terminator::RetryComplete { .. }
         | wasm_ir::Terminator::Throw { .. } => {}
     }
 }
@@ -2979,8 +3001,54 @@ fn compile_async_flow(
             set_async_state(function, *resume_state, context.locals.frame());
             function.instruction(&Instruction::Br(loop_depth));
         }
-        wasm_ir::Terminator::Throw { .. } => {
-            unreachable!("throw is rejected in onAttach until it has a result boundary")
+        wasm_ir::Terminator::Retry {
+            attempt,
+            poll_state,
+            cancellation,
+            source,
+            ..
+        } => {
+            assert_eq!(
+                *cancellation,
+                Some(cancellation_region),
+                "retry must participate in its body's cancellation region"
+            );
+            if let Some(debug) = context.debug {
+                debug.mark_suspend(function, *source);
+            }
+            set_async_state(function, *poll_state, context.locals.frame());
+            compile_async_flow(
+                function,
+                attempt,
+                loop_depth,
+                loop_control,
+                result_global,
+                cancellation_region,
+                runtime,
+                layout,
+                context,
+            );
         }
+        wasm_ir::Terminator::RetryComplete {
+            value,
+            destination,
+            resume_state,
+        } => {
+            compile_retry_poll(function, *destination, *value, layout, context);
+            set_async_state(function, *resume_state, context.locals.frame());
+            function.instruction(&Instruction::Br(loop_depth));
+        }
+        wasm_ir::Terminator::Throw { error, target } => match target {
+            crate::hir::FailureTarget::Return(_) => {
+                unreachable!("throw is rejected in async bodies without a retry boundary")
+            }
+            crate::hir::FailureTarget::Retry { .. } => {
+                compile_expr(function, *error, context);
+                function
+                    .instruction(&Instruction::Drop)
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::Return);
+            }
+        },
     }
 }

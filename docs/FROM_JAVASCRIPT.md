@@ -96,8 +96,33 @@ print(optionalScore(None))
 ```
 
 Recover a [`T!`] with `else fallback`, propagate it from another [`T!`] function
-with postfix [`?`], or use [`match`]. Errors are explicit values rather than thrown
-JavaScript exceptions.
+with postfix [`?`], or use [`match`]. Errors are explicit values; [`throw`]
+transfers the same error representation rather than creating a JavaScript
+exception object.
+
+## Retry is not promise polling
+
+[`await`] polls one existing `async T` value. [`retry`] instead re-evaluates one
+synchronous fallible expression from the beginning on each attached update.
+Because a block is an ordinary expression, it can describe a complete attempt:
+
+```splitscript
+# state "game.exe" {}
+onAttach {
+    let health = retry {
+        let player = process.read<address>(0x1000)?
+        process.read<i32>(player)?
+    }
+    print(health)
+}
+```
+
+Any [`T!`] error, [`?`], or [`throw`] retries the whole block on the next tick.
+The block's successful final expression yields the value. [`return`], [`break`],
+and [`continue`] retain their normal lexical meanings. The attempt must be
+synchronous and bounded: evaluating [`await`] or another [`retry`] inside it is
+an error, although merely calling an async function to construct a future is
+still synchronous.
 
 ## Arrays, records, and control flow
 

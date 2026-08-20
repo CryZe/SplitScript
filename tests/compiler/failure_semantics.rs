@@ -781,7 +781,7 @@ fn question_mark_propagates_to_function_and_state_field_boundaries() {
         .collect::<Vec<_>>();
     assert_eq!(propagation.len(), 2);
     assert!(propagation.into_iter().all(|target| matches!(
-        checked.semantics().types().kind(target),
+        checked.semantics().types().kind(target.result()),
         TypeKind::Result { .. }
     )));
 
@@ -1681,15 +1681,12 @@ fn known_alternate_modules_and_runtime_pointer_bounds_need_no_enumeration_or_ind
     let source = r#"
         state "Hades.exe" {}
 
-        fn engineModule() -> async Module {
-            return loop {
+        fn engineModule() {
+            return retry {
                 let engine = process.loadedModule("EngineWin64s.dll")
                     else process.loadedModule("EngineWin64sv.dll")
-                    else {
-                        await nextTick()
-                        continue
-                    }
-                break engine
+                    else { throw "engine module is not loaded yet" }
+                engine
             }
         }
 

@@ -385,7 +385,7 @@ impl Checker {
             }
             Stmt::Return { value, span } => self.check_return(value.as_ref(), *span),
             Stmt::Throw { error, span } => {
-                if self.failure.result().is_none() {
+                if self.failure.propagate().is_none() {
                     self.error(
                         "`throw` needs a function returning `T!` or an explicit catch boundary",
                         *span,

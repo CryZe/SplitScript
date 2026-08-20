@@ -1216,14 +1216,10 @@ whileAttached {
         assert!(
             hover
                 .markdown
-                .contains("let value = retry resultExpression")
+                .contains("let value = retry fallibleExpression")
         );
-        assert!(hover.markdown.contains("Retries a `T!` expression"));
-        assert!(
-            hover
-                .markdown
-                .contains("let player = retry process.follow(module.address, [0x100, 0x20])")
-        );
+        assert!(hover.markdown.contains("Retries synchronous fallible work"));
+        assert!(hover.markdown.contains("let health = retry"));
         assert!(!hover.markdown.contains("fn readMarker"));
 
         let version = database

@@ -1378,7 +1378,10 @@ fn language_catalog_is_valid_documented_and_compilable() {
         .expect("retry should be a catalog-backed language construct");
     assert_eq!(retry.id, LanguageItemId::Retry);
     assert_eq!(retry.kind, LanguageItemKind::Keyword);
-    assert_eq!(retry.form, "let value = retry resultExpression");
+    assert_eq!(
+        retry.form,
+        "let value = retry fallibleExpression | let value = retry { ... }"
+    );
     assert!(retry.documentation.details.contains("T!"));
     assert_eq!(
         language

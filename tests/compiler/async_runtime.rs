@@ -500,10 +500,7 @@ fn retry_is_first_class_suspending_control_flow_for_result_expressions() {
         .expect("onAttach should have a lowered body");
     assert!(matches!(
         body.entry.terminator,
-        splitscript::compiler::wasm_ir::Terminator::Suspend {
-            mode: splitscript::compiler::ast::SuspensionMode::Retry,
-            ..
-        }
+        splitscript::compiler::wasm_ir::Terminator::Retry { .. }
     ));
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
@@ -525,6 +522,240 @@ fn retry_rejects_non_result_expressions() {
         error
             .iter()
             .any(|diagnostic| { diagnostic.message.contains("expects a result value (`T!`)") })
+    );
+}
+
+#[test]
+fn retry_accepts_an_ordinary_block_expression_and_catches_propagation() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn readTotal() {
+            return retry {
+                let first = process.read<i32>(0x100)?
+                let second = process.read<i32>(0x104)?
+                first + second
+            }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("a retry boundary should lift the successful block tail and catch `?`");
+
+    let retry_expression = checked
+        .syntax()
+        .functions
+        .first()
+        .and_then(|function| function.body.statements.first())
+        .and_then(|statement| match statement {
+            splitscript::compiler::ast::Stmt::Return {
+                value: Some(expression),
+                ..
+            } => Some(expression),
+            _ => None,
+        })
+        .expect("the helper should return its retry expression");
+    let splitscript::compiler::ast::ExprKind::Suspend {
+        mode: splitscript::compiler::ast::SuspensionMode::Retry,
+        value: operand,
+        ..
+    } = &retry_expression.kind
+    else {
+        panic!("expected a retry expression");
+    };
+    assert!(matches!(
+        operand.kind,
+        splitscript::compiler::ast::ExprKind::Block(_)
+    ));
+
+    let targets = checked
+        .typed_hir()
+        .expressions()
+        .filter_map(|expression| match expression.kind {
+            splitscript::compiler::hir::TypedExpressionKind::Propagate { target, .. } => {
+                Some(target)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(targets.len(), 2);
+    assert!(targets.iter().all(|target| matches!(
+        target,
+        splitscript::compiler::hir::FailureTarget::Retry { expression, .. }
+            if *expression == retry_expression.id
+    )));
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("a block retry with local propagation should produce valid Wasm GC");
+}
+
+#[test]
+fn retry_catches_throw_but_return_and_break_keep_their_lexical_targets() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn readOrExit(exitEarly: bool) {
+            return loop {
+                let value = retry {
+                    if exitEarly {
+                        break 7
+                    }
+                    let value = process.read<i32>(0x100)?
+                    if value < 0 {
+                        throw "negative marker"
+                    }
+                    value
+                }
+                break value
+            }
+        }
+
+        fn returnThroughRetry() {
+            return retry {
+                if true {
+                    return 9
+                }
+                process.read<i32>(0x104)?
+            }
+        }
+
+        fn retryExplicitError() -> async i32 {
+            return retry Err("not ready")
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("retry should catch failures without capturing lexical exits");
+    #[derive(Default)]
+    struct ThrowCollector(Vec<splitscript::compiler::hir::FailureTarget>);
+
+    impl splitscript::compiler::hir::TypedVisitor for ThrowCollector {
+        fn visit_statement(
+            &mut self,
+            statement: &splitscript::compiler::hir::TypedStatement,
+            program: &splitscript::compiler::hir::TypedProgram,
+        ) {
+            if let splitscript::compiler::hir::TypedStatementKind::Throw { target, .. } =
+                statement.kind
+            {
+                self.0.push(target);
+            }
+            splitscript::compiler::hir::walk_typed_statement(self, statement, program);
+        }
+    }
+
+    let mut throws = ThrowCollector::default();
+    splitscript::compiler::hir::TypedVisitor::visit_program(&mut throws, checked.typed_hir());
+    assert_eq!(throws.0.len(), 1);
+    assert!(throws.0.iter().all(|target| matches!(
+        target,
+        splitscript::compiler::hir::FailureTarget::Retry { .. }
+    )));
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("retry with throw, return, and break should produce valid Wasm GC");
+}
+
+#[test]
+fn retry_operands_must_not_evaluate_await_or_another_retry() {
+    for (source, nested) in [
+        (
+            r#"
+                state "game.exe" {}
+                onAttach {
+                    let value = retry {
+                        await nextTick()
+                        process.read<i32>(0x100)?
+                    }
+                }
+            "#,
+            "`await`",
+        ),
+        (
+            r#"
+                state "game.exe" {}
+                onAttach {
+                    let value = retry {
+                        retry process.read<i32>(0x100)
+                    }
+                }
+            "#,
+            "`retry`",
+        ),
+    ] {
+        let diagnostics = splitscript::check(splitscript::lower(
+            splitscript::parse(source).expect("the nested suspension probe should parse"),
+        ))
+        .expect_err("retry attempts must remain synchronous within one tick");
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains(nested)
+                && diagnostic
+                    .message
+                    .contains("cannot be evaluated inside an `await` or `retry` operand")
+        }));
+    }
+}
+
+#[test]
+fn retry_may_synchronously_construct_an_async_value_without_awaiting_it() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn delayed() {
+            await nextTick()
+            return 1
+        }
+
+        onAttach {
+            let value = retry {
+                let future = delayed()
+                process.read<i32>(0x100)?
+            }
+            print(value)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("constructing an async value is synchronous until it is awaited");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("an unpolled async value inside retry should produce valid Wasm GC");
+}
+
+#[test]
+fn retry_restarts_the_complete_operand_once_per_attached_update() {
+    let source = r#"
+        state "game.exe" {}
+
+        onAttach {
+            let total = retry {
+                print("attempt")
+                let scene = process.read<i32>(0x7fff_0000)?
+                let entities = process.read<i32>(0x7fff_0004)?
+                scene + entities
+            }
+            print(`ready {total}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    store.data_mut().fail_scene_read = true;
+    store.data_mut().fail_entities_read = true;
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["attempt", "attempt"]);
+
+    store.data_mut().fail_scene_read = false;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["attempt", "attempt", "attempt"]);
+
+    store.data_mut().fail_entities_read = false;
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        ["attempt", "attempt", "attempt", "attempt", "ready 8"]
     );
 }
 
@@ -608,7 +839,7 @@ fn operands_before_a_nested_await_are_spilled_before_suspension() {
     assert!(body.locals.iter().any(
         |local| matches!(local.purpose, LocalPurpose::Temporary(candidate) if candidate == *target)
     ));
-    assert!(matches!(body.entry.terminator, Terminator::Suspend { .. }));
+    assert!(matches!(body.entry.terminator, Terminator::Retry { .. }));
 
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
@@ -651,8 +882,8 @@ fn expression_branches_keep_suspensions_inside_the_selected_path() {
     else {
         panic!("the expression if must remain branch-shaped in the continuation graph")
     };
-    assert!(matches!(then_block.terminator, Terminator::Suspend { .. }));
-    assert!(!matches!(else_block.terminator, Terminator::Suspend { .. }));
+    assert!(matches!(then_block.terminator, Terminator::Retry { .. }));
+    assert!(!matches!(else_block.terminator, Terminator::Retry { .. }));
 
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
@@ -684,7 +915,7 @@ fn suspending_while_conditions_are_reentered_on_every_back_edge() {
     let Terminator::AsyncWhile { header, .. } = &body.entry.terminator else {
         panic!("a suspending condition requires an async loop header")
     };
-    let Terminator::Suspend { continuation, .. } = &header.terminator else {
+    let Terminator::Retry { continuation, .. } = &header.terminator else {
         panic!("the loop header must poll its condition before deciding the iteration")
     };
     assert!(matches!(
@@ -729,13 +960,10 @@ fn match_arm_suspensions_are_selected_and_payloads_survive_resumption() {
     let Some(Statement::Match { arms, .. }) = semantic_statements(&body.entry).next() else {
         panic!("a suspending match must remain branch-shaped")
     };
-    assert!(matches!(
-        arms[0].block.terminator,
-        Terminator::Suspend { .. }
-    ));
+    assert!(matches!(arms[0].block.terminator, Terminator::Retry { .. }));
     assert!(!matches!(
         arms[1].block.terminator,
-        Terminator::Suspend { .. }
+        Terminator::Retry { .. }
     ));
 
     Validator::new_with_features(WasmFeatures::all())
@@ -773,7 +1001,7 @@ fn suspending_match_guards_resume_into_the_next_arm_when_false() {
     let Some(Statement::Match { arms, .. }) = semantic_statements(&body.entry).nth(1) else {
         panic!("the guarded match remains explicit control flow")
     };
-    let Terminator::Suspend { continuation, .. } = &arms[0].block.terminator else {
+    let Terminator::Retry { continuation, .. } = &arms[0].block.terminator else {
         panic!("the first matching arm polls its guard")
     };
     let Some(Statement::If { else_block, .. }) = semantic_statements(continuation).next() else {
@@ -820,11 +1048,11 @@ fn suspending_value_fallbacks_only_poll_on_the_failure_path() {
     };
     assert!(matches!(
         fallback_block.terminator,
-        Terminator::Suspend { .. }
+        Terminator::Retry { .. }
     ));
     assert!(!matches!(
         success_block.terminator,
-        Terminator::Suspend { .. }
+        Terminator::Retry { .. }
     ));
 
     Validator::new_with_features(WasmFeatures::all())

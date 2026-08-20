@@ -353,7 +353,11 @@ onAttach {
     let offsets: [i64; 2] = [0x100, 0x20]
     let module = await process.module("GameAssembly.dll")
     let marker = retry readMarker()
-    print(`ready {module.address}:{marker}`)
+    let health = retry {
+        let player = process.follow(module.address, offsets)?
+        process.read<i32>(player)?
+    }
+    print(`ready {module.address}:{marker}:{health}`)
 }"#;
 
 // Catalog examples are compiled all the way through Wasm. The declaration is
@@ -629,12 +633,18 @@ focused_example!(
     "let module = await process.module(\"GameAssembly.dll\")",
     ASYNC_SOURCE
 );
-focused_example!(
-    RETRY_EXAMPLE,
-    "Poll until a read succeeds",
-    "let player = retry process.follow(module.address, [0x100, 0x20])",
-    ASYNC_SOURCE
-);
+const RETRY_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Retry one fallible expression",
+        "let marker = retry readMarker()",
+        ASYNC_SOURCE,
+    ),
+    Example::checked(
+        "Retry a complete fallible block",
+        "let health = retry {\n    let player = process.follow(module.address, offsets)?\n    process.read<i32>(player)?\n}",
+        ASYNC_SOURCE,
+    ),
+];
 focused_example!(
     PROPAGATE_EXAMPLE,
     "Forward a read error",
@@ -1107,8 +1117,8 @@ define_language_catalog! {
         "throw",
         LanguageItemKind::Keyword,
         "throw error",
-        "Transfers an error to the nearest [`T!`] boundary.",
-        "Without a future catch boundary, [`throw`] returns an error from a [`T!`] function. The error expression must be a [`String`].",
+        "Transfers an error to the nearest failure boundary.",
+        "Inside [`retry`], [`throw`] ends the current attempt and retries the complete operand on the next attached update. Otherwise it returns an error from the enclosing [`T!`] function or rejects the current state-field value. The error expression must be a [`String`].",
         THROW_EXAMPLE
     ),
     language_item!(
@@ -1133,10 +1143,10 @@ define_language_catalog! {
         Retry,
         "retry",
         LanguageItemKind::Keyword,
-        "let value = retry resultExpression",
-        "Retries a [`T!`] expression until it succeeds.",
-        "The [`T!`] expression is evaluated once per attached update. An error stays pending; success yields `T`. A containing function infers an [`async`] result unless it has an explicit result type, in which case write `-> async T`.",
-        RETRY_EXAMPLE
+        "let value = retry fallibleExpression | let value = retry { ... }",
+        "Retries synchronous fallible work until it succeeds.",
+        "[`retry`] creates a local error boundary around any ordinary expression. The complete operand is evaluated again once per attached update. A [`T!`] error, postfix [`?`], or [`throw`] ends only the current attempt; a successful final value yields `T`. A value block is not a special retry form: braces are ordinary expressions, so `retry { ... }` naturally retries every statement and its final expression. [`return`], [`break`], and [`continue`] keep their normal lexical targets. The attempt itself must remain synchronous and bounded: evaluating [`await`] or another [`retry`] inside it is rejected, while merely calling an [`async`] function to construct a future is allowed. A containing function infers an [`async`] result unless its result type is explicit, in which case write `-> async T`. Process closure cancels the retry boundary.",
+        RETRY_EXAMPLES
     ),
     language_item!(
         Propagate,
@@ -1144,7 +1154,7 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "resultExpression?",
         "Propagates a [`T!`] error.",
-        "Postfix [`?`] unwraps success or transfers the original error to the nearest [`T!`] function or state-field assignment boundary.",
+        "Postfix [`?`] unwraps success or transfers the original error to the nearest failure boundary: a [`retry`] operand restarts on the next attached update, a state-field assignment rejects that field update, and a [`T!`] function returns the error.",
         PROPAGATE_EXAMPLE
     ),
     language_item!(

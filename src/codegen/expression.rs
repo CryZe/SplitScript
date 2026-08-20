@@ -530,19 +530,30 @@ fn compile_block_with_loop(
             }
             function.instruction(&Instruction::Return);
         }
-        wasm_ir::Terminator::Throw { error, target } => {
-            let Type::Result(target_result) = context.ty(*target) else {
-                unreachable!("throw targets are result values")
-            };
-            emit_failure_transfer(
-                function,
-                target_result,
-                result_value_type(target_result, context.semantics),
-                context.gc,
-                |function| compile_expr(function, *error, context),
-            );
-        }
-        wasm_ir::Terminator::Suspend { .. } => {
+        wasm_ir::Terminator::Throw { error, target } => match target {
+            crate::hir::FailureTarget::Return(target) => {
+                let Type::Result(target_result) = context.ty(*target) else {
+                    unreachable!("throw targets are result values")
+                };
+                emit_failure_transfer(
+                    function,
+                    target_result,
+                    result_value_type(target_result, context.semantics),
+                    context.gc,
+                    |function| compile_expr(function, *error, context),
+                );
+            }
+            crate::hir::FailureTarget::Retry { .. } => {
+                compile_expr(function, *error, context);
+                function
+                    .instruction(&Instruction::Drop)
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::Return);
+            }
+        },
+        wasm_ir::Terminator::Retry { .. }
+        | wasm_ir::Terminator::RetryComplete { .. }
+        | wasm_ir::Terminator::Suspend { .. } => {
             unreachable!("suspension is lowered by the async action compiler")
         }
     }
@@ -2030,9 +2041,6 @@ fn compile_expr_unconverted(
             let Type::Result(input_result) = context.expression_type(*value) else {
                 unreachable!("typed propagation inputs are result values")
             };
-            let Type::Result(target_result) = context.ty(*target) else {
-                unreachable!("propagation targets are result values")
-            };
             compile_expr(function, *value, context);
             function
                 .instruction(&Instruction::LocalSet(input_local))
@@ -2045,23 +2053,35 @@ fn compile_expr_unconverted(
                 Type::I32,
             );
             function.instruction(&Instruction::If(BlockType::Empty));
-            emit_failure_transfer(
-                function,
-                target_result,
-                result_value_type(target_result, context.semantics),
-                context.gc,
-                |function| {
-                    function
-                        .instruction(&Instruction::LocalGet(input_local))
-                        .instruction(&Instruction::RefAsNonNull);
-                    emit_typed_struct_get(
+            match target {
+                crate::hir::FailureTarget::Return(target) => {
+                    let Type::Result(target_result) = context.ty(*target) else {
+                        unreachable!("propagation targets are result values")
+                    };
+                    emit_failure_transfer(
                         function,
-                        context.gc.index(Type::Result(input_result)),
-                        2,
-                        Type::Standard(StdlibTypeId::String),
+                        target_result,
+                        result_value_type(target_result, context.semantics),
+                        context.gc,
+                        |function| {
+                            function
+                                .instruction(&Instruction::LocalGet(input_local))
+                                .instruction(&Instruction::RefAsNonNull);
+                            emit_typed_struct_get(
+                                function,
+                                context.gc.index(Type::Result(input_result)),
+                                2,
+                                Type::Standard(StdlibTypeId::String),
+                            );
+                        },
                     );
-                },
-            );
+                }
+                crate::hir::FailureTarget::Retry { .. } => {
+                    function
+                        .instruction(&Instruction::I32Const(0))
+                        .instruction(&Instruction::Return);
+                }
+            }
             function.instruction(&Instruction::End);
             if ty != Type::None || context.materialize_none {
                 function

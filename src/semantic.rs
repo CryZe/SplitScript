@@ -268,7 +268,9 @@ pub struct SemanticModel {
     state_layout_fields: HashMap<EnumVariantId, Vec<ValueId>>,
     state_poll_results: HashMap<ValueId, TypeId>,
     propagation_targets: HashMap<ExprId, TypeId>,
+    propagation_retry_boundaries: HashMap<ExprId, ExprId>,
     value_block_failure_targets: HashMap<ExprId, TypeId>,
+    value_block_retry_boundaries: HashMap<ExprId, ExprId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
     record_literals: HashMap<ExprId, ResolvedRecordId>,
     record_literal_fields: HashMap<ExprId, Vec<ResolvedRecordFieldId>>,
@@ -836,9 +838,19 @@ impl SemanticModel {
         self.propagation_targets.get(&expression).copied()
     }
 
+    /// The retry expression which catches this propagation, when it does not
+    /// return from the enclosing result-producing body.
+    pub fn propagation_retry_boundary(&self, expression: ExprId) -> Option<ExprId> {
+        self.propagation_retry_boundaries.get(&expression).copied()
+    }
+
     /// The enclosing result boundary used by `throw` inside a value block.
     pub fn value_block_failure_target(&self, expression: ExprId) -> Option<TypeId> {
         self.value_block_failure_targets.get(&expression).copied()
+    }
+
+    pub fn value_block_retry_boundary(&self, expression: ExprId) -> Option<ExprId> {
+        self.value_block_retry_boundaries.get(&expression).copied()
     }
 
     pub fn path_members(&self, expression: ExprId) -> Option<&[ResolvedMember]> {
@@ -965,7 +977,9 @@ pub(crate) struct SemanticBuilder {
     state_layout_fields: HashMap<EnumVariantId, Vec<ValueId>>,
     state_poll_results: HashMap<ValueId, Type>,
     propagation_targets: HashMap<ExprId, Type>,
+    propagation_retry_boundaries: HashMap<ExprId, ExprId>,
     value_block_failure_targets: HashMap<ExprId, Type>,
+    value_block_retry_boundaries: HashMap<ExprId, ExprId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
     record_literals: HashMap<ExprId, ResolvedRecordId>,
     record_literal_fields: HashMap<ExprId, Vec<ResolvedRecordFieldId>>,
@@ -1136,17 +1150,41 @@ impl SemanticBuilder {
         debug_assert!(previous.is_none(), "state poll result must be unique");
     }
 
-    pub(crate) fn resolve_propagation_target(&mut self, expression: ExprId, result: Type) {
+    pub(crate) fn resolve_propagation_target(
+        &mut self,
+        expression: ExprId,
+        result: Type,
+        retry: Option<ExprId>,
+    ) {
         let previous = self.propagation_targets.insert(expression, result);
         debug_assert!(
             previous.is_none(),
             "propagation expression IDs must be unique"
         );
+        if let Some(retry) = retry {
+            let previous = self.propagation_retry_boundaries.insert(expression, retry);
+            debug_assert!(
+                previous.is_none(),
+                "propagation boundary IDs must be unique"
+            );
+        }
     }
 
-    pub(crate) fn resolve_value_block_failure_target(&mut self, expression: ExprId, result: Type) {
+    pub(crate) fn resolve_value_block_failure_target(
+        &mut self,
+        expression: ExprId,
+        result: Type,
+        retry: Option<ExprId>,
+    ) {
         let previous = self.value_block_failure_targets.insert(expression, result);
         debug_assert!(previous.is_none(), "value block IDs must be unique");
+        if let Some(retry) = retry {
+            let previous = self.value_block_retry_boundaries.insert(expression, retry);
+            debug_assert!(
+                previous.is_none(),
+                "value block boundary IDs must be unique"
+            );
+        }
     }
 
     pub(crate) fn resolve_path_members(
@@ -1281,7 +1319,9 @@ impl SemanticBuilder {
             state_layout_fields,
             state_poll_results,
             propagation_targets,
+            propagation_retry_boundaries,
             value_block_failure_targets,
+            value_block_retry_boundaries,
             path_members,
             record_literals,
             record_literal_fields,
@@ -1655,7 +1695,9 @@ impl SemanticBuilder {
             state_layout_fields,
             state_poll_results,
             propagation_targets,
+            propagation_retry_boundaries,
             value_block_failure_targets,
+            value_block_retry_boundaries,
             path_members,
             record_literals,
             record_literal_fields,

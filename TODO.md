@@ -102,10 +102,9 @@ semantic-review evidence, not as a conformance corpus.
   only live validation of the legacy identities and offsets remains.
   Hades likewise needs no fixed index array for its screen vector: an address
   cursor and the existing `while` preserve the runtime end pointer. Its two
-  known engine-module names compose through `loadedModule` and a cooperative
-  value loop, while arbitrary future prefix matches remain a narrower host
-  enumeration question. The manual loop also motivates the separately planned
-  whole-block retry boundary rather than more module-specific migration text.
+  known engine-module names compose through `loadedModule` and the implemented
+  whole-expression retry boundary, while arbitrary future prefix matches remain
+  a narrower host enumeration question.
 - [ ] Promote a small corrected subset to reviewed fixtures: one exact-name
   native process, one process-name array, one multi-version named layout, one
   timer-state/split-index script, one `tickRate` script, one managed-string or
@@ -151,17 +150,36 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Close feedback loops without papering over language design
 
-- [ ] Design whole-block retry as the next language feature before prescribing
-  the Hades module-discovery recipe. Evaluate `retry { ... }` as an expression
-  that reruns the complete block on the next attached tick when any postfix
-  `?` reaches it, with process-lifetime cancellation and ordinary success as
-  the block value. Specify whether explicit `Err`, nested failure boundaries,
-  `return`/`break`/`continue`, and a suspending operation inside the block
-  transfer or escape; define its inferred `async T` type and diagnostics; then
-  review the syntax and semantics before implementation. Document the final
-  choice with focused examples and contrasts for ASL/C#, JavaScript, and Rust.
-  A general value-producing [`loop`] is available as a lower-level mechanism,
-  but should not become the canonical recipe for a retry transaction.
+- [x] Design and implement whole-expression retry before prescribing
+  the Hades module-discovery recipe. Generalize the existing `retry expression`
+  so its operand establishes a local failure boundary; a value block is then
+  the ergonomic `retry { ... }` form rather than a separate hard-coded grammar.
+  Any postfix `?` reaching that boundary ends the current attempt, suspends, and
+  starts the complete operand again on the next attached tick. Ordinary success
+  yields `T`, so the retry expression has type `T` and makes its containing
+  function `async T`; it does not create a storable `async T` value. Give
+  propagation targets a boundary identity instead of only a result type so
+  code generation can distinguish function return, state-field rejection, and
+  retry restart without guessing from syntax. Preserve process-lifetime
+  cancellation. The operand is one synchronous attempt: reject an [`await`] or
+  another [`retry`] evaluated anywhere inside it, whether it is a parenthesized
+  expression, conditional, match, or value block. Calling an async function is
+  still synchronous future construction and remains valid; only polling that
+  value with [`await`] violates the boundary. This is the dual of [`await`]:
+  `await` consumes an already-asynchronous value, while `retry` repeatedly
+  evaluates synchronous fallible work and is itself the suspension point.
+  Explicit `Err` and `throw` reaching the boundary both retry;
+  `return`/`break`/`continue` keep their ordinary explicit lexical transfers
+  out of the attempt. The accepted model is documented in the language reference
+  and keyword hover, with examples for a direct fallible expression, a
+  multi-step block, alternative fallible operations, and an explicit
+  retry-triggering error. Add focused contrasts to the ASL, C#, JavaScript, and
+  Rust guides, especially that Rust-style `?` normally targets a function while
+  this construct deliberately creates a local retry boundary. Explain that
+  every attempt runs within one tick and must remain bounded; intrinsically
+  asynchronous discovery belongs outside the attempt behind [`await`]. A
+  general value-producing [`loop`] remains the lower-level escape hatch, not
+  the canonical retry transaction.
 - [ ] Design semantic lints from failures that compiled cleanly. Evaluate an
   unused-setting warning (the campaign declared `allSkullsMode` but read an
   unrelated always-false global), a suggestion from literal

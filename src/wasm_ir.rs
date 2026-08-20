@@ -20,8 +20,9 @@ use crate::{
     },
     effects::OperationAnalysis,
     hir::{
-        self, ExpressionResolution, ImplicitConversion, TypedExpression, TypedExpressionKind,
-        TypedFallbackBranch, TypedInterpolatedPart, TypedPattern, TypedProgram, TypedStatementKind,
+        self, ExpressionResolution, FailureTarget, ImplicitConversion, TypedExpression,
+        TypedExpressionKind, TypedFallbackBranch, TypedInterpolatedPart, TypedPattern,
+        TypedProgram, TypedStatementKind,
     },
     intrinsic_registry::{self, ScratchPolicy, ScratchType},
     semantic::{
@@ -188,7 +189,7 @@ pub enum ExpressionKind {
     },
     Propagate {
         value: ExprId,
-        target: TypeId,
+        target: FailureTarget,
     },
     Match {
         value: ExprId,
@@ -513,7 +514,24 @@ pub enum Terminator {
     Return(Option<ExprId>),
     Throw {
         error: ExprId,
-        target: TypeId,
+        target: FailureTarget,
+    },
+    /// Enters a synchronous fallible attempt. The attempt is evaluated in the
+    /// poll state on every tick until `RetryComplete` observes success.
+    Retry {
+        attempt: Box<Block>,
+        continuation: Box<Block>,
+        source: Option<Span>,
+        poll_state: AsyncStateId,
+        resume_state: AsyncStateId,
+        cancellation: Option<CancellationRegion>,
+        live_values: Vec<ValueId>,
+    },
+    /// Completes the enclosing retry attempt with its `T!` value.
+    RetryComplete {
+        value: ExprId,
+        destination: SuspensionDestination,
+        resume_state: AsyncStateId,
     },
     Suspend {
         mode: SuspensionMode,
@@ -1376,6 +1394,49 @@ fn analyze_suspension_liveness(
             collect_expression_values(*value, &mut before_suspend, local_values, program);
             before_suspend
         }
+        Terminator::Retry {
+            attempt,
+            continuation,
+            live_values,
+            ..
+        } => {
+            let continuation_live = analyze_suspension_liveness(
+                continuation,
+                live_after,
+                local_values,
+                ordered_locals,
+                program,
+                frame_values,
+            );
+            let attempt_live = analyze_suspension_liveness(
+                attempt,
+                HashSet::new(),
+                local_values,
+                ordered_locals,
+                program,
+                frame_values,
+            );
+            let mut suspension_live = continuation_live;
+            suspension_live.extend(attempt_live);
+            live_values.clear();
+            live_values.extend(
+                ordered_locals
+                    .iter()
+                    .filter_map(|local| match local.purpose {
+                        LocalPurpose::Value(value) if suspension_live.contains(&value) => {
+                            Some(value)
+                        }
+                        _ => None,
+                    }),
+            );
+            frame_values.extend(live_values.iter().copied());
+            suspension_live
+        }
+        Terminator::RetryComplete { value, .. } => {
+            let mut live = HashSet::new();
+            collect_expression_values(*value, &mut live, local_values, program);
+            live
+        }
         Terminator::Return(value) => {
             let mut live = HashSet::new();
             if let Some(value) = value {
@@ -1749,6 +1810,12 @@ enum AsyncExpressionStep {
         cancellation: Option<CancellationRegion>,
         source: Option<Span>,
     },
+    Retry {
+        attempt: Box<NormalizedExpression>,
+        destination: SuspensionDestination,
+        cancellation: Option<CancellationRegion>,
+        source: Option<Span>,
+    },
     If {
         condition: ExprId,
         then_expression: Box<NormalizedExpression>,
@@ -1790,7 +1857,7 @@ struct NormalizedMatchArm {
 impl AsyncExpressionStep {
     fn suspends(&self) -> bool {
         match self {
-            Self::Suspend { .. } => true,
+            Self::Suspend { .. } | Self::Retry { .. } => true,
             Self::Store { .. } => false,
             Self::If {
                 then_expression,
@@ -1921,13 +1988,7 @@ fn normalize_expression_suspensions_with(
 
     if let ExpressionKind::Suspend { mode, value, .. } = original.kind.clone() {
         let operand = normalize_expression_suspensions_with(value, context);
-        let mut steps = operand.steps;
         let cancellation = suspension_cancellation(mode, value, context.typed_hir);
-        let operand_value = if mode == SuspensionMode::Await {
-            capture_await_operand(operand.value, &mut steps, context)
-        } else {
-            operand.value
-        };
         let storage_ty = original
             .conversion
             .map_or(original.ty, |conversion| conversion.source);
@@ -1935,13 +1996,31 @@ fn normalize_expression_suspensions_with(
             context
                 .wasm_ir
                 .temporary_read(storage_ty, original.ty, original.conversion);
-        steps.push(AsyncExpressionStep::Suspend {
-            mode,
-            destination: SuspensionDestination::Temporary(temporary),
-            value: operand_value,
-            cancellation,
-            source: original.source,
-        });
+        // Both operators accept the same arbitrary expression tree, including
+        // the ordinary `ExpressionKind::Block`. Their evaluation boundaries
+        // differ: retry owns the whole normalized tree so every poll starts a
+        // fresh attempt, while await evaluates and captures its operand once
+        // before polling the resulting future.
+        let steps = if mode == SuspensionMode::Retry {
+            vec![AsyncExpressionStep::Retry {
+                attempt: Box::new(operand),
+                destination: SuspensionDestination::Temporary(temporary),
+                cancellation,
+                source: original.source,
+            }]
+        } else {
+            let mut steps = operand.steps;
+            let operand_value = capture_await_operand(operand.value, &mut steps, context);
+            steps.push(AsyncExpressionStep::Suspend {
+                mode,
+                destination: SuspensionDestination::Temporary(temporary),
+                value: operand_value,
+                cancellation,
+                source: original.source,
+            });
+            steps
+        };
+        debug_assert!(steps.last().is_some());
         return NormalizedExpression { value, steps };
     }
 
@@ -2596,6 +2675,40 @@ fn wrap_async_expression_steps(
                         cancellation,
                         live_values: Vec::new(),
                         continuation: Box::new(continuation),
+                    },
+                };
+            }
+            AsyncExpressionStep::Retry {
+                attempt,
+                destination,
+                cancellation,
+                source: retry_source,
+            } => {
+                let attempt = wrap_async_expression_steps(
+                    attempt.steps,
+                    Block {
+                        statements: Vec::new(),
+                        terminator: Terminator::RetryComplete {
+                            value: attempt.value,
+                            destination,
+                            resume_state: AsyncStateId::ENTRY,
+                        },
+                    },
+                    typed_hir,
+                    semantics,
+                    source,
+                    wasm_ir,
+                );
+                continuation = Block {
+                    statements: Vec::new(),
+                    terminator: Terminator::Retry {
+                        attempt: Box::new(attempt),
+                        continuation: Box::new(continuation),
+                        source: retry_source,
+                        poll_state: AsyncStateId::ENTRY,
+                        resume_state: AsyncStateId::ENTRY,
+                        cancellation,
+                        live_values: Vec::new(),
                     },
                 };
             }
@@ -3430,6 +3543,21 @@ fn assign_async_states(block: &mut Block, next: &mut u32) {
         *resume_state = AsyncStateId(*next);
         *next += 1;
         assign_async_states(continuation, next);
+    } else if let Terminator::Retry {
+        attempt,
+        continuation,
+        poll_state,
+        resume_state,
+        ..
+    } = &mut block.terminator
+    {
+        *poll_state = AsyncStateId(*next);
+        *next += 1;
+        *resume_state = AsyncStateId(*next);
+        *next += 1;
+        set_retry_complete_state(attempt, *resume_state);
+        assign_async_states(attempt, next);
+        assign_async_states(continuation, next);
     } else if let Terminator::AsyncWhile {
         header,
         continuation,
@@ -3461,6 +3589,72 @@ fn assign_async_states(block: &mut Block, next: &mut u32) {
         *next += 1;
         assign_async_states(body, next);
         assign_async_states(continuation, next);
+    }
+}
+
+fn set_retry_complete_state(block: &mut Block, resume_state: AsyncStateId) {
+    for statement in &mut block.statements {
+        match statement {
+            Statement::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                set_retry_complete_state(then_block, resume_state);
+                set_retry_complete_state(else_block, resume_state);
+            }
+            Statement::Match { arms, .. } => {
+                for arm in arms {
+                    set_retry_complete_state(&mut arm.block, resume_state);
+                }
+            }
+            Statement::Fallback {
+                fallback_block,
+                success_block,
+                ..
+            } => {
+                set_retry_complete_state(fallback_block, resume_state);
+                set_retry_complete_state(success_block, resume_state);
+            }
+            Statement::While { body, .. } | Statement::For { body, .. } => {
+                set_retry_complete_state(body, resume_state);
+            }
+            Statement::Store { .. }
+            | Statement::StateStore { .. }
+            | Statement::DebugLocation(_)
+            | Statement::StoreTemporary { .. }
+            | Statement::IndexStore { .. }
+            | Statement::Evaluate { .. }
+            | Statement::ForInit { .. } => {}
+        }
+    }
+    match &mut block.terminator {
+        Terminator::RetryComplete {
+            resume_state: target,
+            ..
+        } => *target = resume_state,
+        Terminator::Retry { .. } => {
+            unreachable!("a retry operand cannot contain another retry")
+        }
+        Terminator::Suspend { .. } => {
+            unreachable!("a retry operand cannot contain await")
+        }
+        Terminator::AsyncWhile {
+            header,
+            continuation,
+            ..
+        } => {
+            set_retry_complete_state(header, resume_state);
+            set_retry_complete_state(continuation, resume_state);
+        }
+        Terminator::AsyncWhileCondition { body, .. } | Terminator::AsyncFor { body, .. } => {
+            set_retry_complete_state(body, resume_state)
+        }
+        Terminator::Fallthrough
+        | Terminator::Break(_)
+        | Terminator::Continue
+        | Terminator::Return(_)
+        | Terminator::Throw { .. } => {}
     }
 }
 
@@ -3516,12 +3710,21 @@ fn set_async_while_targets(
         Terminator::Suspend { continuation, .. } => {
             set_async_while_targets(continuation, header_state, exit_state);
         }
+        Terminator::Retry {
+            attempt,
+            continuation,
+            ..
+        } => {
+            set_async_while_targets(attempt, header_state, exit_state);
+            set_async_while_targets(continuation, header_state, exit_state);
+        }
         Terminator::Fallthrough
         | Terminator::Break(_)
         | Terminator::Continue
         | Terminator::AsyncWhile { .. }
         | Terminator::AsyncFor { .. }
         | Terminator::Return(_)
+        | Terminator::RetryComplete { .. }
         | Terminator::Throw { .. } => {}
     }
 }
@@ -3756,6 +3959,28 @@ impl Visitor for LocalPlanner<'_> {
                 let completion_type = self.awaited_value_type(operand_type);
                 self.push_intrinsic_scratch(*value, completion_type, policy);
             }
+        } else if let Terminator::RetryComplete {
+            destination, value, ..
+        } = terminator
+        {
+            if let Some(binding) = destination.source_value() {
+                self.value(binding);
+            }
+            let operand_type = program
+                .expression(*value)
+                .expect("retried expression belongs to Wasm IR")
+                .ty;
+            let TypeKind::Result {
+                value: completion_type,
+                ..
+            } = self.semantics.types().kind(operand_type)
+            else {
+                unreachable!("retry completion requires a Result expression")
+            };
+            if let SuspensionDestination::Temporary(temporary) = destination {
+                self.push(*completion_type, LocalPurpose::Temporary(*temporary));
+            }
+            self.push(operand_type, LocalPurpose::SuspensionScratch(*value));
         }
         walk_terminator(self, terminator, program);
     }

@@ -164,8 +164,11 @@ impl Checker {
             }
             ExprKind::Block(block) => {
                 if let Some(boundary) = self.failure.result() {
-                    self.semantics
-                        .resolve_value_block_failure_target(expr.id, boundary);
+                    self.semantics.resolve_value_block_failure_target(
+                        expr.id,
+                        boundary,
+                        self.failure.retry_expression(),
+                    );
                 }
                 self.scopes.push(HashMap::new());
                 let tail = block
@@ -242,8 +245,11 @@ impl Checker {
             }
             ExprKind::Loop(block) => {
                 if let Some(boundary) = self.failure.result() {
-                    self.semantics
-                        .resolve_value_block_failure_target(expr.id, boundary);
+                    self.semantics.resolve_value_block_failure_target(
+                        expr.id,
+                        boundary,
+                        self.failure.retry_expression(),
+                    );
                 }
                 let inferred_result = expected.is_none();
                 let result =
@@ -862,6 +868,18 @@ impl Checker {
                 destination,
                 value,
             } => {
+                if self.expression_mode == super::context::ExpressionMode::SuspensionOperand {
+                    let keyword = match mode {
+                        SuspensionMode::Await => "await",
+                        SuspensionMode::Retry => "retry",
+                    };
+                    self.error(
+                        format!(
+                            "`{keyword}` cannot be evaluated inside an `await` or `retry` operand"
+                        ),
+                        expr.span,
+                    );
+                }
                 if !self.callable.can_suspend() {
                     let keyword = match mode {
                         SuspensionMode::Await => "await",
@@ -872,10 +890,41 @@ impl Checker {
                         expr.span,
                     );
                 }
-                let operand = self.with_expression_mode(
-                    super::context::ExpressionMode::SuspensionOperand,
-                    |checker| checker.expr(value, None),
-                )?;
+                let (operand, retry_boundary) = match mode {
+                    SuspensionMode::Await => (
+                        self.with_expression_mode(
+                            super::context::ExpressionMode::SuspensionOperand,
+                            |checker| checker.expr(value, None),
+                        )?,
+                        None,
+                    ),
+                    SuspensionMode::Retry => {
+                        let completion = expected
+                            .unwrap_or_else(|| self.fresh_inference(Requirements::none(), None));
+                        let boundary = Type::Result(self.inference.result_type(completion));
+                        // `value` is checked through the normal expression
+                        // entry point. In particular, a block operand is the
+                        // same generic value block used everywhere else; only
+                        // its surrounding failure boundary is retry-specific.
+                        let (operand, failure) = self.with_expression_mode(
+                            super::context::ExpressionMode::SuspensionOperand,
+                            |checker| {
+                                checker.with_failure_context(
+                                    super::context::FailureContext::retry(boundary, expr.id),
+                                    |checker| checker.expr(value, Some(boundary)),
+                                )
+                            },
+                        );
+                        if !failure.propagated() && !failure.observed_result() {
+                            self.error(
+                                "`retry` expects a result value (`T!`) or synchronous fallible work using `?` or `throw`",
+                                value.span,
+                            );
+                            return None;
+                        }
+                        (operand?, Some((boundary, completion)))
+                    }
+                };
                 let result = match mode {
                     SuspensionMode::Await => match self.shallow_type(operand) {
                         Type::Async(future) => self.inference.async_value(future),
@@ -889,7 +938,13 @@ impl Checker {
                         }
                     },
                     SuspensionMode::Retry => match self.shallow_type(operand) {
-                        Type::Result(result) => self.inference.result_value(result),
+                        Type::Result(result) => {
+                            let value = self.inference.result_value(result);
+                            let (_, completion) = retry_boundary
+                                .expect("retry operands create a local failure boundary");
+                            self.unify(value, completion, expr.span)?;
+                            completion
+                        }
                         operand => {
                             let operand = self.type_name(operand);
                             self.error(
@@ -919,7 +974,11 @@ impl Checker {
                 let Type::Result(_) = self.shallow_type(boundary) else {
                     unreachable!("failure boundaries are result types")
                 };
-                self.semantics.resolve_propagation_target(expr.id, boundary);
+                self.semantics.resolve_propagation_target(
+                    expr.id,
+                    boundary,
+                    self.failure.retry_expression(),
+                );
                 let value_type = self.inference.result_value(input_result);
                 self.expect_expression(expr.id, value_type, expected, expr.span)?
             }

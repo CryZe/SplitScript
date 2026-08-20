@@ -1041,6 +1041,91 @@ fn while_requires_bool_conditions() {
 }
 
 #[test]
+fn loop_expressions_infer_break_values_and_diverge_without_breaks() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn choose(positive: bool) -> i32 {
+            return loop {
+                if positive {
+                    break 7
+                }
+                break -1
+            }
+        }
+
+        fn waitForever() -> async Never {
+            loop {
+                await nextTick()
+            }
+        }
+
+        setup {
+            let none: None = loop { break }
+            let fallbackNone: None = loop {
+                let missing: i32? = None
+                missing else break
+            }
+            print(choose(true))
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("loop results should infer from all breaks and expected types");
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("sync, unit, and suspending divergent loops should produce valid Wasm GC");
+}
+
+#[test]
+fn break_values_only_target_the_nearest_loop_expression() {
+    let while_value =
+        splitscript::compile(r#"state "game.exe" {} setup { while true { break 7 } }"#)
+            .expect_err("while loops must not accept value-carrying breaks");
+    assert!(while_value.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("only a `loop` expression can break with a value")
+    }));
+
+    let nested_while = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn value() -> i32 {
+                return loop {
+                    while true {
+                        break 7
+                    }
+                }
+            }
+        "#,
+    )
+    .expect_err("a break must not skip a nested while to target an outer value loop");
+    assert!(nested_while.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("only a `loop` expression can break with a value")
+    }));
+
+    let conflicting = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            fn value(flag: bool) {
+                return loop {
+                    if flag { break 7 }
+                    break false
+                }
+            }
+        "#,
+    )
+    .expect_err("all loop break values must have one inferred type");
+    assert!(
+        !conflicting.is_empty(),
+        "conflicting break types must be rejected"
+    );
+}
+
+#[test]
 fn on_attach_loops_lower_suspending_back_edges_to_async_states() {
     let source = include_str!("../async_loop.split");
     let checked = splitscript::check(splitscript::parse(source).unwrap())

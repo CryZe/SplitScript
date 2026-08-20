@@ -62,6 +62,28 @@ function. Function, method, and lifecycle bodies continue to use explicit
 semicolon on the final value is accepted for familiarity, but the compiler
 warns because it does not discard that value, and the formatter removes it.
 
+## Unconditional and value-producing loops
+
+C# `while (true)` maps to [`loop`] when repetition is intentionally
+unconditional. Unlike C#, a [`loop`] can itself produce a value through
+`break value`; all break values infer one result type. A loop without a break
+has type [`Never`].
+
+```splitscript
+# state "game.exe" {}
+fn choose(flag: bool) -> i32 {
+    return loop {
+        if flag { break 7 }
+        break -1
+    }
+}
+# setup { print(choose(true)) }
+```
+
+Keep [`while`] for a real condition. Only [`loop`] accepts a value-carrying
+[`break`]; bare break and [`continue`] work in all runtime loops. Function
+results still require the explicit [`return`] shown above.
+
 ## Optional and fallible values
 
 [`T?`] is an optional value and [`T!`] is a value or an error. [`None`] is both the

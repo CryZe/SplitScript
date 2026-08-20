@@ -103,7 +103,9 @@ pub fn walk_statement(
             visitor.visit_block(fallback_block, program);
             visitor.visit_block(success_block, program);
         }
-        Statement::While { condition, body } => {
+        Statement::While {
+            condition, body, ..
+        } => {
             visitor.visit_expression_id(*condition, program);
             visitor.visit_block(body, program);
         }
@@ -121,7 +123,12 @@ pub fn walk_terminator(
     program: &Program,
 ) {
     match terminator {
-        Terminator::Fallthrough | Terminator::Break | Terminator::Continue => {}
+        Terminator::Break(value) => {
+            if let Some(value) = value {
+                visitor.visit_expression_id(*value, program);
+            }
+        }
+        Terminator::Fallthrough | Terminator::Continue => {}
         Terminator::AsyncWhile {
             header,
             continuation,
@@ -178,6 +185,7 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
     match kind {
         ExpressionKind::None
         | ExpressionKind::ValueBlock
+        | ExpressionKind::Loop
         | ExpressionKind::Bool(_)
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)

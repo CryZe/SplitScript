@@ -1675,3 +1675,51 @@ fn explicit_generic_calls_accept_named_and_constructed_types() {
     )
     .expect_err("the former dotted type-selector syntax must not remain available");
 }
+
+#[test]
+fn known_alternate_modules_and_runtime_pointer_bounds_need_no_enumeration_or_index_array() {
+    let source = r#"
+        state "Hades.exe" {}
+
+        fn engineModule() -> async Module {
+            return loop {
+                let engine = process.loadedModule("EngineWin64s.dll")
+                    else process.loadedModule("EngineWin64sv.dll")
+                    else {
+                        await nextTick()
+                        continue
+                    }
+                break engine
+            }
+        }
+
+        fn findGameUi(screenManager: address) -> address? {
+            let cursor = process.read<address>(screenManager.offset(0x48)) else return None
+            let end = process.read<address>(screenManager.offset(0x50)) else return None
+            while cursor < end {
+                let screen = process.read<address>(cursor) else return None
+                let vtable = process.read<address>(screen) else return None
+                let getType = process.read<address>(vtable.offset(0x68)) else return None
+                let screenType = process.read<i32>(getType.offset(1)) else return None
+                if (screenType & 0x7) == 7 {
+                    return Some(screen)
+                }
+                cursor = cursor.offset(8)
+            }
+            return None
+        }
+
+        onAttach {
+            let engine = await engineModule()
+            let gameUi = findGameUi(engine.address) else 0
+            print(gameUi)
+            await process.closed()
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("known alternate modules and runtime-bounded pointer walks should compose");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("the focused Hades discovery shape should produce valid Wasm GC");
+}

@@ -363,7 +363,10 @@ fn render_typed_block(
                 .unwrap();
                 render_typed_block(output, body, depth + 1);
             }
-            TypedStatementKind::Break => writeln!(output, "{indent}break").unwrap(),
+            TypedStatementKind::Break(value) => match value {
+                Some(value) => writeln!(output, "{indent}break e{}", value.index()).unwrap(),
+                None => writeln!(output, "{indent}break").unwrap(),
+            },
             TypedStatementKind::Continue => writeln!(output, "{indent}continue").unwrap(),
             TypedStatementKind::Return(value) => match value {
                 Some(value) => writeln!(output, "{indent}return e{}", value.index()).unwrap(),
@@ -444,6 +447,9 @@ fn snapshot_expression_kind(
             "block statements={} value={value:?}",
             statements.statements.len()
         ),
+        TypedExpressionKind::Loop { body } => {
+            format!("loop statements={}", body.statements.len())
+        }
         TypedExpressionKind::Record { record, fields } => {
             format!("record {record} fields={fields:?}")
         }

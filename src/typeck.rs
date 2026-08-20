@@ -207,10 +207,21 @@ impl Checker {
     }
 
     fn with_loop<T>(&mut self, operation: impl FnOnce(&mut Self) -> T) -> T {
-        self.loops.enter();
+        self.loops.enter_statement();
         let output = operation(self);
         self.loops.exit();
         output
+    }
+
+    fn with_value_loop<T>(
+        &mut self,
+        result: Type,
+        operation: impl FnOnce(&mut Self) -> T,
+    ) -> (T, bool) {
+        self.loops.enter_value(result);
+        let output = operation(self);
+        let has_break = self.loops.exit();
+        (output, has_break)
     }
 
     fn with_expression_mode<T>(

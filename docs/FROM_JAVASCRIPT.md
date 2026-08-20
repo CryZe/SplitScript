@@ -106,6 +106,25 @@ replace object literals when a stable named shape matters. [`if`] and [`match`]
 are expressions, and `for value in values` plus `while condition` provide
 loops without callback allocation.
 
+Use [`loop`] instead of `while (true)` when repetition is intentionally
+unconditional. A [`loop`] with no break has type [`Never`]. It can also produce
+a value with `break value`, while [`while`] and runtime [`for`] accept only a
+bare break:
+
+```splitscript
+# state "game.exe" {}
+fn choose(flag: bool) -> i32 {
+    return loop {
+        if flag { break 7 }
+        break -1
+    }
+}
+# setup { print(choose(true)) }
+```
+
+This is expression control flow, not a JavaScript label: `break value` always
+targets the nearest [`loop`], and function results still use [`return`].
+
 ```splitscript
 # state "game.exe" {}
 fn containsLevel(levels: [u32], target: u32) -> bool {

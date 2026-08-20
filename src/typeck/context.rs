@@ -28,25 +28,58 @@ impl DebugContext {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
+pub(super) enum BreakTarget {
+    Statement,
+    Value(Type),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LoopFrame {
+    target: BreakTarget,
+    has_break: bool,
+}
+
+#[derive(Debug, Clone, Default)]
 pub(super) struct LoopContext {
-    depth: usize,
+    stack: Vec<LoopFrame>,
 }
 
 impl LoopContext {
-    pub(super) fn enter(&mut self) {
-        self.depth += 1;
+    pub(super) fn enter_statement(&mut self) {
+        self.stack.push(LoopFrame {
+            target: BreakTarget::Statement,
+            has_break: false,
+        });
     }
 
-    pub(super) fn exit(&mut self) {
-        self.depth = self
-            .depth
-            .checked_sub(1)
-            .expect("loop contexts are balanced");
+    pub(super) fn enter_value(&mut self, result: Type) {
+        self.stack.push(LoopFrame {
+            target: BreakTarget::Value(result),
+            has_break: false,
+        });
     }
 
-    pub(super) fn is_inside(self) -> bool {
-        self.depth != 0
+    pub(super) fn exit(&mut self) -> bool {
+        self.stack
+            .pop()
+            .expect("loop contexts are balanced")
+            .has_break
+    }
+
+    pub(super) fn break_target(&self) -> Option<BreakTarget> {
+        self.stack.last().map(|frame| frame.target)
+    }
+
+    pub(super) fn record_break(&mut self) {
+        self.stack
+            .last_mut()
+            .expect("a checked break has a loop target")
+            .has_break = true;
+    }
+
+    pub(super) fn is_inside(&self) -> bool {
+        !self.stack.is_empty()
     }
 }
 

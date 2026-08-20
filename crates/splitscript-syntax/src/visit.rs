@@ -253,7 +253,12 @@ pub fn walk_stmt<'ast, V: Visitor<'ast>>(visitor: &mut V, statement: &'ast Stmt)
             visitor.visit_for_binding(binding);
             visitor.visit_block(body);
         }
-        Stmt::Break { .. } | Stmt::Continue { .. } => {}
+        Stmt::Break { value, .. } => {
+            if let Some(value) = value {
+                visitor.visit_expr(value);
+            }
+        }
+        Stmt::Continue { .. } => {}
         Stmt::Return { value, .. } => {
             if let Some(value) = value {
                 visitor.visit_expr(value);
@@ -283,7 +288,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
                 visitor.visit_expr(element);
             }
         }
-        ExprKind::Block(block) => visitor.visit_block(block),
+        ExprKind::Block(block) | ExprKind::Loop(block) => visitor.visit_block(block),
         ExprKind::Record { fields, .. } => {
             for (_, value) in fields {
                 visitor.visit_expr(value);
@@ -608,7 +613,12 @@ pub fn walk_stmt_mut<F: Folder>(folder: &mut F, statement: &mut Stmt) {
             folder.fold_for_binding(binding);
             folder.fold_block(body);
         }
-        Stmt::Break { .. } | Stmt::Continue { .. } => {}
+        Stmt::Break { value, .. } => {
+            if let Some(value) = value {
+                folder.fold_expr(value);
+            }
+        }
+        Stmt::Continue { .. } => {}
         Stmt::Return { value, .. } => {
             if let Some(value) = value {
                 folder.fold_expr(value);
@@ -638,7 +648,7 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
                 folder.fold_expr(element);
             }
         }
-        ExprKind::Block(block) => folder.fold_block(block),
+        ExprKind::Block(block) | ExprKind::Loop(block) => folder.fold_block(block),
         ExprKind::Record { fields, .. } => {
             for (_, value) in fields {
                 folder.fold_expr(value);

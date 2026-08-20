@@ -85,6 +85,33 @@ always returns, throws, breaks, or continues has type [`Never`]. A trailing
 semicolon after the final expression is accepted, but the compiler warns and
 the formatter removes it because it is still the block's value.
 
+## Infinite loops and value-carrying breaks
+
+Use [`loop`] for unconditional repetition. A loop without a reachable
+[`break`] has type [`Never`]. Within a [`loop`] expression, `break value`
+supplies its result and all break values are inferred together. A bare break
+supplies [`None`].
+
+```splitscript
+# state "game.exe" {}
+fn chooseImage(vulkan: bool) -> String {
+    return loop {
+        if vulkan {
+            break "EngineWin64sv.dll"
+        }
+        break "EngineWin64s.dll"
+    }
+}
+# setup { print(chooseImage(false)) }
+```
+
+Legacy ASL and C# `while (true)` and JavaScript `while (true)` normally become
+[`loop`] when they are intentionally unconditional. Keep [`while`] when the
+condition carries real policy. Unlike Rust, SplitScript functions do not
+implicitly return a final loop expression: write `return loop { ... }`.
+Value-carrying [`break`] is limited to [`loop`]; a nested [`while`] or runtime
+[`for`] always captures its own bare break.
+
 ## Signed pointer offsets
 
 ASL `DeepPointer` paths commonly contain negative offsets. Preserve them

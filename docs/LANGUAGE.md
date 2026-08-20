@@ -442,6 +442,40 @@ while index < 5 {
 }
 ```
 
+`loop` repeats without a condition. It is an expression: each `break value`
+supplies a possible result, and inference unifies those values with each other
+and with the surrounding expected type. A bare `break` supplies `None`.
+
+```text
+let moduleName: String = loop {
+    let module = process.loadedModule("EngineWin64s.dll")
+        else process.loadedModule("EngineWin64sv.dll")
+        else {
+            await nextTick()
+            continue
+        }
+    break module.name
+}
+```
+
+A `loop` with no reachable `break` has type `Never`, so it can satisfy any
+expected expression type and makes following control flow unreachable. This is
+the direct form for an intentional infinite loop:
+
+```text
+fn waitForever() -> async Never {
+    loop {
+        await nextTick()
+    }
+}
+```
+
+Unlike Rust, a function body still does not return its final expression
+implicitly. Use `return loop { ... }` when a value-producing loop is the
+function result. C#, JavaScript, and ASL authors should prefer `loop` over
+`while true` only when unconditional repetition or a value-carrying break is
+the actual intent.
+
 `for name in array` visits each element of a general `[T]` or exact-length
 `[T; N]` array. The array expression is evaluated once, the element type is
 inferred in both directions, and the read-only element binding is scoped to the
@@ -469,9 +503,13 @@ tick. Replacing an existing array element with `set` is not a structural
 change. A duplicate set insertion or removal of a missing value is also a
 no-op and does not invalidate the loop.
 
-`break` exits the nearest enclosing loop. `continue` skips the rest of the
-current iteration and evaluates that loop's condition again. Both are
-statements, and nested `if` blocks do not change which loop they target.
+`break` exits the nearest enclosing loop. In a `loop` expression,
+`break expression` also supplies the loop's value. Value-carrying breaks are
+not accepted by `while` or runtime `for`; this prevents a break inside a nested
+statement loop from accidentally targeting an outer value loop. `continue`
+skips the rest of the current iteration and evaluates that loop's condition
+again, or immediately begins the next unconditional `loop` iteration. Nested
+`if` blocks do not change which loop either keyword targets.
 
 ```text
 while index < values.length {

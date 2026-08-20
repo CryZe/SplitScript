@@ -295,6 +295,10 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             Stmt::Assign { span, .. }
             | Stmt::StateAssign { span, .. }
             | Stmt::IndexAssign { span, .. }
+            | Stmt::Break {
+                value: Some(_),
+                span,
+            }
             | Stmt::Return { span, .. }
             | Stmt::Throw { span, .. }
             | Stmt::Suspend { span, .. } => {
@@ -306,8 +310,10 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             Stmt::If { span, .. } | Stmt::While { span, .. } | Stmt::For { span, .. } => {
                 self.break_after.insert(span.end);
             }
-            Stmt::Debug { .. } | Stmt::Variable(_) | Stmt::Break { .. } | Stmt::Continue { .. } => {
-            }
+            Stmt::Debug { .. }
+            | Stmt::Variable(_)
+            | Stmt::Break { value: None, .. }
+            | Stmt::Continue { .. } => {}
         }
         visit::walk_stmt(self, statement);
     }
@@ -1521,7 +1527,7 @@ fn needs_space(
 fn is_prefix_keyword(name: &str) -> bool {
     matches!(
         name,
-        "if" | "while" | "match" | "return" | "throw" | "else" | "await" | "retry"
+        "if" | "while" | "match" | "break" | "return" | "throw" | "else" | "await" | "retry"
     )
 }
 
@@ -1531,7 +1537,11 @@ fn is_prefix_operator(current: &TokenKind, previous: Option<&TokenKind>) -> bool
             is_prefix_boundary(previous)
                 || matches!(previous, TokenKind::Ident(name) if is_prefix_keyword(name))
         })
-        || matches!(current, TokenKind::Minus) && previous.is_none_or(is_prefix_boundary)
+        || matches!(current, TokenKind::Minus)
+            && previous.is_none_or(|previous| {
+                is_prefix_boundary(previous)
+                    || matches!(previous, TokenKind::Ident(name) if is_prefix_keyword(name))
+            })
 }
 
 fn is_prefix_boundary(token: &TokenKind) -> bool {
@@ -1640,6 +1650,27 @@ whileAttached {
         assert_eq!(formatted, expected);
         assert_eq!(format_source(&formatted).unwrap(), formatted);
         crate::check(crate::lower(crate::parse(&formatted).unwrap())).unwrap();
+    }
+
+    #[test]
+    fn formats_value_loops_and_break_values() {
+        let source = r#"state "game.exe"{}
+fn choose(flag:bool)->i32{return loop{if flag{break 7}else{break -1}}}"#;
+        let expected = r#"state "game.exe" {}
+fn choose(flag: bool) -> i32 {
+    return loop {
+        if flag {
+            break 7
+        } else {
+            break -1
+        }
+    }
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        crate::compile(&formatted).expect("formatted value loops should compile");
     }
 
     #[test]

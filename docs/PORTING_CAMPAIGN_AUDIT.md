@@ -543,6 +543,39 @@ behavior is now directly representable.
   three source layouts are representable, not that those legacy layouts remain
   correct.
 
+### Cooperative module discovery and runtime pointer bounds: Hades
+
+Campaign status: `BLOCKED`
+
+Audit result: the reported module-enumeration and runtime-range blockers mix a
+real discoverability gap, an unnecessarily fixed translation, and one narrower
+host boundary.
+
+- Source: the engine module is selected with `StartsWith("EngineWin64s")`.
+  The two documented concrete images are `EngineWin64s.dll` and
+  `EngineWin64sv.dll`. The candidate kept only the first exact name and therefore
+  silently dropped Vulkan support.
+- Existing translation: known exact alternatives compose with synchronous
+  `process.loadedModule(name)` checks inside an attachment-owned retry loop. A
+  focused compiler probe validates both names, async tick yielding, a
+  value-carrying [`loop`] result, and valid WebAssembly GC. Arbitrary prefix
+  enumeration remains a narrower host gap only if future unlisted suffixes are
+  part of the required compatibility contract.
+- The source screen vector already exposes begin and end pointers. Walking a
+  mutable address cursor with [`while cursor < end`](language@while) and
+  `cursor = cursor.offset(8)` preserves that runtime bound. The candidate's
+  fixed 32-index array is neither required nor faithful, so this case does not
+  establish a runtime-range requirement.
+- The value-producing [`loop`] is a valid low-level composition, but this
+  discovery shape is stronger evidence for a future whole-block [`retry`]
+  boundary: the complete fallible transaction should restart on the next tick,
+  and postfix [`?`] should transfer failure to that boundary. That design is
+  now explicit roadmap work rather than being hidden behind a manual infinite
+  loop recipe.
+- Exact `shutdown` and timer-event callback behavior remain the existing host
+  lifecycle gaps. Live-game validation is still required for module identities,
+  vector layout, vtable probing, and split timing.
+
 Further campaign work should begin with a concrete friction report and reduce it
 to a focused source comparison or compiler probe. The generated ports are
 supporting evidence, not an exhaustive conformance corpus. Every resulting
@@ -584,7 +617,9 @@ language features:
 - state candidate rejection retains a previous field value without making
   `current` mutable; derived run-owned values belong in globals;
 - `process.loadedModule(name)`, `process.mainModule()`, executable versions,
-  and typed layout selection cover the reviewed edition probes;
+  and typed layout selection cover reviewed known-name probes; whole-block
+  retry remains a language-design opportunity, while arbitrary prefix module
+  discovery still requires host enumeration;
 - `scan`, `readRelative32`, `MemoryPath`, `onAttach`, and `retry` cover the
   reviewed scanner callback and background retry shapes without exposing
   threads.

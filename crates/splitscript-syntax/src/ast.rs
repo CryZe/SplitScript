@@ -936,6 +936,7 @@ pub enum Stmt {
         span: Span,
     },
     Break {
+        value: Option<Box<Expr>>,
         span: Span,
     },
     Continue {
@@ -1014,6 +1015,9 @@ pub enum ExprKind {
     Array(Vec<Expr>),
     /// A lexically scoped sequence whose final expression supplies its value.
     Block(Block),
+    /// Repeats until a `break`, with break values determining the expression's
+    /// type. A loop without a reachable break has type `Never`.
+    Loop(Block),
     Record {
         name: String,
         name_span: Span,

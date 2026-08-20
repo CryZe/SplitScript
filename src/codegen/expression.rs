@@ -181,11 +181,13 @@ pub(super) enum LoopControl {
     Branch {
         break_depth: u32,
         continue_depth: u32,
+        break_destination: Option<wasm_ir::TemporaryId>,
     },
     Async {
         break_state: wasm_ir::AsyncStateId,
         continue_state: wasm_ir::AsyncStateId,
         dispatcher_depth: u32,
+        break_destination: Option<wasm_ir::TemporaryId>,
     },
 }
 
@@ -195,19 +197,34 @@ impl LoopControl {
             Self::Branch {
                 break_depth,
                 continue_depth,
+                break_destination,
             } => Self::Branch {
                 break_depth: break_depth + depth,
                 continue_depth: continue_depth + depth,
+                break_destination,
             },
             Self::Async {
                 break_state,
                 continue_state,
                 dispatcher_depth,
+                break_destination,
             } => Self::Async {
                 break_state,
                 continue_state,
                 dispatcher_depth: dispatcher_depth + depth,
+                break_destination,
             },
+        }
+    }
+
+    pub(super) fn break_destination(self) -> Option<wasm_ir::TemporaryId> {
+        match self {
+            Self::Branch {
+                break_destination, ..
+            }
+            | Self::Async {
+                break_destination, ..
+            } => break_destination,
         }
     }
 
@@ -224,6 +241,7 @@ impl LoopControl {
             Self::Branch {
                 break_depth,
                 continue_depth,
+                ..
             } => {
                 function.instruction(&Instruction::Br(if is_break {
                     break_depth
@@ -235,6 +253,7 @@ impl LoopControl {
                 break_state,
                 continue_state,
                 dispatcher_depth,
+                ..
             } => {
                 let frame = frame.expect("async loop control has a continuation frame");
                 let state = if is_break {
@@ -359,7 +378,11 @@ fn compile_block_with_loop(
                 );
                 function.instruction(&Instruction::End);
             }
-            wasm_ir::Statement::While { condition, body } => {
+            wasm_ir::Statement::While {
+                condition,
+                body,
+                result,
+            } => {
                 function
                     .instruction(&Instruction::Block(BlockType::Empty))
                     .instruction(&Instruction::Loop(BlockType::Empty));
@@ -375,6 +398,7 @@ fn compile_block_with_loop(
                     Some(LoopControl::Branch {
                         break_depth: 1,
                         continue_depth: 0,
+                        break_destination: *result,
                     }),
                 );
                 function
@@ -426,6 +450,7 @@ fn compile_block_with_loop(
                     Some(LoopControl::Branch {
                         break_depth: 1,
                         continue_depth: 0,
+                        break_destination: None,
                     }),
                 );
                 function
@@ -466,10 +491,19 @@ fn compile_block_with_loop(
     }
     match &block.terminator {
         wasm_ir::Terminator::Fallthrough => {}
-        wasm_ir::Terminator::Break => {
-            loop_control
-                .expect("checked break statements belong to loops")
-                .emit_break(function, context.locals.continuation_frame());
+        wasm_ir::Terminator::Break(value) => {
+            let control = loop_control.expect("checked break statements belong to loops");
+            if let Some(value) = value {
+                if let Some(destination) = control.break_destination() {
+                    compile_temporary_set(function, destination, *value, context);
+                } else {
+                    compile_expr(function, *value, &context.erasing_none());
+                    if context.expression_type(*value).has_runtime_value() {
+                        function.instruction(&Instruction::Drop);
+                    }
+                }
+            }
+            control.emit_break(function, context.locals.continuation_frame());
         }
         wasm_ir::Terminator::Continue => {
             loop_control
@@ -1671,7 +1705,7 @@ fn compile_expr_unconverted(
 ) {
     let expression = expression_ir.id;
     match &expression_ir.kind {
-        wasm_ir::ExpressionKind::ValueBlock => {
+        wasm_ir::ExpressionKind::ValueBlock | wasm_ir::ExpressionKind::Loop => {
             unreachable!("value blocks are lowered before expression code generation")
         }
         wasm_ir::ExpressionKind::Suspend { destination, .. } => {

@@ -221,6 +221,9 @@ pub enum TypedExpressionKind {
         statements: TypedBlock,
         value: Option<ExprId>,
     },
+    Loop {
+        body: TypedBlock,
+    },
     Record {
         record: ResolvedRecordId,
         fields: Vec<(String, ExprId)>,
@@ -364,7 +367,7 @@ pub enum TypedStatementKind {
         iterable: ExprId,
         body: TypedBlock,
     },
-    Break,
+    Break(Option<ExprId>),
     Continue,
     Return(Option<ExprId>),
     Throw {
@@ -972,7 +975,12 @@ pub fn walk_typed_statement<V: TypedVisitor>(
             visit_expression(*iterable);
             visitor.visit_block(body, program);
         }
-        TypedStatementKind::Break | TypedStatementKind::Continue => {}
+        TypedStatementKind::Break(value) => {
+            if let Some(value) = value {
+                visit_expression(*value);
+            }
+        }
+        TypedStatementKind::Continue => {}
         TypedStatementKind::Return(value) => {
             if let Some(value) = value {
                 visit_expression(*value);
@@ -1022,6 +1030,7 @@ pub fn walk_typed_expression<V: TypedVisitor>(
                 );
             }
         }
+        TypedExpressionKind::Loop { body } => visitor.visit_block(body, program),
         TypedExpressionKind::Record { fields, .. } => {
             for (_, value) in fields {
                 visit_expression(*value);
@@ -1212,6 +1221,13 @@ fn lower_expression_kind(
                 value,
             }
         }
+        ExprKind::Loop(block) => TypedExpressionKind::Loop {
+            body: lower_block(
+                block,
+                semantics,
+                semantics.value_block_failure_target(expression.id),
+            ),
+        },
         ExprKind::Record { fields, .. } => TypedExpressionKind::Record {
             record: semantics
                 .record_literal(expression.id)
@@ -1396,7 +1412,7 @@ fn lower_block(
                             | Stmt::If { span, .. }
                             | Stmt::While { span, .. }
                             | Stmt::For { span, .. }
-                            | Stmt::Break { span }
+                            | Stmt::Break { span, .. }
                             | Stmt::Continue { span }
                             | Stmt::Return { span, .. }
                             | Stmt::Throw { span, .. }
@@ -1510,7 +1526,9 @@ fn lower_block(
                             iterable: iterable.id,
                             body: lower_block(body, semantics, failure_boundary),
                         },
-                        Stmt::Break { .. } => TypedStatementKind::Break,
+                        Stmt::Break { value, .. } => {
+                            TypedStatementKind::Break(value.as_ref().map(|value| value.id))
+                        }
                         Stmt::Continue { .. } => TypedStatementKind::Continue,
                         Stmt::Return { value, .. } => {
                             TypedStatementKind::Return(value.as_ref().map(|value| value.id))

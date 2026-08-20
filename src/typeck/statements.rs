@@ -351,11 +351,33 @@ impl Checker {
                 self.with_loop(|checker| checker.block(body, false));
                 self.scopes.pop();
             }
-            Stmt::Break { span } => {
-                if !self.loops.is_inside() {
+            Stmt::Break { value, span } => match self.loops.break_target() {
+                None => {
+                    if let Some(value) = value {
+                        self.expr(value, None);
+                    }
                     self.error("`break` is only available inside a loop", *span);
                 }
-            }
+                Some(super::context::BreakTarget::Statement) => {
+                    if let Some(value) = value {
+                        self.expr(value, None);
+                        self.error(
+                            "only a `loop` expression can break with a value",
+                            value.span,
+                        );
+                    }
+                    self.loops.record_break();
+                }
+                Some(super::context::BreakTarget::Value(result)) => {
+                    if let Some(value) = value {
+                        self.expr(value, Some(result));
+                    } else {
+                        let none = self.core_type(crate::stdlib::CoreTypeId::None);
+                        self.unify(result, none, *span);
+                    }
+                    self.loops.record_break();
+                }
+            },
             Stmt::Continue { span } => {
                 if !self.loops.is_inside() {
                     self.error("`continue` is only available inside a loop", *span);

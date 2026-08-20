@@ -129,6 +129,8 @@ pub enum ExpressionKind {
     /// code generation. Its body remains in typed HIR so it can preserve
     /// lexical control-flow and suspension boundaries.
     ValueBlock,
+    /// Statement-aware marker for a value-producing infinite loop.
+    Loop,
     Record {
         record: ResolvedRecordId,
         fields: Vec<(ResolvedRecordFieldId, ExprId)>,
@@ -446,6 +448,7 @@ pub enum Statement {
     While {
         condition: ExprId,
         body: Block,
+        result: Option<TemporaryId>,
     },
     For {
         binding: ValueId,
@@ -482,13 +485,14 @@ pub enum AssignmentOperation {
 pub enum Terminator {
     #[default]
     Fallthrough,
-    Break,
+    Break(Option<ExprId>),
     Continue,
     AsyncWhile {
         header: Box<Block>,
         continuation: Box<Block>,
         header_state: AsyncStateId,
         exit_state: AsyncStateId,
+        result: Option<TemporaryId>,
     },
     AsyncWhileCondition {
         condition: ExprId,
@@ -831,6 +835,7 @@ fn lower_expression(
         TypedExpressionKind::Signature(value) => ExpressionKind::Signature(value.clone()),
         TypedExpressionKind::Array(elements) => ExpressionKind::Array(elements.clone()),
         TypedExpressionKind::Block { .. } => ExpressionKind::ValueBlock,
+        TypedExpressionKind::Loop { .. } => ExpressionKind::Loop,
         TypedExpressionKind::Record { record, fields } => {
             let Some(ExpressionResolution::RecordLiteral {
                 record: resolved_record,
@@ -1378,7 +1383,14 @@ fn analyze_suspension_liveness(
             }
             live
         }
-        Terminator::Break | Terminator::Continue => live_after,
+        Terminator::Break(value) => {
+            let mut live = live_after;
+            if let Some(value) = value {
+                collect_expression_values(*value, &mut live, local_values, program);
+            }
+            live
+        }
+        Terminator::Continue => live_after,
         Terminator::AsyncWhile {
             header,
             continuation,
@@ -1588,7 +1600,9 @@ fn analyze_statements_liveness(
                 collect_expression_values(*value, &mut branch_live, local_values, program);
                 *live = branch_live;
             }
-            Statement::While { condition, body } => {
+            Statement::While {
+                condition, body, ..
+            } => {
                 let mut body_live = analyze_suspension_liveness(
                     body,
                     live.clone(),
@@ -1759,6 +1773,10 @@ enum AsyncExpressionStep {
         tail: Box<NormalizedExpression>,
         destination: TemporaryId,
     },
+    Loop {
+        body: hir::TypedBlock,
+        destination: TemporaryId,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -1796,7 +1814,7 @@ impl AsyncExpressionStep {
             // A value block is statement-aware lowering work even when it has
             // no suspension. Treat it conservatively when deciding whether a
             // parent expression must capture its other operands.
-            Self::ValueBlock { .. } => true,
+            Self::ValueBlock { .. } | Self::Loop { .. } => true,
         }
     }
 }
@@ -1828,6 +1846,32 @@ fn normalize_expression_suspensions_with(
     expression: ExprId,
     context: &mut AsyncNormalizationContext<'_>,
 ) -> NormalizedExpression {
+    if let Some(TypedExpression {
+        kind: TypedExpressionKind::Loop { body },
+        ..
+    }) = context.typed_hir.expression(expression)
+    {
+        let original = context
+            .wasm_ir
+            .expression(expression)
+            .expect("normalized expression belongs to Wasm IR")
+            .clone();
+        let storage_ty = original
+            .conversion
+            .map_or(original.ty, |conversion| conversion.source);
+        let (destination, value) =
+            context
+                .wasm_ir
+                .temporary_read(storage_ty, original.ty, original.conversion);
+        return NormalizedExpression {
+            value,
+            steps: vec![AsyncExpressionStep::Loop {
+                body: body.clone(),
+                destination,
+            }],
+        };
+    }
+
     if let Some(TypedExpression {
         kind: TypedExpressionKind::Block { statements, value },
         ..
@@ -2309,6 +2353,7 @@ fn map_expression_children(
         | ExpressionKind::FallbackSuccess { .. }
         | ExpressionKind::Path { .. } => kind,
         ExpressionKind::ValueBlock => kind,
+        ExpressionKind::Loop => kind,
         ExpressionKind::InterpolatedString(parts) => ExpressionKind::InterpolatedString(
             parts
                 .into_iter()
@@ -2696,6 +2741,57 @@ fn wrap_async_expression_steps(
                     wasm_ir,
                 );
             }
+            AsyncExpressionStep::Loop { body, destination } => {
+                let condition = wasm_ir.push_generated_expression(
+                    semantics
+                        .types()
+                        .id_for_core(crate::stdlib::CoreTypeId::Bool),
+                    ExpressionKind::Bool(true),
+                    None,
+                    None,
+                );
+                if typed_block_contains_await(&body, typed_hir, source.profile) {
+                    let body = lower_async_statements(
+                        &body.statements,
+                        Block {
+                            statements: Vec::new(),
+                            terminator: Terminator::Continue,
+                        },
+                        typed_hir,
+                        semantics,
+                        source,
+                        wasm_ir,
+                    );
+                    let header = Block {
+                        statements: Vec::new(),
+                        terminator: Terminator::AsyncWhileCondition {
+                            condition,
+                            body: Box::new(body),
+                            header_state: AsyncStateId::ENTRY,
+                            exit_state: AsyncStateId::ENTRY,
+                        },
+                    };
+                    continuation = Block {
+                        statements: Vec::new(),
+                        terminator: Terminator::AsyncWhile {
+                            header: Box::new(header),
+                            continuation: Box::new(continuation),
+                            header_state: AsyncStateId::ENTRY,
+                            exit_state: AsyncStateId::ENTRY,
+                            result: Some(destination),
+                        },
+                    };
+                } else {
+                    continuation.statements.insert(
+                        0,
+                        Statement::While {
+                            condition,
+                            body: lower_block(&body, typed_hir, semantics, source, wasm_ir),
+                            result: Some(destination),
+                        },
+                    );
+                }
+            }
         }
     }
     continuation
@@ -2994,6 +3090,7 @@ fn lower_async_statements(
                             continuation: Box::new(result),
                             header_state: AsyncStateId::ENTRY,
                             exit_state: AsyncStateId::ENTRY,
+                            result: None,
                         },
                     };
                     if source.emits_debug_locations() {
@@ -3008,6 +3105,7 @@ fn lower_async_statements(
                     Statement::While {
                         condition: *condition,
                         body: lower_block(body, typed_hir, semantics, source, wasm_ir),
+                        result: None,
                     },
                 );
             }
@@ -3089,11 +3187,26 @@ fn lower_async_statements(
                     wasm_ir,
                 );
             }
-            TypedStatementKind::Break => {
+            TypedStatementKind::Break(value) => {
+                let normalized = value.map(|value| {
+                    normalize_expression_suspensions(value, typed_hir, semantics, wasm_ir)
+                });
                 result = Block {
                     statements: Vec::new(),
-                    terminator: Terminator::Break,
+                    terminator: Terminator::Break(
+                        normalized.as_ref().map(|normalized| normalized.value),
+                    ),
                 };
+                if let Some(normalized) = normalized {
+                    result = wrap_async_expression_steps(
+                        normalized.steps,
+                        result,
+                        typed_hir,
+                        semantics,
+                        source,
+                        wasm_ir,
+                    );
+                }
             }
             TypedStatementKind::Continue => {
                 result = Block {
@@ -3404,7 +3517,7 @@ fn set_async_while_targets(
             set_async_while_targets(continuation, header_state, exit_state);
         }
         Terminator::Fallthrough
-        | Terminator::Break
+        | Terminator::Break(_)
         | Terminator::Continue
         | Terminator::AsyncWhile { .. }
         | Terminator::AsyncFor { .. }
@@ -3557,6 +3670,15 @@ impl Visitor for LocalPlanner<'_> {
                     .ty;
                 self.push(value_type, LocalPurpose::FallbackValue(*expression));
             }
+            Statement::While {
+                result: Some(result),
+                ..
+            } => {
+                self.push(
+                    program.temporary_type(*result),
+                    LocalPurpose::Temporary(*result),
+                );
+            }
             Statement::For {
                 binding,
                 iterable_value,
@@ -3582,12 +3704,22 @@ impl Visitor for LocalPlanner<'_> {
             | Statement::IndexStore { .. }
             | Statement::Evaluate { .. }
             | Statement::If { .. }
-            | Statement::While { .. } => {}
+            | Statement::While { result: None, .. } => {}
         }
         walk_statement(self, statement, program);
     }
 
     fn visit_terminator(&mut self, terminator: &Terminator, program: &Program) {
+        if let Terminator::AsyncWhile {
+            result: Some(result),
+            ..
+        } = terminator
+        {
+            self.push(
+                program.temporary_type(*result),
+                LocalPurpose::Temporary(*result),
+            );
+        }
         if let Terminator::Suspend {
             mode,
             destination,

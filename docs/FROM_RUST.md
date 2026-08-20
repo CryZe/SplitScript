@@ -57,6 +57,27 @@ insert [`return`]. A semicolon on a value block's final expression is accepted
 but warned about and removed by the formatter; it never silently changes the
 block to [`None`].
 
+## Loop expressions keep Rust's useful part
+
+[`loop`] is expression-valued as in Rust. With no reachable [`break`] it has
+type [`Never`]; `break value` determines its result, and a bare break produces
+[`None`]. [`while`] and runtime [`for`] remain statement loops and reject
+value-carrying breaks.
+
+```splitscript
+# state "game.exe" {}
+fn choose(flag: bool) -> i32 {
+    return loop {
+        if flag { break 7 }
+        break -1
+    }
+}
+# setup { print(choose(true)) }
+```
+
+The important difference is the explicit [`return`]: even when the final
+expression is a [`loop`], a SplitScript function does not return it implicitly.
+
 ## None is the unit type
 
 [`None`] is both the language's zero-sized unit value and the absent side of

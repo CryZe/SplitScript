@@ -399,6 +399,7 @@ fn compile_async_body(
                         AsyncLoopTargets {
                             break_state: exit_state,
                             continue_state: header_state,
+                            break_destination: None,
                         }
                         .control(2),
                     ),
@@ -2392,6 +2393,7 @@ enum AsyncState<'a> {
 struct AsyncLoopTargets {
     break_state: wasm_ir::AsyncStateId,
     continue_state: wasm_ir::AsyncStateId,
+    break_destination: Option<wasm_ir::TemporaryId>,
 }
 
 impl AsyncLoopTargets {
@@ -2400,6 +2402,7 @@ impl AsyncLoopTargets {
             break_state: self.break_state,
             continue_state: self.continue_state,
             dispatcher_depth,
+            break_destination: self.break_destination,
         }
     }
 }
@@ -2479,10 +2482,12 @@ fn collect_async_states<'a>(
             continuation,
             header_state,
             exit_state,
+            result,
         } => {
             let inner_targets = AsyncLoopTargets {
                 break_state: *exit_state,
                 continue_state: *header_state,
+                break_destination: *result,
             };
             states[header_state.index() as usize] = Some(AsyncState::Block {
                 block: header,
@@ -2513,6 +2518,7 @@ fn collect_async_states<'a>(
             let inner_targets = AsyncLoopTargets {
                 break_state: *exit_state,
                 continue_state: *header_state,
+                break_destination: None,
             };
             states[header_state.index() as usize] = Some(AsyncState::ForHeader {
                 binding: *binding,
@@ -2532,7 +2538,7 @@ fn collect_async_states<'a>(
             collect_async_states(continuation, states, loop_targets);
         }
         wasm_ir::Terminator::Fallthrough
-        | wasm_ir::Terminator::Break
+        | wasm_ir::Terminator::Break(_)
         | wasm_ir::Terminator::Continue
         | wasm_ir::Terminator::Return(_)
         | wasm_ir::Terminator::Throw { .. } => {}
@@ -2723,7 +2729,11 @@ fn compile_async_flow(
                 );
                 function.instruction(&Instruction::End);
             }
-            wasm_ir::Statement::While { condition, body } => {
+            wasm_ir::Statement::While {
+                condition,
+                body,
+                result,
+            } => {
                 function
                     .instruction(&Instruction::Block(BlockType::Empty))
                     .instruction(&Instruction::Loop(BlockType::Empty));
@@ -2738,6 +2748,7 @@ fn compile_async_flow(
                     Some(LoopControl::Branch {
                         break_depth: 1,
                         continue_depth: 0,
+                        break_destination: *result,
                     }),
                     result_global,
                     cancellation_region,
@@ -2793,6 +2804,7 @@ fn compile_async_flow(
                     Some(LoopControl::Branch {
                         break_depth: 1,
                         continue_depth: 0,
+                        break_destination: None,
                     }),
                     result_global,
                     cancellation_region,
@@ -2832,10 +2844,19 @@ fn compile_async_flow(
     }
     match &block.terminator {
         wasm_ir::Terminator::Fallthrough => {}
-        wasm_ir::Terminator::Break => {
-            loop_control
-                .expect("checked break statements belong to loops")
-                .emit_break(function, context.locals.continuation_frame());
+        wasm_ir::Terminator::Break(value) => {
+            let control = loop_control.expect("checked break statements belong to loops");
+            if let Some(value) = value {
+                if let Some(destination) = control.break_destination() {
+                    compile_temporary_set(function, destination, *value, context);
+                } else {
+                    compile_expr(function, *value, &context.erasing_none());
+                    if context.expression_type(*value).has_runtime_value() {
+                        function.instruction(&Instruction::Drop);
+                    }
+                }
+            }
+            control.emit_break(function, context.locals.continuation_frame());
         }
         wasm_ir::Terminator::Continue => {
             loop_control

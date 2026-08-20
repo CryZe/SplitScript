@@ -834,7 +834,7 @@ fn collect_assignment_usage(
             TypedStatementKind::Variable { .. }
             | TypedStatementKind::StateAssign { .. }
             | TypedStatementKind::IndexAssign { .. }
-            | TypedStatementKind::Break
+            | TypedStatementKind::Break(_)
             | TypedStatementKind::Continue
             | TypedStatementKind::Return(_)
             | TypedStatementKind::Throw { .. }
@@ -1424,7 +1424,7 @@ fn validate_must_use_block(
             | TypedStatementKind::Assign { .. }
             | TypedStatementKind::StateAssign { .. }
             | TypedStatementKind::IndexAssign { .. }
-            | TypedStatementKind::Break
+            | TypedStatementKind::Break(_)
             | TypedStatementKind::Continue
             | TypedStatementKind::Return(_)
             | TypedStatementKind::Throw { .. }

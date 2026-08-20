@@ -724,6 +724,11 @@ fn language_completion(item: &LanguageItem) -> Option<CompletionItem> {
                 "for ${1:value} in ${2:values} {\n    $0\n}".to_owned(),
                 true,
             ),
+            "loop" => (
+                CompletionKind::Snippet,
+                "loop {\n    $0\n}".to_owned(),
+                true,
+            ),
             _ => (CompletionKind::Keyword, item.name.to_owned(), false),
         },
         LanguageItemKind::Syntax if is_identifier(item.name) => {
@@ -1124,7 +1129,12 @@ fn add_statement_inner_bindings(builder: &mut CompletionBuilder, statement: &Stm
         } => {
             add_expression_bindings(builder, value, offset);
         }
-        Stmt::Return { value: None, .. } | Stmt::Break { .. } | Stmt::Continue { .. } => {}
+        Stmt::Break {
+            value: Some(value), ..
+        } => add_expression_bindings(builder, value, offset),
+        Stmt::Return { value: None, .. }
+        | Stmt::Break { value: None, .. }
+        | Stmt::Continue { .. } => {}
     }
 }
 
@@ -1159,7 +1169,9 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
             }
         }
         ExprKind::Array(values) => add_child_expression_bindings(builder, values, offset),
-        ExprKind::Block(block) => add_block_bindings(builder, block, offset),
+        ExprKind::Block(block) | ExprKind::Loop(block) => {
+            add_block_bindings(builder, block, offset)
+        }
         ExprKind::Record { fields, .. } => {
             for (_, value) in fields {
                 add_expression_bindings(builder, value, offset);
@@ -1264,7 +1276,7 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
         | Stmt::For { span, .. }
-        | Stmt::Break { span }
+        | Stmt::Break { span, .. }
         | Stmt::Continue { span }
         | Stmt::Return { span, .. }
         | Stmt::Throw { span, .. }
@@ -2656,6 +2668,26 @@ fn relay() {
         let all = database.completions(empty_prefix).unwrap();
         assert!(all.items.iter().any(|item| item.label == "whileAttached"));
         assert!(all.items.iter().all(|item| item.label != "utf8"));
+    }
+
+    #[test]
+    fn completes_value_loops_with_language_documentation() {
+        let source = "state \"game.exe\" {}\nfn choose() { let value = loo }";
+        let mut database = CompilerDatabase::new(source);
+        let completions = database
+            .completions(source.find("loo }").unwrap() + 3)
+            .unwrap();
+        let item = completions
+            .items
+            .iter()
+            .find(|item| item.label == "loop")
+            .expect("loop should complete in expression position");
+
+        assert_eq!(item.kind, CompletionKind::Snippet);
+        assert_eq!(item.insert_text, "loop {\n    $0\n}");
+        assert!(item.is_snippet);
+        assert!(item.documentation.as_deref().unwrap().contains("break"));
+        assert_eq!(item.documentation_uri.as_deref(), Some("/language/loop.md"));
     }
 
     #[test]

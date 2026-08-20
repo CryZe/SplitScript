@@ -1032,6 +1032,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             | ExprKind::Signature(_)
             | ExprKind::Array(_)
             | ExprKind::Block(_)
+            | ExprKind::Loop(_)
             | ExprKind::Match { .. }
             | ExprKind::If { .. }
             | ExprKind::Fallback { .. }

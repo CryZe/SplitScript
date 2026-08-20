@@ -100,6 +100,12 @@ semantic-review evidence, not as a conformance corpus.
   array, three named layouts selected through `process.name()`, and the existing
   `tickRate` policy cover all three source executables without separate files;
   only live validation of the legacy identities and offsets remains.
+  Hades likewise needs no fixed index array for its screen vector: an address
+  cursor and the existing `while` preserve the runtime end pointer. Its two
+  known engine-module names compose through `loadedModule` and a cooperative
+  value loop, while arbitrary future prefix matches remain a narrower host
+  enumeration question. The manual loop also motivates the separately planned
+  whole-block retry boundary rather than more module-specific migration text.
 - [ ] Promote a small corrected subset to reviewed fixtures: one exact-name
   native process, one process-name array, one multi-version named layout, one
   timer-state/split-index script, one `tickRate` script, one managed-string or
@@ -145,6 +151,17 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Close feedback loops without papering over language design
 
+- [ ] Design whole-block retry as the next language feature before prescribing
+  the Hades module-discovery recipe. Evaluate `retry { ... }` as an expression
+  that reruns the complete block on the next attached tick when any postfix
+  `?` reaches it, with process-lifetime cancellation and ordinary success as
+  the block value. Specify whether explicit `Err`, nested failure boundaries,
+  `return`/`break`/`continue`, and a suspending operation inside the block
+  transfer or escape; define its inferred `async T` type and diagnostics; then
+  review the syntax and semantics before implementation. Document the final
+  choice with focused examples and contrasts for ASL/C#, JavaScript, and Rust.
+  A general value-producing [`loop`] is available as a lower-level mechanism,
+  but should not become the canonical recipe for a retry transaction.
 - [ ] Design semantic lints from failures that compiled cleanly. Evaluate an
   unused-setting warning (the campaign declared `allSkullsMode` but read an
   unrelated always-false global), a suggestion from literal

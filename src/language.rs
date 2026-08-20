@@ -232,6 +232,27 @@ whileAttached {
     }
 }"#;
 
+const LOOP_SOURCE: &str = r#"state "game.exe" {}
+
+fn chooseModule(useVulkan: bool) -> String {
+    return loop {
+        if useVulkan {
+            break "EngineWin64sv.dll"
+        }
+        break "EngineWin64s.dll"
+    }
+}
+
+fn waitForever() -> async Never {
+    loop {
+        await nextTick()
+    }
+}
+
+setup {
+    print(chooseModule(false))
+}"#;
+
 const FOR_SOURCE: &str = r#"state "game.exe" {}
 
 settings {
@@ -524,6 +545,18 @@ focused_example!(
     "while index < values.length() {\n    index += 1\n}",
     CONTROL_FLOW_SOURCE
 );
+const LOOP_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Repeat without falling through",
+        "loop {\n    await nextTick()\n}",
+        LOOP_SOURCE,
+    ),
+    Example::checked(
+        "Break with a value",
+        "let moduleName = loop {\n    if useVulkan {\n        break \"EngineWin64sv.dll\"\n    }\n    break \"EngineWin64s.dll\"\n}",
+        LOOP_SOURCE,
+    ),
+];
 const FOR_EXAMPLES: &[Example] = &[
     Example::checked(
         "Iterate over an array",
@@ -536,12 +569,18 @@ const FOR_EXAMPLES: &[Example] = &[
         FOR_SOURCE,
     ),
 ];
-focused_example!(
-    BREAK_EXAMPLE,
-    "Exit a loop",
-    "while true {\n    if found { break }\n}",
-    CONTROL_FLOW_SOURCE
-);
+const BREAK_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Exit a conditional loop",
+        "while !found {\n    if cannotContinue { break }\n}",
+        CONTROL_FLOW_SOURCE,
+    ),
+    Example::checked(
+        "Produce a loop value",
+        "let moduleName = loop {\n    if useVulkan { break \"EngineWin64sv.dll\" }\n    break \"EngineWin64s.dll\"\n}",
+        LOOP_SOURCE,
+    ),
+];
 focused_example!(
     CONTINUE_EXAMPLE,
     "Skip an iteration",
@@ -1001,6 +1040,15 @@ define_language_catalog! {
         WHILE_EXAMPLE
     ),
     language_item!(
+        Loop,
+        "loop",
+        LanguageItemKind::Keyword,
+        "loop { ... }",
+        "Repeats a block until it breaks.",
+        "Without a reachable [`break`], [`loop`] has type [`Never`] and cannot fall through. `break value` exits the nearest [`loop`] expression and supplies its result; all such values are inferred bidirectionally as one type. A bare [`break`] supplies [`None`]. Value-carrying breaks are deliberately unavailable in [`while`] and runtime [`for`] loops. [`continue`] starts the next iteration. In an async context, [`await`] and [`retry`] preserve the loop and its live values across ticks.",
+        LOOP_EXAMPLES
+    ),
+    language_item!(
         For,
         "for",
         LanguageItemKind::Keyword,
@@ -1013,10 +1061,10 @@ define_language_catalog! {
         Break,
         "break",
         LanguageItemKind::Keyword,
-        "break",
+        "break | break value",
         "Exits the nearest enclosing loop.",
-        "[`break`] may be written as a statement or as the diverging branch in `value else break`. It may only appear inside a loop and always targets the innermost loop.",
-        BREAK_EXAMPLE
+        "A bare [`break`] exits the innermost [`while`], runtime [`for`], or [`loop`]. Inside a [`loop`] expression, `break value` also supplies the expression's result; a bare break produces [`None`]. Value-carrying breaks are rejected in [`while`] and [`for`] so they can never accidentally skip an inner statement loop to target an outer value loop. Bare [`break`] may also be the diverging branch in `value else break`.",
+        BREAK_EXAMPLES
     ),
     language_item!(
         Continue,

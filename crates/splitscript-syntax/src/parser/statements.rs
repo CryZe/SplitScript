@@ -151,8 +151,17 @@ impl Parser<'_> {
         }
         if self.eat_ident("break").is_some() {
             let start = self.previous().span.start;
+            let value = if self.at(&TokenKind::Semicolon)
+                || self.at(&TokenKind::RBrace)
+                || self.line_break_before_current()
+            {
+                None
+            } else {
+                Some(Box::new(self.root_expression()))
+            };
             self.terminator()?;
             return Ok(Stmt::Break {
+                value,
                 span: Span {
                     start,
                     end: self.previous().span.end,

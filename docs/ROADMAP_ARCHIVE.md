@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-20: value-producing loop expressions
+
+- Added Rust-style [`loop`] expressions: an unbroken loop has type [`Never`],
+  `break value` determines its bidirectionally inferred result, and a bare
+  break produces [`None`].
+- Kept value-carrying breaks exclusive to [`loop`], so nested [`while`] and
+  runtime [`for`] loops always capture their own bare break.
+- Preserved loop results and live values across async tick suspension, with
+  formatter, diagnostics, editor catalog, language guide, and C#/JavaScript/
+  Rust/ASL porting coverage.
+
 ## 2026-08-20: numeric tick rates and frame durations
 
 - Generalized dynamic `setTickRate` calls over `Numeric` while retaining the

@@ -256,6 +256,12 @@ impl Parser<'_> {
                 start.join(end),
             ));
         }
+        if self.eat_ident("loop").is_some() {
+            let start = self.previous().span;
+            let block = self.block()?;
+            let span = start.join(block.span);
+            return Ok(self.new_expr(ExprKind::Loop(block), span));
+        }
         if self.at(&TokenKind::LBrace) {
             let block = self.block()?;
             return Ok(self.value_block(block));

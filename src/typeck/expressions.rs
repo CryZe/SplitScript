@@ -240,6 +240,28 @@ impl Checker {
                 self.scopes.pop();
                 ty?
             }
+            ExprKind::Loop(block) => {
+                if let Some(boundary) = self.failure.result() {
+                    self.semantics
+                        .resolve_value_block_failure_target(expr.id, boundary);
+                }
+                let inferred_result = expected.is_none();
+                let result =
+                    expected.unwrap_or_else(|| self.fresh_inference(Requirements::none(), None));
+                self.scopes.push(HashMap::new());
+                let (_, has_break) =
+                    self.with_value_loop(result, |checker| checker.block(block, true));
+                self.scopes.pop();
+                if has_break {
+                    self.expect_expression(expr.id, result, expected, expr.span)?
+                } else {
+                    let never = self.core_type(crate::stdlib::CoreTypeId::Never);
+                    if inferred_result {
+                        self.unify(result, never, expr.span);
+                    }
+                    self.expect_expression(expr.id, never, expected, expr.span)?
+                }
+            }
             ExprKind::Record { name, fields, .. } => {
                 let declaration = self
                     .declarations
@@ -816,11 +838,17 @@ impl Checker {
                     FallbackBranch::Return { value, span } => {
                         self.check_return(value.as_deref(), *span);
                     }
-                    FallbackBranch::Break { span } => {
-                        if !self.loops.is_inside() {
-                            self.error("`else break` is only available inside a loop", *span);
+                    FallbackBranch::Break { span } => match self.loops.break_target() {
+                        None => self.error("`else break` is only available inside a loop", *span),
+                        Some(super::context::BreakTarget::Statement) => {
+                            self.loops.record_break();
                         }
-                    }
+                        Some(super::context::BreakTarget::Value(result)) => {
+                            let none = self.core_type(crate::stdlib::CoreTypeId::None);
+                            self.unify(result, none, *span);
+                            self.loops.record_break();
+                        }
+                    },
                     FallbackBranch::Continue { span } => {
                         if !self.loops.is_inside() {
                             self.error("`else continue` is only available inside a loop", *span);

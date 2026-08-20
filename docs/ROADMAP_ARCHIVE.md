@@ -3769,3 +3769,15 @@ language catalog document the refinement rule.
 - Unified synchronous and suspending block lowering so `await`, `retry`, and
   divergent control flow retain their enclosing function, loop, or state-field
   boundary inside nested expressions.
+
+# 2026-08-20: string match patterns
+
+- Made decoded string literals first-class [`match`] patterns with ordinary
+  `String` inference, duplicate detection, guards, and wildcard-based
+  exhaustiveness for the open string domain.
+- Lowered matching to the shared content-equality helper rather than GC
+  reference identity, including statement-level matches produced when an arm
+  suspends.
+- Replaced the Crazy Machines alternate-layout audit workaround with direct
+  `match process.name()` dispatch and documented exact process-identity
+  selection for ASL ports.

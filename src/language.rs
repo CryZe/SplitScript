@@ -52,6 +52,14 @@ fn modeName(mode: Mode) {
     }
 }
 
+fn executableKind(name: String) {
+    return match name {
+        "game.exe" => "full game",
+        "game-demo.exe" => "demo",
+        _ => "unsupported",
+    }
+}
+
 fn Position.isOrigin() {
     return self.x == 0.0 && self.y == 0.0
 }
@@ -546,12 +554,18 @@ focused_example!(
     "debug print(`level: {current.level}`)",
     CONTROL_FLOW_SOURCE
 );
-focused_example!(
-    MATCH_EXAMPLE,
-    "Handle every enum variant",
-    "let label = match mode {\n    Mode.Menu => \"Menu\",\n    Mode.Playing => \"Playing\"\n}",
-    CONTROL_FLOW_SOURCE
-);
+const MATCH_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Handle every enum variant",
+        "let label = match mode {\n    Mode.Menu => \"Menu\",\n    Mode.Playing => \"Playing\"\n}",
+        CONTROL_FLOW_SOURCE,
+    ),
+    Example::checked(
+        "Dispatch on exact string contents",
+        "return match name {\n    \"game.exe\" => \"full game\",\n    \"game-demo.exe\" => \"demo\",\n    _ => \"unsupported\",\n}",
+        CONTROL_FLOW_SOURCE,
+    ),
+];
 focused_example!(
     RETURN_EXAMPLE,
     "Return a value",
@@ -1028,8 +1042,8 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "match value { pattern => expression }",
         "Exhaustively matches a value.",
-        "[`match`] supports enum payloads, optional [`None`]/[`Some`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, literals, guards, and a wildcard. Enum and wrapper matches must cover every state; guarded arms do not establish coverage.",
-        MATCH_EXAMPLE
+        "[`match`] supports enum payloads, optional [`None`]/[`Some`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, string, character, integer, boolean, and file-version literals, guards, and a wildcard. String patterns compare contents, not WebAssembly GC identities. Enum and wrapper matches must cover every state; open-ended literal domains require `_`; guarded arms do not establish coverage.",
+        MATCH_EXAMPLES
     ),
     language_item!(
         Return,

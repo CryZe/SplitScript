@@ -695,6 +695,15 @@ pub(super) fn compile_statement_pattern(
                 .instruction(&Instruction::I32Const(*expected as i32))
                 .instruction(&Instruction::I32Eq);
         }
+        wasm_ir::LoweredPattern::String(expected) => {
+            function.instruction(&Instruction::LocalGet(value_local));
+            emit_string_literal(function, expected, context.gc);
+            function.instruction(&Instruction::Call(
+                context
+                    .runtime_helpers
+                    .function(RuntimeHelperId::StringEquality),
+            ));
+        }
         wasm_ir::LoweredPattern::Int(value) => {
             function.instruction(&Instruction::LocalGet(value_local));
             emit_int(function, *value, value_type);
@@ -2121,6 +2130,15 @@ fn compile_expr_unconverted(
                             .instruction(&Instruction::LocalGet(value_local))
                             .instruction(&Instruction::I32Const(*expected as i32))
                             .instruction(&Instruction::I32Eq);
+                    }
+                    wasm_ir::LoweredPattern::String(expected) => {
+                        function.instruction(&Instruction::LocalGet(value_local));
+                        emit_string_literal(function, expected, context.gc);
+                        function.instruction(&Instruction::Call(
+                            context
+                                .runtime_helpers
+                                .function(RuntimeHelperId::StringEquality),
+                        ));
                     }
                     wasm_ir::LoweredPattern::Int(value) => {
                         function.instruction(&Instruction::LocalGet(value_local));

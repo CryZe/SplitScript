@@ -665,20 +665,27 @@ ASL exposes the selected process through `game.ProcessName`. In a native
 SplitScript state, use `process.name()`:
 
 ```splitscript
-state ["game.exe", "game-demo.exe"] {}
+state ["game.exe", "game-demo.exe"] {
+    layout FullGame {},
+    layout Demo {},
+}
 
 onAttach {
-    if process.name() == "game-demo.exe" {
-        print("Attached to the demo")
+    return match process.name() {
+        "game.exe" => StateLayout.FullGame,
+        "game-demo.exe" => StateLayout.Demo,
+        _ => await process.closed(),
     }
 }
 ```
 
 The returned string is the exact candidate from the [`state`] declaration that
 matched during attachment. It is not the executable path and does not perform
-another host lookup. Use it when multiple executable names genuinely select
-different behavior or layouts. When several builds share a name, discriminate
-with reliable evidence such as `process.mainModule().size`, `process.path()`,
+another host lookup. String literals are first-class [`match`] patterns and
+compare text contents, so this is the direct selector when executable names map
+to named layouts. Keep the wildcard arm because strings are an open-ended
+domain. When several builds share a name, discriminate with reliable evidence
+such as `process.mainModule().size`, `process.path()`,
 [`Module.fileVersion()`], [`Module.productVersion()`], or a signature instead.
 
 Legacy `modules.Any(...)` checks often test for one optional module rather than

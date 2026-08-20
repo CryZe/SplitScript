@@ -1219,6 +1219,7 @@ fn literal_matches_support_guards_wildcards_and_bidirectional_inference() {
                 splitscript::compiler::wasm_ir::LoweredPattern::Wildcard => patterns[2] = true,
                 splitscript::compiler::wasm_ir::LoweredPattern::Enum { .. }
                 | splitscript::compiler::wasm_ir::LoweredPattern::Char(_)
+                | splitscript::compiler::wasm_ir::LoweredPattern::String(_)
                 | splitscript::compiler::wasm_ir::LoweredPattern::FileVersion(_)
                 | splitscript::compiler::wasm_ir::LoweredPattern::OptionNone(_)
                 | splitscript::compiler::wasm_ir::LoweredPattern::OptionSome { .. }

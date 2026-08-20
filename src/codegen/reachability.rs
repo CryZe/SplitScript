@@ -124,6 +124,13 @@ impl Reachability {
             wasm_ir::visit_expression_children(&expression.kind, |child| {
                 pending.push((owner.clone(), child))
             });
+            if let wasm_ir::ExpressionKind::Match { arms, .. } = &expression.kind
+                && arms
+                    .iter()
+                    .any(|arm| matches!(arm.pattern, wasm_ir::LoweredPattern::String(_)))
+            {
+                reachable.string_equality = true;
+            }
             if let wasm_ir::ExpressionKind::Call { target, .. } = &expression.kind {
                 if let wasm_ir::CallTarget::Intrinsic {
                     intrinsic: IntrinsicId::EquatableEquals | IntrinsicId::EquatableNotEquals,
@@ -431,6 +438,19 @@ impl Reachability {
                 _ => {}
             }
         }
+        reachable.string_equality |= wasm_ir.bodies().any(|body| {
+            let reachable_body = match &body.owner {
+                BodyOwner::Action(_) => true,
+                BodyOwner::Function(function) => reachable.functions.contains(function),
+            };
+            reachable_body && block_uses_string_match_pattern(&body.entry, wasm_ir)
+        });
+        reachable.string_equality |= wasm_ir
+            .state_expressions()
+            .any(|expression| block_uses_string_match_pattern(&expression.entry, wasm_ir));
+        reachable.string_equality |= wasm_ir
+            .state_transforms()
+            .any(|transform| block_uses_string_match_pattern(&transform.entry, wasm_ir));
         // Standard GC structs are currently emitted as one recursive catalog
         // group. Their constructed field layouts therefore need matching
         // dynamic GC types even when no user expression reaches the owner.
@@ -741,6 +761,30 @@ impl Reachability {
             }
         }
     }
+}
+
+fn block_uses_string_match_pattern(block: &wasm_ir::Block, program: &wasm_ir::Program) -> bool {
+    #[derive(Default)]
+    struct StringPatternFinder {
+        found: bool,
+    }
+
+    impl Visitor for StringPatternFinder {
+        fn visit_statement(&mut self, statement: &wasm_ir::Statement, program: &wasm_ir::Program) {
+            if let wasm_ir::Statement::Match { arms, .. } = statement
+                && arms
+                    .iter()
+                    .any(|arm| matches!(arm.pattern, wasm_ir::LoweredPattern::String(_)))
+            {
+                self.found = true;
+            }
+            wasm_ir::walk_statement(self, statement, program);
+        }
+    }
+
+    let mut finder = StringPatternFinder::default();
+    finder.visit_block(block, program);
+    finder.found
 }
 
 fn collect_block_expression_roots(

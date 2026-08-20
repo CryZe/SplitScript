@@ -511,6 +511,38 @@ scene snapshots are the one timer-critical provider gap.
   class names, offsets, scene semantics, and lifecycle timing still require
   live-game validation once the scene provider exists.
 
+### Alternate executable layouts: Crazy Machines
+
+Campaign status: `PORTED-LIMITED`
+
+Audit result: the omitted alternate executables exposed both undiscovered
+existing state features and one genuine language papercut. The complete source
+behavior is now directly representable.
+
+- Source: `CrazyMachines`, `cm_family`, and `cmnftl` declare the same three byte
+  fields at executable-specific addresses. The start latch, win edge, and menu
+  reset consume only that common field interface.
+- Candidate: only the first layout is retained because the report says that
+  alternate state selection has not been demonstrated. It also drops the
+  source's 120 Hz refresh rate.
+- Existing facilities: use one exact-name candidate array containing
+  `CrazyMachines.exe`, `cm_family.exe`, and `cmnftl.exe`; declare one named layout
+  per executable; return the corresponding `StateLayout` from `onAttach`; and
+  declare `tickRate { attached: 120 }`.
+- The natural selector is a `match process.name()` with one string-literal arm
+  per executable. The audit initially had to replace that expression with an
+  `if` chain because string literals were not accepted as patterns. String
+  patterns now compare decoded contents, require a wildcard for exhaustiveness,
+  diagnose duplicate values, and work across suspending match arms.
+- A focused current-compiler probe validates the complete composition and
+  exposes `win` through the common snapshot interface. The unmatched-name arm
+  waits for process closure, so layout selection remains total without a silent
+  fallback.
+- Live-game verification is still required for the executable filenames,
+  addresses, pointer chains, and transition timing. Compilation proves that all
+  three source layouts are representable, not that those legacy layouts remain
+  correct.
+
 Further campaign work should begin with a concrete friction report and reduce it
 to a focused source comparison or compiler probe. The generated ports are
 supporting evidence, not an exhaustive conformance corpus. Every resulting

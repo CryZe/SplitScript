@@ -40,6 +40,42 @@ fn named_state_layouts_select_a_typed_layout_and_validate() {
 }
 
 #[test]
+fn alternate_process_names_can_select_matching_named_layouts() {
+    let source = r#"
+        state ["CrazyMachines.exe", "cm_family.exe", "cmnftl.exe"] {
+            layout Original {
+                win: u8 at 0x10F344, 0xE0, 0xC, 0x4, 0x4, 0x8, 0x50;
+            },
+            layout Family {
+                win: u8 at 0x110484, 0xE0, 0xC, 0x4, 0x4, 0x8, 0x50;
+            },
+            layout NewFromTheLab {
+                win: u8 at 0x112764, 0xE0, 0xC, 0x4, 0x4, 0x8, 0x50;
+            },
+        }
+
+        tickRate { attached: 120 }
+
+        onAttach {
+            return match process.name() {
+                "CrazyMachines.exe" => StateLayout.Original,
+                "cm_family.exe" => StateLayout.Family,
+                "cmnftl.exe" => StateLayout.NewFromTheLab,
+                _ => await process.closed(),
+            }
+        }
+
+        split { return current.win > old.win }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("alternate exact process identities should select named layouts");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("alternate-process named-layout WebAssembly GC should validate");
+}
+
+#[test]
 fn named_state_layouts_refine_layout_specific_fields_and_types() {
     let source = r#"
         state "game.exe" {

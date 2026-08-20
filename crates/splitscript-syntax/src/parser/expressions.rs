@@ -967,9 +967,13 @@ impl Parser<'_> {
                 self.bump();
                 MatchPattern::Char(value)
             }
+            TokenKind::String(value) => {
+                self.bump();
+                MatchPattern::String(value)
+            }
             _ => {
                 return Err(Diagnostic::new(
-                    "expected an enum variant, character, integer, file-version, boolean, `None`, `Some(value)`, `Ok(value)`, `Err(error)`, or `_` pattern",
+                    "expected an enum variant, string, character, integer, file-version, boolean, `None`, `Some(value)`, `Ok(value)`, `Err(error)`, or `_` pattern",
                     pattern_start,
                 ));
             }

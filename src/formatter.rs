@@ -2002,6 +2002,25 @@ fn supported(version: FileVersion) -> bool {
     }
 
     #[test]
+    fn formats_string_match_patterns_as_literals() {
+        let source = r#"state "game.exe"{}
+fn classify(name:String)->u8{return match name{"game.exe"=>1,"escaped\nname"=>2,_=>0}}"#;
+        let expected = r#"state "game.exe" {}
+fn classify(name: String) -> u8 {
+    return match name {
+        "game.exe" => 1,
+        "escaped\nname" => 2,
+        _ => 0,
+    }
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn preserves_binary_integer_literals_and_their_suffixes() {
         let source = r#"state GBA{flags:u8 at 0b0010_0000;mask:u16 at 0B1111u16}split{return current.flags&0b10!=0}"#;
         let expected = r#"state GBA {

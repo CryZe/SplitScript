@@ -481,6 +481,14 @@ impl Checker {
                             );
                             format!("char:{value}")
                         }
+                        MatchPattern::String(value) => {
+                            self.unify(
+                                value_type,
+                                self.standard_type(StdlibTypeId::String),
+                                arm.span,
+                            );
+                            format!("string:{value:?}")
+                        }
                         MatchPattern::Int { value, suffix } => {
                             let pattern_type = if let Some(suffix) = suffix {
                                 if !suffix.is_integer() {
@@ -671,6 +679,9 @@ impl Checker {
                         }
                         ty if ty == self.core_type(crate::stdlib::CoreTypeId::Char) => {
                             self.error("non-exhaustive character match: add a `_` arm", expr.span)
+                        }
+                        ty if ty == self.standard_type(StdlibTypeId::String) => {
+                            self.error("non-exhaustive string match: add a `_` arm", expr.span)
                         }
                         ty if ty == self.standard_type(StdlibTypeId::FileVersion) => self.error(
                             "non-exhaustive file-version match: add a `_` arm",

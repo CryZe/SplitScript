@@ -1143,6 +1143,7 @@ pub enum MatchPattern {
     },
     Bool(bool),
     Char(char),
+    String(String),
     Int {
         value: u64,
         suffix: Option<TypeRef>,

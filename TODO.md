@@ -24,9 +24,11 @@ General rules:
   representations, validated intrinsics, runtime helpers, and ABI boundaries.
 - Add compiler, runtime, formatter, and editor coverage in the same change when
   a feature crosses those surfaces.
-- Treat reports about an already-supported facility as discoverability and
-  diagnostic evidence. Lead authors to the canonical typed pattern instead of
-  adding compatibility aliases or duplicate abstractions.
+- Treat every reported workaround, misunderstanding, and omission as product
+  evidence, including when the intended facility already exists. Classify it as
+  a documentation, compiler-guidance, tooling, language/library, or host-runtime
+  issue instead of dismissing it as port-author error. Lead authors to canonical
+  typed patterns without hiding genuine ergonomic gaps behind migration advice.
 - Record host-runtime gaps found during ports in
   [`docs/RUNTIME_EVOLUTION.md`](docs/RUNTIME_EVOLUTION.md), with evidence and
   semantic requirements before proposing import spellings. Keep compiler-only
@@ -94,6 +96,10 @@ semantic-review evidence, not as a conformance corpus.
   runtime settings registration. Assemble with Care's base/derived metadata is
   also composable through `staticTable`, `field`, and `MemoryPath`; only its
   loading-scene snapshot remains a timer-critical provider gap.
+  Crazy Machines is another focused false limitation: one exact-name process
+  array, three named layouts selected through `process.name()`, and the existing
+  `tickRate` policy cover all three source executables without separate files;
+  only live validation of the legacy identities and offsets remains.
 - [ ] Promote a small corrected subset to reviewed fixtures: one exact-name
   native process, one process-name array, one multi-version named layout, one
   timer-state/split-index script, one `tickRate` script, one managed-string or

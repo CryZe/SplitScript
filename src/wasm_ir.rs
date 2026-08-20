@@ -263,6 +263,7 @@ pub enum LoweredPattern {
     },
     Bool(bool),
     Char(char),
+    String(String),
     Int(u64),
     FileVersion([u16; 4]),
     OptionNone(OptionTypeId),
@@ -290,6 +291,7 @@ impl LoweredPattern {
             | Self::ResultError { binding, .. } => *binding,
             Self::Bool(_)
             | Self::Char(_)
+            | Self::String(_)
             | Self::Int(_)
             | Self::FileVersion(_)
             | Self::OptionNone(_)
@@ -980,6 +982,7 @@ fn lower_expression(
                         },
                         TypedPattern::Bool(value) => LoweredPattern::Bool(*value),
                         TypedPattern::Char(value) => LoweredPattern::Char(*value),
+                        TypedPattern::String(value) => LoweredPattern::String(value.clone()),
                         TypedPattern::Int { value, .. } => LoweredPattern::Int(*value),
                         TypedPattern::FileVersion(components) => {
                             LoweredPattern::FileVersion(*components)

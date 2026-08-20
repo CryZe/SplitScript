@@ -878,9 +878,11 @@ fn isFirst(value: LevelOrScene) -> bool {
 }
 ```
 
-Integer and boolean values can be matched with literals. Arms may have an `if`
-guard, and `_` is the catch-all pattern. Patterns participate in inference, so
-the parameter types below are inferred as an integer and `bool` from their uses.
+Strings, characters, integers, booleans, and file versions can be matched with
+literals. String patterns compare decoded text contents rather than WebAssembly
+GC object identities. Arms may have an `if` guard, and `_` is the catch-all
+pattern. Patterns participate in inference, so the parameter types below are
+inferred as an integer and `bool` from their uses.
 
 ```text
 fn characterName(character, dlcDemo) {
@@ -893,10 +895,29 @@ fn characterName(character, dlcDemo) {
 }
 ```
 
+String matches are useful for selecting exact host identities while keeping
+the dispatch exhaustive:
+
+```text
+state ["game.exe", "game-demo.exe"] {
+    layout FullGame {},
+    layout Demo {},
+}
+
+onAttach {
+    return match process.name() {
+        "game.exe" => StateLayout.FullGame,
+        "game-demo.exe" => StateLayout.Demo,
+        _ => await process.closed(),
+    }
+}
+```
+
 An unguarded arm counts toward exhaustiveness; a guarded arm may still reject
 its pattern. Enum matches must cover every variant, boolean matches must cover
-`true` and `false`, and integer matches require an unguarded `_` arm. A wildcard
-can also make an enum or boolean match exhaustive.
+`true` and `false`. String, character, integer, and file-version domains are
+open-ended and require an unguarded `_` arm. A wildcard can also make an enum
+or boolean match exhaustive.
 
 Enums are immutable GC values and can be nested in records, passed through
 functions, and retained across `await`. This directly models the original

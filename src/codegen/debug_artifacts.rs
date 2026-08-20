@@ -365,6 +365,7 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
                 | MatchPattern::ResultError(binding) => binding.as_ref(),
                 MatchPattern::Bool(_)
                 | MatchPattern::Char(_)
+                | MatchPattern::String(_)
                 | MatchPattern::Int { .. }
                 | MatchPattern::FileVersion(_)
                 | MatchPattern::None

@@ -867,6 +867,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             MatchPattern::Enum { binding: None, .. }
             | MatchPattern::Bool(_)
             | MatchPattern::Char(_)
+            | MatchPattern::String(_)
             | MatchPattern::Int { .. }
             | MatchPattern::FileVersion(_)
             | MatchPattern::None

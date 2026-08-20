@@ -833,6 +833,7 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
             | MatchPattern::ResultError(binding) => binding.as_ref(),
             MatchPattern::Bool(_)
             | MatchPattern::Char(_)
+            | MatchPattern::String(_)
             | MatchPattern::Int { .. }
             | MatchPattern::FileVersion(_)
             | MatchPattern::None

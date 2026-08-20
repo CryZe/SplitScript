@@ -1604,6 +1604,95 @@ fn file_version_matches_require_a_wildcard_and_reject_invalid_patterns() {
 }
 
 #[test]
+fn string_literals_are_content_based_match_patterns() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn classify(name: String) -> String {
+            return match name {
+                "CrazyMachines.exe" => "matched",
+                "line\nfeed" => "escaped",
+                _ => "missed",
+            }
+        }
+
+        whileAttached {
+            let constructed = `CrazyMachines.{"exe"}`
+            print(classify(constructed))
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("string patterns should type check");
+    assert!(checked.typed_hir().expressions().any(|expression| {
+        let splitscript::compiler::hir::TypedExpressionKind::Match { arms, .. } = &expression.kind
+        else {
+            return false;
+        };
+        arms.iter().any(|arm| {
+            matches!(
+                &arm.pattern,
+                splitscript::compiler::hir::TypedPattern::String(value)
+                    if value == "CrazyMachines.exe"
+            )
+        })
+    }));
+
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages, ["matched"]);
+}
+
+#[test]
+fn string_matches_require_a_wildcard_and_reject_invalid_or_duplicate_patterns() {
+    let non_exhaustive = r#"
+        state "game.exe" {}
+        fn classify(value: String) -> bool {
+            return match value { "yes" => true }
+        }
+    "#;
+    let diagnostics =
+        splitscript::compile(non_exhaustive).expect_err("string matches are open-ended");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("non-exhaustive string match") })
+    );
+
+    let wrong_type = r#"
+        state "game.exe" {}
+        fn classify(value: u32) -> bool {
+            return match value { "yes" => true, _ => false }
+        }
+    "#;
+    let diagnostics = splitscript::compile(wrong_type).expect_err("string patterns require String");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("String") && diagnostic.message.contains("u32")
+    }));
+
+    let duplicate = r#"
+        state "game.exe" {}
+        fn classify(value: String) -> bool {
+            return match value {
+                "line\nfeed" => true,
+                "line\nfeed" => false,
+                _ => false,
+            }
+        }
+    "#;
+    let diagnostics = splitscript::compile(duplicate)
+        .expect_err("equivalent decoded string patterns must be duplicates");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("duplicate match arm"))
+    );
+}
+
+#[test]
 fn explicit_process_reads_and_pointer_following_work_in_sync_and_async_code() {
     let source = r#"
         state "game.exe" {}

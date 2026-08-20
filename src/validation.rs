@@ -677,6 +677,7 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
             ast::MatchPattern::Enum { binding: None, .. }
             | ast::MatchPattern::Bool(_)
             | ast::MatchPattern::Char(_)
+            | ast::MatchPattern::String(_)
             | ast::MatchPattern::Int { .. }
             | ast::MatchPattern::FileVersion(_)
             | ast::MatchPattern::None

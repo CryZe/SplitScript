@@ -190,6 +190,7 @@ pub enum TypedPattern {
     },
     Bool(bool),
     Char(char),
+    String(String),
     Int {
         value: u64,
         suffix: Option<TypeRef>,
@@ -1241,6 +1242,7 @@ fn lower_expression_kind(
                         },
                         MatchPattern::Bool(value) => TypedPattern::Bool(*value),
                         MatchPattern::Char(value) => TypedPattern::Char(*value),
+                        MatchPattern::String(value) => TypedPattern::String(value.clone()),
                         MatchPattern::Int { value, suffix } => TypedPattern::Int {
                             value: *value,
                             suffix: *suffix,

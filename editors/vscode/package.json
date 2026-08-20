@@ -1,7 +1,7 @@
 {
   "name": "splitscript",
   "displayName": "SplitScript",
-  "description": "Language support for statically typed LiveSplit autosplitters.",
+  "description": "Language support for statically typed autosplitters.",
   "version": "0.1.0",
   "publisher": "livesplit",
   "license": "MIT OR Apache-2.0",
@@ -15,6 +15,7 @@
   ],
   "keywords": [
     "LiveSplit",
+    "timers",
     "autosplitter",
     "speedrunning",
     "WebAssembly"
@@ -230,7 +231,6 @@
     },
     "configurationDefaults": {
       "[splitscript]": {
-        "editor.formatOnSave": false,
         "editor.semanticHighlighting.enabled": true
       }
     }

@@ -22,6 +22,9 @@ interface ExtensionManifest {
             'editor/title': MenuContribution[];
             'editor/context': MenuContribution[];
         };
+        configurationDefaults: {
+            '[splitscript]': Record<string, unknown>;
+        };
     };
 }
 
@@ -64,4 +67,10 @@ test('language-server documentation links trust only the documentation command',
             enabledCommands: ['splitscript.openDocumentation'],
         },
     });
+});
+
+test('SplitScript inherits the user formatting policy', () => {
+    const defaults = manifest.contributes.configurationDefaults['[splitscript]'];
+    assert(!Object.hasOwn(defaults, 'editor.formatOnSave'));
+    assert(!Object.hasOwn(defaults, 'editor.defaultFormatter'));
 });

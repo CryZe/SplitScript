@@ -1,10 +1,36 @@
 use std::io;
 
-use codespan_reporting::term::termcolor::{Color, ColorSpec, WriteColor};
+use codespan_reporting::term::termcolor::{
+    Ansi, Color, ColorChoice, ColorSpec, StandardStream, WriteColor,
+};
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use splitscript::tooling::{database::CompilerDatabase, highlight::SemanticTokenKind};
+use supports_color::Stream;
 
 const SEARCH_RESULT_LIMIT: usize = 12;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColorDepth {
+    Ansi16,
+    Ansi256,
+}
+
+impl ColorDepth {
+    fn stdout() -> Self {
+        if supports_color::on_cached(Stream::Stdout).is_some_and(|support| support.has_256) {
+            Self::Ansi256
+        } else {
+            Self::Ansi16
+        }
+    }
+
+    const fn color(self, fallback: Color, ansi256: u8) -> Color {
+        match self {
+            Self::Ansi16 => fallback,
+            Self::Ansi256 => Color::Ansi256(ansi256),
+        }
+    }
+}
 
 #[derive(Debug)]
 enum Block {
@@ -502,14 +528,40 @@ fn take_normalized_string(text: &mut String) -> String {
 /// Links intentionally collapse to their labels because the documentation
 /// graph uses editor-only virtual paths. `WriteColor` decides whether styling
 /// becomes ANSI escapes, so redirected output remains stable plain text.
+#[cfg(test)]
 pub(crate) fn emit(writer: &mut dyn WriteColor, markdown: &str, width: usize) -> io::Result<()> {
+    emit_with_color_depth(writer, markdown, width, ColorDepth::stdout())
+}
+
+pub(crate) fn emit_stdout(markdown: &str, width: usize) -> io::Result<()> {
+    let color_depth = ColorDepth::stdout();
+    if color_depth == ColorDepth::Ansi256 {
+        // `termcolor`'s legacy Windows-console backend only supports 16 colors.
+        // A terminal that advertises 256 colors understands ANSI escapes, so
+        // use its ANSI writer directly instead of silently dropping the richer
+        // colors on Windows Terminal and VS Code's integrated terminal.
+        let stdout = io::stdout();
+        let mut writer = Ansi::new(stdout.lock());
+        emit_with_color_depth(&mut writer, markdown, width, color_depth)
+    } else {
+        let writer = StandardStream::stdout(ColorChoice::Auto);
+        emit_with_color_depth(&mut writer.lock(), markdown, width, color_depth)
+    }
+}
+
+fn emit_with_color_depth(
+    writer: &mut dyn WriteColor,
+    markdown: &str,
+    width: usize,
+    color_depth: ColorDepth,
+) -> io::Result<()> {
     let width = width.max(20);
     let blocks = DocumentBuilder::parse(markdown);
     for (index, block) in blocks.iter().enumerate() {
         if index != 0 {
             writeln!(writer)?;
         }
-        render_block(writer, block, width)?;
+        render_block(writer, block, width, color_depth)?;
     }
     Ok(())
 }
@@ -547,7 +599,12 @@ fn escape_table_cell(value: &str) -> String {
     value.replace('|', "\\|").replace(['\r', '\n'], " ")
 }
 
-fn render_block(writer: &mut dyn WriteColor, block: &Block, width: usize) -> io::Result<()> {
+fn render_block(
+    writer: &mut dyn WriteColor,
+    block: &Block,
+    width: usize,
+    color_depth: ColorDepth,
+) -> io::Result<()> {
     match block {
         Block::Heading { level, text } => {
             let mut style = ColorSpec::new();
@@ -555,13 +612,13 @@ fn render_block(writer: &mut dyn WriteColor, block: &Block, width: usize) -> io:
                 HeadingLevel::H1 => Color::Cyan,
                 _ => Color::Blue,
             }));
-            render_styled_range(writer, text, 0, text.chars.len(), &style)?;
+            render_styled_range(writer, text, 0, text.chars.len(), &style, color_depth)?;
             writer.reset()?;
             writeln!(writer)
         }
         Block::Paragraph { quote_depth, text } => {
             let prefix = "> ".repeat(*quote_depth);
-            write_wrapped(writer, text, &prefix, &prefix, width)
+            write_wrapped(writer, text, &prefix, &prefix, width, color_depth)
         }
         Block::ListItem {
             quote_depth,
@@ -572,23 +629,27 @@ fn render_block(writer: &mut dyn WriteColor, block: &Block, width: usize) -> io:
             let quote = "> ".repeat(*quote_depth);
             let initial = format!("{quote}{}{marker} ", "  ".repeat(*depth));
             let subsequent = " ".repeat(initial.chars().count());
-            write_wrapped(writer, text, &initial, &subsequent, width)
+            write_wrapped(writer, text, &initial, &subsequent, width, color_depth)
         }
-        Block::Code(fragments) => render_code(writer, fragments),
+        Block::Code(fragments) => render_code(writer, fragments, color_depth),
         Block::Table(rows) => render_table(writer, rows, width),
         Block::Rule => writeln!(writer, "{}", "─".repeat(width.min(80))),
     }
 }
 
-fn render_code(writer: &mut dyn WriteColor, fragments: &[CodeFragment]) -> io::Result<()> {
+fn render_code(
+    writer: &mut dyn WriteColor,
+    fragments: &[CodeFragment],
+    color_depth: ColorDepth,
+) -> io::Result<()> {
     let mut line_start = true;
     for fragment in fragments {
-        writer.set_color(&code_style(fragment.kind))?;
+        writer.set_color(&code_style(fragment.kind, color_depth))?;
         for part in fragment.text.split_inclusive('\n') {
             if line_start {
                 writer.reset()?;
                 write!(writer, "  ")?;
-                writer.set_color(&code_style(fragment.kind))?;
+                writer.set_color(&code_style(fragment.kind, color_depth))?;
             }
             write!(writer, "{part}")?;
             line_start = part.ends_with('\n');
@@ -601,49 +662,76 @@ fn render_code(writer: &mut dyn WriteColor, fragments: &[CodeFragment]) -> io::R
     Ok(())
 }
 
-fn code_style(kind: Option<SemanticTokenKind>) -> ColorSpec {
+fn code_style(kind: Option<SemanticTokenKind>, color_depth: ColorDepth) -> ColorSpec {
     let mut style = ColorSpec::new();
     match kind {
         Some(SemanticTokenKind::Keyword | SemanticTokenKind::Debug) => {
-            style.set_fg(Some(Color::Magenta)).set_bold(true);
+            style
+                .set_fg(Some(color_depth.color(Color::Red, 197)))
+                .set_intense(true);
         }
-        Some(SemanticTokenKind::Type | SemanticTokenKind::Struct | SemanticTokenKind::Enum) => {
-            style.set_fg(Some(Color::Cyan));
+        Some(SemanticTokenKind::Capability) => {
+            style
+                .set_fg(Some(color_depth.color(Color::Yellow, 208)))
+                .set_intense(true);
         }
-        Some(SemanticTokenKind::EnumMember | SemanticTokenKind::Constant) => {
-            style.set_fg(Some(Color::Blue)).set_bold(true);
+        Some(SemanticTokenKind::Type | SemanticTokenKind::Struct) => {
+            style.set_fg(Some(color_depth.color(Color::Cyan, 81)));
+        }
+        Some(SemanticTokenKind::Enum) => {
+            style
+                .set_fg(Some(color_depth.color(Color::Cyan, 81)))
+                .set_italic(true);
+        }
+        Some(SemanticTokenKind::EnumMember) => {
+            style.set_fg(Some(color_depth.color(Color::Magenta, 197)));
+        }
+        Some(
+            SemanticTokenKind::Constant | SemanticTokenKind::Number | SemanticTokenKind::Version,
+        ) => {
+            style.set_fg(Some(color_depth.color(Color::Magenta, 141)));
         }
         Some(
             SemanticTokenKind::Function | SemanticTokenKind::Method | SemanticTokenKind::Lifecycle,
         ) => {
-            style.set_fg(Some(Color::Green));
+            style
+                .set_fg(Some(color_depth.color(Color::Green, 148)))
+                .set_intense(true);
         }
         Some(
             SemanticTokenKind::Property
             | SemanticTokenKind::Setting
-            | SemanticTokenKind::SettingTitle
             | SemanticTokenKind::StateField,
         ) => {
-            style.set_fg(Some(Color::Yellow));
+            style
+                .set_fg(Some(color_depth.color(Color::White, 193)))
+                .set_intense(true);
+        }
+        Some(SemanticTokenKind::SettingTitle | SemanticTokenKind::String) => {
+            style.set_fg(Some(color_depth.color(Color::Yellow, 186)));
         }
         Some(SemanticTokenKind::Namespace) => {
-            style.set_fg(Some(Color::Cyan)).set_bold(true);
+            style
+                .set_fg(Some(color_depth.color(Color::Cyan, 85)))
+                .set_intense(true);
         }
-        Some(
-            SemanticTokenKind::String | SemanticTokenKind::Signature | SemanticTokenKind::Version,
-        ) => {
-            style.set_fg(Some(Color::Green));
-        }
-        Some(SemanticTokenKind::Number) => {
-            style.set_fg(Some(Color::Cyan));
+        Some(SemanticTokenKind::TemplateString | SemanticTokenKind::Signature) => {
+            style.set_fg(Some(color_depth.color(Color::Green, 77)));
         }
         Some(SemanticTokenKind::Operator) => {
-            style.set_fg(Some(Color::Magenta));
+            style.set_fg(Some(color_depth.color(Color::Red, 197)));
         }
         Some(SemanticTokenKind::Comment) => {
-            style.set_fg(Some(Color::Green)).set_intense(false);
+            style
+                .set_fg(Some(color_depth.color(Color::White, 242)))
+                .set_dimmed(true);
         }
-        Some(SemanticTokenKind::Variable | SemanticTokenKind::Parameter) | None => {}
+        Some(SemanticTokenKind::Variable | SemanticTokenKind::Parameter) => {
+            style.set_fg(Some(color_depth.color(Color::White, 231)));
+        }
+        None => {
+            style.set_fg(Some(color_depth.color(Color::White, 231)));
+        }
     }
     style
 }
@@ -654,6 +742,7 @@ fn write_wrapped(
     initial: &str,
     subsequent: &str,
     width: usize,
+    color_depth: ColorDepth,
 ) -> io::Result<()> {
     let plain = text.plain();
     let options = textwrap::Options::new(width)
@@ -666,7 +755,7 @@ fn write_wrapped(
         writer.reset()?;
         write!(writer, "{prefix}")?;
         let count = content.chars().count();
-        render_styled_range(writer, text, offset, count, &ColorSpec::new())?;
+        render_styled_range(writer, text, offset, count, &ColorSpec::new(), color_depth)?;
         offset += count;
         while text
             .chars
@@ -687,13 +776,14 @@ fn render_styled_range(
     start: usize,
     count: usize,
     base: &ColorSpec,
+    color_depth: ColorDepth,
 ) -> io::Result<()> {
     let mut current_style = None;
     let mut run = String::new();
     for character in text.chars.iter().skip(start).take(count) {
         if current_style != Some(character.style) {
             if let Some(style) = current_style {
-                writer.set_color(&inline_style(base, style))?;
+                writer.set_color(&inline_style(base, style, color_depth))?;
                 write!(writer, "{run}")?;
                 run.clear();
             }
@@ -702,20 +792,20 @@ fn render_styled_range(
         run.push(character.value);
     }
     if let Some(style) = current_style {
-        writer.set_color(&inline_style(base, style))?;
+        writer.set_color(&inline_style(base, style, color_depth))?;
         write!(writer, "{run}")?;
     }
     Ok(())
 }
 
-fn inline_style(base: &ColorSpec, inline: InlineStyle) -> ColorSpec {
+fn inline_style(base: &ColorSpec, inline: InlineStyle, color_depth: ColorDepth) -> ColorSpec {
     let mut style = base.clone();
     style
         .set_bold(base.bold() || inline.bold)
         .set_italic(base.italic() || inline.italic)
         .set_strikethrough(base.strikethrough() || inline.strikethrough);
     if inline.code {
-        style.set_fg(Some(Color::Yellow));
+        style.set_fg(Some(color_depth.color(Color::Yellow, 186)));
     }
     style
 }
@@ -851,11 +941,60 @@ mod tests {
         );
 
         let mut ansi = Buffer::ansi();
-        emit(&mut ansi, markdown, 80).unwrap();
+        emit_with_color_depth(&mut ansi, markdown, 80, ColorDepth::Ansi16).unwrap();
         let ansi = String::from_utf8(ansi.into_inner()).unwrap();
         assert!(ansi.contains("\u{1b}[3m"), "{ansi:?}");
         assert!(ansi.contains("\u{1b}[1m"), "{ansi:?}");
         assert!(ansi.contains("\u{1b}[33m"), "{ansi:?}");
+    }
+
+    #[test]
+    fn maps_semantic_tokens_to_the_configured_ansi256_palette() {
+        let cases = [
+            (SemanticTokenKind::Keyword, 197),
+            (SemanticTokenKind::Operator, 197),
+            (SemanticTokenKind::Capability, 208),
+            (SemanticTokenKind::Type, 81),
+            (SemanticTokenKind::Enum, 81),
+            (SemanticTokenKind::EnumMember, 197),
+            (SemanticTokenKind::Function, 148),
+            (SemanticTokenKind::Method, 148),
+            (SemanticTokenKind::Property, 193),
+            (SemanticTokenKind::Namespace, 85),
+            (SemanticTokenKind::String, 186),
+            (SemanticTokenKind::TemplateString, 77),
+            (SemanticTokenKind::Number, 141),
+            (SemanticTokenKind::Constant, 141),
+            (SemanticTokenKind::Version, 141),
+            (SemanticTokenKind::Comment, 242),
+            (SemanticTokenKind::Variable, 231),
+        ];
+        for (kind, color) in cases {
+            assert_eq!(
+                code_style(Some(kind), ColorDepth::Ansi256).fg(),
+                Some(&Color::Ansi256(color)),
+                "wrong color for {kind:?}",
+            );
+        }
+        assert!(code_style(Some(SemanticTokenKind::Enum), ColorDepth::Ansi256).italic());
+        assert!(code_style(Some(SemanticTokenKind::Comment), ColorDepth::Ansi256).dimmed());
+    }
+
+    #[test]
+    fn keeps_a_readable_basic_color_fallback() {
+        assert_eq!(
+            code_style(Some(SemanticTokenKind::Keyword), ColorDepth::Ansi16).fg(),
+            Some(&Color::Red),
+        );
+        assert_eq!(
+            code_style(Some(SemanticTokenKind::String), ColorDepth::Ansi16).fg(),
+            Some(&Color::Yellow),
+        );
+        assert_eq!(
+            code_style(Some(SemanticTokenKind::Type), ColorDepth::Ansi16).fg(),
+            Some(&Color::Cyan),
+        );
+        assert!(code_style(Some(SemanticTokenKind::Enum), ColorDepth::Ansi16).italic());
     }
 
     #[test]

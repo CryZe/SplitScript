@@ -68,6 +68,11 @@
         "description": "A language constant such as a boolean literal."
       },
       {
+        "id": "templateString",
+        "superType": "string",
+        "description": "An interpolated string literal."
+      },
+      {
         "id": "setting",
         "superType": "property",
         "description": "An autosplitter setting value."
@@ -115,6 +120,9 @@
         "scopes": {
           "constant": [
             "constant.language.splitscript"
+          ],
+          "templateString": [
+            "string.quoted.template.splitscript"
           ],
           "setting": [
             "variable.other.property.splitscript"

@@ -343,8 +343,7 @@ fn render_documentation(topic: Option<&str>) -> ExitCode {
     } else {
         80
     };
-    let writer = StandardStream::stdout(ColorChoice::Auto);
-    if let Err(error) = cli_documentation::emit(&mut writer.lock(), &markdown, width) {
+    if let Err(error) = cli_documentation::emit_stdout(&markdown, width) {
         eprintln!("splitc: could not render documentation: {error}");
         return ExitCode::FAILURE;
     }

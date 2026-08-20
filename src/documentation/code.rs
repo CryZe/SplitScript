@@ -143,6 +143,14 @@ fn lexical_kind(
         }
         TokenKind::Ident(name) if is_keyword(name) => Some(SemanticTokenKind::Keyword),
         TokenKind::Ident(name)
+            if library
+                .capabilities()
+                .iter()
+                .any(|capability| capability.name == name) =>
+        {
+            Some(SemanticTokenKind::Capability)
+        }
+        TokenKind::Ident(name)
             if primary.is_some_and(|symbol| {
                 primary_name(symbol, library) == name && matches!(symbol, StdlibSymbolId::Item(_))
             }) =>
@@ -178,11 +186,10 @@ fn lexical_kind(
             Some(SemanticTokenKind::Property)
         }
         TokenKind::Ident(_) => Some(SemanticTokenKind::Variable),
-        TokenKind::Char(_)
-        | TokenKind::String(_)
-        | TokenKind::TemplateStart
-        | TokenKind::TemplateChunk(_)
-        | TokenKind::TemplateEnd => Some(SemanticTokenKind::String),
+        TokenKind::Char(_) | TokenKind::String(_) => Some(SemanticTokenKind::String),
+        TokenKind::TemplateStart | TokenKind::TemplateChunk(_) | TokenKind::TemplateEnd => {
+            Some(SemanticTokenKind::TemplateString)
+        }
         TokenKind::DocComment(_) => Some(SemanticTokenKind::Comment),
         TokenKind::Int(_) | TokenKind::Float(_) => Some(SemanticTokenKind::Number),
         kind if is_operator(kind) => Some(SemanticTokenKind::Operator),
@@ -195,6 +202,7 @@ fn is_linkable(kind: SemanticTokenKind) -> bool {
         kind,
         SemanticTokenKind::Keyword
             | SemanticTokenKind::Type
+            | SemanticTokenKind::Capability
             | SemanticTokenKind::Struct
             | SemanticTokenKind::Enum
             | SemanticTokenKind::EnumMember
@@ -419,6 +427,7 @@ fn css_class(kind: SemanticTokenKind) -> &'static str {
         SemanticTokenKind::Type | SemanticTokenKind::Struct | SemanticTokenKind::Enum => {
             "hljs-type"
         }
+        SemanticTokenKind::Capability => "hljs-type",
         SemanticTokenKind::EnumMember | SemanticTokenKind::Constant => "hljs-literal",
         SemanticTokenKind::Function | SemanticTokenKind::Method | SemanticTokenKind::Lifecycle => {
             "hljs-title function_"
@@ -429,9 +438,10 @@ fn css_class(kind: SemanticTokenKind) -> &'static str {
         | SemanticTokenKind::SettingTitle
         | SemanticTokenKind::StateField => "hljs-attr",
         SemanticTokenKind::Namespace => "hljs-built_in",
-        SemanticTokenKind::String | SemanticTokenKind::Signature | SemanticTokenKind::Version => {
-            "hljs-string"
-        }
+        SemanticTokenKind::String
+        | SemanticTokenKind::TemplateString
+        | SemanticTokenKind::Signature
+        | SemanticTokenKind::Version => "hljs-string",
         SemanticTokenKind::Number => "hljs-number",
         SemanticTokenKind::Operator => "splitscript-token-operator",
         SemanticTokenKind::Comment => "hljs-comment",
@@ -482,6 +492,12 @@ mod tests {
         );
         assert!(
             html.contains("capabilities/MemoryReadable/index.md"),
+            "{html}"
+        );
+        assert!(
+            html.contains(
+                "data-splitscript-token=\"interface\" class=\"hljs-type\">MemoryReadable"
+            ),
             "{html}"
         );
     }

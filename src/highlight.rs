@@ -19,6 +19,7 @@ use crate::{
 pub enum SemanticTokenKind {
     Keyword,
     Type,
+    Capability,
     Struct,
     Enum,
     EnumMember,
@@ -30,6 +31,7 @@ pub enum SemanticTokenKind {
     Namespace,
     Constant,
     String,
+    TemplateString,
     Number,
     Operator,
     Comment,
@@ -43,9 +45,10 @@ pub enum SemanticTokenKind {
 }
 
 impl SemanticTokenKind {
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 25] = [
         Self::Keyword,
         Self::Type,
+        Self::Capability,
         Self::Struct,
         Self::Enum,
         Self::EnumMember,
@@ -57,6 +60,7 @@ impl SemanticTokenKind {
         Self::Namespace,
         Self::Constant,
         Self::String,
+        Self::TemplateString,
         Self::Number,
         Self::Operator,
         Self::Comment,
@@ -77,6 +81,7 @@ impl SemanticTokenKind {
         match self {
             Self::Keyword => "keyword",
             Self::Type => "type",
+            Self::Capability => "interface",
             Self::Struct => "struct",
             Self::Enum => "enum",
             Self::EnumMember => "enumMember",
@@ -88,6 +93,7 @@ impl SemanticTokenKind {
             Self::Namespace => "namespace",
             Self::Constant => "constant",
             Self::String => "string",
+            Self::TemplateString => "templateString",
             Self::Number => "number",
             Self::Operator => "operator",
             Self::Comment => "comment",
@@ -295,6 +301,11 @@ impl HighlightCollector<'_> {
                         TokenKind::Ident(name) if is_keyword(name) => {
                             Some(SemanticTokenKind::Keyword)
                         }
+                        TokenKind::Ident(name)
+                            if is_capability(&self.standard_library, name) =>
+                        {
+                            Some(SemanticTokenKind::Capability)
+                        }
                         TokenKind::Ident(name) if is_builtin_type(&self.standard_library, name) => {
                             Some(SemanticTokenKind::Type)
                         }
@@ -318,11 +329,12 @@ impl HighlightCollector<'_> {
                             if previous_token.is_some_and(|previous| {
                                 matches!(&previous.kind, TokenKind::Ident(name) if name == "v")
                             }) => Some(SemanticTokenKind::Version),
-                        TokenKind::Char(_)
-                        | TokenKind::String(_)
-                        | TokenKind::TemplateStart
+                        TokenKind::Char(_) | TokenKind::String(_) => {
+                            Some(SemanticTokenKind::String)
+                        }
+                        TokenKind::TemplateStart
                         | TokenKind::TemplateChunk(_)
-                        | TokenKind::TemplateEnd => Some(SemanticTokenKind::String),
+                        | TokenKind::TemplateEnd => Some(SemanticTokenKind::TemplateString),
                         TokenKind::DocComment(_) => Some(SemanticTokenKind::Comment),
                         TokenKind::Int(_) | TokenKind::Float(_) => Some(SemanticTokenKind::Number),
                         kind if is_operator(kind) => Some(SemanticTokenKind::Operator),
@@ -1062,6 +1074,13 @@ fn is_builtin_type(standard_library: &StandardLibrary, name: &str) -> bool {
             .is_some()
 }
 
+fn is_capability(standard_library: &StandardLibrary, name: &str) -> bool {
+    standard_library
+        .capabilities()
+        .iter()
+        .any(|capability| capability.name == name)
+}
+
 fn is_namespace(standard_library: &StandardLibrary, name: &str) -> bool {
     standard_library.namespace_by_name(name).is_some()
 }
@@ -1185,6 +1204,32 @@ fn offset(position: Position) -> f64 {
             &highlights,
             "'x'",
             SemanticTokenKind::String,
+            0,
+        ));
+    }
+
+    #[test]
+    fn distinguishes_template_strings_from_ordinary_strings() {
+        let source = concat!(
+            "state \"game.exe\" {}\n",
+            "fn label(value: i32) -> String { return `value={value}` }",
+        );
+        let mut database = CompilerDatabase::new(source);
+        database.check().expect("template highlighting fixture");
+        let highlights = database.semantic_highlights().unwrap();
+
+        assert!(contains(
+            source,
+            &highlights,
+            "\"game.exe\"",
+            SemanticTokenKind::String,
+            0,
+        ));
+        assert!(contains(
+            source,
+            &highlights,
+            "value=",
+            SemanticTokenKind::TemplateString,
             0,
         ));
     }

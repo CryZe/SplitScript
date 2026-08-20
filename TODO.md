@@ -60,7 +60,7 @@ semantic-review evidence, not as a conformance corpus.
   the script. The residual host requirements are configured segment count and
   exact ordered reset notification; unknown-version fallback remains an
   explicit port policy choice rather than a compiler limitation.
-- [ ] Turn campaign feedback into targeted, minimized reproducers rather than
+- [x] Turn campaign feedback into targeted, minimized reproducers rather than
   exhaustively auditing every generated port. Classify each reported friction
   point as an existing but undiscovered facility, a compiler or diagnostic bug,
   a documentation/migration gap, a genuine language/library gap, or a
@@ -69,7 +69,11 @@ semantic-review evidence, not as a conformance corpus.
   may hide a semantic mismatch. The known high-risk examples include omitted
   `.exe` identities and named layouts, dropped `refreshRate`, incorrect
   `ulong` narrowing, missed fixed/growable array operations, and manual managed
-  string decoding.
+  string decoding. The focused audit now confirms exact-name attachment and
+  named layouts as undiscovered facilities, maps `refreshRate` to `tickRate`,
+  preserves `ulong` state reads as `u64` while isolating the exact Duration
+  conversion question, validates fixed and growable array patterns, and
+  separates managed-string decoding from the genuine managed-collection gap.
 - [ ] Re-check entries reported as blocked before designing adjacent host work,
   using a focused source comparison and compiler probe rather than a full-file
   audit.

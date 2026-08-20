@@ -181,6 +181,31 @@ timer, win split, cumulative game time, version comparison, timer-state logic,
 and unsupported-build suspension do not need new APIs. Last-segment detection
 and exact reset-event semantics remain unavailable host behavior.
 
+### Unsigned memory values: Alkali
+
+Campaign status: `PORTED-LIMITED`
+
+Audit result: the candidate silently narrows every source `ulong` watcher even
+though the language supports the exact unsigned representation.
+
+- Source: all seven memory watchers are C# `ulong` values, including the file
+  timer. Their faithful SplitScript type is `u64`; the parser's existing
+  machine-applicable migration fix rewrites `ulong` to `u64`, including in a
+  state field, and a focused compiler probe preserves the full unsigned range.
+- Candidate: every watcher is declared as `i64` based on the false premise that
+  it is the compiler's only 64-bit integer. Clean compilation therefore hides a
+  semantic narrowing for values above `i64::MAX`.
+- Residual library question: `Duration.fromWholeMilliseconds` accepts `i64`,
+  while the candidate casts its timer to `f64` for `fromMilliseconds`. That cast
+  cannot exactly represent every `u64` value. A faithful port must either prove
+  the game's counter range before converting or use a future exact unsigned
+  constructor; this is evidence for the separate Duration constructor review,
+  not evidence for narrowing the memory read.
+- Attachment is independently incorrect: the provider candidate is
+  extensionless even though module-qualified fields name `Alkali.exe`. Under
+  the current exact host contract, the state candidate itself must be
+  `Alkali.exe`.
+
 ### Fixed memory arrays: 1001 Spikes Ukampa
 
 Campaign status: `PORTED-LIMITED`

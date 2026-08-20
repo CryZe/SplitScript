@@ -1896,6 +1896,38 @@ fn csharp_numeric_type_names_have_machine_applicable_fixes() {
 }
 
 #[test]
+fn csharp_ulong_state_fields_rewrite_to_unsigned_memory_reads() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state "Alkali.exe" {
+            fileTimer: ulong at "Alkali.exe", 0x568D10;
+        }
+
+        split {
+            return current.fileTimer == 18_446_744_073_709_551_615u64
+        }
+    "#;
+    let recovered = splitscript::parse_recovering(source).unwrap();
+
+    assert_eq!(recovered.diagnostics().len(), 1);
+    let diagnostic = &recovered.diagnostics()[0];
+    assert_eq!(&source[diagnostic.span.start..diagnostic.span.end], "ulong");
+    assert_eq!(diagnostic.fixes.len(), 1);
+    let fix = &diagnostic.fixes[0];
+    assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+    assert_eq!(fix.edits[0].replacement, "u64");
+
+    let mut fixed = source.to_owned();
+    fixed.replace_range(
+        fix.edits[0].span.start..fix.edits[0].span.end,
+        &fix.edits[0].replacement,
+    );
+    splitscript::compile(&fixed)
+        .expect("the unsigned 64-bit state field should retain its complete memory range");
+}
+
+#[test]
 fn unknown_calls_suggest_canonical_names_across_naming_styles() {
     use splitscript::FixApplicability;
 

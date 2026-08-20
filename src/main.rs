@@ -326,7 +326,7 @@ fn main() -> ExitCode {
 }
 
 fn render_documentation(topic: Option<&str>) -> ExitCode {
-    let reference = splitscript::DocumentationReference::for_terminal();
+    let reference = splitscript::DocumentationReference::default();
     let requested = topic.unwrap_or("");
     let markdown = if let Some(page) = reference.topic(requested) {
         page.markdown

@@ -35,16 +35,6 @@ pub(super) fn example(example: Example, current_uri: &str, library: &StandardLib
     render(example.source, &annotations)
 }
 
-/// Renders source as ordinary fenced Markdown for non-HTML consumers.
-///
-/// The editor reference deliberately uses semantic HTML so every token can be
-/// styled and linked. Native terminal frontends instead need the original
-/// source to remain a Markdown code block that a normal event parser can
-/// consume without understanding that editor-only HTML dialect.
-pub(super) fn fenced(source: &str) -> String {
-    format!("```splitscript\n{source}\n```")
-}
-
 fn semantic_example_annotations(
     example: Example,
     current_uri: &str,
@@ -406,7 +396,9 @@ fn render(source: &str, annotations: &[Annotation]) -> String {
             escape_html_attribute_into(&mut html, target);
             html.push_str("\">");
         }
-        html.push_str("<span class=\"");
+        html.push_str("<span data-splitscript-token=\"");
+        html.push_str(annotation.kind.name());
+        html.push_str("\" class=\"");
         html.push_str(css_class(annotation.kind));
         html.push_str("\">");
         escape_html_into(&mut html, &source[annotation.start..annotation.end]);
@@ -479,11 +471,13 @@ mod tests {
             &library,
         );
         assert!(
-            html.contains("class=\"hljs-type\">Process</span>"),
+            html.contains("data-splitscript-token=\"type\" class=\"hljs-type\">Process</span>"),
             "{html}"
         );
         assert!(
-            html.contains("href=\"read.md\"><span class=\"hljs-title function_\">read"),
+            html.contains(
+                "href=\"read.md\"><span data-splitscript-token=\"method\" class=\"hljs-title function_\">read"
+            ),
             "{html}"
         );
         assert!(

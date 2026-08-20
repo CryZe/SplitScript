@@ -100,6 +100,11 @@ impl SemanticTokenKind {
             Self::Debug => "debug",
         }
     }
+
+    /// Resolves the stable editor-facing name of a semantic token kind.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
+    }
 }
 
 pub const MODIFIER_DECLARATION: u32 = 1 << 0;

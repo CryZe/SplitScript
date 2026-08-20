@@ -1,7 +1,8 @@
 use std::io;
 
 use codespan_reporting::term::termcolor::{Color, ColorSpec, WriteColor};
-use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use splitscript::tooling::{database::CompilerDatabase, highlight::SemanticTokenKind};
 
 const SEARCH_RESULT_LIMIT: usize = 12;
 
@@ -9,21 +10,33 @@ const SEARCH_RESULT_LIMIT: usize = 12;
 enum Block {
     Heading {
         level: HeadingLevel,
-        text: String,
+        text: StyledText,
     },
     Paragraph {
         quote_depth: usize,
-        text: String,
+        text: StyledText,
     },
     ListItem {
         quote_depth: usize,
         depth: usize,
         marker: String,
-        text: String,
+        text: StyledText,
     },
-    Code(String),
+    Code(Vec<CodeFragment>),
     Table(Vec<Vec<String>>),
     Rule,
+}
+
+#[derive(Debug)]
+struct CodeFragment {
+    text: String,
+    kind: Option<SemanticTokenKind>,
+}
+
+#[derive(Debug)]
+struct CodeState {
+    source: String,
+    is_splitscript: bool,
 }
 
 #[derive(Debug)]
@@ -35,7 +48,63 @@ struct ListState {
 struct ItemState {
     depth: usize,
     marker: String,
-    text: String,
+    text: StyledText,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct InlineStyle {
+    bold: bool,
+    italic: bool,
+    strikethrough: bool,
+    code: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct InlineState {
+    strong: usize,
+    emphasis: usize,
+    strikethrough: usize,
+}
+
+impl InlineState {
+    fn style(self) -> InlineStyle {
+        InlineStyle {
+            bold: self.strong != 0,
+            italic: self.emphasis != 0,
+            strikethrough: self.strikethrough != 0,
+            code: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct StyledChar {
+    value: char,
+    style: InlineStyle,
+}
+
+#[derive(Debug, Clone, Default)]
+struct StyledText {
+    chars: Vec<StyledChar>,
+}
+
+impl StyledText {
+    fn push_str(&mut self, text: &str, style: InlineStyle) {
+        self.chars
+            .extend(text.chars().map(|value| StyledChar { value, style }));
+    }
+
+    fn is_empty(&self) -> bool {
+        self.chars.is_empty()
+    }
+
+    fn clear(&mut self) {
+        self.chars.clear();
+    }
+
+    fn plain(&self) -> String {
+        self.chars.iter().map(|character| character.value).collect()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -50,14 +119,16 @@ struct TableState {
 #[derive(Debug, Default)]
 struct DocumentBuilder {
     blocks: Vec<Block>,
-    text: String,
+    text: StyledText,
     heading: Option<HeadingLevel>,
-    code: Option<String>,
+    code: Option<CodeState>,
     lists: Vec<ListState>,
     items: Vec<ItemState>,
     table: Option<TableState>,
+    html_block: Option<String>,
     quote_depth: usize,
     suppress_next_table_header: bool,
+    inline: InlineState,
 }
 
 impl DocumentBuilder {
@@ -79,21 +150,28 @@ impl DocumentBuilder {
             Event::Start(tag) => self.start(tag),
             Event::End(tag) => self.end(tag),
             Event::Text(text)
-            | Event::Code(text)
             | Event::InlineMath(text)
             | Event::DisplayMath(text)
             | Event::FootnoteReference(text) => self.push_text(&text),
+            Event::Code(text) => {
+                let mut style = self.inline.style();
+                style.code = true;
+                self.push_styled_text(&text, style);
+            }
             Event::SoftBreak => self.push_text(" "),
             Event::HardBreak => self.push_text("\n"),
             Event::Rule => self.blocks.push(Block::Rule),
             Event::TaskListMarker(checked) => {
                 self.push_text(if checked { "[x] " } else { "[ ] " });
             }
-            Event::Html(html) | Event::InlineHtml(html) => {
-                if html.contains("splitscript-reference-table") {
-                    self.suppress_next_table_header = true;
+            Event::Html(html) => {
+                if let Some(block) = &mut self.html_block {
+                    block.push_str(&html);
+                } else {
+                    self.html(&html);
                 }
             }
+            Event::InlineHtml(html) => self.html(&html),
         }
     }
 
@@ -111,7 +189,17 @@ impl DocumentBuilder {
                 self.heading = Some(level);
             }
             Tag::BlockQuote(_) => self.quote_depth += 1,
-            Tag::CodeBlock(_) => self.code = Some(String::new()),
+            Tag::CodeBlock(kind) => {
+                let is_splitscript = matches!(
+                    kind,
+                    CodeBlockKind::Fenced(info)
+                        if info.split_whitespace().next() == Some("splitscript")
+                );
+                self.code = Some(CodeState {
+                    source: String::new(),
+                    is_splitscript,
+                });
+            }
             Tag::List(start) => self.lists.push(ListState { next: start }),
             Tag::Item => {
                 let list = self
@@ -129,7 +217,7 @@ impl DocumentBuilder {
                 self.items.push(ItemState {
                     depth: self.lists.len().saturating_sub(1),
                     marker,
-                    text: String::new(),
+                    text: StyledText::default(),
                 });
             }
             Tag::Table(_) => {
@@ -153,11 +241,11 @@ impl DocumentBuilder {
                     table.cell = Some(String::new());
                 }
             }
-            Tag::HtmlBlock
-            | Tag::Emphasis
-            | Tag::Strong
-            | Tag::Strikethrough
-            | Tag::Superscript
+            Tag::HtmlBlock => self.html_block = Some(String::new()),
+            Tag::Emphasis => self.inline.emphasis += 1,
+            Tag::Strong => self.inline.strong += 1,
+            Tag::Strikethrough => self.inline.strikethrough += 1,
+            Tag::Superscript
             | Tag::Subscript
             | Tag::Link { .. }
             | Tag::Image { .. }
@@ -190,8 +278,15 @@ impl DocumentBuilder {
             TagEnd::BlockQuote(_) => self.quote_depth = self.quote_depth.saturating_sub(1),
             TagEnd::CodeBlock => {
                 if let Some(code) = self.code.take() {
-                    self.blocks
-                        .push(Block::Code(code.trim_end_matches('\n').to_owned()));
+                    let source = code.source.trim_end_matches('\n');
+                    self.blocks.push(Block::Code(if code.is_splitscript {
+                        splitscript_code_fragments(source)
+                    } else {
+                        vec![CodeFragment {
+                            text: source.to_owned(),
+                            kind: None,
+                        }]
+                    }));
                 }
             }
             TagEnd::List(_) => {
@@ -212,7 +307,7 @@ impl DocumentBuilder {
                 if let Some(table) = &mut self.table
                     && let Some(mut cell) = table.cell.take()
                 {
-                    table.row.push(take_normalized(&mut cell));
+                    table.row.push(take_normalized_string(&mut cell));
                 }
             }
             TagEnd::TableRow => {
@@ -235,11 +330,17 @@ impl DocumentBuilder {
                     self.blocks.push(Block::Table(table.rows));
                 }
             }
-            TagEnd::HtmlBlock
-            | TagEnd::Emphasis
-            | TagEnd::Strong
-            | TagEnd::Strikethrough
-            | TagEnd::Superscript
+            TagEnd::HtmlBlock => {
+                if let Some(html) = self.html_block.take() {
+                    self.html(&html);
+                }
+            }
+            TagEnd::Emphasis => self.inline.emphasis = self.inline.emphasis.saturating_sub(1),
+            TagEnd::Strong => self.inline.strong = self.inline.strong.saturating_sub(1),
+            TagEnd::Strikethrough => {
+                self.inline.strikethrough = self.inline.strikethrough.saturating_sub(1);
+            }
+            TagEnd::Superscript
             | TagEnd::Subscript
             | TagEnd::Link
             | TagEnd::Image
@@ -252,21 +353,145 @@ impl DocumentBuilder {
     }
 
     fn push_text(&mut self, text: &str) {
+        self.push_styled_text(text, self.inline.style());
+    }
+
+    fn push_styled_text(&mut self, text: &str, style: InlineStyle) {
         if let Some(code) = &mut self.code {
-            code.push_str(text);
+            code.source.push_str(text);
         } else if let Some(table) = &mut self.table
             && let Some(cell) = &mut table.cell
         {
             cell.push_str(text);
         } else if let Some(item) = self.items.last_mut() {
-            item.text.push_str(text);
+            item.text.push_str(text, style);
         } else {
-            self.text.push_str(text);
+            self.text.push_str(text, style);
+        }
+    }
+
+    fn html(&mut self, html: &str) {
+        if let Some(code) = semantic_code_fragments(html) {
+            self.blocks.push(Block::Code(code));
+        } else if html.contains("splitscript-reference-table") {
+            self.suppress_next_table_header = true;
         }
     }
 }
 
-fn take_normalized(text: &mut String) -> String {
+fn splitscript_code_fragments(source: &str) -> Vec<CodeFragment> {
+    let mut database = CompilerDatabase::new(source);
+    let Ok(highlights) = database.semantic_highlights() else {
+        return vec![CodeFragment {
+            text: source.to_owned(),
+            kind: None,
+        }];
+    };
+    let spans = highlights
+        .highlights()
+        .iter()
+        .map(|highlight| (highlight.span.start, highlight.span.end, highlight.kind));
+    fragments_from_spans(source, spans)
+}
+
+fn fragments_from_spans(
+    source: &str,
+    spans: impl IntoIterator<Item = (usize, usize, SemanticTokenKind)>,
+) -> Vec<CodeFragment> {
+    let mut fragments = Vec::new();
+    let mut cursor = 0;
+    for (start, end, kind) in spans {
+        if start < cursor || start > end || end > source.len() {
+            continue;
+        }
+        push_code_fragment(&mut fragments, &source[cursor..start], None);
+        push_code_fragment(&mut fragments, &source[start..end], Some(kind));
+        cursor = end;
+    }
+    push_code_fragment(&mut fragments, &source[cursor..], None);
+    fragments
+}
+
+fn semantic_code_fragments(html: &str) -> Option<Vec<CodeFragment>> {
+    const PREFIX: &str = "<pre class=\"hljs splitscript-code\"><code>";
+    const SUFFIX: &str = "</code></pre>";
+    let mut source = html.trim().strip_prefix(PREFIX)?.strip_suffix(SUFFIX)?;
+    let mut fragments = Vec::new();
+    while !source.is_empty() {
+        if let Some(rest) = source.strip_prefix("<a ") {
+            source = rest.split_once('>')?.1;
+            continue;
+        }
+        if let Some(rest) = source.strip_prefix("</a>") {
+            source = rest;
+            continue;
+        }
+        if let Some(rest) = source.strip_prefix("<span data-splitscript-token=\"") {
+            let (kind, rest) = rest.split_once('"')?;
+            let kind = SemanticTokenKind::from_name(kind)?;
+            let rest = rest.strip_prefix(" class=\"")?;
+            let (_, rest) = rest.split_once("\">")?;
+            let (text, rest) = rest.split_once("</span>")?;
+            push_code_fragment(&mut fragments, &decode_generated_html(text), Some(kind));
+            source = rest;
+            continue;
+        }
+        let end = source.find('<').unwrap_or(source.len());
+        if end == 0 {
+            return None;
+        }
+        push_code_fragment(&mut fragments, &decode_generated_html(&source[..end]), None);
+        source = &source[end..];
+    }
+    Some(fragments)
+}
+
+fn decode_generated_html(text: &str) -> String {
+    text.replace("&quot;", "\"")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+fn push_code_fragment(
+    fragments: &mut Vec<CodeFragment>,
+    text: &str,
+    kind: Option<SemanticTokenKind>,
+) {
+    if text.is_empty() {
+        return;
+    }
+    if let Some(previous) = fragments.last_mut()
+        && previous.kind == kind
+    {
+        previous.text.push_str(text);
+    } else {
+        fragments.push(CodeFragment {
+            text: text.to_owned(),
+            kind,
+        });
+    }
+}
+
+fn take_normalized(text: &mut StyledText) -> StyledText {
+    let mut normalized = StyledText::default();
+    let mut pending_space = None;
+    for character in std::mem::take(&mut text.chars) {
+        if character.value.is_whitespace() {
+            if !normalized.chars.is_empty() {
+                pending_space = Some(character.style);
+            }
+        } else {
+            if let Some(style) = pending_space.take() {
+                normalized.chars.push(StyledChar { value: ' ', style });
+            }
+            normalized.chars.push(character);
+        }
+    }
+    normalized
+}
+
+fn take_normalized_string(text: &mut String) -> String {
     let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
     text.clear();
     normalized
@@ -330,9 +555,9 @@ fn render_block(writer: &mut dyn WriteColor, block: &Block, width: usize) -> io:
                 HeadingLevel::H1 => Color::Cyan,
                 _ => Color::Blue,
             }));
-            writer.set_color(&style)?;
-            writeln!(writer, "{text}")?;
-            writer.reset()
+            render_styled_range(writer, text, 0, text.chars.len(), &style)?;
+            writer.reset()?;
+            writeln!(writer)
         }
         Block::Paragraph { quote_depth, text } => {
             let prefix = "> ".repeat(*quote_depth);
@@ -349,34 +574,150 @@ fn render_block(writer: &mut dyn WriteColor, block: &Block, width: usize) -> io:
             let subsequent = " ".repeat(initial.chars().count());
             write_wrapped(writer, text, &initial, &subsequent, width)
         }
-        Block::Code(code) => {
-            let mut style = ColorSpec::new();
-            style.set_fg(Some(Color::Green));
-            writer.set_color(&style)?;
-            for line in code.lines() {
-                writeln!(writer, "  {line}")?;
-            }
-            writer.reset()
-        }
+        Block::Code(fragments) => render_code(writer, fragments),
         Block::Table(rows) => render_table(writer, rows, width),
         Block::Rule => writeln!(writer, "{}", "─".repeat(width.min(80))),
     }
 }
 
+fn render_code(writer: &mut dyn WriteColor, fragments: &[CodeFragment]) -> io::Result<()> {
+    let mut line_start = true;
+    for fragment in fragments {
+        writer.set_color(&code_style(fragment.kind))?;
+        for part in fragment.text.split_inclusive('\n') {
+            if line_start {
+                writer.reset()?;
+                write!(writer, "  ")?;
+                writer.set_color(&code_style(fragment.kind))?;
+            }
+            write!(writer, "{part}")?;
+            line_start = part.ends_with('\n');
+        }
+    }
+    writer.reset()?;
+    if !line_start {
+        writeln!(writer)?;
+    }
+    Ok(())
+}
+
+fn code_style(kind: Option<SemanticTokenKind>) -> ColorSpec {
+    let mut style = ColorSpec::new();
+    match kind {
+        Some(SemanticTokenKind::Keyword | SemanticTokenKind::Debug) => {
+            style.set_fg(Some(Color::Magenta)).set_bold(true);
+        }
+        Some(SemanticTokenKind::Type | SemanticTokenKind::Struct | SemanticTokenKind::Enum) => {
+            style.set_fg(Some(Color::Cyan));
+        }
+        Some(SemanticTokenKind::EnumMember | SemanticTokenKind::Constant) => {
+            style.set_fg(Some(Color::Blue)).set_bold(true);
+        }
+        Some(
+            SemanticTokenKind::Function | SemanticTokenKind::Method | SemanticTokenKind::Lifecycle,
+        ) => {
+            style.set_fg(Some(Color::Green));
+        }
+        Some(
+            SemanticTokenKind::Property
+            | SemanticTokenKind::Setting
+            | SemanticTokenKind::SettingTitle
+            | SemanticTokenKind::StateField,
+        ) => {
+            style.set_fg(Some(Color::Yellow));
+        }
+        Some(SemanticTokenKind::Namespace) => {
+            style.set_fg(Some(Color::Cyan)).set_bold(true);
+        }
+        Some(
+            SemanticTokenKind::String | SemanticTokenKind::Signature | SemanticTokenKind::Version,
+        ) => {
+            style.set_fg(Some(Color::Green));
+        }
+        Some(SemanticTokenKind::Number) => {
+            style.set_fg(Some(Color::Cyan));
+        }
+        Some(SemanticTokenKind::Operator) => {
+            style.set_fg(Some(Color::Magenta));
+        }
+        Some(SemanticTokenKind::Comment) => {
+            style.set_fg(Some(Color::Green)).set_intense(false);
+        }
+        Some(SemanticTokenKind::Variable | SemanticTokenKind::Parameter) | None => {}
+    }
+    style
+}
+
 fn write_wrapped(
     writer: &mut dyn WriteColor,
-    text: &str,
+    text: &StyledText,
     initial: &str,
     subsequent: &str,
     width: usize,
 ) -> io::Result<()> {
+    let plain = text.plain();
     let options = textwrap::Options::new(width)
         .initial_indent(initial)
         .subsequent_indent(subsequent);
-    for line in textwrap::wrap(text, options) {
-        writeln!(writer, "{line}")?;
+    let mut offset = 0;
+    for (index, line) in textwrap::wrap(&plain, options).into_iter().enumerate() {
+        let prefix = if index == 0 { initial } else { subsequent };
+        let content = line.strip_prefix(prefix).unwrap_or(&line);
+        writer.reset()?;
+        write!(writer, "{prefix}")?;
+        let count = content.chars().count();
+        render_styled_range(writer, text, offset, count, &ColorSpec::new())?;
+        offset += count;
+        while text
+            .chars
+            .get(offset)
+            .is_some_and(|character| character.value.is_whitespace())
+        {
+            offset += 1;
+        }
+        writer.reset()?;
+        writeln!(writer)?;
     }
     Ok(())
+}
+
+fn render_styled_range(
+    writer: &mut dyn WriteColor,
+    text: &StyledText,
+    start: usize,
+    count: usize,
+    base: &ColorSpec,
+) -> io::Result<()> {
+    let mut current_style = None;
+    let mut run = String::new();
+    for character in text.chars.iter().skip(start).take(count) {
+        if current_style != Some(character.style) {
+            if let Some(style) = current_style {
+                writer.set_color(&inline_style(base, style))?;
+                write!(writer, "{run}")?;
+                run.clear();
+            }
+            current_style = Some(character.style);
+        }
+        run.push(character.value);
+    }
+    if let Some(style) = current_style {
+        writer.set_color(&inline_style(base, style))?;
+        write!(writer, "{run}")?;
+    }
+    Ok(())
+}
+
+fn inline_style(base: &ColorSpec, inline: InlineStyle) -> ColorSpec {
+    let mut style = base.clone();
+    style
+        .set_bold(base.bold() || inline.bold)
+        .set_italic(base.italic() || inline.italic)
+        .set_strikethrough(base.strikethrough() || inline.strikethrough);
+    if inline.code {
+        style.set_fg(Some(Color::Yellow));
+    }
+    style
 }
 
 fn render_table(writer: &mut dyn WriteColor, rows: &[Vec<String>], width: usize) -> io::Result<()> {
@@ -499,8 +840,76 @@ mod tests {
     }
 
     #[test]
+    fn preserves_markdown_emphasis_strong_text_and_inline_code() {
+        let markdown = "_Method_\n\n**Effects:** reads `address`.\n";
+
+        let mut plain = Buffer::no_color();
+        emit(&mut plain, markdown, 80).unwrap();
+        assert_eq!(
+            String::from_utf8(plain.into_inner()).unwrap(),
+            "Method\n\nEffects: reads address.\n",
+        );
+
+        let mut ansi = Buffer::ansi();
+        emit(&mut ansi, markdown, 80).unwrap();
+        let ansi = String::from_utf8(ansi.into_inner()).unwrap();
+        assert!(ansi.contains("\u{1b}[3m"), "{ansi:?}");
+        assert!(ansi.contains("\u{1b}[1m"), "{ansi:?}");
+        assert!(ansi.contains("\u{1b}[33m"), "{ansi:?}");
+    }
+
+    #[test]
+    fn renders_compiler_owned_semantic_code_as_terminal_colors() {
+        let reference = splitscript::DocumentationReference::default();
+        let page = reference
+            .page("/stdlib/types/Process/methods/read.md")
+            .expect("Process.read has a documentation page");
+
+        let mut plain = Buffer::no_color();
+        emit(&mut plain, &page.markdown, 100).unwrap();
+        let plain = String::from_utf8(plain.into_inner()).unwrap();
+        assert!(plain.contains("Process.read<T>(address: address) -> T!"));
+        assert!(plain.contains("let health = process.read<i32>"));
+        assert!(!plain.contains("<pre"));
+        assert!(!plain.contains("data-splitscript-token"));
+        assert!(!plain.contains("\u{1b}["));
+
+        let mut ansi = Buffer::ansi();
+        emit(&mut ansi, &page.markdown, 100).unwrap();
+        let ansi = String::from_utf8(ansi.into_inner()).unwrap();
+        assert!(ansi.matches("\u{1b}[").count() > 8, "{ansi:?}");
+        assert!(ansi.contains("Process"));
+        assert!(ansi.contains("read"));
+    }
+
+    #[test]
+    fn renders_module_scan_example_code() {
+        let reference = splitscript::DocumentationReference::default();
+        let page = reference
+            .topic("Module.scan")
+            .expect("Module.scan has a documentation page");
+        let blocks = DocumentBuilder::parse(&page.markdown);
+        assert_eq!(
+            blocks
+                .iter()
+                .filter(|block| matches!(block, Block::Code(_)))
+                .count(),
+            2,
+            "{blocks:#?}",
+        );
+        let mut plain = Buffer::no_color();
+        emit(&mut plain, &page.markdown, 100).unwrap();
+        let plain = String::from_utf8(plain.into_inner()).unwrap();
+        assert!(
+            plain.contains("let marker = await gameAssembly.scan"),
+            "markdown:\n{}\nrendered:\n{plain}",
+            page.markdown,
+        );
+    }
+
+    #[test]
     fn renders_ranked_search_results_as_a_compact_borderless_table() {
-        let reference = splitscript::DocumentationReference::for_terminal();
+        let reference = splitscript::DocumentationReference::default();
         let results = reference.search("multiple processes");
         let markdown = search_results_markdown("multiple processes", &results);
         let mut buffer = Buffer::no_color();

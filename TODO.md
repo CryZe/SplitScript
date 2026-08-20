@@ -82,7 +82,11 @@ semantic-review evidence, not as a conformance corpus.
   layouts, settings families, growable `[T]`, and Mono static-singleton paths
   already cover parts of AoE2DE, Borderlands, TUNIC, and other reported
   blockers. Preserve the residual host gap only after removing these false
-  premises.
+  premises. AER is now a focused false-blocker: raw `MemoryPath` polling,
+  explicit `SetZeroOrNull` fallback, one `tickRate` declaration, and automatic
+  attachment cancellation cover its timer-critical loading behavior without a
+  managed-object bridge or dynamic watcher registration; its auxiliary sound
+  and modal UI remain fidelity-ledger omissions.
 - [ ] Promote a small corrected subset to reviewed fixtures: one exact-name
   native process, one process-name array, one multi-version named layout, one
   timer-state/split-index script, one `tickRate` script, one managed-string or
@@ -260,8 +264,8 @@ semantic-review evidence, not as a conformance corpus.
   `asl-help` callbacks.
 - [ ] Extend Unity Mono managed-object support from corpus-proven residual
   needs: typed cross-class object paths, managed list/dictionary traversal, and
-  dynamic typed tag values for Alba, A Short Hike, AER, Bzzzt, and Assemble
-  with Care. Separate stable singleton/field chains
+  dynamic typed tag values for Alba, A Short Hike, Bzzzt, and Assemble with
+  Care. Separate stable singleton/field chains
   already expressible through `staticFieldPath` and `field` from collection
   enumeration that genuinely needs new library/runtime support. Alba does not
   require runtime-created state fields: growable arrays can retain discovered

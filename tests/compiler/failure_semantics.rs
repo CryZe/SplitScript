@@ -928,6 +928,62 @@ fn declared_record_enum_and_array_layouts_are_semantic_facts() {
 }
 
 #[test]
+fn replaceable_deep_pointer_flags_do_not_require_background_watcher_registration() {
+    let source = r#"
+        let teleporterLoadingPath: MemoryPath? = None
+        let teleporterTransitionPath: MemoryPath? = None
+        let loadingScreenPath: MemoryPath? = None
+
+        state "AER.exe" {
+            teleporterLoading: bool = readFlag(teleporterLoadingPath);
+            teleporterTransition: bool = readFlag(teleporterTransitionPath);
+            loadingScreen: bool = readFlag(loadingScreenPath);
+        }
+
+        tickRate {
+            attached: 58,
+            detached: 2,
+        }
+
+        fn readFlag(path: MemoryPath?) -> bool {
+            let resolvedPath = path else return false
+            let address = resolvedPath.resolve() else return false
+            return process.read<bool>(address) else false
+        }
+
+        onAttach {
+            let mono = await process.module("mono.dll")
+            let teleporter = mono.address.offset(0x1f6964)
+            teleporterLoadingPath = teleporter.memoryPath(
+                [0x30, 0xd5c],
+                0xe90 + 0x5a,
+                PointerSize.Bit32,
+            )
+            teleporterTransitionPath = teleporter.memoryPath(
+                [0x30, 0xd5c],
+                0xe90 + 0x59,
+                PointerSize.Bit32,
+            )
+            loadingScreenPath = mono.address.offset(0x1f696c).memoryPath(
+                [0x80, 0x90, 0x40, 0x1c, 0x4, 0xc],
+                0x4,
+                PointerSize.Bit32,
+            )
+        }
+
+        isLoading {
+            return current.teleporterLoading
+                || current.teleporterTransition
+                || current.loadingScreen
+        }
+    "#;
+
+    splitscript::compile(source).expect(
+        "attachment-owned paths should re-resolve replaceable objects on every state update",
+    );
+}
+
+#[test]
 fn catalog_queries_expose_generic_calls_effects_and_docs_for_editor_tooling() {
     let library = StandardLibrary::new();
     let process_type = library

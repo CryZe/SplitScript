@@ -423,6 +423,40 @@ start notification is the only active behavior that remains host-limited.
   replaced on every successful `onAttach`, so the helper's explicit reset does
   not require a guest-visible managed-object lifetime API.
 
+### Background pointer discovery without dynamic watchers: AER
+
+Campaign status: `BLOCKED`
+
+Audit result: the report mistakes raw replaceable `DeepPointer` chains for a
+managed-object and dynamic-watcher requirement. The active loading behavior is
+already expressible.
+
+- Source: both the `Teleporter` and later-created `LoadingScreen` values are
+  found through fixed 32-bit pointer paths rooted in `mono.dll`. The source does
+  not query Mono class or field metadata. Its background task only retries the
+  latter path until it resolves, then replaces a placeholder boolean watcher.
+- Existing translation: retain three `MemoryPath?` globals, populate them from
+  `await process.module("mono.dll")` in `onAttach`, and resolve each path from a
+  boolean expression-backed state field. A focused current-compiler probe
+  covers both pointer shapes and combines all three flags in `isLoading`.
+- Read semantics: the source configures every watcher with
+  `ReadFailAction.SetZeroOrNull`. A helper that uses `path.resolve() else return
+  false` and `process.read<bool>(address) else false` reproduces that behavior;
+  ordinary state failure retention would be the wrong choice here.
+- Polling and cancellation are existing facilities. The source's integer
+  `refreshRate` calculations select 2 Hz while detached and 58 Hz while
+  attached, which map to one `tickRate` declaration. Process closure cancels
+  attachment-owned discovery, and the paths are replaced on the next successful
+  `onAttach`, so no cancellation-token or shutdown API is required for the
+  loading provider.
+- The embedded sound, modal message, version label, and optional debug logging
+  are auxiliary UI behavior rather than inputs to the timer decisions. Omitting
+  them must be recorded in a fidelity ledger, but they do not block the loading
+  remover.
+- Attachment under the current exact-name contract is `AER.exe`. The pointer
+  width, offsets, and flag timing still require live-game verification; the
+  compiler probe proves representability, not runtime correctness.
+
 Further campaign work should begin with a concrete friction report and reduce it
 to a focused source comparison or compiler probe. The generated ports are
 supporting evidence, not an exhaustive conformance corpus. Every resulting

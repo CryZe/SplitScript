@@ -130,6 +130,39 @@ is not mutated. [`push`] adds one element and keeps the resulting value an
 ordinary `[i64]`; [`Process.follow`] therefore handles every source length with
 the same function.
 
+An ASL background task that repeatedly retries the same `DeepPointer` usually
+does not need a task or dynamically replaced watcher in SplitScript. Retain a
+[`MemoryPath`] after module discovery and resolve it from an expression-backed
+state field on every poll:
+
+```splitscript
+# let loadingPath: MemoryPath? = None
+fn readLoading(path: MemoryPath?) -> bool {
+    let selectedPath = path else return false
+    let address = selectedPath.resolve() else return false
+    return process.read<bool>(address) else false
+}
+
+# state "game.exe" {
+#     loading: bool = readLoading(loadingPath);
+# }
+# onAttach {
+#     let module = await process.module("game.dll")
+#     loadingPath = module.address.memoryPath(
+#         [0x20, 0x18],
+#         0x4,
+#         PointerSize.Bit32,
+#     )
+# }
+```
+
+[`MemoryPath.resolve`] follows the retained chain afresh, so an object that is
+created or replaced later becomes visible without guest-managed cancellation.
+The explicit `else false` matches ASL `ReadFailAction.SetZeroOrNull`. Letting a
+fallible read escape the field instead keeps its last accepted value, matching
+the default persistent-watcher behavior. Use the target's actual
+[`PointerSize`]; do not infer it from the host running the timer.
+
 ## Bounded native `stringN` state
 
 The original ASL runtime implements `stringN` by:

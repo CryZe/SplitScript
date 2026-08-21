@@ -6,7 +6,7 @@ use wasm_encoder::{BlockType, Function, HeapType, Instruction, RefType, ValType}
 
 use crate::{
     abi::AbiImportId,
-    ast::{ActionKind, Program},
+    ast::{ActionKind, Program, ValueId},
     stdlib::{CoreTypeId, RuntimeRepresentation, StdlibFieldId, StdlibTypeId},
     wasm_ir,
 };
@@ -23,6 +23,9 @@ pub(super) struct UpdateContext<'a> {
     pub gc: &'a GcLayout,
     pub runtime_globals: RuntimeGlobals,
     pub semantics: &'a crate::semantic::SemanticModel,
+    pub globals: &'a HashMap<ValueId, u32>,
+    pub global_types: &'a HashMap<ValueId, Type>,
+    pub attachment_globals: &'a [ValueId],
     pub process_names: &'a [&'a str],
     pub provider_attach: Option<ProviderAttach>,
 }
@@ -172,6 +175,14 @@ pub(super) fn compile_update(
                 lowering.gc.index(Type::Enum(enumeration.id)),
             )))
             .instruction(&Instruction::GlobalSet(selected));
+    }
+    for value in lowering.attachment_globals {
+        let ty = lowering.global_types[value];
+        if !ty.has_runtime_value() {
+            continue;
+        }
+        emit_storage_default(&mut function, lowering.gc.val_type(ty));
+        function.instruction(&Instruction::GlobalSet(lowering.globals[value]));
     }
     if let Some(region) = cancellation_region {
         emit_cancel_region(&mut function, region, lowering.gc, globals);
@@ -440,6 +451,20 @@ pub(super) fn compile_update(
         .instruction(&Instruction::End)
         .instruction(&Instruction::End);
     function
+}
+
+/// Clears attachment-owned storage without constructing source defaults.
+/// Reference-typed globals are nullable at the storage boundary precisely so
+/// a detached runtime cannot retain GC objects from the previous process.
+fn emit_storage_default(function: &mut Function, ty: ValType) {
+    match ty {
+        ValType::I32 => function.instruction(&Instruction::I32Const(0)),
+        ValType::I64 => function.instruction(&Instruction::I64Const(0)),
+        ValType::F32 => function.instruction(&Instruction::F32Const(0.0.into())),
+        ValType::F64 => function.instruction(&Instruction::F64Const(0.0.into())),
+        ValType::V128 => function.instruction(&Instruction::V128Const(0)),
+        ValType::Ref(reference) => function.instruction(&Instruction::RefNull(reference.heap_type)),
+    };
 }
 
 fn emit_state_field_poll(

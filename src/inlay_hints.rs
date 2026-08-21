@@ -275,6 +275,27 @@ whileAttached {
     }
 
     #[test]
+    fn shows_types_inferred_for_attachment_scoped_globals() {
+        let source = r#"let module
+state "game.exe" {}
+onAttach { module = await process.mainModule() }
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let snapshot = database.semantic_snapshot().unwrap();
+        let hints = inferred_type_hints(
+            &snapshot,
+            Span {
+                start: 0,
+                end: source.len(),
+            },
+        );
+        assert!(hints.iter().any(|hint| {
+            hint.position == source.find("module").unwrap() + "module".len()
+                && hint.label == ": Module"
+        }));
+    }
+
+    #[test]
     fn failed_inference_does_not_publish_fabricated_type_hints() {
         let source = r#"state GBA {
     ok at 0x100;

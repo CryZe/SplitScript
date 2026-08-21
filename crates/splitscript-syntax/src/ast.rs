@@ -810,7 +810,10 @@ pub struct VariableDecl {
     pub mutable: bool,
     pub debug_only: bool,
     pub annotation: Option<TypeRef>,
-    pub value: Expr,
+    /// Ordinary globals and local variables have an initializer. A top-level
+    /// declaration without one is initialized by `onAttach` and has the same
+    /// lifetime as the selected process.
+    pub value: Option<Expr>,
     pub span: Span,
 }
 

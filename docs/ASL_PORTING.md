@@ -987,13 +987,15 @@ operations before entering the retry block.
 
 ## Attach-time-discovered addresses
 
-Keep discovery in [`onAttach`] and polling in the state declaration. Polling does
-not begin until [`onAttach`] completes, so a global address initializer is never
-observed when every completing path assigns the discovered address. An
-unsupported build should await process closure instead of completing:
+Keep discovery in [`onAttach`] and polling in the state declaration. Declare an
+attachment-discovered value with a bare top-level [`let`], without a fake zero
+or [`None`] initializer. Its type is inferred from assignments and uses. The
+compiler proves that every successful attachment path initializes it before
+polling begins, and the runtime clears its storage when that process detaches.
+An unsupported build should await process closure instead of completing:
 
 ```splitscript
-let loadingAddress: address = 0x0
+let loadingAddress
 
 state "game.exe" {
     loading: i32 = process.read(loadingAddress);
@@ -1009,6 +1011,13 @@ onAttach {
     }
 }
 ```
+
+With named layouts, a bare global may belong to only the layouts whose return
+paths initialize it. Access it under the same direct [`match`] on [`layout`]
+that refines layout-specific state fields. Helpers inherit these requirements,
+so a helper reading a Steam-only value is callable from the
+`StateLayout.Steam` arm but not from unrefined polling code. Values assigned on
+every successful layout path remain available everywhere while attached.
 
 Expression-backed fields are persistent watcher values. The initial snapshot
 waits for every required field to succeed together. Afterwards, a failed [`T!`]

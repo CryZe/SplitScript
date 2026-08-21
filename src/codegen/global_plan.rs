@@ -219,8 +219,17 @@ pub(super) fn encode(
             continue;
         }
         let index = section.len();
+        let mut val_type = gc.val_type(ty);
+        if variable.value.is_none()
+            && let ValType::Ref(reference) = &mut val_type
+        {
+            // The source value is non-null after successful initialization,
+            // but detached storage needs a null sentinel so it can release
+            // the previous attachment's GC graph.
+            reference.nullable = true;
+        }
         let global_type = GlobalType {
-            val_type: gc.val_type(ty),
+            val_type,
             mutable: variable.mutable,
             shared: false,
         };
@@ -242,8 +251,10 @@ pub(super) fn encode(
                 global_type,
                 &ConstExpr::ref_null(HeapType::Concrete(gc.index(ty))),
             );
+        } else if let Some(value) = &variable.value {
+            section.global(global_type, &constant(value.id, wasm_ir, ty));
         } else {
-            section.global(global_type, &constant(variable.value.id, wasm_ir, ty));
+            section.global(global_type, &default_const_expr(gc.val_type(ty)));
         }
         variables.insert(variable.id, index);
         variable_types.insert(variable.id, ty);
@@ -279,6 +290,17 @@ pub(super) fn encode(
         variables,
         variable_types,
         settings,
+    }
+}
+
+fn default_const_expr(ty: ValType) -> ConstExpr {
+    match ty {
+        ValType::I32 => ConstExpr::i32_const(0),
+        ValType::I64 => ConstExpr::i64_const(0),
+        ValType::F32 => ConstExpr::f32_const(0.0.into()),
+        ValType::F64 => ConstExpr::f64_const(0.0.into()),
+        ValType::Ref(reference) => ConstExpr::ref_null(reference.heap_type),
+        ValType::V128 => unreachable!("SplitScript has no v128 source values"),
     }
 }
 

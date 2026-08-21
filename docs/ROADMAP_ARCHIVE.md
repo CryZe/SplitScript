@@ -1,5 +1,20 @@
 # SplitScript roadmap
 
+## 2026-08-22: attachment-scoped inferred globals
+
+- Added bare top-level declarations such as `let gameAssembly` for values that
+  are discovered by `onAttach`, with bidirectional type inference across
+  assignments, state expressions, helper calls, and attached actions.
+- Proved definite initialization per successful attachment path and named state
+  layout. Direct `match layout` refinement exposes layout-specific values and
+  helper requirements propagate transitively like attached-process effects.
+- Rejected reads and writes before initialization or outside their attachment
+  lifetime, cleared numeric and GC-backed storage on detach, and preserved
+  debug-only erasure in both build profiles.
+- Added formatter, hover, inlay-hint, documentation, diagnostics, and validated
+  WebAssembly GC coverage, including non-null source values backed by nullable
+  lifetime storage.
+
 ## 2026-08-20: value-producing loop expressions
 
 - Added Rust-style [`loop`] expressions: an unbroken loop has type [`Never`],

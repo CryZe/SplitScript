@@ -175,6 +175,12 @@ impl TypedVisitor for CallCollector<'_> {
         {
             self.facts.effects.push(Effect::RequiresStateSnapshots);
         }
+        if let Some((Some(crate::semantic::ResolvedValue::Variable(value)), _)) =
+            program.value_path(expression.id)
+            && program.is_attachment_global(value)
+        {
+            self.facts.effects.push(Effect::RequiresAttachedProcess);
+        }
         if let hir::TypedExpressionKind::Suspend { value, .. } = expression.kind {
             self.facts
                 .effects
@@ -185,6 +191,14 @@ impl TypedVisitor for CallCollector<'_> {
             }
         }
         if let Some(call) = program.call(expression.id) {
+            if call
+                .receiver()
+                .and_then(|receiver| receiver.path().map(|(root, _)| root))
+                .and_then(|root| root.source_value())
+                .is_some_and(|value| program.is_attachment_global(value))
+            {
+                self.facts.effects.push(Effect::RequiresAttachedProcess);
+            }
             let creates_future = matches!(
                 self.semantics.types().kind(expression.ty),
                 TypeKind::Async { .. }
@@ -209,6 +223,11 @@ impl TypedVisitor for CallCollector<'_> {
             && let Some(call) = &assignment.operator
         {
             collect_call_facts(self.facts, call, program, false);
+        }
+        if let hir::TypedStatementKind::Assign { assignment, .. } = &statement.kind
+            && program.is_attachment_global(assignment.target)
+        {
+            self.facts.effects.push(Effect::RequiresAttachedProcess);
         }
         if matches!(statement.kind, hir::TypedStatementKind::StateAssign { .. }) {
             self.facts.effects.push(Effect::WritesCurrentState);

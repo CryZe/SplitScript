@@ -574,7 +574,7 @@ fn compiler_database_exposes_types_resolutions_and_references() {
         panic!("expected the local declaration");
     };
     let local_id = local.id;
-    let ExprKind::Binary { right, .. } = &local.value.kind else {
+    let ExprKind::Binary { right, .. } = &local.value.as_ref().unwrap().kind else {
         panic!("expected the local binary initializer");
     };
     let min_call = right.id;
@@ -584,8 +584,8 @@ fn compiler_database_exposes_types_resolutions_and_references() {
     let Stmt::Variable(result) = &syntax.actions[0].body.statements[0] else {
         panic!("expected the result declaration");
     };
-    let bump_call = result.value.id;
-    let ExprKind::Call { args, .. } = &result.value.kind else {
+    let bump_call = result.value.as_ref().unwrap().id;
+    let ExprKind::Call { args, .. } = &result.value.as_ref().unwrap().kind else {
         panic!("expected the user-function call");
     };
     let state_path = args[0].id;
@@ -600,7 +600,9 @@ fn compiler_database_exposes_types_resolutions_and_references() {
         Some(TypeKind::Builtin(BuiltinType::I32))
     );
     assert_eq!(
-        database.expression_type(local.value.id).unwrap(),
+        database
+            .expression_type(local.value.as_ref().unwrap().id)
+            .unwrap(),
         Some(local_type)
     );
     assert_eq!(database.value_type(parameter).unwrap(), Some(local_type));
@@ -1126,7 +1128,7 @@ fn compiler_database_preserves_semantics_around_type_errors() {
         Some(TypeKind::Builtin(BuiltinType::I32))
     );
     assert!(matches!(
-        database.resolved_call(answer.value.id).unwrap(),
+        database.resolved_call(answer.value.as_ref().unwrap().id).unwrap(),
         Some(ResolvedCall::UserFunction {
             function: target, ..
         }) if target == function

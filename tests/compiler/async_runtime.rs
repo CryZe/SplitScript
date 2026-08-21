@@ -283,7 +283,7 @@ fn on_attach_preserves_locals_across_awaits() {
         panic!("expected unusedModule await binding");
     };
     assert!(matches!(
-        unused_module.value.kind,
+        unused_module.value.as_ref().unwrap().kind,
         splitscript::compiler::ast::ExprKind::Suspend {
             mode: splitscript::compiler::ast::SuspensionMode::Await,
             ..
@@ -477,7 +477,7 @@ fn retry_is_first_class_suspending_control_flow_for_result_expressions() {
         panic!("expected a retry binding");
     };
     assert!(matches!(
-        marker.value.kind,
+        marker.value.as_ref().unwrap().kind,
         splitscript::compiler::ast::ExprKind::Suspend {
             mode: splitscript::compiler::ast::SuspensionMode::Retry,
             ..

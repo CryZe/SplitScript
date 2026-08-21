@@ -217,7 +217,13 @@ fn extract_variable(source: &str, program: &Program, expression: &Expr) -> Optio
 
 fn can_hoist_from_statement(statement: &Stmt, target: ExprId) -> bool {
     let (root, repeated) = match statement {
-        Stmt::Variable(variable) => (&variable.value, false),
+        Stmt::Variable(variable) => (
+            variable
+                .value
+                .as_ref()
+                .expect("local variables have initializers"),
+            false,
+        ),
         Stmt::Assign { value, .. } | Stmt::Expression(value) => (value, false),
         Stmt::StateAssign { .. } | Stmt::IndexAssign { .. } => return false,
         Stmt::If { condition, .. } => (condition, false),

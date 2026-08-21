@@ -245,7 +245,7 @@ impl Parser<'_> {
                 if self.at_ident("const") || self.at_ident("var") {
                     self.record_let_keyword_diagnostic();
                 }
-                self.variable_decl().and_then(|mut declaration| {
+                self.variable_decl(true).and_then(|mut declaration| {
                     declaration.documentation = documentation.take();
                     self.terminator()?;
                     program.globals.push(declaration);
@@ -267,7 +267,7 @@ impl Parser<'_> {
                     if self.at_ident("const") || self.at_ident("var") {
                         self.record_let_keyword_diagnostic();
                     }
-                    self.variable_decl().and_then(|mut declaration| {
+                    self.variable_decl(true).and_then(|mut declaration| {
                         declaration.documentation = documentation.take();
                         declaration.debug_only = true;
                         declaration.span.start = start;
@@ -783,7 +783,7 @@ mod tests {
         let ExprKind::Unary {
             op: UnaryOp::Not,
             expr,
-        } = &variable.value.kind
+        } = &variable.value.as_ref().unwrap().kind
         else {
             panic!("expected unary negation outside the call")
         };
@@ -804,7 +804,7 @@ mod tests {
         };
         let ExprKind::Index {
             receiver, index, ..
-        } = &variable.value.kind
+        } = &variable.value.as_ref().unwrap().kind
         else {
             panic!("expected the second postfix index")
         };

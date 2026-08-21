@@ -108,7 +108,7 @@ impl Parser<'_> {
             if self.at_ident("const") || self.at_ident("var") {
                 self.record_let_keyword_diagnostic();
             }
-            let declaration = self.variable_decl()?;
+            let declaration = self.variable_decl(false)?;
             self.terminator()?;
             return Ok(Stmt::Variable(declaration));
         }
@@ -290,7 +290,10 @@ impl Parser<'_> {
         })
     }
 
-    pub(super) fn variable_decl(&mut self) -> Result<VariableDecl, Diagnostic> {
+    pub(super) fn variable_decl(
+        &mut self,
+        allow_attachment_scoped: bool,
+    ) -> Result<VariableDecl, Diagnostic> {
         let keyword = self.bump().clone();
         if self.at_ident("mut") {
             let span = self.current().span;
@@ -307,8 +310,16 @@ impl Parser<'_> {
         } else {
             None
         };
-        self.expect(TokenKind::Assign, "expected `=` in variable declaration")?;
-        let value = self.root_expression();
+        let value = if self.eat(&TokenKind::Assign).is_some() {
+            Some(self.root_expression())
+        } else if allow_attachment_scoped {
+            None
+        } else {
+            return Err(self.error("expected `=` in variable declaration"));
+        };
+        let end = value
+            .as_ref()
+            .map_or(self.previous().span.end, |value| value.span.end);
         Ok(VariableDecl {
             id: self.new_value_id(),
             name,
@@ -319,7 +330,7 @@ impl Parser<'_> {
             annotation,
             span: Span {
                 start: keyword.span.start,
-                end: value.span.end.max(name_span.end),
+                end: end.max(name_span.end),
             },
             value,
         })

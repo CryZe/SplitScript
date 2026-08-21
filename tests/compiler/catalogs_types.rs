@@ -1764,10 +1764,10 @@ fn checked_program_exposes_resolved_standard_library_calls_without_codegen() {
     let splitscript::compiler::ast::Stmt::Variable(bounded) = &action.body.statements[1] else {
         panic!("the second statement should declare the bounded value");
     };
-    assert_eq!(calls[0].0, bounded.value.id);
+    assert_eq!(calls[0].0, bounded.value.as_ref().unwrap().id);
     let result_type = checked
         .semantics()
-        .expression_type(bounded.value.id)
+        .expression_type(bounded.value.as_ref().unwrap().id)
         .expect("every checked expression has a semantic type");
     assert_eq!(
         checked.semantics().types().kind(result_type),
@@ -1789,13 +1789,15 @@ fn expression_ids_distinguish_nested_nodes_and_expose_their_types() {
     else {
         panic!("expected the sum variable");
     };
-    let splitscript::compiler::ast::ExprKind::Binary { left, right, .. } = &sum.value.kind else {
+    let splitscript::compiler::ast::ExprKind::Binary { left, right, .. } =
+        &sum.value.as_ref().unwrap().kind
+    else {
         panic!("expected a binary expression");
     };
-    assert_ne!(sum.value.id, left.id);
-    assert_ne!(sum.value.id, right.id);
+    assert_ne!(sum.value.as_ref().unwrap().id, left.id);
+    assert_ne!(sum.value.as_ref().unwrap().id, right.id);
     assert_ne!(left.id, right.id);
-    for expression in [&sum.value, left.as_ref(), right.as_ref()] {
+    for expression in [sum.value.as_ref().unwrap(), left.as_ref(), right.as_ref()] {
         let ty = checked
             .semantics()
             .expression_type(expression.id)
@@ -1872,7 +1874,7 @@ fn inferred_declaration_types_are_semantic_and_syntax_annotations_stay_optional(
         panic!("expected an awaited module binding");
     };
     assert!(matches!(
-        module.value.kind,
+        module.value.as_ref().unwrap().kind,
         splitscript::compiler::ast::ExprKind::Suspend { .. }
     ));
     assert_eq!(module.annotation, None);
@@ -1965,7 +1967,9 @@ fn parsed_type_references_are_inference_free_syntax() {
             panic!("expected the annotated local");
         };
         assert_eq!(count.annotation, Some(TypeRef::core(CoreTypeId::I64)));
-        let splitscript::compiler::ast::ExprKind::Int { suffix, .. } = &count.value.kind else {
+        let splitscript::compiler::ast::ExprKind::Int { suffix, .. } =
+            &count.value.as_ref().unwrap().kind
+        else {
             panic!("expected the suffixed integer literal");
         };
         assert_eq!(*suffix, Some(TypeRef::core(CoreTypeId::I64)));

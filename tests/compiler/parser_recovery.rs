@@ -7,8 +7,10 @@ fn recovering_parse_reports_multiple_errors_and_keeps_later_declarations() {
     let source = r#"
         state "game.exe" {}
         record Broken { value }
-        let missingAssignment
-        fn retained() { return 1 }
+        fn retained() {
+            let missingAssignment
+            return 1
+        }
         nonsense
         whileAttached { print("retained action") }
         reset { let = 1 }
@@ -726,7 +728,7 @@ fn recovering_parse_keeps_valid_array_elements_and_call_arguments() {
     let Stmt::Variable(values) = &statements[0] else {
         panic!("the recovered first statement should remain a variable declaration");
     };
-    let ExprKind::Array(elements) = &values.value.kind else {
+    let ExprKind::Array(elements) = &values.value.as_ref().unwrap().kind else {
         panic!("the recovered initializer should remain an array");
     };
     assert_eq!(
@@ -812,7 +814,7 @@ fn recovering_parse_keeps_valid_record_fields_and_template_interpolations() {
     let Stmt::Variable(point) = &statements[0] else {
         panic!("the recovered record literal should remain a variable initializer");
     };
-    let ExprKind::Record { fields, .. } = &point.value.kind else {
+    let ExprKind::Record { fields, .. } = &point.value.as_ref().unwrap().kind else {
         panic!("the recovered initializer should remain a record literal");
     };
     assert_eq!(
@@ -904,7 +906,7 @@ fn recovering_parse_preserves_missing_operands_and_parenthesized_expressions() {
         panic!("expected the binary initializer to be retained");
     };
     assert!(matches!(
-        missing_right.value.kind,
+        missing_right.value.as_ref().unwrap().kind,
         ExprKind::Binary { ref right, .. } if matches!(right.kind, ExprKind::Error)
     ));
 
@@ -912,20 +914,23 @@ fn recovering_parse_preserves_missing_operands_and_parenthesized_expressions() {
         panic!("expected the unary initializer to be retained");
     };
     assert!(matches!(
-        missing_unary.value.kind,
+        missing_unary.value.as_ref().unwrap().kind,
         ExprKind::Unary { ref expr, .. } if matches!(expr.kind, ExprKind::Error)
     ));
 
     let Stmt::Variable(empty_group) = &statements[4] else {
         panic!("expected the empty parenthesized initializer to be retained");
     };
-    assert!(matches!(empty_group.value.kind, ExprKind::Error));
+    assert!(matches!(
+        empty_group.value.as_ref().unwrap().kind,
+        ExprKind::Error
+    ));
 
     let Stmt::Variable(noisy_group) = &statements[5] else {
         panic!("expected the parenthesized initializer with trailing syntax to be retained");
     };
     assert!(matches!(
-        noisy_group.value.kind,
+        noisy_group.value.as_ref().unwrap().kind,
         ExprKind::Int { value: 4, .. }
     ));
 
@@ -966,7 +971,7 @@ fn recovering_parse_preserves_malformed_if_expressions() {
             condition,
             then_expr,
             else_expr,
-        } = &variable.value.kind
+        } = &variable.value.as_ref().unwrap().kind
         else {
             panic!("expected a retained if expression");
         };
@@ -1081,11 +1086,11 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
     );
     assert_eq!(recovered.syntax().globals.len(), 2);
     assert!(matches!(
-        recovered.syntax().globals[0].value.kind,
+        recovered.syntax().globals[0].value.as_ref().unwrap().kind,
         ExprKind::Error
     ));
     assert!(matches!(
-        recovered.syntax().globals[1].value.kind,
+        recovered.syntax().globals[1].value.as_ref().unwrap().kind,
         ExprKind::Int { value: 1, .. }
     ));
 
@@ -1100,7 +1105,7 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
     assert_eq!(statements.len(), 8);
     assert!(matches!(
         statements[0],
-        Stmt::Variable(ref variable) if matches!(variable.value.kind, ExprKind::Error)
+        Stmt::Variable(ref variable) if matches!(variable.value.as_ref().unwrap().kind, ExprKind::Error)
     ));
     assert!(matches!(
         statements[1],
@@ -1133,7 +1138,7 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
     ));
     assert!(matches!(
         statements[6],
-        Stmt::Variable(ref variable) if matches!(variable.value.kind, ExprKind::Error)
+        Stmt::Variable(ref variable) if matches!(variable.value.as_ref().unwrap().kind, ExprKind::Error)
     ));
     assert!(matches!(
         statements[7],

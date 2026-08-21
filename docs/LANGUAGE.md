@@ -22,6 +22,15 @@ ordinary assignment supplies a `T`; a standalone `None` global remains the
 zero-sized `None` type. An explicit annotation remains available when it makes
 the intended stored type clearer.
 
+A top-level declaration without an initializer, such as `let gameAssembly`, is
+attachment-scoped. `onAttach` must assign it on every successful attachment
+path that uses it. Its type is inferred bidirectionally from those assignments
+and later uses, and its storage is cleared when the process detaches. It is not
+available in detached actions. With named state layouts, a value may be
+initialized for only some returned layouts; a direct `match layout` refines
+where it and helpers that use it are available. An initialized top-level
+declaration remains run-scoped.
+
 Closed comma-separated forms use punctuation rather than line breaks to
 separate items. This includes arguments, array and record literals, match arms,
 record fields, enum variants, state layouts, settings, choice options, and file
@@ -1405,12 +1414,25 @@ successful read becomes a present `u32` without an explicit `Some` constructor.
 The error text is deliberately discarded, so `discardError()` should not be used
 merely to silence an unexpected failure.
 
-Discovery globals currently require an initializer because they exist for the
-whole script lifetime. State polling is gated until `onAttach` completes, so a
-typed sentinel such as `let levelAddress: address = 0x0` is safe when every
-completing attach path assigns it. Unsupported builds should remain suspended
-with `await process.closed()` rather than complete with an uninitialized
-address. The maintained ABZÛ example demonstrates this contract.
+Declare an attach-time discovery value as an attachment-scoped global by
+omitting its initializer. State polling is gated until `onAttach` completes,
+and the compiler proves that the value is assigned on every successful path
+where it can be read. This avoids exposing a fake zero or `None` sentinel:
+
+```text
+let levelAddress
+
+state "game.exe" {
+    level: u32 = process.read(levelAddress)?;
+}
+
+onAttach {
+    levelAddress = (await process.mainModule()).address
+}
+```
+
+Unsupported builds should remain suspended with `await process.closed()`
+rather than complete without initializing a required attachment value.
 
 Pointer width belongs to the resolved memory path, not to the state-field
 declaration. Use `PointerSize.Bit32` for a 32-bit target even when SplitScript

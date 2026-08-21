@@ -572,6 +572,7 @@ pub struct Program {
     profile: crate::BuildProfile,
     bodies: Vec<Body>,
     global_initializers: Vec<(ValueId, ExprId)>,
+    attachment_globals: Vec<ValueId>,
     state_expressions: Vec<StateExpression>,
     state_transforms: Vec<StateTransform>,
     expressions: Vec<Expression>,
@@ -601,11 +602,17 @@ impl Program {
             .filter(|initializer| !initializer.debug_only || profile == crate::BuildProfile::Debug)
             .map(|initializer| (initializer.value, initializer.expression))
             .collect();
+        let attachment_globals = typed_hir
+            .attachment_globals_with_debug()
+            .filter(|(_, debug_only)| !*debug_only || profile == crate::BuildProfile::Debug)
+            .map(|(value, _)| value)
+            .collect();
         let mut program = Self {
             standard_library: typed_hir.standard_library().clone(),
             profile,
             bodies: Vec::new(),
             global_initializers,
+            attachment_globals,
             state_expressions: Vec::new(),
             state_transforms: Vec::new(),
             expressions,
@@ -705,6 +712,15 @@ impl Program {
         self.global_initializers
             .iter()
             .any(|(candidate, _)| *candidate == value)
+            || self.attachment_globals.contains(&value)
+    }
+
+    pub fn attachment_globals(&self) -> impl Iterator<Item = ValueId> + '_ {
+        self.attachment_globals.iter().copied()
+    }
+
+    pub fn is_attachment_global(&self, value: ValueId) -> bool {
+        self.attachment_globals.contains(&value)
     }
 
     pub fn bodies(&self) -> impl Iterator<Item = &Body> {

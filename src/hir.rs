@@ -444,6 +444,7 @@ pub struct TypedProgram {
     function_bodies: Vec<FunctionBody>,
     action_bodies: Vec<ActionBody>,
     global_initializers: Vec<GlobalInitializer>,
+    attachment_globals: Vec<(ValueId, bool)>,
     state_sources: Vec<(ValueId, ExprId)>,
     state_transforms: Vec<StateTransform>,
     setting_choice_defaults: HashMap<ValueId, EnumVariantId>,
@@ -515,11 +516,19 @@ impl TypedProgram {
         let global_initializers = syntax
             .globals
             .iter()
-            .map(|global| GlobalInitializer {
-                value: global.id,
-                expression: global.value.id,
-                debug_only: global.debug_only,
+            .filter_map(|global| {
+                global.value.as_ref().map(|value| GlobalInitializer {
+                    value: global.id,
+                    expression: value.id,
+                    debug_only: global.debug_only,
+                })
             })
+            .collect();
+        let attachment_globals = syntax
+            .globals
+            .iter()
+            .filter(|global| global.value.is_none())
+            .map(|global| (global.id, global.debug_only))
             .collect();
         let state_sources = syntax
             .state
@@ -599,6 +608,7 @@ impl TypedProgram {
             function_bodies,
             action_bodies,
             global_initializers,
+            attachment_globals,
             state_sources,
             state_transforms,
             setting_choice_defaults,
@@ -752,6 +762,24 @@ impl TypedProgram {
 
     pub fn global_initializers(&self) -> impl Iterator<Item = GlobalInitializer> + '_ {
         self.global_initializers.iter().copied()
+    }
+
+    /// Globals whose storage is initialized by a successful `onAttach` run
+    /// and cleared when that attachment ends.
+    pub fn attachment_globals(&self) -> impl Iterator<Item = ValueId> + '_ {
+        self.attachment_globals.iter().map(|(value, _)| *value)
+    }
+
+    pub(crate) fn attachment_globals_with_debug(
+        &self,
+    ) -> impl Iterator<Item = (ValueId, bool)> + '_ {
+        self.attachment_globals.iter().copied()
+    }
+
+    pub fn is_attachment_global(&self, value: ValueId) -> bool {
+        self.attachment_globals
+            .iter()
+            .any(|(candidate, _)| *candidate == value)
     }
 
     pub fn state_sources(&self) -> impl Iterator<Item = (ValueId, ExprId)> + '_ {
@@ -1411,7 +1439,11 @@ fn lower_block(block: &Block, semantics: &SemanticModel) -> TypedBlock {
                         }
                         Stmt::Variable(variable) => TypedStatementKind::Variable {
                             value: variable.id,
-                            initializer: variable.value.id,
+                            initializer: variable
+                                .value
+                                .as_ref()
+                                .expect("local variables have initializers")
+                                .id,
                         },
                         Stmt::Assign {
                             id,

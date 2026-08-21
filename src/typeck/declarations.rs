@@ -134,6 +134,9 @@ pub(super) struct DeclarationEnvironment {
     pub(super) state_storage_fields: HashMap<ValueId, ValueId>,
     pub(super) settings: HashMap<String, (ValueId, Type)>,
     pub(super) settings_by_runtime_key: HashMap<String, RuntimeSettingDeclaration>,
+    /// Top-level declarations without an initializer. Their values exist
+    /// only after `onAttach` establishes the selected attachment layout.
+    pub(super) attachment_globals: HashSet<ValueId>,
     pub(super) globals: HashMap<String, Binding>,
     pub(super) functions: HashMap<String, FunctionSignature>,
     pub(super) methods: HashMap<(Type, String), FunctionSignature>,
@@ -157,6 +160,7 @@ impl DeclarationEnvironment {
             state_storage_fields: HashMap::new(),
             settings: HashMap::new(),
             settings_by_runtime_key: HashMap::new(),
+            attachment_globals: HashSet::new(),
             globals: HashMap::new(),
             functions: HashMap::new(),
             methods: HashMap::new(),

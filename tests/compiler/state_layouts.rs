@@ -1,6 +1,251 @@
 use wasmparser::{Validator, WasmFeatures};
 
 #[test]
+fn attachment_scoped_globals_infer_from_on_attach_and_support_layout_specific_values() {
+    let source = r#"
+        let module
+        let steamBase
+        let gogBase
+
+        state "game.exe" {
+            layout Steam { level: u32 = process.read(steamBase)? },
+            layout GOG { level: u32 = process.read(gogBase)? },
+        }
+
+        onAttach {
+            module = await process.mainModule()
+            if module.size == 0x1000 {
+                steamBase = module.address
+                return StateLayout.Steam
+            }
+            gogBase = module.address
+            return StateLayout.GOG
+        }
+
+        split {
+            return match layout {
+                StateLayout.Steam => steamBase != 0 && current.level != old.level,
+                StateLayout.GOG => gogBase != 0 && current.level != old.level,
+            }
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("attachment globals should infer from assignments and uses");
+    let globals = checked.syntax().globals.iter().collect::<Vec<_>>();
+    assert!(
+        checked
+            .attachment_globals()
+            .available_layouts(globals[0].id)
+            .count()
+            == 2
+    );
+    assert!(
+        checked
+            .attachment_globals()
+            .available_layouts(globals[1].id)
+            .count()
+            == 1
+    );
+    assert!(
+        checked
+            .attachment_globals()
+            .available_layouts(globals[2].id)
+            .count()
+            == 1
+    );
+
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("attachment-global WebAssembly GC should validate");
+
+    let wrong_layout = source.replace(
+        "layout Steam { level: u32 = process.read(steamBase)? }",
+        "layout Steam { level: u32 = process.read(gogBase)? }",
+    );
+    let errors = splitscript::compile(&wrong_layout)
+        .expect_err("state expressions need the attachment values for their own layout");
+    assert!(errors.iter().any(|error| {
+        error.message.contains(
+            "attachment-scoped global `gogBase` is not initialized for `StateLayout.Steam`",
+        )
+    }));
+}
+
+#[test]
+fn attachment_scoped_gc_values_use_nullable_storage_without_exposing_null() {
+    let source = r#"
+        let delay: Duration
+
+        state "game.exe" {}
+
+        onAttach {
+            delay = Duration.fromSeconds(1)
+        }
+
+        split {
+            return delay > Duration.zero()
+        }
+    "#;
+
+    for profile in [
+        splitscript::BuildProfile::Debug,
+        splitscript::BuildProfile::Release,
+    ] {
+        let wasm = splitscript::compile_with_options(
+            source,
+            splitscript::CompilerOptions {
+                profile,
+                ..splitscript::CompilerOptions::default()
+            },
+        )
+        .expect("attachment-scoped non-null GC values should compile");
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&wasm)
+            .expect("nullable attachment storage must validate as a non-null source value");
+    }
+}
+
+#[test]
+fn debug_attachment_globals_are_initialized_and_erased_with_their_profile() {
+    let source = r#"
+        debug let inspectedAddress
+
+        state "game.exe" {}
+
+        onAttach {
+            debug inspectedAddress = 0x1000
+        }
+
+        whileAttached {
+            debug print(inspectedAddress)
+        }
+    "#;
+
+    for profile in [
+        splitscript::BuildProfile::Debug,
+        splitscript::BuildProfile::Release,
+    ] {
+        let wasm = splitscript::compile_with_options(
+            source,
+            splitscript::CompilerOptions {
+                profile,
+                ..splitscript::CompilerOptions::default()
+            },
+        )
+        .expect("debug attachment globals should follow debug statement lifetime");
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&wasm)
+            .expect("both attachment-global profiles should validate");
+    }
+}
+
+#[test]
+fn attachment_globals_require_definite_initialization_and_layout_refinement() {
+    let missing = r#"
+        let base: address
+        state "game.exe" {}
+        onAttach {
+            if process.name() == "game.exe" {
+                base = 0x1000
+            }
+        }
+        split { return base != 0 }
+    "#;
+    let errors = splitscript::compile(missing)
+        .expect_err("single-layout attachment values need assignment on every completion path");
+    assert!(errors.iter().any(|error| {
+        error.message == "attachment-scoped global `base` is never initialized by `onAttach`"
+            || error.message.contains("not initialized for the attachment")
+    }));
+
+    let unrefined = r#"
+        let steamBase: address
+        let gogBase: address
+        state "game.exe" {
+            layout Steam { level: u32 at 0x10 },
+            layout GOG { level: u32 at 0x20 },
+        }
+        onAttach {
+            if process.name() == "game.exe" {
+                steamBase = 0x1000
+                return StateLayout.Steam
+            }
+            gogBase = 0x2000
+            return StateLayout.GOG
+        }
+        fn steamReady() -> bool { return steamBase != 0 }
+        split { return steamReady() }
+    "#;
+    let errors = splitscript::compile(unrefined)
+        .expect_err("a layout-specific helper needs a matching refinement");
+    assert!(errors.iter().any(|error| {
+        error
+            .message
+            .contains("`steamReady` requires attachment values unavailable for `StateLayout.GOG`")
+    }));
+
+    let refined = unrefined.replace(
+        "split { return steamReady() }",
+        r#"split {
+            return match layout {
+                StateLayout.Steam => steamReady(),
+                StateLayout.GOG => gogBase != 0,
+            }
+        }"#,
+    );
+    splitscript::compile(&refined)
+        .expect("a direct layout match should prove attachment-global availability");
+}
+
+#[test]
+fn on_attach_rejects_attachment_global_reads_before_assignment() {
+    let source = r#"
+        let module: Module
+        state "game.exe" {}
+        onAttach {
+            let copy = module
+            module = await process.mainModule()
+        }
+    "#;
+    let errors = splitscript::compile(source)
+        .expect_err("backend defaults must not be observable during initialization");
+    assert!(errors.iter().any(|error| {
+        error.message == "attachment-scoped global `module` may be read before it is initialized"
+    }));
+}
+
+#[test]
+fn attachment_globals_are_viral_and_unavailable_after_detach() {
+    let source = r#"
+        let base: address
+        state "game.exe" {}
+        onAttach { base = 0x1000 }
+        fn hasBase() -> bool { return base != 0 }
+        onDetach {
+            let copy = base
+            base = 0x2000
+            hasBase()
+        }
+    "#;
+    let errors = splitscript::compile(source)
+        .expect_err("detached code must not observe cleared attachment storage");
+    assert!(errors.iter().any(|error| {
+        error.message == "attachment-scoped global `base` is unavailable in `onDetach`"
+            && error.labels.iter().any(|label| {
+                label
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| message.contains("write occurs"))
+            })
+    }));
+    assert!(errors.iter().any(|error| {
+        error.message == "`hasBase` requires an attached process and is unavailable in `onDetach`"
+    }));
+}
+
+#[test]
 fn named_state_layouts_select_a_typed_layout_and_validate() {
     let source = r#"
         state "game.exe" {

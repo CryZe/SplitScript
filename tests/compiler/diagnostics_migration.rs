@@ -1682,7 +1682,7 @@ fn familiar_declaration_keywords_recover_as_let_with_machine_applicable_fixes() 
     assert!(matches!(
         recovered.syntax().actions[0].body.statements[0],
         Stmt::Variable(ref variable)
-            if matches!(variable.value.kind, splitscript::compiler::ast::ExprKind::Suspend { .. })
+            if matches!(variable.value.as_ref().unwrap().kind, splitscript::compiler::ast::ExprKind::Suspend { .. })
     ));
     assert!(matches!(
         recovered.syntax().actions[1].body.statements[0],

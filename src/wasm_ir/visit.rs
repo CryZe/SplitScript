@@ -305,7 +305,7 @@ mod tests {
         let Stmt::Variable(variable) = &parsed.syntax().functions[0].body.statements[0] else {
             panic!("expected a variable declaration")
         };
-        let ExprKind::Match { value, arms } = &variable.value.kind else {
+        let ExprKind::Match { value, arms } = &variable.value.as_ref().unwrap().kind else {
             panic!("expected a match expression")
         };
         let expected = [
@@ -314,7 +314,7 @@ mod tests {
             arms[0].value.id,
             arms[1].value.id,
         ];
-        let match_id = variable.value.id;
+        let match_id = variable.value.as_ref().unwrap().id;
         let lowered = crate::lower(parsed);
         let checked = crate::check(lowered).unwrap();
         let program = crate::lower_wasm(&checked);

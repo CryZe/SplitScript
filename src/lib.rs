@@ -4,6 +4,8 @@
 //! compile a source file to a WebAssembly GC module.
 
 mod abi;
+mod attachment_globals;
+pub use attachment_globals::{AttachmentGlobalAnalysis, AttachmentLayout};
 pub use splitscript_syntax::ast;
 mod build_identity;
 mod capabilities;
@@ -378,6 +380,7 @@ pub struct CheckedProgram {
     semantics: semantic::SemanticModel,
     capabilities: capabilities::CapabilityAnalysis,
     effects: effects::OperationAnalysis,
+    attachment_globals: AttachmentGlobalAnalysis,
     enum_types: Vec<ast::EnumDecl>,
     array_types: Vec<types::ResolvedArrayType>,
     option_types: Vec<types::ResolvedOptionType>,
@@ -490,6 +493,10 @@ impl CheckedProgram {
 
     pub fn effects(&self) -> &effects::OperationAnalysis {
         &self.effects
+    }
+
+    pub fn attachment_globals(&self) -> &AttachmentGlobalAnalysis {
+        &self.attachment_globals
     }
 
     /// Source enum layouts visible to semantic analysis. Standard-library
@@ -708,6 +715,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         semantics: output.semantics,
         capabilities: validation.capabilities,
         effects: validation.effects,
+        attachment_globals: validation.attachment_globals,
         enum_types: output.enum_types,
         array_types: output.array_types,
         option_types: output.option_types,

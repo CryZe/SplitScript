@@ -516,6 +516,10 @@ impl Checker {
     }
 
     fn variable(&mut self, variable: &VariableDecl) {
+        let value = variable
+            .value
+            .as_ref()
+            .expect("local variables have initializers");
         let duplicate = self
             .scopes
             .iter()
@@ -542,10 +546,10 @@ impl Checker {
                         variable.name
                     ),
                 },
-                |checker| checker.expr(&variable.value, Some(expected)),
+                |checker| checker.expr(value, Some(expected)),
             )
         } else {
-            self.expr(&variable.value, None)
+            self.expr(value, None)
         };
         let mut ty = inferred.unwrap_or_else(|| self.error_type());
         let unsupported_standard = self.standard_type_id(ty).is_some_and(|standard| {

@@ -92,18 +92,17 @@ fn emit_enum_global_initializers(
     lowering: &SettingsContext<'_>,
     debug: Option<DebugEmission<'_>>,
 ) {
-    for variable in program
-        .globals
-        .iter()
-        .filter(|variable| lowering.wasm_ir.contains_global(variable.id))
-    {
+    for variable in program.globals.iter().filter(|variable| {
+        variable.value.is_some() && lowering.wasm_ir.contains_global(variable.id)
+    }) {
+        let value = variable.value.as_ref().unwrap();
         let ty = value_type(variable.id, lowering.semantics);
         if !ty.is_enum(lowering.standard_library) {
             continue;
         }
         let wasm_ir::ExpressionKind::Enum { variant, .. } = &lowering
             .wasm_ir
-            .expression(variable.value.id)
+            .expression(value.id)
             .expect("global enum initializer belongs to Wasm IR")
             .kind
         else {
@@ -114,7 +113,7 @@ fn emit_enum_global_initializers(
                 function,
                 lowering
                     .wasm_ir
-                    .expression(variable.value.id)
+                    .expression(value.id)
                     .and_then(|expression| expression.source),
             );
         }
@@ -196,11 +195,10 @@ fn emit_aggregate_global_initializers(
         materialize_none: true,
     };
 
-    for variable in program
-        .globals
-        .iter()
-        .filter(|variable| lowering.wasm_ir.contains_global(variable.id))
-    {
+    for variable in program.globals.iter().filter(|variable| {
+        variable.value.is_some() && lowering.wasm_ir.contains_global(variable.id)
+    }) {
+        let value = variable.value.as_ref().unwrap();
         let ty = value_type(variable.id, lowering.semantics);
         if !matches!(
             ty,
@@ -208,7 +206,7 @@ fn emit_aggregate_global_initializers(
         ) {
             continue;
         }
-        compile_expr(function, variable.value.id, &context);
+        compile_expr(function, value.id, &context);
         function.instruction(&Instruction::GlobalSet(lowering.globals[&variable.id]));
     }
 }

@@ -1644,6 +1644,22 @@ whileAttached {
     }
 
     #[test]
+    fn formats_bare_attachment_globals_without_inventing_initializers() {
+        let source = "let module\nlet base:address\nstate\"game.exe\"{}\nonAttach{module=await process.mainModule()\nbase=module.address}";
+        let expected = r#"let module
+let base: address
+state "game.exe" {}
+onAttach {
+    module = await process.mainModule()
+    base = module.address
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
     fn formats_value_loops_and_break_values() {
         let source = r#"state "game.exe"{}
 fn choose(flag:bool)->i32{return loop{if flag{break 7}else{break -1}}}"#;

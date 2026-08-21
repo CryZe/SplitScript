@@ -1283,10 +1283,8 @@ fn compile_resolved_path(
             LocalStorage::Hybrid { frame_values, .. } if frame_values.contains_key(&value) => {
                 let (field, ty) = frame_values[&value];
                 if !ty.has_runtime_value() {
-                    if context.materialize_none {
-                        if ty == Type::None {
-                            emit_default(function, Type::None, context.gc);
-                        }
+                    if context.materialize_none && ty == Type::None {
+                        emit_default(function, Type::None, context.gc);
                     }
                 } else {
                     let frame = context.locals.frame();
@@ -1298,10 +1296,8 @@ fn compile_resolved_path(
             LocalStorage::Hybrid { wasm_values, .. } if wasm_values.contains_key(&value) => {
                 let (local, ty) = wasm_values[&value];
                 if !ty.has_runtime_value() {
-                    if context.materialize_none {
-                        if ty == Type::None {
-                            emit_default(function, Type::None, context.gc);
-                        }
+                    if context.materialize_none && ty == Type::None {
+                        emit_default(function, Type::None, context.gc);
                     }
                 } else {
                     function.instruction(&Instruction::LocalGet(local));
@@ -1311,10 +1307,8 @@ fn compile_resolved_path(
             LocalStorage::Wasm { values, .. } if values.contains_key(&value) => {
                 let (local, ty) = values[&value];
                 if !ty.has_runtime_value() {
-                    if context.materialize_none {
-                        if ty == Type::None {
-                            emit_default(function, Type::None, context.gc);
-                        }
+                    if context.materialize_none && ty == Type::None {
+                        emit_default(function, Type::None, context.gc);
                     }
                 } else {
                     function.instruction(&Instruction::LocalGet(local));
@@ -1325,6 +1319,15 @@ fn compile_resolved_path(
                 let ty = context.global_types[&value];
                 if ty.has_runtime_value() {
                     function.instruction(&Instruction::GlobalGet(context.globals[&value]));
+                    if context.wasm_ir.is_attachment_global(value)
+                        && matches!(context.gc.val_type(ty), ValType::Ref(reference) if !reference.nullable)
+                    {
+                        // Definite-initialization and layout analysis prove
+                        // this storage is populated in every source context
+                        // that can read it. Re-establish the non-null source
+                        // type after loading the nullable lifetime sentinel.
+                        function.instruction(&Instruction::RefAsNonNull);
+                    }
                 } else if ty == Type::None && context.materialize_none {
                     emit_default(function, Type::None, context.gc);
                 }

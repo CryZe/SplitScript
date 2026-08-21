@@ -207,7 +207,9 @@ pub fn walk_variable<'ast, V: Visitor<'ast>>(visitor: &mut V, variable: &'ast Va
     if let Some(annotation) = &variable.annotation {
         visitor.visit_type_ref(annotation);
     }
-    visitor.visit_expr(&variable.value);
+    if let Some(value) = &variable.value {
+        visitor.visit_expr(value);
+    }
 }
 
 pub fn walk_block<'ast, V: Visitor<'ast>>(visitor: &mut V, block: &'ast Block) {
@@ -554,7 +556,9 @@ pub fn walk_variable_mut<F: Folder>(folder: &mut F, variable: &mut VariableDecl)
     if let Some(annotation) = &mut variable.annotation {
         folder.fold_type_ref(annotation);
     }
-    folder.fold_expr(&mut variable.value);
+    if let Some(value) = &mut variable.value {
+        folder.fold_expr(value);
+    }
 }
 
 pub fn walk_block_mut<F: Folder>(folder: &mut F, block: &mut Block) {

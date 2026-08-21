@@ -420,9 +420,14 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     "Read-only memory layout selected for the attached game build.".to_owned(),
                 )
             } else if let Some(global) = syntax.globals.iter().find(|global| global.id == value) {
+                let kind = if global.value.is_none() {
+                    "Attachment-scoped global variable"
+                } else {
+                    "Global variable"
+                };
                 (
                     format!("let {}: {ty}", definition.name),
-                    documented_description("Global variable", global.documentation.as_deref()),
+                    documented_description(kind, global.documentation.as_deref()),
                 )
             } else if let Some(field) = syntax
                 .state
@@ -528,7 +533,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 || function.name.clone(),
                 |receiver| format!("{receiver}.{}", function.name),
             );
-            let description = source_function_description(
+            let mut description = source_function_description(
                 function.method_of.is_some(),
                 function.debug_only,
                 function.documentation.as_deref(),
@@ -536,6 +541,33 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     .effects()
                     .map(|effects| effects.function(function.id)),
             );
+            if let Some(checked) = context.snapshot.checked() {
+                let attachment = checked.attachment_globals();
+                let allowed = attachment.function_layouts(function.id).collect::<Vec<_>>();
+                if !allowed.is_empty() && allowed.len() < attachment.layouts().len() {
+                    let names = allowed
+                        .iter()
+                        .filter_map(|layout| match layout {
+                            crate::attachment_globals::AttachmentLayout::Single => {
+                                Some("the attachment".to_owned())
+                            }
+                            crate::attachment_globals::AttachmentLayout::Named(variant) => syntax
+                                .state
+                                .as_ref()
+                                .and_then(|state| state.layout_enum.as_ref())
+                                .and_then(|enumeration| {
+                                    enumeration
+                                        .variants
+                                        .iter()
+                                        .find(|candidate| candidate.id == *variant)
+                                })
+                                .map(|variant| format!("`StateLayout.{}`", variant.name)),
+                        })
+                        .collect::<Vec<_>>();
+                    description.push_str("\n\n**Attachment layouts:** ");
+                    description.push_str(&names.join(", "));
+                }
+            }
             Some(source_markdown(
                 &format!(
                     "fn {name}({}) -> {}{}",
@@ -1584,6 +1616,55 @@ whileAttached {
                 hover.markdown
             );
         }
+    }
+
+    #[test]
+    fn hover_distinguishes_attachment_globals_and_layout_constrained_helpers() {
+        let source = r#"
+let steamBase
+let gogBase
+state "game.exe" {
+    layout Steam { level: u32 at 0x10 },
+    layout GOG { level: u32 at 0x20 },
+}
+onAttach {
+    if process.name() == "game.exe" {
+        steamBase = 0x1000 as address
+        return StateLayout.Steam
+    }
+    gogBase = 0x2000 as address
+    return StateLayout.GOG
+}
+fn steamReady() { return steamBase != 0 }
+split {
+    return match layout {
+        StateLayout.Steam => steamReady(),
+        StateLayout.GOG => gogBase != 0,
+    }
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let global = database
+            .hover(source.find("steamBase\n").unwrap() + 1)
+            .unwrap()
+            .expect("attachment global hover");
+        assert!(global.markdown.contains("let steamBase: address"));
+        assert!(
+            global
+                .markdown
+                .contains("Attachment-scoped global variable")
+        );
+
+        let helper = database
+            .hover(source.find("steamReady() {").unwrap() + 1)
+            .unwrap()
+            .expect("layout-constrained helper hover");
+        assert!(helper.markdown.contains("requires an attached process"));
+        assert!(
+            helper
+                .markdown
+                .contains("**Attachment layouts:** `StateLayout.Steam`")
+        );
     }
 
     #[test]

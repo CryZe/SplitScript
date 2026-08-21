@@ -41,46 +41,69 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
             );
             continue;
         }
-        let constant_initializer = is_constant(&global.value, &checker.resolutions);
-        let inferred = checker.with_debug_context(
-            DebugContext::from_declaration(global.debug_only),
-            |checker| {
-                let expected = global
+        let constant_initializer = global
+            .value
+            .as_ref()
+            .is_some_and(|value| is_constant(value, &checker.resolutions));
+        let inferred = if let Some(value) = &global.value {
+            checker.with_debug_context(
+                DebugContext::from_declaration(global.debug_only),
+                |checker| {
+                    let expected =
+                        global
+                            .annotation
+                            .map(|ty| checker.syntax_type(ty))
+                            .or_else(|| {
+                                inferred_options.contains(&global.name).then(|| {
+                                    let value = checker.fresh_inference(
+                                        crate::inference::Requirements::none(),
+                                        None,
+                                    );
+                                    Type::Option(checker.inference.option_type(value))
+                                })
+                            });
+                    if global.annotation.is_some()
+                        && let Some(expected) = expected
+                    {
+                        let expected_name = checker.type_name(expected);
+                        checker.with_expected_type_source(
+                            super::ExpectedTypeSource {
+                                span: global.name_span,
+                                label: format!(
+                                    "global variable `{}` is declared as `{expected_name}`",
+                                    global.name,
+                                ),
+                            },
+                            |checker| checker.expr(value, Some(expected)),
+                        )
+                    } else {
+                        checker.expr(value, expected)
+                    }
+                },
+            )
+        } else {
+            Some(
+                global
                     .annotation
                     .map(|ty| checker.syntax_type(ty))
-                    .or_else(|| {
-                        inferred_options.contains(&global.name).then(|| {
-                            let value = checker
-                                .fresh_inference(crate::inference::Requirements::none(), None);
-                            Type::Option(checker.inference.option_type(value))
-                        })
-                    });
-                if global.annotation.is_some()
-                    && let Some(expected) = expected
-                {
-                    let expected_name = checker.type_name(expected);
-                    checker.with_expected_type_source(
-                        super::ExpectedTypeSource {
-                            span: global.name_span,
-                            label: format!(
-                                "global variable `{}` is declared as `{expected_name}`",
-                                global.name,
-                            ),
-                        },
-                        |checker| checker.expr(&global.value, Some(expected)),
-                    )
-                } else {
-                    checker.expr(&global.value, expected)
-                }
-            },
-        );
-        let run_scoped_initializer = checker.semantics.standard_library_item(global.value.id)
-            == Some(crate::stdlib::StdlibItemId::SetNew);
+                    .unwrap_or_else(|| {
+                        checker.fresh_inference(crate::inference::Requirements::none(), None)
+                    }),
+            )
+        };
+        let run_scoped_initializer = global.value.as_ref().is_some_and(|value| {
+            checker.semantics.standard_library_item(value.id)
+                == Some(crate::stdlib::StdlibItemId::SetNew)
+        });
         let initializer_checked = inferred.is_some();
-        if initializer_checked && !constant_initializer && !run_scoped_initializer {
+        if let Some(value) = &global.value
+            && initializer_checked
+            && !constant_initializer
+            && !run_scoped_initializer
+        {
             checker.error(
                 "global initializers must be literal values composed from None, numbers, booleans, strings, payload-free enums, records, or arrays, or a run-scoped Set.new value",
-                global.value.span,
+                value.span,
             );
         }
         let mut ty = inferred.unwrap_or_else(|| checker.error_type());
@@ -92,10 +115,11 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
                     .value_usage
                     .global_variable
         });
-        if unsupported_standard
-            || matches!(ty, Type::Result(_))
-            || matches!(ty, Type::Option(_))
-                && !matches!(global.value.kind, crate::ast::ExprKind::None)
+        if let Some(value) = &global.value
+            && (unsupported_standard
+                || matches!(ty, Type::Result(_))
+                || matches!(ty, Type::Option(_))
+                    && !matches!(value.kind, crate::ast::ExprKind::None))
         {
             let name = checker.type_name(ty);
             checker.error(
@@ -105,6 +129,9 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
             ty = checker.error_type();
         }
         checker.semantics.resolve_value_type(global.id, ty);
+        if global.value.is_none() {
+            checker.declarations.attachment_globals.insert(global.id);
+        }
         checker.declarations.globals.insert(
             global.name.clone(),
             Binding {
@@ -126,7 +153,13 @@ fn globals_inferred_as_options(program: &Program) -> HashSet<String> {
     let candidates = program
         .globals
         .iter()
-        .filter(|global| global.annotation.is_none() && matches!(global.value.kind, ExprKind::None))
+        .filter(|global| {
+            global.annotation.is_none()
+                && global
+                    .value
+                    .as_ref()
+                    .is_some_and(|value| matches!(value.kind, ExprKind::None))
+        })
         .map(|global| global.name.clone())
         .collect::<HashSet<_>>();
 
@@ -639,7 +672,13 @@ pub(super) fn statement_is_terminal(checker: &mut Checker, statement: &crate::as
                     block_is_terminal(checker, then_block) && block_is_terminal(checker, else_block)
                 })
         }
-        crate::ast::Stmt::Variable(variable) => expression_is_never(checker, &variable.value),
+        crate::ast::Stmt::Variable(variable) => expression_is_never(
+            checker,
+            variable
+                .value
+                .as_ref()
+                .expect("local variables have initializers"),
+        ),
         crate::ast::Stmt::Assign { value, .. }
         | crate::ast::Stmt::StateAssign { value, .. }
         | crate::ast::Stmt::IndexAssign { value, .. } => expression_is_never(checker, value),

@@ -431,12 +431,28 @@ macro_rules! focused_example {
     };
 }
 
-focused_example!(
-    LET_EXAMPLE,
-    "Infer a local type",
-    "let retryDelay = 30",
-    DECLARATIONS_SOURCE
-);
+const ATTACHMENT_GLOBAL_SOURCE: &str = r#"let module
+
+state "game.exe" {
+    level: u32 = process.read(module.address)?;
+}
+
+onAttach {
+    module = await process.mainModule()
+}"#;
+
+const LET_EXAMPLE: &[Example] = &[
+    Example::checked(
+        "Infer a local type",
+        "let retryDelay = 30",
+        DECLARATIONS_SOURCE,
+    ),
+    Example::checked(
+        "Keep an attachment-discovered value",
+        ATTACHMENT_GLOBAL_SOURCE,
+        ATTACHMENT_GLOBAL_SOURCE,
+    ),
+];
 focused_example!(
     FUNCTION_EXAMPLE,
     "Declare a helper",
@@ -893,9 +909,9 @@ define_language_catalog! {
         Let,
         "let",
         LanguageItemKind::Keyword,
-        "let name = expression",
+        "let name = expression or let name",
         "Declares an inferred variable.",
-        "Bindings are mutable and their types are inferred bidirectionally from their initializer and uses.",
+        "Bindings are mutable and their types are inferred bidirectionally from initializers, assignments, and uses. A bare top-level [`let`] is attachment-scoped: [`onAttach`] must initialize it before completing, attached polling code may read it only for layouts whose attach paths assigned it, and the runtime clears it on detach. Ordinary initialized globals remain run-scoped.",
         LET_EXAMPLE
     ),
     language_item!(

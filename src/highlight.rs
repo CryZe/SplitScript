@@ -926,10 +926,14 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
     }
 
     fn visit_variable(&mut self, variable: &'ast VariableDecl) {
+        let initializer_start = variable
+            .value
+            .as_ref()
+            .map_or(variable.span.end, |value| value.span.start);
         self.mark_ident(
             Span {
                 start: variable.span.start,
-                end: variable.value.span.start,
+                end: initializer_start,
             },
             &variable.name,
             SemanticTokenKind::Variable,
@@ -939,7 +943,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
             self.mark_none_type(
                 Span {
                     start: variable.name_span.end,
-                    end: variable.value.span.start,
+                    end: initializer_start,
                 },
                 annotation,
             );

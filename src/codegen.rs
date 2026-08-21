@@ -422,12 +422,16 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             completion_field,
         }
     });
+    let attachment_globals = wasm_ir.attachment_globals().collect::<Vec<_>>();
     let update_context = update::UpdateContext {
         standard_library: &standard_library,
         abi: &abi,
         gc: &gc,
         runtime_globals,
         semantics,
+        globals: &global_indices,
+        global_types: &global_types,
+        attachment_globals: &attachment_globals,
         process_names: &process_names,
         provider_attach,
     };

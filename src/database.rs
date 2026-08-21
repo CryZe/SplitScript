@@ -832,11 +832,15 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
     fn visit_variable(&mut self, variable: &'ast crate::ast::VariableDecl) {
         self.insert_value(variable.id, &variable.name, variable.span);
         if let Some(annotation) = variable.annotation {
+            let initializer_start = variable
+                .value
+                .as_ref()
+                .map_or(variable.span.end, |value| value.span.start);
             self.add_type_after_colon(
                 annotation,
                 Span {
                     start: variable.span.start,
-                    end: variable.value.span.start,
+                    end: initializer_start,
                 },
             );
         }

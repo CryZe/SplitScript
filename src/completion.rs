@@ -1066,7 +1066,9 @@ fn add_statement_inner_bindings(builder: &mut CompletionBuilder, statement: &Stm
             }
         }
         Stmt::Variable(variable) => {
-            add_expression_bindings(builder, &variable.value, offset);
+            if let Some(value) = &variable.value {
+                add_expression_bindings(builder, value, offset);
+            }
         }
         Stmt::Assign { value, .. } | Stmt::Suspend { value, .. } | Stmt::Expression(value) => {
             add_expression_bindings(builder, value, offset);

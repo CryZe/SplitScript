@@ -1650,7 +1650,7 @@ fn user_function_and_method_calls_expose_stable_callable_ids() {
         panic!("expected the method call binding");
     };
     assert_eq!(
-        checked.semantics().call(direct.value.id),
+        checked.semantics().call(direct.value.as_ref().unwrap().id),
         Some(&ResolvedCall::UserFunction {
             function: direct_target,
             type_arguments: Vec::new(),
@@ -1658,7 +1658,7 @@ fn user_function_and_method_calls_expose_stable_callable_ids() {
         })
     );
     assert_eq!(
-        checked.semantics().call(method.value.id),
+        checked.semantics().call(method.value.as_ref().unwrap().id),
         Some(&ResolvedCall::UserMethod {
             function: method_target,
             type_arguments: Vec::new(),
@@ -1675,7 +1675,7 @@ fn user_function_and_method_calls_expose_stable_callable_ids() {
             },
             receiver_type: checked
                 .semantics()
-                .expression_type(counter.value.id)
+                .expression_type(counter.value.as_ref().unwrap().id)
                 .expect("the method receiver has a semantic type"),
         })
     );
@@ -1803,7 +1803,9 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
     else {
         panic!("expected the result binding");
     };
-    let splitscript::compiler::ast::ExprKind::Call { args, .. } = &result.value.kind else {
+    let splitscript::compiler::ast::ExprKind::Call { args, .. } =
+        &result.value.as_ref().unwrap().kind
+    else {
         panic!("expected the read call");
     };
     assert_eq!(
@@ -1854,18 +1856,24 @@ fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
         panic!("expected the outer binding");
     };
     assert_eq!(
-        checked.semantics().record_literal_fields(outer.value.id),
+        checked
+            .semantics()
+            .record_literal_fields(outer.value.as_ref().unwrap().id),
         Some([ResolvedRecordFieldId::Source(outer_inner)].as_slice())
     );
     assert_eq!(
-        checked.typed_hir().record_literal_fields(outer.value.id),
+        checked
+            .typed_hir()
+            .record_literal_fields(outer.value.as_ref().unwrap().id),
         Some([ResolvedRecordFieldId::Source(outer_inner)].as_slice())
     );
     let splitscript::compiler::ast::Stmt::Variable(nested) = &statements[2] else {
         panic!("expected the nested field binding");
     };
     assert_eq!(
-        checked.semantics().path_members(nested.value.id),
+        checked
+            .semantics()
+            .path_members(nested.value.as_ref().unwrap().id),
         Some(
             [
                 ResolvedMember::RecordField(outer_inner),
@@ -1876,7 +1884,7 @@ fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
     );
     let (nested_root, nested_members) = checked
         .typed_hir()
-        .value_path(nested.value.id)
+        .value_path(nested.value.as_ref().unwrap().id)
         .expect("typed HIR should materialize resolved paths");
     assert_eq!(nested_root, Some(ResolvedValue::Variable(outer.id)));
     assert_eq!(
@@ -1890,7 +1898,8 @@ fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
     let splitscript::compiler::ast::Stmt::Variable(method) = &statements[3] else {
         panic!("expected the nested receiver binding");
     };
-    let Some(ResolvedCall::UserMethod { receiver, .. }) = checked.semantics().call(method.value.id)
+    let Some(ResolvedCall::UserMethod { receiver, .. }) =
+        checked.semantics().call(method.value.as_ref().unwrap().id)
     else {
         panic!("expected a resolved nested method receiver");
     };
@@ -1906,7 +1915,9 @@ fn member_paths_resolve_record_and_standard_fields_to_stable_ids() {
         panic!("expected the built-in field binding");
     };
     assert_eq!(
-        checked.semantics().path_members(address.value.id),
+        checked
+            .semantics()
+            .path_members(address.value.as_ref().unwrap().id),
         Some([ResolvedMember::StandardField(StdlibFieldId::ModuleAddress,)].as_slice())
     );
 
@@ -1950,13 +1961,15 @@ fn value_paths_resolve_globals_parameters_and_locals_to_declaration_ids() {
         panic!("expected the local copy");
     };
     assert_eq!(
-        checked.semantics().value(copy.value.id),
+        checked.semantics().value(copy.value.as_ref().unwrap().id),
         Some(ResolvedValue::Variable(global))
     );
     let splitscript::compiler::ast::Stmt::Variable(result) = &statements[1] else {
         panic!("expected the result binding");
     };
-    let splitscript::compiler::ast::ExprKind::Call { args, .. } = &result.value.kind else {
+    let splitscript::compiler::ast::ExprKind::Call { args, .. } =
+        &result.value.as_ref().unwrap().kind
+    else {
         panic!("expected the identity call");
     };
     assert_eq!(
@@ -2001,7 +2014,12 @@ fn snapshot_paths_resolve_state_and_setting_ids_with_temporal_identity() {
         let splitscript::compiler::ast::Stmt::Variable(variable) = statement else {
             panic!("expected a snapshot binding");
         };
-        assert_eq!(checked.semantics().value(variable.value.id), Some(expected));
+        assert_eq!(
+            checked
+                .semantics()
+                .value(variable.value.as_ref().unwrap().id),
+            Some(expected)
+        );
     }
 
     Validator::new_with_features(WasmFeatures::all())

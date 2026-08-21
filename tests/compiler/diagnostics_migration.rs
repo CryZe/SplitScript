@@ -2992,3 +2992,98 @@ fn duplicate_state_blocks_explain_named_version_layouts_without_cascades() {
         "first"
     );
 }
+
+#[test]
+fn reported_asl_helper_gaps_produce_focused_migration_diagnostics() {
+    for (source, expected_message, expected_topic) in [
+        (
+            r#"
+                state "game.exe" {}
+                fn useWatchers(values: MemoryWatcherList<u32>) { print(values) }
+            "#,
+            "ASL `MemoryWatcherList` has no single collection-shaped replacement",
+            "asl.state.memory-watcher-list",
+        ),
+        (
+            r#"
+                state "game.exe" {}
+                fn startWorker() { Task.Run() }
+            "#,
+            "`Task.Run` threads do not belong in SplitScript's cooperative execution model",
+            "asl.async.task-run",
+        ),
+    ] {
+        let diagnostics = splitscript::compile(source).expect_err("legacy helper should be guided");
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message == expected_message)
+            .unwrap_or_else(|| panic!("missing focused diagnostic in {diagnostics:#?}"));
+        assert_eq!(diagnostic.migration_topic.as_deref(), Some(expected_topic));
+        assert!(diagnostic.fixes.is_empty());
+    }
+}
+
+#[test]
+fn settings_map_syntax_guides_to_typed_settings_view_operations() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state "game.exe" {}
+        settings { "Enabled" => enabled key "enabled": true }
+
+        fn selected(key: String) -> bool {
+            return settings[key]
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("ASL settings indexing should receive focused guidance");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("settings-map lookup"))
+        .expect("settings indexing diagnostic");
+    assert_eq!(
+        diagnostic.migration_topic.as_deref(),
+        Some("asl.settings.dynamic-lookup")
+    );
+    let [fix] = diagnostic.fixes.as_slice() else {
+        panic!("settings indexing should offer one direct rewrite");
+    };
+    assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+
+    let mut fixed = source.to_owned();
+    for edit in fix.edits.iter().rev() {
+        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+    assert!(fixed.contains("settings.enabled(key)"));
+    splitscript::compile(&fixed).expect("the dynamic boolean settings lookup should compile");
+}
+
+#[test]
+fn settings_contains_key_guides_to_contains_with_an_automatic_rewrite() {
+    use splitscript::FixApplicability;
+
+    let source = r#"
+        state "game.exe" {}
+        settings { "Enabled" => enabled key "enabled": true }
+
+        fn declared(key: String) -> bool {
+            return settings.ContainsKey(key)
+        }
+    "#;
+    let diagnostics = splitscript::compile(source)
+        .expect_err("ASL settings membership should receive focused guidance");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("settings-map lookup"))
+        .expect("settings membership diagnostic");
+    let [fix] = diagnostic.fixes.as_slice() else {
+        panic!("ContainsKey should offer one direct rewrite");
+    };
+    assert_eq!(fix.applicability, FixApplicability::MachineApplicable);
+    assert_eq!(fix.edits[0].replacement, "contains");
+
+    let mut fixed = source.to_owned();
+    let edit = &fix.edits[0];
+    fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    splitscript::compile(&fixed).expect("the settings membership replacement should compile");
+}

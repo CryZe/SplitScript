@@ -1582,6 +1582,17 @@ fn normalize_search_text(value: &str) -> String {
         }
     }
     normalized
+        .split_whitespace()
+        .map(|word| {
+            let suffix = word.strip_prefix("string").unwrap_or_default();
+            if !suffix.is_empty() && suffix.chars().all(|character| character.is_ascii_digit()) {
+                "stringn"
+            } else {
+                word
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn search_score(
@@ -2313,6 +2324,16 @@ mod tests {
                 "TimeSpan.FromMilliseconds",
                 "/stdlib/types/Duration/methods/fromMilliseconds.md",
             ),
+            (
+                "MemoryWatcherList",
+                "/migration/asl/state/memory-watcher-list.md",
+            ),
+            ("Task.Run", "/migration/asl/async/task-run.md"),
+            (
+                "settings.ContainsKey",
+                "/migration/asl/settings/dynamic-lookup.md",
+            ),
+            ("string128", "/migration/asl/state/string-n.md"),
         ] {
             let results = reference.search(query);
             assert_eq!(

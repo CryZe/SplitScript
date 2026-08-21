@@ -3,18 +3,19 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    Diagnostic,
+    Diagnostic, DiagnosticFix, FixApplicability, TextEdit,
     ast::{
         BinaryOp, Expr, ExprId, ExprKind, InterpolatedPart, MatchPattern, Span, SuspensionMode,
         UnaryOp,
     },
     inference::{Requirements, Type},
+    migration::{ASL_SETTINGS_LOOKUP_DIAGNOSTIC, migration_diagnostic},
     semantic::{
         ResolvedEnumVariantId, ResolvedRecordFieldId, ResolvedRecordId, ResolvedWrapperPattern,
     },
     signature::parse_signature,
     stdlib::{Implementation, RuntimeRepresentation, StdlibCapabilityId, StdlibTypeId},
-    types::EnumTypeId,
+    types::{EnumTypeId, TypeKind},
 };
 
 use super::{Checker, context::NonePolicy, declarations::Binding};
@@ -1443,6 +1444,45 @@ impl Checker {
         }
         if self.diagnose_unhandled_result(receiver_ty, "indexing it", bracket_span) {
             self.expr(index, None);
+            return None;
+        }
+        if matches!(
+            self.shallow_type(receiver_ty),
+            Type::Known(id)
+                if matches!(self.inference.type_store().kind(id), TypeKind::SettingsView)
+        ) {
+            self.expr(index, Some(self.standard_type(StdlibTypeId::String)));
+            let metadata = migration_diagnostic(ASL_SETTINGS_LOOKUP_DIAGNOSTIC)
+                .expect("type checker migration diagnostic IDs must exist");
+            let opening = Span {
+                start: bracket_span.start,
+                end: bracket_span.start + 1,
+            };
+            let closing = Span {
+                start: bracket_span.end - 1,
+                end: bracket_span.end,
+            };
+            let mut diagnostic = Diagnostic::type_error(metadata.message, bracket_span)
+                .with_primary_label(metadata.primary_label)
+                .with_migration_topic(metadata.concept.as_str())
+                .with_fix(DiagnosticFix {
+                    title: "replace indexed lookup with `enabled`".to_owned(),
+                    applicability: FixApplicability::MachineApplicable,
+                    edits: vec![
+                        TextEdit {
+                            span: opening,
+                            replacement: ".enabled(".to_owned(),
+                        },
+                        TextEdit {
+                            span: closing,
+                            replacement: ")".to_owned(),
+                        },
+                    ],
+                });
+            for note in metadata.notes {
+                diagnostic = diagnostic.with_note(*note);
+            }
+            self.errors.push(diagnostic);
             return None;
         }
         let element = match self.shallow_type(receiver_ty) {

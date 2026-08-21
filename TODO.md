@@ -46,7 +46,7 @@ Windows process name, none used named state layouts, and several reports
 declared existing APIs missing. Treat this campaign as discoverability and
 semantic-review evidence, not as a conformance corpus.
 
-### Correct false gaps before adding adjacent features
+### Turn every reported blocker into an actionable product outcome
 
 - [x] Extend the campaign behavior ledger with the first high-risk tranche
   against the ASL sources.
@@ -64,47 +64,53 @@ semantic-review evidence, not as a conformance corpus.
   explicit port policy choice rather than a compiler limitation.
 - [x] Turn campaign feedback into targeted, minimized reproducers rather than
   exhaustively auditing every generated port. Classify each reported friction
-  point as an existing but undiscovered facility, a compiler or diagnostic bug,
-  a documentation/migration gap, a genuine language/library gap, or a
-  host-runtime gap. Inspect the corresponding ASL and `.split` files only when
-  the report does not establish the intended behavior or when a clean compile
-  may hide a semantic mismatch. The known high-risk examples include omitted
+  point as a discoverability or guidance failure around an existing facility, a
+  compiler or diagnostic bug, a genuine language/library gap, or a host-runtime
+  gap. An existing implementation does not invalidate the report: record why
+  the intended route was missed and improve documentation, search, completion,
+  diagnostics, or API ergonomics as appropriate. Inspect the corresponding ASL
+  and `.split` files only when the report does not establish the intended
+  behavior or when a clean compile may hide a semantic mismatch. The known
+  high-risk examples include omitted
   `.exe` identities and named layouts, dropped `refreshRate`, incorrect
   `ulong` narrowing, missed fixed/growable array operations, and manual managed
-  string decoding. The focused audit now confirms exact-name attachment and
-  named layouts as undiscovered facilities, maps `refreshRate` to `tickRate`,
+  string decoding. The focused audit now records exact-name attachment and
+  named layouts as discoverability failures, maps `refreshRate` to `tickRate`,
   preserves `ulong` state reads as `u64` while isolating the exact Duration
   conversion question, validates fixed and growable array patterns, and
   separates managed-string decoding from the genuine managed-collection gap.
-- [ ] Re-check entries reported as blocked before designing adjacent host work,
-  using a focused source comparison and compiler probe rather than a full-file
-  audit.
+- [ ] Follow through on entries reported as blocked before designing adjacent
+  host work, using a focused source comparison and compiler probe rather than a
+  full-file audit. Every report must produce a concrete product outcome even
+  when the required feature already exists: strengthen its canonical docs and
+  search path, add contextual editor/compiler guidance, improve the API, or
+  record a genuine language/runtime boundary. Do not close an item merely by
+  relabeling the porter's conclusion as incorrect.
   `timer.state()`, `timer.currentSplitIndex()`, game-time pause/resume,
   `Module.fileVersion()` / `productVersion()`, process-name arrays, named
   layouts, settings families, growable `[T]`, and Mono static-singleton paths
   already cover parts of AoE2DE, Borderlands, TUNIC, and other reported
-  blockers. Preserve the residual host gap only after removing these false
-  premises. AER is now a focused false-blocker: raw `MemoryPath` polling,
+  blockers. Their omission is evidence that those facilities were not led to
+  strongly enough. AER's report demonstrates that raw `MemoryPath` polling,
   explicit `SetZeroOrNull` fallback, one `tickRate` declaration, and automatic
   attachment cancellation cover its timer-critical loading behavior without a
   managed-object bridge or dynamic watcher registration; its auxiliary sound
-  and modal UI remain fidelity-ledger omissions. Bzzzt is likewise a focused
-  false-blocker: partitioned compile-time settings families preserve its 51
+  and modal UI remain fidelity-ledger omissions. Bzzzt's report likewise shows
+  that partitioned compile-time settings families preserve its 51
   bounded keys and exceptional defaults, while `staticFieldPath` plus
   `dereference` follows its replaceable `Main.instance` fields. Its family is
   verbose under the current uniform-default rule, but it does not require
   runtime settings registration. Assemble with Care's base/derived metadata is
   also composable through `staticTable`, `field`, and `MemoryPath`; only its
   loading-scene snapshot remains a timer-critical provider gap.
-  Crazy Machines is another focused false limitation: one exact-name process
-  array, three named layouts selected through `process.name()`, and the existing
-  `tickRate` policy cover all three source executables without separate files;
-  only live validation of the legacy identities and offsets remains.
-  Hades likewise needs no fixed index array for its screen vector: an address
-  cursor and the existing `while` preserve the runtime end pointer. Its two
-  known engine-module names compose through `loadedModule` and the implemented
-  whole-expression retry boundary, while arbitrary future prefix matches remain
-  a narrower host enumeration question.
+  Crazy Machines exposed weak discovery of process-name arrays, named layouts,
+  `process.name()`, and `tickRate`; the generated state and layout documentation
+  now presents that complete composition, while live validation of the legacy
+  identities and offsets remains. Hades exposed both a guidance gap around an
+  address cursor plus `while` and a genuine ergonomic gap in retrying a group of
+  known module alternatives. Its two module names now compose through
+  `loadedModule` and the implemented whole-expression retry boundary, while
+  arbitrary future prefix matches remain a narrower host enumeration question.
 - [ ] Promote a small corrected subset to reviewed fixtures: one exact-name
   native process, one process-name array, one multi-version named layout, one
   timer-state/split-index script, one `tickRate` script, one managed-string or
@@ -147,6 +153,19 @@ semantic-review evidence, not as a conformance corpus.
   plain text with no escape sequences or HTML tags. Keep this as another
   renderer over the compiler-owned documentation graph rather than parsing or
   maintaining a second documentation source.
+- [x] Turn the first repeated legacy spellings from the docs-only campaign into
+  exact documentation journeys and contextual source diagnostics.
+  `MemoryWatcherList` and `Task.Run` now lead to focused compiler-owned
+  migration pages instead of a broad guide or generic unknown-name error;
+  arbitrary ASL `stringN` widths normalize to the bounded-native-string topic.
+  `settings[key]` and `settings.ContainsKey(key)` offer machine-applicable
+  rewrites to `settings.enabled(key)` and `settings.contains(key)`. Keep the
+  semantic distinction visible: settings lookup is a direct migration,
+  `Task.Run` requires intent-specific cooperative control flow, and
+  `MemoryWatcherList` depends on how it is populated. Do not publish
+  placeholder migration pages whose only useful answer is that Unity scenes or
+  ergonomic Mono value/string paths are unavailable; prioritize implementing
+  those provider features instead, then document their real API.
 
 ### Close feedback loops without papering over language design
 
@@ -307,6 +326,22 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Engine and emulator providers
 
+- [ ] Design an ergonomic, source-defined Unity Mono value-path surface for
+  the repeated `mono.Make<T>` and `mono.MakeString` porting pattern before
+  prescribing lower-level pointer work as the canonical migration. The public
+  operation should retain the helper's useful shape: select a target-family
+  layout explicitly, name static or singleton roots and managed fields, infer
+  or state the final read type, compose with `state` polling, and decode managed
+  strings without exposing object-header arithmetic at each call site. Compare
+  methods on `MonoClass` / `MemoryPath`, a typed watcher/path value, and narrow
+  state-field sugar with representative Beeny-style scalar and string reads;
+  discuss the source syntax before choosing one. Intrinsics may supply metadata
+  discovery, but traversal and high-level composition belong in the
+  source-defined standard library. Until that design lands, diagnostics and
+  migration pages must identify the ergonomic gap honestly: existing
+  `staticFieldPath`, `field`, and `readManagedString` primitives can explain
+  what is possible, but a porter should not be told that manually rebuilding
+  every helper chain is the finished API.
 - [ ] Treat Unity scene snapshots as a now-proven provider gap. TUNIC,
   Anemoiapolis, Building 71, Cannibal Abduction, Chop Goblins, Assemble with
   Care, and Beeny need active/loaded scene names or indices and well-defined
@@ -315,8 +350,9 @@ semantic-review evidence, not as a conformance corpus.
   `readManagedString` surface so those are not mistaken for missing instance or
   string support; then design one typed scene API rather than reproducing
   `asl-help` callbacks.
-- [ ] Extend Unity Mono managed-object support from corpus-proven residual
-  needs: add managed list/dictionary traversal for Alba and A Short Hike, and
+- [ ] Extend Unity Mono managed collections after the typed value-path design,
+  using corpus-proven residual needs: add managed list/dictionary traversal for
+  Alba and A Short Hike, and
   represent A Short Hike's dynamic typed tag values. Separate stable
   singleton/field chains
   already expressible through `staticFieldPath` and `field` from collection
@@ -556,11 +592,6 @@ remaining work is product hardening and distribution.
   (the current single-receiver capability graph has no associated types), then
   make its declarations, documentation, completion, and lowering catalog
   driven rather than disguising the operation as a callable method.
-- [ ] Explore Unity managed strings as a readable wrapper/derived layout only
-  beyond the existing `process.readManagedString(address, maxUtf16Units)`
-  helper. Preserve pointer chasing, length validation, and UTF-16 conversion,
-  and make the wrapper worthwhile through typed object-path composition rather
-  than adding another spelling for the same read.
 - [ ] Add structural anonymous records only after named records prove materially
   noisy. Decide explicitly whether anonymous records are memory-readable.
 
@@ -637,9 +668,9 @@ remaining work is product hardening and distribution.
 - [ ] Treat compiler-clean generated ports as hypotheses rather than successful
   ports. Audit attachment identity, selected builds, lifecycle/timer behavior,
   settings reachability, integer signedness/width, failure behavior, and omitted
-  source branches even when no diagnostic fired. Record both false blockers
-  (existing features reported missing) and false successes (compiling scripts
-  that cannot attach or silently disable behavior).
+  source branches even when no diagnostic fired. Record both discoverability
+  failures (existing facilities that porters could not find) and silent false
+  successes (compiling scripts that cannot attach or disable behavior).
 - [ ] Keep a structured record per port: source, target build, preserved
   behavior, omissions, blockers, workaround quality, compiler revision, and
   runtime status. Distinguish complete, variant-limited, and behavior-limited

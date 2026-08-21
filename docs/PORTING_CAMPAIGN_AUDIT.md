@@ -42,9 +42,13 @@ evidence. Its report often classified a clean compile as `PORTED`, and several
 entries declared existing facilities unavailable. This first tranche checks
 five high-risk candidates against their ASL sources and the current compiler.
 
-The findings below use these classifications:
+The findings below use these classifications. None dismisses the campaign
+report: difficulty finding an existing facility is actionable product evidence
+just as much as a missing facility is.
 
-- **undiscovered** means the language already supports the source behavior;
+- **discoverability failure** means the language supports the source behavior,
+  but the documentation, search, compiler guidance, editor, or API shape did
+  not lead the porter to it;
 - **port bug** means the translation changed behavior despite sufficient
   existing facilities;
 - **host gap** means preserving the behavior needs a runtime contract;
@@ -61,11 +65,11 @@ file.
 
 | Candidate | Campaign result | Audit result |
 | --- | --- | --- |
-| Arietta of Spirits | `PORTED` | The extensionless Windows provider compiles but does not attach under the current host contract. This is an **undiscovered** exact-name requirement. Omitting the single ASL version label remains a reasonable **policy** until another physical layout is supported. |
-| TUNIC | `PORTED-LIMITED` | The report incorrectly says one file cannot accept both `TUNIC` and `Secret Legend`; one state candidate array supports both exact executable names. The port also manually decodes a Mono string despite `process.readManagedString()`. Both are **undiscovered**. Missing Unity scene behavior is a **language or library question**, and exact `onStart` cleanup remains a **host gap**. |
-| A Proof of Concept | `PORTED-LIMITED` as two files | One state candidate array, two named layouts, `process.name()`, and a returned `StateLayout` can represent both executables in one file. The split is **undiscovered**, not a single-provider limitation. Timer run-offset mutation and exact `onStart` restoration remain **host gaps**. |
-| Aim Climb | `PORTED-LIMITED` | Dropping ASL's 60 Hz `refreshRate` is **undiscovered** because `tickRate { attached: 60 }` owns this lifecycle behavior. The module-qualified `.exe` reads do not repair the extensionless provider. Dynamic lookup of a statically declared setting is valid but misses its typed member. |
-| 25 To Life | `PORTED-LIMITED` | `timer.state() == TimerState.NotRunning` can preserve the source's accumulator reset, so the reported timer-state gap is **undiscovered**. Accumulating on every positive IGT rollback instead of only a positive-to-zero boundary is a **port bug**. The provider is also extensionless. |
+| Arietta of Spirits | `PORTED` | The extensionless Windows provider compiles but does not attach under the current host contract. This is an exact-name **discoverability failure**. Omitting the single ASL version label remains a reasonable **policy** until another physical layout is supported. |
+| TUNIC | `PORTED-LIMITED` | The campaign could not find how one file accepts both `TUNIC` and `Secret Legend`; one state candidate array supports both exact executable names. The port also manually decodes a Mono string instead of finding `process.readManagedString()`. Both are **discoverability failures**. Missing Unity scene behavior is a **language or library question**, and exact `onStart` cleanup remains a **host gap**. |
+| A Proof of Concept | `PORTED-LIMITED` as two files | One state candidate array, two named layouts, `process.name()`, and a returned `StateLayout` can represent both executables in one file. Producing separate files is a **discoverability failure** around the combined attachment/layout workflow. Timer run-offset mutation and exact `onStart` restoration remain **host gaps**. |
+| Aim Climb | `PORTED-LIMITED` | Dropping ASL's 60 Hz `refreshRate` is a **discoverability failure** because `tickRate { attached: 60 }` owns this lifecycle behavior. The module-qualified `.exe` reads do not repair the extensionless provider. Dynamic lookup of a statically declared setting is valid but misses its typed member. |
+| 25 To Life | `PORTED-LIMITED` | Missing `timer.state() == TimerState.NotRunning` is a **discoverability failure** because it can preserve the source's accumulator reset. Accumulating on every positive IGT rollback instead of only a positive-to-zero boundary is a **port bug**. The provider is also extensionless. |
 
 ### Behavior ledger
 
@@ -192,8 +196,8 @@ though the language supports the exact unsigned representation.
   timer. Their faithful SplitScript type is `u64`; the parser's existing
   machine-applicable migration fix rewrites `ulong` to `u64`, including in a
   state field, and a focused compiler probe preserves the full unsigned range.
-- Candidate: every watcher is declared as `i64` based on the false premise that
-  it is the compiler's only 64-bit integer. Clean compilation therefore hides a
+- Candidate: every watcher is declared as `i64` because the porter did not find
+  the compiler's unsigned 64-bit type. Clean compilation therefore hides a
   semantic narrowing for values above `i64::MAX`.
 - `Duration.fromMilliseconds` now accepts the `u64` watcher directly and uses
   its exact integer implementation. The candidate's intermediate `f64` cast is
@@ -281,8 +285,8 @@ an ordinary SplitScript memory helper.
 
 Campaign status: `PORTED-LIMITED`
 
-Audit result: the candidate's path-length branching is an undiscovered existing
-array facility, not a static-array limitation.
+Audit result: the candidate's path-length branching exposes a discoverability
+failure around growable arrays and pointer-path composition.
 
 - Source: `Array.Copy` copies a selected version-specific offset path and adds
   one boss, arena, scroll, or rune offset before constructing a `DeepPointer`.
@@ -293,14 +297,14 @@ array facility, not a static-array limitation.
   `fullPath.extend(path)`, call `fullPath.push(lastOffset)`, and pass the result
   to `process.follow(base, fullPath)`. A focused current-compiler probe validates
   that exact generic function and state-field call.
-- The branch explosion is therefore **undiscovered**, not a language gap. The
+- The branch explosion therefore records a **discoverability failure**. The
   porting guide now puts growable-array composition next to dynamic
   `DeepPointer` migration rather than expecting authors to connect separate
   pointer and collection chapters.
 - Ato's timer event and mutation omissions remain independent host gaps; the
   array correction does not improve their fidelity.
 
-### False version-selection blocker: Borderlands
+### Version-selection discoverability failure: Borderlands
 
 Campaign status: `BLOCKED`
 
@@ -315,8 +319,9 @@ language and standard library.
   matching `StateLayout` variant, and use `await process.closed()` for read
   failure or an unsupported version. A focused current-compiler probe validates
   this complete shape.
-- The report's claim that executable file-version dispatch is unavailable is
-  **undiscovered**. No module-size approximation or new host selector is needed.
+- The report could not find executable file-version dispatch. This is a
+  **discoverability failure**, and no module-size approximation or new host
+  selector is needed.
 - `FileVersion` literals are first-class match patterns, so version selection
   maps directly to `v"1.0.0.0" => StateLayout.Patch100` arms. Because executable
   versions form an open value space, the match must include `_` for unsupported
@@ -326,7 +331,7 @@ language and standard library.
   version blocker. Runtime verification is still required for both address
   layouts and exact PE version values.
 
-### False timer-metadata blocker: Castle of Illusion HD
+### Timer-metadata discoverability failure: Castle of Illusion HD
 
 Campaign status: `BLOCKED`
 
@@ -515,9 +520,9 @@ scene snapshots are the one timer-critical provider gap.
 
 Campaign status: `PORTED-LIMITED`
 
-Audit result: the omitted alternate executables exposed both undiscovered
-existing state features and one genuine language papercut. The complete source
-behavior is now directly representable.
+Audit result: the omitted alternate executables exposed weak discoverability
+for existing state features and one genuine language papercut. The complete
+source behavior is now directly representable.
 
 - Source: `CrazyMachines`, `cm_family`, and `cmnftl` declare the same three byte
   fields at executable-specific addresses. The start latch, win edge, and menu
@@ -601,10 +606,12 @@ machine-applicable `else return None` rewrite. Generic failures retain their
 capability requirements through inference, name the missing capability, and
 list accepted concrete types when the catalog proves that set is finite.
 
-### Supported facilities that were missed
+### Existing facilities whose user journeys failed
 
-These reports indicate discoverability or diagnostic failures, not missing
-language features:
+Finding an implementation after the campaign does not invalidate the report.
+Each item below is a product failure in documentation, search, completion,
+diagnostics, or API ergonomics even when it does not require a second language
+feature:
 
 - growable `[T]` is the ordered `List<T>` replacement and supports indexing,
   iteration, search, insertion at the end, removal, and clearing;
@@ -624,6 +631,30 @@ language features:
 
 The roadmap therefore asks the compiler and editor to lead authors to these
 facilities rather than adding compatibility aliases or duplicate abstractions.
+
+### Documentation journey probe and first follow-through
+
+A focused `splitc docs` probe reproduced the campaign's general discovery
+failure without auditing every generated port. `MemoryWatcherList` and
+`string128` returned no documentation; `Task.Run`, `vars.Helper.Scenes`,
+`mono.Make`, `mono.MakeString`, `settings.ContainsKey`, and settings indexing
+either led only to a broad guide or ranked an unrelated topic first. This is
+actionable evidence regardless of whether lower-level primitives can be made to
+compose.
+
+The first follow-through gives `MemoryWatcherList` and `Task.Run` focused
+compiler-owned pages and contextual source diagnostics. Arbitrary `stringN`
+widths normalize to the bounded native-string topic. Settings indexing and
+`ContainsKey` additionally receive safe automatic rewrites to `enabled` and
+`contains`. The outcomes deliberately differ: settings lookup is already a
+direct typed operation; `Task.Run` must be mapped from its intent to cooperative
+control flow; and `MemoryWatcherList` has distinct fixed-state,
+discovered-address, and managed-collection shapes. Unity scenes and ergonomic
+typed Mono scalar/string paths remain provider design work. They deliberately
+do not get placeholder migration pages whose answer is only "not available";
+the roadmap prioritizes implementing a real API first. In particular, the
+existence of `MemoryPath` and `readManagedString` does not make manual
+object-header arithmetic an acceptable final `mono.MakeString` migration.
 
 ### Real compiler and documentation work
 

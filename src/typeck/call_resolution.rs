@@ -7,10 +7,10 @@ use crate::{
     ast::{ActionKind, ArrayTypeId, Expr, ExprId, ExprKind, Span},
     inference::{InferenceError, Requirements, Type, type_may_have_capability},
     migration::{
-        ASL_SETTINGS_ADD_DIAGNOSTIC, ForeignSpellingContext, foreign_spelling,
-        legacy_array_field_diagnostic, legacy_set_field_diagnostic, legacy_static_call_diagnostic,
-        legacy_string_field_diagnostic, legacy_string_method_diagnostic,
-        legacy_value_path_diagnostic, migration_diagnostic,
+        ASL_SETTINGS_ADD_DIAGNOSTIC, ASL_SETTINGS_LOOKUP_DIAGNOSTIC, ForeignSpellingContext,
+        foreign_spelling, legacy_array_field_diagnostic, legacy_set_field_diagnostic,
+        legacy_static_call_diagnostic, legacy_string_field_diagnostic,
+        legacy_string_method_diagnostic, legacy_value_path_diagnostic, migration_diagnostic,
     },
     semantic::{PendingResolvedCall, ResolvedMember, ResolvedValue},
     signature::parse_signature,
@@ -997,6 +997,20 @@ impl Checker {
                 diagnostic = diagnostic.with_note(*note);
             }
             self.errors.push(diagnostic);
+            return;
+        }
+        if method == "ContainsKey"
+            && matches!(
+                receiver,
+                Type::Known(id)
+                    if matches!(self.inference.type_store().kind(id), TypeKind::SettingsView)
+            )
+        {
+            self.migration_member_error(
+                ASL_SETTINGS_LOOKUP_DIAGNOSTIC,
+                name_span,
+                Some(("replace `ContainsKey` with `contains`", "contains")),
+            );
             return;
         }
         let receiver = self.type_name(receiver);

@@ -1,9 +1,9 @@
 //! Validated migration knowledge and human-readable capability reporting.
 
 pub use splitscript_syntax::migration::{
-    ASL_SETTINGS_ADD_DIAGNOSTIC, ForeignSpelling, ForeignSpellingContext,
-    ForeignSpellingReplacement, MigrationConcept, MigrationConceptId, MigrationDiagnostic,
-    MigrationDiagnosticId, MigrationSupport, MigrationTarget, SourceLanguage,
+    ASL_SETTINGS_ADD_DIAGNOSTIC, ASL_SETTINGS_LOOKUP_DIAGNOSTIC, ForeignSpelling,
+    ForeignSpellingContext, ForeignSpellingReplacement, MigrationConcept, MigrationConceptId,
+    MigrationDiagnostic, MigrationDiagnosticId, MigrationSupport, MigrationTarget, SourceLanguage,
     diagnostic as migration_diagnostic, foreign_spelling, legacy_array_field_diagnostic,
     legacy_set_field_diagnostic, legacy_static_call_diagnostic, legacy_string_field_diagnostic,
     legacy_string_method_diagnostic, legacy_type_diagnostic, legacy_value_path_diagnostic,
@@ -87,6 +87,16 @@ impl MigrationCatalog {
                 errors.push(format!(
                     "migration concept `{}` references missing cookbook anchor `{anchor}`",
                     concept.id.as_str()
+                ));
+            }
+        }
+
+        for diagnostic in self.diagnostics() {
+            if self.concept(diagnostic.concept).is_none() {
+                errors.push(format!(
+                    "migration diagnostic `{}` references missing concept `{}`",
+                    diagnostic.id.as_str(),
+                    diagnostic.concept.as_str(),
                 ));
             }
         }

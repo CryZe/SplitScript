@@ -181,6 +181,12 @@ pub const ASL_TIMER_CONTROL_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.timer.control-path");
 pub const ASL_LIST_TYPE_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.collection.list-type");
+pub const ASL_MEMORY_WATCHER_LIST_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.state.memory-watcher-list-type");
+pub const ASL_TASK_RUN_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.async.task-run-call");
+pub const ASL_SETTINGS_LOOKUP_DIAGNOSTIC: MigrationDiagnosticId =
+    MigrationDiagnosticId::new("asl.settings.dynamic-lookup");
 pub const ASL_SETTINGS_ADD_DIAGNOSTIC: MigrationDiagnosticId =
     MigrationDiagnosticId::new("asl.settings.add-call");
 pub const ASL_MODULES_MAIN_DIAGNOSTIC: MigrationDiagnosticId =
@@ -418,6 +424,41 @@ pub const DIAGNOSTICS: &[MigrationDiagnostic] = &[
             "size-changing array operations such as append, insert, remove, and clear are planned on `[T]`; SplitScript will not add a separate `List<T>` compatibility type",
             "use `Set<T>` only when the source semantics genuinely require uniqueness rather than ordering and duplicates; it is not a substitute for a C# list",
             "there is no automatic rewrite yet because the generic `List<T>` syntax and any size-changing calls must migrate together",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_MEMORY_WATCHER_LIST_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.state.memory-watcher-list"),
+        message: "ASL `MemoryWatcherList` has no single collection-shaped replacement",
+        primary_label: "choose the representation from how this watcher list is populated",
+        notes: &[
+            "declare a fixed set of named reads in `state`; SplitScript updates the snapshot transactionally and exposes `old` and `current`",
+            "when runtime discovery produces a homogeneous set of addresses, retain those addresses in `[address]` and perform typed reads while iterating",
+            "managed list or dictionary enumeration is a Unity provider gap rather than an array spelling; keep that requirement explicit instead of guessing object offsets",
+            "there is no automatic rewrite because `MemoryWatcherList` is used for several materially different ownership and discovery patterns",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_TASK_RUN_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.async.task-run"),
+        message: "`Task.Run` threads do not belong in SplitScript's cooperative execution model",
+        primary_label: "express the operation's suspension or retry boundary directly",
+        notes: &[
+            "use `await` for intrinsically asynchronous discovery such as attaching, module loading, and incremental scans",
+            "use `retry expression` or `retry { ... }` for bounded synchronous fallible work that should be attempted again on the next tick",
+            "autosplitter code must yield predictably so one background operation cannot make timer updates appear hung",
+            "there is no automatic rewrite because a thread body may mix discovery, polling, mutation, and host operations with different cooperative equivalents",
+        ],
+    },
+    MigrationDiagnostic {
+        id: ASL_SETTINGS_LOOKUP_DIAGNOSTIC,
+        concept: MigrationConceptId::new("asl.settings.dynamic-lookup"),
+        message: "ASL settings-map lookup uses typed `SettingsView` operations in SplitScript",
+        primary_label: "this value is a settings view, not a general indexable map",
+        notes: &[
+            "read a statically named declaration with `settings.name` so its type remains visible to inference and editor tooling",
+            "use `settings.enabled(key)` when a computed string selects a declared boolean setting",
+            "use `settings.contains(key)` when declaration membership must be distinguished from a disabled boolean value",
         ],
     },
     MigrationDiagnostic {
@@ -841,6 +882,9 @@ pub fn legacy_static_call_diagnostic(
     path: &[String],
     argument_count: usize,
 ) -> Option<MigrationDiagnosticId> {
+    if matches!(path, [task, method] if task == "Task" && method == "Run") {
+        return Some(ASL_TASK_RUN_DIAGNOSTIC);
+    }
     if matches!(path, [modules, method] if modules == "modules" && method == "First") {
         return Some(if argument_count == 0 {
             ASL_MODULES_MAIN_DIAGNOSTIC
@@ -998,6 +1042,7 @@ pub fn legacy_value_path_diagnostic(path: &str) -> Option<MigrationDiagnosticId>
 pub fn legacy_type_diagnostic(name: &str) -> Option<MigrationDiagnosticId> {
     match name {
         "List" => Some(ASL_LIST_TYPE_DIAGNOSTIC),
+        "MemoryWatcherList" => Some(ASL_MEMORY_WATCHER_LIST_DIAGNOSTIC),
         "TimerPhase" => Some(ASL_TIMER_PHASE_DIAGNOSTIC),
         _ => None,
     }
@@ -1825,6 +1870,19 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: &[],
     },
     MigrationConcept {
+        id: MigrationConceptId::new("asl.async.task-run"),
+        name: "Task.Run",
+        sources: ASL_CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Replace worker threads with cooperative [`await`] discovery or a bounded [`retry`] transaction so timer updates keep yielding predictably.",
+        targets: &[
+            MigrationTarget::Language("await"),
+            MigrationTarget::Language("retry"),
+        ],
+        cookbook_anchor: Some("background-signature-scans"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("asl.process.identity"),
         name: "Attached process identity",
         sources: ASL,
@@ -1859,6 +1917,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         summary: "Declare polled memory in [`state`]; use a trailing field [`if`] with `value` and return `Err(message)` when a transient candidate should retain its last accepted value.",
         targets: &[MigrationTarget::Language("state")],
         cookbook_anchor: Some("retaining-the-last-accepted-field-value"),
+        spellings: &[],
+    },
+    MigrationConcept {
+        id: MigrationConceptId::new("asl.state.memory-watcher-list"),
+        name: "MemoryWatcherList",
+        sources: ASL_CSHARP,
+        support: MigrationSupport::TypedPattern,
+        summary: "Use [`state`] for a fixed set of named transactional reads or retain runtime-discovered homogeneous addresses in an array; managed collection enumeration remains a distinct provider requirement.",
+        targets: &[MigrationTarget::Language("state")],
+        cookbook_anchor: None,
         spellings: &[],
     },
     MigrationConcept {
@@ -2032,7 +2100,7 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         name: "Dynamic settings lookup",
         sources: ASL,
         support: MigrationSupport::Direct,
-        summary: "Declare an exact string key with `key \"...\"`, then use `settings.enabled(key)` or `oldSettings.enabled(key)` for boolean settings. Choice and file settings remain statically typed.",
+        summary: "Replace `settings[key]` with `settings.enabled(key)` and `settings.ContainsKey(key)` with `settings.contains(key)`. Declare exact host strings with `key \"...\"`; choice and file settings remain statically typed.",
         targets: &[
             MigrationTarget::Language("settings"),
             MigrationTarget::Language("oldSettings"),

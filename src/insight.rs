@@ -395,6 +395,38 @@ fn syntax_for_binding(
     finder.found
 }
 
+fn append_attachment_layouts(
+    description: &mut String,
+    syntax: &crate::ast::Program,
+    layouts: &[crate::AttachmentLayout],
+    total_layouts: usize,
+) {
+    if layouts.is_empty() || layouts.len() == total_layouts {
+        return;
+    }
+    let names = layouts
+        .iter()
+        .filter_map(|layout| match layout {
+            crate::AttachmentLayout::Single => Some("the attachment".to_owned()),
+            crate::AttachmentLayout::Named(variant) => syntax
+                .state
+                .as_ref()
+                .and_then(|state| state.layout_enum.as_ref())
+                .and_then(|enumeration| {
+                    enumeration
+                        .variants
+                        .iter()
+                        .find(|candidate| candidate.id == *variant)
+                })
+                .map(|variant| format!("`StateLayout.{}`", variant.name)),
+        })
+        .collect::<Vec<_>>();
+    if !names.is_empty() {
+        description.push_str("\n\n**Attachment layouts:** ");
+        description.push_str(&names.join(", "));
+    }
+}
+
 fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext) -> Option<String> {
     let syntax = context.syntax();
     let semantics = context.semantics();
@@ -425,10 +457,20 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 } else {
                     "Global variable"
                 };
-                (
-                    format!("let {}: {ty}", definition.name),
-                    documented_description(kind, global.documentation.as_deref()),
-                )
+                let mut description = documented_description(kind, global.documentation.as_deref());
+                if global.value.is_none()
+                    && let Some(checked) = context.snapshot.checked()
+                {
+                    let attachment = checked.attachment_globals();
+                    let layouts = attachment.available_layouts(value).collect::<Vec<_>>();
+                    append_attachment_layouts(
+                        &mut description,
+                        syntax,
+                        &layouts,
+                        attachment.layouts().len(),
+                    );
+                }
+                (format!("let {}: {ty}", definition.name), description)
             } else if let Some(field) = syntax
                 .state
                 .as_ref()
@@ -544,29 +586,12 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
             if let Some(checked) = context.snapshot.checked() {
                 let attachment = checked.attachment_globals();
                 let allowed = attachment.function_layouts(function.id).collect::<Vec<_>>();
-                if !allowed.is_empty() && allowed.len() < attachment.layouts().len() {
-                    let names = allowed
-                        .iter()
-                        .filter_map(|layout| match layout {
-                            crate::attachment_globals::AttachmentLayout::Single => {
-                                Some("the attachment".to_owned())
-                            }
-                            crate::attachment_globals::AttachmentLayout::Named(variant) => syntax
-                                .state
-                                .as_ref()
-                                .and_then(|state| state.layout_enum.as_ref())
-                                .and_then(|enumeration| {
-                                    enumeration
-                                        .variants
-                                        .iter()
-                                        .find(|candidate| candidate.id == *variant)
-                                })
-                                .map(|variant| format!("`StateLayout.{}`", variant.name)),
-                        })
-                        .collect::<Vec<_>>();
-                    description.push_str("\n\n**Attachment layouts:** ");
-                    description.push_str(&names.join(", "));
-                }
+                append_attachment_layouts(
+                    &mut description,
+                    syntax,
+                    &allowed,
+                    attachment.layouts().len(),
+                );
             }
             Some(source_markdown(
                 &format!(
@@ -1653,6 +1678,11 @@ split {
             global
                 .markdown
                 .contains("Attachment-scoped global variable")
+        );
+        assert!(
+            global
+                .markdown
+                .contains("**Attachment layouts:** `StateLayout.Steam`")
         );
 
         let helper = database

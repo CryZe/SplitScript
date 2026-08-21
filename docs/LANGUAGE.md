@@ -772,6 +772,13 @@ to the right. Consequently, `optional else result else fallback` means
 annotation, argument type, return type, or other expected-type context to
 determine its contained `T`.
 
+Like other prefix operators, [`await`] and [`retry`] bind more tightly than
+fallback `else`: `retry value else fallback` means `(retry value) else
+fallback`. Because the alternate interpretation establishes a materially
+different retry boundary, writing these constructs next to each other without
+parentheses produces a warning with fixes for both `(retry value) else
+fallback` and `retry (value else fallback)`.
+
 ## Value blocks
 
 A brace-delimited block in an expression position may perform scoped work and

@@ -7,7 +7,7 @@ use super::{
     MatchArm, MatchPattern, Parser, PatternBinding, Span, TokenKind, TypeRef, UnaryOp,
     assignment_operator, parse_integer,
 };
-use crate::diagnostic::DiagnosticCode;
+use crate::diagnostic::{DiagnosticCode, DiagnosticFix, FixApplicability, TextEdit};
 
 impl Parser<'_> {
     pub(super) fn expression(&mut self, min_precedence: u8) -> Result<Expr, Diagnostic> {
@@ -94,9 +94,80 @@ impl Parser<'_> {
                 if FALLBACK_PRECEDENCE < min_precedence {
                     break;
                 }
+                let ambiguous_retry = match &left.kind {
+                    ExprKind::Suspend {
+                        mode: super::SuspensionMode::Retry,
+                        value,
+                        ..
+                    } if self
+                        .source
+                        .get(left.span.start..left.span.end)
+                        .is_some_and(|source| source.starts_with("retry")) =>
+                    {
+                        Some((left.span, value.span.start))
+                    }
+                    _ => None,
+                };
                 self.bump();
                 let fallback = self.required_expression(FALLBACK_PRECEDENCE)?;
                 let span = left.span.join(fallback.span);
+                if let Some((retry_span, operand_start)) = ambiguous_retry {
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            DiagnosticCode::AmbiguousRetryFallback,
+                            "`retry` binds more tightly than fallback `else`",
+                            retry_span,
+                        )
+                        .with_primary_label("only this expression is inside the retry boundary")
+                        .with_secondary_label(
+                            fallback.span,
+                            "this fallback is evaluated after retry completes",
+                        )
+                        .with_note(
+                            "the current grouping is `(retry value) else fallback`; use parentheses to make either interpretation explicit",
+                        )
+                        .with_fix(DiagnosticFix {
+                            title: "make the current retry boundary explicit".to_owned(),
+                            applicability: FixApplicability::MachineApplicable,
+                            edits: vec![
+                                TextEdit {
+                                    span: Span {
+                                        start: retry_span.start,
+                                        end: retry_span.start,
+                                    },
+                                    replacement: "(".to_owned(),
+                                },
+                                TextEdit {
+                                    span: Span {
+                                        start: retry_span.end,
+                                        end: retry_span.end,
+                                    },
+                                    replacement: ")".to_owned(),
+                                },
+                            ],
+                        })
+                        .with_fix(DiagnosticFix {
+                            title: "retry the complete fallback chain".to_owned(),
+                            applicability: FixApplicability::MaybeIncorrect,
+                            edits: vec![
+                                TextEdit {
+                                    span: Span {
+                                        start: operand_start,
+                                        end: operand_start,
+                                    },
+                                    replacement: "(".to_owned(),
+                                },
+                                TextEdit {
+                                    span: Span {
+                                        start: span.end,
+                                        end: span.end,
+                                    },
+                                    replacement: ")".to_owned(),
+                                },
+                            ],
+                        }),
+                    );
+                }
                 left = self.new_expr(
                     ExprKind::Fallback {
                         value: Box::new(left),

@@ -99,6 +99,7 @@ pub struct WarningPolicy {
     unused_declaration: WarningLevel,
     unused_member: WarningLevel,
     value_block_semicolon: WarningLevel,
+    ambiguous_retry_fallback: WarningLevel,
 }
 
 impl WarningPolicy {
@@ -109,6 +110,7 @@ impl WarningPolicy {
             DiagnosticCode::UnusedDeclaration => Some(self.unused_declaration),
             DiagnosticCode::UnusedMember => Some(self.unused_member),
             DiagnosticCode::ValueBlockSemicolon => Some(self.value_block_semicolon),
+            DiagnosticCode::AmbiguousRetryFallback => Some(self.ambiguous_retry_fallback),
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type
@@ -124,6 +126,7 @@ impl WarningPolicy {
             DiagnosticCode::UnusedDeclaration => &mut self.unused_declaration,
             DiagnosticCode::UnusedMember => &mut self.unused_member,
             DiagnosticCode::ValueBlockSemicolon => &mut self.value_block_semicolon,
+            DiagnosticCode::AmbiguousRetryFallback => &mut self.ambiguous_retry_fallback,
             DiagnosticCode::Lexical
             | DiagnosticCode::Syntax
             | DiagnosticCode::Type

@@ -848,6 +848,98 @@ fn else_rejects_values_that_are_not_option_or_result() {
 }
 
 #[test]
+fn retry_next_to_fallback_requires_explicit_grouping() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn choose(value: i32?!) {
+            return retry value else 0
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("the current grouping is well typed even though it is visually ambiguous");
+    let warning = checked
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::AmbiguousRetryFallback)
+        .expect("an adjacent retry and fallback should require explicit grouping");
+    assert_eq!(warning.severity, splitscript::DiagnosticSeverity::Warning);
+    assert!(warning.message.contains("binds more tightly"));
+    assert_eq!(warning.fixes.len(), 2);
+    assert_eq!(
+        warning.fixes[0].applicability,
+        splitscript::FixApplicability::MachineApplicable
+    );
+    assert_eq!(
+        warning.fixes[1].applicability,
+        splitscript::FixApplicability::MaybeIncorrect
+    );
+
+    fn apply_fix(source: &str, fix: &splitscript::DiagnosticFix) -> String {
+        let mut edits = fix.edits.clone();
+        edits.sort_by_key(|edit| std::cmp::Reverse((edit.span.start, edit.span.end)));
+        let mut fixed = source.to_owned();
+        for edit in edits {
+            fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+        }
+        fixed
+    }
+
+    let explicit_current = apply_fix(source, &warning.fixes[0]);
+    assert!(explicit_current.contains("return (retry value) else 0"));
+    assert!(
+        splitscript::parse_recovering(&explicit_current)
+            .unwrap()
+            .diagnostics()
+            .iter()
+            .all(
+                |diagnostic| diagnostic.code != splitscript::DiagnosticCode::AmbiguousRetryFallback
+            )
+    );
+
+    let explicit_complete = apply_fix(source, &warning.fixes[1]);
+    assert!(explicit_complete.contains("return retry (value else 0)"));
+    assert!(
+        splitscript::parse_recovering(&explicit_complete)
+            .unwrap()
+            .diagnostics()
+            .iter()
+            .all(
+                |diagnostic| diagnostic.code != splitscript::DiagnosticCode::AmbiguousRetryFallback
+            )
+    );
+
+    let invalid = r#"
+        state "game.exe" {}
+
+        fn engineModule() {
+            return retry process.loadedModule("EngineWin64s.dll")
+                else process.loadedModule("EngineWin64sv.dll")
+                else {
+                    throw "engine module is not loaded yet"
+                }
+        }
+    "#;
+    let diagnostics = splitscript::compile(invalid)
+        .expect_err("retry currently completes before the adjacent fallback chain");
+    let precedence = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::AmbiguousRetryFallback)
+        .expect("the invalid form should retain the grouping guidance and fixes");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("`retry` expects a result value (`T!`)")
+        }),
+        "{diagnostics:#?}"
+    );
+    let fixed = apply_fix(invalid, &precedence.fixes[1]);
+    splitscript::compile(&fixed)
+        .expect("moving the complete fallback chain into retry should fix this occurrence");
+}
+
+#[test]
 fn declared_record_enum_and_array_layouts_are_semantic_facts() {
     let source = r#"
         state "game.exe" {}

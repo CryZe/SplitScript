@@ -179,7 +179,12 @@ semantic-review evidence, not as a conformance corpus.
   every attempt runs within one tick and must remain bounded; intrinsically
   asynchronous discovery belongs outside the attempt behind [`await`]. A
   general value-producing [`loop`] remains the lower-level escape hatch, not
-  the canonical retry transaction.
+  the canonical retry transaction. Keep [`retry`] at the same prefix
+  precedence as [`await`] and fallback [`else`] at its existing low
+  precedence. Because adjacent `retry value else fallback` admits two
+  materially different retry boundaries, emit a warning whenever neither
+  interpretation is parenthesized and offer fixes for both `(retry value) else
+  fallback` and `retry (value else fallback)`.
 - [x] Make fallback [`else`] take one ordinary expression instead of encoding
   a private list of value/return/break/continue branches. Represent [`return`],
   [`break`], [`continue`], and [`throw`] as first-class [`Never`]-typed

@@ -223,7 +223,11 @@ impl CompilerDatabase {
                 Ok(recovered) => {
                     let syntax = recovered.syntax().clone();
                     let mut compilation_syntax = syntax.clone();
-                    if recovered.diagnostics().is_empty() {
+                    if !recovered
+                        .diagnostics()
+                        .iter()
+                        .any(|diagnostic| diagnostic.severity == crate::DiagnosticSeverity::Error)
+                    {
                         // Editor recovery must remain available even if the
                         // compiler-owned augmentation boundary itself fails.
                         // Those generated diagnostics cannot be repaired in

@@ -660,6 +660,77 @@ fn value_block_tail_warning_survives_analysis_and_offers_its_parser_fix() {
 }
 
 #[test]
+fn retry_fallback_warning_preserves_editor_analysis_and_offers_both_groupings() {
+    let source = concat!(
+        "state \"game.exe\" {}\n",
+        "fn choose(value: i32?!) { return retry value else 0 }\n",
+        "whileAttached {\n",
+        "    let number: i32 = 4\n",
+        "    let bounded = number.clamp(0, 7)\n",
+        "}\n"
+    );
+    let uri = "file:///retry-fallback-warning.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    let diagnostics = server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    let published = diagnostics[0]["params"]["diagnostics"].as_array().unwrap();
+    let warning = published
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "SS1006")
+        .expect("the retry/fallback ambiguity warning should be published");
+    assert_eq!(warning["severity"], 2);
+    let warning_range = warning["range"].clone();
+
+    let actions = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 25,
+        "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": warning_range,
+            "context": {
+                "diagnostics": [warning],
+                "only": ["quickfix"]
+            }
+        }
+    }));
+    let quick_fixes = actions[0]["result"].as_array().unwrap();
+    assert_eq!(quick_fixes.len(), 2, "{quick_fixes:#?}");
+    assert_eq!(
+        quick_fixes[0]["title"],
+        "make the current retry boundary explicit"
+    );
+    assert_eq!(quick_fixes[0]["isPreferred"], true);
+    assert_eq!(quick_fixes[1]["title"], "retry the complete fallback chain");
+    assert_eq!(quick_fixes[1]["isPreferred"], false);
+
+    let hover_offset = source.find("clamp").unwrap() + 2;
+    let (hover_line, hover_character) = position_parts(source, hover_offset);
+    let hover = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 26,
+        "method": "textDocument/hover",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": hover_line, "character": hover_character }
+        }
+    }));
+    let markdown = hover[0]["result"]["contents"]["value"]
+        .as_str()
+        .expect("catalog hover should survive the parser warning");
+    assert!(markdown.contains("i32.clamp"), "{markdown}");
+}
+
+#[test]
 fn positions_use_utf16_code_units_and_close_clears_diagnostics() {
     assert_eq!(
         position("🦊x", "🦊".len()),

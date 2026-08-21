@@ -638,8 +638,8 @@ fn plain_none_calls_need_no_bottom_reference_values() {
 #[test]
 fn else_unwraps_options_and_results_with_value_or_return_fallbacks() {
     use splitscript::{
-        compiler::hir::{TypedExpressionKind, TypedFallbackBranch},
-        compiler::wasm_ir::{BodyOwner, ExpressionKind, FallbackBranch, LocalPurpose},
+        compiler::hir::TypedExpressionKind,
+        compiler::wasm_ir::{BodyOwner, ExpressionKind, LocalPurpose},
     };
 
     let source = r#"
@@ -689,7 +689,6 @@ fn else_unwraps_options_and_results_with_value_or_return_fallbacks() {
     );
 
     let lowered = splitscript::lower_wasm(&checked);
-    let mut branches = [false; 3];
     for expression in checked.typed_hir().expressions() {
         let TypedExpressionKind::Fallback { value, fallback } = &expression.kind else {
             continue;
@@ -705,22 +704,20 @@ fn else_unwraps_options_and_results_with_value_or_return_fallbacks() {
             panic!("fallback expressions must not remain deferred to typed HIR")
         };
         assert_eq!(lowered_value, value);
-        match (fallback, lowered_fallback) {
-            (TypedFallbackBranch::Value(expected), FallbackBranch::Value(actual)) => {
-                assert_eq!(actual, expected);
-                branches[0] = true;
-            }
-            (TypedFallbackBranch::Return(Some(expected)), FallbackBranch::Return(Some(actual))) => {
-                assert_eq!(actual, expected);
-                branches[1] = true;
-            }
-            (TypedFallbackBranch::Return(None), FallbackBranch::Return(None)) => {
-                branches[2] = true;
-            }
-            _ => panic!("Wasm IR must preserve the resolved fallback branch"),
-        }
+        assert_eq!(lowered_fallback, fallback);
     }
-    assert!(branches.into_iter().all(|branch| branch));
+    assert!(
+        checked
+            .typed_hir()
+            .expressions()
+            .any(|expression| matches!(expression.kind, TypedExpressionKind::Return(Some(_))))
+    );
+    assert!(
+        checked
+            .typed_hir()
+            .expressions()
+            .any(|expression| matches!(expression.kind, TypedExpressionKind::Return(None)))
+    );
     let planned_fallbacks = lowered
         .bodies()
         .filter(|body| match &body.owner {
@@ -1685,7 +1682,7 @@ fn known_alternate_modules_and_runtime_pointer_bounds_need_no_enumeration_or_ind
             return retry {
                 let engine = process.loadedModule("EngineWin64s.dll")
                     else process.loadedModule("EngineWin64sv.dll")
-                    else { throw "engine module is not loaded yet" }
+                    else throw "engine module is not loaded yet"
                 engine
             }
         }

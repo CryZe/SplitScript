@@ -547,10 +547,10 @@ fn retry_accepts_an_ordinary_block_expression_and_catches_propagation() {
         .first()
         .and_then(|function| function.body.statements.first())
         .and_then(|statement| match statement {
-            splitscript::compiler::ast::Stmt::Return {
-                value: Some(expression),
+            splitscript::compiler::ast::Stmt::Expression(splitscript::compiler::ast::Expr {
+                kind: splitscript::compiler::ast::ExprKind::Return(Some(expression)),
                 ..
-            } => Some(expression),
+            }) => Some(expression.as_ref()),
             _ => None,
         })
         .expect("the helper should return its retry expression");
@@ -629,17 +629,17 @@ fn retry_catches_throw_but_return_and_break_keep_their_lexical_targets() {
     struct ThrowCollector(Vec<splitscript::compiler::hir::FailureTarget>);
 
     impl splitscript::compiler::hir::TypedVisitor for ThrowCollector {
-        fn visit_statement(
+        fn visit_expression(
             &mut self,
-            statement: &splitscript::compiler::hir::TypedStatement,
+            expression: &splitscript::compiler::hir::TypedExpression,
             program: &splitscript::compiler::hir::TypedProgram,
         ) {
-            if let splitscript::compiler::hir::TypedStatementKind::Throw { target, .. } =
-                statement.kind
+            if let splitscript::compiler::hir::TypedExpressionKind::Throw { target, .. } =
+                expression.kind
             {
                 self.0.push(target);
             }
-            splitscript::compiler::hir::walk_typed_statement(self, statement, program);
+            splitscript::compiler::hir::walk_typed_expression(self, expression, program);
         }
     }
 

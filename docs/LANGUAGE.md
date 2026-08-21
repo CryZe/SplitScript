@@ -523,9 +523,11 @@ while index < values.length {
 }
 ```
 
-Like `else return`, loop control can be used directly as a diverging fallback
-for a `T?` or `T!` value. This works even when the fallback is nested inside an
-expression-valued `if`, match arm, or short-circuit expression:
+[`break`] and [`continue`] are ordinary expressions with type [`Never`]. They
+can be used wherever an expression is accepted inside their target loop, not
+only in a special fallback form. This includes a fallback for a `T?` or `T!`
+value nested inside an expression-valued [`if`], [`match`] arm, or
+short-circuit expression:
 
 ```text
 let entry = process.read(address) else continue
@@ -707,8 +709,10 @@ Actions such as `whileAttached` are not result boundaries, so an unhandled `?` t
 a compile-time error. The propagation operation is represented explicitly in
 typed HIR with its target result type; it is not treated as a zero/default read.
 
-An explicit `throw error` statement transfers a `String` error through the same
-boundary mechanism. It is currently available in functions returning `T!`:
+An explicit `throw error` expression transfers a `String` error through the
+same boundary mechanism. It has type [`Never`], so it can appear wherever an
+expression is accepted. It is available in functions returning `T!`, state
+fields, and a [`retry`] operand:
 
 ```text
 fn requirePositive(value: i32) -> i32! {
@@ -737,14 +741,28 @@ let displayName = selected else "Unknown"
 let address = discovered else 0 as address
 ```
 
-The fallback can instead return from the current function or action. This is an
-explicit alternative to `?` and retains an ordinary `T!` return value rather
-than using a hidden failure channel:
+The right operand of fallback [`else`] is any ordinary expression; the parser
+does not recognize a special list of fallback forms. Since [`return`],
+[`break`], [`continue`], and [`throw`] all have type [`Never`], each can satisfy
+the wrapped value's expected type by transferring control rather than yielding
+locally. Returning is an explicit alternative to `?` and retains an ordinary
+`T!` return value rather than using a hidden failure channel:
 
 ```text
 fn requireAddress(value: address!) -> address! {
     let address = value else return Err("required address is unavailable")
     return address
+}
+```
+
+Fallbacks can be chained with a final thrown error inside [`retry`]:
+
+```splitscript
+let engine = retry {
+    let module = process.loadedModule("EngineWin64s.dll")
+        else process.loadedModule("EngineWin64sv.dll")
+        else throw "engine module is not loaded yet"
+    module
 }
 ```
 

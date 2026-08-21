@@ -363,24 +363,6 @@ fn render_typed_block(
                 .unwrap();
                 render_typed_block(output, body, depth + 1);
             }
-            TypedStatementKind::Break(value) => match value {
-                Some(value) => writeln!(output, "{indent}break e{}", value.index()).unwrap(),
-                None => writeln!(output, "{indent}break").unwrap(),
-            },
-            TypedStatementKind::Continue => writeln!(output, "{indent}continue").unwrap(),
-            TypedStatementKind::Return(value) => match value {
-                Some(value) => writeln!(output, "{indent}return e{}", value.index()).unwrap(),
-                None => writeln!(output, "{indent}return").unwrap(),
-            },
-            TypedStatementKind::Throw { error, target } => {
-                writeln!(
-                    output,
-                    "{indent}throw e{} -> {}",
-                    error.index(),
-                    render_failure_target(*target)
-                )
-                .unwrap();
-            }
             TypedStatementKind::Suspend {
                 mode,
                 binding,
@@ -405,9 +387,7 @@ fn snapshot_expression_kind(
     checked: &splitscript::CheckedProgram,
     kind: &splitscript::compiler::hir::TypedExpressionKind,
 ) -> String {
-    use splitscript::compiler::hir::{
-        TypedExpressionKind, TypedFallbackBranch, TypedInterpolatedPart,
-    };
+    use splitscript::compiler::hir::{TypedExpressionKind, TypedInterpolatedPart};
 
     match kind {
         TypedExpressionKind::None => "None".to_owned(),
@@ -482,18 +462,17 @@ fn snapshot_expression_kind(
             then_expr.index(),
             else_expr.index()
         ),
-        TypedExpressionKind::Fallback { value, fallback } => match fallback {
-            TypedFallbackBranch::Value(fallback) => {
-                format!("fallback e{} else=e{}", value.index(), fallback.index())
-            }
-            TypedFallbackBranch::Return(return_value) => {
-                format!("fallback e{} else=return {return_value:?}", value.index())
-            }
-            TypedFallbackBranch::Break => format!("fallback e{} else=break", value.index()),
-            TypedFallbackBranch::Continue => {
-                format!("fallback e{} else=continue", value.index())
-            }
-        },
+        TypedExpressionKind::Fallback { value, fallback } => {
+            format!("fallback e{} else=e{}", value.index(), fallback.index())
+        }
+        TypedExpressionKind::Break(value) => format!("break {value:?}"),
+        TypedExpressionKind::Continue => "continue".to_owned(),
+        TypedExpressionKind::Return(value) => format!("return {value:?}"),
+        TypedExpressionKind::Throw { error, target } => format!(
+            "throw e{} -> {}",
+            error.index(),
+            render_failure_target(*target)
+        ),
         TypedExpressionKind::Suspend { mode, value, .. } => {
             format!("{mode:?} e{}", value.index())
         }

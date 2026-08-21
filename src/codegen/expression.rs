@@ -77,7 +77,9 @@ impl LocalStorage<'_> {
 pub(super) enum BareReturn {
     None,
     Action(ActionKind),
-    AsyncAttach,
+    AsyncAttach {
+        result_global: Option<u32>,
+    },
     AsyncFuture {
         frame: AsyncFrameRef,
         completion: Option<(u32, Type)>,
@@ -477,7 +479,11 @@ fn compile_block_with_loop(
                 discard_result,
             } => {
                 let ty = context.expression_type(*expression);
-                let expression_context = if *discard_result && !ty.has_runtime_value() {
+                // Erase a discarded unit result, but do not erase values nested
+                // inside a `Never` expression. A transfer such as
+                // `return Some(None)` has no local result while its operand
+                // still needs the physical `None` payload required by `Some`.
+                let expression_context = if *discard_result && ty == Type::None {
                     context.erasing_none()
                 } else {
                     *context
@@ -492,7 +498,7 @@ fn compile_block_with_loop(
     match &block.terminator {
         wasm_ir::Terminator::Fallthrough => {}
         wasm_ir::Terminator::Break(value) => {
-            let control = loop_control.expect("checked break statements belong to loops");
+            let control = loop_control.expect("checked break expressions belong to loops");
             if let Some(value) = value {
                 if let Some(destination) = control.break_destination() {
                     compile_temporary_set(function, destination, *value, context);
@@ -507,7 +513,7 @@ fn compile_block_with_loop(
         }
         wasm_ir::Terminator::Continue => {
             loop_control
-                .expect("checked continue statements belong to loops")
+                .expect("checked continue expressions belong to loops")
                 .emit_continue(function, context.locals.continuation_frame());
         }
         wasm_ir::Terminator::AsyncWhile { .. }
@@ -1991,7 +1997,7 @@ fn compile_expr_unconverted(
                         .instruction(&Instruction::RefIsNull)
                         .instruction(&Instruction::If(result));
                     let nested_context = context.nested_loop_control(1);
-                    compile_fallback_branch(function, *fallback, &nested_context);
+                    compile_expr(function, *fallback, &nested_context);
                     function.instruction(&Instruction::Else);
                     if ty != Type::None || context.materialize_none {
                         function
@@ -2018,7 +2024,7 @@ fn compile_expr_unconverted(
                     );
                     function.instruction(&Instruction::If(result));
                     let nested_context = context.nested_loop_control(1);
-                    compile_fallback_branch(function, *fallback, &nested_context);
+                    compile_expr(function, *fallback, &nested_context);
                     function.instruction(&Instruction::Else);
                     if ty != Type::None || context.materialize_none {
                         function
@@ -2036,6 +2042,52 @@ fn compile_expr_unconverted(
                 _ => unreachable!("typed fallback inputs are optional or result values"),
             }
         }
+        wasm_ir::ExpressionKind::Break(value) => {
+            let control = context
+                .loop_control
+                .expect("checked break expressions belong to loops");
+            if let Some(value) = value {
+                if let Some(destination) = control.break_destination() {
+                    compile_temporary_set(function, destination, *value, context);
+                } else {
+                    compile_expr(function, *value, &context.erasing_none());
+                    if context.expression_type(*value).has_runtime_value() {
+                        function.instruction(&Instruction::Drop);
+                    }
+                }
+            }
+            control.emit_break(function, context.locals.continuation_frame());
+        }
+        wasm_ir::ExpressionKind::Continue => {
+            context
+                .loop_control
+                .expect("checked continue expressions belong to loops")
+                .emit_continue(function, context.locals.continuation_frame());
+        }
+        wasm_ir::ExpressionKind::Return(value) => {
+            compile_return_expression(function, *value, context);
+        }
+        wasm_ir::ExpressionKind::Throw { error, target } => match target {
+            crate::hir::FailureTarget::Return(target) => {
+                let Type::Result(target_result) = context.ty(*target) else {
+                    unreachable!("throw targets are result values")
+                };
+                emit_failure_transfer(
+                    function,
+                    target_result,
+                    result_value_type(target_result, context.semantics),
+                    context.gc,
+                    |function| compile_expr(function, *error, context),
+                );
+            }
+            crate::hir::FailureTarget::Retry { .. } => {
+                compile_expr(function, *error, context);
+                function
+                    .instruction(&Instruction::Drop)
+                    .instruction(&Instruction::I32Const(0))
+                    .instruction(&Instruction::Return);
+            }
+        },
         wasm_ir::ExpressionKind::Propagate { value, target } => {
             let input_local = context.matches.fallback_values[&expression];
             let Type::Result(input_result) = context.expression_type(*value) else {
@@ -3371,64 +3423,66 @@ fn compile_user_argument(function: &mut Function, argument: ExprId, context: &Ex
     }
 }
 
-fn compile_fallback_branch(
+fn compile_return_expression(
     function: &mut Function,
-    fallback: wasm_ir::FallbackBranch,
+    value: Option<ExprId>,
     context: &ExprContext<'_>,
 ) {
-    match fallback {
-        wasm_ir::FallbackBranch::Value(value) => compile_expr(function, value, context),
-        wasm_ir::FallbackBranch::Return(value) => {
-            if let BareReturn::AsyncFuture { frame, completion } = context.bare_return {
-                if let Some(value) = value {
-                    if let Some((field, _)) = completion {
-                        frame.emit(function);
-                        compile_expr(function, value, context);
-                        function.instruction(&Instruction::StructSet {
-                            struct_type_index: frame.struct_type,
-                            field_index: field,
-                        });
-                    } else {
-                        compile_expr(function, value, &context.erasing_none());
-                    }
-                }
-                frame.emit(function);
-                function
-                    .instruction(&Instruction::I32Const(-1))
-                    .instruction(&Instruction::StructSet {
+    match context.bare_return {
+        BareReturn::AsyncFuture { frame, completion } => {
+            if let Some(value) = value {
+                if let Some((field, _)) = completion {
+                    frame.emit(function);
+                    compile_expr(function, value, context);
+                    function.instruction(&Instruction::StructSet {
                         struct_type_index: frame.struct_type,
-                        field_index: 0,
+                        field_index: field,
                     });
-                function.instruction(&Instruction::I32Const(1));
-            } else if let Some(value) = value {
-                compile_expr(function, value, context);
-            } else {
-                match context.bare_return {
-                    BareReturn::None => {}
-                    BareReturn::Action(action) => {
-                        emit_action_default(function, action, context.gc);
-                    }
-                    BareReturn::AsyncAttach => {
-                        function.instruction(&Instruction::I32Const(1));
-                    }
-                    BareReturn::AsyncFuture { .. } => unreachable!(),
+                } else {
+                    compile_expr(function, value, &context.erasing_none());
                 }
             }
-            function.instruction(&Instruction::Return);
+            frame.emit(function);
+            function
+                .instruction(&Instruction::I32Const(-1))
+                .instruction(&Instruction::StructSet {
+                    struct_type_index: frame.struct_type,
+                    field_index: 0,
+                });
+            function.instruction(&Instruction::I32Const(1));
         }
-        wasm_ir::FallbackBranch::Break => {
-            context
-                .loop_control
-                .expect("checked `else break` belongs to a loop")
-                .emit_break(function, context.locals.continuation_frame());
+        BareReturn::AsyncAttach { result_global } => {
+            if let Some(global) = result_global {
+                compile_expr(
+                    function,
+                    value.expect("layout selection returns a typed layout"),
+                    context,
+                );
+                function.instruction(&Instruction::GlobalSet(global));
+            } else {
+                debug_assert!(value.is_none());
+            }
+            function.instruction(&Instruction::I32Const(1));
         }
-        wasm_ir::FallbackBranch::Continue => {
-            context
-                .loop_control
-                .expect("checked `else continue` belongs to a loop")
-                .emit_continue(function, context.locals.continuation_frame());
+        BareReturn::None => {
+            if let Some(value) = value {
+                let return_context = if context.expression_type(value) == Type::None {
+                    context.erasing_none()
+                } else {
+                    *context
+                };
+                compile_expr(function, value, &return_context);
+            }
+        }
+        BareReturn::Action(action) => {
+            if let Some(value) = value {
+                compile_expr(function, value, context);
+            } else {
+                emit_action_default(function, action, context.gc);
+            }
         }
     }
+    function.instruction(&Instruction::Return);
 }
 
 fn emit_numeric_method(

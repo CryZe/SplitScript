@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     Diagnostic,
     ast::{
-        BinaryOp, Expr, ExprId, ExprKind, FallbackBranch, InterpolatedPart, MatchPattern, Span,
-        SuspensionMode, UnaryOp,
+        BinaryOp, Expr, ExprId, ExprKind, InterpolatedPart, MatchPattern, Span, SuspensionMode,
+        UnaryOp,
     },
     inference::{Requirements, Type},
     semantic::{
@@ -163,13 +163,6 @@ impl Checker {
                 self.expect_expression(expr.id, Type::Array(id), expected, expr.span)?
             }
             ExprKind::Block(block) => {
-                if let Some(boundary) = self.failure.result() {
-                    self.semantics.resolve_value_block_failure_target(
-                        expr.id,
-                        boundary,
-                        self.failure.retry_expression(),
-                    );
-                }
                 self.scopes.push(HashMap::new());
                 let tail = block
                     .statements
@@ -244,13 +237,6 @@ impl Checker {
                 ty?
             }
             ExprKind::Loop(block) => {
-                if let Some(boundary) = self.failure.result() {
-                    self.semantics.resolve_value_block_failure_target(
-                        expr.id,
-                        boundary,
-                        self.failure.retry_expression(),
-                    );
-                }
                 let inferred_result = expected.is_none();
                 let result =
                     expected.unwrap_or_else(|| self.fresh_inference(Requirements::none(), None));
@@ -804,64 +790,102 @@ impl Checker {
                         return None;
                     }
                 };
-                match fallback {
-                    FallbackBranch::Value(fallback) => {
-                        let direct_optional_return = if self.expression_mode
-                            == super::context::ExpressionMode::DirectReturn
-                            && matches!(wrapper, Type::Result(_))
-                            && matches!(fallback.kind, ExprKind::None)
-                        {
-                            expected.is_some_and(|expected| {
-                                matches!(self.shallow_type(expected), Type::Option(_))
-                            })
-                        } else {
-                            false
-                        };
-                        if direct_optional_return {
-                            self.expr(fallback, None);
-                            self.errors.push(
-                                Diagnostic::type_error(
-                                    "`else None` supplies the unwrapped fallback value, not the optional function return",
-                                    fallback.span,
-                                )
-                                .with_primary_label("return the absent optional value from this branch")
-                                .with_note(
-                                    "write `else return None` when failure should make the enclosing function return `None`",
-                                )
-                                .with_machine_applicable_fix(
-                                    "return `None` from the fallback branch",
-                                    Span {
-                                        start: fallback.span.start,
-                                        end: fallback.span.start,
-                                    },
-                                    "return ",
-                                ),
-                            );
-                        } else {
-                            self.expr(fallback, Some(value_type));
-                        }
-                    }
-                    FallbackBranch::Return { value, span } => {
-                        self.check_return(value.as_deref(), *span);
-                    }
-                    FallbackBranch::Break { span } => match self.loops.break_target() {
-                        None => self.error("`else break` is only available inside a loop", *span),
-                        Some(super::context::BreakTarget::Statement) => {
-                            self.loops.record_break();
-                        }
-                        Some(super::context::BreakTarget::Value(result)) => {
-                            let none = self.core_type(crate::stdlib::CoreTypeId::None);
-                            self.unify(result, none, *span);
-                            self.loops.record_break();
-                        }
-                    },
-                    FallbackBranch::Continue { span } => {
-                        if !self.loops.is_inside() {
-                            self.error("`else continue` is only available inside a loop", *span);
-                        }
-                    }
+                let direct_optional_return = if self.expression_mode
+                    == super::context::ExpressionMode::DirectReturn
+                    && matches!(wrapper, Type::Result(_))
+                    && matches!(fallback.kind, ExprKind::None)
+                {
+                    expected.is_some_and(|expected| {
+                        matches!(self.shallow_type(expected), Type::Option(_))
+                    })
+                } else {
+                    false
+                };
+                if direct_optional_return {
+                    self.expr(fallback, None);
+                    self.errors.push(
+                        Diagnostic::type_error(
+                            "`else None` supplies the unwrapped fallback value, not the optional function return",
+                            fallback.span,
+                        )
+                        .with_primary_label("return the absent optional value from this branch")
+                        .with_note(
+                            "write `else return None` when failure should make the enclosing function return `None`",
+                        )
+                        .with_machine_applicable_fix(
+                            "return `None` from the fallback branch",
+                            Span {
+                                start: fallback.span.start,
+                                end: fallback.span.start,
+                            },
+                            "return ",
+                        ),
+                    );
+                } else {
+                    self.expr(fallback, Some(value_type));
                 }
                 self.expect_expression(expr.id, value_type, expected, expr.span)?
+            }
+            ExprKind::Break(value) => {
+                match self.loops.break_target() {
+                    None => {
+                        if let Some(value) = value {
+                            self.expr(value, None);
+                        }
+                        self.error("`break` is only available inside a loop", expr.span);
+                    }
+                    Some(super::context::BreakTarget::Statement) => {
+                        if let Some(value) = value {
+                            self.expr(value, None);
+                            self.error(
+                                "only a `loop` expression can break with a value",
+                                value.span,
+                            );
+                        }
+                        self.loops.record_break();
+                    }
+                    Some(super::context::BreakTarget::Value(result)) => {
+                        if let Some(value) = value {
+                            self.expr(value, Some(result));
+                        } else {
+                            let none = self.core_type(crate::stdlib::CoreTypeId::None);
+                            self.unify(result, none, expr.span);
+                        }
+                        self.loops.record_break();
+                    }
+                }
+                let never = self.core_type(crate::stdlib::CoreTypeId::Never);
+                self.expect_expression(expr.id, never, expected, expr.span)?
+            }
+            ExprKind::Continue => {
+                if !self.loops.is_inside() {
+                    self.error("`continue` is only available inside a loop", expr.span);
+                }
+                let never = self.core_type(crate::stdlib::CoreTypeId::Never);
+                self.expect_expression(expr.id, never, expected, expr.span)?
+            }
+            ExprKind::Return(value) => {
+                self.check_return(value.as_deref(), expr.span);
+                let never = self.core_type(crate::stdlib::CoreTypeId::Never);
+                self.expect_expression(expr.id, never, expected, expr.span)?
+            }
+            ExprKind::Throw(error) => {
+                let boundary = self.failure.propagate();
+                if let Some(boundary) = boundary {
+                    self.semantics.resolve_propagation_target(
+                        expr.id,
+                        boundary,
+                        self.failure.retry_expression(),
+                    );
+                } else {
+                    self.error(
+                        "`throw` needs a function returning `T!` or an explicit catch boundary",
+                        expr.span,
+                    );
+                }
+                self.expr(error, Some(self.standard_type(StdlibTypeId::String)));
+                let never = self.core_type(crate::stdlib::CoreTypeId::Never);
+                self.expect_expression(expr.id, never, expected, expr.span)?
             }
             ExprKind::Suspend {
                 mode,

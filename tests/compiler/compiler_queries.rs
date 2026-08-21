@@ -413,7 +413,9 @@ fn record_literals_resolve_their_nominal_identity_after_parsing() {
 
 #[test]
 fn enum_syntax_stays_named_while_semantics_publish_resolved_variants() {
-    use splitscript::compiler::ast::{EnumReference, ExprKind, MatchPattern, StateSource, Stmt};
+    use splitscript::compiler::ast::{
+        EnumReference, Expr, ExprKind, MatchPattern, StateSource, Stmt,
+    };
 
     let source = r#"
         enum Mode {
@@ -439,10 +441,10 @@ fn enum_syntax_stays_named_while_semantics_publish_resolved_variants() {
         panic!("expected an expression-backed field");
     };
     assert!(matches!(&initializer.kind, ExprKind::Path(_)));
-    let Stmt::Return {
-        value: Some(matched),
+    let Stmt::Expression(Expr {
+        kind: ExprKind::Return(Some(matched)),
         ..
-    } = &parsed.syntax().functions[0].body.statements[0]
+    }) = &parsed.syntax().functions[0].body.statements[0]
     else {
         panic!("expected a match return");
     };
@@ -468,10 +470,10 @@ fn enum_syntax_stays_named_while_semantics_publish_resolved_variants() {
         unreachable!();
     };
     assert!(matches!(&initializer.kind, ExprKind::Path(_)));
-    let Stmt::Return {
-        value: Some(matched),
+    let Stmt::Expression(Expr {
+        kind: ExprKind::Return(Some(matched)),
         ..
-    } = &lowered.syntax().functions[0].body.statements[0]
+    }) = &lowered.syntax().functions[0].body.statements[0]
     else {
         unreachable!();
     };
@@ -492,10 +494,10 @@ fn enum_syntax_stays_named_while_semantics_publish_resolved_variants() {
         unreachable!();
     };
     assert!(checked.semantics().enum_variant(initializer.id).is_some());
-    let Stmt::Return {
-        value: Some(matched),
+    let Stmt::Expression(Expr {
+        kind: ExprKind::Return(Some(matched)),
         ..
-    } = &checked.syntax().functions[0].body.statements[0]
+    }) = &checked.syntax().functions[0].body.statements[0]
     else {
         unreachable!();
     };

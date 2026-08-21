@@ -3,9 +3,9 @@
 //! Expression grammar.
 
 use super::{
-    BinaryOp, DelimiterDepth, Diagnostic, EnumReference, Expr, ExprKind, FallbackBranch,
-    InterpolatedPart, MatchArm, MatchPattern, Parser, PatternBinding, Span, TokenKind, TypeRef,
-    UnaryOp, assignment_operator, parse_integer,
+    BinaryOp, DelimiterDepth, Diagnostic, EnumReference, Expr, ExprKind, InterpolatedPart,
+    MatchArm, MatchPattern, Parser, PatternBinding, Span, TokenKind, TypeRef, UnaryOp,
+    assignment_operator, parse_integer,
 };
 use crate::diagnostic::DiagnosticCode;
 
@@ -95,42 +95,12 @@ impl Parser<'_> {
                     break;
                 }
                 self.bump();
-                let fallback = if self.eat_ident("return").is_some() {
-                    let return_span = self.previous().span;
-                    let value = if self.at(&TokenKind::Semicolon)
-                        || self.at(&TokenKind::RBrace)
-                        || self.at(&TokenKind::Eof)
-                        || self.line_break_before_current()
-                    {
-                        None
-                    } else {
-                        Some(Box::new(self.expression(FALLBACK_PRECEDENCE)?))
-                    };
-                    let span = value
-                        .as_ref()
-                        .map_or(return_span, |value| return_span.join(value.span));
-                    FallbackBranch::Return { value, span }
-                } else if self.eat_ident("break").is_some() {
-                    FallbackBranch::Break {
-                        span: self.previous().span,
-                    }
-                } else if self.eat_ident("continue").is_some() {
-                    FallbackBranch::Continue {
-                        span: self.previous().span,
-                    }
-                } else {
-                    FallbackBranch::Value(Box::new(self.expression(FALLBACK_PRECEDENCE)?))
-                };
-                let end = match &fallback {
-                    FallbackBranch::Value(value) => value.span,
-                    FallbackBranch::Return { span, .. } => *span,
-                    FallbackBranch::Break { span } | FallbackBranch::Continue { span } => *span,
-                };
-                let span = left.span.join(end);
+                let fallback = self.required_expression(FALLBACK_PRECEDENCE)?;
+                let span = left.span.join(fallback.span);
                 left = self.new_expr(
                     ExprKind::Fallback {
                         value: Box::new(left),
-                        fallback,
+                        fallback: Box::new(fallback),
                     },
                     span,
                 );
@@ -200,6 +170,28 @@ impl Parser<'_> {
     }
 
     pub(super) fn prefix(&mut self) -> Result<Expr, Diagnostic> {
+        if self.eat_ident("return").is_some() {
+            let start = self.previous().span;
+            let value = self.optional_control_flow_value()?;
+            let span = value.as_ref().map_or(start, |value| start.join(value.span));
+            return Ok(self.new_expr(ExprKind::Return(value.map(Box::new)), span));
+        }
+        if self.eat_ident("break").is_some() {
+            let start = self.previous().span;
+            let value = self.optional_control_flow_value()?;
+            let span = value.as_ref().map_or(start, |value| start.join(value.span));
+            return Ok(self.new_expr(ExprKind::Break(value.map(Box::new)), span));
+        }
+        if self.eat_ident("continue").is_some() {
+            let span = self.previous().span;
+            return Ok(self.new_expr(ExprKind::Continue, span));
+        }
+        if self.eat_ident("throw").is_some() {
+            let start = self.previous().span;
+            let error = self.required_expression(0)?;
+            let span = start.join(error.span);
+            return Ok(self.new_expr(ExprKind::Throw(Box::new(error)), span));
+        }
         if self.at_ident("await") || self.at_ident("retry") {
             let mode = if self.eat_ident("await").is_some() {
                 super::SuspensionMode::Await
@@ -579,6 +571,21 @@ impl Parser<'_> {
         }
     }
 
+    fn optional_control_flow_value(&mut self) -> Result<Option<Expr>, Diagnostic> {
+        if self.at(&TokenKind::Semicolon)
+            || self.at(&TokenKind::Comma)
+            || self.at(&TokenKind::RParen)
+            || self.at(&TokenKind::RBracket)
+            || self.at(&TokenKind::RBrace)
+            || self.at(&TokenKind::Eof)
+            || self.line_break_before_current()
+        {
+            Ok(None)
+        } else {
+            self.expression(0).map(Some)
+        }
+    }
+
     pub(super) fn record_literal_field(&mut self) -> Result<(String, Expr), Diagnostic> {
         let (name, _) = self.expect_any_ident("expected a record field name")?;
         self.expect(TokenKind::Colon, "expected `:` after the field name")?;
@@ -733,12 +740,6 @@ impl Parser<'_> {
         self.recover_root_expression(parsed, expression_start)
     }
 
-    pub(super) fn missing_root_expression(&mut self, message: &'static str) -> Expr {
-        let expression_start = self.cursor.position();
-        let error = self.error(message);
-        self.recover_root_expression(Err(error), expression_start)
-    }
-
     pub(super) fn recover_root_expression(
         &mut self,
         parsed: Result<Expr, Diagnostic>,
@@ -816,16 +817,7 @@ impl Parser<'_> {
             TokenKind::Ident(name) => {
                 matches!(
                     name.as_str(),
-                    "debug"
-                        | "let"
-                        | "const"
-                        | "var"
-                        | "while"
-                        | "for"
-                        | "break"
-                        | "continue"
-                        | "return"
-                        | "throw"
+                    "debug" | "let" | "const" | "var" | "while" | "for"
                 ) || assignment_operator(&self.peek(1).kind).is_some()
             }
             _ => false,

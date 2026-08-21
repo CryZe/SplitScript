@@ -253,18 +253,6 @@ pub fn walk_stmt<'ast, V: Visitor<'ast>>(visitor: &mut V, statement: &'ast Stmt)
             visitor.visit_for_binding(binding);
             visitor.visit_block(body);
         }
-        Stmt::Break { value, .. } => {
-            if let Some(value) = value {
-                visitor.visit_expr(value);
-            }
-        }
-        Stmt::Continue { .. } => {}
-        Stmt::Return { value, .. } => {
-            if let Some(value) = value {
-                visitor.visit_expr(value);
-            }
-        }
-        Stmt::Throw { error, .. } => visitor.visit_expr(error),
         Stmt::Suspend { binding, value, .. } => {
             if let Some(binding) = binding {
                 visitor.visit_suspension_binding(binding);
@@ -311,17 +299,13 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
         }
         ExprKind::Fallback { value, fallback } => {
             visitor.visit_expr(value);
-            match fallback {
-                FallbackBranch::Value(fallback) => visitor.visit_expr(fallback),
-                FallbackBranch::Return {
-                    value: Some(value), ..
-                } => visitor.visit_expr(value),
-                FallbackBranch::Return { value: None, .. }
-                | FallbackBranch::Break { .. }
-                | FallbackBranch::Continue { .. } => {}
-            }
+            visitor.visit_expr(fallback);
         }
-        ExprKind::Suspend { value, .. } | ExprKind::Propagate(value) => visitor.visit_expr(value),
+        ExprKind::Break(Some(value))
+        | ExprKind::Return(Some(value))
+        | ExprKind::Throw(value)
+        | ExprKind::Suspend { value, .. }
+        | ExprKind::Propagate(value) => visitor.visit_expr(value),
         ExprKind::Member { receiver, .. } => visitor.visit_expr(receiver),
         ExprKind::Index {
             receiver, index, ..
@@ -352,6 +336,9 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
         }
         ExprKind::Error
         | ExprKind::None
+        | ExprKind::Break(None)
+        | ExprKind::Continue
+        | ExprKind::Return(None)
         | ExprKind::Bool(_)
         | ExprKind::Int { .. }
         | ExprKind::Float(_)
@@ -613,18 +600,6 @@ pub fn walk_stmt_mut<F: Folder>(folder: &mut F, statement: &mut Stmt) {
             folder.fold_for_binding(binding);
             folder.fold_block(body);
         }
-        Stmt::Break { value, .. } => {
-            if let Some(value) = value {
-                folder.fold_expr(value);
-            }
-        }
-        Stmt::Continue { .. } => {}
-        Stmt::Return { value, .. } => {
-            if let Some(value) = value {
-                folder.fold_expr(value);
-            }
-        }
-        Stmt::Throw { error, .. } => folder.fold_expr(error),
         Stmt::Suspend { binding, value, .. } => {
             if let Some(binding) = binding {
                 folder.fold_suspension_binding(binding);
@@ -671,17 +646,13 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
         }
         ExprKind::Fallback { value, fallback } => {
             folder.fold_expr(value);
-            match fallback {
-                FallbackBranch::Value(fallback) => folder.fold_expr(fallback),
-                FallbackBranch::Return {
-                    value: Some(value), ..
-                } => folder.fold_expr(value),
-                FallbackBranch::Return { value: None, .. }
-                | FallbackBranch::Break { .. }
-                | FallbackBranch::Continue { .. } => {}
-            }
+            folder.fold_expr(fallback);
         }
-        ExprKind::Suspend { value, .. } | ExprKind::Propagate(value) => folder.fold_expr(value),
+        ExprKind::Break(Some(value))
+        | ExprKind::Return(Some(value))
+        | ExprKind::Throw(value)
+        | ExprKind::Suspend { value, .. }
+        | ExprKind::Propagate(value) => folder.fold_expr(value),
         ExprKind::Member { receiver, .. } => folder.fold_expr(receiver),
         ExprKind::Index {
             receiver, index, ..
@@ -716,6 +687,9 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
         }
         ExprKind::Error
         | ExprKind::None
+        | ExprKind::Break(None)
+        | ExprKind::Continue
+        | ExprKind::Return(None)
         | ExprKind::Bool(_)
         | ExprKind::Int { .. }
         | ExprKind::Float(_)

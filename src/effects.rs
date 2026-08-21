@@ -695,16 +695,16 @@ fn loadUnity() {
         let function = &checked.syntax().functions[0];
         assert!(matches!(
             function.body.statements.as_slice(),
-            [crate::ast::Stmt::Return {
-                value: Some(crate::ast::Expr {
-                    kind: crate::ast::ExprKind::Suspend {
-                        mode: crate::ast::SuspensionMode::Await,
-                        ..
-                    },
-                    ..
-                }),
+            [crate::ast::Stmt::Expression(crate::ast::Expr {
+                kind: crate::ast::ExprKind::Return(Some(value)),
                 ..
-            }]
+            })] if matches!(
+                value.kind,
+                crate::ast::ExprKind::Suspend {
+                    mode: crate::ast::SuspensionMode::Await,
+                    ..
+                }
+            )
         ));
         assert_eq!(
             checked.effects().function(function.id).suspension,

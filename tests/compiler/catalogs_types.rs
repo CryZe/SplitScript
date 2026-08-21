@@ -1947,9 +1947,10 @@ fn parsed_type_references_are_inference_free_syntax() {
             function.return_annotation,
             Some(TypeRef::core(CoreTypeId::U64))
         );
-        let splitscript::compiler::ast::Stmt::Return {
-            value: Some(cast), ..
-        } = &function.body.statements[0]
+        let splitscript::compiler::ast::Stmt::Expression(splitscript::compiler::ast::Expr {
+            kind: splitscript::compiler::ast::ExprKind::Return(Some(cast)),
+            ..
+        }) = &function.body.statements[0]
         else {
             panic!("expected the cast return expression");
         };

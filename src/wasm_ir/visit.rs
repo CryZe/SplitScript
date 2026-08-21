@@ -2,10 +2,7 @@
 
 use crate::ast::ExprId;
 
-use super::{
-    Block, Expression, ExpressionKind, FallbackBranch, InterpolatedPart, Program, Statement,
-    Terminator,
-};
+use super::{Block, Expression, ExpressionKind, InterpolatedPart, Program, Statement, Terminator};
 
 pub trait Visitor {
     fn visit_program(&mut self, program: &Program) {
@@ -267,12 +264,13 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
         }
         ExpressionKind::Fallback { value, fallback } => {
             visit(*value);
-            match fallback {
-                FallbackBranch::Value(value) => visit(*value),
-                FallbackBranch::Return(value) => value.iter().copied().for_each(&mut visit),
-                FallbackBranch::Break | FallbackBranch::Continue => {}
-            }
+            visit(*fallback);
         }
+        ExpressionKind::Break(value) | ExpressionKind::Return(value) => {
+            value.iter().copied().for_each(&mut visit)
+        }
+        ExpressionKind::Throw { error, .. } => visit(*error),
+        ExpressionKind::Continue => {}
         ExpressionKind::Match { value, arms } => {
             visit(*value);
             for arm in arms {

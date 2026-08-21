@@ -269,8 +269,6 @@ pub struct SemanticModel {
     state_poll_results: HashMap<ValueId, TypeId>,
     propagation_targets: HashMap<ExprId, TypeId>,
     propagation_retry_boundaries: HashMap<ExprId, ExprId>,
-    value_block_failure_targets: HashMap<ExprId, TypeId>,
-    value_block_retry_boundaries: HashMap<ExprId, ExprId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
     record_literals: HashMap<ExprId, ResolvedRecordId>,
     record_literal_fields: HashMap<ExprId, Vec<ResolvedRecordFieldId>>,
@@ -844,15 +842,6 @@ impl SemanticModel {
         self.propagation_retry_boundaries.get(&expression).copied()
     }
 
-    /// The enclosing result boundary used by `throw` inside a value block.
-    pub fn value_block_failure_target(&self, expression: ExprId) -> Option<TypeId> {
-        self.value_block_failure_targets.get(&expression).copied()
-    }
-
-    pub fn value_block_retry_boundary(&self, expression: ExprId) -> Option<ExprId> {
-        self.value_block_retry_boundaries.get(&expression).copied()
-    }
-
     pub fn path_members(&self, expression: ExprId) -> Option<&[ResolvedMember]> {
         self.path_members.get(&expression).map(Vec::as_slice)
     }
@@ -978,8 +967,6 @@ pub(crate) struct SemanticBuilder {
     state_poll_results: HashMap<ValueId, Type>,
     propagation_targets: HashMap<ExprId, Type>,
     propagation_retry_boundaries: HashMap<ExprId, ExprId>,
-    value_block_failure_targets: HashMap<ExprId, Type>,
-    value_block_retry_boundaries: HashMap<ExprId, ExprId>,
     path_members: HashMap<ExprId, Vec<ResolvedMember>>,
     record_literals: HashMap<ExprId, ResolvedRecordId>,
     record_literal_fields: HashMap<ExprId, Vec<ResolvedRecordFieldId>>,
@@ -1170,23 +1157,6 @@ impl SemanticBuilder {
         }
     }
 
-    pub(crate) fn resolve_value_block_failure_target(
-        &mut self,
-        expression: ExprId,
-        result: Type,
-        retry: Option<ExprId>,
-    ) {
-        let previous = self.value_block_failure_targets.insert(expression, result);
-        debug_assert!(previous.is_none(), "value block IDs must be unique");
-        if let Some(retry) = retry {
-            let previous = self.value_block_retry_boundaries.insert(expression, retry);
-            debug_assert!(
-                previous.is_none(),
-                "value block boundary IDs must be unique"
-            );
-        }
-    }
-
     pub(crate) fn resolve_path_members(
         &mut self,
         expression: ExprId,
@@ -1320,8 +1290,6 @@ impl SemanticBuilder {
             state_poll_results,
             propagation_targets,
             propagation_retry_boundaries,
-            value_block_failure_targets,
-            value_block_retry_boundaries,
             path_members,
             record_literals,
             record_literal_fields,
@@ -1613,15 +1581,6 @@ impl SemanticBuilder {
                 )
             })
             .collect();
-        let value_block_failure_targets = value_block_failure_targets
-            .into_iter()
-            .map(|(expression, result)| {
-                (
-                    expression,
-                    types.intern_inferred(resolve(result), arrays, options, results, asyncs, sets),
-                )
-            })
-            .collect();
         let value_conversions = value_conversions
             .into_iter()
             .map(|(expression, conversion)| {
@@ -1696,8 +1655,6 @@ impl SemanticBuilder {
             state_poll_results,
             propagation_targets,
             propagation_retry_boundaries,
-            value_block_failure_targets,
-            value_block_retry_boundaries,
             path_members,
             record_literals,
             record_literal_fields,

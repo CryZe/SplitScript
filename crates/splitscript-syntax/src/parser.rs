@@ -11,10 +11,10 @@ use crate::{
     ast::{
         Action, ActionKind, ArrayTypeDecl, ArrayTypeId, AssignmentId, AsyncTypeDecl, AsyncTypeId,
         BinaryOp, Block, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference, EnumVariant,
-        EnumVariantId, Expr, ExprId, ExprKind, FallbackBranch, ForBinding, FunctionDecl,
-        FunctionId, InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId,
-        Parameter, PatternBinding, PatternId, PointerPath, PointerPathBase, Program, RecordDecl,
-        RecordField, RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
+        EnumVariantId, Expr, ExprId, ExprKind, ForBinding, FunctionDecl, FunctionId,
+        InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter,
+        PatternBinding, PatternId, PointerPath, PointerPathBase, Program, RecordDecl, RecordField,
+        RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
         SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFamilyDecl,
         SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl,
         StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource,
@@ -377,10 +377,6 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
         | Stmt::For { span, .. }
-        | Stmt::Break { span, .. }
-        | Stmt::Continue { span }
-        | Stmt::Return { span, .. }
-        | Stmt::Throw { span, .. }
         | Stmt::Suspend { span, .. } => *span,
         Stmt::Variable(variable) => variable.span,
         Stmt::Expression(expression) => expression.span,
@@ -1090,9 +1086,10 @@ mod tests {
         ] {
             let program = parse(source, lex(source, SyntaxMode::Program).unwrap())
                 .expect("a generic cast target should leave the following equality operator");
-            let Stmt::Return {
-                value: Some(value), ..
-            } = &program.functions[0].body.statements[0]
+            let Stmt::Expression(Expr {
+                kind: ExprKind::Return(Some(value)),
+                ..
+            }) = &program.functions[0].body.statements[0]
             else {
                 panic!("expected a returned expression")
             };
@@ -1151,9 +1148,10 @@ mod tests {
                 .unwrap_or_else(|diagnostic| {
                     panic!("failed to parse `{expression}`: {diagnostic:?}")
                 });
-            let Stmt::Return {
-                value: Some(value), ..
-            } = &program.functions[0].body.statements[0]
+            let Stmt::Expression(Expr {
+                kind: ExprKind::Return(Some(value)),
+                ..
+            }) = &program.functions[0].body.statements[0]
             else {
                 panic!("expected a returned cast")
             };
@@ -1204,9 +1202,10 @@ mod tests {
                 .unwrap_or_else(|diagnostic| {
                     panic!("failed to parse `{expression}`: {diagnostic:?}")
                 });
-            let Stmt::Return {
-                value: Some(value), ..
-            } = &program.functions[0].body.statements[0]
+            let Stmt::Expression(Expr {
+                kind: ExprKind::Return(Some(value)),
+                ..
+            }) = &program.functions[0].body.statements[0]
             else {
                 panic!("expected a propagated cast")
             };
@@ -1287,9 +1286,10 @@ mod tests {
                 .unwrap_or_else(|diagnostic| {
                     panic!("failed to parse `{expression}`: {diagnostic:?}")
                 });
-            let Stmt::Return {
-                value: Some(value), ..
-            } = &program.functions[0].body.statements[0]
+            let Stmt::Expression(Expr {
+                kind: ExprKind::Return(Some(value)),
+                ..
+            }) = &program.functions[0].body.statements[0]
             else {
                 panic!("expected `{expression}` to remain a returned binary expression")
             };
@@ -1312,9 +1312,10 @@ mod tests {
         let explicit =
             "state \"game.exe\" {} fn compare(value, other) { return (value as T) < other }";
         let program = parse(explicit, lex(explicit, SyntaxMode::Program).unwrap()).unwrap();
-        let Stmt::Return {
-            value: Some(value), ..
-        } = &program.functions[0].body.statements[0]
+        let Stmt::Expression(Expr {
+            kind: ExprKind::Return(Some(value)),
+            ..
+        }) = &program.functions[0].body.statements[0]
         else {
             panic!("expected a parenthesized cast comparison")
         };
@@ -1365,6 +1366,50 @@ mod tests {
         assert_eq!(error.message, "expected `;` between state fields");
         assert_eq!(error.fixes[0].title, "replace `,` with `;`");
         assert_eq!(error.fixes[0].edits[0].replacement, ";");
+    }
+
+    #[test]
+    fn fallback_rhs_is_an_ordinary_control_flow_expression() {
+        let source = r#"
+            state "game.exe" {}
+            fn engineModule() {
+                return retry {
+                    let engine = process.loadedModule("EngineWin64s.dll")
+                        else process.loadedModule("EngineWin64sv.dll")
+                        else throw "engine module is not loaded yet"
+                    engine
+                }
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let Stmt::Expression(Expr {
+            kind: ExprKind::Return(Some(retry)),
+            ..
+        }) = &program.functions[0].body.statements[0]
+        else {
+            panic!("expected the function body to contain a returned retry expression")
+        };
+        let ExprKind::Suspend {
+            mode: SuspensionMode::Retry,
+            value: operand,
+            ..
+        } = &retry.kind
+        else {
+            panic!("expected retry to remain an ordinary prefix expression")
+        };
+        let ExprKind::Block(block) = &operand.kind else {
+            panic!("expected retry's operand to remain an ordinary value block")
+        };
+        let Stmt::Variable(VariableDecl { value, .. }) = &block.statements[0] else {
+            panic!("expected the module fallback binding")
+        };
+        let ExprKind::Fallback { fallback, .. } = &value.kind else {
+            panic!("expected the first fallback")
+        };
+        let ExprKind::Fallback { fallback, .. } = &fallback.kind else {
+            panic!("expected the right-associated second fallback")
+        };
+        assert!(matches!(fallback.kind, ExprKind::Throw(_)));
     }
 
     #[test]

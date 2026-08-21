@@ -923,6 +923,40 @@ fn nested_value_blocks_typecheck_lower_and_preserve_statement_control_flow() {
 }
 
 #[test]
+fn control_flow_keywords_are_never_typed_expressions_in_ordinary_positions() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn describe(stop: bool) -> String {
+            print(if stop { return "stopped" } else { "continuing" })
+            return "finished"
+        }
+
+        fn firstPresent(left: i32?, right: i32?) -> i32 {
+            return left else right else return -1
+        }
+
+        whileAttached {
+            let index = 0
+            while index < 3 {
+                print(if index == 1 { continue } else { index })
+                let value: i32? = None
+                print(value else break)
+                index += 1
+            }
+            print(describe(false))
+            print(firstPresent(None, 7))
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("control transfers should compose as ordinary Never expressions");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("control-flow expressions should produce valid Wasm GC");
+}
+
+#[test]
 fn value_blocks_explain_missing_values_function_returns_and_tail_semicolons() {
     let missing_value = splitscript::compile(
         r#"
@@ -1265,10 +1299,10 @@ fn break_and_continue_require_loops() {
     }
 
     for (branch, expected) in [
-        ("else break", "`else break` is only available inside a loop"),
+        ("else break", "`break` is only available inside a loop"),
         (
             "else continue",
-            "`else continue` is only available inside a loop",
+            "`continue` is only available inside a loop",
         ),
     ] {
         let source = format!(
@@ -1679,10 +1713,10 @@ fn match_payload_bindings_and_method_receivers_resolve_by_value_id() {
     "#;
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
     let method_target = checked.syntax().functions[0].id;
-    let splitscript::compiler::ast::Stmt::Return {
-        value: Some(matched),
+    let splitscript::compiler::ast::Stmt::Expression(splitscript::compiler::ast::Expr {
+        kind: splitscript::compiler::ast::ExprKind::Return(Some(matched)),
         ..
-    } = &checked.syntax().functions[1].body.statements[0]
+    }) = &checked.syntax().functions[1].body.statements[0]
     else {
         panic!("expected the match return expression");
     };
@@ -1899,10 +1933,10 @@ fn value_paths_resolve_globals_parameters_and_locals_to_declaration_ids() {
     let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
     let global = checked.syntax().globals[0].id;
     let parameter = checked.syntax().functions[0].params[0].id;
-    let splitscript::compiler::ast::Stmt::Return {
-        value: Some(parameter_path),
+    let splitscript::compiler::ast::Stmt::Expression(splitscript::compiler::ast::Expr {
+        kind: splitscript::compiler::ast::ExprKind::Return(Some(parameter_path)),
         ..
-    } = &checked.syntax().functions[0].body.statements[0]
+    }) = &checked.syntax().functions[0].body.statements[0]
     else {
         panic!("expected the parameter return");
     };

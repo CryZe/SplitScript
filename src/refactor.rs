@@ -4,9 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     TextEdit,
-    ast::{
-        Block, Expr, ExprId, ExprKind, FallbackBranch, MatchPattern, Program, Span, Stmt, ValueId,
-    },
+    ast::{Block, Expr, ExprId, ExprKind, MatchPattern, Program, Span, Stmt, ValueId},
     database::{CompilerDatabase, SemanticQueryResult, SemanticSnapshot},
     semantic::ResolvedValue,
     type_display::display_type,
@@ -220,21 +218,13 @@ fn extract_variable(source: &str, program: &Program, expression: &Expr) -> Optio
 fn can_hoist_from_statement(statement: &Stmt, target: ExprId) -> bool {
     let (root, repeated) = match statement {
         Stmt::Variable(variable) => (&variable.value, false),
-        Stmt::Assign { value, .. } | Stmt::Expression(value) | Stmt::Throw { error: value, .. } => {
-            (value, false)
-        }
+        Stmt::Assign { value, .. } | Stmt::Expression(value) => (value, false),
         Stmt::StateAssign { .. } | Stmt::IndexAssign { .. } => return false,
         Stmt::If { condition, .. } => (condition, false),
         Stmt::While { condition, .. } => (condition, true),
         Stmt::For { iterable, .. } => (iterable, false),
-        Stmt::Return {
-            value: Some(value), ..
-        } => (value, false),
         Stmt::Suspend { value, .. } => (value, false),
         Stmt::Debug { statement, .. } => return can_hoist_from_statement(statement, target),
-        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Return { value: None, .. } => {
-            return false;
-        }
     };
     let mut finder = ConditionalFinder {
         target,
@@ -287,15 +277,7 @@ impl<'ast> Visitor<'ast> for ConditionalFinder {
             }
             ExprKind::Fallback { value, fallback } => {
                 self.visit_expr(value);
-                match fallback {
-                    FallbackBranch::Value(value) => self.under_condition(value),
-                    FallbackBranch::Return {
-                        value: Some(value), ..
-                    } => self.under_condition(value),
-                    FallbackBranch::Return { value: None, .. }
-                    | FallbackBranch::Break { .. }
-                    | FallbackBranch::Continue { .. } => {}
-                }
+                self.under_condition(fallback);
             }
             ExprKind::Binary {
                 op: crate::ast::BinaryOp::And | crate::ast::BinaryOp::Or,
@@ -325,7 +307,7 @@ fn extract_function(
     expression: &Expr,
 ) -> Option<Refactoring> {
     let facts = ExpressionFacts::collect(expression, snapshot);
-    if facts.has_escaping_fallback {
+    if facts.has_escaping_control_flow {
         return None;
     }
     let parameters = extraction_parameters(source, snapshot, &facts)?;
@@ -422,7 +404,7 @@ fn extract_statements_function(
     selection: StatementSelection<'_>,
 ) -> Option<Refactoring> {
     let facts = ExpressionFacts::collect_statements(selection.statements, snapshot);
-    if facts.has_escaping_fallback || facts.has_propagation {
+    if facts.has_escaping_control_flow || facts.has_propagation {
         return None;
     }
 
@@ -496,12 +478,6 @@ struct StatementSafety<'a> {
 impl<'ast> Visitor<'ast> for StatementSafety<'_> {
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
         match statement {
-            Stmt::Return { .. }
-            | Stmt::Break { .. }
-            | Stmt::Continue { .. }
-            | Stmt::Throw { .. } => {
-                self.unsafe_control_flow = true;
-            }
             Stmt::Assign { id, .. } => {
                 if let Some(target) = self.snapshot.semantics().assignment_target(*id) {
                     self.assignments.push(target);
@@ -510,6 +486,16 @@ impl<'ast> Visitor<'ast> for StatementSafety<'_> {
             }
             _ => visit::walk_stmt(self, statement),
         }
+    }
+
+    fn visit_expr(&mut self, expression: &'ast Expr) {
+        if matches!(
+            expression.kind,
+            ExprKind::Return(_) | ExprKind::Break(_) | ExprKind::Continue | ExprKind::Throw(_)
+        ) {
+            self.unsafe_control_flow = true;
+        }
+        visit::walk_expr(self, expression);
     }
 }
 
@@ -755,7 +741,7 @@ struct ExpressionFacts<'a> {
     internal_bindings: HashSet<ValueId>,
     has_suspension: bool,
     has_propagation: bool,
-    has_escaping_fallback: bool,
+    has_escaping_control_flow: bool,
 }
 
 impl<'a> ExpressionFacts<'a> {
@@ -766,7 +752,7 @@ impl<'a> ExpressionFacts<'a> {
             internal_bindings: HashSet::new(),
             has_suspension: false,
             has_propagation: false,
-            has_escaping_fallback: false,
+            has_escaping_control_flow: false,
         };
         facts.visit_expr(expression);
         facts
@@ -779,7 +765,7 @@ impl<'a> ExpressionFacts<'a> {
             internal_bindings: HashSet::new(),
             has_suspension: false,
             has_propagation: false,
-            has_escaping_fallback: false,
+            has_escaping_control_flow: false,
         };
         for statement in statements {
             facts.visit_stmt(statement);
@@ -813,13 +799,9 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
         match &expression.kind {
             ExprKind::Suspend { .. } => self.has_suspension = true,
             ExprKind::Propagate(_) => self.has_propagation = true,
-            ExprKind::Fallback {
-                fallback:
-                    FallbackBranch::Return { .. }
-                    | FallbackBranch::Break { .. }
-                    | FallbackBranch::Continue { .. },
-                ..
-            } => self.has_escaping_fallback = true,
+            ExprKind::Return(_) | ExprKind::Break(_) | ExprKind::Continue | ExprKind::Throw(_) => {
+                self.has_escaping_control_flow = true
+            }
             _ => {}
         }
         visit::walk_expr(self, expression);
@@ -987,10 +969,6 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
         | Stmt::For { span, .. }
-        | Stmt::Break { span, .. }
-        | Stmt::Continue { span }
-        | Stmt::Return { span, .. }
-        | Stmt::Throw { span, .. }
         | Stmt::Suspend { span, .. } => *span,
         Stmt::Variable(variable) => variable.span,
         Stmt::Expression(expression) => expression.span,

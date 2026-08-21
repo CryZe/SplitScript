@@ -3,9 +3,8 @@
 use std::collections::HashMap;
 
 use crate::{
-    ast::{ActionKind, Block, Expr, Span, Stmt, SuspensionMode, VariableDecl},
+    ast::{ActionKind, Block, Expr, ExprKind, Span, Stmt, SuspensionMode, VariableDecl},
     inference::{Requirements, Type},
-    stdlib::StdlibTypeId,
 };
 
 use super::{
@@ -33,17 +32,7 @@ impl Checker {
                 statement: inner,
                 span,
             } => {
-                if !matches!(
-                    inner.as_ref(),
-                    Stmt::Variable(_)
-                        | Stmt::Assign { .. }
-                        | Stmt::StateAssign { .. }
-                        | Stmt::If { .. }
-                        | Stmt::While { .. }
-                        | Stmt::For { .. }
-                        | Stmt::Expression(_)
-                        | Stmt::Suspend { .. }
-                ) {
+                if contains_control_flow_expression(inner) {
                     self.error(
                         "`debug` currently supports bindings, expression statements, assignments, `if`, `while`, `for`, and `await`/`retry` statements",
                         *span,
@@ -351,48 +340,6 @@ impl Checker {
                 self.with_loop(|checker| checker.block(body, false));
                 self.scopes.pop();
             }
-            Stmt::Break { value, span } => match self.loops.break_target() {
-                None => {
-                    if let Some(value) = value {
-                        self.expr(value, None);
-                    }
-                    self.error("`break` is only available inside a loop", *span);
-                }
-                Some(super::context::BreakTarget::Statement) => {
-                    if let Some(value) = value {
-                        self.expr(value, None);
-                        self.error(
-                            "only a `loop` expression can break with a value",
-                            value.span,
-                        );
-                    }
-                    self.loops.record_break();
-                }
-                Some(super::context::BreakTarget::Value(result)) => {
-                    if let Some(value) = value {
-                        self.expr(value, Some(result));
-                    } else {
-                        let none = self.core_type(crate::stdlib::CoreTypeId::None);
-                        self.unify(result, none, *span);
-                    }
-                    self.loops.record_break();
-                }
-            },
-            Stmt::Continue { span } => {
-                if !self.loops.is_inside() {
-                    self.error("`continue` is only available inside a loop", *span);
-                }
-            }
-            Stmt::Return { value, span } => self.check_return(value.as_ref(), *span),
-            Stmt::Throw { error, span } => {
-                if self.failure.propagate().is_none() {
-                    self.error(
-                        "`throw` needs a function returning `T!` or an explicit catch boundary",
-                        *span,
-                    );
-                }
-                self.expr(error, Some(self.standard_type(StdlibTypeId::String)));
-            }
             Stmt::Suspend {
                 mode,
                 binding,
@@ -680,4 +627,26 @@ impl Checker {
             },
         );
     }
+}
+
+fn contains_control_flow_expression(statement: &Stmt) -> bool {
+    #[derive(Default)]
+    struct Finder(bool);
+
+    impl<'ast> crate::visit::Visitor<'ast> for Finder {
+        fn visit_expr(&mut self, expression: &'ast Expr) {
+            if matches!(
+                expression.kind,
+                ExprKind::Break(_) | ExprKind::Continue | ExprKind::Return(_) | ExprKind::Throw(_)
+            ) {
+                self.0 = true;
+            } else {
+                crate::visit::walk_expr(self, expression);
+            }
+        }
+    }
+
+    let mut finder = Finder::default();
+    crate::visit::Visitor::visit_stmt(&mut finder, statement);
+    finder.0
 }

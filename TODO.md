@@ -180,6 +180,13 @@ semantic-review evidence, not as a conformance corpus.
   asynchronous discovery belongs outside the attempt behind [`await`]. A
   general value-producing [`loop`] remains the lower-level escape hatch, not
   the canonical retry transaction.
+- [x] Make fallback [`else`] take one ordinary expression instead of encoding
+  a private list of value/return/break/continue branches. Represent [`return`],
+  [`break`], [`continue`], and [`throw`] as first-class [`Never`]-typed
+  expressions throughout syntax, inference, typed HIR, async lowering,
+  codegen, formatting, refactoring, and editor traversal. This lets chained
+  fallible operations end in `else throw ...` and makes the same control-flow
+  forms work consistently in every expression position.
 - [ ] Design semantic lints from failures that compiled cleanly. Evaluate an
   unused-setting warning (the campaign declared `allSkullsMode` but read an
   unrelated always-false global), a suggestion from literal

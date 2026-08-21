@@ -51,10 +51,10 @@ fn user_function_types_are_inferred_across_bodies_and_call_sites() {
         ),
         &TypeKind::Record(snapshot)
     );
-    let splitscript::compiler::ast::Stmt::Return {
-        value: Some(returned),
+    let splitscript::compiler::ast::Stmt::Expression(splitscript::compiler::ast::Expr {
+        kind: splitscript::compiler::ast::ExprKind::Return(Some(returned)),
         ..
-    } = &format_clock.body.statements[0]
+    }) = &format_clock.body.statements[0]
     else {
         panic!("expected formatClock's return expression");
     };

@@ -229,10 +229,6 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
         | Stmt::For { span, .. }
-        | Stmt::Break { span, .. }
-        | Stmt::Continue { span }
-        | Stmt::Return { span, .. }
-        | Stmt::Throw { span, .. }
         | Stmt::Suspend { span, .. } => *span,
         Stmt::Variable(variable) => variable.span,
         Stmt::Expression(expression) => expression.span,

@@ -561,7 +561,7 @@ fn recovering_parse_keeps_valid_choice_options_and_file_filters() {
 #[test]
 fn recovering_parse_keeps_valid_match_arms_and_enclosing_function() {
     use splitscript::{
-        compiler::ast::{ExprKind, MatchPattern, Stmt},
+        compiler::ast::{Expr, ExprKind, MatchPattern, Stmt},
         compiler::syntax::RecoveryNodeKind,
     };
 
@@ -589,9 +589,10 @@ fn recovering_parse_keeps_valid_match_arms_and_enclosing_function() {
         "expected `=>` after the pattern"
     );
     assert_eq!(recovered.syntax().functions.len(), 1);
-    let Stmt::Return {
-        value: Some(value), ..
-    } = &recovered.syntax().functions[0].body.statements[0]
+    let Stmt::Expression(Expr {
+        kind: ExprKind::Return(Some(value)),
+        ..
+    }) = &recovered.syntax().functions[0].body.statements[0]
     else {
         panic!("the recovered function should retain its return expression");
     };
@@ -1074,7 +1075,7 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
 
     assert_eq!(
         recovered.diagnostics().len(),
-        11,
+        10,
         "{:#?}",
         recovered.diagnostics()
     );
@@ -1096,7 +1097,7 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
     ));
 
     let statements = &recovered.syntax().functions[0].body.statements;
-    assert_eq!(statements.len(), 9);
+    assert_eq!(statements.len(), 8);
     assert!(matches!(
         statements[0],
         Stmt::Variable(ref variable) if matches!(variable.value.kind, ExprKind::Error)
@@ -1107,33 +1108,40 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
     ));
     assert!(matches!(
         statements[2],
-        Stmt::Throw { ref error, .. } if matches!(error.kind, ExprKind::Error)
+        Stmt::Expression(Expr {
+            kind: ExprKind::Throw(ref error),
+            ..
+        }) if matches!(error.kind, ExprKind::Suspend {
+            mode: SuspensionMode::Await,
+            ref value,
+            ..
+        } if matches!(value.kind, ExprKind::Error))
     ));
     assert!(matches!(
         statements[3],
-        Stmt::Expression(Expr { kind: ExprKind::Suspend {
-            mode: SuspensionMode::Await, ref value, ..
-        }, .. }) if matches!(value.kind, ExprKind::Error)
-    ));
-    assert!(matches!(
-        statements[4],
         Stmt::Expression(Expr { kind: ExprKind::Suspend {
             mode: SuspensionMode::Retry, ref value, ..
         }, .. }) if matches!(value.kind, ExprKind::Error)
     ));
     assert!(matches!(
-        statements[5],
+        statements[4],
         Stmt::Expression(ref expression) if matches!(expression.kind, ExprKind::Error)
     ));
     assert!(matches!(
-        statements[6],
+        statements[5],
         Stmt::While { ref condition, .. } if matches!(condition.kind, ExprKind::Error)
     ));
     assert!(matches!(
-        statements[7],
+        statements[6],
         Stmt::Variable(ref variable) if matches!(variable.value.kind, ExprKind::Error)
     ));
-    assert!(matches!(statements[8], Stmt::Return { .. }));
+    assert!(matches!(
+        statements[7],
+        Stmt::Expression(Expr {
+            kind: ExprKind::Return(_),
+            ..
+        })
+    ));
     assert_eq!(recovered.syntax().actions.len(), 1);
 
     assert_eq!(
@@ -1142,7 +1150,7 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
             .iter()
             .filter(|node| node.kind == RecoveryNodeKind::Missing)
             .count(),
-        11
+        10
     );
     assert_eq!(
         recovered
@@ -1155,7 +1163,7 @@ fn recovering_parse_preserves_declarations_and_statements_with_bad_root_expressi
     assert_eq!(recovered.source_document().reconstruct(), source);
 
     let strict_errors = splitscript::parse(source).expect_err("batch parsing remains strict");
-    assert_eq!(strict_errors.len(), 11);
+    assert_eq!(strict_errors.len(), 10);
 }
 
 #[test]

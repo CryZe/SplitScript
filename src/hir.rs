@@ -9,9 +9,9 @@ use std::collections::HashMap;
 use crate::{
     ast::{
         ActionKind, AssignmentId, BinaryOp, Block, EnumId, EnumVariantId, Expr, ExprId, ExprKind,
-        FallbackBranch, FunctionId, InterpolatedPart, MatchArm, MatchPattern, PatternBinding,
-        PatternId, Program as SyntaxProgram, RecordId, SettingChoiceOptionId, SettingKind, Span,
-        Stmt, SuspensionMode, TypeRef, UnaryOp, ValueId,
+        FunctionId, InterpolatedPart, MatchArm, MatchPattern, PatternBinding, PatternId,
+        Program as SyntaxProgram, RecordId, SettingChoiceOptionId, SettingKind, Span, Stmt,
+        SuspensionMode, TypeRef, UnaryOp, ValueId,
     },
     semantic::{
         FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember,
@@ -244,7 +244,14 @@ pub enum TypedExpressionKind {
     },
     Fallback {
         value: ExprId,
-        fallback: TypedFallbackBranch,
+        fallback: ExprId,
+    },
+    Break(Option<ExprId>),
+    Continue,
+    Return(Option<ExprId>),
+    Throw {
+        error: ExprId,
+        target: FailureTarget,
     },
     Suspend {
         mode: SuspensionMode,
@@ -303,14 +310,6 @@ impl FailureTarget {
             Self::Return(result) | Self::Retry { result, .. } => result,
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TypedFallbackBranch {
-    Value(ExprId),
-    Return(Option<ExprId>),
-    Break,
-    Continue,
 }
 
 #[derive(Debug, Clone)]
@@ -385,13 +384,6 @@ pub enum TypedStatementKind {
         version_value: ValueId,
         iterable: ExprId,
         body: TypedBlock,
-    },
-    Break(Option<ExprId>),
-    Continue,
-    Return(Option<ExprId>),
-    Throw {
-        error: ExprId,
-        target: FailureTarget,
     },
     Suspend {
         mode: SuspensionMode,
@@ -509,16 +501,7 @@ impl TypedProgram {
             .map(|function| FunctionBody {
                 function: FunctionInstance::monomorphic(function.id),
                 debug_only: function.debug_only,
-                body: lower_block(
-                    &function.body,
-                    semantics,
-                    semantics
-                        .function_completion(function.id)
-                        .filter(|result| {
-                            matches!(semantics.types().kind(*result), TypeKind::Result { .. })
-                        })
-                        .map(FailureTarget::Return),
-                ),
+                body: lower_block(&function.body, semantics),
             })
             .collect();
         let action_bodies = syntax
@@ -526,7 +509,7 @@ impl TypedProgram {
             .iter()
             .map(|action| ActionBody {
                 action: action.kind,
-                body: lower_block(&action.body, semantics, None),
+                body: lower_block(&action.body, semantics),
             })
             .collect();
         let global_initializers = syntax
@@ -997,18 +980,6 @@ pub fn walk_typed_statement<V: TypedVisitor>(
             visit_expression(*iterable);
             visitor.visit_block(body, program);
         }
-        TypedStatementKind::Break(value) => {
-            if let Some(value) = value {
-                visit_expression(*value);
-            }
-        }
-        TypedStatementKind::Continue => {}
-        TypedStatementKind::Return(value) => {
-            if let Some(value) = value {
-                visit_expression(*value);
-            }
-        }
-        TypedStatementKind::Throw { error, .. } => visit_expression(*error),
         TypedStatementKind::Suspend { value, .. } | TypedStatementKind::Expression(value) => {
             visit_expression(*value);
         }
@@ -1080,15 +1051,12 @@ pub fn walk_typed_expression<V: TypedVisitor>(
         }
         TypedExpressionKind::Fallback { value, fallback } => {
             visit_expression(*value);
-            match fallback {
-                TypedFallbackBranch::Value(fallback) => visit_expression(*fallback),
-                TypedFallbackBranch::Return(Some(value)) => visit_expression(*value),
-                TypedFallbackBranch::Return(None)
-                | TypedFallbackBranch::Break
-                | TypedFallbackBranch::Continue => {}
-            }
+            visit_expression(*fallback);
         }
-        TypedExpressionKind::Suspend { value, .. }
+        TypedExpressionKind::Break(Some(value))
+        | TypedExpressionKind::Return(Some(value))
+        | TypedExpressionKind::Throw { error: value, .. }
+        | TypedExpressionKind::Suspend { value, .. }
         | TypedExpressionKind::Propagate { value, .. } => visit_expression(*value),
         TypedExpressionKind::Member { receiver, .. } => visit_expression(*receiver),
         TypedExpressionKind::Index { receiver, index } => {
@@ -1114,6 +1082,9 @@ pub fn walk_typed_expression<V: TypedVisitor>(
             }
         }
         TypedExpressionKind::None
+        | TypedExpressionKind::Break(None)
+        | TypedExpressionKind::Continue
+        | TypedExpressionKind::Return(None)
         | TypedExpressionKind::Bool(_)
         | TypedExpressionKind::Int { .. }
         | TypedExpressionKind::Float(_)
@@ -1235,20 +1206,12 @@ fn lower_expression_kind(
                 trailing_semicolon: None,
             };
             TypedExpressionKind::Block {
-                statements: lower_block(
-                    &statements,
-                    semantics,
-                    failure_target_for_value_block(semantics, expression.id),
-                ),
+                statements: lower_block(&statements, semantics),
                 value,
             }
         }
         ExprKind::Loop(block) => TypedExpressionKind::Loop {
-            body: lower_block(
-                block,
-                semantics,
-                failure_target_for_value_block(semantics, expression.id),
-            ),
+            body: lower_block(block, semantics),
         },
         ExprKind::Record { fields, .. } => TypedExpressionKind::Record {
             record: semantics
@@ -1323,14 +1286,16 @@ fn lower_expression_kind(
         },
         ExprKind::Fallback { value, fallback } => TypedExpressionKind::Fallback {
             value: value.id,
-            fallback: match fallback {
-                FallbackBranch::Value(fallback) => TypedFallbackBranch::Value(fallback.id),
-                FallbackBranch::Return { value, .. } => {
-                    TypedFallbackBranch::Return(value.as_ref().map(|value| value.id))
-                }
-                FallbackBranch::Break { .. } => TypedFallbackBranch::Break,
-                FallbackBranch::Continue { .. } => TypedFallbackBranch::Continue,
-            },
+            fallback: fallback.id,
+        },
+        ExprKind::Break(value) => TypedExpressionKind::Break(value.as_ref().map(|value| value.id)),
+        ExprKind::Continue => TypedExpressionKind::Continue,
+        ExprKind::Return(value) => {
+            TypedExpressionKind::Return(value.as_ref().map(|value| value.id))
+        }
+        ExprKind::Throw(error) => TypedExpressionKind::Throw {
+            error: error.id,
+            target: failure_target_for_propagation(semantics, expression.id),
         },
         ExprKind::Suspend {
             mode,
@@ -1411,11 +1376,7 @@ fn enum_type_for_variant(
     }
 }
 
-fn lower_block(
-    block: &Block,
-    semantics: &SemanticModel,
-    failure_boundary: Option<FailureTarget>,
-) -> TypedBlock {
+fn lower_block(block: &Block, semantics: &SemanticModel) -> TypedBlock {
     TypedBlock {
         statements: block
             .statements
@@ -1432,10 +1393,6 @@ fn lower_block(
                             | Stmt::If { span, .. }
                             | Stmt::While { span, .. }
                             | Stmt::For { span, .. }
-                            | Stmt::Break { span, .. }
-                            | Stmt::Continue { span }
-                            | Stmt::Return { span, .. }
-                            | Stmt::Throw { span, .. }
                             | Stmt::Suspend { span, .. } => *span,
                             Stmt::Expression(expression) => expression.span,
                             Stmt::Debug { .. } => {
@@ -1519,16 +1476,16 @@ fn lower_block(
                             ..
                         } => TypedStatementKind::If {
                             condition: condition.id,
-                            then_block: lower_block(then_block, semantics, failure_boundary),
+                            then_block: lower_block(then_block, semantics),
                             else_block: else_block
                                 .as_ref()
-                                .map(|block| lower_block(block, semantics, failure_boundary)),
+                                .map(|block| lower_block(block, semantics)),
                         },
                         Stmt::While {
                             condition, body, ..
                         } => TypedStatementKind::While {
                             condition: condition.id,
-                            body: lower_block(body, semantics, failure_boundary),
+                            body: lower_block(body, semantics),
                         },
                         Stmt::For {
                             binding,
@@ -1544,19 +1501,7 @@ fn lower_block(
                             index_value: *index_value,
                             version_value: *version_value,
                             iterable: iterable.id,
-                            body: lower_block(body, semantics, failure_boundary),
-                        },
-                        Stmt::Break { value, .. } => {
-                            TypedStatementKind::Break(value.as_ref().map(|value| value.id))
-                        }
-                        Stmt::Continue { .. } => TypedStatementKind::Continue,
-                        Stmt::Return { value, .. } => {
-                            TypedStatementKind::Return(value.as_ref().map(|value| value.id))
-                        }
-                        Stmt::Throw { error, .. } => TypedStatementKind::Throw {
-                            error: error.id,
-                            target: failure_boundary
-                                .expect("checked throw statements have a failure boundary"),
+                            body: lower_block(body, semantics),
                         },
                         Stmt::Suspend {
                             mode,
@@ -1594,18 +1539,4 @@ fn failure_target_for_propagation(semantics: &SemanticModel, expression: ExprId)
             result,
         },
     )
-}
-
-fn failure_target_for_value_block(
-    semantics: &SemanticModel,
-    expression: ExprId,
-) -> Option<FailureTarget> {
-    let result = semantics.value_block_failure_target(expression)?;
-    Some(semantics.value_block_retry_boundary(expression).map_or(
-        FailureTarget::Return(result),
-        |retry| FailureTarget::Retry {
-            expression: retry,
-            result,
-        },
-    ))
 }

@@ -21,8 +21,7 @@ use crate::{
     effects::OperationAnalysis,
     hir::{
         self, ExpressionResolution, FailureTarget, ImplicitConversion, TypedExpression,
-        TypedExpressionKind, TypedFallbackBranch, TypedInterpolatedPart, TypedPattern,
-        TypedProgram, TypedStatementKind,
+        TypedExpressionKind, TypedInterpolatedPart, TypedPattern, TypedProgram, TypedStatementKind,
     },
     intrinsic_registry::{self, ScratchPolicy, ScratchType},
     semantic::{
@@ -176,7 +175,14 @@ pub enum ExpressionKind {
     },
     Fallback {
         value: ExprId,
-        fallback: FallbackBranch,
+        fallback: ExprId,
+    },
+    Break(Option<ExprId>),
+    Continue,
+    Return(Option<ExprId>),
+    Throw {
+        error: ExprId,
+        target: FailureTarget,
     },
     Suspend {
         mode: SuspensionMode,
@@ -239,14 +245,6 @@ pub enum InterpolatedPart {
         expression: ExprId,
         string_conversion_source: Option<TypeId>,
     },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FallbackBranch {
-    Value(ExprId),
-    Return(Option<ExprId>),
-    Break,
-    Continue,
 }
 
 #[derive(Debug, Clone)]
@@ -964,12 +962,14 @@ fn lower_expression(
         },
         TypedExpressionKind::Fallback { value, fallback } => ExpressionKind::Fallback {
             value: *value,
-            fallback: match fallback {
-                TypedFallbackBranch::Value(value) => FallbackBranch::Value(*value),
-                TypedFallbackBranch::Return(value) => FallbackBranch::Return(*value),
-                TypedFallbackBranch::Break => FallbackBranch::Break,
-                TypedFallbackBranch::Continue => FallbackBranch::Continue,
-            },
+            fallback: *fallback,
+        },
+        TypedExpressionKind::Break(value) => ExpressionKind::Break(*value),
+        TypedExpressionKind::Continue => ExpressionKind::Continue,
+        TypedExpressionKind::Return(value) => ExpressionKind::Return(*value),
+        TypedExpressionKind::Throw { error, target } => ExpressionKind::Throw {
+            error: *error,
+            target: *target,
         },
         TypedExpressionKind::Suspend {
             mode,
@@ -2054,11 +2054,7 @@ fn normalize_expression_suspensions_with(
         return normalize_match_expression(original, value, arms, context);
     }
 
-    if let ExpressionKind::Fallback {
-        value,
-        fallback: FallbackBranch::Value(fallback),
-    } = original.kind.clone()
-    {
+    if let ExpressionKind::Fallback { value, fallback } = original.kind.clone() {
         return normalize_fallback_expression(original, value, fallback, context);
     }
 
@@ -2244,7 +2240,7 @@ fn normalize_fallback_expression(
     if fallback.steps.is_empty() {
         let kind = ExpressionKind::Fallback {
             value: input.value,
-            fallback: FallbackBranch::Value(fallback.value),
+            fallback: fallback.value,
         };
         let value = context.wasm_ir.push_generated_expression(
             original.ty,
@@ -2430,6 +2426,9 @@ fn map_expression_children(
         | ExpressionKind::Signature(_)
         | ExpressionKind::Temporary(_)
         | ExpressionKind::FallbackSuccess { .. }
+        | ExpressionKind::Break(None)
+        | ExpressionKind::Continue
+        | ExpressionKind::Return(None)
         | ExpressionKind::Path { .. } => kind,
         ExpressionKind::ValueBlock => kind,
         ExpressionKind::Loop => kind,
@@ -2519,12 +2518,13 @@ fn map_expression_children(
         },
         ExpressionKind::Fallback { value, fallback } => ExpressionKind::Fallback {
             value: map(value),
-            fallback: match fallback {
-                FallbackBranch::Value(value) => FallbackBranch::Value(map(value)),
-                FallbackBranch::Return(value) => FallbackBranch::Return(value.map(&mut map)),
-                FallbackBranch::Break => FallbackBranch::Break,
-                FallbackBranch::Continue => FallbackBranch::Continue,
-            },
+            fallback: map(fallback),
+        },
+        ExpressionKind::Break(value) => ExpressionKind::Break(value.map(&mut map)),
+        ExpressionKind::Return(value) => ExpressionKind::Return(value.map(&mut map)),
+        ExpressionKind::Throw { error, target } => ExpressionKind::Throw {
+            error: map(error),
+            target,
         },
         ExpressionKind::Suspend {
             mode,
@@ -2918,6 +2918,13 @@ fn lower_async_statements(
     source: SourceProvenance,
     wasm_ir: &mut Program,
 ) -> Block {
+    enum ControlFlowTerminator {
+        Break,
+        Continue,
+        Return,
+        Throw(FailureTarget),
+    }
+
     let mut result = tail;
     for statement in statements.iter().rev() {
         if statement.debug_only && source.profile == crate::BuildProfile::Release {
@@ -3300,73 +3307,6 @@ fn lower_async_statements(
                     wasm_ir,
                 );
             }
-            TypedStatementKind::Break(value) => {
-                let normalized = value.map(|value| {
-                    normalize_expression_suspensions(value, typed_hir, semantics, wasm_ir)
-                });
-                result = Block {
-                    statements: Vec::new(),
-                    terminator: Terminator::Break(
-                        normalized.as_ref().map(|normalized| normalized.value),
-                    ),
-                };
-                if let Some(normalized) = normalized {
-                    result = wrap_async_expression_steps(
-                        normalized.steps,
-                        result,
-                        typed_hir,
-                        semantics,
-                        source,
-                        wasm_ir,
-                    );
-                }
-            }
-            TypedStatementKind::Continue => {
-                result = Block {
-                    statements: Vec::new(),
-                    terminator: Terminator::Continue,
-                };
-            }
-            TypedStatementKind::Return(value) => {
-                let normalized = value.map(|value| {
-                    normalize_expression_suspensions(value, typed_hir, semantics, wasm_ir)
-                });
-                result = Block {
-                    statements: Vec::new(),
-                    terminator: Terminator::Return(
-                        normalized.as_ref().map(|normalized| normalized.value),
-                    ),
-                };
-                if let Some(normalized) = normalized {
-                    result = wrap_async_expression_steps(
-                        normalized.steps,
-                        result,
-                        typed_hir,
-                        semantics,
-                        source,
-                        wasm_ir,
-                    );
-                }
-            }
-            TypedStatementKind::Throw { error, target } => {
-                let normalized =
-                    normalize_expression_suspensions(*error, typed_hir, semantics, wasm_ir);
-                result = Block {
-                    statements: Vec::new(),
-                    terminator: Terminator::Throw {
-                        error: normalized.value,
-                        target: *target,
-                    },
-                };
-                result = wrap_async_expression_steps(
-                    normalized.steps,
-                    result,
-                    typed_hir,
-                    semantics,
-                    source,
-                    wasm_ir,
-                );
-            }
             TypedStatementKind::Suspend {
                 mode,
                 binding,
@@ -3396,23 +3336,78 @@ fn lower_async_statements(
                 };
             }
             TypedStatementKind::Expression(expression) => {
-                let normalized =
-                    normalize_expression_suspensions(*expression, typed_hir, semantics, wasm_ir);
-                result.statements.insert(
-                    0,
-                    Statement::Evaluate {
-                        expression: normalized.value,
-                        discard_result: true,
-                    },
-                );
-                result = wrap_async_expression_steps(
-                    normalized.steps,
-                    result,
-                    typed_hir,
-                    semantics,
-                    source,
-                    wasm_ir,
-                );
+                let expression = typed_hir
+                    .expression(*expression)
+                    .expect("statement expressions belong to typed HIR");
+                let control_flow = match &expression.kind {
+                    TypedExpressionKind::Break(value) => Some((
+                        value.map(|value| {
+                            normalize_expression_suspensions(value, typed_hir, semantics, wasm_ir)
+                        }),
+                        ControlFlowTerminator::Break,
+                    )),
+                    TypedExpressionKind::Continue => Some((None, ControlFlowTerminator::Continue)),
+                    TypedExpressionKind::Return(value) => Some((
+                        value.map(|value| {
+                            normalize_expression_suspensions(value, typed_hir, semantics, wasm_ir)
+                        }),
+                        ControlFlowTerminator::Return,
+                    )),
+                    TypedExpressionKind::Throw { error, target } => Some((
+                        Some(normalize_expression_suspensions(
+                            *error, typed_hir, semantics, wasm_ir,
+                        )),
+                        ControlFlowTerminator::Throw(*target),
+                    )),
+                    _ => None,
+                };
+                if let Some((normalized, terminator)) = control_flow {
+                    let normalized_value = normalized.as_ref().map(|value| value.value);
+                    result = Block {
+                        statements: Vec::new(),
+                        terminator: match terminator {
+                            ControlFlowTerminator::Break => Terminator::Break(normalized_value),
+                            ControlFlowTerminator::Continue => Terminator::Continue,
+                            ControlFlowTerminator::Return => Terminator::Return(normalized_value),
+                            ControlFlowTerminator::Throw(target) => Terminator::Throw {
+                                error: normalized_value.expect("throw has an error expression"),
+                                target,
+                            },
+                        },
+                    };
+                    if let Some(normalized) = normalized {
+                        result = wrap_async_expression_steps(
+                            normalized.steps,
+                            result,
+                            typed_hir,
+                            semantics,
+                            source,
+                            wasm_ir,
+                        );
+                    }
+                } else {
+                    let normalized = normalize_expression_suspensions(
+                        expression.id,
+                        typed_hir,
+                        semantics,
+                        wasm_ir,
+                    );
+                    result.statements.insert(
+                        0,
+                        Statement::Evaluate {
+                            expression: normalized.value,
+                            discard_result: true,
+                        },
+                    );
+                    result = wrap_async_expression_steps(
+                        normalized.steps,
+                        result,
+                        typed_hir,
+                        semantics,
+                        source,
+                        wasm_ir,
+                    );
+                }
             }
         }
         if source.emits_debug_locations() {
@@ -3462,12 +3457,6 @@ fn typed_block_contains_await(
             TypedStatementKind::For { iterable, body, .. } => {
                 typed_expression_contains_suspension(*iterable, typed_hir)
                     || typed_block_contains_await(body, typed_hir, profile)
-            }
-            TypedStatementKind::Return(Some(value)) => {
-                typed_expression_contains_suspension(*value, typed_hir)
-            }
-            TypedStatementKind::Throw { error, .. } => {
-                typed_expression_contains_suspension(*error, typed_hir)
             }
             _ => false,
         }
@@ -4031,16 +4020,7 @@ impl Visitor for LocalPlanner<'_> {
                 .expect("fallback input belongs to Wasm IR")
                 .ty;
             self.push(value_type, LocalPurpose::FallbackValue(expression.id));
-            match fallback {
-                FallbackBranch::Value(fallback) => {
-                    self.visit_expression_id(*fallback, program);
-                }
-                FallbackBranch::Return(Some(value)) => {
-                    self.visit_expression_id(*value, program);
-                }
-                FallbackBranch::Return(None) | FallbackBranch::Break | FallbackBranch::Continue => {
-                }
-            }
+            self.visit_expression_id(*fallback, program);
             return;
         }
 

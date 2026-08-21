@@ -295,12 +295,6 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             Stmt::Assign { span, .. }
             | Stmt::StateAssign { span, .. }
             | Stmt::IndexAssign { span, .. }
-            | Stmt::Break {
-                value: Some(_),
-                span,
-            }
-            | Stmt::Return { span, .. }
-            | Stmt::Throw { span, .. }
             | Stmt::Suspend { span, .. } => {
                 self.continuation_before_block(span.start, span.end);
             }
@@ -310,10 +304,7 @@ impl<'ast> Visitor<'ast> for SyntaxLayoutCollector<'_> {
             Stmt::If { span, .. } | Stmt::While { span, .. } | Stmt::For { span, .. } => {
                 self.break_after.insert(span.end);
             }
-            Stmt::Debug { .. }
-            | Stmt::Variable(_)
-            | Stmt::Break { value: None, .. }
-            | Stmt::Continue { .. } => {}
+            Stmt::Debug { .. } | Stmt::Variable(_) => {}
         }
         visit::walk_stmt(self, statement);
     }
@@ -2126,6 +2117,26 @@ onAttach {
         let formatted = format_source(source).unwrap();
         assert_eq!(formatted, expected);
         assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn formats_chained_fallbacks_with_a_throw_expression() {
+        let source = r#"state "game.exe"{}
+fn engineModule(){return retry{let engine=process.loadedModule("EngineWin64s.dll")else process.loadedModule("EngineWin64sv.dll")else throw "engine module is not loaded yet"
+engine}}"#;
+        let expected = r#"state "game.exe" {}
+fn engineModule() {
+    return retry {
+        let engine = process.loadedModule("EngineWin64s.dll") else process.loadedModule("EngineWin64sv.dll") else throw "engine module is not loaded yet"
+        engine
+    }
+}
+"#;
+
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        crate::compile(&formatted).expect("formatted generic fallbacks should compile");
     }
 
     #[test]

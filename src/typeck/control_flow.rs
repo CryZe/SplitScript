@@ -83,15 +83,18 @@ struct ValueReturnFinder(bool);
 
 impl<'ast> Visitor<'ast> for ValueReturnFinder {
     fn visit_stmt(&mut self, statement: &'ast Stmt) {
-        if matches!(
-            statement,
-            Stmt::Return { value: Some(_), .. } | Stmt::Suspend { returns: true, .. }
-        ) {
+        if matches!(statement, Stmt::Suspend { returns: true, .. }) {
             self.0 = true;
         } else if !self.0 {
             visit::walk_stmt(self, statement);
         }
     }
 
-    fn visit_expr(&mut self, _expression: &'ast Expr) {}
+    fn visit_expr(&mut self, expression: &'ast Expr) {
+        if matches!(expression.kind, ExprKind::Return(Some(_))) {
+            self.0 = true;
+        } else if !self.0 {
+            visit::walk_expr(self, expression);
+        }
+    }
 }

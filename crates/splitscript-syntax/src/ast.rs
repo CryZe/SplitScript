@@ -935,21 +935,6 @@ pub enum Stmt {
         body: Block,
         span: Span,
     },
-    Break {
-        value: Option<Box<Expr>>,
-        span: Span,
-    },
-    Continue {
-        span: Span,
-    },
-    Return {
-        value: Option<Expr>,
-        span: Span,
-    },
-    Throw {
-        error: Expr,
-        span: Span,
-    },
     Suspend {
         mode: SuspensionMode,
         binding: Option<SuspensionBinding>,
@@ -1034,8 +1019,18 @@ pub enum ExprKind {
     },
     Fallback {
         value: Box<Expr>,
-        fallback: FallbackBranch,
+        fallback: Box<Expr>,
     },
+    /// Leaves the nearest loop. Like every other control-flow expression,
+    /// this has type `Never` and may appear anywhere an expression is valid.
+    Break(Option<Box<Expr>>),
+    /// Continues the nearest loop and has type `Never`.
+    Continue,
+    /// Leaves the surrounding function or action and has type `Never`.
+    Return(Option<Box<Expr>>),
+    /// Transfers an error to the nearest failure boundary and has type
+    /// `Never`.
+    Throw(Box<Expr>),
     Suspend {
         mode: SuspensionMode,
         /// Compiler-owned storage for the completed value. This gives an
@@ -1089,21 +1084,6 @@ pub enum ExprKind {
 pub struct FloatLiteral {
     pub normalized: String,
     pub value: f64,
-}
-
-#[derive(Debug, Clone)]
-pub enum FallbackBranch {
-    Value(Box<Expr>),
-    Return {
-        value: Option<Box<Expr>>,
-        span: Span,
-    },
-    Break {
-        span: Span,
-    },
-    Continue {
-        span: Span,
-    },
 }
 
 #[derive(Debug, Clone)]

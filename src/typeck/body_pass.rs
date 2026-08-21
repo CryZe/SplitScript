@@ -625,7 +625,6 @@ pub(super) fn block_is_terminal(checker: &mut Checker, block: &crate::ast::Block
 
 pub(super) fn statement_is_terminal(checker: &mut Checker, statement: &crate::ast::Stmt) -> bool {
     match statement {
-        crate::ast::Stmt::Return { .. } | crate::ast::Stmt::Throw { .. } => true,
         // A debug statement is removed from release builds, so control flow
         // outside it must remain valid without relying on its body diverging.
         crate::ast::Stmt::Debug { .. } => false,
@@ -665,7 +664,6 @@ pub(super) fn statement_is_terminal(checker: &mut Checker, statement: &crate::as
             checker.is_never_type(completion)
         }
         crate::ast::Stmt::Expression(expression) => expression_is_never(checker, expression),
-        crate::ast::Stmt::Break { .. } | crate::ast::Stmt::Continue { .. } => true,
     }
 }
 

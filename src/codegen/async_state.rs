@@ -69,7 +69,7 @@ pub(super) fn compile_async_attach(
         runtime,
         frame,
         None,
-        BareReturn::AsyncAttach,
+        BareReturn::AsyncAttach { result_global },
         result_global,
         function_index,
     )
@@ -2867,7 +2867,7 @@ fn compile_async_flow(
     match &block.terminator {
         wasm_ir::Terminator::Fallthrough => {}
         wasm_ir::Terminator::Break(value) => {
-            let control = loop_control.expect("checked break statements belong to loops");
+            let control = loop_control.expect("checked break expressions belong to loops");
             if let Some(value) = value {
                 if let Some(destination) = control.break_destination() {
                     compile_temporary_set(function, destination, *value, context);
@@ -2882,7 +2882,7 @@ fn compile_async_flow(
         }
         wasm_ir::Terminator::Continue => {
             loop_control
-                .expect("checked continue statements belong to loops")
+                .expect("checked continue expressions belong to loops")
                 .emit_continue(function, context.locals.continuation_frame());
         }
         wasm_ir::Terminator::AsyncWhile { header_state, .. } => {
@@ -2934,7 +2934,7 @@ fn compile_async_flow(
                         }
                     }
                 }
-                BareReturn::AsyncAttach => {
+                BareReturn::AsyncAttach { .. } => {
                     if let Some(global) = result_global {
                         compile_expr(
                             function,

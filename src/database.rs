@@ -1036,6 +1036,10 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             | ExprKind::Match { .. }
             | ExprKind::If { .. }
             | ExprKind::Fallback { .. }
+            | ExprKind::Break(_)
+            | ExprKind::Continue
+            | ExprKind::Return(_)
+            | ExprKind::Throw(_)
             | ExprKind::Suspend { .. }
             | ExprKind::Propagate(_)
             | ExprKind::Index { .. }

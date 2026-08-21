@@ -334,6 +334,15 @@ fn explicitError() -> i32! {
     return Err("not available")
 }
 
+fn engineModule() {
+    return retry {
+        let module = process.loadedModule("EngineWin64s.dll")
+            else process.loadedModule("EngineWin64sv.dll")
+            else throw "engine module is not loaded yet"
+        module
+    }
+}
+
 whileAttached {
     print(readOrZero() as String)
 }"#;
@@ -537,12 +546,18 @@ const VALUE_BLOCK_EXAMPLES: &[Example] = &[
         VALUE_BLOCK_SOURCE,
     ),
 ];
-focused_example!(
-    ELSE_EXAMPLE,
-    "Provide a read fallback",
-    "let health = process.read<i32>(healthAddress) else 0",
-    FAILURE_SOURCE
-);
+const ELSE_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Provide a read fallback",
+        "let health = process.read<i32>(healthAddress) else 0",
+        FAILURE_SOURCE,
+    ),
+    Example::checked(
+        "Retry either of two module names",
+        "let engine = retry {\n    let module = process.loadedModule(\"EngineWin64s.dll\")\n        else process.loadedModule(\"EngineWin64sv.dll\")\n        else throw \"engine module is not loaded yet\"\n    module\n}",
+        FAILURE_SOURCE,
+    ),
+];
 focused_example!(
     WHILE_EXAMPLE,
     "Repeat while attached",
@@ -1037,8 +1052,8 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "value else fallback",
         "Provides a branch or unwrap fallback.",
-        "After [`if`], [`else`] selects the alternate branch. After a [`T?`] or [`T!`] expression, it unwraps success and evaluates a value fallback or transfers control with [`return`], [`break`], or [`continue`] on absence or error.",
-        ELSE_EXAMPLE
+        "After [`if`], [`else`] selects the alternate branch. After a [`T?`] or [`T!`] expression, it unwraps success or evaluates its right operand on absence or error. That operand is any ordinary expression; [`return`], [`break`], [`continue`], and [`throw`] work naturally because each has type [`Never`]. Chained fallbacks associate to the right.",
+        ELSE_EXAMPLES
     ),
     language_item!(
         While,
@@ -1073,7 +1088,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "break | break value",
         "Exits the nearest enclosing loop.",
-        "A bare [`break`] exits the innermost [`while`], runtime [`for`], or [`loop`]. Inside a [`loop`] expression, `break value` also supplies the expression's result; a bare break produces [`None`]. Value-carrying breaks are rejected in [`while`] and [`for`] so they can never accidentally skip an inner statement loop to target an outer value loop. Bare [`break`] may also be the diverging branch in `value else break`.",
+        "[`break`] is an ordinary [`Never`]-typed expression which exits the innermost [`while`], runtime [`for`], or [`loop`]. Inside a [`loop`] expression, `break value` also supplies the expression's result; a bare break produces [`None`]. Value-carrying breaks are rejected in [`while`] and [`for`] so they can never accidentally skip an inner statement loop to target an outer value loop. Because it never yields locally, [`break`] can appear in any expression position whose evaluation may exit that loop, including a fallback [`else`].",
         BREAK_EXAMPLES
     ),
     language_item!(
@@ -1082,7 +1097,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "continue",
         "Starts the next iteration of the nearest enclosing loop.",
-        "[`continue`] may be written as a statement or as the diverging branch in `value else continue`. It may only appear inside a loop; the condition is evaluated again before the next iteration.",
+        "[`continue`] is an ordinary [`Never`]-typed expression. It may appear anywhere an expression is accepted inside a loop, including a fallback [`else`]; evaluating it starts the next iteration instead of yielding a local value. The loop condition is then evaluated again.",
         CONTINUE_EXAMPLE
     ),
     language_item!(
@@ -1109,7 +1124,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "return expression",
         "Returns from the current function or action.",
-        "Functions infer their result from explicit [`return`] expressions and call-site constraints. Unlike a nested [`value block`], a function or lifecycle body never returns its final expression implicitly. Lifecycle actions apply their domain default when control falls through.",
+        "[`return`] is an ordinary [`Never`]-typed expression, so it may appear anywhere an expression is accepted and satisfies any surrounding expected type by leaving the current function or action instead of yielding locally. Functions infer their result from explicit [`return`] expressions and call-site constraints. Unlike a nested [`value block`], a function or lifecycle body never returns its final expression implicitly. Lifecycle actions apply their domain default when control falls through.",
         RETURN_EXAMPLE
     ),
     language_item!(
@@ -1118,7 +1133,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "throw error",
         "Transfers an error to the nearest failure boundary.",
-        "Inside [`retry`], [`throw`] ends the current attempt and retries the complete operand on the next attached update. Otherwise it returns an error from the enclosing [`T!`] function or rejects the current state-field value. The error expression must be a [`String`].",
+        "[`throw`] is an ordinary [`Never`]-typed expression. Inside [`retry`], it ends the current attempt and retries the complete operand on the next attached update. Otherwise it returns an error from the enclosing [`T!`] function or rejects the current state-field value. The error expression must be a [`String`]. Because it never yields locally, it can be used directly as a fallback [`else`] operand or in any other expression position.",
         THROW_EXAMPLE
     ),
     language_item!(

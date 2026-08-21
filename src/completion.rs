@@ -1053,10 +1053,6 @@ fn add_completed_statement_binding(builder: &mut CompletionBuilder, statement: &
         | Stmt::If { .. }
         | Stmt::While { .. }
         | Stmt::For { .. }
-        | Stmt::Break { .. }
-        | Stmt::Continue { .. }
-        | Stmt::Return { .. }
-        | Stmt::Throw { .. }
         | Stmt::Suspend { binding: None, .. }
         | Stmt::Expression(_) => {}
     }
@@ -1072,10 +1068,7 @@ fn add_statement_inner_bindings(builder: &mut CompletionBuilder, statement: &Stm
         Stmt::Variable(variable) => {
             add_expression_bindings(builder, &variable.value, offset);
         }
-        Stmt::Assign { value, .. }
-        | Stmt::Suspend { value, .. }
-        | Stmt::Throw { error: value, .. }
-        | Stmt::Expression(value) => {
+        Stmt::Assign { value, .. } | Stmt::Suspend { value, .. } | Stmt::Expression(value) => {
             add_expression_bindings(builder, value, offset);
         }
         Stmt::StateAssign { target, value, .. } | Stmt::IndexAssign { target, value, .. } => {
@@ -1124,17 +1117,6 @@ fn add_statement_inner_bindings(builder: &mut CompletionBuilder, statement: &Stm
                 add_block_bindings(builder, body, offset);
             }
         }
-        Stmt::Return {
-            value: Some(value), ..
-        } => {
-            add_expression_bindings(builder, value, offset);
-        }
-        Stmt::Break {
-            value: Some(value), ..
-        } => add_expression_bindings(builder, value, offset),
-        Stmt::Return { value: None, .. }
-        | Stmt::Break { value: None, .. }
-        | Stmt::Continue { .. } => {}
     }
 }
 
@@ -1188,17 +1170,12 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
         }
         ExprKind::Fallback { value, fallback } => {
             add_expression_bindings(builder, value, offset);
-            match fallback {
-                crate::ast::FallbackBranch::Value(value)
-                | crate::ast::FallbackBranch::Return {
-                    value: Some(value), ..
-                } => add_expression_bindings(builder, value, offset),
-                crate::ast::FallbackBranch::Return { value: None, .. }
-                | crate::ast::FallbackBranch::Break { .. }
-                | crate::ast::FallbackBranch::Continue { .. } => {}
-            }
+            add_expression_bindings(builder, fallback, offset);
         }
-        ExprKind::Suspend { value, .. }
+        ExprKind::Break(Some(value))
+        | ExprKind::Return(Some(value))
+        | ExprKind::Throw(value)
+        | ExprKind::Suspend { value, .. }
         | ExprKind::Propagate(value)
         | ExprKind::Member {
             receiver: value, ..
@@ -1220,6 +1197,9 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
         ExprKind::Call { args, .. } => add_child_expression_bindings(builder, args, offset),
         ExprKind::Error
         | ExprKind::None
+        | ExprKind::Break(None)
+        | ExprKind::Continue
+        | ExprKind::Return(None)
         | ExprKind::Bool(_)
         | ExprKind::Int { .. }
         | ExprKind::Float(_)
@@ -1276,10 +1256,6 @@ fn statement_span(statement: &Stmt) -> Span {
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
         | Stmt::For { span, .. }
-        | Stmt::Break { span, .. }
-        | Stmt::Continue { span }
-        | Stmt::Return { span, .. }
-        | Stmt::Throw { span, .. }
         | Stmt::Suspend { span, .. } => *span,
         Stmt::Variable(variable) => variable.span,
         Stmt::Expression(expression) => expression.span,

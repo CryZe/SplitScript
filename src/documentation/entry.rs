@@ -84,7 +84,7 @@ impl StandardLibraryDocumentation {
     }
 
     fn raw_summary_markdown(&self) -> String {
-        format!("{}\n\n{}", self.summary, self.details)
+        super::prose_markdown(self.summary, self.details)
     }
 
     fn raw_details_markdown(&self) -> String {

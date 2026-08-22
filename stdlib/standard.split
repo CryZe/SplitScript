@@ -2629,6 +2629,9 @@ intrinsic type Signature {}
 
 /// Identifies a signature selected by a multi-pattern memory scan.
 ///
+/// The address and input index are returned together so one scan can both find
+/// a marker and identify the matching executable layout.
+///
 /// # Example
 ///
 /// Select a discovered memory layout
@@ -2642,6 +2645,10 @@ intrinsic type Signature {}
 struct SignatureMatch {
     /// Address where the signature matched.
     ///
+    /// This is the first byte corresponding to the selected signature. Use the
+    /// companion [`index`](field@SignatureMatch.index) field to determine which
+    /// input pattern produced it.
+    ///
     /// # Example
     ///
     /// Read the matching address
@@ -2652,6 +2659,9 @@ struct SignatureMatch {
     /// ```
     address: address,
     /// Zero-based index in the supplied signature array.
+    ///
+    /// The index preserves the order passed to [`Process.scanMemoryAny`], so it
+    /// can select a layout or interpretation without rescanning the process.
     ///
     /// # Example
     ///
@@ -3822,6 +3832,10 @@ struct ModuleVersionInfo {
 struct Module {
     /// Returns the module base address.
     ///
+    /// Relative virtual addresses within the image are measured from this
+    /// value. Prefer [`offset`] when deriving another address so the intent is
+    /// explicit at the call site.
+    ///
     /// # Example
     ///
     /// Read a discovered module's base address
@@ -3833,6 +3847,10 @@ struct Module {
     address: address,
 
     /// Returns the mapped module size.
+    ///
+    /// The value is the host-reported extent of the loaded image in bytes. It
+    /// can be paired with [`address`] to constrain scanning or validate a
+    /// relative offset before reading memory.
     ///
     /// # Example
     ///
@@ -5144,6 +5162,10 @@ struct MonoModule {
 
 /// Describes a managed image loaded by a Unity Mono runtime.
 ///
+/// A Mono image identifies one managed assembly's metadata within its owning
+/// runtime. Keeping the runtime with the address lets subsequent class
+/// discovery use the correct version-specific metadata layout.
+///
 /// # Example
 ///
 /// Discover the main game image
@@ -5205,6 +5227,10 @@ struct MonoImage {
 }
 
 /// Describes a class discovered in Unity Mono metadata.
+///
+/// The value retains both the discovered metadata address and the runtime that
+/// knows how to traverse its hierarchy. Field lookup therefore remains tied to
+/// the Mono layout used during discovery.
 ///
 /// # Example
 ///

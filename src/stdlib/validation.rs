@@ -504,9 +504,6 @@ fn validate_documentation<Id>(
     if documentation.summary.trim().is_empty() {
         errors.push(format!("{kind} `{name}` has no documentation summary"));
     }
-    if documentation.details.trim().is_empty() {
-        errors.push(format!("{kind} `{name}` has no documentation details"));
-    }
     if require_example && documentation.examples.len() != 1 {
         errors.push(format!(
             "{kind} `{name}` must have exactly one focused documentation example"

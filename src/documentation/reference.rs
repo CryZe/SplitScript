@@ -946,8 +946,9 @@ impl DocumentationReference {
         let uri = language_item_uri(item.id);
         let summary = intra_doc::render_links(item.documentation.summary, &uri, &self.library);
         let details = intra_doc::render_links(item.documentation.details, &uri, &self.library);
+        let prose = super::prose_markdown(&summary, &details);
         let mut markdown = format!(
-            "{}\n\n# {}\n\n_{}_\n\n{}\n\n{}\n\n{}",
+            "{}\n\n# {}\n\n_{}_\n\n{}\n\n{}",
             reference_breadcrumb(
                 &uri,
                 vec![("Language".to_owned(), "/language/index.md".to_owned())],
@@ -956,8 +957,7 @@ impl DocumentationReference {
             item.name,
             language_item_kind_label(item.kind),
             self.render_signature(item.form, &uri, None),
-            summary,
-            details,
+            prose,
         );
         append_examples(
             &mut markdown,
@@ -1370,7 +1370,8 @@ fn append_documentation<Id>(
 ) {
     let summary = intra_doc::render_links(documentation.summary, current_uri, library);
     let details = intra_doc::render_links(documentation.details, current_uri, library);
-    markdown.push_str(&format!("\n\n{}\n\n{}", summary, details));
+    markdown.push_str("\n\n");
+    markdown.push_str(&super::prose_markdown(&summary, &details));
     append_examples(markdown, current_uri, library, documentation.examples);
 }
 
@@ -2074,6 +2075,21 @@ mod tests {
                 .markdown
                 .contains("[`fromSeconds`](fromSeconds.md)"),
             "standard-library prose should render navigable intra-doc references"
+        );
+        let module_address = reference
+            .page("/stdlib/types/Module/fields/address.md")
+            .expect("Module.address has a page");
+        assert_eq!(
+            module_address
+                .markdown
+                .matches("Returns the module base address.")
+                .count(),
+            1
+        );
+        assert!(
+            module_address
+                .markdown
+                .contains("Relative virtual addresses within the image")
         );
         assert!(!page.markdown.contains("splitscript-docs:"));
     }

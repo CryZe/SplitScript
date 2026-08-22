@@ -801,21 +801,24 @@ fn render_stdlib_symbol_hover(library: StandardLibrary, symbol: StdlibSymbolId) 
         }
         StdlibSymbolId::Item(id) => return render_stdlib_hover(library, id, Vec::new()),
     };
+    let prose = crate::documentation::prose_markdown(documentation.summary, documentation.details);
     let mut markdown = format!(
-        "```splitscript\n{form}\n```\n\n{}\n\n{}",
-        crate::documentation::strip_intra_doc_links(documentation.summary),
-        crate::documentation::strip_intra_doc_links(documentation.details)
+        "```splitscript\n{form}\n```\n\n{}",
+        crate::documentation::strip_intra_doc_links(&prose)
     );
     append_examples(&mut markdown, documentation.examples);
     markdown
 }
 
 fn render_language_hover(item: &LanguageItem) -> String {
+    let prose = crate::documentation::prose_markdown(
+        item.documentation.summary,
+        item.documentation.details,
+    );
     let mut markdown = format!(
-        "```splitscript\n{}\n```\n\n{}\n\n{}",
+        "```splitscript\n{}\n```\n\n{}",
         item.form,
-        crate::documentation::strip_intra_doc_links(item.documentation.summary),
-        crate::documentation::strip_intra_doc_links(item.documentation.details)
+        crate::documentation::strip_intra_doc_links(&prose)
     );
     append_examples(&mut markdown, item.documentation.examples);
     markdown
@@ -1433,6 +1436,30 @@ whileAttached {
         );
         assert!(hover.markdown.contains("main executable module"));
         assert!(hover.markdown.contains("available in onAttach; suspends"));
+    }
+
+    #[test]
+    fn field_hover_does_not_repeat_a_documentation_summary() {
+        let source = "state \"game.exe\" {}\nonAttach { let executable = await process.mainModule(); print(executable.address) }";
+        let offset = source.rfind("address").unwrap() + 1;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(offset)
+            .unwrap()
+            .expect("Module.address hover");
+        assert_eq!(
+            hover
+                .markdown
+                .matches("Returns the module base address.")
+                .count(),
+            1,
+            "the concise summary must not be manufactured into a second paragraph"
+        );
+        assert!(
+            hover
+                .markdown
+                .contains("Relative virtual addresses within the image")
+        );
     }
 
     #[test]

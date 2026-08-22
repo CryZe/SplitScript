@@ -1393,7 +1393,7 @@ fn validate_named_declarations<T, I>(
         if !names.insert(name) {
             errors.push(format!("duplicate {kind} name `{name}`"));
         }
-        if documentation.summary.trim().is_empty() || documentation.details.trim().is_empty() {
+        if documentation.summary.trim().is_empty() {
             errors.push(format!("{kind} `{name}` has incomplete documentation"));
         }
         if documentation.examples.len() != 1 {

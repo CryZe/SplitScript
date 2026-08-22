@@ -1769,9 +1769,9 @@ fn simple_completion(label: &str, kind: CompletionKind, detail: &str) -> Complet
 }
 
 fn render_documentation<Id>(documentation: &Documentation<Id>) -> String {
-    crate::documentation::strip_intra_doc_links(&format!(
-        "{}\n\n{}",
-        documentation.summary, documentation.details
+    crate::documentation::strip_intra_doc_links(&crate::documentation::prose_markdown(
+        documentation.summary,
+        documentation.details,
     ))
 }
 

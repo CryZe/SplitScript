@@ -203,11 +203,7 @@ impl<'a> CatalogGenerator<'a> {
         format!(
             "Documentation {{ summary: {}, details: {}, examples: &[{examples}], related: &[] }}",
             quote(&documentation.summary),
-            quote(if documentation.details.is_empty() {
-                &documentation.summary
-            } else {
-                &documentation.details
-            })
+            quote(&documentation.details)
         )
     }
 
@@ -1036,6 +1032,40 @@ stateProvider GBA as gba { "mGBA" }
         ] {
             assert!(generated.contains(identity), "missing {identity}");
         }
+    }
+
+    #[test]
+    fn summary_only_documentation_is_not_copied_into_details() {
+        let source = r#"
+/// A documented record.
+///
+/// # Example
+///
+/// Construct the record
+///
+/// ```splitscript
+/// let value = Example { field: 1 }
+/// ```
+@representation(gcStruct)
+@valueUsage(localVariable)
+struct Example {
+    /// A concise field summary.
+    ///
+    /// # Example
+    ///
+    /// Read the field
+    ///
+    /// ```splitscript
+    /// let field = value.field
+    /// ```
+    field: i32,
+}
+"#;
+        let generated = generate_catalog(&parse(source).unwrap()).unwrap();
+        assert!(generated.contains("summary: \"A concise field summary.\", details: \"\""));
+        assert!(!generated.contains(
+            "summary: \"A concise field summary.\", details: \"A concise field summary.\""
+        ));
     }
 
     #[test]

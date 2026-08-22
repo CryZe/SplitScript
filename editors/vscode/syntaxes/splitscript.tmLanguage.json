@@ -136,7 +136,7 @@
       "patterns": [
         {
           "name": "keyword.control.splitscript",
-          "match": "\\b(if|else|while|for|in|break|continue|match|return|throw|async|await|retry|as|debug)\\b"
+          "match": "\\b(if|else|while|loop|for|in|break|continue|match|return|throw|async|await|retry|as|debug)\\b"
         },
         {
           "name": "keyword.declaration.splitscript",
@@ -152,7 +152,11 @@
         },
         {
           "name": "constant.language.splitscript",
-          "match": "\\b(true|false|None|Some|Success|Err)\\b"
+          "match": "\\b(true|false)\\b"
+        },
+        {
+          "name": "variable.other.enummember.splitscript",
+          "match": "\\b(Some|None|Ok|Err)\\b"
         },
         {
           "name": "variable.language.splitscript",

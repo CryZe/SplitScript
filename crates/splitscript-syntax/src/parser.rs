@@ -366,7 +366,7 @@ impl Parser<'_> {
                 )
                 .with_primary_label("no attachment provider is declared")
                 .with_note(
-                    "use `state \"game.exe\" { ... }` for a native process or `state GBA { ... }` for a supported provider",
+                    "use `state \"game.exe\" { ... }` for a native process or `state Provider { ... }` for a named standard-library provider",
                 )
                 .with_note(
                     "SplitScript currently compiles one executable autosplitter per file; a state-less helper module is not a supported compilation unit",

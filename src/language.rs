@@ -129,6 +129,30 @@ const GBA_STATE_SOURCE: &str = r#"state GBA {
     room: u8 at 0x03000010;
 }"#;
 
+const PS1_STATE_SOURCE: &str = r#"state PS1 {
+    health: u16 at 0x80012346;
+}"#;
+
+const PS2_STATE_SOURCE: &str = r#"state PS2 {
+    health: u16 at 0x00123456;
+}"#;
+
+const SMS_STATE_SOURCE: &str = r#"state SMS {
+    lives: u8 at 0xc010;
+}"#;
+
+const GENESIS_STATE_SOURCE: &str = r#"state Genesis {
+    score: u32 at 0x1200;
+}"#;
+
+const GCN_STATE_SOURCE: &str = r#"state GCN {
+    room: u16 at 0x80001000;
+}"#;
+
+const WII_STATE_SOURCE: &str = r#"state Wii {
+    room: u16 at 0x80001000;
+}"#;
+
 const TICK_RATE_SOURCE: &str = r#"state "game.exe" {}
 
 tickRate {
@@ -515,6 +539,36 @@ const STATE_DECL_EXAMPLES: &[Example] = &[
         "Read state from a GBA emulator",
         "state GBA {\n    room: u8 at 0x03000010;\n}",
         GBA_STATE_SOURCE,
+    ),
+    Example::checked(
+        "Read state from a PlayStation emulator",
+        "state PS1 {\n    health: u16 at 0x80012346;\n}",
+        PS1_STATE_SOURCE,
+    ),
+    Example::checked(
+        "Read state from a PlayStation 2 emulator",
+        "state PS2 {\n    health: u16 at 0x00123456;\n}",
+        PS2_STATE_SOURCE,
+    ),
+    Example::checked(
+        "Read state from a Master System emulator",
+        "state SMS {\n    lives: u8 at 0xc010;\n}",
+        SMS_STATE_SOURCE,
+    ),
+    Example::checked(
+        "Read state from a Sega Genesis emulator",
+        "state Genesis {\n    score: u32 at 0x1200;\n}",
+        GENESIS_STATE_SOURCE,
+    ),
+    Example::checked(
+        "Read state from a GameCube emulator",
+        "state GCN {\n    room: u16 at 0x80001000;\n}",
+        GCN_STATE_SOURCE,
+    ),
+    Example::checked(
+        "Read state from a Wii emulator",
+        "state Wii {\n    room: u16 at 0x80001000;\n}",
+        WII_STATE_SOURCE,
     ),
 ];
 const STATE_LAYOUT_EXAMPLE: &[Example] = &[Example::checked(
@@ -982,9 +1036,9 @@ define_language_catalog! {
         State,
         "state",
         LanguageItemKind::Declaration,
-        "state \"game.exe\" { ... } | state [\"game.exe\", \"demo.exe\"] { ... } | state GBA { ... }",
+        "state \"game.exe\" { ... } | state [\"game.exe\", \"demo.exe\"] { ... } | state Provider { ... }",
         "Declares process attachment and persistent watched state.",
-        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
+        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. A named standard-library provider selects a typed emulator memory model: [`GBA`], [`PS1`], [`PS2`], [`SMS`], [`Genesis`], [`GCN`], and [`Wii`] are currently available. Each provider introduces its documented read root instead of native [`process`](provider@Native) access and accepts original console addresses in state fields. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
         STATE_DECL_EXAMPLES
     ),
     language_item!(

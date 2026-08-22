@@ -293,10 +293,14 @@ impl HighlightCollector<'_> {
                         TokenKind::Ident(name) if name == "v" => {
                             Some(SemanticTokenKind::Version)
                         }
-                        TokenKind::Ident(name)
-                            if matches!(name.as_str(), "true" | "false" | "None") =>
+                        TokenKind::Ident(name) if matches!(name.as_str(), "true" | "false") =>
                         {
                             Some(SemanticTokenKind::Constant)
+                        }
+                        TokenKind::Ident(name)
+                            if matches!(name.as_str(), "Some" | "None" | "Ok" | "Err") =>
+                        {
+                            Some(SemanticTokenKind::EnumMember)
                         }
                         TokenKind::Ident(name) if is_keyword(name) => {
                             Some(SemanticTokenKind::Keyword)
@@ -1062,6 +1066,7 @@ fn is_keyword(name: &str) -> bool {
             | "if"
             | "else"
             | "while"
+            | "loop"
             | "for"
             | "break"
             | "continue"
@@ -1072,9 +1077,6 @@ fn is_keyword(name: &str) -> bool {
             | "retry"
             | "match"
             | "as"
-            | "Some"
-            | "Ok"
-            | "Err"
     )
 }
 
@@ -1144,6 +1146,57 @@ fn is_operator(kind: &TokenKind) -> bool {
 mod tests {
     use super::*;
     use crate::database::CompilerDatabase;
+
+    #[test]
+    fn every_documented_keyword_is_semantically_highlighted() {
+        for item in crate::language::LanguageCatalog::new().items() {
+            if item.kind == crate::language::LanguageItemKind::Keyword {
+                assert!(
+                    item.name == "debug" || is_keyword(item.name),
+                    "documented keyword `{}` is missing from semantic highlighting",
+                    item.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn loop_and_wrapper_variants_have_consistent_semantic_highlighting() {
+        let source = r#"fn wrappers(value: i32?) {
+    let present = Some(5)
+    let absent: i32? = None
+    let success: i32! = Ok(5)
+    let failure: i32! = Err("failed")
+    loop {
+        match value {
+            Some(inner) => break,
+            None => break,
+        }
+    }
+}"#;
+        let mut database = CompilerDatabase::new(source);
+        let highlights = database.semantic_highlights().unwrap();
+        assert!(contains(
+            source,
+            &highlights,
+            "loop",
+            SemanticTokenKind::Keyword,
+            0
+        ));
+        for spelling in ["Some", "None", "Ok", "Err"] {
+            for (offset, _) in source.match_indices(spelling) {
+                assert_eq!(
+                    kind_at(&highlights, offset),
+                    Some(SemanticTokenKind::EnumMember),
+                    "`{spelling}` at {offset} was not highlighted as an enum variant"
+                );
+            }
+        }
+        assert!(!highlights.highlights().iter().any(|highlight| {
+            &source[highlight.span.start..highlight.span.end] == "None"
+                && highlight.kind == SemanticTokenKind::Constant
+        }));
+    }
 
     fn contains(
         source: &str,
@@ -1428,14 +1481,14 @@ whileAttached {
             source,
             &first,
             "None",
-            SemanticTokenKind::Constant,
+            SemanticTokenKind::EnumMember,
             0
         ));
         assert!(!contains(
             source,
             &first,
             "None",
-            SemanticTokenKind::Keyword,
+            SemanticTokenKind::Constant,
             0
         ));
         assert!(contains(

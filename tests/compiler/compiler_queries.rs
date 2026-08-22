@@ -114,12 +114,21 @@ fn vscode_manifest_tracks_the_lsp_semantic_token_legend() {
         "../../editors/vscode/syntaxes/splitscript.tmLanguage.json"
     ))
     .expect("fallback grammar should be valid JSON");
+    let grammar_source = include_str!("../../editors/vscode/syntaxes/splitscript.tmLanguage.json");
 
     assert_eq!(
         manifest["contributes"]["languages"][0]["extensions"][0],
         ".split"
     );
     assert_eq!(grammar["scopeName"], "source.splitscript");
+    assert!(
+        grammar_source.contains("if|else|while|loop|for"),
+        "fallback grammar should recognize the unconditional loop keyword"
+    );
+    assert!(
+        grammar_source.contains("Some|None|Ok|Err"),
+        "fallback grammar should recognize wrapper enum variants"
+    );
     assert_eq!(
         manifest["contributes"]["configurationDefaults"]["[splitscript]"]["editor.semanticHighlighting.enabled"],
         true

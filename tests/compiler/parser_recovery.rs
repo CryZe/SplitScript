@@ -77,7 +77,7 @@ fn missing_state_uses_canonical_attachment_syntax() {
         "a SplitScript autosplitter needs one attachment `state` declaration"
     );
     assert!(diagnostic.notes.iter().any(|note| {
-        note.contains("state \"game.exe\" { ... }") && note.contains("state GBA { ... }")
+        note.contains("state \"game.exe\" { ... }") && note.contains("state Provider { ... }")
     }));
     assert!(
         diagnostic

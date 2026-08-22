@@ -392,10 +392,13 @@ semantic-review evidence, not as a conformance corpus.
   or silently guess offsets.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
-- [ ] Before implementing GameCube, Wii, or Genesis, agree on the public
-  endianness model. Decide whether byte order belongs to a provider, a
-  `MemoryReadable` implementation, a field annotation, or an explicit read;
-  do not hide big-endian or word-swapped behavior in type-checker exceptions.
+- [ ] Add a Wii provider on the provider-owned byte-order foundation established
+  by `state GCN`. Cover MEM1 and MEM2 bounds, Dolphin and libretro discovery,
+  recursive big-endian values, and guest pointer paths.
+- [ ] Add a Genesis provider after extending the provider read boundary to
+  normalize emulator-dependent word-swapped raw bytes before shared endian
+  decoding. Preserve source-level `MemoryReadable` records and arrays rather
+  than exposing backend byte shuffling to autosplitter authors.
 
 ## P1 — expand migration guidance and automated fixes
 

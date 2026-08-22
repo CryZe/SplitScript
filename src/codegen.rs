@@ -72,6 +72,21 @@ use crate::intrinsic_registry::RuntimeHelperId;
 
 const STATE_TYPE: u32 = 0;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemoryByteOrder {
+    Little,
+    Big,
+}
+
+impl From<crate::intrinsic_registry::ProviderByteOrder> for MemoryByteOrder {
+    fn from(value: crate::intrinsic_registry::ProviderByteOrder) -> Self {
+        match value {
+            crate::intrinsic_registry::ProviderByteOrder::Little => Self::Little,
+            crate::intrinsic_registry::ProviderByteOrder::Big => Self::Big,
+        }
+    }
+}
+
 fn standard_display_function(
     source: TypeId,
     program: &Program,
@@ -787,14 +802,19 @@ fn emit_memory_value(
     memory: &MemoryLayouts,
     semantics: &SemanticModel,
     gc: &GcLayout,
+    byte_order: MemoryByteOrder,
 ) {
     match memory
         .layout(ty, semantics)
         .expect("checked memory values are MemoryReadable")
     {
         MemoryTypeLayout::Scalar { .. } => {
-            function.instruction(&Instruction::I32Const(scratch.at(offset)));
-            emit_memory_load(function, semantic_type(ty, semantics));
+            emit_memory_load(
+                function,
+                semantic_type(ty, semantics),
+                scratch.at(offset),
+                byte_order,
+            );
         }
         MemoryTypeLayout::Record(layout) => {
             for field in &layout.fields {
@@ -806,6 +826,7 @@ fn emit_memory_value(
                     memory,
                     semantics,
                     gc,
+                    byte_order,
                 );
             }
             function.instruction(&Instruction::StructNew(
@@ -822,6 +843,7 @@ fn emit_memory_value(
                     memory,
                     semantics,
                     gc,
+                    byte_order,
                 );
             }
             let Type::Array(array) = semantic_type(layout.ty, semantics) else {
@@ -832,7 +854,12 @@ fn emit_memory_value(
     }
 }
 
-fn emit_memory_load(function: &mut Function, ty: Type) {
+fn emit_memory_load(function: &mut Function, ty: Type, address: i32, byte_order: MemoryByteOrder) {
+    if byte_order == MemoryByteOrder::Big && !matches!(ty, Type::Bool | Type::U8 | Type::I8) {
+        emit_big_endian_memory_load(function, ty, address);
+        return;
+    }
+    function.instruction(&Instruction::I32Const(address));
     function.instruction(&match ty {
         Type::Bool | Type::U8 => Instruction::I32Load8U(memarg()),
         Type::I8 => Instruction::I32Load8S(memarg()),
@@ -844,6 +871,59 @@ fn emit_memory_load(function: &mut Function, ty: Type) {
         Type::F64 => Instruction::F64Load(memarg()),
         _ => unreachable!(),
     });
+}
+
+fn emit_big_endian_memory_load(function: &mut Function, ty: Type, address: i32) {
+    let (bytes, wide) = match ty {
+        Type::U16 | Type::I16 => (2, false),
+        Type::I32 | Type::U32 | Type::F32 => (4, false),
+        Type::I64 | Type::U64 | Type::Address | Type::F64 => (8, true),
+        _ => unreachable!("non-scalar or byte-sized values do not need big-endian assembly"),
+    };
+
+    for byte in 0..bytes {
+        function
+            .instruction(&Instruction::I32Const(address))
+            .instruction(&Instruction::I32Load8U(MemArg {
+                offset: byte,
+                align: 0,
+                memory_index: 0,
+            }));
+        let shift = (bytes - byte - 1) * 8;
+        if wide {
+            function.instruction(&Instruction::I64ExtendI32U);
+            if shift != 0 {
+                function
+                    .instruction(&Instruction::I64Const(shift as i64))
+                    .instruction(&Instruction::I64Shl);
+            }
+            if byte != 0 {
+                function.instruction(&Instruction::I64Or);
+            }
+        } else {
+            if shift != 0 {
+                function
+                    .instruction(&Instruction::I32Const(shift as i32))
+                    .instruction(&Instruction::I32Shl);
+            }
+            if byte != 0 {
+                function.instruction(&Instruction::I32Or);
+            }
+        }
+    }
+
+    match ty {
+        Type::I16 => {
+            function.instruction(&Instruction::I32Extend16S);
+        }
+        Type::F32 => {
+            function.instruction(&Instruction::F32ReinterpretI32);
+        }
+        Type::F64 => {
+            function.instruction(&Instruction::F64ReinterpretI64);
+        }
+        _ => {}
+    }
 }
 
 fn emit_default(function: &mut Function, ty: Type, gc: &GcLayout) {
@@ -1043,6 +1123,85 @@ fn memarg() -> MemArg {
 #[cfg(test)]
 mod architecture_tests {
     use std::{fs, path::Path};
+
+    use wasm_encoder::{
+        CodeSection, ConstExpr, DataSection, ExportKind, ExportSection, FunctionSection,
+        MemorySection, MemoryType, Module, TypeSection,
+    };
+
+    use super::*;
+
+    #[test]
+    fn big_endian_scalar_decoder_preserves_integer_float_and_sign_bits() {
+        let mut types = TypeSection::new();
+        types.ty().function([], [ValType::I32]);
+        types.ty().function([], [ValType::F32]);
+        let mut functions = FunctionSection::new();
+        functions.function(0);
+        functions.function(1);
+        functions.function(0);
+        let mut memories = MemorySection::new();
+        memories.memory(MemoryType {
+            minimum: 1,
+            maximum: None,
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        });
+        let mut exports = ExportSection::new();
+        exports.export("integer", ExportKind::Func, 0);
+        exports.export("float", ExportKind::Func, 1);
+        exports.export("signed", ExportKind::Func, 2);
+        let mut code = CodeSection::new();
+        for (ty, address) in [(Type::U32, 0), (Type::F32, 4), (Type::I16, 8)] {
+            let mut function = Function::new([]);
+            emit_memory_load(&mut function, ty, address, MemoryByteOrder::Big);
+            function.instruction(&Instruction::End);
+            code.function(&function);
+        }
+        let mut data = DataSection::new();
+        data.active(
+            0,
+            &ConstExpr::i32_const(0),
+            [0x12, 0x34, 0x56, 0x78, 0x3f, 0xc0, 0x00, 0x00, 0xff, 0xfe],
+        );
+        let mut module = Module::new();
+        module.section(&types);
+        module.section(&functions);
+        module.section(&memories);
+        module.section(&exports);
+        module.section(&code);
+        module.section(&data);
+
+        let engine = wasmtime::Engine::default();
+        let module = wasmtime::Module::new(&engine, module.finish()).unwrap();
+        let mut store = wasmtime::Store::new(&engine, ());
+        let instance = wasmtime::Instance::new(&mut store, &module, &[]).unwrap();
+        assert_eq!(
+            instance
+                .get_typed_func::<(), i32>(&mut store, "integer")
+                .unwrap()
+                .call(&mut store, ())
+                .unwrap() as u32,
+            0x1234_5678
+        );
+        assert_eq!(
+            instance
+                .get_typed_func::<(), f32>(&mut store, "float")
+                .unwrap()
+                .call(&mut store, ())
+                .unwrap(),
+            1.5
+        );
+        assert_eq!(
+            instance
+                .get_typed_func::<(), i32>(&mut store, "signed")
+                .unwrap()
+                .call(&mut store, ())
+                .unwrap(),
+            -2
+        );
+    }
 
     fn visit_rust_files(path: &Path, check: &mut impl FnMut(&Path)) {
         for entry in fs::read_dir(path).expect("codegen source directory should be readable") {

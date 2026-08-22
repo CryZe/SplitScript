@@ -142,6 +142,30 @@ stateProvider SMS as sms {
     "mednafen.exe",
 }
 
+/// Attaches to a supported Nintendo GameCube emulator.
+///
+/// The provider discovers the console's 24 MiB MEM1 mapping and exposes
+/// original GameCube addresses through the read-only `gcn` value of type
+/// [`GCNEmulator`]. Multi-byte values are decoded using the console's
+/// big-endian byte order.
+///
+/// # Example
+///
+/// Read GameCube memory
+///
+/// ```splitscript
+/// state GCN {
+///     room: u16 at 0x80001000
+/// }
+/// ```
+@processType(GCNEmulator)
+@attachment(GCNEmulatorDiscover)
+@directRead(GCNEmulatorRead)
+stateProvider GCN as gcn {
+    "Dolphin.exe",
+    "retroarch.exe",
+}
+
 root {
     /// Prints a diagnostic message.
     ///
@@ -6431,6 +6455,93 @@ struct SMSEmulator {
     @intrinsic(SmsEmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original Master System work RAM address.
+        address: u32,
+    ) -> T!;
+}
+
+/// Retains a discovered Nintendo GameCube MEM1 mapping.
+///
+/// Dolphin exposes MEM1 as a stable 24 MiB native mapping. RetroArch uses the
+/// same mapping while `dolphin_libretro.dll` remains loaded. Reads accept the
+/// original console addresses and decode every [`MemoryReadable`] scalar,
+/// record field, and fixed-array element as big endian.
+///
+/// # Example
+///
+/// Use the attached GameCube memory provider
+///
+/// ```splitscript state GCN
+/// let emulator: GCNEmulator = gcn
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct GCNEmulator {
+    /// Identifies whether the mapping belongs to a standalone or libretro host.
+    private backend: u32,
+
+    /// Stores the native start of the console's MEM1 mapping.
+    private base: address,
+
+    /// Stores the libretro core base used for lifetime validation.
+    private auxiliary: address,
+
+    /// Discovers the emulator's GameCube MEM1 mapping.
+    ///
+    /// A [`state`] declaration using [`GCN`] invokes this automatically after
+    /// attaching to Dolphin or RetroArch.
+    ///
+    /// # Example
+    ///
+    /// Discover a GameCube emulator mapping explicitly
+    ///
+    /// ```splitscript state GCN
+    /// let emulator = await GCNEmulator.discover()
+    /// ```
+    static fn discover() -> GCNEmulator {
+        let processName = process.name()
+        let coreBase: address = 0
+
+        if processName == "retroarch.exe" {
+            let executable = await process.mainModule()
+            if retry executable.pointerSize() != PointerSize.Bit64 {
+                await process.closed()
+            }
+            let core = await process.module("dolphin_libretro.dll")
+            coreBase = core.address
+        }
+
+        let mapping = await process.findMemoryRange(
+            0x2000000,
+            MemoryRangeAccess.ReadWrite,
+        ) else await process.closed()
+        let magic = retry process.read<u32>(mapping.address.offset(0x1c))
+        if magic != 0x3d9f33c2 {
+            await process.closed()
+        }
+
+        return GCNEmulator {
+            backend: if processName == "retroarch.exe" { 4 } else { 1 },
+            base: mapping.address,
+            auxiliary: coreBase,
+        }
+    }
+
+    /// Reads a typed value from emulated GameCube MEM1.
+    ///
+    /// Valid reads lie entirely within `0x80000000..=0x817fffff`. Primitive
+    /// values, record fields, and fixed-array elements are decoded using the
+    /// GameCube's big-endian byte order.
+    ///
+    /// # Example
+    ///
+    /// Read an emulated value
+    ///
+    /// ```splitscript state GCN
+    /// let health: u16 = gcn.read(0x80001234) else 0
+    /// ```
+    @intrinsic(GCNEmulatorRead)
+    fn read<T: MemoryReadable>(
+        /// The original GameCube memory address.
         address: u32,
     ) -> T!;
 }

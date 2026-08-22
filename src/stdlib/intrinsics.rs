@@ -114,6 +114,7 @@ macro_rules! trusted_intrinsics {
             Ps2EmulatorRead,
             Ps1EmulatorRead,
             SmsEmulatorRead,
+            GCNEmulatorRead,
         }
     };
 }

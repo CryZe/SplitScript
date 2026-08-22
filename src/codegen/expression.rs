@@ -22,8 +22,8 @@ use crate::{
 };
 
 use super::{
-    EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, SetFunctions, SettingStorage, Type,
-    array_element_type,
+    EqualityFunctions, GcLayout, MemoryByteOrder, RuntimeHelperPlan, STATE_TYPE, SetFunctions,
+    SettingStorage, Type, array_element_type,
     async_frame::{AsyncFrameRef, IntrinsicFutureInstance, IntrinsicFutureLayout},
     emit_array_get, emit_default, emit_failure_transfer, emit_int, emit_memory_value,
     emit_result_error, emit_result_success, emit_string_literal, emit_struct_get,
@@ -3269,6 +3269,7 @@ fn compile_expr_unconverted(
                     result_type,
                     "process read failed",
                     context,
+                    MemoryByteOrder::Little,
                 );
             }
             IntrinsicId::ProcessFollow => {
@@ -3422,6 +3423,7 @@ fn compile_expr_unconverted(
                 );
             }
             IntrinsicId::GBAEmulatorRead
+            | IntrinsicId::GCNEmulatorRead
             | IntrinsicId::Ps2EmulatorRead
             | IntrinsicId::Ps1EmulatorRead
             | IntrinsicId::SmsEmulatorRead => {
@@ -3881,6 +3883,7 @@ fn emit_process_read_from_stack(
     result_type: ResultTypeId,
     error: &str,
     context: &ExprContext<'_>,
+    byte_order: MemoryByteOrder,
 ) {
     let ty = context.type_id(ty);
     let physical_type = semantic_type(ty, context.semantics);
@@ -3906,6 +3909,7 @@ fn emit_process_read_from_stack(
         context.memory,
         context.semantics,
         context.gc,
+        byte_order,
     );
     emit_result_success(function, result_type, context.gc);
     function.instruction(&Instruction::Else);
@@ -4227,6 +4231,7 @@ fn compile_provider_read(
         result_type,
         contract.read_failure,
         context,
+        contract.byte_order.into(),
     );
     function.instruction(&Instruction::End);
 }

@@ -15,7 +15,7 @@ use crate::{
 };
 
 use super::{
-    LocalPlanOptions, Type,
+    LocalPlanOptions, MemoryByteOrder, Type,
     async_frame::{
         AsyncFrameLayout, AsyncFrameRef, AsyncFrameSource, IntrinsicFutureInstance,
         IntrinsicFutureLayout,
@@ -1627,6 +1627,7 @@ fn compile_suspension_poll(
                     context.memory,
                     context.semantics,
                     context.gc,
+                    MemoryByteOrder::Little,
                 );
                 function.instruction(&Instruction::StructSet {
                     struct_type_index: context.locals.frame().struct_type,

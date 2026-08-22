@@ -1,5 +1,14 @@
 # SplitScript roadmap
 
+## 2026-08-22: provider-owned byte order and GameCube support
+
+- Separated fixed `MemoryReadable` shape from the byte order supplied by an
+  emulator provider.
+- Added recursive big-endian decoding for primitives, records, fixed arrays,
+  floating-point values, signed integers, and provider pointer paths.
+- Added `state GCN` and `gcn: GCNEmulator` with source-defined Dolphin and
+  `dolphin_libretro.dll` discovery and MEM1 address translation.
+
 ## 2026-08-22: source-defined Master System emulator provider
 
 - Added `state SMS` and `sms: SMSEmulator` with source-defined discovery for

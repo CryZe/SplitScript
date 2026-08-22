@@ -21,6 +21,7 @@ mod decimal_conversion;
 mod equality;
 mod float_parse;
 mod gba;
+mod gcn;
 mod process;
 mod ps1;
 mod ps2;
@@ -327,6 +328,10 @@ pub(super) fn build_follow_address(inputs: &RuntimeHelperInputs<'_>) -> Function
 
 pub(super) fn build_gba_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
     gba::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
+}
+
+pub(super) fn build_gcn_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    gcn::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
 }
 
 pub(super) fn build_ps2_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {

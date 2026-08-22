@@ -252,6 +252,7 @@ pub(super) fn compile_read(
         lowering.memory,
         lowering.semantics,
         lowering.gc,
+        MemoryByteOrder::Little,
     );
     emit_pointer_read_success(&mut function, result_type, optional, lowering.gc);
     function.instruction(&Instruction::End);
@@ -381,9 +382,13 @@ fn compile_provider_direct_read(
             },
             4,
         );
+        emit_memory_load(
+            &mut function,
+            Type::U32,
+            lowering.abi_read.start(),
+            contract.byte_order.into(),
+        );
         function
-            .instruction(&Instruction::I32Const(lowering.abi_read.start()))
-            .instruction(&Instruction::I32Load(memarg()))
             .instruction(&Instruction::I32Const(*offset as i32))
             .instruction(&Instruction::I32Add)
             .instruction(&Instruction::LocalSet(guest_address_local));
@@ -438,6 +443,7 @@ fn compile_provider_direct_read(
         lowering.memory,
         lowering.semantics,
         lowering.gc,
+        contract.byte_order.into(),
     );
     emit_pointer_read_success(&mut function, result_type, optional, lowering.gc);
     function.instruction(&Instruction::End);
@@ -873,11 +879,11 @@ use crate::{
 };
 
 use super::{
-    GcLayout, Type,
+    GcLayout, MemoryByteOrder, Type,
     async_frame::AsyncFrameLayout,
     context::EmissionContext,
     data_plan::StringPool,
-    emit_default, emit_memory_value, emit_result_error, emit_result_success,
+    emit_default, emit_memory_load, emit_memory_value, emit_result_error, emit_result_success,
     expression::{BareReturn, ExprContext, LocalStorage, MatchLayout, compile_block},
     imports::Abi,
     memarg, memory_plan, semantic_type, value_type,

@@ -2213,7 +2213,7 @@ fn inspect() {
         assert!(!candidates.contains(&"Process".to_owned()));
 
         let mut provider = CompilerDatabase::new("state G");
-        assert_eq!(labels(&mut provider, "state G"), vec!["GBA"]);
+        assert_eq!(labels(&mut provider, "state G"), vec!["GBA", "GCN"]);
 
         let mut provider_body = CompilerDatabase::new("state GBA ");
         assert_eq!(labels(&mut provider_body, "state GBA "), vec!["{"]);

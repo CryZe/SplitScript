@@ -156,6 +156,27 @@ state SMS {
 Both `sms.read<T>(address)` and state-field pointer paths use the shared
 provider-read contract and little-endian `MemoryReadable` layouts.
 
+## Nintendo GameCube emulator support
+
+`state GCN { ... }` introduces `gcn: GCNEmulator` and maps original MEM1
+addresses in `0x80000000..=0x817fffff`. The source-defined provider supports
+Dolphin and 64-bit RetroArch with `dolphin_libretro.dll`.
+
+```splitscript
+record PlayerState {
+    health: u16,
+    position: [f32; 3],
+}
+
+state GCN {
+    player: PlayerState at 0x80001000;
+}
+```
+
+GameCube reads use provider-owned big-endian decoding. The same recursive
+decoder handles primitive values, every field of a readable record, fixed
+arrays, and intermediate `u32` pointers in state-field pointer paths.
+
 ## Compiler and tooling model
 
 The library surface is described by a backend-independent catalog. Each entry

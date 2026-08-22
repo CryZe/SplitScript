@@ -389,6 +389,7 @@ mod tests {
             ("process helper", include_str!("runtime_helpers/process.rs")),
             ("Unity helper", include_str!("runtime_helpers/unity.rs")),
             ("GBA helper", include_str!("runtime_helpers/gba.rs")),
+            ("GameCube helper", include_str!("runtime_helpers/gcn.rs")),
         ] {
             let lines = source.lines().collect::<Vec<_>>();
             for (index, line) in lines.iter().enumerate() {

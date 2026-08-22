@@ -45,6 +45,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::PS2EmulatorDiscover,
         StdlibItemId::PS1EmulatorDiscover,
         StdlibItemId::SMSEmulatorDiscover,
+        StdlibItemId::GCNEmulatorDiscover,
     ] {
         assert!(matches!(
             library.item(item).implementation,
@@ -1038,6 +1039,94 @@ fn sms_provider_covers_asr_backends_and_guest_pointer_paths() {
         .expect("the SMS provider should expose catalog documentation");
     assert!(hover.markdown.contains("state SMS { ... }"));
     assert!(hover.markdown.contains("sms: SMSEmulator"));
+}
+
+#[test]
+fn gcn_provider_decodes_big_endian_records_arrays_and_guest_pointer_paths() {
+    let library = StandardLibrary::new();
+    let gcn = library
+        .state_provider_by_name("GCN")
+        .expect("the bundled GameCube provider should be discoverable by source name");
+    assert_eq!(gcn.id, StdlibStateProviderId::Gcn);
+    assert_eq!(gcn.value_name, "gcn");
+    assert_eq!(gcn.process_type, StdlibTypeId::GCNEmulator);
+    assert_eq!(gcn.direct_read, StdlibItemId::GCNEmulatorRead);
+    assert_eq!(
+        gcn.attachment,
+        splitscript::compiler::stdlib::StateProviderAttachment::Callable(
+            StdlibItemId::GCNEmulatorDiscover,
+        )
+    );
+    assert!(matches!(
+        library
+            .item(StdlibItemId::GCNEmulatorDiscover)
+            .implementation,
+        Implementation::LibraryBody { .. }
+    ));
+    assert!(matches!(
+        gcn.processes,
+        splitscript::compiler::stdlib::StateProviderProcesses::Declared(processes)
+            if processes.contains(&"Dolphin.exe") && processes.contains(&"retroarch.exe")
+    ));
+
+    let source = r#"
+        record Snapshot {
+            health: u16,
+            velocity: i32,
+            samples: [u16; 2],
+        }
+
+        state GCN {
+            snapshot: Snapshot at 0x80001000;
+            pointer: u32 at 0x80002000, 0x20, -0x8;
+        }
+
+        whileAttached {
+            let value: f32 = gcn.read(0x80003000) else 0.0
+            if value > 0.0 { print("positive") }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("GameCube big-endian values and guest pointer paths should type-check");
+    assert_eq!(
+        checked.semantics().state_provider(),
+        Some(StdlibStateProviderId::Gcn)
+    );
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("GameCube big-endian values and guest pointer paths should emit valid Wasm");
+    let operators = wasmparser::Parser::new(0)
+        .parse_all(&wasm)
+        .filter_map(Result::ok)
+        .filter_map(|payload| match payload {
+            wasmparser::Payload::CodeSectionEntry(body) => Some(body),
+            _ => None,
+        })
+        .flat_map(|body| body.get_operators_reader().unwrap().into_iter())
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    assert!(
+        operators
+            .iter()
+            .filter(|operator| matches!(operator, wasmparser::Operator::I32Load8U { .. }))
+            .count()
+            >= 12
+    );
+    assert!(
+        operators
+            .iter()
+            .any(|operator| matches!(operator, wasmparser::Operator::F32ReinterpretI32))
+    );
+
+    let provider_source = "state GCN {}";
+    let mut database = splitscript::tooling::database::CompilerDatabase::new(provider_source);
+    let hover = database
+        .hover(provider_source.find("GCN").unwrap() + 1)
+        .unwrap()
+        .expect("the GameCube provider should expose catalog documentation");
+    assert!(hover.markdown.contains("state GCN { ... }"));
+    assert!(hover.markdown.contains("gcn: GCNEmulator"));
 }
 
 #[test]

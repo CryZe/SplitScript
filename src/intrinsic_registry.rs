@@ -79,6 +79,7 @@ pub(crate) enum RuntimeHelperId {
     JoinStrings,
     FollowAddress,
     GBATranslateAddress,
+    GCNTranslateAddress,
     Ps2TranslateAddress,
     Ps1TranslateAddress,
     SmsTranslateAddress,
@@ -95,31 +96,55 @@ pub(crate) enum RuntimeHelperId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ProviderReadContract {
     pub translator: RuntimeHelperId,
+    pub byte_order: ProviderByteOrder,
     pub invalid_address: &'static str,
     pub read_failure: &'static str,
+}
+
+/// The byte order of scalar values exposed by an emulator provider.
+///
+/// This belongs to the provider read contract rather than `MemoryReadable`:
+/// the latter describes a value's fixed shape, while the provider describes
+/// how bytes from the emulated machine are encoded. A future provider whose
+/// byte order varies by backend can extend this with provider-owned runtime
+/// state without duplicating record or array layouts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProviderByteOrder {
+    Little,
+    Big,
 }
 
 pub(crate) const fn provider_read_contract(intrinsic: IntrinsicId) -> Option<ProviderReadContract> {
     match intrinsic {
         IntrinsicId::GBAEmulatorRead => Some(ProviderReadContract {
             translator: RuntimeHelperId::GBATranslateAddress,
+            byte_order: ProviderByteOrder::Little,
             invalid_address: "invalid or unavailable GBA memory address",
             read_failure: "GBA memory read failed",
         }),
         IntrinsicId::Ps2EmulatorRead => Some(ProviderReadContract {
             translator: RuntimeHelperId::Ps2TranslateAddress,
+            byte_order: ProviderByteOrder::Little,
             invalid_address: "invalid or unavailable PS2 memory address",
             read_failure: "PS2 memory read failed",
         }),
         IntrinsicId::Ps1EmulatorRead => Some(ProviderReadContract {
             translator: RuntimeHelperId::Ps1TranslateAddress,
+            byte_order: ProviderByteOrder::Little,
             invalid_address: "invalid or unavailable PS1 memory address",
             read_failure: "PS1 memory read failed",
         }),
         IntrinsicId::SmsEmulatorRead => Some(ProviderReadContract {
             translator: RuntimeHelperId::SmsTranslateAddress,
+            byte_order: ProviderByteOrder::Little,
             invalid_address: "invalid or unavailable SMS memory address",
             read_failure: "SMS memory read failed",
+        }),
+        IntrinsicId::GCNEmulatorRead => Some(ProviderReadContract {
+            translator: RuntimeHelperId::GCNTranslateAddress,
+            byte_order: ProviderByteOrder::Big,
+            invalid_address: "invalid or unavailable GameCube memory address",
+            read_failure: "GameCube memory read failed",
         }),
         _ => None,
     }
@@ -373,6 +398,7 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::StringCharAt
         | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
         IntrinsicId::GBAEmulatorRead
+        | IntrinsicId::GCNEmulatorRead
         | IntrinsicId::Ps2EmulatorRead
         | IntrinsicId::Ps1EmulatorRead
         | IntrinsicId::SmsEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
@@ -446,6 +472,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::UnityClassFieldAny => &[Helper(Runtime::UnityGetFieldAny)],
         IntrinsicId::UnityClassStaticInstance => &[Helper(Runtime::UnityGetStaticInstance)],
         IntrinsicId::GBAEmulatorRead => &[Helper(Runtime::GBATranslateAddress)],
+        IntrinsicId::GCNEmulatorRead => &[Helper(Runtime::GCNTranslateAddress)],
         IntrinsicId::Ps2EmulatorRead => &[Helper(Runtime::Ps2TranslateAddress)],
         IntrinsicId::Ps1EmulatorRead => &[Helper(Runtime::Ps1TranslateAddress)],
         IntrinsicId::SmsEmulatorRead => &[Helper(Runtime::SmsTranslateAddress)],
@@ -566,6 +593,7 @@ const UNITY_IMAGE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Uni
 const UNITY_CLASS: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityClass);
 const UNITY_FIELD: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityField);
 const GBA_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GBAEmulator);
+const GCN_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GCNEmulator);
 const PS2_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS2Emulator);
 const PS1_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS1Emulator);
 const SMS_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SMSEmulator);
@@ -1728,6 +1756,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             GBAEmulatorRead,
             Method,
             signature(MEMORY_T, Some(GBA_EMULATOR), params![value(U32)], T_RESULT,),
+            PROCESS,
+            Everywhere,
+            Retryable
+        ),
+        IntrinsicId::GCNEmulatorRead => contract!(
+            GCNEmulatorRead,
+            Method,
+            signature(MEMORY_T, Some(GCN_EMULATOR), params![value(U32)], T_RESULT,),
             PROCESS,
             Everywhere,
             Retryable

@@ -256,6 +256,10 @@ fn type_name(
         TypeKind::Result { value, .. } => format!("{}!", nested(*value)),
         TypeKind::Async { value, .. } => format!("async {}", nested(*value)),
         TypeKind::Set { element, .. } => format!("Set<{}>", nested(*element)),
+        TypeKind::Range { bound, kind, .. } => {
+            let bound = nested(*bound);
+            format!("{bound}{}{bound}", kind.operator())
+        }
     }
 }
 
@@ -810,6 +814,7 @@ fn scalar_type_entry(
         | Type::Option(_)
         | Type::Result(_)
         | Type::Async(_)
+        | Type::Range(_)
         | Type::Set(_) => return None,
     };
     let entry = dwarf.unit.add(root, gimli::DW_TAG_base_type);

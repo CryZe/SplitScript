@@ -9,8 +9,8 @@ use std::fmt;
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, EnumDecl, EnumId, FunctionId, OptionTypeId, RecordDecl, RecordId,
-        ResultTypeId, TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, EnumDecl, EnumId, FunctionId, OptionTypeId, RangeKind,
+        RangeTypeId, RecordDecl, RecordId, ResultTypeId, TypeApplicationId,
     },
     inference::Type,
     stdlib::{CoreTypeId, StandardLibrary, StdlibTypeId},
@@ -61,6 +61,7 @@ pub enum ResolvedTypeRef {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Range(RangeTypeId),
     Set(TypeApplicationId),
 }
 
@@ -96,6 +97,13 @@ pub struct ResolvedResultType {
 pub struct ResolvedAsyncType {
     pub id: AsyncTypeId,
     pub value: ResolvedTypeRef,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedRangeType {
+    pub id: RangeTypeId,
+    pub bound: ResolvedTypeRef,
+    pub kind: RangeKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +158,11 @@ pub enum TypeKind {
     Async {
         layout: AsyncTypeId,
         value: TypeId,
+    },
+    Range {
+        layout: RangeTypeId,
+        bound: TypeId,
+        kind: RangeKind,
     },
     Set {
         layout: TypeApplicationId,
@@ -246,6 +259,7 @@ impl TypeStore {
             TypeKind::Option { value, .. }
             | TypeKind::Result { value, .. }
             | TypeKind::Async { value, .. } => self.contains_error(*value),
+            TypeKind::Range { bound, .. } => self.contains_error(*bound),
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot
@@ -352,6 +366,16 @@ impl TypeStore {
                 let value = self.intern_type_ref(value, arrays, options, results, asyncs, sets);
                 TypeKind::Async { layout: id, value }
             }
+            Type::Range(id) => {
+                return self
+                    .kinds
+                    .iter()
+                    .position(
+                        |kind| matches!(kind, TypeKind::Range { layout, .. } if *layout == id),
+                    )
+                    .map(|index| TypeId(index as u32))
+                    .unwrap_or_else(|| panic!("missing checked range type {id}"));
+            }
             Type::Set(id) => {
                 let set = sets
                     .iter()
@@ -402,6 +426,12 @@ impl TypeStore {
             ResolvedTypeRef::Async(id) => {
                 self.intern_inferred(Type::Async(id), arrays, options, results, asyncs, sets)
             }
+            ResolvedTypeRef::Range(id) => self
+                .kinds
+                .iter()
+                .position(|kind| matches!(kind, TypeKind::Range { layout, .. } if *layout == id))
+                .map(|index| TypeId(index as u32))
+                .unwrap_or_else(|| panic!("missing checked range type {id}")),
             ResolvedTypeRef::Set(id) => {
                 self.intern_inferred(Type::Set(id), arrays, options, results, asyncs, sets)
             }

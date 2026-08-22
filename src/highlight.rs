@@ -421,6 +421,14 @@ impl HighlightCollector<'_> {
                 .iter()
                 .find(|future| future.id == id)
                 .is_some_and(|future| self.type_contains_none(future.value)),
+            TypeRef::Range(id) => self
+                .syntax
+                .range_types
+                .iter()
+                .find(|range| range.id == id)
+                .is_some_and(|range| {
+                    self.type_contains_none(range.lower) || self.type_contains_none(range.upper)
+                }),
             TypeRef::Application(id) => self
                 .syntax
                 .type_applications
@@ -1126,6 +1134,8 @@ fn is_operator(kind: &TokenKind) -> bool {
             | TokenKind::Shl
             | TokenKind::Shr
             | TokenKind::Dot
+            | TokenKind::DotDot
+            | TokenKind::DotDotLt
             | TokenKind::DotDotEq
     )
 }

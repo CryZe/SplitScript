@@ -76,6 +76,7 @@ pub struct CheckOutput {
     pub option_types: Vec<ResolvedOptionType>,
     pub result_types: Vec<ResolvedResultType>,
     pub async_types: Vec<ResolvedAsyncType>,
+    pub range_types: Vec<crate::types::ResolvedRangeType>,
     pub set_types: Vec<ResolvedSetType>,
 }
 
@@ -719,6 +720,7 @@ fn resolved_type_ref(ty: ResolvedTypeRef, types: &TypeStore) -> Type {
         ResolvedTypeRef::Option(id) => Type::Option(id),
         ResolvedTypeRef::Result(id) => Type::Result(id),
         ResolvedTypeRef::Async(id) => Type::Async(id),
+        ResolvedTypeRef::Range(id) => Type::Range(id),
         ResolvedTypeRef::Set(id) => Type::Set(id),
     }
 }

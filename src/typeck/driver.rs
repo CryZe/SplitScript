@@ -3,8 +3,8 @@
 use crate::{
     ast::Program,
     inference::{
-        ArrayLayout, AsyncLayout, ConstructedLayouts, InferenceContext, OptionLayout, Requirements,
-        ResultLayout, SetLayout, Type,
+        ArrayLayout, AsyncLayout, ConstructedLayouts, InferenceContext, OptionLayout, RangeLayout,
+        Requirements, ResultLayout, SetLayout, Type,
     },
     resolution::ProgramResolutions,
     semantic::SemanticBuilder,
@@ -74,6 +74,16 @@ fn initialize_checker(
             value: syntax_type(future.value, &semantic_types, resolutions),
         })
         .collect::<Vec<_>>();
+    let range_types = program
+        .range_types
+        .iter()
+        .map(|range| RangeLayout {
+            id: range.id,
+            lower: syntax_type(range.lower, &semantic_types, resolutions),
+            upper: syntax_type(range.upper, &semantic_types, resolutions),
+            kind: range.kind,
+        })
+        .collect::<Vec<_>>();
     let set_types = program
         .type_applications
         .iter()
@@ -99,6 +109,7 @@ fn initialize_checker(
             options: option_types,
             results: result_types,
             asyncs: async_types,
+            ranges: range_types,
             sets: set_types,
         },
     );
@@ -149,6 +160,16 @@ fn initialize_checker(
         expected_type_source: None,
         return_type_source: None,
     };
+    for range in program.range_types.iter() {
+        let lower = checker.syntax_type(range.lower);
+        let upper = checker.syntax_type(range.upper);
+        checker.unify(lower, upper, range.occurrences[0]);
+        checker.require(
+            lower,
+            Requirements::capability(crate::stdlib::StdlibCapabilityId::Integer),
+            range.occurrences[0],
+        );
+    }
     let fields = checker.standard_library.fields().to_vec();
     let variables = std::collections::HashMap::new();
     for field in fields {

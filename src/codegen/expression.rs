@@ -6,7 +6,7 @@ use wasm_encoder::{AbstractHeapType, BlockType, Function, HeapType, Instruction,
 
 use crate::{
     abi::AbiImportId,
-    ast::{ActionKind, BinaryOp, EnumDecl, ExprId, RecordDecl, ResultTypeId, ValueId},
+    ast::{ActionKind, BinaryOp, EnumDecl, ExprId, RangeKind, RecordDecl, ResultTypeId, ValueId},
     intrinsic_registry::RuntimeHelperId,
     memory::MemoryLayouts,
     semantic::{
@@ -442,6 +442,7 @@ fn compile_block_with_loop(
                     *binding,
                     *iterable_value,
                     *index_value,
+                    *version_value,
                     context,
                 );
                 compile_block_with_loop(
@@ -1407,6 +1408,15 @@ enum ForCollection {
         set: crate::ast::TypeApplicationId,
         backing: crate::ast::ArrayTypeId,
     },
+    /// A first-class range stored as an immutable GC object.
+    Range {
+        range: crate::ast::RangeTypeId,
+        bound: Type,
+    },
+    /// A range literal whose end is kept directly in `iterable_value`.
+    DirectRange {
+        bound: Type,
+    },
 }
 
 fn for_collection_type(
@@ -1438,7 +1448,24 @@ fn for_collection_type(
                 .expect("checked set layouts have iterable storage");
             (ForCollection::Set { set, backing }, element)
         }
-        _ => unreachable!("checked for-loop iterables are arrays or sets"),
+        Type::Range(range) => {
+            let bound = context
+                .semantics
+                .types()
+                .iter()
+                .find_map(|(_, kind)| match kind {
+                    crate::types::TypeKind::Range { layout, bound, .. } if *layout == range => {
+                        Some(context.ty(*bound))
+                    }
+                    _ => None,
+                })
+                .expect("checked range layouts have a bound type");
+            (ForCollection::Range { range, bound }, bound)
+        }
+        // Only compiler-owned `for` storage can reach this helper. A scalar
+        // iterable slot is the allocation-free representation of a direct
+        // range literal and contains its upper bound.
+        bound => (ForCollection::DirectRange { bound }, bound),
     }
 }
 
@@ -1450,19 +1477,54 @@ pub(super) fn compile_for_init(
     iterable: ExprId,
     context: &ExprContext<'_>,
 ) {
-    compile_value_set(function, iterable_value, context, |function| {
-        compile_expr(function, iterable, context);
-    });
-    compile_value_set(function, index_value, context, |function| {
-        function.instruction(&Instruction::I32Const(0));
-    });
-    compile_value_set(function, version_value, context, |function| {
-        compile_value_get(function, iterable_value, context);
-        match for_collection_type(iterable_value, context).0 {
+    let collection = for_collection_type(iterable_value, context).0;
+    match collection {
+        ForCollection::DirectRange { .. } => {
+            let wasm_ir::ExpressionKind::Range { start, end, .. } = &context
+                .wasm_ir
+                .expression(iterable)
+                .expect("range expression exists")
+                .kind
+            else {
+                unreachable!("direct range storage belongs to a range literal")
+            };
+            compile_value_set(function, iterable_value, context, |function| {
+                compile_expr(function, *end, context);
+            });
+            compile_value_set(function, index_value, context, |function| {
+                compile_expr(function, *start, context);
+            });
+        }
+        ForCollection::Range { range, bound } => {
+            compile_value_set(function, iterable_value, context, |function| {
+                compile_expr(function, iterable, context);
+            });
+            compile_value_set(function, index_value, context, |function| {
+                compile_value_get(function, iterable_value, context);
+                function.instruction(&Instruction::RefAsNonNull);
+                emit_typed_struct_get(function, context.gc.index(Type::Range(range)), 0, bound);
+            });
+        }
+        ForCollection::Array(_) | ForCollection::Set { .. } => {
+            compile_value_set(function, iterable_value, context, |function| {
+                compile_expr(function, iterable, context);
+            });
+            compile_value_set(function, index_value, context, |function| {
+                function.instruction(&Instruction::I32Const(0));
+            });
+        }
+    }
+    compile_value_set(
+        function,
+        version_value,
+        context,
+        |function| match collection {
             ForCollection::Array(array) => {
+                compile_value_get(function, iterable_value, context);
                 super::array_value::emit_version(function, context.gc, array);
             }
             ForCollection::Set { set, .. } => {
+                compile_value_get(function, iterable_value, context);
                 function
                     .instruction(&Instruction::RefAsNonNull)
                     .instruction(&Instruction::StructGet {
@@ -1470,8 +1532,37 @@ pub(super) fn compile_for_init(
                         field_index: super::set_functions::VERSION_FIELD,
                     });
             }
-        }
-    });
+            ForCollection::Range { range, .. } => {
+                let kind = context
+                    .semantics
+                    .types()
+                    .iter()
+                    .find_map(|(_, kind)| match kind {
+                        crate::types::TypeKind::Range { layout, kind, .. } if *layout == range => {
+                            Some(*kind)
+                        }
+                        _ => None,
+                    })
+                    .expect("checked range layouts retain their endpoint kind");
+                function.instruction(&Instruction::I32Const(
+                    matches!(kind, RangeKind::Inclusive) as i32
+                ));
+            }
+            ForCollection::DirectRange { .. } => {
+                let wasm_ir::ExpressionKind::Range { kind, .. } = &context
+                    .wasm_ir
+                    .expression(iterable)
+                    .expect("range expression exists")
+                    .kind
+                else {
+                    unreachable!("direct range storage belongs to a range literal")
+                };
+                function.instruction(&Instruction::I32Const(
+                    matches!(kind, RangeKind::Inclusive) as i32
+                ));
+            }
+        },
+    );
 }
 
 /// Leaves whether another element exists on the stack.
@@ -1482,8 +1573,49 @@ pub(super) fn compile_for_has_next(
     version_value: ValueId,
     context: &ExprContext<'_>,
 ) {
+    let (collection, _) = for_collection_type(iterable_value, context);
+    if matches!(
+        collection,
+        ForCollection::Range { .. } | ForCollection::DirectRange { .. }
+    ) {
+        let bound = match collection {
+            ForCollection::Range { bound, .. } | ForCollection::DirectRange { bound } => bound,
+            _ => unreachable!(),
+        };
+        let emit_end = |function: &mut Function| match collection {
+            ForCollection::Range { range, .. } => {
+                compile_value_get(function, iterable_value, context);
+                function.instruction(&Instruction::RefAsNonNull);
+                emit_typed_struct_get(function, context.gc.index(Type::Range(range)), 1, bound);
+            }
+            ForCollection::DirectRange { .. } => {
+                compile_value_get(function, iterable_value, context);
+            }
+            _ => unreachable!(),
+        };
+
+        // `version_value` is 0 for an exclusive range, 1 for an active
+        // inclusive range, and 2 after the inclusive endpoint has been
+        // yielded. Keeping the exhausted state separately avoids overflowing
+        // when the inclusive endpoint is the integer type's maximum value.
+        compile_value_get(function, index_value, context);
+        emit_end(function);
+        function.instruction(&compare(bound, bound.is_signed(), Compare::Lt));
+        compile_value_get(function, version_value, context);
+        function
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::I32Eq);
+        compile_value_get(function, index_value, context);
+        emit_end(function);
+        emit_binary_instruction(function, BinaryOp::Eq, bound);
+        function
+            .instruction(&Instruction::I32And)
+            .instruction(&Instruction::I32Or);
+        return;
+    }
+
     compile_value_get(function, iterable_value, context);
-    match for_collection_type(iterable_value, context).0 {
+    match collection {
         ForCollection::Array(array) => {
             super::array_value::emit_version(function, context.gc, array);
         }
@@ -1495,6 +1627,7 @@ pub(super) fn compile_for_has_next(
                     field_index: super::set_functions::VERSION_FIELD,
                 });
         }
+        ForCollection::Range { .. } | ForCollection::DirectRange { .. } => unreachable!(),
     }
     compile_value_get(function, version_value, context);
     function
@@ -1504,7 +1637,7 @@ pub(super) fn compile_for_has_next(
         .instruction(&Instruction::End);
     compile_value_get(function, index_value, context);
     compile_value_get(function, iterable_value, context);
-    match for_collection_type(iterable_value, context).0 {
+    match collection {
         ForCollection::Array(array) => {
             super::array_value::emit_length(function, context.gc, array);
         }
@@ -1515,6 +1648,7 @@ pub(super) fn compile_for_has_next(
                 field_index: super::set_functions::LENGTH_FIELD,
             });
         }
+        ForCollection::Range { .. } | ForCollection::DirectRange { .. } => unreachable!(),
     }
     function.instruction(&Instruction::I32LtU);
 }
@@ -1526,9 +1660,62 @@ pub(super) fn compile_for_bind_and_advance(
     binding: ValueId,
     iterable_value: ValueId,
     index_value: ValueId,
+    version_value: ValueId,
     context: &ExprContext<'_>,
 ) {
     let (collection, element) = for_collection_type(iterable_value, context);
+    if matches!(
+        collection,
+        ForCollection::Range { .. } | ForCollection::DirectRange { .. }
+    ) {
+        compile_value_set(function, binding, context, |function| {
+            compile_value_get(function, index_value, context);
+        });
+
+        let emit_end = |function: &mut Function| match collection {
+            ForCollection::Range { range, bound } => {
+                compile_value_get(function, iterable_value, context);
+                function.instruction(&Instruction::RefAsNonNull);
+                emit_typed_struct_get(function, context.gc.index(Type::Range(range)), 1, bound);
+            }
+            ForCollection::DirectRange { .. } => {
+                compile_value_get(function, iterable_value, context);
+            }
+            _ => unreachable!(),
+        };
+        // The only non-advancing iteration is the inclusive endpoint. Mark it
+        // exhausted before entering the body so both fallthrough and
+        // `continue` reach a terminating header.
+        compile_value_get(function, version_value, context);
+        function
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::I32Eq);
+        compile_value_get(function, index_value, context);
+        emit_end(function);
+        emit_binary_instruction(function, BinaryOp::Eq, element);
+        function
+            .instruction(&Instruction::I32And)
+            .instruction(&Instruction::If(BlockType::Empty));
+        compile_value_set(function, version_value, context, |function| {
+            function.instruction(&Instruction::I32Const(2));
+        });
+        function.instruction(&Instruction::Else);
+        compile_value_set(function, index_value, context, |function| {
+            compile_value_get(function, index_value, context);
+            function.instruction(
+                &if matches!(element, Type::I64 | Type::U64 | Type::Address) {
+                    Instruction::I64Const(1)
+                } else {
+                    Instruction::I32Const(1)
+                },
+            );
+            emit_binary_instruction(function, BinaryOp::Add, element);
+            emit_narrow_integer_result(function, element);
+        });
+        function.instruction(&Instruction::End);
+        return;
+    }
+
     compile_value_set(function, binding, context, |function| {
         compile_value_get(function, iterable_value, context);
         let array = match collection {
@@ -1545,6 +1732,7 @@ pub(super) fn compile_for_bind_and_advance(
                 function.instruction(&Instruction::RefAsNonNull);
                 backing
             }
+            ForCollection::Range { .. } | ForCollection::DirectRange { .. } => unreachable!(),
         };
         compile_value_get(function, index_value, context);
         let backing_type = match collection {
@@ -1554,6 +1742,7 @@ pub(super) fn compile_for_bind_and_advance(
                 context.semantics,
             )),
             ForCollection::Set { .. } => Type::ArrayStorage(array),
+            ForCollection::Range { .. } | ForCollection::DirectRange { .. } => unreachable!(),
         };
         emit_array_get(function, context.gc.index(backing_type), element);
     });
@@ -1852,6 +2041,16 @@ fn compile_expr_unconverted(
                 array_id,
                 elements.len() as u32,
             );
+        }
+        wasm_ir::ExpressionKind::Range { start, end, .. } => {
+            let Type::Range(range) = ty else {
+                unreachable!("typed range literals have range types")
+            };
+            compile_expr(function, *start, context);
+            compile_expr(function, *end, context);
+            function.instruction(&Instruction::StructNew(
+                context.gc.index(Type::Range(range)),
+            ));
         }
         wasm_ir::ExpressionKind::Record { record, fields } => match record {
             ResolvedRecordId::Source(record) => {

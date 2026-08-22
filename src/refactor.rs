@@ -842,7 +842,8 @@ fn contains_generic_parameter(ty: TypeId, snapshot: &SemanticSnapshot) -> bool {
         | TypeKind::Set { element, .. }
         | TypeKind::Option { value: element, .. }
         | TypeKind::Result { value: element, .. }
-        | TypeKind::Async { value: element, .. } => contains_generic_parameter(*element, snapshot),
+        | TypeKind::Async { value: element, .. }
+        | TypeKind::Range { bound: element, .. } => contains_generic_parameter(*element, snapshot),
         TypeKind::Builtin(_)
         | TypeKind::Standard(_)
         | TypeKind::StateSnapshot

@@ -183,6 +183,22 @@ split {
 let currentLevel = 2
 "#;
 
+const RUNTIME_RANGE_SOURCE: &str = r#"state "game.exe" {}
+
+fn visit(checkpoints: u8..=u8) {
+    for checkpoint in checkpoints {
+        print(checkpoint)
+    }
+}
+
+whileAttached {
+    for index in 0u32..<3 {
+        print(index)
+    }
+    visit(1u8..=3)
+}
+"#;
+
 const DOCUMENTATION_COMMENT_SOURCE: &str = r#"state "game.exe" {}
 
 /// Formats a level number for display.
@@ -605,6 +621,18 @@ const FOR_EXAMPLES: &[Example] = &[
         "Declare a family of settings",
         "/// Controls each generated level split.\nfor level in 2..=36 {\n    `Level {level}` key `{level}`: true,\n}",
         FOR_SOURCE,
+    ),
+];
+const RANGE_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Exclude the upper endpoint",
+        "for index in 0u32..<3 {\n    print(index)\n}",
+        RUNTIME_RANGE_SOURCE,
+    ),
+    Example::checked(
+        "Pass an inclusive range as a value",
+        "fn visit(checkpoints: u8..=u8) {\n    for checkpoint in checkpoints {\n        print(checkpoint)\n    }\n}\n\nvisit(1u8..=3)",
+        RUNTIME_RANGE_SOURCE,
     ),
 ];
 const BREAK_EXAMPLES: &[Example] = &[
@@ -1102,10 +1130,19 @@ define_language_catalog! {
         For,
         "for",
         LanguageItemKind::Keyword,
-        "for value in array { ... } | for value in start..=end { setting }",
-        "Iterates over an array or declares a finite settings family.",
-        "In runtime code, the array expression is evaluated exactly once. The element binding is read-only, lexically scoped to the body, and inferred from [`[T]`] or [`[T; N]`]. [`break`] and [`continue`] target the nearest loop. In [`onAttach`], a body containing [`await`] or [`retry`] preserves the array, index, and current binding across suspension. Inside [`settings`], the inclusive range form expands a [`settings family`] at compile time instead of creating a runtime loop.",
+        "for value in iterable { ... }",
+        "Iterates over an array, set, or integer range.",
+        "The iterable expression is evaluated exactly once. The read-only element binding is lexically scoped to the body and inferred from [`[T]`], [`[T; N]`], [`Set`], or an integer [`range`]. [`break`] and [`continue`] target the nearest loop. In [`onAttach`], a body containing [`await`] or [`retry`] preserves the iterable and current binding across suspension. Inside [`settings`], an inclusive range expands a [`settings family`] at compile time instead of creating a runtime loop.",
         FOR_EXAMPLES
+    ),
+    language_item!(
+        Range,
+        "range",
+        LanguageItemKind::Syntax,
+        "start..<end | start..=end | T..<T | T..=T",
+        "Creates an explicitly exclusive or inclusive integer range.",
+        "[`..<`](syntax@range) excludes the upper endpoint and [`..=`](syntax@range) includes it. The operator is mandatory: bare `..` is rejected so endpoint inclusion never depends on remembered language convention. Both endpoints have one exact [`Integer`] type, and the corresponding first-class type repeats that bound around the same operator. A reversed ascending range is empty. Direct [`for`] iteration does not allocate a range object; storing or passing the range preserves it as an immutable value.",
+        RANGE_EXAMPLES
     ),
     language_item!(
         Break,
@@ -1588,6 +1625,7 @@ impl LanguageCatalog {
             let id = match token {
                 "Address" => LanguageItemId::BuiltinType(BuiltinType::Address),
                 "[" => LanguageItemId::ArrayType,
+                "..<" | "..=" => LanguageItemId::Range,
                 "?" => LanguageItemId::OptionType,
                 "!" => LanguageItemId::ResultType,
                 "///" => LanguageItemId::DocumentationComment,

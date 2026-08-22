@@ -1422,6 +1422,20 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         spellings: BITWISE_COMPLEMENT_SPELLINGS,
     },
     MigrationConcept {
+        id: MigrationConceptId::new("iteration.range"),
+        name: "Bounded integer ranges",
+        sources: &[
+            SourceLanguage::Asl,
+            SourceLanguage::CSharp,
+            SourceLanguage::Rust,
+        ],
+        support: MigrationSupport::Direct,
+        summary: "Use [`..<`] for an exclusive upper endpoint or [`..=`] for an inclusive one; SplitScript rejects bare `..` so the endpoint policy is explicit.",
+        targets: &[MigrationTarget::Language("range")],
+        cookbook_anchor: Some("bounded-integer-iteration"),
+        spellings: &[],
+    },
+    MigrationConcept {
         id: MigrationConceptId::new("string.substring"),
         name: "Substring extraction",
         sources: CSHARP,

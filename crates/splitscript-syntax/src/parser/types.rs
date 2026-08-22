@@ -1,8 +1,9 @@
 //! Source type-expression parsing and constructed syntax-type interning.
 
 use super::{
-    ArrayTypeDecl, AsyncTypeDecl, Diagnostic, OptionTypeDecl, Parser, ResultTypeDecl, Span,
-    TokenKind, TypeApplicationDecl, TypeApplicationOccurrence, TypeNameId, TypeRef,
+    ArrayTypeDecl, AsyncTypeDecl, Diagnostic, OptionTypeDecl, Parser, RangeKind, RangeTypeDecl,
+    ResultTypeDecl, Span, TokenKind, TypeApplicationDecl, TypeApplicationOccurrence, TypeNameId,
+    TypeRef, ambiguous_range_diagnostic,
 };
 use crate::migration::ForeignSpellingContext;
 
@@ -65,7 +66,89 @@ impl Parser<'_> {
             };
             return Ok((TypeRef::Async(id), start.join(end)));
         }
-        let (mut ty, start, mut end) = if let Some(start) = self.eat(&TokenKind::LBracket) {
+        let (mut ty, start, mut end) = self.parse_type_atom(message)?;
+
+        if matches!(
+            self.current().kind,
+            TokenKind::DotDot | TokenKind::DotDotLt | TokenKind::DotDotEq
+        ) {
+            let operator = self.bump().clone();
+            let kind = match operator.kind {
+                TokenKind::DotDotLt => RangeKind::Exclusive,
+                TokenKind::DotDotEq => RangeKind::Inclusive,
+                TokenKind::DotDot => {
+                    return Err(ambiguous_range_diagnostic(operator.span));
+                }
+                _ => unreachable!(),
+            };
+            let (upper, _, upper_end) = self.parse_type_atom("expected an upper-bound type")?;
+            let key = (ty, upper, kind);
+            let id = if let Some(&id) = self.range_type_ids.get(&key) {
+                self.range_types
+                    .iter_mut()
+                    .find(|range| range.id == id)
+                    .expect("interned range types retain their declaration")
+                    .occurrences
+                    .push(operator.span);
+                id
+            } else {
+                let id = self.constructed_type_ids.range();
+                self.range_types.push(RangeTypeDecl {
+                    id,
+                    lower: ty,
+                    upper,
+                    kind,
+                    occurrences: vec![operator.span],
+                });
+                self.range_type_ids.insert(key, id);
+                id
+            };
+            ty = TypeRef::Range(id);
+            end = upper_end;
+        }
+
+        let mut previous_suffix = None;
+        loop {
+            let (suffix, is_option) = if let Some(suffix) = self.eat(&TokenKind::Question) {
+                (suffix, true)
+            } else if let Some(suffix) = self.eat(&TokenKind::Bang).or_else(|| {
+                allow_joined_result_suffix
+                    .then(|| self.eat_fallible_type_suffix())
+                    .flatten()
+            }) {
+                (suffix, false)
+            } else {
+                break;
+            };
+
+            if previous_suffix == Some(is_option) {
+                let spelling = if is_option { "?" } else { "!" };
+                return Err(Diagnostic::new(
+                    format!("a type cannot have two adjacent `{spelling}` wrappers"),
+                    suffix,
+                )
+                .with_primary_label("this wrapper duplicates the preceding wrapper")
+                .with_note("mixed wrappers are valid: `T!?` is an optional result and `T?!` is a fallible option")
+                .with_machine_applicable_fix("remove the duplicate wrapper", suffix, ""));
+            }
+
+            ty = if is_option {
+                TypeRef::Option(self.intern_option_type(ty, suffix))
+            } else {
+                TypeRef::Result(self.intern_result_type(ty, suffix))
+            };
+            end = suffix;
+            previous_suffix = Some(is_option);
+        }
+
+        Ok((ty, start.join(end)))
+    }
+
+    fn parse_type_atom(
+        &mut self,
+        message: &'static str,
+    ) -> Result<(TypeRef, Span, Span), Diagnostic> {
+        if let Some(start) = self.eat(&TokenKind::LBracket) {
             let (element, _) = self.parse_type("expected an array element type")?;
             let length = if self.eat(&TokenKind::Semicolon).is_some() {
                 let value = self.expect_u64("expected a fixed array length after `;`")?;
@@ -92,7 +175,7 @@ impl Parser<'_> {
                 self.array_type_ids.insert(key, id);
                 id
             };
-            (TypeRef::Array(id), start, end)
+            Ok((TypeRef::Array(id), start, end))
         } else {
             let (mut name, start) = self.expect_any_ident(message)?;
             if let Some(replacement) =
@@ -146,47 +229,11 @@ impl Parser<'_> {
                     self.type_application_ids.insert(key, id);
                     id
                 };
-                (TypeRef::Application(id), start, end)
+                Ok((TypeRef::Application(id), start, end))
             } else {
-                (named, start, start)
+                Ok((named, start, start))
             }
-        };
-
-        let mut previous_suffix = None;
-        loop {
-            let (suffix, is_option) = if let Some(suffix) = self.eat(&TokenKind::Question) {
-                (suffix, true)
-            } else if let Some(suffix) = self.eat(&TokenKind::Bang).or_else(|| {
-                allow_joined_result_suffix
-                    .then(|| self.eat_fallible_type_suffix())
-                    .flatten()
-            }) {
-                (suffix, false)
-            } else {
-                break;
-            };
-
-            if previous_suffix == Some(is_option) {
-                let spelling = if is_option { "?" } else { "!" };
-                return Err(Diagnostic::new(
-                    format!("a type cannot have two adjacent `{spelling}` wrappers"),
-                    suffix,
-                )
-                .with_primary_label("this wrapper duplicates the preceding wrapper")
-                .with_note("mixed wrappers are valid: `T!?` is an optional result and `T?!` is a fallible option")
-                .with_machine_applicable_fix("remove the duplicate wrapper", suffix, ""));
-            }
-
-            ty = if is_option {
-                TypeRef::Option(self.intern_option_type(ty, suffix))
-            } else {
-                TypeRef::Result(self.intern_result_type(ty, suffix))
-            };
-            end = suffix;
-            previous_suffix = Some(is_option);
         }
-
-        Ok((ty, start.join(end)))
     }
 
     fn intern_option_type(&mut self, value: TypeRef, occurrence: Span) -> super::OptionTypeId {

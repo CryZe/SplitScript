@@ -1331,6 +1331,12 @@ fn render_type_constructor(
         crate::stdlib::TypeConstructorSyntax::Array => format!("[{parameters}]"),
         crate::stdlib::TypeConstructorSyntax::Optional => format!("{parameters}?"),
         crate::stdlib::TypeConstructorSyntax::Fallible => format!("{parameters}!"),
+        crate::stdlib::TypeConstructorSyntax::ExclusiveRange => {
+            format!("{parameters}..<{parameters}")
+        }
+        crate::stdlib::TypeConstructorSyntax::InclusiveRange => {
+            format!("{parameters}..={parameters}")
+        }
     }
 }
 
@@ -1340,6 +1346,8 @@ fn type_constructor_slug(constructor: &crate::stdlib::StdlibTypeConstructor) -> 
         crate::stdlib::TypeConstructorSyntax::Array => "array",
         crate::stdlib::TypeConstructorSyntax::Optional => "optional",
         crate::stdlib::TypeConstructorSyntax::Fallible => "fallible",
+        crate::stdlib::TypeConstructorSyntax::ExclusiveRange => "exclusive range",
+        crate::stdlib::TypeConstructorSyntax::InclusiveRange => "inclusive range",
     }
 }
 

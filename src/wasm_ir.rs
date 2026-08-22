@@ -125,6 +125,11 @@ pub enum ExpressionKind {
     InterpolatedString(Vec<InterpolatedPart>),
     Signature(String),
     Array(Vec<ExprId>),
+    Range {
+        start: ExprId,
+        end: ExprId,
+        kind: crate::ast::RangeKind,
+    },
     /// Marker lowered through statement-aware expression normalization before
     /// code generation. Its body remains in typed HIR so it can preserve
     /// lexical control-flow and suspension boundaries.
@@ -866,6 +871,11 @@ fn lower_expression(
         ),
         TypedExpressionKind::Signature(value) => ExpressionKind::Signature(value.clone()),
         TypedExpressionKind::Array(elements) => ExpressionKind::Array(elements.clone()),
+        TypedExpressionKind::Range { start, end, kind } => ExpressionKind::Range {
+            start: *start,
+            end: *end,
+            kind: *kind,
+        },
         TypedExpressionKind::Block { .. } => ExpressionKind::ValueBlock,
         TypedExpressionKind::Loop { .. } => ExpressionKind::Loop,
         TypedExpressionKind::Record { record, fields } => {
@@ -2466,6 +2476,11 @@ fn map_expression_children(
         ExpressionKind::Array(elements) => {
             ExpressionKind::Array(elements.into_iter().map(&mut map).collect())
         }
+        ExpressionKind::Range { start, end, kind } => ExpressionKind::Range {
+            start: map(start),
+            end: map(end),
+            kind,
+        },
         ExpressionKind::Record { record, fields } => ExpressionKind::Record {
             record,
             fields: fields

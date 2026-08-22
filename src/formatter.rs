@@ -1431,7 +1431,13 @@ fn needs_space(
     if matches!(previous, TokenKind::Minus) && matches!(current, TokenKind::Gt) {
         return false;
     }
-    if matches!(previous, TokenKind::DotDotEq) || matches!(current, TokenKind::DotDotEq) {
+    if matches!(
+        previous,
+        TokenKind::DotDot | TokenKind::DotDotLt | TokenKind::DotDotEq
+    ) || matches!(
+        current,
+        TokenKind::DotDot | TokenKind::DotDotLt | TokenKind::DotDotEq
+    ) {
         return false;
     }
     if matches!(previous, TokenKind::Ident(name) if matches!(name.as_str(), "sig" | "v"))
@@ -1956,6 +1962,30 @@ whileAttached {
             continue
         }
         print(value as String)
+    }
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn keeps_range_operators_compact_in_values_and_types() {
+        let source = r#"state "game.exe"{}
+fn visit(values:u16 ..< u16?){for value in values else 0u16 ..< 0{print(value)}}
+whileAttached{let values=1u16 ..= 3;visit(0u16+1 ..< 8/2);for value in values{print(value)}}"#;
+        let expected = r#"state "game.exe" {}
+fn visit(values: u16..<u16?) {
+    for value in values else 0u16..<0 {
+        print(value)
+    }
+}
+whileAttached {
+    let values = 1u16..=3;
+    visit(0u16 + 1..<8 / 2);
+    for value in values {
+        print(value)
     }
 }
 "#;

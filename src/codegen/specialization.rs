@@ -7,8 +7,8 @@ use crate::{
     ast::{ConstructedTypeIdAllocator, ExprId},
     semantic::{FunctionInstance, SemanticModel},
     types::{
-        ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType,
-        ResolvedSetType, TypeId,
+        ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedRangeType,
+        ResolvedResultType, ResolvedSetType, TypeId,
     },
     wasm_ir::{self, BodyOwner, Visitor},
 };
@@ -20,6 +20,7 @@ pub(super) fn materialize(
     options: &mut Vec<ResolvedOptionType>,
     results: &mut Vec<ResolvedResultType>,
     asyncs: &mut Vec<ResolvedAsyncType>,
+    ranges: &mut Vec<ResolvedRangeType>,
     sets: &mut Vec<ResolvedSetType>,
 ) {
     let next = arrays
@@ -28,6 +29,7 @@ pub(super) fn materialize(
         .chain(options.iter().map(|ty| ty.id.index() as u32 + 1))
         .chain(results.iter().map(|ty| ty.id.index() as u32 + 1))
         .chain(asyncs.iter().map(|ty| ty.id.index() as u32 + 1))
+        .chain(ranges.iter().map(|ty| ty.id.index() as u32 + 1))
         .chain(sets.iter().map(|ty| ty.id.index() as u32 + 1))
         .max()
         .unwrap_or_default();
@@ -56,7 +58,8 @@ pub(super) fn materialize(
             .expect("reachable calls have function templates");
         for local in &body.locals {
             materialize_type(
-                semantics, &instance, local.ty, &mut ids, arrays, options, results, asyncs, sets,
+                semantics, &instance, local.ty, &mut ids, arrays, options, results, asyncs, ranges,
+                sets,
             );
         }
         for (expression, owner) in &owners {
@@ -67,7 +70,8 @@ pub(super) fn materialize(
                 .expression(*expression)
                 .expect("owned expressions belong to Wasm IR");
             materialize_expression_types(
-                expression, &instance, semantics, &mut ids, arrays, options, results, asyncs, sets,
+                expression, &instance, semantics, &mut ids, arrays, options, results, asyncs,
+                ranges, sets,
             );
             if let Some(called) = called_function(
                 &expression.kind,
@@ -165,6 +169,7 @@ fn materialize_expression_types(
     options: &mut Vec<ResolvedOptionType>,
     results: &mut Vec<ResolvedResultType>,
     asyncs: &mut Vec<ResolvedAsyncType>,
+    ranges: &mut Vec<ResolvedRangeType>,
     sets: &mut Vec<ResolvedSetType>,
 ) {
     materialize_type(
@@ -176,12 +181,13 @@ fn materialize_expression_types(
         options,
         results,
         asyncs,
+        ranges,
         sets,
     );
     if let Some(conversion) = expression.conversion {
         for ty in [conversion.source, conversion.target] {
             materialize_type(
-                semantics, instance, ty, ids, arrays, options, results, asyncs, sets,
+                semantics, instance, ty, ids, arrays, options, results, asyncs, ranges, sets,
             );
         }
     }
@@ -195,7 +201,8 @@ fn materialize_expression_types(
                 wasm_ir::InterpolatedPart::Text(_) => None,
             }) {
                 materialize_type(
-                    semantics, instance, source, ids, arrays, options, results, asyncs, sets,
+                    semantics, instance, source, ids, arrays, options, results, asyncs, ranges,
+                    sets,
                 );
             }
         }
@@ -210,6 +217,7 @@ fn materialize_expression_types(
                     options,
                     results,
                     asyncs,
+                    ranges,
                     sets,
                 );
             }
@@ -220,7 +228,8 @@ fn materialize_expression_types(
             } => {
                 for ty in type_arguments.iter().copied().chain(*receiver_type) {
                     materialize_type(
-                        semantics, instance, ty, ids, arrays, options, results, asyncs, sets,
+                        semantics, instance, ty, ids, arrays, options, results, asyncs, ranges,
+                        sets,
                     );
                 }
             }
@@ -231,7 +240,8 @@ fn materialize_expression_types(
             } => {
                 for ty in std::iter::once(*dispatch_type).chain(*receiver_type) {
                     materialize_type(
-                        semantics, instance, ty, ids, arrays, options, results, asyncs, sets,
+                        semantics, instance, ty, ids, arrays, options, results, asyncs, ranges,
+                        sets,
                     );
                 }
             }
@@ -250,6 +260,7 @@ fn materialize_expression_types(
                 options,
                 results,
                 asyncs,
+                ranges,
                 sets,
             );
         }
@@ -267,8 +278,10 @@ fn materialize_type(
     options: &mut Vec<ResolvedOptionType>,
     results: &mut Vec<ResolvedResultType>,
     asyncs: &mut Vec<ResolvedAsyncType>,
+    ranges: &mut Vec<ResolvedRangeType>,
     sets: &mut Vec<ResolvedSetType>,
 ) {
-    semantics
-        .materialize_specialized_type(instance, ty, ids, arrays, options, results, asyncs, sets);
+    semantics.materialize_specialized_type(
+        instance, ty, ids, arrays, options, results, asyncs, ranges, sets,
+    );
 }

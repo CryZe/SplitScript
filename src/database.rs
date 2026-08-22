@@ -1035,6 +1035,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             | ExprKind::InterpolatedString(_)
             | ExprKind::Signature(_)
             | ExprKind::Array(_)
+            | ExprKind::Range { .. }
             | ExprKind::Block(_)
             | ExprKind::Loop(_)
             | ExprKind::Match { .. }
@@ -1089,6 +1090,11 @@ fn named_type(
                     .iter()
                     .find_map(|argument| named_type(syntax, *argument))
             }),
+        SyntaxTypeRef::Range(id) => syntax
+            .range_types
+            .iter()
+            .find(|range| range.id == id)
+            .and_then(|range| named_type(syntax, range.lower)),
         SyntaxTypeRef::Named(id) => {
             let name = syntax.type_name(id);
             syntax

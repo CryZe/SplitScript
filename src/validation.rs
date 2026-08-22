@@ -359,7 +359,8 @@ fn validate_future_storage(
             TypeKind::Array { element, .. }
             | TypeKind::Set { element, .. }
             | TypeKind::Option { value: element, .. }
-            | TypeKind::Result { value: element, .. } => {
+            | TypeKind::Result { value: element, .. }
+            | TypeKind::Range { bound: element, .. } => {
                 contains_future(*element, syntax, semantics, enum_types, visited)
             }
             TypeKind::Builtin(_)
@@ -1353,7 +1354,8 @@ fn expand_fully_observed_types(
             | TypeKind::Set { element, .. }
             | TypeKind::Option { value: element, .. }
             | TypeKind::Result { value: element, .. }
-            | TypeKind::Async { value: element, .. } => pending.push_back(*element),
+            | TypeKind::Async { value: element, .. }
+            | TypeKind::Range { bound: element, .. } => pending.push_back(*element),
             TypeKind::Builtin(_) | TypeKind::Standard(_) | TypeKind::GenericParameter { .. } => {}
         }
     }
@@ -1426,7 +1428,8 @@ fn expand_reachable_nominal_types(
             | TypeKind::Set { element, .. }
             | TypeKind::Option { value: element, .. }
             | TypeKind::Result { value: element, .. }
-            | TypeKind::Async { value: element, .. } => pending.push_back(*element),
+            | TypeKind::Async { value: element, .. }
+            | TypeKind::Range { bound: element, .. } => pending.push_back(*element),
             TypeKind::Builtin(_) | TypeKind::Standard(_) | TypeKind::GenericParameter { .. } => {}
         }
     }

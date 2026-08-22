@@ -129,6 +129,8 @@ impl<'a> CatalogGenerator<'a> {
                     TypeConstructorSyntax::Array => "Array",
                     TypeConstructorSyntax::Optional => "Optional",
                     TypeConstructorSyntax::Fallible => "Fallible",
+                    TypeConstructorSyntax::ExclusiveRange => "ExclusiveRange",
+                    TypeConstructorSyntax::InclusiveRange => "InclusiveRange",
                 };
                 let must_use = optional_attribute_name(&owner.attributes, "mustUse")
                     .map(|reason| format!("Some({})", quote(reason)))
@@ -643,6 +645,14 @@ impl<'a> CatalogGenerator<'a> {
             ),
             Type::Result(value) => format!(
                 "TypeRef::Application {{ constructor: StdlibTypeConstructorId::Result, arguments: &[{}] }}",
+                self.type_ref(value, parameters)
+            ),
+            Type::ExclusiveRange(value) => format!(
+                "TypeRef::Application {{ constructor: StdlibTypeConstructorId::ExclusiveRange, arguments: &[{}] }}",
+                self.type_ref(value, parameters)
+            ),
+            Type::InclusiveRange(value) => format!(
+                "TypeRef::Application {{ constructor: StdlibTypeConstructorId::InclusiveRange, arguments: &[{}] }}",
                 self.type_ref(value, parameters)
             ),
             Type::Array(element) => format!(

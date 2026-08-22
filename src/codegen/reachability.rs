@@ -676,6 +676,7 @@ impl Reachability {
                     self.gc_array_storage.insert(*backing);
                     pending.push(*element);
                 }
+                TypeKind::Range { bound, .. } => pending.push(*bound),
             }
         }
     }
@@ -757,6 +758,7 @@ impl Reachability {
                 | TypeKind::Option { .. }
                 | TypeKind::Result { .. }
                 | TypeKind::Async { .. }
+                | TypeKind::Range { .. }
                 | TypeKind::Set { .. } => {}
             }
         }

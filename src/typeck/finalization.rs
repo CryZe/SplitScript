@@ -8,8 +8,8 @@ use crate::{
     inference::Type,
     stdlib::CoreTypeId,
     types::{
-        ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType,
-        ResolvedSetType, TypeKind,
+        ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedRangeType,
+        ResolvedResultType, ResolvedSetType, TypeKind,
     },
     visit::{Visitor, walk_expr},
 };
@@ -56,6 +56,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     }
     checker.finalize_array_types();
     checker.inference.finalize_wrappers();
+    checker.inference.finalize_ranges();
     checker.finalize_array_types();
     checker.inference.finalize_sets();
     checker.inference.intern_resolved_constructed_types();
@@ -94,6 +95,16 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
         .map(|future| ResolvedAsyncType {
             id: future.id,
             value: future.value.to_ref(checker.inference.type_store()),
+        })
+        .collect::<Vec<_>>();
+    let range_types = checker
+        .inference
+        .ranges()
+        .iter()
+        .map(|range| ResolvedRangeType {
+            id: range.id,
+            bound: range.lower.to_ref(checker.inference.type_store()),
+            kind: range.kind,
         })
         .collect::<Vec<_>>();
     let set_types = checker
@@ -159,6 +170,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             option_types,
             result_types,
             async_types,
+            range_types,
             set_types,
         },
         diagnostics,

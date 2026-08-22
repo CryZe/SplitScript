@@ -1140,6 +1140,7 @@ fn expression_children(kind: &TypedExpressionKind) -> Vec<crate::ast::ExprId> {
             })
             .collect(),
         TypedExpressionKind::Array(values) => values.clone(),
+        TypedExpressionKind::Range { start, end, .. } => vec![*start, *end],
         TypedExpressionKind::Record { fields, .. } => {
             fields.iter().map(|(_, value)| *value).collect()
         }

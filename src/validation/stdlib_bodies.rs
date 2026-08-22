@@ -404,6 +404,10 @@ fn render_actual_type(
             "Set<{}>",
             render_actual_type(library, semantics, *element, parameter_bindings)
         ),
+        TypeKind::Range { bound, kind, .. } => {
+            let bound = render_actual_type(library, semantics, *bound, parameter_bindings);
+            format!("{bound}{}{bound}", kind.operator())
+        }
     }
 }
 

@@ -10,8 +10,8 @@ use crate::{
     inference::Type,
     stdlib::{StdlibFieldId, StdlibItemId, StdlibStateProviderId, StdlibTypeId, StdlibVariantId},
     types::{
-        ResolvedArrayType, ResolvedOptionType, ResolvedResultType, ResolvedSetType, TypeId,
-        TypeKind, TypeStore,
+        ResolvedArrayType, ResolvedOptionType, ResolvedRangeType, ResolvedResultType,
+        ResolvedSetType, TypeId, TypeKind, TypeStore,
     },
 };
 
@@ -443,6 +443,7 @@ impl SemanticModel {
             TypeKind::Result { value, .. } => Some((2, self.specialize_type(instance, *value))),
             TypeKind::Async { value, .. } => Some((3, self.specialize_type(instance, *value))),
             TypeKind::Set { element, .. } => Some((4, self.specialize_type(instance, *element))),
+            TypeKind::Range { bound, .. } => Some((5, self.specialize_type(instance, *bound))),
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot
@@ -464,6 +465,7 @@ impl SemanticModel {
             | TypeKind::Result { value, .. }
             | TypeKind::Async { value, .. } => *value,
             TypeKind::Set { element, .. } => *element,
+            TypeKind::Range { bound, .. } => *bound,
             _ => unreachable!(),
         };
         if child == original_child {
@@ -482,6 +484,7 @@ impl SemanticModel {
                 (2, TypeKind::Result { value, .. }) if *value == child => Some(candidate),
                 (3, TypeKind::Async { value, .. }) if *value == child => Some(candidate),
                 (4, TypeKind::Set { element, .. }) if *element == child => Some(candidate),
+                (5, TypeKind::Range { bound, .. }) if *bound == child => Some(candidate),
                 _ => None,
             })
             .unwrap_or_else(|| {
@@ -520,6 +523,7 @@ impl SemanticModel {
         options: &mut Vec<ResolvedOptionType>,
         results: &mut Vec<ResolvedResultType>,
         asyncs: &mut Vec<crate::types::ResolvedAsyncType>,
+        ranges: &mut Vec<ResolvedRangeType>,
         sets: &mut Vec<ResolvedSetType>,
     ) -> TypeId {
         if let Some(specialized) = self.specialized_types.get(&(instance.clone(), ty)) {
@@ -537,7 +541,7 @@ impl SemanticModel {
                 element, length, ..
             } => {
                 let element = self.materialize_specialized_type(
-                    instance, element, ids, arrays, options, results, asyncs, sets,
+                    instance, element, ids, arrays, options, results, asyncs, ranges, sets,
                 );
                 if element
                     == match self.types.kind(ty) {
@@ -563,7 +567,7 @@ impl SemanticModel {
             }
             TypeKind::Option { value, .. } => {
                 let value = self.materialize_specialized_type(
-                    instance, value, ids, arrays, options, results, asyncs, sets,
+                    instance, value, ids, arrays, options, results, asyncs, ranges, sets,
                 );
                 if value
                     == match self.types.kind(ty) {
@@ -583,7 +587,7 @@ impl SemanticModel {
             }
             TypeKind::Result { value, .. } => {
                 let value = self.materialize_specialized_type(
-                    instance, value, ids, arrays, options, results, asyncs, sets,
+                    instance, value, ids, arrays, options, results, asyncs, ranges, sets,
                 );
                 if value
                     == match self.types.kind(ty) {
@@ -603,7 +607,7 @@ impl SemanticModel {
             }
             TypeKind::Async { value, .. } => {
                 let value = self.materialize_specialized_type(
-                    instance, value, ids, arrays, options, results, asyncs, sets,
+                    instance, value, ids, arrays, options, results, asyncs, ranges, sets,
                 );
                 if value
                     == match self.types.kind(ty) {
@@ -623,7 +627,7 @@ impl SemanticModel {
             }
             TypeKind::Set { element, .. } => {
                 let element = self.materialize_specialized_type(
-                    instance, element, ids, arrays, options, results, asyncs, sets,
+                    instance, element, ids, arrays, options, results, asyncs, ranges, sets,
                 );
                 if element
                     == match self.types.kind(ty) {
@@ -668,6 +672,31 @@ impl SemanticModel {
                     })
                 }
             }
+            TypeKind::Range { bound, kind, .. } => {
+                let bound = self.materialize_specialized_type(
+                    instance, bound, ids, arrays, options, results, asyncs, ranges, sets,
+                );
+                if bound
+                    == match self.types.kind(ty) {
+                        TypeKind::Range { bound, .. } => *bound,
+                        _ => unreachable!(),
+                    }
+                {
+                    ty
+                } else {
+                    let layout = ids.range();
+                    ranges.push(ResolvedRangeType {
+                        id: layout,
+                        bound: self.resolved_type_ref(bound),
+                        kind,
+                    });
+                    self.types.intern(TypeKind::Range {
+                        layout,
+                        bound,
+                        kind,
+                    })
+                }
+            }
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot
@@ -698,6 +727,7 @@ impl SemanticModel {
             TypeKind::Result { layout, .. } => crate::types::ResolvedTypeRef::Result(*layout),
             TypeKind::Async { layout, .. } => crate::types::ResolvedTypeRef::Async(*layout),
             TypeKind::Set { layout, .. } => crate::types::ResolvedTypeRef::Set(*layout),
+            TypeKind::Range { layout, .. } => crate::types::ResolvedTypeRef::Range(*layout),
         }
     }
 
@@ -741,6 +771,14 @@ impl SemanticModel {
                 },
                 TypeKind::Async {
                     value: concrete, ..
+                },
+            ) => self.specialize_signature_node(*template, *concrete, searched),
+            (
+                TypeKind::Range {
+                    bound: template, ..
+                },
+                TypeKind::Range {
+                    bound: concrete, ..
                 },
             ) => self.specialize_signature_node(*template, *concrete, searched),
             (

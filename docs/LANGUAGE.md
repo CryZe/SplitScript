@@ -1166,6 +1166,40 @@ while traversing it invalidates the loop using the same fail-fast rule as
 growable arrays. Compute pending additions or removals separately and apply
 them after the loop.
 
+## Integer ranges
+
+Integer ranges are first-class immutable values. The operator always states
+whether the upper endpoint participates: [`start..<end`](syntax@range) is
+exclusive and [`start..=end`](syntax@range) is inclusive. Bare `start..end` is deliberately rejected, with
+fixes for both spellings, so a reader never has to remember another language's
+range convention.
+
+```splitscript
+for index in 0u32..<count {
+    inspect(index)
+}
+
+let checkpoints: u8..=u8 = 1..=3
+visit(checkpoints)
+```
+
+Both endpoints must have one exact integer type. The corresponding type syntax
+repeats that type around the same operator: [`T..<T`](syntax@range) or
+[`T..=T`](syntax@range). Inference flows
+through either endpoint, annotations, arguments, returns, and loop bindings.
+An ascending range whose end precedes its start is empty; an exclusive range
+also excludes equal endpoints. Direct `for` iteration keeps the bounds in
+compiler-owned scalar locals and allocates no range object. A stored or passed
+range uses an immutable WebAssembly GC value. Inclusive iteration records
+completion separately from its current integer, so ending at an integer type's
+maximum value terminates without wrapping.
+
+`for` evaluates its iterable exactly once. A suspending body preserves the
+range, current bound, and endpoint policy across ticks, and `continue` cannot
+repeat the current element. Descending ranges, custom step sizes, and
+open-ended ranges are intentionally deferred until concrete autosplitter ports
+establish their semantics.
+
 ## Settings
 
 ```text

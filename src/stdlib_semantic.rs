@@ -149,6 +149,7 @@ fn semantic_type_may_have_capability(
         }
         TypeKind::GenericParameter { .. } => false,
         TypeKind::Async { .. } => false,
+        TypeKind::Range { .. } => false,
         TypeKind::Set { .. } => false,
     }
 }

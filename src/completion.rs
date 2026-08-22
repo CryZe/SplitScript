@@ -1153,6 +1153,10 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
             }
         }
         ExprKind::Array(values) => add_child_expression_bindings(builder, values, offset),
+        ExprKind::Range { start, end, .. } => {
+            add_expression_bindings(builder, start, offset);
+            add_expression_bindings(builder, end, offset);
+        }
         ExprKind::Block(block) | ExprKind::Loop(block) => {
             add_block_bindings(builder, block, offset)
         }
@@ -1334,6 +1338,7 @@ fn add_inferred_fields(
         | TypeKind::Option { .. }
         | TypeKind::Result { .. }
         | TypeKind::Async { .. }
+        | TypeKind::Range { .. }
         | TypeKind::Set { .. } => {}
     }
 }

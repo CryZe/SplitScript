@@ -217,6 +217,11 @@ pub enum TypedExpressionKind {
     InterpolatedString(Vec<TypedInterpolatedPart>),
     Signature(String),
     Array(Vec<ExprId>),
+    Range {
+        start: ExprId,
+        end: ExprId,
+        kind: crate::ast::RangeKind,
+    },
     Block {
         statements: TypedBlock,
         value: Option<ExprId>,
@@ -1040,6 +1045,10 @@ pub fn walk_typed_expression<V: TypedVisitor>(
                 visit_expression(*element);
             }
         }
+        TypedExpressionKind::Range { start, end, .. } => {
+            visit_expression(*start);
+            visit_expression(*end);
+        }
         TypedExpressionKind::Block { statements, value } => {
             visitor.visit_block(statements, program);
             if let Some(value) = value {
@@ -1219,6 +1228,13 @@ fn lower_expression_kind(
         ExprKind::Array(elements) => {
             TypedExpressionKind::Array(elements.iter().map(|element| element.id).collect())
         }
+        ExprKind::Range {
+            start, end, kind, ..
+        } => TypedExpressionKind::Range {
+            start: start.id,
+            end: end.id,
+            kind: *kind,
+        },
         ExprKind::Block(block) => {
             let value = block
                 .statements

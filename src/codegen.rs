@@ -13,7 +13,9 @@ use crate::stdlib::{
     Implementation, IntrinsicId, StandardLibrary, StateProviderAttachment, StateProviderProcesses,
     StdlibTypeId,
 };
-use crate::types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, TypeId, TypeKind};
+use crate::types::{
+    ResolvedArrayType, ResolvedOptionType, ResolvedRangeType, ResolvedResultType, TypeId, TypeKind,
+};
 use crate::wasm_ir::{self, BodyOwner};
 
 mod array_functions;
@@ -129,6 +131,7 @@ struct ConstructedTypes {
     options: Vec<ResolvedOptionType>,
     results: Vec<ResolvedResultType>,
     asyncs: Vec<crate::types::ResolvedAsyncType>,
+    ranges: Vec<ResolvedRangeType>,
     sets: Vec<crate::types::ResolvedSetType>,
 }
 
@@ -158,6 +161,7 @@ impl<'a> BackendProgram<'a> {
             options: checked.option_types.clone(),
             results: checked.result_types.clone(),
             asyncs: checked.async_types.clone(),
+            ranges: checked.range_types.clone(),
             sets: checked.set_types.clone(),
         };
         specialization::materialize(
@@ -167,6 +171,7 @@ impl<'a> BackendProgram<'a> {
             &mut constructed_types.options,
             &mut constructed_types.results,
             &mut constructed_types.asyncs,
+            &mut constructed_types.ranges,
             &mut constructed_types.sets,
         );
         Self {
@@ -225,6 +230,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         options: option_types,
         results: result_types,
         asyncs: async_types,
+        ranges: range_types,
         sets: set_types,
     } = constructed_types;
     let semantics = &semantics;
@@ -294,6 +300,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         result_types,
         async_types: &async_types,
         set_types,
+        range_types: &range_types,
         reachability: &reachability,
     });
     let imports::EncodedImports {
@@ -633,6 +640,7 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
         TypeKind::Result { layout, .. } => Type::Result(*layout),
         TypeKind::Async { layout, .. } => Type::Async(*layout),
         TypeKind::Set { layout, .. } => Type::Set(*layout),
+        TypeKind::Range { layout, .. } => Type::Range(*layout),
     }
 }
 

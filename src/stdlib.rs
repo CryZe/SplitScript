@@ -75,6 +75,12 @@ impl TypeRef {
                     TypeConstructorSyntax::Array => format!("[{arguments}]"),
                     TypeConstructorSyntax::Optional => format!("{arguments}?"),
                     TypeConstructorSyntax::Fallible => format!("{arguments}!"),
+                    TypeConstructorSyntax::ExclusiveRange => {
+                        format!("{arguments}..<{arguments}")
+                    }
+                    TypeConstructorSyntax::InclusiveRange => {
+                        format!("{arguments}..={arguments}")
+                    }
                 }
             }
             Self::FixedArray { element, length } => format!(
@@ -290,6 +296,8 @@ impl StandardLibrary {
             TypeConstructorSyntax::Array => format!("[{parameters}]"),
             TypeConstructorSyntax::Optional => format!("{parameters}?"),
             TypeConstructorSyntax::Fallible => format!("{parameters}!"),
+            TypeConstructorSyntax::ExclusiveRange => format!("{parameters}..<{parameters}"),
+            TypeConstructorSyntax::InclusiveRange => format!("{parameters}..={parameters}"),
         }
     }
 

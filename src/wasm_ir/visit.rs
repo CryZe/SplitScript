@@ -216,6 +216,10 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
             }
         }
         ExpressionKind::Array(elements) => elements.iter().copied().for_each(&mut visit),
+        ExpressionKind::Range { start, end, .. } => {
+            visit(*start);
+            visit(*end);
+        }
         ExpressionKind::Record { fields, .. } => {
             fields.iter().map(|(_, value)| *value).for_each(&mut visit);
         }

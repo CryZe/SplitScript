@@ -389,6 +389,7 @@ fn compile_async_body(
                     binding,
                     iterable_value,
                     index_value,
+                    version_value,
                     &context,
                 );
                 compile_async_flow(
@@ -2817,6 +2818,7 @@ fn compile_async_flow(
                     *binding,
                     *iterable_value,
                     *index_value,
+                    *version_value,
                     context,
                 );
                 compile_async_flow(

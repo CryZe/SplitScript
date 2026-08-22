@@ -232,12 +232,19 @@ semantic-review evidence, not as a conformance corpus.
   - [ ] Decide whether and how to diagnose state fields that never influence
     reachable behavior. Intentional display-only state and host observation
     need explicit semantics before enabling that warning by default.
-- [ ] Evaluate ordinary runtime ranges from the repeated bounded-index ports.
-  Compare `for index in 0..count` with a source-defined range value and the
-  existing `while` loop; keep settings-family ranges a compile-time DSL. Do not
-  force index arrays merely to express iteration, but do not add a range concept
-  until its inference, endpoint types, overflow, and inclusive/exclusive
-  semantics are settled.
+- [x] Add first-class integer ranges with explicit `start..<end` and
+  `start..=end` operators and matching `T..<T` / `T..=T` type syntax. Bare
+  `..` is a focused diagnostic with fixes for both endpoint policies. Runtime
+  `for` evaluates stored ranges once, preserves them across suspension, treats
+  reversed ascending ranges as empty, and handles an inclusive maximum without
+  overflowing. Direct range loops keep scalar bounds in compiler-owned locals
+  and allocate no GC range object; settings-family ranges remain a compile-time
+  DSL.
+  - [ ] Choose the public endpoint/member surface before adding it. Prefer
+    immutable `.start` and `.end` fields with `.contains(value)` and
+    `.isEmpty()`, but do not special-case range fields in the compiler: either
+    extend source-defined generic standard-library types to declare fields
+    cleanly or deliberately choose method accessors instead.
 
 ## P0 — unblock the next representative native ports
 

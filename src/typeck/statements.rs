@@ -252,6 +252,7 @@ impl Checker {
                     Some(ty) => match self.shallow_type(ty) {
                         Type::Array(array) => (ty, self.inference.array_element(array)),
                         Type::Set(set) => (ty, self.inference.set_element(set)),
+                        Type::Range(range) => (ty, self.inference.range_bound(range)),
                         Type::Known(id) => match self.inference.type_store().kind(id) {
                             crate::types::TypeKind::Array { element, .. } => {
                                 (ty, Type::Known(*element))
@@ -259,11 +260,14 @@ impl Checker {
                             crate::types::TypeKind::Set { element, .. } => {
                                 (ty, Type::Known(*element))
                             }
+                            crate::types::TypeKind::Range { bound, .. } => {
+                                (ty, Type::Known(*bound))
+                            }
                             _ => {
                                 let actual = self.type_name(ty);
                                 self.error(
                                     format!(
-                                        "`for ... in` expects an array or set, but this expression has type `{actual}`"
+                                        "`for ... in` expects an array, set, or range, but this expression has type `{actual}`"
                                     ),
                                     iterable.span,
                                 );
@@ -280,7 +284,7 @@ impl Checker {
                                 let actual = self.type_name(ty);
                                 self.error(
                                     format!(
-                                        "`for ... in` expects an array or set, but this expression has type `{actual}`"
+                                        "`for ... in` expects an array, set, or range, but this expression has type `{actual}`"
                                     ),
                                     iterable.span,
                                 );
@@ -291,7 +295,7 @@ impl Checker {
                             let actual = self.type_name(ty);
                             self.error(
                                 format!(
-                                    "`for ... in` expects an array or set, but this expression has type `{actual}`"
+                                    "`for ... in` expects an array, set, or range, but this expression has type `{actual}`"
                                 ),
                                 iterable.span,
                             );
@@ -300,11 +304,33 @@ impl Checker {
                         }
                     },
                 };
+                // A literal range keeps its upper bound directly in the
+                // compiler-owned iterable slot. This lets the backend lower a
+                // direct range loop without allocating the first-class range
+                // object that is needed when a range escapes into a value.
+                let iterable_storage_ty =
+                    if matches!(iterable.kind, crate::ast::ExprKind::Range { .. }) {
+                        element_ty
+                    } else {
+                        iterable_ty
+                    };
                 self.semantics
-                    .resolve_value_type(*iterable_value, iterable_ty);
+                    .resolve_value_type(*iterable_value, iterable_storage_ty);
+                let is_range = match self.shallow_type(iterable_ty) {
+                    Type::Range(_) => true,
+                    Type::Known(id) => matches!(
+                        self.inference.type_store().kind(id),
+                        crate::types::TypeKind::Range { .. }
+                    ),
+                    _ => false,
+                };
                 self.semantics.resolve_value_type(
                     *index_value,
-                    self.core_type(crate::stdlib::CoreTypeId::U32),
+                    if is_range {
+                        element_ty
+                    } else {
+                        self.core_type(crate::stdlib::CoreTypeId::U32)
+                    },
                 );
                 self.semantics.resolve_value_type(
                     *version_value,

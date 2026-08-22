@@ -1249,6 +1249,9 @@ impl Checker {
                         && matches!(receiver, Type::Result(_)))
                     || (constructor == StdlibTypeConstructorId::Set
                         && matches!(receiver, Type::Set(_)))
+                    || ((constructor == StdlibTypeConstructorId::ExclusiveRange
+                        || constructor == StdlibTypeConstructorId::InclusiveRange)
+                        && matches!(receiver, Type::Range(_)))
             }
             CatalogTypeRef::FixedArray { length, .. } => {
                 matches!(receiver, Type::Variable(_))
@@ -1351,6 +1354,16 @@ impl Checker {
                     Type::Result(self.inference.result_type(value))
                 } else if constructor == StdlibTypeConstructorId::Set {
                     Type::Set(self.inference.set_type(value))
+                } else if constructor == StdlibTypeConstructorId::ExclusiveRange {
+                    Type::Range(
+                        self.inference
+                            .range_type(value, crate::ast::RangeKind::Exclusive),
+                    )
+                } else if constructor == StdlibTypeConstructorId::InclusiveRange {
+                    Type::Range(
+                        self.inference
+                            .range_type(value, crate::ast::RangeKind::Inclusive),
+                    )
                 } else {
                     unreachable!("validated catalog type constructor has semantic support")
                 }
@@ -2113,6 +2126,13 @@ impl Checker {
             Type::Set(set) => {
                 let element = self.inference.set_element(set);
                 format!("Set<{}>", self.type_name(element))
+            }
+            Type::Range(range) => {
+                let bound = self.type_name(self.inference.range_bound(range));
+                format!(
+                    "{bound}{}{bound}",
+                    self.inference.range_kind(range).operator()
+                )
             }
             Type::Variable(_) => "an inferred type".to_owned(),
             Type::Known(id) => match self.inference.type_store().kind(id) {

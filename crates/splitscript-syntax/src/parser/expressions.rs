@@ -5,7 +5,7 @@
 use super::{
     BinaryOp, DelimiterDepth, Diagnostic, EnumReference, Expr, ExprKind, InterpolatedPart,
     MatchArm, MatchPattern, Parser, PatternBinding, Span, TokenKind, TypeRef, UnaryOp,
-    assignment_operator, parse_integer,
+    ambiguous_range_diagnostic, assignment_operator, parse_integer,
 };
 use crate::diagnostic::{DiagnosticCode, DiagnosticFix, FixApplicability, TextEdit};
 
@@ -177,7 +177,41 @@ impl Parser<'_> {
                 );
                 continue;
             }
-            const CAST_PRECEDENCE: u8 = 10;
+            const RANGE_PRECEDENCE: u8 = 1;
+            if matches!(
+                self.current().kind,
+                TokenKind::DotDot | TokenKind::DotDotLt | TokenKind::DotDotEq
+            ) {
+                if RANGE_PRECEDENCE < min_precedence {
+                    break;
+                }
+                if matches!(left.kind, ExprKind::Range { .. }) {
+                    return Err(self
+                        .error("range operators cannot be chained; use two named ranges instead"));
+                }
+                let operator = self.bump().clone();
+                let kind = match operator.kind {
+                    TokenKind::DotDotLt => super::RangeKind::Exclusive,
+                    TokenKind::DotDotEq => super::RangeKind::Inclusive,
+                    TokenKind::DotDot => {
+                        return Err(ambiguous_range_diagnostic(operator.span));
+                    }
+                    _ => unreachable!(),
+                };
+                let right = self.required_expression(RANGE_PRECEDENCE + 1)?;
+                let span = left.span.join(right.span);
+                left = self.new_expr(
+                    ExprKind::Range {
+                        start: Box::new(left),
+                        end: Box::new(right),
+                        kind,
+                        operator_span: operator.span,
+                    },
+                    span,
+                );
+                continue;
+            }
+            const CAST_PRECEDENCE: u8 = 11;
             if self.at_ident("as") {
                 if CAST_PRECEDENCE < min_precedence {
                     break;
@@ -275,7 +309,7 @@ impl Parser<'_> {
             let parsed = if self.expression_is_missing_before_statement() {
                 Err(self.error("expected an expression"))
             } else {
-                self.expression(11)
+                self.expression(12)
             };
             let value = self.recover_root_expression(parsed, expression_start);
             let span = start.join(value.span);
@@ -331,7 +365,7 @@ impl Parser<'_> {
         }
         if self.eat(&TokenKind::Bang).is_some() {
             let start = self.previous().span;
-            let expr = self.required_expression(11)?;
+            let expr = self.required_expression(12)?;
             let span = start.join(expr.span);
             return Ok(self.new_expr(
                 ExprKind::Unary {
@@ -343,7 +377,7 @@ impl Parser<'_> {
         }
         if self.eat(&TokenKind::Minus).is_some() {
             let start = self.previous().span;
-            let expr = self.required_expression(11)?;
+            let expr = self.required_expression(12)?;
             let span = start.join(expr.span);
             return Ok(self.new_expr(
                 ExprKind::Unary {
@@ -361,7 +395,7 @@ impl Parser<'_> {
                 crate::migration::ForeignSpellingContext::Operator,
             );
             self.bump();
-            let expr = self.required_expression(11)?;
+            let expr = self.required_expression(12)?;
             let span = start.join(expr.span);
             return Ok(self.new_expr(
                 ExprKind::Unary {
@@ -1280,24 +1314,24 @@ impl Parser<'_> {
 
     pub(super) fn binary_operator(&self) -> Option<(u8, BinaryOp)> {
         Some(match self.current().kind {
-            TokenKind::OrOr => (1, BinaryOp::Or),
-            TokenKind::AndAnd => (2, BinaryOp::And),
-            TokenKind::EqEq => (3, BinaryOp::Eq),
-            TokenKind::BangEq => (3, BinaryOp::Ne),
-            TokenKind::Lt => (3, BinaryOp::Lt),
-            TokenKind::Le => (3, BinaryOp::Le),
-            TokenKind::Gt => (3, BinaryOp::Gt),
-            TokenKind::Ge => (3, BinaryOp::Ge),
-            TokenKind::Or => (4, BinaryOp::BitOr),
-            TokenKind::Caret => (5, BinaryOp::BitXor),
-            TokenKind::And => (6, BinaryOp::BitAnd),
-            TokenKind::Shl => (7, BinaryOp::Shl),
-            TokenKind::Shr => (7, BinaryOp::Shr),
-            TokenKind::Plus => (8, BinaryOp::Add),
-            TokenKind::Minus => (8, BinaryOp::Sub),
-            TokenKind::Star => (9, BinaryOp::Mul),
-            TokenKind::Slash => (9, BinaryOp::Div),
-            TokenKind::Percent => (9, BinaryOp::Rem),
+            TokenKind::OrOr => (2, BinaryOp::Or),
+            TokenKind::AndAnd => (3, BinaryOp::And),
+            TokenKind::EqEq => (4, BinaryOp::Eq),
+            TokenKind::BangEq => (4, BinaryOp::Ne),
+            TokenKind::Lt => (4, BinaryOp::Lt),
+            TokenKind::Le => (4, BinaryOp::Le),
+            TokenKind::Gt => (4, BinaryOp::Gt),
+            TokenKind::Ge => (4, BinaryOp::Ge),
+            TokenKind::Or => (5, BinaryOp::BitOr),
+            TokenKind::Caret => (6, BinaryOp::BitXor),
+            TokenKind::And => (7, BinaryOp::BitAnd),
+            TokenKind::Shl => (8, BinaryOp::Shl),
+            TokenKind::Shr => (8, BinaryOp::Shr),
+            TokenKind::Plus => (9, BinaryOp::Add),
+            TokenKind::Minus => (9, BinaryOp::Sub),
+            TokenKind::Star => (10, BinaryOp::Mul),
+            TokenKind::Slash => (10, BinaryOp::Div),
+            TokenKind::Percent => (10, BinaryOp::Rem),
             _ => return None,
         })
     }

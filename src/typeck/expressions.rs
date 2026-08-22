@@ -163,6 +163,33 @@ impl Checker {
                 }
                 self.expect_expression(expr.id, Type::Array(id), expected, expr.span)?
             }
+            ExprKind::Range {
+                start, end, kind, ..
+            } => {
+                let hinted = expected
+                    .map(|ty| self.expected_value_type(ty))
+                    .and_then(|ty| match self.shallow_type(ty) {
+                        Type::Range(range) if self.inference.range_kind(range) == *kind => {
+                            Some((range, self.inference.range_bound(range)))
+                        }
+                        _ => None,
+                    });
+                let (range, bound) = hinted.unwrap_or_else(|| {
+                    let bound = self.fresh_inference(
+                        Requirements::capability(StdlibCapabilityId::Integer),
+                        None,
+                    );
+                    (self.inference.range_type(bound, *kind), bound)
+                });
+                self.require(
+                    bound,
+                    Requirements::capability(StdlibCapabilityId::Integer),
+                    expr.span,
+                );
+                self.expr(start, Some(bound));
+                self.expr(end, Some(bound));
+                self.expect_expression(expr.id, Type::Range(range), expected, expr.span)?
+            }
             ExprKind::Block(block) => {
                 self.scopes.push(HashMap::new());
                 let tail = block

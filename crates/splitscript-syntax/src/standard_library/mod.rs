@@ -56,6 +56,8 @@ pub enum TypeConstructorSyntax {
     Array,
     Optional,
     Fallible,
+    ExclusiveRange,
+    InclusiveRange,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,6 +144,8 @@ pub enum Type {
     },
     Option(Box<Type>),
     Result(Box<Type>),
+    ExclusiveRange(Box<Type>),
+    InclusiveRange(Box<Type>),
 }
 
 impl fmt::Display for Type {
@@ -167,6 +171,8 @@ impl fmt::Display for Type {
             }
             Self::Option(value) => write!(formatter, "{value}?"),
             Self::Result(value) => write!(formatter, "{value}!"),
+            Self::ExclusiveRange(value) => write!(formatter, "{value}..<{value}"),
+            Self::InclusiveRange(value) => write!(formatter, "{value}..={value}"),
         }
     }
 }

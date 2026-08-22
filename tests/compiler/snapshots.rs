@@ -424,6 +424,12 @@ fn snapshot_expression_kind(
         ),
         TypedExpressionKind::Signature(value) => format!("signature {value:?}"),
         TypedExpressionKind::Array(values) => format!("array {values:?}"),
+        TypedExpressionKind::Range { start, end, kind } => format!(
+            "range e{} {} e{}",
+            start.index(),
+            kind.operator(),
+            end.index()
+        ),
         TypedExpressionKind::Block { statements, value } => format!(
             "block statements={} value={value:?}",
             statements.statements.len()
@@ -556,6 +562,10 @@ fn snapshot_type_name(
         TypeKind::Result { value, .. } => format!("{}!", snapshot_type_name(checked, *value)),
         TypeKind::Async { value, .. } => {
             format!("async {}", snapshot_type_name(checked, *value))
+        }
+        TypeKind::Range { bound, kind, .. } => {
+            let bound = snapshot_type_name(checked, *bound);
+            format!("{bound}{}{bound}", kind.operator())
         }
     }
 }

@@ -7,8 +7,8 @@ use std::{collections::HashMap, fmt, ops::BitOr};
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, ConstructedTypeIdAllocator, OptionTypeId, ResultTypeId,
-        TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, ConstructedTypeIdAllocator, OptionTypeId, RangeKind, RangeTypeId,
+        ResultTypeId, TypeApplicationId,
     },
     stdlib::{CapabilityBehavior, CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
     types::{BuiltinType, ResolvedTypeRef, TypeId, TypeKind, TypeStore},
@@ -21,6 +21,7 @@ pub(crate) enum Type {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Range(RangeTypeId),
     Set(TypeApplicationId),
     Variable(u32),
 }
@@ -41,12 +42,14 @@ impl Type {
                 TypeKind::Option { layout, .. } => ResolvedTypeRef::Option(*layout),
                 TypeKind::Result { layout, .. } => ResolvedTypeRef::Result(*layout),
                 TypeKind::Async { layout, .. } => ResolvedTypeRef::Async(*layout),
+                TypeKind::Range { layout, .. } => ResolvedTypeRef::Range(*layout),
                 TypeKind::Set { layout, .. } => ResolvedTypeRef::Set(*layout),
             },
             Self::Array(id) => ResolvedTypeRef::Array(id),
             Self::Option(id) => ResolvedTypeRef::Option(id),
             Self::Result(id) => ResolvedTypeRef::Result(id),
             Self::Async(id) => ResolvedTypeRef::Async(id),
+            Self::Range(id) => ResolvedTypeRef::Range(id),
             Self::Set(id) => ResolvedTypeRef::Set(id),
             Self::Variable(variable) => {
                 unreachable!("inference variable ?{variable} cannot become a source type reference")
@@ -63,6 +66,7 @@ impl fmt::Display for Type {
             Self::Option(id) => write!(formatter, "T?#{id}"),
             Self::Result(id) => write!(formatter, "T!#{id}"),
             Self::Async(id) => write!(formatter, "Async#{id}"),
+            Self::Range(id) => write!(formatter, "Range#{id}"),
             Self::Set(id) => write!(formatter, "Set#{id}"),
             Self::Variable(id) => write!(formatter, "?{id}"),
         }
@@ -192,6 +196,14 @@ pub(crate) struct AsyncLayout {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub(crate) struct RangeLayout {
+    pub(crate) id: RangeTypeId,
+    pub(crate) lower: Type,
+    pub(crate) upper: Type,
+    pub(crate) kind: RangeKind,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct SetLayout {
     pub(crate) id: TypeApplicationId,
     pub(crate) element: Type,
@@ -204,6 +216,7 @@ pub(crate) struct ConstructedLayouts {
     pub(crate) options: Vec<OptionLayout>,
     pub(crate) results: Vec<ResultLayout>,
     pub(crate) asyncs: Vec<AsyncLayout>,
+    pub(crate) ranges: Vec<RangeLayout>,
     pub(crate) sets: Vec<SetLayout>,
 }
 
@@ -215,11 +228,13 @@ pub(crate) struct InferenceContext {
     options: Vec<OptionLayout>,
     results: Vec<ResultLayout>,
     asyncs: Vec<AsyncLayout>,
+    ranges: Vec<RangeLayout>,
     sets: Vec<SetLayout>,
     canonical_arrays: HashMap<ArrayTypeId, ArrayTypeId>,
     canonical_options: HashMap<OptionTypeId, OptionTypeId>,
     canonical_results: HashMap<ResultTypeId, ResultTypeId>,
     canonical_asyncs: HashMap<AsyncTypeId, AsyncTypeId>,
+    canonical_ranges: HashMap<RangeTypeId, RangeTypeId>,
     canonical_sets: HashMap<TypeApplicationId, TypeApplicationId>,
     constructed_types: HashMap<Type, TypeId>,
     constructed_type_ids: ConstructedTypeIdAllocator,
@@ -237,6 +252,7 @@ impl InferenceContext {
             options,
             results,
             asyncs,
+            ranges,
             mut sets,
         } = layouts;
         let next_constructed_type_index = arrays
@@ -245,6 +261,7 @@ impl InferenceContext {
             .chain(options.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(results.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(asyncs.iter().map(|layout| layout.id.index() as u32 + 1))
+            .chain(ranges.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(sets.iter().map(|layout| layout.id.index() as u32 + 1))
             .fold(first_constructed_type_index, u32::max);
         let mut constructed_type_ids =
@@ -273,11 +290,13 @@ impl InferenceContext {
             options,
             results,
             asyncs,
+            ranges,
             sets,
             canonical_arrays: HashMap::new(),
             canonical_options: HashMap::new(),
             canonical_results: HashMap::new(),
             canonical_asyncs: HashMap::new(),
+            canonical_ranges: HashMap::new(),
             canonical_sets: HashMap::new(),
             constructed_types: HashMap::new(),
             constructed_type_ids,
@@ -380,6 +399,10 @@ impl InferenceContext {
             TypeKind::Option { value, .. } => format!("{}?", self.known_type_name(*value)),
             TypeKind::Result { value, .. } => format!("{}!", self.known_type_name(*value)),
             TypeKind::Async { value, .. } => format!("async {}", self.known_type_name(*value)),
+            TypeKind::Range { bound, kind, .. } => {
+                let bound = self.known_type_name(*bound);
+                format!("{bound}{}{bound}", kind.operator())
+            }
         }
     }
 
@@ -505,6 +528,15 @@ impl InferenceContext {
                     Type::Async(self.async_type(instantiated))
                 }
             }
+            Type::Range(range) => {
+                let bound = self.range_bound(range);
+                let instantiated = self.instantiate_type(bound, generalized, substitutions);
+                if instantiated == bound {
+                    Type::Range(range)
+                } else {
+                    Type::Range(self.range_type(instantiated, self.range_kind(range)))
+                }
+            }
             known @ Type::Known(_) => known,
         }
     }
@@ -536,6 +568,7 @@ impl InferenceContext {
                 self.collect_unbound_variables(self.result_value(result), output)
             }
             Type::Async(future) => self.collect_unbound_variables(self.async_value(future), output),
+            Type::Range(range) => self.collect_unbound_variables(self.range_bound(range), output),
             Type::Known(_) => {}
         }
     }
@@ -631,6 +664,18 @@ impl InferenceContext {
                 let right_value = self.async_value(right);
                 self.unify(left_value, right_value)?;
                 Ok(Type::Async(left))
+            }
+            (Type::Range(left), Type::Range(right)) => {
+                if self.range_kind(left) != self.range_kind(right) {
+                    return Err(InferenceError::TypeMismatch {
+                        left: Type::Range(left),
+                        right: Type::Range(right),
+                    });
+                }
+                let left_bound = self.range_bound(left);
+                let right_bound = self.range_bound(right);
+                self.unify(left_bound, right_bound)?;
+                Ok(Type::Range(left))
             }
             (left, right) if left == right => Ok(left),
             (left, right) => Err(InferenceError::TypeMismatch { left, right }),
@@ -778,6 +823,9 @@ impl InferenceContext {
                     .copied()
                     .unwrap_or(future),
             ),
+            Type::Range(range) => {
+                Type::Range(self.canonical_ranges.get(&range).copied().unwrap_or(range))
+            }
             Type::Set(set) => Type::Set(self.canonical_sets.get(&set).copied().unwrap_or(set)),
             ty => ty,
         };
@@ -808,6 +856,11 @@ impl InferenceContext {
             .iter()
             .map(|layout| Type::Async(layout.id))
             .collect::<Vec<_>>();
+        let ranges = self
+            .ranges
+            .iter()
+            .map(|layout| Type::Range(layout.id))
+            .collect::<Vec<_>>();
         let sets = self
             .sets
             .iter()
@@ -818,6 +871,7 @@ impl InferenceContext {
             .chain(options)
             .chain(results)
             .chain(asyncs)
+            .chain(ranges)
             .chain(sets)
         {
             self.intern_resolved_type(ty);
@@ -914,6 +968,40 @@ impl InferenceContext {
         let id = self.constructed_type_ids.async_value();
         self.asyncs.push(AsyncLayout { id, value });
         id
+    }
+
+    pub(crate) fn range_type(&mut self, bound: Type, kind: RangeKind) -> RangeTypeId {
+        if let Some(range) = self
+            .ranges
+            .iter()
+            .find(|range| range.lower == bound && range.upper == bound && range.kind == kind)
+        {
+            return range.id;
+        }
+        let id = self.constructed_type_ids.range();
+        self.ranges.push(RangeLayout {
+            id,
+            lower: bound,
+            upper: bound,
+            kind,
+        });
+        id
+    }
+
+    pub(crate) fn range_bound(&self, id: RangeTypeId) -> Type {
+        self.ranges
+            .iter()
+            .find(|range| range.id == id)
+            .expect("checked range type has a layout")
+            .lower
+    }
+
+    pub(crate) fn range_kind(&self, id: RangeTypeId) -> RangeKind {
+        self.ranges
+            .iter()
+            .find(|range| range.id == id)
+            .expect("checked range type has a layout")
+            .kind
     }
 
     pub(crate) fn set_type(&mut self, element: Type) -> TypeApplicationId {
@@ -1197,6 +1285,37 @@ impl InferenceContext {
         }
     }
 
+    pub(crate) fn finalize_ranges(&mut self) {
+        let bounds = self
+            .ranges
+            .iter()
+            .map(|range| (range.lower, range.upper))
+            .collect::<Vec<_>>();
+        let bounds = bounds
+            .into_iter()
+            .map(|(lower, upper)| (self.resolve(lower), self.resolve(upper)))
+            .collect::<Vec<_>>();
+        for (range, (lower, upper)) in self.ranges.iter_mut().zip(bounds) {
+            range.lower = lower;
+            range.upper = upper;
+        }
+
+        let mut representatives = Vec::<(Type, RangeKind, RangeTypeId)>::new();
+        self.canonical_ranges.clear();
+        for range in &self.ranges {
+            let canonical = representatives
+                .iter()
+                .find_map(|(bound, kind, id)| {
+                    (*bound == range.lower && *kind == range.kind).then_some(*id)
+                })
+                .unwrap_or_else(|| {
+                    representatives.push((range.lower, range.kind, range.id));
+                    range.id
+                });
+            self.canonical_ranges.insert(range.id, canonical);
+        }
+    }
+
     pub(crate) fn arrays(&self) -> &[ArrayLayout] {
         &self.arrays
     }
@@ -1211,6 +1330,10 @@ impl InferenceContext {
 
     pub(crate) fn asyncs(&self) -> &[AsyncLayout] {
         &self.asyncs
+    }
+
+    pub(crate) fn ranges(&self) -> &[RangeLayout] {
+        &self.ranges
     }
 
     pub(crate) fn sets(&self) -> &[SetLayout] {
@@ -1249,6 +1372,15 @@ impl InferenceContext {
                 let value = self.async_value(layout);
                 let value = self.intern_resolved_type(value);
                 TypeKind::Async { layout, value }
+            }
+            Type::Range(layout) => {
+                let bound = self.range_bound(layout);
+                let bound = self.intern_resolved_type(bound);
+                TypeKind::Range {
+                    layout,
+                    bound,
+                    kind: self.range_kind(layout),
+                }
             }
             Type::Set(layout) => {
                 let element = self.set_element(layout);
@@ -1358,6 +1490,7 @@ impl InferenceContext {
             Type::Option(option) => self.occurs_in(variable, self.option_value(option), visited),
             Type::Result(result) => self.occurs_in(variable, self.result_value(result), visited),
             Type::Async(future) => self.occurs_in(variable, self.async_value(future), visited),
+            Type::Range(range) => self.occurs_in(variable, self.range_bound(range), visited),
             Type::Known(_) => false,
         }
     }
@@ -1455,6 +1588,7 @@ pub(crate) fn type_may_have_capability(
                 behavior == CapabilityBehavior::StructuralEquality
             }
             TypeKind::Async { .. } => false,
+            TypeKind::Range { .. } => false,
             TypeKind::Array { length, .. } => {
                 behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
             }
@@ -1463,6 +1597,7 @@ pub(crate) fn type_may_have_capability(
         },
         Type::Option(_) | Type::Result(_) => behavior == CapabilityBehavior::StructuralEquality,
         Type::Async(_) => false,
+        Type::Range(_) => false,
         Type::Array(_) => behavior == CapabilityBehavior::StructuralMemoryLayout,
         Type::Set(_) => false,
         Type::Variable(_) => false,

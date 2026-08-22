@@ -1342,6 +1342,31 @@ unloaded. Clear it at the lifecycle boundary that matches the original source:
 [`onAttach`] for per-process state, or a detected timer-start transition for
 per-attempt state. The maintained OpenJK-Speed port exercises the former.
 
+## Bounded integer iteration
+
+For bounded integer iteration, use an explicit SplitScript range instead of
+constructing an array of indices:
+
+```splitscript
+# state "game.exe" {}
+# let count: u32 = 4
+# whileAttached {
+for index in 0u32..<count {
+    print(index)
+}
+# }
+```
+
+[`..<`](syntax@range) excludes the upper endpoint and
+[`..=`](syntax@range) includes it. This differs from
+Rust, where bare `..` is the exclusive spelling, and from C# range syntax,
+where `..` describes slicing bounds rather than iteration. SplitScript requires
+the `<` or `=` marker; writing bare `..` produces a diagnostic with both
+machine-applicable choices. The type itself uses the same explicit shape,
+[`T..<T`](syntax@range) or [`T..=T`](syntax@range), when a range is stored or
+passed to a helper. A direct loop
+does not allocate a collection or range object.
+
 When membership comes from a small closed enum, a typed bit set remains more
 compact and makes the finite domain explicit:
 

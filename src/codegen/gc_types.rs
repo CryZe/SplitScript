@@ -10,8 +10,8 @@ use crate::{
     semantic::SemanticModel,
     stdlib::{DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibTypeId},
     types::{
-        ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType,
-        ResolvedSetType,
+        ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedRangeType,
+        ResolvedResultType, ResolvedSetType,
     },
 };
 
@@ -40,6 +40,7 @@ pub(super) struct Inputs<'a> {
     pub result_types: &'a [ResolvedResultType],
     pub async_types: &'a [ResolvedAsyncType],
     pub set_types: &'a [ResolvedSetType],
+    pub range_types: &'a [ResolvedRangeType],
     pub reachability: &'a reachability::Reachability,
 }
 
@@ -56,6 +57,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         result_types,
         async_types,
         set_types,
+        range_types,
         reachability,
     } = inputs;
     let layout = GcLayout::plan(super::gc_layout::Inputs {
@@ -68,6 +70,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         results: result_types,
         asyncs: async_types,
         sets: set_types,
+        ranges: range_types,
         async_frames,
         reachability,
     });
@@ -329,6 +332,33 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                             FieldType {
                                 element_type: StorageType::Val(ValType::I32),
                                 mutable: true,
+                            },
+                        ]
+                        .into(),
+                    }),
+                    true,
+                    None,
+                )
+            }
+            Type::Range(id) => {
+                let range = range_types
+                    .iter()
+                    .find(|range| range.id == id)
+                    .expect("reachable ranges have resolved declarations");
+                let crate::types::ResolvedTypeRef::Core(bound) = range.bound else {
+                    unreachable!("range bounds are concrete integer types")
+                };
+                let bound = Type::from_core(bound);
+                (
+                    CompositeInnerType::Struct(StructType {
+                        fields: vec![
+                            FieldType {
+                                element_type: layout.storage_type(bound),
+                                mutable: false,
+                            },
+                            FieldType {
+                                element_type: layout.storage_type(bound),
+                                mutable: false,
                             },
                         ]
                         .into(),

@@ -723,6 +723,14 @@ impl<'a> Validator<'a> {
                 self.require_constructor(owner, "Result", 1);
                 self.validate_type(owner, value, parameters);
             }
+            Type::ExclusiveRange(value) => {
+                self.require_constructor(owner, "ExclusiveRange", 1);
+                self.validate_type(owner, value, parameters);
+            }
+            Type::InclusiveRange(value) => {
+                self.require_constructor(owner, "InclusiveRange", 1);
+                self.validate_type(owner, value, parameters);
+            }
             Type::Application {
                 constructor,
                 arguments,

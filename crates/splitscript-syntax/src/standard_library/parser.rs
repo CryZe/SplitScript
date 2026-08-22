@@ -231,6 +231,32 @@ impl Parser<'_> {
                 }],
             ));
         }
+        if self.at(&TokenKind::DotDotLt) || self.at(&TokenKind::DotDotEq) {
+            let inclusive = self.at(&TokenKind::DotDotEq);
+            self.bump();
+            let upper = self.ident("expected the range type parameter after the operator")?;
+            if upper != name {
+                return Err(self.error(
+                    "both sides of a structural range type must use the same type parameter",
+                ));
+            }
+            return Ok((
+                if inclusive {
+                    "InclusiveRange".to_owned()
+                } else {
+                    "ExclusiveRange".to_owned()
+                },
+                if inclusive {
+                    TypeConstructorSyntax::InclusiveRange
+                } else {
+                    TypeConstructorSyntax::ExclusiveRange
+                },
+                vec![TypeParameter {
+                    name,
+                    constraints: vec!["Integer".to_owned()],
+                }],
+            ));
+        }
 
         let type_parameters = self.type_parameters()?;
         Ok((name, TypeConstructorSyntax::Named, type_parameters))
@@ -523,6 +549,19 @@ impl Parser<'_> {
                 Type::Name(name)
             }
         };
+        if self.at(&TokenKind::DotDotLt) || self.at(&TokenKind::DotDotEq) {
+            let inclusive = self.at(&TokenKind::DotDotEq);
+            self.bump();
+            let upper = self.ty()?;
+            if upper != ty {
+                return Err(self.error("both sides of a range type must name the same bound type"));
+            }
+            ty = if inclusive {
+                Type::InclusiveRange(Box::new(ty))
+            } else {
+                Type::ExclusiveRange(Box::new(ty))
+            };
+        }
         let mut previous_suffix = None;
         loop {
             let is_option = if self.eat(&TokenKind::Question) {

@@ -1922,6 +1922,40 @@ typeConstructor [T] {
     fn clear() -> None;
 }
 
+/// Represents an integer interval whose upper bound is excluded.
+///
+/// Use [`..<`](syntax@range) when the value at `end` must not be visited.
+/// Range bounds are immutable, and a range whose end precedes its start is
+/// empty.
+///
+/// # Example
+///
+/// Visit array indices
+///
+/// ```splitscript
+/// let values = ["health", "mana"]
+/// for index in 0..<values.length() {
+///     print(values[index])
+/// }
+/// ```
+typeConstructor T..<T {}
+
+/// Represents an integer interval whose upper bound is included.
+///
+/// Use [`..=`](syntax@range) when the value at `end` must be visited. Range
+/// bounds are immutable, and a range whose end precedes its start is empty.
+///
+/// # Example
+///
+/// Visit both endpoints
+///
+/// ```splitscript
+/// for checkpoint in 1..=3 {
+///     print(checkpoint)
+/// }
+/// ```
+typeConstructor T..=T {}
+
 /// Stores a growable collection of unique values for one script instance.
 ///
 /// A set keeps its allocation and contents across ticks. Mutating operations

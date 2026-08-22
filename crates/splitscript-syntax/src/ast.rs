@@ -155,6 +155,20 @@ impl AsyncTypeId {
     }
 }
 
+/// Stable identity for a range type expression in one parsed program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct RangeTypeId(u32);
+
+impl RangeTypeId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    pub(crate) fn from_index(index: u32) -> Self {
+        Self(index)
+    }
+}
+
 /// Stable identity for a named generic type application such as `Set<String>`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TypeApplicationId(u32);
@@ -216,6 +230,7 @@ display_stable_id!(
     OptionTypeId,
     ResultTypeId,
     AsyncTypeId,
+    RangeTypeId,
     TypeApplicationId,
     RecordFieldId,
     EnumVariantId
@@ -292,6 +307,7 @@ pub struct Program {
     pub option_types: Vec<OptionTypeDecl>,
     pub result_types: Vec<ResultTypeDecl>,
     pub async_types: Vec<AsyncTypeDecl>,
+    pub range_types: Vec<RangeTypeDecl>,
     pub type_applications: Vec<TypeApplicationDecl>,
     pub functions: Vec<FunctionDecl>,
     pub actions: Vec<Action>,
@@ -403,6 +419,10 @@ impl ConstructedTypeIdAllocator {
         AsyncTypeId::from_index(self.take())
     }
 
+    pub fn range(&mut self) -> RangeTypeId {
+        RangeTypeId::from_index(self.take())
+    }
+
     pub fn application(&mut self) -> TypeApplicationId {
         TypeApplicationId::from_index(self.take())
     }
@@ -468,6 +488,31 @@ pub struct TypeApplicationOccurrence {
 pub struct AsyncTypeDecl {
     pub id: AsyncTypeId,
     pub value: TypeRef,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RangeKind {
+    Exclusive,
+    Inclusive,
+}
+
+impl RangeKind {
+    pub const fn operator(self) -> &'static str {
+        match self {
+            Self::Exclusive => "..<",
+            Self::Inclusive => "..=",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RangeTypeDecl {
+    pub id: RangeTypeId,
+    pub lower: TypeRef,
+    pub upper: TypeRef,
+    pub kind: RangeKind,
+    /// Every source-written range operator for this interned structural type.
+    pub occurrences: Vec<Span>,
 }
 
 #[derive(Debug, Clone)]
@@ -1002,6 +1047,12 @@ pub enum ExprKind {
     InterpolatedString(Vec<InterpolatedPart>),
     Signature(String),
     Array(Vec<Expr>),
+    Range {
+        start: Box<Expr>,
+        end: Box<Expr>,
+        kind: RangeKind,
+        operator_span: Span,
+    },
     /// A lexically scoped sequence whose final expression supplies its value.
     Block(Block),
     /// Repeats until a `break`, with break values determining the expression's
@@ -1187,6 +1238,7 @@ pub enum TypeRef {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Range(RangeTypeId),
     Application(TypeApplicationId),
 }
 
@@ -1220,6 +1272,7 @@ impl fmt::Display for TypeRef {
             Self::Option(id) => write!(f, "Option#{id}"),
             Self::Result(id) => write!(f, "Result#{id}"),
             Self::Async(id) => write!(f, "Async#{id}"),
+            Self::Range(id) => write!(f, "Range#{id}"),
             Self::Application(id) => write!(f, "Application#{id}"),
         }
     }

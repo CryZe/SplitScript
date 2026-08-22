@@ -386,6 +386,7 @@ pub struct CheckedProgram {
     option_types: Vec<types::ResolvedOptionType>,
     result_types: Vec<types::ResolvedResultType>,
     async_types: Vec<types::ResolvedAsyncType>,
+    range_types: Vec<types::ResolvedRangeType>,
     set_types: Vec<types::ResolvedSetType>,
 }
 
@@ -721,6 +722,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         option_types: output.option_types,
         result_types: output.result_types,
         async_types: output.async_types,
+        range_types: output.range_types,
         set_types: output.set_types,
     })
 }

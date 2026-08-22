@@ -13,19 +13,41 @@ use crate::{
         BinaryOp, Block, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference, EnumVariant,
         EnumVariantId, Expr, ExprId, ExprKind, ForBinding, FunctionDecl, FunctionId,
         InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter,
-        PatternBinding, PatternId, PointerPath, PointerPathBase, Program, RecordDecl, RecordField,
-        RecordFieldId, RecordId, ResultTypeDecl, ResultTypeId, SettingChoiceOption,
-        SettingChoiceOptionId, SettingDecl, SettingExternalKey, SettingFamilyDecl,
-        SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern, Span, StateDecl,
-        StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef, StateSource,
-        StateTransform, Stmt, SuspensionMode, TickRateDecl, TickRateValue, TypeApplicationDecl,
-        TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef, UnaryOp, ValueId,
-        VariableDecl,
+        PatternBinding, PatternId, PointerPath, PointerPathBase, Program, RangeKind, RangeTypeDecl,
+        RangeTypeId, RecordDecl, RecordField, RecordFieldId, RecordId, ResultTypeDecl,
+        ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl, SettingExternalKey,
+        SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern,
+        Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
+        StateSource, StateTransform, Stmt, SuspensionMode, TickRateDecl, TickRateValue,
+        TypeApplicationDecl, TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef,
+        UnaryOp, ValueId, VariableDecl,
     },
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
     source::{RecoveryNode, RecoveryNodeKind},
 };
+
+fn ambiguous_range_diagnostic(span: Span) -> Diagnostic {
+    Diagnostic::new("a range must say whether its upper bound is included", span)
+        .with_primary_label("bare `..` is intentionally not valid range syntax")
+        .with_note("use `..<` for an exclusive upper bound or `..=` for an inclusive upper bound")
+        .with_fix(DiagnosticFix {
+            title: "exclude the upper bound".to_owned(),
+            applicability: FixApplicability::MaybeIncorrect,
+            edits: vec![TextEdit {
+                span,
+                replacement: "..<".to_owned(),
+            }],
+        })
+        .with_fix(DiagnosticFix {
+            title: "include the upper bound".to_owned(),
+            applicability: FixApplicability::MaybeIncorrect,
+            edits: vec![TextEdit {
+                span,
+                replacement: "..=".to_owned(),
+            }],
+        })
+}
 
 pub fn parse(source: &str, tokens: Vec<Token>) -> Result<Program, Diagnostic> {
     let output = parse_recovering(source, tokens);
@@ -54,6 +76,8 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         result_type_ids: HashMap::new(),
         async_types: Vec::new(),
         async_type_ids: HashMap::new(),
+        range_types: Vec::new(),
+        range_type_ids: HashMap::new(),
         type_applications: Vec::new(),
         type_application_ids: HashMap::new(),
         type_names: Vec::new(),
@@ -88,6 +112,8 @@ struct Parser<'a> {
     result_type_ids: HashMap<TypeRef, ResultTypeId>,
     async_types: Vec<AsyncTypeDecl>,
     async_type_ids: HashMap<TypeRef, AsyncTypeId>,
+    range_types: Vec<RangeTypeDecl>,
+    range_type_ids: HashMap<(TypeRef, TypeRef, RangeKind), RangeTypeId>,
     type_applications: Vec<TypeApplicationDecl>,
     type_application_ids: HashMap<(TypeNameId, Vec<TypeRef>), TypeApplicationId>,
     type_names: Vec<String>,
@@ -356,6 +382,7 @@ impl Parser<'_> {
         program.option_types = self.option_types;
         program.result_types = self.result_types;
         program.async_types = self.async_types;
+        program.range_types = self.range_types;
         program.type_applications = self.type_applications;
         program.type_names = self.type_names;
         program.type_name_spans = self.type_name_spans;

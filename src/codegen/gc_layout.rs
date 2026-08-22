@@ -11,8 +11,8 @@ use crate::{
         DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibTypeId,
     },
     types::{
-        EnumTypeId, ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType,
-        ResolvedSetType,
+        EnumTypeId, ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedRangeType,
+        ResolvedResultType, ResolvedSetType,
     },
 };
 
@@ -47,6 +47,7 @@ pub(super) struct Inputs<'a> {
     pub results: &'a [ResolvedResultType],
     pub asyncs: &'a [ResolvedAsyncType],
     pub sets: &'a [ResolvedSetType],
+    pub ranges: &'a [ResolvedRangeType],
     pub async_frames: &'a AsyncFrameLayouts,
     pub reachability: &'a reachability::Reachability,
 }
@@ -63,6 +64,7 @@ impl GcLayout {
             results,
             asyncs,
             sets,
+            ranges,
             async_frames,
             reachability,
         } = inputs;
@@ -232,6 +234,13 @@ impl GcLayout {
             next += 1;
         }
 
+        for range in ranges {
+            let ty = Type::Range(range.id);
+            dynamic.insert(ty, next);
+            ordered.push(ty);
+            next += 1;
+        }
+
         let mut constructed = options
             .iter()
             .filter(|option| reachability.contains_option_type(option.id))
@@ -380,6 +389,7 @@ impl GcLayout {
             | Type::Array(_)
             | Type::Option(_)
             | Type::Result(_)
+            | Type::Range(_)
             | Type::Set(_) => *self
                 .dynamic
                 .get(&ty)
@@ -434,6 +444,7 @@ impl GcLayout {
             | Type::Option(_)
             | Type::Result(_)
             | Type::Async(_)
+            | Type::Range(_)
             | Type::Set(_) => ValType::Ref(RefType {
                 nullable: true,
                 heap_type: HeapType::Concrete(self.index(ty)),

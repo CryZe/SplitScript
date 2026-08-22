@@ -193,6 +193,8 @@ pub enum TypeConstructorSyntax {
     Array,
     Optional,
     Fallible,
+    ExclusiveRange,
+    InclusiveRange,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

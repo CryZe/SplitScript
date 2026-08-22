@@ -112,6 +112,29 @@ GBA-specific branch in either code-generation path. Only the target address
 translation remains a Rust runtime helper; attachment and discovery policy stay
 in `stdlib/standard.split` as ordinary checked SplitScript source.
 
+## PlayStation emulator support
+
+`state PS1 { ... }` introduces a read-only `ps1: PS1Emulator` value and accepts
+original PlayStation addresses in `0x80000000..=0x817fffff`. It supports ePSXe,
+pSX, DuckStation, Mednafen, PCSX-Redux, XEBRA, and RetroArch cores based on
+Beetle PSX, SwanStation, and PCSX ReARMed.
+
+Discovery and signatures are source-defined. Stable emulators retain their RAM
+base directly; DuckStation refreshes its exported or signature-discovered RAM
+pointer on each read, and PCSX-Redux follows its discovered native pointer path
+on each read. RetroArch validates that the selected core remains mapped before
+using its discovered base.
+
+```splitscript
+state PS1 {
+    health: u16 at 0x80012346;
+    inventory: u32 at 0x80020000, 0x20, 0x8;
+}
+```
+
+Explicit `ps1.read<T>(address)` calls and state-field pointer paths use the same
+provider contract and little-endian `MemoryReadable` layouts.
+
 ## Compiler and tooling model
 
 The library surface is described by a backend-independent catalog. Each entry

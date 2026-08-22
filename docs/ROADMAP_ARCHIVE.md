@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-22: source-defined PlayStation emulator provider
+
+- Added `state PS1` and a typed `ps1: PS1Emulator` root with source-defined
+  discovery for the seven backend families supported by ASR: ePSXe, pSX,
+  DuckStation, Mednafen, PCSX-Redux, XEBRA, and multiple RetroArch cores.
+- Kept moving DuckStation and PCSX-Redux mappings current at the read boundary,
+  validated libretro core lifetime, and routed explicit reads plus guest pointer
+  paths through the shared provider-read contract.
+- Preserved original PlayStation address bounds and little-endian typed memory
+  reads without adding PS1-specific parser or type-checker behavior.
+
 ## 2026-08-22: source-defined PlayStation 2 emulator provider
 
 - Added `state PS2` with a typed `ps2: PS2Emulator` root and source-defined

@@ -22,6 +22,7 @@ mod equality;
 mod float_parse;
 mod gba;
 mod process;
+mod ps1;
 mod ps2;
 mod strings;
 mod unity;
@@ -329,6 +330,10 @@ pub(super) fn build_gba_translate_address(inputs: &RuntimeHelperInputs<'_>) -> F
 
 pub(super) fn build_ps2_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
     ps2::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
+}
+
+pub(super) fn build_ps1_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    ps1::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
 }
 
 pub(super) fn build_string_from_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {

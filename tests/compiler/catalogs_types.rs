@@ -43,6 +43,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::UnityIl2Cpp,
         StdlibItemId::GBAEmulatorDiscover,
         StdlibItemId::PS2EmulatorDiscover,
+        StdlibItemId::PS1EmulatorDiscover,
     ] {
         assert!(matches!(
             library.item(item).implementation,
@@ -914,6 +915,67 @@ fn ps2_provider_is_source_defined_and_supports_direct_and_pointer_path_reads() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::codegen(&checked))
         .expect("PS2 direct reads and provider-relative pointer paths should emit valid Wasm");
+}
+
+#[test]
+fn ps1_provider_covers_asr_backends_and_guest_pointer_paths() {
+    let library = StandardLibrary::new();
+    let ps1 = library
+        .state_provider_by_name("PS1")
+        .expect("the bundled PS1 provider should be discoverable by source name");
+    assert_eq!(ps1.id, StdlibStateProviderId::Ps1);
+    assert_eq!(ps1.value_name, "ps1");
+    assert_eq!(ps1.process_type, StdlibTypeId::PS1Emulator);
+    assert_eq!(ps1.direct_read, StdlibItemId::PS1EmulatorRead);
+    assert_eq!(
+        ps1.attachment,
+        splitscript::compiler::stdlib::StateProviderAttachment::Callable(
+            StdlibItemId::PS1EmulatorDiscover,
+        )
+    );
+    assert!(matches!(
+        library
+            .item(StdlibItemId::PS1EmulatorDiscover)
+            .implementation,
+        Implementation::LibraryBody { .. }
+    ));
+    assert!(matches!(
+        ps1.processes,
+        splitscript::compiler::stdlib::StateProviderProcesses::Declared(processes)
+            if processes.contains(&"ePSXe.exe")
+                && processes.contains(&"retroarch.exe")
+                && processes.contains(&"pcsx-redux.main")
+    ));
+
+    let source = r#"
+        state PS1 {
+            direct: u16 at 0x80000000;
+            pointer: u32 at 0x80000100, 0x20, -0x8;
+        }
+
+        whileAttached {
+            let value: u32 = ps1.read(0x80000200) else 0
+            print(value)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("PS1 direct reads and guest pointer paths should type-check");
+    assert_eq!(
+        checked.semantics().state_provider(),
+        Some(StdlibStateProviderId::Ps1)
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("PS1 direct reads and guest pointer paths should emit valid Wasm");
+
+    let provider_source = "state PS1 {}";
+    let mut database = splitscript::tooling::database::CompilerDatabase::new(provider_source);
+    let hover = database
+        .hover(provider_source.find("PS1").unwrap() + 1)
+        .unwrap()
+        .expect("the PS1 provider should expose catalog documentation");
+    assert!(hover.markdown.contains("state PS1 { ... }"));
+    assert!(hover.markdown.contains("ps1: PS1Emulator"));
 }
 
 #[test]

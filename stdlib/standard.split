@@ -90,6 +90,34 @@ stateProvider PS2 as ps2 {
     "retroarch.exe",
 }
 
+/// Attaches to a supported PlayStation emulator.
+///
+/// The provider discovers emulated main RAM and exposes original PlayStation
+/// addresses through the read-only `ps1` value of type [`PS1Emulator`].
+///
+/// # Example
+///
+/// Read PlayStation memory
+///
+/// ```splitscript
+/// state PS1 {
+///     health: u16 at 0x80012346
+/// }
+/// ```
+@processType(PS1Emulator)
+@attachment(PS1EmulatorDiscover)
+@directRead(PS1EmulatorRead)
+stateProvider PS1 as ps1 {
+    "ePSXe.exe",
+    "psxfin.exe",
+    "duckstation-qt-x64-ReleaseLTCG.exe",
+    "duckstation-nogui-x64-ReleaseLTCG.exe",
+    "retroarch.exe",
+    "pcsx-redux.main",
+    "XEBRA.EXE",
+    "mednafen.exe",
+}
+
 root {
     /// Prints a diagnostic message.
     ///
@@ -5969,6 +5997,246 @@ struct PS2Emulator {
     @intrinsic(Ps2EmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original PlayStation 2 memory address.
+        address: u32,
+    ) -> T!;
+}
+
+/// Retains a discovered PlayStation emulator memory mapping.
+///
+/// Stable mappings store RAM directly, while DuckStation and PCSX-Redux retain
+/// the native pointers needed to refresh a moving RAM base before every read.
+/// [`PS1Emulator.read`] always accepts original PlayStation addresses.
+///
+/// # Example
+///
+/// Use the attached PlayStation memory provider
+///
+/// ```splitscript state PS1
+/// let emulator: PS1Emulator = ps1
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct PS1Emulator {
+    /// Identifies how the selected emulator exposes its RAM base.
+    private backend: u32,
+
+    /// Stores either the RAM base or the first native pointer in its path.
+    private base: address,
+
+    /// Stores backend-specific lifetime state or a pointer-path offset.
+    private auxiliary1: i64,
+
+    /// Stores a second backend-specific pointer-path offset.
+    private auxiliary2: i64,
+
+    /// Discovers the emulator's PlayStation memory mapping.
+    ///
+    /// A [`state`] declaration using [`PS1`] invokes this automatically after
+    /// attaching to one of the provider's supported processes.
+    ///
+    /// # Example
+    ///
+    /// Discover a PlayStation emulator mapping explicitly
+    ///
+    /// ```splitscript state PS1
+    /// let emulator = await PS1Emulator.discover()
+    /// ```
+    static fn discover() -> PS1Emulator {
+        let processName = process.name()
+        let executable = await process.mainModule()
+
+        if processName == "ePSXe.exe" {
+            let found = await executable.scan(sig"C1 E1 10 8D 89")
+            let ramBase = retry process.read<u32>(found.offset(5))
+            return PS1Emulator {
+                backend: 1,
+                base: ramBase as address,
+                auxiliary1: 0,
+                auxiliary2: 0,
+            }
+        }
+
+        if processName == "psxfin.exe" {
+            let found = await executable.scanAny([
+                sig"8B 15 ?? ?? ?? ?? 8D 34 1A",
+                sig"A1 ?? ?? ?? ?? 8D 34 18",
+                sig"A1 ?? ?? ?? ?? 8B 7C 24 14",
+                sig"A1 ?? ?? ?? ?? 8B 6C 24",
+            ])
+            let pointer = if found.index == 0 {
+                retry process.read<u32>(found.address.offset(2))
+            } else {
+                retry process.read<u32>(found.address.offset(1))
+            }
+            let ramBase = retry process.read<u32>(pointer as address)
+            return PS1Emulator {
+                backend: 1,
+                base: ramBase as address,
+                auxiliary1: 0,
+                auxiliary2: 0,
+            }
+        }
+
+        if processName == "duckstation-qt-x64-ReleaseLTCG.exe"
+            || processName == "duckstation-nogui-x64-ReleaseLTCG.exe" {
+            if retry executable.pointerSize() != PointerSize.Bit64 {
+                await process.closed()
+            }
+            let basePointer = executable.peExport("RAM") else 0
+            if basePointer == 0 {
+                let found = await executable.scan(sig"48 89 0D ?? ?? ?? ?? B8")
+                basePointer = retry process.readRelative32(found.offset(3))
+            }
+            return PS1Emulator {
+                backend: 3,
+                base: basePointer,
+                auxiliary1: 0,
+                auxiliary2: 0,
+            }
+        }
+
+        if processName == "retroarch.exe" {
+            let pointerSize = retry executable.pointerSize()
+            let core = retry {
+                process.loadedModule("mednafen_psx_hw_libretro.dll")
+                    else process.loadedModule("mednafen_psx_libretro.dll")
+                    else process.loadedModule("swanstation_libretro.dll")
+                    else process.loadedModule("pcsx_rearmed_libretro.dll")
+                    else throw "a supported PlayStation libretro core is not loaded"
+            }
+            let getMemoryData = retry core.peExport("retro_get_memory_data")
+            let ramBase: address = 0
+
+            if core.name == "mednafen_psx_hw_libretro.dll"
+                || core.name == "mednafen_psx_libretro.dll" {
+                if pointerSize == PointerSize.Bit64 {
+                    let found = await process.scan(
+                        getMemoryData,
+                        0x100,
+                        sig"48 0F 44 05",
+                    )
+                    let target = retry process.readRelative32(found.offset(4))
+                    ramBase = retry process.read<address>(target)
+                } else {
+                    let found = await process.scan(
+                        getMemoryData,
+                        0x100,
+                        sig"0F 44 05",
+                    )
+                    let pointer = retry process.read<u32>(found.offset(3))
+                    ramBase = retry process.read<u32>(pointer as address) as address
+                }
+            } else if core.name == "swanstation_libretro.dll" {
+                if pointerSize == PointerSize.Bit64 {
+                    let found = await process.scan(
+                        getMemoryData,
+                        0x100,
+                        sig"48 8B 05 ?? ?? ?? ?? C3",
+                    )
+                    let target = retry process.readRelative32(found.offset(3))
+                    ramBase = retry process.read<address>(target)
+                } else {
+                    let found = await process.scan(
+                        getMemoryData,
+                        0x100,
+                        sig"74 ?? A1",
+                    )
+                    let pointer = retry process.read<u32>(found.offset(3))
+                    ramBase = retry process.read<u32>(pointer as address) as address
+                }
+            } else if pointerSize == PointerSize.Bit64 {
+                let found = await process.scan(
+                    getMemoryData,
+                    0x100,
+                    sig"48 8B 05 ?? ?? ?? ?? 48 8B 00",
+                )
+                let target = retry process.readRelative32(found.offset(3))
+                let pointer = retry process.read<address>(target)
+                ramBase = retry process.read<address>(pointer)
+            } else {
+                let found = await process.scan(
+                    getMemoryData,
+                    0x100,
+                    sig"0F 44 05 ?? ?? ?? ?? C3",
+                )
+                let pointer = retry process.read<u32>(found.offset(3))
+                ramBase = retry process.read<u32>(pointer as address) as address
+            }
+
+            return PS1Emulator {
+                backend: 4,
+                base: ramBase,
+                auxiliary1: core.address as i64,
+                auxiliary2: 0,
+            }
+        }
+
+        if processName == "pcsx-redux.main" {
+            if retry executable.pointerSize() != PointerSize.Bit64 {
+                await process.closed()
+            }
+            let found = await executable.scan(
+                sig"48 8B 05 ?? ?? ?? ?? 48 8B 80 ?? ?? ?? ?? 48 8B 50 ?? E8",
+            )
+            let basePointer = retry process.readRelative32(found.offset(3))
+            let offset1 = retry process.read<i32>(found.offset(10))
+            let offset2 = retry process.read<u8>(found.offset(17))
+            return PS1Emulator {
+                backend: 5,
+                base: basePointer,
+                auxiliary1: offset1 as i64,
+                auxiliary2: offset2 as i64,
+            }
+        }
+
+        if processName == "XEBRA.EXE" {
+            let found = await executable.scan(
+                sig"E8 ?? ?? ?? ?? E9 ?? ?? ?? ?? 89 C8 C1 F8 10",
+            )
+            let target = retry process.readRelative32(found.offset(1))
+            let pointer = retry process.read<u32>(target.offset(0x16a))
+            let ramBase = retry process.read<u32>(pointer as address)
+            return PS1Emulator {
+                backend: 1,
+                base: ramBase as address,
+                auxiliary1: 0,
+                auxiliary2: 0,
+            }
+        }
+
+        if processName == "mednafen.exe" {
+            let found = if retry executable.pointerSize() == PointerSize.Bit64 {
+                await executable.scan(sig"89 01 0F B6 82")
+            } else {
+                await executable.scan(sig"89 01 0F B6 82 ?? ?? ?? ?? C3")
+            }
+            let ramBase = retry process.read<u32>(found.offset(5))
+            return PS1Emulator {
+                backend: 1,
+                base: ramBase as address,
+                auxiliary1: 0,
+                auxiliary2: 0,
+            }
+        }
+
+        await process.closed()
+    }
+
+    /// Reads a typed value from emulated PlayStation memory.
+    ///
+    /// Valid reads lie entirely within `0x80000000..=0x817fffff`. The expected
+    /// [`MemoryReadable`] type determines the byte layout.
+    ///
+    /// # Example
+    ///
+    /// Read an emulated value
+    ///
+    /// ```splitscript state PS1
+    /// let health: u16 = ps1.read(0x80012346) else 0
+    /// ```
+    @intrinsic(Ps1EmulatorRead)
+    fn read<T: MemoryReadable>(
+        /// The original PlayStation memory address.
         address: u32,
     ) -> T!;
 }

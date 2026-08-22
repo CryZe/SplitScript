@@ -80,6 +80,7 @@ pub(crate) enum RuntimeHelperId {
     FollowAddress,
     GBATranslateAddress,
     Ps2TranslateAddress,
+    Ps1TranslateAddress,
     RefreshSettings,
     SettingsEnabled,
     SettingsContains,
@@ -108,6 +109,11 @@ pub(crate) const fn provider_read_contract(intrinsic: IntrinsicId) -> Option<Pro
             translator: RuntimeHelperId::Ps2TranslateAddress,
             invalid_address: "invalid or unavailable PS2 memory address",
             read_failure: "PS2 memory read failed",
+        }),
+        IntrinsicId::Ps1EmulatorRead => Some(ProviderReadContract {
+            translator: RuntimeHelperId::Ps1TranslateAddress,
+            invalid_address: "invalid or unavailable PS1 memory address",
+            read_failure: "PS1 memory read failed",
         }),
         _ => None,
     }
@@ -360,9 +366,9 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::StringByteAt
         | IntrinsicId::StringCharAt
         | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
-        IntrinsicId::GBAEmulatorRead | IntrinsicId::Ps2EmulatorRead => {
-            scratch(ScratchType::Core(CoreTypeId::Address), 1)
-        }
+        IntrinsicId::GBAEmulatorRead
+        | IntrinsicId::Ps2EmulatorRead
+        | IntrinsicId::Ps1EmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
         _ => None,
     }
 }
@@ -434,6 +440,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::UnityClassStaticInstance => &[Helper(Runtime::UnityGetStaticInstance)],
         IntrinsicId::GBAEmulatorRead => &[Helper(Runtime::GBATranslateAddress)],
         IntrinsicId::Ps2EmulatorRead => &[Helper(Runtime::Ps2TranslateAddress)],
+        IntrinsicId::Ps1EmulatorRead => &[Helper(Runtime::Ps1TranslateAddress)],
         IntrinsicId::StringContains
         | IntrinsicId::StringStartsWith
         | IntrinsicId::StringEndsWith
@@ -552,6 +559,7 @@ const UNITY_CLASS: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Uni
 const UNITY_FIELD: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityField);
 const GBA_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GBAEmulator);
 const PS2_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS2Emulator);
+const PS1_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS1Emulator);
 const T: ContractTypeRef = ContractTypeRef::Parameter(0);
 const T_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
@@ -1719,6 +1727,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Ps2EmulatorRead,
             Method,
             signature(MEMORY_T, Some(PS2_EMULATOR), params![value(U32)], T_RESULT,),
+            PROCESS,
+            Everywhere,
+            Retryable
+        ),
+        IntrinsicId::Ps1EmulatorRead => contract!(
+            Ps1EmulatorRead,
+            Method,
+            signature(MEMORY_T, Some(PS1_EMULATOR), params![value(U32)], T_RESULT,),
             PROCESS,
             Everywhere,
             Retryable

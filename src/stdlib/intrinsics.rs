@@ -112,6 +112,7 @@ macro_rules! trusted_intrinsics {
             UnityClassStaticInstance,
             GBAEmulatorRead,
             Ps2EmulatorRead,
+            Ps1EmulatorRead,
         }
     };
 }

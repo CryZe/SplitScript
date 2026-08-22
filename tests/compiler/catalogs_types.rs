@@ -428,6 +428,10 @@ fn unary_syntax_resolves_through_catalog_declared_methods() {
         library.render_signature(StdlibItemId::IntegerBitNot),
         "T.bitNot() -> T where T: Integer"
     );
+    assert_eq!(
+        library.render_signature(StdlibItemId::NumericSwapBytes),
+        "T.swapBytes() -> T where T: Numeric"
+    );
 
     let source = r#"
         state "game.exe" {}

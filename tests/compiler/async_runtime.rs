@@ -1329,6 +1329,40 @@ fn catalog_declared_unary_operators_execute_for_globals_and_methods() {
 }
 
 #[test]
+fn numeric_swap_bytes_preserves_width_signedness_and_bit_patterns() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let unsignedByte = 0x12u8.swapBytes()
+            let signedByte = (-2i8).swapBytes()
+            let unsignedWord = 0x1234u16.swapBytes()
+            let signedWord = (-2i16).swapBytes()
+            let unsignedDword = 0x12345678u32.swapBytes()
+            let signedDword = (-2i32).swapBytes()
+            let unsignedQword = 0x0123456789abcdefu64.swapBytes()
+            let signedQword = (-2i64).swapBytes()
+            let floatBits = f32.fromBits(0x12345678u32).swapBytes().toBits()
+            let doubleBits = f64.fromBits(0x0123456789abcdefu64).swapBytes().toBits()
+            print(`{unsignedByte}:{signedByte}:{unsignedWord}:{signedWord}:{unsignedDword}:{signedDword}:{unsignedQword}:{signedQword}:{floatBits}:{doubleBits}`)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(
+        store.data().messages,
+        [
+            "18:-2:13330:-257:2018915346:-16777217:17279655951921914625:-72057594037927937:2018915346:17279655951921914625"
+        ]
+    );
+}
+
+#[test]
 fn current_state_assignment_overrides_this_tick_and_becomes_next_ticks_old_state() {
     let source = r#"
         state "game.exe" {

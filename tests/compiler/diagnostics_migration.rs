@@ -1977,6 +1977,8 @@ fn unknown_calls_suggest_canonical_names_across_naming_styles() {
         ),
         ("values.AddRange([2, 3])", "AddRange", "extend", "extend"),
         ("values.Remove(1)", "Remove", "remove", "remove"),
+        ("value.swap_bytes()", "swap_bytes", "swapBytes", "swapBytes"),
+        ("value.from_be()", "from_be", "swapBytes", "swapBytes"),
         ("add_one(value)", "add_one", "addOne", "addOne"),
     ];
 

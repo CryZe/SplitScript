@@ -1175,6 +1175,25 @@ const ARRAY_EXTEND_SPELLINGS: &[ForeignSpelling] = &[type_spelling!(
     "replace this C# collection method name"
 )];
 
+const INTEGER_SWAP_BYTES_SPELLINGS: &[ForeignSpelling] = &[
+    type_spelling!(
+        SourceLanguage::Rust,
+        ForeignSpellingContext::Method,
+        "swap_bytes",
+        "swapBytes",
+        "SplitScript spells this numeric byte-order operation `swapBytes`",
+        "replace this Rust method name"
+    ),
+    type_spelling!(
+        SourceLanguage::Rust,
+        ForeignSpellingContext::Method,
+        "from_be",
+        "swapBytes",
+        "process memory is decoded little-endian, so convert a big-endian integer with `swapBytes`",
+        "replace this Rust byte-order conversion"
+    ),
+];
+
 const STRICT_EQUALITY_SPELLINGS: &[ForeignSpelling] = &[
     type_spelling!(
         SourceLanguage::JavaScript,
@@ -1317,6 +1336,16 @@ const ASL_TIMER_STATE_SPELLINGS: &[ForeignSpelling] = &[
 ];
 
 pub const CONCEPTS: &[MigrationConcept] = &[
+    MigrationConcept {
+        id: MigrationConceptId::new("numeric.byte-order"),
+        name: "Numeric byte order",
+        sources: &[SourceLanguage::Rust, SourceLanguage::CSharp],
+        support: MigrationSupport::Direct,
+        summary: "Use [`Numeric.swapBytes`] to reverse a numeric value's raw bytes after reading data stored in the opposite byte order. It preserves the exact integer or floating-point type; eight-bit values are unchanged.",
+        targets: &[MigrationTarget::StandardLibraryItem("Numeric.swapBytes")],
+        cookbook_anchor: None,
+        spellings: INTEGER_SWAP_BYTES_SPELLINGS,
+    },
     MigrationConcept {
         id: MigrationConceptId::new("declaration.let"),
         name: "Variable declarations",

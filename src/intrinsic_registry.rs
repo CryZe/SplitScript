@@ -392,6 +392,7 @@ const fn async_state(id: IntrinsicId) -> Option<ScratchPolicy> {
 
 const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
     match id {
+        IntrinsicId::NumericSwapBytes => scratch(ScratchType::Expression, 1),
         IntrinsicId::ProcessLoadedModule => scratch(ScratchType::Standard(StdlibTypeId::Module), 1),
         IntrinsicId::ProcessMemoryRanges => scratch(ScratchType::Expression, 1),
         IntrinsicId::NumericMin | IntrinsicId::NumericMax => scratch(ScratchType::Expression, 2),
@@ -524,6 +525,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::NextTick
         | IntrinsicId::BoolNot
         | IntrinsicId::IntegerBitNot
+        | IntrinsicId::NumericSwapBytes
         | IntrinsicId::NumericAdd
         | IntrinsicId::NumericSubtract
         | IntrinsicId::NumericMultiply
@@ -843,6 +845,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             IntegerBitNot,
             Method,
             signature(INTEGER_T, Some(T), params![], T),
+            PURE,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::NumericSwapBytes => contract!(
+            NumericSwapBytes,
+            Method,
+            signature(NUMERIC_T, Some(T), params![], T),
             PURE,
             Everywhere,
             RepresentationPrimitive

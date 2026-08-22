@@ -1,6 +1,83 @@
 use wasmparser::{Validator, WasmFeatures};
 
 #[test]
+fn sonic_three_air_shaped_range_discovery_and_filtered_state_compile_cleanly() {
+    let source = r#"
+        let wramBase
+
+        enum Level {
+            AngelIsland1,
+            AngelIsland2,
+        }
+
+        settings {
+            "Angel Island 1" => angelIsland1: true,
+            "Angel Island 2" => angelIsland2: true,
+        }
+
+        state "Sonic3AIR.exe" {
+            rawGameState: u8 = process.read(wramBase.offset(0xf600))?;
+            rawSaveSlot: u8 = process.read(wramBase.offset(0xf61a))?;
+            rawLevel: u8 = process.read(wramBase.offset(0xee4e))?;
+            timeBonus: u16 = process.read<u16>(wramBase.offset(0xf7d2))?.swapBytes();
+            saveSlot: u8 = 0;
+            level: Level = Level.AngelIsland1;
+        }
+
+        onAttach {
+            wramBase = loop {
+                let mapping = await process.findMemoryRange(
+                    0x521000,
+                    MemoryRangeAccess.Read,
+                )
+                match mapping {
+                    Some(range) => break range.address.offset(0x400020),
+                    None => {
+                        await nextTick()
+                        continue
+                    },
+                }
+            }
+        }
+
+        whileAttached {
+            current.saveSlot = if current.rawSaveSlot < 8 {
+                current.rawSaveSlot
+            } else {
+                old.saveSlot
+            }
+            current.level = match current.rawLevel {
+                0 => Level.AngelIsland1,
+                1 => Level.AngelIsland2,
+                _ => old.level,
+            }
+        }
+
+        start {
+            return old.rawGameState != 0x0c && current.rawGameState == 0x0c
+        }
+
+        reset {
+            return old.saveSlot != current.saveSlot
+        }
+
+        split {
+            return old.level != current.level
+                && match current.level {
+                    Level.AngelIsland1 => settings.angelIsland1,
+                    Level.AngelIsland2 => settings.angelIsland2,
+                }
+        }
+    "#;
+
+    let wasm = splitscript::compile(source)
+        .expect("the Sonic 3 A.I.R. memory-range and endian patterns should be first-class");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("the representative port should lower to valid Wasm GC");
+}
+
+#[test]
 fn attachment_scoped_globals_infer_from_on_attach_and_support_layout_specific_values() {
     let source = r#"
         let module

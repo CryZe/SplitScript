@@ -3464,6 +3464,38 @@ fn compile_expr_unconverted(
                 }
                 emit_narrow_integer_result(function, receiver);
             }
+            IntrinsicId::NumericSwapBytes => {
+                let receiver = compile_receiver(function, target, context);
+                let value = context.matches.intrinsic_temps[&expression][0];
+                function.instruction(&Instruction::LocalSet(value));
+                match receiver {
+                    Type::I8 | Type::U8 => {
+                        function.instruction(&Instruction::LocalGet(value));
+                    }
+                    Type::I16 | Type::U16 => {
+                        function
+                            .instruction(&Instruction::LocalGet(value))
+                            .instruction(&Instruction::I32Const(8))
+                            .instruction(&Instruction::I32Shl)
+                            .instruction(&Instruction::LocalGet(value))
+                            .instruction(&Instruction::I32Const(8))
+                            .instruction(&Instruction::I32ShrU)
+                            .instruction(&Instruction::I32Const(0xff))
+                            .instruction(&Instruction::I32And)
+                            .instruction(&Instruction::I32Or);
+                        emit_narrow_integer_result(function, receiver);
+                    }
+                    Type::I32 | Type::U32 => {
+                        emit_swap_bytes_i32(function, value, false);
+                    }
+                    Type::I64 | Type::U64 => {
+                        emit_swap_bytes_i64(function, value, false);
+                    }
+                    Type::F32 => emit_swap_bytes_i32(function, value, true),
+                    Type::F64 => emit_swap_bytes_i64(function, value, true),
+                    _ => unreachable!("byte swapping requires a numeric receiver"),
+                }
+            }
             IntrinsicId::SignedNegate => {
                 let receiver = compile_receiver(function, target, context);
                 match receiver {
@@ -4143,6 +4175,79 @@ fn emit_narrow_i32(function: &mut Function, target: Type) {
 fn emit_narrow_integer_result(function: &mut Function, ty: Type) {
     if matches!(ty, Type::I8 | Type::U8 | Type::I16 | Type::U16) {
         emit_narrow_i32(function, ty);
+    }
+}
+
+fn emit_swap_bytes_i32(function: &mut Function, value: u32, float: bool) {
+    function.instruction(&Instruction::LocalGet(value));
+    if float {
+        function.instruction(&Instruction::I32ReinterpretF32);
+    }
+    function
+        .instruction(&Instruction::I32Const(8))
+        .instruction(&Instruction::I32Rotl)
+        .instruction(&Instruction::I32Const(0x00ff_00ff))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::LocalGet(value));
+    if float {
+        function.instruction(&Instruction::I32ReinterpretF32);
+    }
+    function
+        .instruction(&Instruction::I32Const(8))
+        .instruction(&Instruction::I32Rotr)
+        .instruction(&Instruction::I32Const(0xff00_ff00u32 as i32))
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::I32Or);
+    if float {
+        function.instruction(&Instruction::F32ReinterpretI32);
+    }
+}
+
+fn emit_swap_bytes_i64(function: &mut Function, value: u32, float: bool) {
+    // A single expression-typed local keeps evaluation one-shot for both i64
+    // and f64. Each term moves one input byte directly to its final position,
+    // avoiding an extra integer-typed temporary for floating-point receivers.
+    let left = [
+        (0x0000_0000_0000_00ffu64, 56),
+        (0x0000_0000_0000_ff00u64, 40),
+        (0x0000_0000_00ff_0000u64, 24),
+        (0x0000_0000_ff00_0000u64, 8),
+    ];
+    let right = [
+        (8, 0x0000_0000_ff00_0000u64),
+        (24, 0x0000_0000_00ff_0000u64),
+        (40, 0x0000_0000_0000_ff00u64),
+        (56, 0x0000_0000_0000_00ffu64),
+    ];
+
+    for (term, (mask, shift)) in left.into_iter().enumerate() {
+        function.instruction(&Instruction::LocalGet(value));
+        if float {
+            function.instruction(&Instruction::I64ReinterpretF64);
+        }
+        function
+            .instruction(&Instruction::I64Const(mask as i64))
+            .instruction(&Instruction::I64And)
+            .instruction(&Instruction::I64Const(shift))
+            .instruction(&Instruction::I64Shl);
+        if term != 0 {
+            function.instruction(&Instruction::I64Or);
+        }
+    }
+    for (shift, mask) in right {
+        function.instruction(&Instruction::LocalGet(value));
+        if float {
+            function.instruction(&Instruction::I64ReinterpretF64);
+        }
+        function
+            .instruction(&Instruction::I64Const(shift))
+            .instruction(&Instruction::I64ShrU)
+            .instruction(&Instruction::I64Const(mask as i64))
+            .instruction(&Instruction::I64And)
+            .instruction(&Instruction::I64Or);
+    }
+    if float {
+        function.instruction(&Instruction::F64ReinterpretI64);
     }
 }
 

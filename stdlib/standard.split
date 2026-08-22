@@ -1238,6 +1238,27 @@ capability Numeric<T: Equatable> {
         let lowerBounded = self.max(minimum)
         return lowerBounded.min(maximum)
     }
+
+    /// Reverses the order of the bytes in this numeric value.
+    ///
+    /// The result keeps the receiver's exact type and raw bit pattern.
+    /// Eight-bit integers are unchanged because they contain only one byte.
+    /// Floating-point values reverse their IEEE 754 representation and then
+    /// reinterpret those bits as the same floating-point type; this is not a
+    /// numeric conversion. The method is useful when a value was read using
+    /// the opposite byte order, such as big-endian process memory decoded by
+    /// [`Process.read`].
+    ///
+    /// # Example
+    ///
+    /// Decode a big-endian integer
+    ///
+    /// ```splitscript
+    /// let decoded = 0x3412u16.swapBytes()
+    /// ```
+    @mustUse("Byte swapping returns a new value and does not modify its receiver.")
+    @intrinsic(NumericSwapBytes)
+    fn swapBytes() -> T;
 }
 
 /// Identifies integral numeric types.

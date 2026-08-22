@@ -17,6 +17,7 @@ macro_rules! trusted_intrinsics {
             NextTick,
             BoolNot,
             IntegerBitNot,
+            NumericSwapBytes,
             IntegerToStringRadix,
             NumericAdd,
             NumericSubtract,

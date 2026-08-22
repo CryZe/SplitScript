@@ -288,8 +288,15 @@ semantic-review evidence, not as a conformance corpus.
   address decoding, and concise pointer-follow composition. Existing `sig`,
   scan, follow, and `readRelative32` APIs should be documented before new APIs
   are introduced.
+- [ ] Design typed byte-order reads for every [`MemoryReadable`] value once a
+  representative port needs more than scalar conversion. The design must
+  recursively decode records and fixed arrays, compose with ordinary reads and
+  state-field `at` declarations, and make mixed-endian fields auditable without
+  per-tick temporary allocations. `Numeric.swapBytes()` now covers the Sonic 3
+  A.I.R. scalar case; do not choose the aggregate API before a concrete target
+  establishes its shape.
 - [ ] Add exact record layout controls only when a target requires them:
-  offsets, padding/alignment, packing, and per-field endianness. Keep
+  offsets, padding/alignment, packing, and per-field byte order. Keep
   field-order native-endian layout as the default and diagnose overlaps and
   unsupported combinations.
 

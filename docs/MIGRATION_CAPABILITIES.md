@@ -5,6 +5,7 @@ This index maps common source-language concepts to canonical SplitScript APIs an
 
 | Foreign concept | Source | Status | SplitScript direction |
 | --- | --- | --- | --- |
+| `numeric.byte-order` — Numeric byte order | Rust, C# | Supported directly | Use `Numeric.swapBytes` to reverse a numeric value's raw bytes after reading data stored in the opposite byte order. It preserves the exact integer or floating-point type; eight-bit values are unchanged. Canonical targets: `Numeric.swapBytes`. |
 | `declaration.let` — Variable declarations | C#, JavaScript, Rust | Supported directly | Use one inferred `let` declaration; SplitScript has no const/let split. Canonical targets: `let`. |
 | `value.none` — Absent optional values | JavaScript | Supported directly | `None` is SplitScript's zero-sized unit value and the absent side of an option. Canonical targets: `None`. |
 | `declaration.function` — Function declarations | C#, JavaScript | Supported directly | Functions and methods use the `fn` declaration keyword. Canonical targets: `fn`. |

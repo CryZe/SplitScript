@@ -811,6 +811,7 @@ impl Parser<'_> {
             settings.push(SettingDecl {
                 id: self.new_value_id(),
                 name,
+                name_span: label_token.span,
                 description,
                 tooltip,
                 external_key: None,
@@ -866,6 +867,7 @@ impl Parser<'_> {
         settings.push(SettingDecl {
             id: self.new_value_id(),
             name,
+            name_span,
             description,
             tooltip,
             external_key,
@@ -949,6 +951,7 @@ impl Parser<'_> {
             settings.push(SettingDecl {
                 id: self.new_value_id(),
                 name: format!("_setting_family_{family_index}_{value}"),
+                name_span: binding_span,
                 description,
                 tooltip: family.tooltip.clone(),
                 external_key: Some(SettingExternalKey {

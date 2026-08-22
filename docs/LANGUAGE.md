@@ -333,11 +333,20 @@ recursively compared shape. Unobserved fields and variants produce non-fatal
 warnings with their exact declaration-name spans and support the same `_`
 suppression convention.
 
+Statically named value settings are checked by the same reachable-code
+analysis. Reading `settings.name` or `oldSettings.name` observes that setting,
+as does a literal-key `settings.enabled("runtime-key")` or
+`settings.contains("runtime-key")` lookup. A computed key may name any setting,
+so its presence conservatively suppresses unused-setting warnings. Headings and
+the generated members of settings families are not diagnosed individually. An
+unused setting's quick fix prefixes its source name with `_` while retaining an
+explicit host key, which keeps existing saved settings compatible.
+
 Warning codes are stable tooling identifiers: `SS1001` denotes a discarded
 must-use value, `SS1002` an unread local binding, `SS1003` an unreachable
-declaration, and `SS1004` an unused record field or enum variant. The wording
-may improve without requiring editor integrations to classify messages by
-text.
+declaration, and `SS1004` an unused setting, record field, or enum variant. The
+wording may improve without requiring editor integrations to classify messages
+by text.
 
 Compiler hosts can configure every warning code as `allow`, `warn`, or `deny`.
 Allowing suppresses that diagnostic, while denying makes the configured build
@@ -348,10 +357,12 @@ features remain available for denied warnings. With `splitc`, repeat
 all warning codes. Later arguments override earlier selectors.
 
 The language server offers preferred quick fixes that apply the `_`
-suppression convention. For declarations and members, the action is a complete
-validated rename: references in dead helper code and record-literal labels are
-updated as well, name collisions gain additional underscores, and the edited
-program must still preserve every resolved declaration identity.
+suppression convention. For ordinary declarations and nominal members, the
+action is a complete validated rename: references in dead helper code and
+record-literal labels are updated as well, name collisions gain additional
+underscores, and the edited program must still preserve every resolved
+declaration identity. An unused setting instead retains or introduces its
+original host key while changing only its statically accessible source name.
 
 Supported value types are:
 

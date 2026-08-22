@@ -219,13 +219,19 @@ semantic-review evidence, not as a conformance corpus.
   generated [`state`] and [`?`] reference pages now show this exact composition,
   and their compiler-checked example prevents the older rejection from
   returning unnoticed.
-- [ ] Design semantic lints from failures that compiled cleanly. Evaluate an
-  unused-setting warning (the campaign declared `allSkullsMode` but read an
-  unrelated always-false global), a suggestion from literal
-  `settings.enabled("key")` to the typed `settings.name` member, and checks for
-  declared settings or state fields that never influence reachable behavior.
-  Account for settings families, host-visible declarations, dynamic keys, and
-  intentional display-only state before enabling warnings by default.
+- [ ] Design semantic lints from failures that compiled cleanly.
+  - [x] Warn when a statically named value setting is never read by reachable
+    behavior (the campaign declared `allSkullsMode` but read an unrelated
+    always-false global). Direct current/old access and exact literal runtime
+    keys count as reads; computed keys conservatively suppress the warning;
+    headings and generated family members are excluded. The machine-applicable
+    `_` suppression fix preserves the setting's host-visible key.
+  - [ ] Suggest rewriting a literal `settings.enabled("key")` or
+    `settings.contains("key")` lookup to the corresponding typed
+    `settings.name` member when its setting kind permits direct access.
+  - [ ] Decide whether and how to diagnose state fields that never influence
+    reachable behavior. Intentional display-only state and host observation
+    need explicit semantics before enabling that warning by default.
 - [ ] Evaluate ordinary runtime ranges from the repeated bounded-index ports.
   Compare `for index in 0..count` with a source-defined range value and the
   existing `while` loop; keep settings-family ranges a compile-time DSL. Do not

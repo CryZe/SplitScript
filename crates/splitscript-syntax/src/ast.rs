@@ -681,6 +681,7 @@ pub enum StateMemoryDecoder {
 pub struct SettingDecl {
     pub id: ValueId,
     pub name: String,
+    pub name_span: Span,
     pub description: String,
     pub tooltip: Option<String>,
     /// Stable key used by the host settings map and data-driven lookup. When

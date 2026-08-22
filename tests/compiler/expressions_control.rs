@@ -289,6 +289,92 @@ fn dynamic_and_compatible_setting_key_lookups_remain_valid() {
 }
 
 #[test]
+fn unused_settings_warn_without_guessing_through_dynamic_keys() {
+    let source = r#"
+        state "game.exe" {}
+        settings {
+            "General" {
+                "Direct" => direct: true,
+                "Previous" => previous: true,
+                "Literal key" => literalKey key "literal-key": true,
+                "Unused explicit" => unusedExplicit key "stable-key": true,
+                "Unused implicit" => unusedImplicit: true,
+                "Reserved" => _reserved: true,
+                for stage in 1..=2 {
+                    `Stage {stage}` key `stage-{stage}`: true,
+                },
+            },
+        }
+
+        whileAttached {
+            print(settings.direct)
+            print(oldSettings.previous)
+            print(settings.enabled("literal-key"))
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("unused settings should be warnings, not compilation errors");
+    let unused = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.message.starts_with("unused setting"))
+        .collect::<Vec<_>>();
+    assert_eq!(unused.len(), 2, "{unused:#?}");
+
+    let explicit = unused
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("unusedExplicit"))
+        .expect("the unused setting with an explicit key should be reported");
+    assert_eq!(explicit.code, splitscript::DiagnosticCode::UnusedMember);
+    assert_eq!(explicit.fixes.len(), 1);
+    assert_eq!(explicit.fixes[0].edits[0].replacement, "_unusedExplicit");
+
+    let implicit = unused
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("unusedImplicit"))
+        .expect("the unused setting with an implicit key should be reported");
+    assert_eq!(implicit.fixes.len(), 1);
+    assert_eq!(
+        implicit.fixes[0].edits[0].replacement,
+        "_unusedImplicit key \"unusedImplicit\""
+    );
+
+    let mut edits = unused
+        .iter()
+        .flat_map(|diagnostic| diagnostic.fixes[0].edits.iter())
+        .collect::<Vec<_>>();
+    edits.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
+    let mut fixed = source.to_owned();
+    for edit in edits {
+        fixed.replace_range(edit.span.start..edit.span.end, &edit.replacement);
+    }
+    splitscript::compile(&fixed).expect("unused-setting fixes should preserve valid settings");
+
+    let dynamic = r#"
+        state "game.exe" {}
+        settings {
+            "First" => first: true,
+            "Second" => second: true,
+        }
+
+        fn selectedKey() { return "first" }
+        whileAttached {
+            print(settings.enabled(selectedKey()))
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(dynamic).unwrap())
+        .expect("computed setting-key lookup should remain valid");
+    assert!(
+        checked
+            .diagnostics()
+            .iter()
+            .all(|diagnostic| !diagnostic.message.starts_with("unused setting")),
+        "a dynamic key can address any declared setting: {:#?}",
+        checked.diagnostics()
+    );
+}
+
+#[test]
 fn discarded_must_use_values_warn_without_failing_compilation() {
     let source = r#"
         state "game.exe" {}

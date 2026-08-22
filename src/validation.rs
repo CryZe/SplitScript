@@ -17,7 +17,8 @@ use crate::{
         TypedMatchArm, TypedProgram, TypedStatementKind, TypedVisitor,
     },
     semantic::{
-        FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember, SemanticModel,
+        FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue,
+        SemanticModel,
     },
     stdlib::{Implementation, StandardLibrary, StdlibCapabilityId, StdlibTypeConstructorId},
     types::TypeKind,
@@ -855,6 +856,9 @@ enum DeclarationWorkItem {
 struct DeclarationDependencyCollector {
     dependencies: HashSet<DeclarationWorkItem>,
     types: HashSet<crate::types::TypeId>,
+    observed_settings: HashSet<ast::ValueId>,
+    literal_setting_keys: HashSet<String>,
+    has_dynamic_setting_lookup: bool,
     observed_record_fields: HashSet<ast::RecordFieldId>,
     observed_enum_variants: HashSet<ast::EnumVariantId>,
     fully_observed_types: HashSet<crate::types::TypeId>,
@@ -864,6 +868,13 @@ impl TypedVisitor for DeclarationDependencyCollector {
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
         self.types.insert(expression.ty);
         let mut observe_members = |members: &[ResolvedMember]| {
+            self.observed_settings
+                .extend(members.iter().filter_map(|member| match member {
+                    ResolvedMember::SettingField(setting) => Some(*setting),
+                    ResolvedMember::StateField(_)
+                    | ResolvedMember::RecordField(_)
+                    | ResolvedMember::StandardField(_) => None,
+                }));
             self.observed_record_fields
                 .extend(members.iter().filter_map(|member| match member {
                     ResolvedMember::RecordField(field) => Some(*field),
@@ -904,7 +915,7 @@ impl TypedVisitor for DeclarationDependencyCollector {
                     .ty,
             );
         }
-        let source_value = program
+        let resolved_root = program
             .value_path(expression.id)
             .and_then(|(root, _)| root)
             .or_else(|| {
@@ -912,10 +923,39 @@ impl TypedVisitor for DeclarationDependencyCollector {
                     call.receiver()
                         .and_then(|receiver| receiver.path().map(|(root, _)| root))
                 })
-            })
-            .and_then(|root| root.source_value());
+            });
+        let source_value = resolved_root.and_then(ResolvedValue::source_value);
         if let Some(value) = source_value {
             self.dependencies.insert(DeclarationWorkItem::Global(value));
+        }
+
+        if let Some(ResolvedValue::Setting(setting) | ResolvedValue::OldSetting(setting)) =
+            resolved_root
+        {
+            self.observed_settings.insert(setting);
+        }
+
+        if let (
+            Some(ResolvedCall::StandardLibrary { item, .. }),
+            TypedExpressionKind::Call { arguments, .. },
+        ) = (program.call(expression.id), &expression.kind)
+            && matches!(
+                *item,
+                crate::stdlib::StdlibItemId::SettingsViewEnabled
+                    | crate::stdlib::StdlibItemId::SettingsViewContains
+            )
+            && let Some(argument) = arguments.first()
+        {
+            match &program
+                .expression(*argument)
+                .expect("call argument belongs to typed HIR")
+                .kind
+            {
+                TypedExpressionKind::String(key) => {
+                    self.literal_setting_keys.insert(key.clone());
+                }
+                _ => self.has_dynamic_setting_lookup = true,
+            }
         }
 
         if let Some(
@@ -964,6 +1004,9 @@ fn validate_unused_declarations(
 
     let mut reachable = HashSet::new();
     let mut reachable_types = HashSet::new();
+    let mut observed_settings = HashSet::new();
+    let mut literal_setting_keys = HashSet::new();
+    let mut has_dynamic_setting_lookup = false;
     let mut observed_record_fields = HashSet::new();
     let mut observed_enum_variants = HashSet::new();
     let mut fully_observed_types = HashSet::new();
@@ -980,6 +1023,9 @@ fn validate_unused_declarations(
         );
     }
     reachable_types.extend(roots.types.iter().copied());
+    observed_settings.extend(roots.observed_settings.iter().copied());
+    literal_setting_keys.extend(roots.literal_setting_keys.iter().cloned());
+    has_dynamic_setting_lookup |= roots.has_dynamic_setting_lookup;
     observed_record_fields.extend(roots.observed_record_fields.iter().copied());
     observed_enum_variants.extend(roots.observed_enum_variants.iter().copied());
     fully_observed_types.extend(roots.fully_observed_types.iter().copied());
@@ -1051,6 +1097,9 @@ fn validate_unused_declarations(
             }
         }
         reachable_types.extend(collector.types.iter().copied());
+        observed_settings.extend(collector.observed_settings.iter().copied());
+        literal_setting_keys.extend(collector.literal_setting_keys.iter().cloned());
+        has_dynamic_setting_lookup |= collector.has_dynamic_setting_lookup;
         observed_record_fields.extend(collector.observed_record_fields.iter().copied());
         observed_enum_variants.extend(collector.observed_enum_variants.iter().copied());
         fully_observed_types.extend(collector.fully_observed_types.iter().copied());
@@ -1068,6 +1117,51 @@ fn validate_unused_declarations(
     );
 
     let mut diagnostics = Vec::new();
+    if !has_dynamic_setting_lookup {
+        observed_settings.extend(
+            syntax
+                .settings
+                .iter()
+                .filter(|setting| literal_setting_keys.contains(setting.runtime_key()))
+                .map(|setting| setting.id),
+        );
+        for setting in syntax.settings.iter().filter(|setting| {
+            setting.source_visible
+                && !matches!(setting.kind, ast::SettingKind::Title { .. })
+                && !setting.name.starts_with('_')
+                && !observed_settings.contains(&setting.id)
+        }) {
+            let replacement = if setting.external_key.is_some() {
+                format!("_{}", setting.name)
+            } else {
+                format!(
+                    "_{} key {}",
+                    setting.name,
+                    quote_string_literal(&setting.name)
+                )
+            };
+            diagnostics.push(
+                Diagnostic::warning(
+                    DiagnosticCode::UnusedMember,
+                    format!("unused setting `{}`", setting.name),
+                    setting.name_span,
+                )
+                .with_primary_label("this setting is never read from reachable code")
+                .with_note(
+                    "a declared setting cannot affect script behavior until its value is read",
+                )
+                .with_note("prefix the source name with `_` to indicate that this is intentional")
+                .with_fix(DiagnosticFix {
+                    title: format!("rename `{}` to `_{}`", setting.name, setting.name),
+                    applicability: FixApplicability::MachineApplicable,
+                    edits: vec![TextEdit {
+                        span: setting.name_span,
+                        replacement,
+                    }],
+                }),
+            );
+        }
+    }
     for global in globals.values() {
         if !global.name.starts_with('_')
             && !reachable.contains(&DeclarationWorkItem::Global(global.id))
@@ -1174,6 +1268,24 @@ fn validate_unused_declarations(
     }
     diagnostics.sort_by_key(|diagnostic| (diagnostic.span.start, diagnostic.span.end));
     diagnostics
+}
+
+fn quote_string_literal(value: &str) -> String {
+    let mut quoted = String::with_capacity(value.len() + 2);
+    quoted.push('"');
+    for character in value.chars() {
+        match character {
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            '\\' => quoted.push_str("\\\\"),
+            '"' => quoted.push_str("\\\""),
+            '\'' => quoted.push_str("\\'"),
+            character => quoted.push(character),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 fn expand_fully_observed_types(

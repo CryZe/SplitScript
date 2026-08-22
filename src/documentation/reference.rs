@@ -1346,8 +1346,8 @@ fn type_constructor_slug(constructor: &crate::stdlib::StdlibTypeConstructor) -> 
         crate::stdlib::TypeConstructorSyntax::Array => "array",
         crate::stdlib::TypeConstructorSyntax::Optional => "optional",
         crate::stdlib::TypeConstructorSyntax::Fallible => "fallible",
-        crate::stdlib::TypeConstructorSyntax::ExclusiveRange => "exclusive range",
-        crate::stdlib::TypeConstructorSyntax::InclusiveRange => "inclusive range",
+        crate::stdlib::TypeConstructorSyntax::ExclusiveRange => "exclusive-range",
+        crate::stdlib::TypeConstructorSyntax::InclusiveRange => "inclusive-range",
     }
 }
 
@@ -2547,5 +2547,34 @@ mod tests {
         assert!(fallible.markdown.contains("# T!"));
         assert!(fallible.markdown.contains("discardError"));
         assert!(!fallible.markdown.contains("Result"));
+
+        let exclusive_range = reference
+            .page("/stdlib/type-forms/exclusive-range/index.md")
+            .expect("T..<T has a page with a URL-safe path");
+        assert!(
+            exclusive_range
+                .markdown
+                .contains("# T where Integer..<T where Integer")
+        );
+        assert!(exclusive_range.markdown.contains("upper bound is excluded"));
+
+        let inclusive_range = reference
+            .page("/stdlib/type-forms/inclusive-range/index.md")
+            .expect("T..=T has a page with a URL-safe path");
+        assert!(
+            inclusive_range
+                .markdown
+                .contains("# T where Integer..=T where Integer")
+        );
+        assert!(inclusive_range.markdown.contains("upper bound is included"));
+
+        assert!(
+            reference
+                .index()
+                .iter()
+                .filter(|entry| entry.kind == "type constructor")
+                .all(|entry| !entry.uri.contains(' ')),
+            "documentation routes must not contain raw spaces"
+        );
     }
 }

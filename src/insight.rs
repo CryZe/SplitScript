@@ -15,7 +15,7 @@ use crate::{
     semantic::ResolvedCall,
     stdlib::{
         StandardLibrary, StateProviderProcesses, StdlibItem, StdlibItemId, StdlibSymbolId,
-        TypeRef as CatalogTypeRef,
+        StdlibTypeConstructorId, TypeRef as CatalogTypeRef,
     },
     stdlib_semantic::StandardLibrarySemanticExt,
     syntax::SourceDocument,
@@ -66,6 +66,25 @@ pub(crate) fn hover(
             span: token.span,
             markdown,
             documentation_uri: None,
+        }));
+    }
+    if let Some(constructor) = range_constructor_for_token(&token.kind)
+        && let Some(analysis) = database.analysis_at(offset)?
+        && matches!(analysis.type_kind, TypeKind::Range { .. })
+        && let Some(context) = semantic_context(database)
+    {
+        let concrete_type = render_type(analysis.ty, &context);
+        return Ok(Some(HoverInfo {
+            span: token.span,
+            markdown: render_stdlib_symbol_hover_with_form(
+                standard_library.clone(),
+                StdlibSymbolId::TypeConstructor(constructor),
+                Some(&concrete_type),
+            ),
+            documentation_uri: Some(symbol_uri(
+                StdlibSymbolId::TypeConstructor(constructor),
+                &standard_library,
+            )),
         }));
     }
     let target = database.definition_at_query_offset(offset)?;
@@ -176,6 +195,14 @@ fn expression_type_hover(
         ),
         documentation_uri: None,
     }))
+}
+
+fn range_constructor_for_token(kind: &TokenKind) -> Option<StdlibTypeConstructorId> {
+    match kind {
+        TokenKind::DotDotLt => Some(StdlibTypeConstructorId::ExclusiveRange),
+        TokenKind::DotDotEq => Some(StdlibTypeConstructorId::InclusiveRange),
+        _ => None,
+    }
 }
 
 fn provider_value_for_resolution(
@@ -720,6 +747,14 @@ fn render_stdlib_hover(
 }
 
 fn render_stdlib_symbol_hover(library: StandardLibrary, symbol: StdlibSymbolId) -> String {
+    render_stdlib_symbol_hover_with_form(library, symbol, None)
+}
+
+fn render_stdlib_symbol_hover_with_form(
+    library: StandardLibrary,
+    symbol: StdlibSymbolId,
+    form_override: Option<&str>,
+) -> String {
     let (form, documentation) = match symbol {
         StdlibSymbolId::StateProvider(id) => {
             let declaration = library.state_provider(id);
@@ -748,8 +783,11 @@ fn render_stdlib_symbol_hover(library: StandardLibrary, symbol: StdlibSymbolId) 
         }
         StdlibSymbolId::TypeConstructor(id) => {
             let declaration = library.type_constructor(id);
-            let mut form = library.render_type_constructor(id);
-            if declaration.syntax == crate::stdlib::TypeConstructorSyntax::Named
+            let mut form = form_override
+                .map(str::to_owned)
+                .unwrap_or_else(|| library.render_type_constructor(id));
+            if form_override.is_none()
+                && declaration.syntax == crate::stdlib::TypeConstructorSyntax::Named
                 && !declaration.parameters.is_empty()
             {
                 form = declaration.name.to_owned();
@@ -1387,6 +1425,64 @@ whileAttached {
             .expect("call expression hover");
         assert_eq!(&source[call.span.start..call.span.end], "add(4, 5)");
         assert_eq!(call.markdown, "```splitscript\nu64\n```");
+    }
+
+    #[test]
+    fn range_operator_hover_combines_type_information_with_type_form_documentation() {
+        let source = r#"fn exclusiveStart(values: u16..<u16) -> u16 {
+    return values.start
+}
+
+fn inclusiveEnd(values: u8..=u8) -> u8 {
+    return values.end
+}
+
+fn ranges() {
+    let exclusive = 1u16..<4
+    let inclusive = 1u8..=4
+}
+"#;
+        let mut database = CompilerDatabase::new(source);
+
+        for (operator, expected_type, expected_summary, expected_uri) in [
+            (
+                "..<",
+                "u16..<u16",
+                "upper bound is excluded",
+                "/stdlib/type-forms/exclusive-range/index.md",
+            ),
+            (
+                "..=",
+                "u8..=u8",
+                "upper bound is included",
+                "/stdlib/type-forms/inclusive-range/index.md",
+            ),
+        ] {
+            let occurrences = source
+                .match_indices(operator)
+                .map(|(offset, _)| offset)
+                .collect::<Vec<_>>();
+            assert_eq!(occurrences.len(), 2);
+
+            let type_hover = database
+                .hover(occurrences[0] + 1)
+                .unwrap()
+                .expect("range operator in type position has hover documentation");
+            assert!(type_hover.markdown.contains(&format!("T{operator}T")));
+            assert!(type_hover.markdown.contains(expected_summary));
+            assert_eq!(type_hover.documentation_uri.as_deref(), Some(expected_uri));
+
+            let expression_hover = database
+                .hover(occurrences[1] + 1)
+                .unwrap()
+                .expect("range operator in expression position has hover documentation");
+            assert!(expression_hover.markdown.contains(expected_type));
+            assert!(expression_hover.markdown.contains(expected_summary));
+            assert_eq!(
+                expression_hover.documentation_uri.as_deref(),
+                Some(expected_uri)
+            );
+        }
     }
 
     #[test]

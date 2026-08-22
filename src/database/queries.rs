@@ -11,7 +11,7 @@ use crate::{
     language::{LanguageCatalog, LanguageItemId},
     lexer::{Token, TokenKind},
     semantic::ResolvedCall,
-    stdlib::StdlibSymbolId,
+    stdlib::{StdlibSymbolId, StdlibTypeConstructorId},
     types::{TypeId, TypeKind},
     visit::{self, Visitor},
 };
@@ -745,6 +745,15 @@ impl CompilerDatabase {
         {
             return Ok(Some(DefinitionTarget::StandardLibrarySymbol(
                 StdlibSymbolId::TypeConstructor(constructor.id),
+            )));
+        }
+        if let Some(constructor) = match token.kind {
+            TokenKind::DotDotLt => Some(StdlibTypeConstructorId::ExclusiveRange),
+            TokenKind::DotDotEq => Some(StdlibTypeConstructorId::InclusiveRange),
+            _ => None,
+        } {
+            return Ok(Some(DefinitionTarget::StandardLibrarySymbol(
+                StdlibSymbolId::TypeConstructor(constructor),
             )));
         }
         let language = LanguageCatalog::new();

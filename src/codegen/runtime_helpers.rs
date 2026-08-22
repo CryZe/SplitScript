@@ -23,6 +23,7 @@ mod float_parse;
 mod gba;
 mod gcn;
 mod process;
+mod provider;
 mod ps1;
 mod ps2;
 mod sms;
@@ -331,24 +332,66 @@ pub(super) fn build_gba_translate_address(inputs: &RuntimeHelperInputs<'_>) -> F
     gba::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
 }
 
+pub(super) fn build_gba_read_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    provider::compile_translated_read(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::GBATranslateAddress),
+    )
+}
+
 pub(super) fn build_gcn_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
     gcn::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
+}
+
+pub(super) fn build_gcn_read_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    provider::compile_translated_read(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::GCNTranslateAddress),
+    )
 }
 
 pub(super) fn build_wii_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
     wii::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
 }
 
+pub(super) fn build_wii_read_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    provider::compile_translated_read(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::WiiTranslateAddress),
+    )
+}
+
 pub(super) fn build_ps2_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
     ps2::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
+}
+
+pub(super) fn build_ps2_read_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    provider::compile_translated_read(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::Ps2TranslateAddress),
+    )
 }
 
 pub(super) fn build_ps1_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
     ps1::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
 }
 
+pub(super) fn build_ps1_read_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    provider::compile_translated_read(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::Ps1TranslateAddress),
+    )
+}
+
 pub(super) fn build_sms_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
     sms::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
+}
+
+pub(super) fn build_sms_read_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    provider::compile_translated_read(
+        inputs.abi,
+        inputs.plan.function(RuntimeHelperId::SmsTranslateAddress),
+    )
 }
 
 pub(super) fn build_string_from_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {

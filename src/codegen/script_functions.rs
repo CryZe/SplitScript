@@ -351,36 +351,22 @@ fn compile_provider_direct_read(
     lowering: &EmissionContext<'_>,
 ) -> Function {
     let mut function = Function::new([(1, ValType::I64), (1, ValType::I32)]);
-    let address_local = 1;
+    let status_local = 1;
     let guest_address_local = 2;
     function
         .instruction(&Instruction::I32Const(address as i32))
         .instruction(&Instruction::LocalSet(guest_address_local));
     for offset in offsets {
-        emit_provider_translation(
+        emit_provider_read(
             &mut function,
             guest_address_local,
-            address_local,
+            status_local,
             4,
             field_type,
             optional,
             result_type,
             contract,
             lowering,
-        );
-        emit_process_read(
-            &mut function,
-            &ProcessReadEmission {
-                abi: lowering.abi,
-                address_local,
-                fallback_ty: field_type,
-                optional,
-                result_type,
-                gc: lowering.gc,
-                abi_read: lowering.abi_read,
-                read_failure: contract.read_failure,
-            },
-            4,
         );
         emit_memory_load(
             &mut function,
@@ -393,47 +379,16 @@ fn compile_provider_direct_read(
             .instruction(&Instruction::I32Add)
             .instruction(&Instruction::LocalSet(guest_address_local));
     }
-    function
-        .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
-        .instruction(&Instruction::GlobalGet(
-            lowering
-                .runtime_globals
-                .provider_value
-                .expect("provider direct reads require provider storage"),
-        ))
-        .instruction(&Instruction::LocalGet(guest_address_local))
-        .instruction(&Instruction::I32Const(field_size as i32))
-        .instruction(&Instruction::Call(
-            lowering.runtime_helpers.function(contract.translator),
-        ))
-        .instruction(&Instruction::LocalTee(address_local))
-        .instruction(&Instruction::I64Eqz)
-        .instruction(&Instruction::If(BlockType::Empty));
-    emit_pointer_read_failure(
+    emit_provider_read(
         &mut function,
-        result_type,
+        guest_address_local,
+        status_local,
+        field_size,
         field_type,
         optional,
-        contract.invalid_address,
-        lowering.gc,
-    );
-    function
-        .instruction(&Instruction::Return)
-        .instruction(&Instruction::End);
-
-    emit_process_read(
-        &mut function,
-        &ProcessReadEmission {
-            abi: lowering.abi,
-            address_local,
-            fallback_ty: field_type,
-            optional,
-            result_type,
-            gc: lowering.gc,
-            abi_read: lowering.abi_read,
-            read_failure: contract.read_failure,
-        },
-        field_size,
+        result_type,
+        contract,
+        lowering,
     );
     emit_memory_value(
         &mut function,
@@ -450,10 +405,10 @@ fn compile_provider_direct_read(
     function
 }
 
-fn emit_provider_translation(
+fn emit_provider_read(
     function: &mut Function,
     guest_address_local: u32,
-    address_local: u32,
+    status_local: u32,
     size: u32,
     field_type: Type,
     optional: Option<crate::ast::OptionTypeId>,
@@ -470,13 +425,21 @@ fn emit_provider_translation(
                 .expect("provider direct reads require provider storage"),
         ))
         .instruction(&Instruction::LocalGet(guest_address_local))
+        .instruction(&Instruction::I32Const(lowering.abi_read.destination(size)))
         .instruction(&Instruction::I32Const(size as i32))
         .instruction(&Instruction::Call(
-            lowering.runtime_helpers.function(contract.translator),
+            lowering.runtime_helpers.function(contract.reader),
         ))
-        .instruction(&Instruction::LocalTee(address_local))
-        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::LocalTee(status_local))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Ne)
         .instruction(&Instruction::If(BlockType::Empty));
+    function
+        .instruction(&Instruction::LocalGet(status_local))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Result(
+            lowering.gc.val_type(Type::Result(result_type)),
+        )));
     emit_pointer_read_failure(
         function,
         result_type,
@@ -485,7 +448,17 @@ fn emit_provider_translation(
         contract.invalid_address,
         lowering.gc,
     );
+    function.instruction(&Instruction::Else);
+    emit_pointer_read_failure(
+        function,
+        result_type,
+        field_type,
+        optional,
+        contract.read_failure,
+        lowering.gc,
+    );
     function
+        .instruction(&Instruction::End)
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
 }

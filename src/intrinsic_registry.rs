@@ -79,11 +79,17 @@ pub(crate) enum RuntimeHelperId {
     JoinStrings,
     FollowAddress,
     GBATranslateAddress,
+    GBAReadMemory,
     GCNTranslateAddress,
+    GCNReadMemory,
     WiiTranslateAddress,
+    WiiReadMemory,
     Ps2TranslateAddress,
+    Ps2ReadMemory,
     Ps1TranslateAddress,
+    Ps1ReadMemory,
     SmsTranslateAddress,
+    SmsReadMemory,
     RefreshSettings,
     SettingsEnabled,
     SettingsContains,
@@ -96,7 +102,7 @@ pub(crate) enum RuntimeHelperId {
 /// polling consume the same lowering metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ProviderReadContract {
-    pub translator: RuntimeHelperId,
+    pub reader: RuntimeHelperId,
     pub byte_order: ProviderByteOrder,
     pub invalid_address: &'static str,
     pub read_failure: &'static str,
@@ -118,37 +124,37 @@ pub(crate) enum ProviderByteOrder {
 pub(crate) const fn provider_read_contract(intrinsic: IntrinsicId) -> Option<ProviderReadContract> {
     match intrinsic {
         IntrinsicId::GBAEmulatorRead => Some(ProviderReadContract {
-            translator: RuntimeHelperId::GBATranslateAddress,
+            reader: RuntimeHelperId::GBAReadMemory,
             byte_order: ProviderByteOrder::Little,
             invalid_address: "invalid or unavailable GBA memory address",
             read_failure: "GBA memory read failed",
         }),
         IntrinsicId::Ps2EmulatorRead => Some(ProviderReadContract {
-            translator: RuntimeHelperId::Ps2TranslateAddress,
+            reader: RuntimeHelperId::Ps2ReadMemory,
             byte_order: ProviderByteOrder::Little,
             invalid_address: "invalid or unavailable PS2 memory address",
             read_failure: "PS2 memory read failed",
         }),
         IntrinsicId::Ps1EmulatorRead => Some(ProviderReadContract {
-            translator: RuntimeHelperId::Ps1TranslateAddress,
+            reader: RuntimeHelperId::Ps1ReadMemory,
             byte_order: ProviderByteOrder::Little,
             invalid_address: "invalid or unavailable PS1 memory address",
             read_failure: "PS1 memory read failed",
         }),
         IntrinsicId::SmsEmulatorRead => Some(ProviderReadContract {
-            translator: RuntimeHelperId::SmsTranslateAddress,
+            reader: RuntimeHelperId::SmsReadMemory,
             byte_order: ProviderByteOrder::Little,
             invalid_address: "invalid or unavailable SMS memory address",
             read_failure: "SMS memory read failed",
         }),
         IntrinsicId::GCNEmulatorRead => Some(ProviderReadContract {
-            translator: RuntimeHelperId::GCNTranslateAddress,
+            reader: RuntimeHelperId::GCNReadMemory,
             byte_order: ProviderByteOrder::Big,
             invalid_address: "invalid or unavailable GameCube memory address",
             read_failure: "GameCube memory read failed",
         }),
         IntrinsicId::WiiEmulatorRead => Some(ProviderReadContract {
-            translator: RuntimeHelperId::WiiTranslateAddress,
+            reader: RuntimeHelperId::WiiReadMemory,
             byte_order: ProviderByteOrder::Big,
             invalid_address: "invalid or unavailable Wii memory address",
             read_failure: "Wii memory read failed",
@@ -479,12 +485,12 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::UnityClassField => &[Helper(Runtime::UnityGetFieldOffset)],
         IntrinsicId::UnityClassFieldAny => &[Helper(Runtime::UnityGetFieldAny)],
         IntrinsicId::UnityClassStaticInstance => &[Helper(Runtime::UnityGetStaticInstance)],
-        IntrinsicId::GBAEmulatorRead => &[Helper(Runtime::GBATranslateAddress)],
-        IntrinsicId::GCNEmulatorRead => &[Helper(Runtime::GCNTranslateAddress)],
-        IntrinsicId::WiiEmulatorRead => &[Helper(Runtime::WiiTranslateAddress)],
-        IntrinsicId::Ps2EmulatorRead => &[Helper(Runtime::Ps2TranslateAddress)],
-        IntrinsicId::Ps1EmulatorRead => &[Helper(Runtime::Ps1TranslateAddress)],
-        IntrinsicId::SmsEmulatorRead => &[Helper(Runtime::SmsTranslateAddress)],
+        IntrinsicId::GBAEmulatorRead => &[Helper(Runtime::GBAReadMemory)],
+        IntrinsicId::GCNEmulatorRead => &[Helper(Runtime::GCNReadMemory)],
+        IntrinsicId::WiiEmulatorRead => &[Helper(Runtime::WiiReadMemory)],
+        IntrinsicId::Ps2EmulatorRead => &[Helper(Runtime::Ps2ReadMemory)],
+        IntrinsicId::Ps1EmulatorRead => &[Helper(Runtime::Ps1ReadMemory)],
+        IntrinsicId::SmsEmulatorRead => &[Helper(Runtime::SmsReadMemory)],
         IntrinsicId::StringContains
         | IntrinsicId::StringStartsWith
         | IntrinsicId::StringEndsWith

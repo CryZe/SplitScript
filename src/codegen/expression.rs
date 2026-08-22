@@ -4196,7 +4196,7 @@ fn compile_provider_read(
     let Type::Result(result_type) = context.expression_type(expression) else {
         unreachable!("provider reads produce Result values")
     };
-    let address = context.matches.intrinsic_temps[&expression][0];
+    let status = context.matches.intrinsic_temps[&expression][0];
     function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
     compile_receiver(function, target, context);
     compile_expr(function, address_expression, context);
@@ -4206,11 +4206,31 @@ fn compile_provider_read(
         .expect("checked provider reads are MemoryReadable")
         .size();
     function
+        .instruction(&Instruction::I32Const(context.abi_read.destination(size)))
         .instruction(&Instruction::I32Const(size as i32))
         .instruction(&Instruction::Call(
-            context.runtime_helpers.function(contract.translator),
+            context.runtime_helpers.function(contract.reader),
         ))
-        .instruction(&Instruction::LocalTee(address))
+        .instruction(&Instruction::LocalTee(status))
+        .instruction(&Instruction::I64Const(1))
+        .instruction(&Instruction::I64Eq)
+        .instruction(&Instruction::If(BlockType::Result(
+            context.gc.val_type(Type::Result(result_type)),
+        )));
+    emit_memory_value(
+        function,
+        read_type,
+        context.abi_read,
+        0,
+        context.memory,
+        context.semantics,
+        context.gc,
+        contract.byte_order.into(),
+    );
+    emit_result_success(function, result_type, context.gc);
+    function.instruction(&Instruction::Else);
+    function
+        .instruction(&Instruction::LocalGet(status))
         .instruction(&Instruction::I64Eqz)
         .instruction(&Instruction::If(BlockType::Result(
             context.gc.val_type(Type::Result(result_type)),
@@ -4222,18 +4242,15 @@ fn compile_provider_read(
         contract.invalid_address,
         context.gc,
     );
-    function
-        .instruction(&Instruction::Else)
-        .instruction(&Instruction::GlobalGet(context.runtime_globals.process))
-        .instruction(&Instruction::LocalGet(address));
-    emit_process_read_from_stack(
+    function.instruction(&Instruction::Else);
+    emit_result_error(
         function,
-        read_type,
         result_type,
+        context.ty(read_type),
         contract.read_failure,
-        context,
-        contract.byte_order.into(),
+        context.gc,
     );
+    function.instruction(&Instruction::End);
     function.instruction(&Instruction::End);
 }
 

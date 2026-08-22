@@ -55,6 +55,29 @@ fn compiles_first_class_and_direct_integer_ranges() {
 }
 
 #[test]
+fn global_range_literals_are_materialized_once_at_module_start() {
+    let wasm = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            let exclusive: u16..<u16 = 2..<5
+            let inclusive = -2i64..=2
+
+            whileAttached {
+                print(exclusive.start)
+                print(exclusive.contains(4))
+                print(inclusive.end)
+                print(inclusive.contains(2))
+            }
+        "#,
+    )
+    .expect("constant range literals should be valid global initializers");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("global range initialization should produce valid Wasm GC");
+}
+
+#[test]
 fn preserves_inclusive_and_exclusive_range_types() {
     let checked = splitscript::check(splitscript::parse(RANGES).unwrap()).unwrap();
     let visit = checked

@@ -16,6 +16,9 @@ pub(super) fn is_constant(expression: &Expr, resolutions: &ProgramResolutions) -
         ExprKind::Array(elements) => elements
             .iter()
             .all(|element| is_constant(element, resolutions)),
+        ExprKind::Range { start, end, .. } => {
+            is_constant(start, resolutions) && is_constant(end, resolutions)
+        }
         ExprKind::Record { fields, .. } => fields
             .iter()
             .all(|(_, value)| is_constant(value, resolutions)),

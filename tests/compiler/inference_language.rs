@@ -3,6 +3,44 @@
 use super::*;
 
 #[test]
+fn dynamic_global_initializer_diagnostic_explains_persistent_sets_without_internal_terms() {
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+
+            fn initialValue() -> u32 {
+                return 1
+            }
+
+            let value = initialValue()
+
+            whileAttached {
+                print(value)
+            }
+        "#,
+    )
+    .expect_err("function calls are not constant global initializers");
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.message.contains("global initializers"))
+        .expect("a focused global-initializer diagnostic should be emitted");
+    assert!(diagnostic.message.contains("`Set.new<T>()`"));
+    assert!(
+        diagnostic
+            .notes
+            .iter()
+            .any(|note| note.contains("persistent mutable set"))
+    );
+    assert!(
+        !diagnostic.message.contains("run-scoped")
+            && diagnostic
+                .notes
+                .iter()
+                .all(|note| !note.contains("run-scoped"))
+    );
+}
+
+#[test]
 fn user_function_types_are_inferred_across_bodies_and_call_sites() {
     let source = r#"
         state "game.exe" {}

@@ -243,6 +243,7 @@ pub(super) fn encode(
                 ty,
                 Type::Record(_)
                     | Type::Array(_)
+                    | Type::Range(_)
                     | Type::Set(_)
                     | Type::Standard(StdlibTypeId::String)
             )

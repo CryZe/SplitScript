@@ -101,9 +101,18 @@ fn check_global_initializers(checker: &mut Checker, program: &Program) {
             && !constant_initializer
             && !run_scoped_initializer
         {
-            checker.error(
-                "global initializers must be literal values composed from None, numbers, booleans, strings, payload-free enums, records, or arrays, or a run-scoped Set.new value",
-                value.span,
+            checker.errors.push(
+                Diagnostic::type_error(
+                    "global initializers must be constant values or `Set.new<T>()`",
+                    value.span,
+                )
+                .with_primary_label("this initializer needs runtime evaluation")
+                .with_note(
+                    "constant values may be composed from `None`, number, boolean, string, payload-free enum, record, array, and range literals",
+                )
+                .with_note(
+                    "`Set.new<T>()` is also allowed and creates one persistent mutable set for this script instance",
+                ),
             );
         }
         let mut ty = inferred.unwrap_or_else(|| checker.error_type());

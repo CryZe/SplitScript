@@ -202,7 +202,11 @@ fn emit_aggregate_global_initializers(
         let ty = value_type(variable.id, lowering.semantics);
         if !matches!(
             ty,
-            Type::Record(_) | Type::Array(_) | Type::Set(_) | Type::Standard(StdlibTypeId::String)
+            Type::Record(_)
+                | Type::Array(_)
+                | Type::Range(_)
+                | Type::Set(_)
+                | Type::Standard(StdlibTypeId::String)
         ) {
             continue;
         }

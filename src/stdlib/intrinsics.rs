@@ -110,7 +110,8 @@ macro_rules! trusted_intrinsics {
             UnityClassFieldAny,
             UnityClassStaticTable,
             UnityClassStaticInstance,
-            GbaEmulatorRead,
+            GBAEmulatorRead,
+            Ps2EmulatorRead,
         }
     };
 }

@@ -41,7 +41,8 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::ResultDiscardError,
         StdlibItemId::AddressOffset,
         StdlibItemId::UnityIl2Cpp,
-        StdlibItemId::GbaEmulatorDiscover,
+        StdlibItemId::GBAEmulatorDiscover,
+        StdlibItemId::PS2EmulatorDiscover,
     ] {
         assert!(matches!(
             library.item(item).implementation,
@@ -781,17 +782,17 @@ fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
         .expect("the bundled GBA provider should be discoverable by source name");
     assert_eq!(gba.id, StdlibStateProviderId::Gba);
     assert_eq!(gba.value_name, "gba");
-    assert_eq!(gba.process_type, StdlibTypeId::GbaEmulator);
-    assert_eq!(gba.direct_read, StdlibItemId::GbaEmulatorRead);
+    assert_eq!(gba.process_type, StdlibTypeId::GBAEmulator);
+    assert_eq!(gba.direct_read, StdlibItemId::GBAEmulatorRead);
     assert_eq!(
         gba.attachment,
         splitscript::compiler::stdlib::StateProviderAttachment::Callable(
-            StdlibItemId::GbaEmulatorDiscover,
+            StdlibItemId::GBAEmulatorDiscover,
         )
     );
     assert!(matches!(
         library
-            .item(StdlibItemId::GbaEmulatorDiscover)
+            .item(StdlibItemId::GBAEmulatorDiscover)
             .implementation,
         Implementation::LibraryBody { .. }
     ));
@@ -861,7 +862,58 @@ fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
         .unwrap()
         .expect("the provider name should have catalog documentation");
     assert!(hover.markdown.contains("state GBA { ... }"));
-    assert!(hover.markdown.contains("gba: GbaEmulator"));
+    assert!(hover.markdown.contains("gba: GBAEmulator"));
+}
+
+#[test]
+fn ps2_provider_is_source_defined_and_supports_direct_and_pointer_path_reads() {
+    let library = StandardLibrary::new();
+    let ps2 = library
+        .state_provider_by_name("PS2")
+        .expect("the bundled PS2 provider should be discoverable by source name");
+    assert_eq!(ps2.id, StdlibStateProviderId::Ps2);
+    assert_eq!(ps2.value_name, "ps2");
+    assert_eq!(ps2.process_type, StdlibTypeId::PS2Emulator);
+    assert_eq!(ps2.direct_read, StdlibItemId::PS2EmulatorRead);
+    assert_eq!(
+        ps2.attachment,
+        splitscript::compiler::stdlib::StateProviderAttachment::Callable(
+            StdlibItemId::PS2EmulatorDiscover,
+        )
+    );
+    assert!(matches!(
+        library
+            .item(StdlibItemId::PS2EmulatorDiscover)
+            .implementation,
+        Implementation::LibraryBody { .. }
+    ));
+    assert!(matches!(
+        ps2.processes,
+        splitscript::compiler::stdlib::StateProviderProcesses::Declared(processes)
+            if processes.contains(&"pcsx2-qt.exe")
+                && processes.contains(&"retroarch.exe")
+    ));
+
+    let source = r#"
+        state PS2 {
+            direct: u16 at 0x00100000;
+            pointer: u32 at 0x00100100, 0x20, -0x8;
+        }
+
+        whileAttached {
+            let value: u32 = ps2.read(0x00100200) else 0
+            print(value)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("PS2 direct reads and provider-relative pointer paths should type-check");
+    assert_eq!(
+        checked.semantics().state_provider(),
+        Some(StdlibStateProviderId::Ps2)
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("PS2 direct reads and provider-relative pointer paths should emit valid Wasm");
 }
 
 #[test]

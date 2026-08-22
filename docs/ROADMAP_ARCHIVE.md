@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-22: source-defined PlayStation 2 emulator provider
+
+- Added `state PS2` with a typed `ps2: PS2Emulator` root and source-defined
+  PCSX2 and RetroArch discovery derived from ASR, including current PCSX2
+  exports, legacy 32/64-bit signatures, and the 64-bit libretro core.
+- Replaced the GBA-only code-generation branch with one intrinsic-owned
+  provider-read contract consumed by explicit reads and state polling alike.
+  Renamed the existing public provider type to `GBAEmulator` without an alias.
+- Extended emulator-backed `at` fields to follow 32-bit guest pointer paths,
+  translating and validating every dereference through the selected provider.
+
 ## 2026-08-22: attachment-scoped inferred globals
 
 - Added bare top-level declarations such as `let gameAssembly` for values that
@@ -1348,7 +1359,7 @@
   engine discovery path can hide an unbounded scan behind an async-looking API.
 - Removed the hard-coded GBA process/signature tables and attachment helper.
   Emulator policy, signatures, layout selection, and supported process names
-  are now co-located with `GbaEmulator.discover`; only target-address
+  are now co-located with `GBAEmulator.discover`; only target-address
   translation and host reads remain representation intrinsics.
 - Extended the Minish Cap runtime fixture to cover both stable mGBA and
   pointer-backed VBA mappings and to assert the per-update memory-range query

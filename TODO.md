@@ -347,6 +347,13 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Engine and emulator providers
 
+- [ ] Decide the source-defined provider refresh lifecycle before claiming
+  parity for emulator cores that unload without their host process exiting.
+  `state PS2` validates RetroArch's core mapping on every read and fails safely
+  after unload, but attachment discovery currently reruns only after process
+  detach. Compare a general provider refresh hook with lifecycle-level
+  reattachment; discuss the public model before adding either one.
+
 - [ ] Design an ergonomic, source-defined Unity Mono value-path surface for
   the repeated `mono.Make<T>` and `mono.MakeString` porting pattern before
   prescribing lower-level pointer work as the canonical migration. The public
@@ -385,9 +392,14 @@ semantic-review evidence, not as a conformance corpus.
   or silently guess offsets.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
-- [ ] Add the next emulator provider from a real port—such as Dolphin, PCSX2,
-  RetroArch, or DOSBox—without introducing parser or type-checker conditionals
-  for emulator names.
+- [ ] Add PS1 and Sega Master System providers from representative real ports,
+  building on the shared intrinsic-owned provider-read contract established by
+  `state GBA` and `state PS2`. Keep attachment and discovery source-defined and
+  cover both explicit reads and guest-relative `at` pointer paths.
+- [ ] Before implementing GameCube, Wii, or Genesis, agree on the public
+  endianness model. Decide whether byte order belongs to a provider, a
+  `MemoryReadable` implementation, a field annotation, or an explicit read;
+  do not hide big-endian or word-swapped behavior in type-checker exceptions.
 
 ## P1 — expand migration guidance and automated fixes
 

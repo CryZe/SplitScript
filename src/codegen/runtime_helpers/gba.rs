@@ -24,7 +24,7 @@ pub(super) fn compile_translate_address(
     let base = 4;
     let pointer = 5;
     let backend = 6;
-    let emulator_type = gc.standard_index(StdlibTypeId::GbaEmulator);
+    let emulator_type = gc.standard_index(StdlibTypeId::GBAEmulator);
 
     function
         .instruction(&Instruction::LocalGet(emulator))
@@ -38,7 +38,7 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
-            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GbaEmulatorBackend),
+            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorBackend),
         })
         .instruction(&Instruction::LocalTee(backend))
         .instruction(&Instruction::I32Eqz)
@@ -66,14 +66,14 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
-            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GbaEmulatorEwram),
+            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorEwram),
         })
         .instruction(&Instruction::LocalSet(base))
         .instruction(&Instruction::LocalGet(emulator))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
-            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GbaEmulatorAux1),
+            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorAux1),
         })
         .instruction(&Instruction::LocalSet(pointer))
         .instruction(&Instruction::Br(2))
@@ -98,14 +98,14 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
-            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GbaEmulatorIwram),
+            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorIwram),
         })
         .instruction(&Instruction::LocalSet(base))
         .instruction(&Instruction::LocalGet(emulator))
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
-            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GbaEmulatorAux2),
+            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorAux2),
         })
         .instruction(&Instruction::LocalSet(pointer))
         .instruction(&Instruction::Br(2))
@@ -145,7 +145,7 @@ pub(super) fn compile_translate_address(
         .instruction(&Instruction::RefAsNonNull)
         .instruction(&Instruction::StructGet {
             struct_type_index: emulator_type,
-            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GbaEmulatorAux1),
+            field_index: gc.standard_field_index(crate::stdlib::StdlibFieldId::GBAEmulatorAux1),
         })
         .instruction(&Instruction::LocalSet(pointer));
     emit_translate_process_read(&mut function, abi, abi_read, pointer, 4);

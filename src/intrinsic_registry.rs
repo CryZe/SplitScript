@@ -78,10 +78,39 @@ pub(crate) enum RuntimeHelperId {
     UnityGetStaticInstance,
     JoinStrings,
     FollowAddress,
-    GbaTranslateAddress,
+    GBATranslateAddress,
+    Ps2TranslateAddress,
     RefreshSettings,
     SettingsEnabled,
     SettingsContains,
+}
+
+/// Backend information shared by every emulator-style state provider read.
+///
+/// Keeping this next to the intrinsic contracts makes the provider declaration
+/// the only public source of truth while both ordinary method calls and state
+/// polling consume the same lowering metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ProviderReadContract {
+    pub translator: RuntimeHelperId,
+    pub invalid_address: &'static str,
+    pub read_failure: &'static str,
+}
+
+pub(crate) const fn provider_read_contract(intrinsic: IntrinsicId) -> Option<ProviderReadContract> {
+    match intrinsic {
+        IntrinsicId::GBAEmulatorRead => Some(ProviderReadContract {
+            translator: RuntimeHelperId::GBATranslateAddress,
+            invalid_address: "invalid or unavailable GBA memory address",
+            read_failure: "GBA memory read failed",
+        }),
+        IntrinsicId::Ps2EmulatorRead => Some(ProviderReadContract {
+            translator: RuntimeHelperId::Ps2TranslateAddress,
+            invalid_address: "invalid or unavailable PS2 memory address",
+            read_failure: "PS2 memory read failed",
+        }),
+        _ => None,
+    }
 }
 
 impl RuntimeHelperId {
@@ -331,7 +360,9 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::StringByteAt
         | IntrinsicId::StringCharAt
         | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
-        IntrinsicId::GbaEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
+        IntrinsicId::GBAEmulatorRead | IntrinsicId::Ps2EmulatorRead => {
+            scratch(ScratchType::Core(CoreTypeId::Address), 1)
+        }
         _ => None,
     }
 }
@@ -401,7 +432,8 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::UnityClassField => &[Helper(Runtime::UnityGetFieldOffset)],
         IntrinsicId::UnityClassFieldAny => &[Helper(Runtime::UnityGetFieldAny)],
         IntrinsicId::UnityClassStaticInstance => &[Helper(Runtime::UnityGetStaticInstance)],
-        IntrinsicId::GbaEmulatorRead => &[Helper(Runtime::GbaTranslateAddress)],
+        IntrinsicId::GBAEmulatorRead => &[Helper(Runtime::GBATranslateAddress)],
+        IntrinsicId::Ps2EmulatorRead => &[Helper(Runtime::Ps2TranslateAddress)],
         IntrinsicId::StringContains
         | IntrinsicId::StringStartsWith
         | IntrinsicId::StringEndsWith
@@ -518,7 +550,8 @@ const UNITY_MODULE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Un
 const UNITY_IMAGE: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityImage);
 const UNITY_CLASS: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityClass);
 const UNITY_FIELD: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityField);
-const GBA_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GbaEmulator);
+const GBA_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GBAEmulator);
+const PS2_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS2Emulator);
 const T: ContractTypeRef = ContractTypeRef::Parameter(0);
 const T_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
@@ -1674,10 +1707,18 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             OnAttach,
             Suspension
         ),
-        IntrinsicId::GbaEmulatorRead => contract!(
-            GbaEmulatorRead,
+        IntrinsicId::GBAEmulatorRead => contract!(
+            GBAEmulatorRead,
             Method,
             signature(MEMORY_T, Some(GBA_EMULATOR), params![value(U32)], T_RESULT,),
+            PROCESS,
+            Everywhere,
+            Retryable
+        ),
+        IntrinsicId::Ps2EmulatorRead => contract!(
+            Ps2EmulatorRead,
+            Method,
+            signature(MEMORY_T, Some(PS2_EMULATOR), params![value(U32)], T_RESULT,),
             PROCESS,
             Everywhere,
             Retryable

@@ -293,19 +293,23 @@ fn collect_state_field_type(
                     field.span,
                 );
             }
-            if !path.offsets.is_empty() {
-                checker.error(
-                    format!(
-                        "`state {}` direct reads currently require exactly one address",
-                        provider.name
-                    ),
-                    field.span,
-                );
-            }
             if !matches!(path.base, crate::ast::PointerPathBase::Absolute(address) if address <= u32::MAX.into())
             {
                 checker.error(
                     format!("`state {}` addresses must fit in `u32`", provider.name),
+                    field.span,
+                );
+            }
+            if path
+                .offsets
+                .iter()
+                .any(|offset| *offset < i32::MIN.into() || *offset > u32::MAX.into())
+            {
+                checker.error(
+                    format!(
+                        "`state {}` pointer offsets must fit in 32 bits",
+                        provider.name
+                    ),
                     field.span,
                 );
             }

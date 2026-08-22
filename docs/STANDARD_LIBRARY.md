@@ -43,7 +43,7 @@ not a provider-name switch in the parser, checker, or runtime lifecycle.
 
 `state GBA { ... }` selects the standard-library GBA state provider. The
 provider attaches to a supported emulator, discovers its EWRAM and IWRAM
-mapping, and exposes a read-only `gba: GbaEmulator` value. Its generic
+mapping, and exposes a read-only `gba: GBAEmulator` value. Its generic
 `gba.read(address) -> T!` method accepts original GBA hardware addresses and
 infers the memory representation from its expected result type. Reads outside
 `0x02000000..0x02040000` and `0x03000000..0x03008000`, including reads that
@@ -73,7 +73,7 @@ Pointer-backed layouts refresh the current RAM base during reads so starting
 or reloading a ROM does not leave the script with a stale mapping.
 
 The emulator policy, signatures, and mapping selection live together in
-`GbaEmulator.discover`, an ordinary source-defined standard-library function.
+`GBAEmulator.discover`, an ordinary source-defined standard-library function.
 Memory-range lookup and module signature selection are bounded suspension
 primitives: each poll inspects at most one range or one signature window before
 returning control to the host. Only hardware-address translation and the final
@@ -84,6 +84,33 @@ Autosplitters do not call an attachment function or retain an optional handle.
 Only `gba` is available as the process-access root in a GBA script; ordinary
 native-process scripts use `process` instead. This keeps the two memory models
 distinct and lets completion and diagnostics present only the applicable API.
+
+## PlayStation 2 emulator support
+
+`state PS2 { ... }` selects the PlayStation 2 provider and introduces a
+read-only `ps2: PS2Emulator` value. It supports PCSX2 and 64-bit RetroArch with
+the `pcsx2_libretro.dll` core. PCSX2 discovery prefers the exported `EEmem`
+symbol and retains signature fallbacks for older 32-bit and 64-bit builds;
+RetroArch resolves `retro_get_memory_data` from the loaded core.
+
+Both `ps2.read<T>(address)` and state-field `at` declarations use original PS2
+addresses. Reads must lie entirely within `0x00100000..=0x01ffffff`.
+Provider-relative pointer paths dereference 32-bit guest pointers through the
+same translation backend before applying each signed offset:
+
+```splitscript
+state PS2 {
+    health: u16 at 0x00123456;
+    inventory: u32 at 0x00110000, 0x20, 0x8;
+}
+```
+
+Emulator translation is selected by the direct-read intrinsic's central
+provider contract. Ordinary method calls and generated state polling consume
+that same contract, so adding an emulator no longer requires a provider-name or
+GBA-specific branch in either code-generation path. Only the target address
+translation remains a Rust runtime helper; attachment and discovery policy stay
+in `stdlib/standard.split` as ordinary checked SplitScript source.
 
 ## Compiler and tooling model
 

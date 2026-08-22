@@ -105,13 +105,13 @@ pub(super) fn compile_read(
         else {
             unreachable!("validated state-provider reads are intrinsic")
         };
-        if direct_read == IntrinsicId::GbaEmulatorRead {
+        if let Some(contract) = crate::intrinsic_registry::provider_read_contract(direct_read) {
             let field_size = lowering
                 .memory
                 .layout(memory_type_id, lowering.semantics)
                 .expect("provider pointer fields are MemoryReadable")
                 .size();
-            return compile_gba_direct_read(
+            return compile_provider_direct_read(
                 match path.base {
                     crate::ast::PointerPathBase::Absolute(address) => address as u32,
                     crate::ast::PointerPathBase::Module { .. } => {
@@ -123,6 +123,8 @@ pub(super) fn compile_read(
                 optional,
                 field_size,
                 result_type,
+                contract,
+                &path.offsets,
                 lowering,
             );
         }
@@ -183,6 +185,7 @@ pub(super) fn compile_read(
         result_type,
         gc: lowering.gc,
         abi_read: lowering.abi_read,
+        read_failure: "process read failed",
     };
     for offset in offsets {
         emit_process_read(&mut function, &process_read, 8);
@@ -335,17 +338,56 @@ pub(super) fn compile_state_transform(
     function
 }
 
-fn compile_gba_direct_read(
+fn compile_provider_direct_read(
     address: u32,
     memory_type_id: crate::types::TypeId,
     field_type: Type,
     optional: Option<crate::ast::OptionTypeId>,
     field_size: u32,
     result_type: ResultTypeId,
+    contract: crate::intrinsic_registry::ProviderReadContract,
+    offsets: &[i64],
     lowering: &EmissionContext<'_>,
 ) -> Function {
-    let mut function = Function::new([(1, ValType::I64)]);
+    let mut function = Function::new([(1, ValType::I64), (1, ValType::I32)]);
     let address_local = 1;
+    let guest_address_local = 2;
+    function
+        .instruction(&Instruction::I32Const(address as i32))
+        .instruction(&Instruction::LocalSet(guest_address_local));
+    for offset in offsets {
+        emit_provider_translation(
+            &mut function,
+            guest_address_local,
+            address_local,
+            4,
+            field_type,
+            optional,
+            result_type,
+            contract,
+            lowering,
+        );
+        emit_process_read(
+            &mut function,
+            &ProcessReadEmission {
+                abi: lowering.abi,
+                address_local,
+                fallback_ty: field_type,
+                optional,
+                result_type,
+                gc: lowering.gc,
+                abi_read: lowering.abi_read,
+                read_failure: contract.read_failure,
+            },
+            4,
+        );
+        function
+            .instruction(&Instruction::I32Const(lowering.abi_read.start()))
+            .instruction(&Instruction::I32Load(memarg()))
+            .instruction(&Instruction::I32Const(*offset as i32))
+            .instruction(&Instruction::I32Add)
+            .instruction(&Instruction::LocalSet(guest_address_local));
+    }
     function
         .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
         .instruction(&Instruction::GlobalGet(
@@ -354,12 +396,10 @@ fn compile_gba_direct_read(
                 .provider_value
                 .expect("provider direct reads require provider storage"),
         ))
-        .instruction(&Instruction::I32Const(address as i32))
+        .instruction(&Instruction::LocalGet(guest_address_local))
         .instruction(&Instruction::I32Const(field_size as i32))
         .instruction(&Instruction::Call(
-            lowering
-                .runtime_helpers
-                .function(RuntimeHelperId::GbaTranslateAddress),
+            lowering.runtime_helpers.function(contract.translator),
         ))
         .instruction(&Instruction::LocalTee(address_local))
         .instruction(&Instruction::I64Eqz)
@@ -369,7 +409,7 @@ fn compile_gba_direct_read(
         result_type,
         field_type,
         optional,
-        "invalid or unavailable GBA memory address",
+        contract.invalid_address,
         lowering.gc,
     );
     function
@@ -386,6 +426,7 @@ fn compile_gba_direct_read(
             result_type,
             gc: lowering.gc,
             abi_read: lowering.abi_read,
+            read_failure: contract.read_failure,
         },
         field_size,
     );
@@ -403,6 +444,46 @@ fn compile_gba_direct_read(
     function
 }
 
+fn emit_provider_translation(
+    function: &mut Function,
+    guest_address_local: u32,
+    address_local: u32,
+    size: u32,
+    field_type: Type,
+    optional: Option<crate::ast::OptionTypeId>,
+    result_type: ResultTypeId,
+    contract: crate::intrinsic_registry::ProviderReadContract,
+    lowering: &EmissionContext<'_>,
+) {
+    function
+        .instruction(&Instruction::GlobalGet(lowering.runtime_globals.process))
+        .instruction(&Instruction::GlobalGet(
+            lowering
+                .runtime_globals
+                .provider_value
+                .expect("provider direct reads require provider storage"),
+        ))
+        .instruction(&Instruction::LocalGet(guest_address_local))
+        .instruction(&Instruction::I32Const(size as i32))
+        .instruction(&Instruction::Call(
+            lowering.runtime_helpers.function(contract.translator),
+        ))
+        .instruction(&Instruction::LocalTee(address_local))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_pointer_read_failure(
+        function,
+        result_type,
+        field_type,
+        optional,
+        contract.invalid_address,
+        lowering.gc,
+    );
+    function
+        .instruction(&Instruction::Return)
+        .instruction(&Instruction::End);
+}
+
 struct ProcessReadEmission<'a> {
     abi: &'a Abi,
     address_local: u32,
@@ -411,6 +492,7 @@ struct ProcessReadEmission<'a> {
     result_type: ResultTypeId,
     gc: &'a GcLayout,
     abi_read: memory_plan::AbiReadScratch,
+    read_failure: &'a str,
 }
 
 fn emit_process_read(function: &mut Function, emission: &ProcessReadEmission<'_>, size: u32) {
@@ -429,7 +511,7 @@ fn emit_process_read(function: &mut Function, emission: &ProcessReadEmission<'_>
         emission.result_type,
         emission.fallback_ty,
         emission.optional,
-        "process read failed",
+        emission.read_failure,
         emission.gc,
     );
     function

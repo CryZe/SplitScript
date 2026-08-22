@@ -1575,7 +1575,7 @@ fn domain_roots_navigate_to_their_blocks_and_providers_hover() {
         .as_str()
         .expect("provider hover markdown");
     assert!(markdown.contains("state GBA { ... }"));
-    assert!(markdown.contains("gba: GbaEmulator"));
+    assert!(markdown.contains("gba: GBAEmulator"));
 
     let native_source = concat!(
         "state \"game.exe\" {}\n",

@@ -2644,6 +2644,10 @@ fn compile_expr_unconverted(
         return;
     }
     let intrinsic = resolved_intrinsic(target);
+    if let Some(contract) = intrinsic.and_then(crate::intrinsic_registry::provider_read_contract) {
+        compile_provider_read(function, expression, target, args[0], contract, context);
+        return;
+    }
     match intrinsic {
         None => match target {
             wasm_ir::CallTarget::UserMethod {
@@ -3417,56 +3421,8 @@ fn compile_expr_unconverted(
                     context,
                 );
             }
-            IntrinsicId::GbaEmulatorRead => {
-                let read_type = match target {
-                    wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => {
-                        context.type_id(type_arguments[0])
-                    }
-                    _ => unreachable!("GBA reads resolve to their standard-library method"),
-                };
-                let Type::Result(result_type) = context.expression_type(expression) else {
-                    unreachable!("GBA reads produce Result values")
-                };
-                let address = context.matches.intrinsic_temps[&expression][0];
-                function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
-                compile_receiver(function, target, context);
-                compile_expr(function, args[0], context);
-                let size = context
-                    .memory
-                    .layout(read_type, context.semantics)
-                    .expect("checked GBA reads are MemoryReadable")
-                    .size();
-                function
-                    .instruction(&Instruction::I32Const(size as i32))
-                    .instruction(&Instruction::Call(
-                        context
-                            .runtime_helpers
-                            .function(RuntimeHelperId::GbaTranslateAddress),
-                    ))
-                    .instruction(&Instruction::LocalTee(address))
-                    .instruction(&Instruction::I64Eqz)
-                    .instruction(&Instruction::If(BlockType::Result(
-                        context.gc.val_type(Type::Result(result_type)),
-                    )));
-                emit_result_error(
-                    function,
-                    result_type,
-                    context.ty(read_type),
-                    "invalid or unavailable GBA memory address",
-                    context.gc,
-                );
-                function
-                    .instruction(&Instruction::Else)
-                    .instruction(&Instruction::GlobalGet(context.runtime_globals.process))
-                    .instruction(&Instruction::LocalGet(address));
-                emit_process_read_from_stack(
-                    function,
-                    read_type,
-                    result_type,
-                    "GBA memory read failed",
-                    context,
-                );
-                function.instruction(&Instruction::End);
+            IntrinsicId::GBAEmulatorRead | IntrinsicId::Ps2EmulatorRead => {
+                unreachable!("provider reads are lowered before ordinary intrinsics")
             }
             IntrinsicId::NumericMin | IntrinsicId::NumericMax => {
                 unreachable!("numeric intrinsics are lowered before ordinary calls")
@@ -4215,6 +4171,61 @@ fn emit_binary(
     compile_expr(function, right, context);
     emit_binary_instruction(function, op, operand_type);
     emit_narrow_integer_result(function, operand_type);
+}
+
+fn compile_provider_read(
+    function: &mut Function,
+    expression: ExprId,
+    target: &wasm_ir::CallTarget,
+    address_expression: ExprId,
+    contract: crate::intrinsic_registry::ProviderReadContract,
+    context: &ExprContext<'_>,
+) {
+    let read_type = match target {
+        wasm_ir::CallTarget::Intrinsic { type_arguments, .. } => context.type_id(type_arguments[0]),
+        _ => unreachable!("provider reads resolve to their standard-library method"),
+    };
+    let Type::Result(result_type) = context.expression_type(expression) else {
+        unreachable!("provider reads produce Result values")
+    };
+    let address = context.matches.intrinsic_temps[&expression][0];
+    function.instruction(&Instruction::GlobalGet(context.runtime_globals.process));
+    compile_receiver(function, target, context);
+    compile_expr(function, address_expression, context);
+    let size = context
+        .memory
+        .layout(read_type, context.semantics)
+        .expect("checked provider reads are MemoryReadable")
+        .size();
+    function
+        .instruction(&Instruction::I32Const(size as i32))
+        .instruction(&Instruction::Call(
+            context.runtime_helpers.function(contract.translator),
+        ))
+        .instruction(&Instruction::LocalTee(address))
+        .instruction(&Instruction::I64Eqz)
+        .instruction(&Instruction::If(BlockType::Result(
+            context.gc.val_type(Type::Result(result_type)),
+        )));
+    emit_result_error(
+        function,
+        result_type,
+        context.ty(read_type),
+        contract.invalid_address,
+        context.gc,
+    );
+    function
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::GlobalGet(context.runtime_globals.process))
+        .instruction(&Instruction::LocalGet(address));
+    emit_process_read_from_stack(
+        function,
+        read_type,
+        result_type,
+        contract.read_failure,
+        context,
+    );
+    function.instruction(&Instruction::End);
 }
 
 fn compile_intrinsic_equality(

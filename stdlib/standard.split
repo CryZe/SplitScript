@@ -49,9 +49,9 @@ stateProvider Native as process {}
 ///     room: u8 at 0x03000010
 /// }
 /// ```
-@processType(GbaEmulator)
-@attachment(GbaEmulatorDiscover)
-@directRead(GbaEmulatorRead)
+@processType(GBAEmulator)
+@attachment(GBAEmulatorDiscover)
+@directRead(GBAEmulatorRead)
 stateProvider GBA as gba {
     "visualboyadvance-m.exe",
     "VisualBoyAdvance.exe",
@@ -61,6 +61,33 @@ stateProvider GBA as gba {
     "retroarch.exe",
     "EmuHawk.exe",
     "mednafen.exe",
+}
+
+/// Attaches to a supported PlayStation 2 emulator.
+///
+/// The provider discovers the emulator's main RAM mapping and exposes original
+/// PS2 addresses through the read-only `ps2` value of type [`PS2Emulator`].
+/// PCSX2 and 64-bit RetroArch using `pcsx2_libretro.dll` are supported.
+///
+/// # Example
+///
+/// Read PS2 memory
+///
+/// ```splitscript
+/// state PS2 {
+///     health: u16 at 0x00123456
+/// }
+/// ```
+@processType(PS2Emulator)
+@attachment(PS2EmulatorDiscover)
+@directRead(PS2EmulatorRead)
+stateProvider PS2 as ps2 {
+    "pcsx2x64.exe",
+    "pcsx2-qt.exe",
+    "pcsx2x64-avx2.exe",
+    "pcsx2-avx2.exe",
+    "pcsx2.exe",
+    "retroarch.exe",
 }
 
 root {
@@ -5541,11 +5568,11 @@ struct MonoClass {
 /// Use the attached GBA memory provider
 ///
 /// ```splitscript state GBA
-/// let emulator: GbaEmulator = gba
+/// let emulator: GBAEmulator = gba
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
-struct GbaEmulator {
+struct GBAEmulator {
     /// Identifies the emulator-specific memory layout.
     private backend: u32,
 
@@ -5574,9 +5601,9 @@ struct GbaEmulator {
     /// Discover a GBA emulator mapping explicitly
     ///
     /// ```splitscript state GBA
-    /// let emulator = await GbaEmulator.discover()
+    /// let emulator = await GBAEmulator.discover()
     /// ```
-    static fn discover() -> GbaEmulator {
+    static fn discover() -> GBAEmulator {
         let processName = process.name()
 
         if processName == "mGBA.exe" || processName == "mGBA" || processName == "EmuHawk.exe" {
@@ -5587,7 +5614,7 @@ struct GbaEmulator {
                 )
                 while true {
                     let mapping = range else break
-                    return GbaEmulator {
+                    return GBAEmulator {
                         backend: 1,
                         ewram: mapping.address,
                         iwram: mapping.address.offset(0x40000),
@@ -5603,7 +5630,7 @@ struct GbaEmulator {
         if processName == "NO$GBA.EXE" {
             let matched = await process.scanMemory(sig"FF 35 ?? ?? ?? ?? 55")
             let basePointer = retry process.read<u32>(matched.offset(2))
-            return GbaEmulator {
+            return GBAEmulator {
                 backend: 4,
                 ewram: 0,
                 iwram: 0,
@@ -5637,7 +5664,7 @@ struct GbaEmulator {
                 if iwramOpcode == 0x48 {
                     iwramPointer = retry process.read<address>(iwramPointer)
                 }
-                return GbaEmulator {
+                return GBAEmulator {
                     backend: 3,
                     ewram: 0,
                     iwram: 0,
@@ -5651,7 +5678,7 @@ struct GbaEmulator {
                     sig"A1 ?? ?? ?? ?? 81 ?? FF 7F 00 00",
                 )
                 let iwramPointer = retry process.read<u32>(iwramMatch.offset(1))
-                return GbaEmulator {
+                return GBAEmulator {
                     backend: 2,
                     ewram: 0,
                     iwram: 0,
@@ -5661,7 +5688,7 @@ struct GbaEmulator {
                 }
             } else {
                 let ewramPointer = retry process.read<u32>(found.address.offset(8))
-                return GbaEmulator {
+                return GBAEmulator {
                     backend: 2,
                     ewram: 0,
                     iwram: 0,
@@ -5679,7 +5706,7 @@ struct GbaEmulator {
             )
             while true {
                 let mapping = range else break
-                return GbaEmulator {
+                return GBAEmulator {
                     backend: 1,
                     ewram: mapping.address,
                     iwram: mapping.address.offset(0x40000),
@@ -5711,7 +5738,7 @@ struct GbaEmulator {
                 let ewramOffset = retry process.read<i32>(ewramMatch.offset(8))
                 let iwramMatch = await process.scanMemory(sig"25 FE 7F 00 00 66 89 94 03")
                 let iwramOffset = retry process.read<i32>(iwramMatch.offset(9))
-                return GbaEmulator {
+                return GBAEmulator {
                     backend: 1,
                     ewram: base.offset(ewramOffset as i64),
                     iwram: base.offset(iwramOffset as i64),
@@ -5752,7 +5779,7 @@ struct GbaEmulator {
             } else {
                 iwramPointer = retry process.read<u32>(iwramMatch.offset(1)) as address
             }
-            return GbaEmulator {
+            return GBAEmulator {
                 backend: if found.index == 0 { 3 } else { 2 },
                 ewram: 0,
                 iwram: 0,
@@ -5799,7 +5826,7 @@ struct GbaEmulator {
             } else {
                 iwramPointer = retry process.read<u32>(iwramMatch.offset(1)) as address
             }
-            return GbaEmulator {
+            return GBAEmulator {
                 backend: if found.index == 0 { 3 } else { 2 },
                 ewram: 0,
                 iwram: 0,
@@ -5810,7 +5837,7 @@ struct GbaEmulator {
         }
 
         await process.closed()
-        return GbaEmulator {
+        return GBAEmulator {
             backend: 0,
             ewram: 0,
             iwram: 0,
@@ -5831,9 +5858,117 @@ struct GbaEmulator {
     /// ```splitscript state GBA
     /// let room: u8 = gba.read(0x03000010) else 0
     /// ```
-    @intrinsic(GbaEmulatorRead)
+    @intrinsic(GBAEmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original GBA hardware address.
+        address: u32,
+    ) -> T!;
+}
+
+/// Retains a discovered PlayStation 2 emulator memory mapping.
+///
+/// PCSX2 keeps its RAM base behind a native pointer that may change while the
+/// emulator is running. RetroArch exposes a stable base for the lifetime of its
+/// loaded PS2 core. [`PS2Emulator.read`] hides those backend details and always
+/// accepts original PS2 addresses.
+///
+/// # Example
+///
+/// Use the attached PS2 memory provider
+///
+/// ```splitscript state PS2
+/// let emulator: PS2Emulator = ps2
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct PS2Emulator {
+    /// Identifies how the current emulator exposes its RAM base.
+    private backend: u32,
+
+    /// Stores either the RAM base or the native address containing that base.
+    private base: address,
+
+    /// Stores backend-specific lifetime state.
+    private auxiliary: address,
+
+    /// Discovers the emulator's PlayStation 2 memory mapping.
+    ///
+    /// A [`state`] declaration using [`PS2`] invokes this automatically after
+    /// attaching to one of the provider's supported processes.
+    ///
+    /// # Example
+    ///
+    /// Discover a PS2 emulator mapping explicitly
+    ///
+    /// ```splitscript state PS2
+    /// let emulator = await PS2Emulator.discover()
+    /// ```
+    static fn discover() -> PS2Emulator {
+        let processName = process.name()
+
+        if processName == "retroarch.exe" {
+            let executable = await process.mainModule()
+            let pointerSize = retry executable.pointerSize()
+            if pointerSize != PointerSize.Bit64 {
+                await process.closed()
+            }
+
+            let core = await process.module("pcsx2_libretro.dll")
+            let getMemoryData = retry core.peExport("retro_get_memory_data")
+            let displacement = await process.scan(
+                getMemoryData,
+                0x100,
+                sig"?? ?? ?? ?? C3",
+            )
+            let basePointer = retry process.readRelative32(displacement)
+            let ramBase = retry process.read<address>(basePointer)
+            return PS2Emulator {
+                backend: 4,
+                base: ramBase,
+                auxiliary: core.address,
+            }
+        }
+
+        let executable = await process.mainModule()
+        let pointerSize = retry executable.pointerSize()
+        let basePointer = executable.peExport("EEmem") else 0
+        if basePointer == 0 {
+            if pointerSize == PointerSize.Bit64 {
+                let found = await executable.scan(
+                    sig"48 8B ?? ?? ?? ?? ?? 25 F0 3F 00 00",
+                )
+                basePointer = retry process.readRelative32(found.offset(3))
+            } else {
+                let found = await executable.scanAny([
+                    sig"8B ?? ?? ?? ?? ?? 25 F0 3F 00 00",
+                    sig"8B ?? ?? ?? ?? ?? 81 ?? F0 3F 00 00",
+                ])
+                basePointer = retry process.read<u32>(found.address.offset(2)) as address
+            }
+        }
+
+        return PS2Emulator {
+            backend: if pointerSize == PointerSize.Bit64 { 3 } else { 2 },
+            base: basePointer,
+            auxiliary: 0,
+        }
+    }
+
+    /// Reads a typed value from emulated PlayStation 2 memory.
+    ///
+    /// Valid reads lie entirely within `0x00100000..=0x01ffffff`. The expected
+    /// [`MemoryReadable`] type determines the byte layout.
+    ///
+    /// # Example
+    ///
+    /// Read an emulated value
+    ///
+    /// ```splitscript state PS2
+    /// let health: u16 = ps2.read(0x00123456) else 0
+    /// ```
+    @intrinsic(Ps2EmulatorRead)
+    fn read<T: MemoryReadable>(
+        /// The original PlayStation 2 memory address.
         address: u32,
     ) -> T!;
 }

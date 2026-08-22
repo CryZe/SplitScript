@@ -2345,7 +2345,10 @@ fn state_expression_propagation_and_final_results_share_one_failure_boundary() {
         }
 
         state "game.exe" {
-            scene: i32 = process.read(sceneAddress()?);
+            scene: i32 = {
+                let address = sceneAddress()?
+                process.read(address)
+            };
             entities: i32 = process.read(process.follow(0x7fff0004, [])?)
         }
 

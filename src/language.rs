@@ -80,7 +80,10 @@ split {
 }"#;
 
 const FALLIBLE_STATE_SOURCE: &str = r#"state "game.exe" {
-    score: i32 = process.read(process.follow(0x1000, [0x20])?);
+    score: i32 = {
+        let address = process.follow(0x1000, [0x20])?
+        process.read(address)
+    };
 }"#;
 
 const ALTERNATE_PROCESS_STATE_SOURCE: &str = r#"state ["game.exe", "game-demo.exe"] {
@@ -676,12 +679,18 @@ const RETRY_EXAMPLES: &[Example] = &[
         ASYNC_SOURCE,
     ),
 ];
-focused_example!(
-    PROPAGATE_EXAMPLE,
-    "Forward a read error",
-    "let health = process.read<i32>(healthAddress)?",
-    FAILURE_SOURCE
-);
+const PROPAGATE_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Forward an error from a function",
+        "let health = process.read<i32>(healthAddress)?",
+        FAILURE_SOURCE,
+    ),
+    Example::checked(
+        "Reject one state-field update",
+        "score: i32 = {\n    let address = process.follow(0x1000, [0x20])?\n    process.read(address)\n};",
+        FALLIBLE_STATE_SOURCE,
+    ),
+];
 focused_example!(
     CAST_EXAMPLE,
     "Convert an integer",
@@ -947,7 +956,7 @@ define_language_catalog! {
         LanguageItemKind::Declaration,
         "state \"game.exe\" { ... } | state [\"game.exe\", \"demo.exe\"] { ... } | state GBA { ... }",
         "Declares process attachment and persistent watched state.",
-        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
+        "A native string is an exact host process identity. The current Windows host reports executable filenames including `.exe`, so a Windows candidate must include that extension. An array tries alternate executable names in order; it does not attach to several processes at once. Put build-specific memory shapes in named [`layout`] blocks instead of duplicating ASL-style state declarations. Every state expression has one implicit fallible boundary ([`T!`]): internal postfix [`?`] and a fallible final call propagate into that same boundary. Use an ordinary [`value block`] when address discovery or decoding needs several local steps; its final expression supplies the field value without requiring a helper function. Initialization requires all required fields to succeed in one poll and seeds [`old`] and [`current`] equally without running lifecycle actions. Later, failed fields retain their accepted values while successful sibling fields advance. Deliberately optional reads can discard their error into [`T?`] with [`discardError`](method@Result.discardError).",
         STATE_DECL_EXAMPLES
     ),
     language_item!(
@@ -1185,8 +1194,8 @@ define_language_catalog! {
         LanguageItemKind::Syntax,
         "resultExpression?",
         "Propagates a [`T!`] error.",
-        "Postfix [`?`] unwraps success or transfers the original error to the nearest failure boundary: a [`retry`] operand restarts on the next attached update, a state-field assignment rejects that field update, and a [`T!`] function returns the error.",
-        PROPAGATE_EXAMPLE
+        "Postfix [`?`] unwraps success or transfers the original error to the nearest failure boundary: a [`retry`] operand restarts on the next attached update, a state-field assignment rejects that field update, and a [`T!`] function returns the error. A state expression may use a [`value block`] to perform several local steps; every [`?`] and a fallible final expression still target that one field boundary, so no helper function is required.",
+        PROPAGATE_EXAMPLES
     ),
     language_item!(
         AsCast,

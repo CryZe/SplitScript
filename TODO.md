@@ -211,6 +211,14 @@ semantic-review evidence, not as a conformance corpus.
   codegen, formatting, refactoring, and editor traversal. This lets chained
   fallible operations end in `else throw ...` and makes the same control-flow
   forms work consistently in every expression position.
+- [x] Close the reported state-field propagation journey after general value
+  blocks made the intended form directly expressible. A state expression can
+  discover an address in local steps, use postfix [`?`] on any intermediate
+  [`T!`], and finish with another fallible read; all failures target the one
+  transactional field boundary, so a helper function is unnecessary. The
+  generated [`state`] and [`?`] reference pages now show this exact composition,
+  and their compiler-checked example prevents the older rejection from
+  returning unnoticed.
 - [ ] Design semantic lints from failures that compiled cleanly. Evaluate an
   unused-setting warning (the campaign declared `allSkullsMode` but read an
   unrelated always-false global), a suggestion from literal
@@ -709,15 +717,13 @@ remaining work is product hardening and distribution.
 3. Semantically audit the fresh campaign and promote a small corrected,
    runtime-tested subset instead of treating all compiler-clean outputs as a
    corpus.
-4. Review the state-field `?` boundary with the user before implementing a
-   design; then add the chosen diagnostics, documentation, and tests together.
-5. Reclassify blocked ports after subtracting existing features, then design
+4. Reclassify blocked ports after subtracting existing features, then design
    the proven Unity scene/managed-collection and remaining timer host surfaces.
-6. Harden and publish the bundled VSIX and native releases, then evaluate the
+5. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench.
-7. Resume source-debugging work only after the JavaScript debugger, native
+6. Resume source-debugging work only after the JavaScript debugger, native
    Wasmtime/DWARF path, and typed-IR interpreter have been compared against the
    same GC and async fixtures.
-8. Keep physical `None` aggregate specialization and sandbox-sensitive host
+7. Keep physical `None` aggregate specialization and sandbox-sensitive host
    capabilities deferred until measurements or explicit product requirements
    justify them.

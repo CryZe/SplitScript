@@ -1938,7 +1938,72 @@ typeConstructor [T] {
 ///     print(values[index])
 /// }
 /// ```
-typeConstructor T..<T {}
+typeConstructor T..<T {
+    /// Returns the included lower endpoint.
+    ///
+    /// Range endpoints are immutable and retain the range's exact integer type.
+    ///
+    /// # Example
+    ///
+    /// Inspect an exclusive range's beginning
+    ///
+    /// ```splitscript
+    /// let checkpoints = 2u16..<5
+    /// print(checkpoints.start)
+    /// ```
+    start: T,
+
+    /// Returns the excluded upper endpoint.
+    ///
+    /// Iteration stops before this value. The endpoint remains available even
+    /// when the range is empty.
+    ///
+    /// # Example
+    ///
+    /// Inspect an exclusive range's limit
+    ///
+    /// ```splitscript
+    /// let checkpoints = 2u16..<5
+    /// print(checkpoints.end)
+    /// ```
+    end: T,
+
+    /// Reports whether a value belongs to this range.
+    ///
+    /// The lower endpoint participates and the upper endpoint does not.
+    /// Reversed ranges contain no values.
+    ///
+    /// # Example
+    ///
+    /// Test exclusive membership
+    ///
+    /// ```splitscript
+    /// let activeChapters = 2u8..<5
+    /// let isActive = activeChapters.contains(4)
+    /// ```
+    fn contains(
+        /// The value to test.
+        value: T,
+    ) -> bool {
+        return self.start <= value && value < self.end
+    }
+
+    /// Reports whether this range contains no values.
+    ///
+    /// Equal or reversed endpoints make an exclusive range empty.
+    ///
+    /// # Example
+    ///
+    /// Detect an empty exclusive range
+    ///
+    /// ```splitscript
+    /// let pending = 4u32..<4
+    /// let finished = pending.isEmpty()
+    /// ```
+    fn isEmpty() -> bool {
+        return self.start >= self.end
+    }
+}
 
 /// Represents an integer interval whose upper bound is included.
 ///
@@ -1954,7 +2019,71 @@ typeConstructor T..<T {}
 ///     print(checkpoint)
 /// }
 /// ```
-typeConstructor T..=T {}
+typeConstructor T..=T {
+    /// Returns the included lower endpoint.
+    ///
+    /// Range endpoints are immutable and retain the range's exact integer type.
+    ///
+    /// # Example
+    ///
+    /// Inspect an inclusive range's beginning
+    ///
+    /// ```splitscript
+    /// let checkpoints = 2u16..=5
+    /// print(checkpoints.start)
+    /// ```
+    start: T,
+
+    /// Returns the included upper endpoint.
+    ///
+    /// Iteration visits this value when the range is not reversed.
+    ///
+    /// # Example
+    ///
+    /// Inspect an inclusive range's end
+    ///
+    /// ```splitscript
+    /// let checkpoints = 2u16..=5
+    /// print(checkpoints.end)
+    /// ```
+    end: T,
+
+    /// Reports whether a value belongs to this range.
+    ///
+    /// Both endpoints participate. Reversed ranges contain no values.
+    ///
+    /// # Example
+    ///
+    /// Test inclusive membership
+    ///
+    /// ```splitscript
+    /// let activeChapters = 2u8..=5
+    /// let isActive = activeChapters.contains(5)
+    /// ```
+    fn contains(
+        /// The value to test.
+        value: T,
+    ) -> bool {
+        return self.start <= value && value <= self.end
+    }
+
+    /// Reports whether this range contains no values.
+    ///
+    /// Only reversed endpoints make an inclusive range empty; equal endpoints
+    /// contain exactly one value.
+    ///
+    /// # Example
+    ///
+    /// Detect a reversed inclusive range
+    ///
+    /// ```splitscript
+    /// let pending = 5u32..=4
+    /// let finished = pending.isEmpty()
+    /// ```
+    fn isEmpty() -> bool {
+        return self.start > self.end
+    }
+}
 
 /// Stores a growable collection of unique values for one script instance.
 ///

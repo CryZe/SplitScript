@@ -34,8 +34,8 @@ pub(super) struct StandardLibraryGraph {
     pub(super) types: HashMap<StdlibTypeId, &'static StdlibType>,
     pub(super) types_by_name: HashMap<&'static str, &'static StdlibType>,
     pub(super) fields: HashMap<StdlibFieldId, &'static StdlibField>,
-    pub(super) fields_by_owner: HashMap<StdlibTypeId, Vec<&'static StdlibField>>,
-    pub(super) public_fields: HashMap<(StdlibTypeId, &'static str), &'static StdlibField>,
+    pub(super) fields_by_owner: HashMap<StdlibOwner, Vec<&'static StdlibField>>,
+    pub(super) public_fields: HashMap<(StdlibOwner, &'static str), &'static StdlibField>,
     pub(super) variants: HashMap<StdlibVariantId, &'static StdlibVariant>,
     pub(super) variants_by_owner: HashMap<StdlibTypeId, Vec<&'static StdlibVariant>>,
     pub(super) items: HashMap<StdlibItemId, &'static StdlibItem>,
@@ -330,16 +330,18 @@ impl StandardLibraryGraph {
             self.push_child(StdlibOwner::Root, StdlibSymbolId::Type(ty.id));
         }
         for field in FIELDS {
-            if !self.types.contains_key(&field.owner) {
+            if !self.owner_exists(field.owner)
+                || !matches!(
+                    field.owner,
+                    StdlibOwner::Type(_) | StdlibOwner::TypeConstructor(_)
+                )
+            {
                 errors.push(format!(
                     "field `{:?}` has missing owner `{:?}`",
                     field.id, field.owner
                 ));
             }
-            self.push_child(
-                StdlibOwner::Type(field.owner),
-                StdlibSymbolId::Field(field.id),
-            );
+            self.push_child(field.owner, StdlibSymbolId::Field(field.id));
         }
         for variant in VARIANTS {
             if !self.types.contains_key(&variant.owner) {

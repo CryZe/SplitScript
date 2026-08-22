@@ -454,11 +454,17 @@ impl Reachability {
         // Standard GC structs are currently emitted as one recursive catalog
         // group. Their constructed field layouts therefore need matching
         // dynamic GC types even when no user expression reaches the owner.
-        type_roots.extend(standard_library.fields().iter().map(|field| {
-            semantics
-                .standard_field_type(field.id)
-                .expect("checked standard fields have semantic types")
-        }));
+        type_roots.extend(
+            standard_library
+                .fields()
+                .iter()
+                .filter(|field| matches!(field.owner, crate::stdlib::StdlibOwner::Type(_)))
+                .map(|field| {
+                    semantics
+                        .standard_field_type(field.id)
+                        .expect("checked nominal standard fields have semantic types")
+                }),
+        );
         reachable.require_types(type_roots, program, enums, semantics, standard_library);
         reachable
     }

@@ -49,6 +49,7 @@ struct DeferredMemberPath {
     fields: Vec<String>,
     result: Type,
     span: Span,
+    library_item: Option<crate::stdlib::StdlibItemId>,
 }
 
 struct MethodReceiver {

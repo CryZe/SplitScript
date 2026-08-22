@@ -12,7 +12,7 @@ use crate::{
     },
     types::{
         EnumTypeId, ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedRangeType,
-        ResolvedResultType, ResolvedSetType,
+        ResolvedResultType, ResolvedSetType, ResolvedTypeRef,
     },
 };
 
@@ -234,7 +234,13 @@ impl GcLayout {
             next += 1;
         }
 
-        for range in ranges {
+        // Generic source-defined methods can introduce template range shapes.
+        // Only their materialized integer instantiations have a physical Wasm
+        // representation; the generic template itself is erased.
+        for range in ranges
+            .iter()
+            .filter(|range| matches!(range.bound, ResolvedTypeRef::Core(_)))
+        {
             let ty = Type::Range(range.id);
             dynamic.insert(ty, next);
             ordered.push(ty);

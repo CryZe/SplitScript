@@ -13,7 +13,10 @@ use crate::{
         FunctionInstance, ResolvedMember, ResolvedReceiver, ResolvedRecordFieldId,
         ResolvedRecordId, ResolvedValue, SemanticModel, ValueConversionKind,
     },
-    stdlib::{IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibTypeId},
+    stdlib::{
+        IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibOwner,
+        StdlibTypeId,
+    },
     types::{EnumTypeId, ResolvedArrayType, TypeId},
     wasm_ir::{self, TemporaryId},
 };
@@ -1785,22 +1788,62 @@ fn emit_path_fields(
             ResolvedMember::StandardField(field) => {
                 let library = context.standard_library;
                 let declaration = library.field(*field);
-                let owner = library.type_decl(declaration.owner);
-                let RuntimeRepresentation::GcStruct { .. } = owner.representation else {
-                    unreachable!("resolved standard field belongs to a GC struct")
-                };
-                let field_index = library
-                    .fields_of(owner.id)
-                    .position(|candidate| candidate.id == *field)
-                    .expect("declared standard field has a runtime slot")
-                    as u32;
-                let owner_type = Type::from_standard(declaration.owner);
-                debug_assert_eq!(current_type, owner_type);
-                (
-                    context.gc.index(owner_type),
-                    field_index,
-                    standard_field_type(declaration.id, context.semantics),
-                )
+                match declaration.owner {
+                    StdlibOwner::Type(owner) => {
+                        let owner = library.type_decl(owner);
+                        let RuntimeRepresentation::GcStruct { .. } = owner.representation else {
+                            unreachable!("resolved standard field belongs to a GC struct")
+                        };
+                        let field_index = library
+                            .fields_of(owner.id)
+                            .position(|candidate| candidate.id == *field)
+                            .expect("declared standard field has a runtime slot")
+                            as u32;
+                        let owner_type = Type::from_standard(owner.id);
+                        debug_assert_eq!(current_type, owner_type);
+                        (
+                            context.gc.index(owner_type),
+                            field_index,
+                            standard_field_type(declaration.id, context.semantics),
+                        )
+                    }
+                    StdlibOwner::TypeConstructor(owner) => {
+                        let Type::Range(range) = current_type else {
+                            unreachable!("constructed fields require their declared receiver")
+                        };
+                        let field_index = library
+                            .fields_of_constructor(owner)
+                            .position(|candidate| candidate.id == *field)
+                            .expect("declared constructed field has a runtime slot")
+                            as u32;
+                        let (field_type, kind) = context
+                            .semantics
+                            .types()
+                            .iter()
+                            .find_map(|(_, kind)| match kind {
+                                crate::types::TypeKind::Range {
+                                    layout,
+                                    bound,
+                                    kind,
+                                } if *layout == range => Some((context.ty(*bound), *kind)),
+                                _ => None,
+                            })
+                            .expect("checked range fields retain their bound type");
+                        debug_assert_eq!(
+                            owner,
+                            match kind {
+                                crate::ast::RangeKind::Exclusive => {
+                                    crate::stdlib::StdlibTypeConstructorId::ExclusiveRange
+                                }
+                                crate::ast::RangeKind::Inclusive => {
+                                    crate::stdlib::StdlibTypeConstructorId::InclusiveRange
+                                }
+                            }
+                        );
+                        (context.gc.index(current_type), field_index, field_type)
+                    }
+                    _ => unreachable!("fields have type or type-constructor owners"),
+                }
             }
             ResolvedMember::RecordField(field) => {
                 let (record, field_index, field) = context

@@ -780,11 +780,10 @@ fn render_stdlib_symbol_hover(library: StandardLibrary, symbol: StdlibSymbolId) 
         }
         StdlibSymbolId::Field(id) => {
             let declaration = library.field(id);
-            let owner = library.type_decl(declaration.owner);
             (
                 format!(
                     "{}.{}: {}",
-                    owner.name,
+                    library.render_field_owner(declaration.owner),
                     declaration.name,
                     library.render_type(declaration.ty)
                 ),

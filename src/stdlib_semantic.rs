@@ -100,6 +100,22 @@ fn catalog_method_accepts(
                     && matches!(receiver, TypeKind::Result { .. }))
                 || (constructor == StdlibTypeConstructorId::Set
                     && matches!(receiver, TypeKind::Set { .. }))
+                || (constructor == StdlibTypeConstructorId::ExclusiveRange
+                    && matches!(
+                        receiver,
+                        TypeKind::Range {
+                            kind: crate::ast::RangeKind::Exclusive,
+                            ..
+                        }
+                    ))
+                || (constructor == StdlibTypeConstructorId::InclusiveRange
+                    && matches!(
+                        receiver,
+                        TypeKind::Range {
+                            kind: crate::ast::RangeKind::Inclusive,
+                            ..
+                        }
+                    ))
         }
         TypeRef::FixedArray { length, .. } => {
             matches!(receiver, TypeKind::Array { length: Some(actual), .. } if *actual == length)

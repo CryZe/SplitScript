@@ -16,7 +16,7 @@ use crate::{
     signature::parse_signature,
     stdlib::{
         Availability, CapabilityBehavior, DeclaredTypeRef, ItemKind, ParameterRule,
-        StandardBinaryOperator, StandardUnaryOperator, StdlibItem, StdlibItemId,
+        StandardBinaryOperator, StandardUnaryOperator, StdlibItem, StdlibItemId, StdlibOwner,
         StdlibTypeConstructorId, StdlibTypeId, TypeRef as CatalogTypeRef,
     },
     stdlib_semantic::{CallCandidate, StandardLibrarySemanticExt},
@@ -1249,9 +1249,10 @@ impl Checker {
                         && matches!(receiver, Type::Result(_)))
                     || (constructor == StdlibTypeConstructorId::Set
                         && matches!(receiver, Type::Set(_)))
-                    || ((constructor == StdlibTypeConstructorId::ExclusiveRange
-                        || constructor == StdlibTypeConstructorId::InclusiveRange)
-                        && matches!(receiver, Type::Range(_)))
+                    || (constructor == StdlibTypeConstructorId::ExclusiveRange
+                        && matches!(receiver, Type::Range(range) if self.inference.range_kind(range) == crate::ast::RangeKind::Exclusive))
+                    || (constructor == StdlibTypeConstructorId::InclusiveRange
+                        && matches!(receiver, Type::Range(range) if self.inference.range_kind(range) == crate::ast::RangeKind::Inclusive))
             }
             CatalogTypeRef::FixedArray { length, .. } => {
                 matches!(receiver, Type::Variable(_))
@@ -1735,6 +1736,10 @@ impl Checker {
                 fields: fields.to_vec(),
                 result,
                 span,
+                library_item: match self.callable {
+                    CallableContext::LibraryFunction(item) => Some(item),
+                    _ => None,
+                },
             });
             return Some((result, None));
         }
@@ -1876,6 +1881,26 @@ impl Checker {
                 ResolvedMember::StandardField(field.id),
             ));
         }
+        if let Some((constructor, argument)) = self.constructed_field_receiver(ty)
+            && let Some(field) = self.visible_constructor_field(constructor, field)
+        {
+            let parameter = self
+                .standard_library
+                .type_constructor(constructor)
+                .parameters
+                .first()
+                .expect("supported constructed runtime values have one type parameter")
+                .name;
+            let field_type = match field.ty {
+                CatalogTypeRef::Parameter(name) if name == parameter => argument,
+                CatalogTypeRef::Core(core) => self.declared_type(DeclaredTypeRef::Core(core)),
+                CatalogTypeRef::Standard(standard) => self.standard_type(standard),
+                _ => unreachable!(
+                    "constructed standard-library fields currently use direct declared types"
+                ),
+            };
+            return Some((field_type, ResolvedMember::StandardField(field.id)));
+        }
         match self.source_record_id(ty) {
             Some(record_id) => self
                 .declarations
@@ -1948,6 +1973,52 @@ impl Checker {
         })
     }
 
+    fn visible_constructor_field(
+        &self,
+        owner: StdlibTypeConstructorId,
+        name: &str,
+    ) -> Option<&'static crate::stdlib::StdlibField> {
+        self.standard_library
+            .public_constructor_field(owner, name)
+            .or_else(|| {
+                let CallableContext::LibraryFunction(_) = self.callable else {
+                    return None;
+                };
+                self.standard_library
+                    .fields_of_constructor(owner)
+                    .find(|field| field.name == name)
+            })
+    }
+
+    fn constructed_field_receiver(&self, ty: Type) -> Option<(StdlibTypeConstructorId, Type)> {
+        match ty {
+            Type::Array(array) => Some((
+                StdlibTypeConstructorId::Array,
+                self.inference.array_element(array),
+            )),
+            Type::Option(option) => Some((
+                StdlibTypeConstructorId::Option,
+                self.inference.option_value(option),
+            )),
+            Type::Result(result) => Some((
+                StdlibTypeConstructorId::Result,
+                self.inference.result_value(result),
+            )),
+            Type::Set(set) => Some((
+                StdlibTypeConstructorId::Set,
+                self.inference.set_element(set),
+            )),
+            Type::Range(range) => Some((
+                match self.inference.range_kind(range) {
+                    crate::ast::RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
+                    crate::ast::RangeKind::Inclusive => StdlibTypeConstructorId::InclusiveRange,
+                },
+                self.inference.range_bound(range),
+            )),
+            _ => None,
+        }
+    }
+
     pub(super) fn resolve_deferred_member_paths(&mut self) {
         let mut pending = std::mem::take(&mut self.deferred_member_paths);
         loop {
@@ -1983,7 +2054,10 @@ impl Checker {
                     })
                     .cloned()
                     .collect::<Vec<_>>();
-                let mut candidates = self.member_receiver_types();
+                let contextual_item = constraints
+                    .iter()
+                    .find_map(|constraint| constraint.library_item);
+                let mut candidates = self.member_receiver_types(contextual_item);
                 candidates.retain(|candidate| {
                     constraints.iter().all(|constraint| {
                         let Some((result, _)) = self.lookup_members(*candidate, &constraint.fields)
@@ -2020,7 +2094,10 @@ impl Checker {
                     self.shallow_type(candidate.receiver) == Type::Variable(variable)
                 })
                 .collect::<Vec<_>>();
-            let mut candidates = self.member_receiver_types();
+            let contextual_item = constraints
+                .iter()
+                .find_map(|constraint| constraint.library_item);
+            let mut candidates = self.member_receiver_types(contextual_item);
             candidates.retain(|candidate| {
                 constraints.iter().all(|constraint| {
                     self.lookup_members(*candidate, &constraint.fields)
@@ -2079,8 +2156,12 @@ impl Checker {
         Some((ty, members))
     }
 
-    pub(super) fn member_receiver_types(&self) -> Vec<Type> {
-        self.standard_library
+    pub(super) fn member_receiver_types(
+        &mut self,
+        contextual_item: Option<StdlibItemId>,
+    ) -> Vec<Type> {
+        let mut receivers = self
+            .standard_library
             .types()
             .iter()
             .filter(|ty| self.standard_library.public_fields(ty.id).next().is_some())
@@ -2097,7 +2178,46 @@ impl Checker {
                     .iter()
                     .map(|record| self.record_type(record.id)),
             )
-            .collect()
+            .collect::<Vec<_>>();
+
+        // Generic source-defined standard-library bodies deliberately infer
+        // their source parameters. When such a body accesses a structural
+        // field through `self`, its catalog declaration is nevertheless an
+        // exact, authoritative receiver constraint. Instantiate that receiver
+        // here so ordinary deferred member inference can resolve the field and
+        // relate its type parameter to the rest of the body.
+        if let Some(item_id) = contextual_item {
+            let item = *self.standard_library.item(item_id);
+            if let ItemKind::Method { receiver } = item.kind
+                && let StdlibOwner::TypeConstructor(owner) = item.owner
+                && self
+                    .standard_library
+                    .public_constructor_fields(owner)
+                    .next()
+                    .is_some()
+            {
+                let variables = item
+                    .signature
+                    .type_parameters
+                    .iter()
+                    .map(|parameter| {
+                        let requirements = parameter.constraints.iter().fold(
+                            Requirements::none(),
+                            |requirements, constraint| {
+                                requirements | Requirements::capability(*constraint)
+                            },
+                        );
+                        (parameter.name, self.fresh_inference(requirements, None))
+                    })
+                    .collect::<HashMap<_, _>>();
+                let receiver = self.catalog_type(receiver, &variables);
+                if !receivers.contains(&receiver) {
+                    receivers.push(receiver);
+                }
+            }
+        }
+
+        receivers
     }
 
     pub(super) fn type_name(&mut self, ty: Type) -> String {

@@ -27,7 +27,7 @@ use crate::{
     semantic::ResolvedCall,
     stdlib::{
         ItemKind, StandardLibrary, StdlibCapabilityId, StdlibItem, StdlibItemId, StdlibNamespace,
-        StdlibSymbolId, TypeRef,
+        StdlibSymbolId, StdlibTypeConstructorId, TypeRef,
     },
     stdlib_semantic::StandardLibrarySemanticExt,
     types::TypeKind,
@@ -1331,15 +1331,55 @@ fn add_inferred_fields(
                 });
             }
         }
+        TypeKind::Array { .. } => {
+            add_constructor_fields(builder, standard_library, StdlibTypeConstructorId::Array)
+        }
+        TypeKind::Option { .. } => {
+            add_constructor_fields(builder, standard_library, StdlibTypeConstructorId::Option)
+        }
+        TypeKind::Result { .. } => {
+            add_constructor_fields(builder, standard_library, StdlibTypeConstructorId::Result)
+        }
+        TypeKind::Range { kind, .. } => add_constructor_fields(
+            builder,
+            standard_library,
+            match kind {
+                crate::ast::RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
+                crate::ast::RangeKind::Inclusive => StdlibTypeConstructorId::InclusiveRange,
+            },
+        ),
+        TypeKind::Set { .. } => {
+            add_constructor_fields(builder, standard_library, StdlibTypeConstructorId::Set)
+        }
         TypeKind::Builtin(_)
         | TypeKind::Enum(_)
         | TypeKind::GenericParameter { .. }
-        | TypeKind::Array { .. }
-        | TypeKind::Option { .. }
-        | TypeKind::Result { .. }
-        | TypeKind::Async { .. }
-        | TypeKind::Range { .. }
-        | TypeKind::Set { .. } => {}
+        | TypeKind::Async { .. } => {}
+    }
+}
+
+fn add_constructor_fields(
+    builder: &mut CompletionBuilder,
+    standard_library: &StandardLibrary,
+    owner: StdlibTypeConstructorId,
+) {
+    for field in standard_library.public_constructor_fields(owner) {
+        builder.add(CompletionItem {
+            label: field.name.to_owned(),
+            kind: CompletionKind::Property,
+            detail: Some(format!(
+                "{}.{}",
+                standard_library.render_field_owner(field.owner),
+                field.name
+            )),
+            documentation: Some(render_documentation(&field.documentation)),
+            documentation_uri: Some(symbol_uri(
+                StdlibSymbolId::Field(field.id),
+                standard_library,
+            )),
+            insert_text: field.name.to_owned(),
+            is_snippet: false,
+        });
     }
 }
 

@@ -207,26 +207,14 @@ impl<'a> Validator<'a> {
         self.validate_representation(&value.name, &value.attributes, "");
         self.validate_value_usage(&value.name, &value.attributes);
         self.validate_capabilities(&value.name, &value.attributes);
-        let mut fields = HashSet::new();
-        for field in &value.fields {
-            let owner = format!("{}.{}", value.name, field.name);
-            if !fields.insert(field.name.as_str()) {
-                self.error(format!(
-                    "struct `{}` repeats field `{}`",
-                    value.name, field.name
-                ));
-            }
-            let public_field = public && !field.private;
-            self.validate_documentation(&owner, &field.documentation, false, public_field);
-            self.validate_attributes(&owner, &field.attributes, &[]);
-            self.validate_type(&owner, &field.ty, &[]);
-        }
+        self.validate_fields(&value.name, &value.fields, &[], public);
         let owner = CallableOwnerDeclaration {
             name: value.name.clone(),
             type_constructor_syntax: None,
             type_parameters: Vec::new(),
             documentation: value.documentation.clone(),
             attributes: value.attributes.clone(),
+            fields: Vec::new(),
             functions: value.functions.clone(),
         };
         if owner
@@ -252,7 +240,32 @@ impl<'a> Validator<'a> {
     ) {
         self.validate_documentation(&owner.name, &owner.documentation, false, public);
         self.validate_type_parameters(&owner.name, &owner.type_parameters);
+        self.validate_fields(&owner.name, &owner.fields, inherited, public);
         self.validate_functions(&owner.name, &owner.functions, inherited);
+    }
+
+    fn validate_fields(
+        &mut self,
+        owner: &str,
+        fields: &[crate::FieldDeclaration],
+        inherited: &[TypeParameter],
+        public: bool,
+    ) {
+        let mut names = HashSet::new();
+        for field in fields {
+            let qualified = format!("{owner}.{}", field.name);
+            if !names.insert(field.name.as_str()) {
+                self.error(format!("type `{owner}` repeats field `{}`", field.name));
+            }
+            self.validate_documentation(
+                &qualified,
+                &field.documentation,
+                false,
+                public && !field.private,
+            );
+            self.validate_attributes(&qualified, &field.attributes, &[]);
+            self.validate_type(&qualified, &field.ty, inherited);
+        }
     }
 
     fn validate_functions(

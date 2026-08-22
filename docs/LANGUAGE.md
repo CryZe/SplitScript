@@ -1187,6 +1187,25 @@ Both endpoints must have one exact integer type. The corresponding type syntax
 repeats that type around the same operator: [`T..<T`](syntax@range) or
 [`T..=T`](syntax@range). Inference flows
 through either endpoint, annotations, arguments, returns, and loop bindings.
+The immutable [`start`](field@T..<T.start) and
+[`end`](field@T..<T.end) fields expose those endpoints without
+changing their integer type. [`contains`](method@ExclusiveRange.contains)
+tests membership using the range's endpoint policy, while
+[`isEmpty`](method@ExclusiveRange.isEmpty) recognizes equal exclusive
+bounds and reversed ranges. Inclusive ranges provide the corresponding
+[`start`](field@T..=T.start),
+[`end`](field@T..=T.end),
+[`contains`](method@InclusiveRange.contains), and
+[`isEmpty`](method@InclusiveRange.isEmpty) members.
+
+```splitscript
+let checkpoints = 2u16..<5
+print(`from {checkpoints.start} to {checkpoints.end}`)
+if checkpoints.contains(4) {
+    print("checkpoint 4 is active")
+}
+```
+
 An ascending range whose end precedes its start is empty; an exclusive range
 also excludes equal endpoints. Direct `for` iteration keeps the bounds in
 compiler-owned scalar locals and allocates no range object. A stored or passed

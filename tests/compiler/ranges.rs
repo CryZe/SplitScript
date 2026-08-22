@@ -1,13 +1,28 @@
 use splitscript::compiler::types::TypeKind;
+use splitscript::{
+    compiler::stdlib::{StdlibFieldId, StdlibSymbolId},
+    tooling::{
+        completion::CompletionKind,
+        database::{CompilerDatabase, DefinitionTarget},
+    },
+};
 use wasmparser::{Parser, Payload, Validator, WasmFeatures};
 
 const RANGES: &str = r#"
 state "game.exe" {}
 
 fn visit(exclusive: u16..<u16, inclusive: i64..=i64) {
+    print(exclusive.start)
+    print(exclusive.end)
+    print(exclusive.contains(exclusive.start))
+    print(exclusive.isEmpty())
     for value in exclusive {
         print(value)
     }
+    print(inclusive.start)
+    print(inclusive.end)
+    print(inclusive.contains(inclusive.end))
+    print(inclusive.isEmpty())
     for value in inclusive {
         print(value)
     }
@@ -192,4 +207,67 @@ fn direct_range_loops_do_not_construct_a_gc_range_value() {
     }
 
     assert_eq!(struct_new_count(&stored), struct_new_count(&direct) + 1);
+}
+
+#[test]
+fn range_fields_and_methods_power_editor_queries() {
+    let source = r#"
+state "game.exe" {}
+
+whileAttached {
+    let exclusive = 2u16..<5
+    print(exclusive.start)
+    let inclusive = -2i64..=2
+    print(inclusive.end)
+    exclusive.
+}
+"#;
+    let mut database = CompilerDatabase::new(source);
+    let completion_offset = source.find("exclusive.\n").unwrap() + "exclusive.".len();
+    let completions = database.completions(completion_offset).unwrap();
+    for expected in ["start", "end", "contains", "isEmpty"] {
+        assert!(
+            completions.items.iter().any(|item| item.label == expected),
+            "range completion is missing `{expected}`: {:#?}",
+            completions.items
+        );
+    }
+    for field in ["start", "end"] {
+        assert_eq!(
+            completions
+                .items
+                .iter()
+                .find(|item| item.label == field)
+                .unwrap()
+                .kind,
+            CompletionKind::Property,
+        );
+    }
+
+    let start = source.find("exclusive.start").unwrap() + "exclusive.".len();
+    assert_eq!(
+        database.definition_at(start).unwrap(),
+        Some(DefinitionTarget::StandardLibrarySymbol(
+            StdlibSymbolId::Field(StdlibFieldId::ExclusiveRangeStart),
+        )),
+    );
+    let hover = database.hover(start).unwrap().expect("range field hover");
+    assert!(
+        hover.markdown.contains("T..<T.start: T"),
+        "{}",
+        hover.markdown
+    );
+    assert!(
+        hover.markdown.contains("Range endpoints are immutable"),
+        "{}",
+        hover.markdown
+    );
+
+    let end = source.find("inclusive.end").unwrap() + "inclusive.".len();
+    assert_eq!(
+        database.definition_at(end).unwrap(),
+        Some(DefinitionTarget::StandardLibrarySymbol(
+            StdlibSymbolId::Field(StdlibFieldId::InclusiveRangeEnd),
+        )),
+    );
 }

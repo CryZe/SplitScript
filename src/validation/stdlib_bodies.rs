@@ -281,6 +281,22 @@ fn constructed_argument(
         (StdlibTypeConstructorId::Option, TypeKind::Option { value, .. })
         | (StdlibTypeConstructorId::Result, TypeKind::Result { value, .. }) => Some((*value, None)),
         (StdlibTypeConstructorId::Set, TypeKind::Set { element, .. }) => Some((*element, None)),
+        (
+            StdlibTypeConstructorId::ExclusiveRange,
+            TypeKind::Range {
+                bound,
+                kind: crate::ast::RangeKind::Exclusive,
+                ..
+            },
+        )
+        | (
+            StdlibTypeConstructorId::InclusiveRange,
+            TypeKind::Range {
+                bound,
+                kind: crate::ast::RangeKind::Inclusive,
+                ..
+            },
+        ) => Some((*bound, None)),
         _ => None,
     }
 }
@@ -329,36 +345,7 @@ fn declared_type_has_capability(
 }
 
 fn render_declared_type(library: &StandardLibrary, ty: TypeRef) -> String {
-    match ty {
-        TypeRef::Core(core) => core.to_string(),
-        TypeRef::Standard(standard) => library.type_decl(standard).name.to_owned(),
-        TypeRef::Parameter(name) => name.to_owned(),
-        TypeRef::Application {
-            constructor,
-            arguments,
-        } => {
-            let arguments = arguments
-                .iter()
-                .map(|argument| render_declared_type(library, *argument))
-                .collect::<Vec<_>>();
-            if constructor == StdlibTypeConstructorId::Array {
-                format!("[{}]", arguments.join(", "))
-            } else if constructor == StdlibTypeConstructorId::Option {
-                format!("{}?", arguments.join(", "))
-            } else if constructor == StdlibTypeConstructorId::Result {
-                format!("{}!", arguments.join(", "))
-            } else {
-                format!(
-                    "{}<{}>",
-                    library.type_constructor(constructor).name,
-                    arguments.join(", ")
-                )
-            }
-        }
-        TypeRef::FixedArray { element, length } => {
-            format!("[{}; {length}]", render_declared_type(library, *element))
-        }
-    }
+    library.render_type(ty)
 }
 
 fn render_actual_type(

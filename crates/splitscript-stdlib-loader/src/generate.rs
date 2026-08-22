@@ -170,10 +170,32 @@ impl<'a> CatalogGenerator<'a> {
         }
         output.push_str("];\n\npub(super) const FIELDS: &[StdlibField] = &[\n");
         for declaration in &self.library.declarations {
-            if let Declaration::Struct(declaration) | Declaration::IntrinsicType(declaration) =
-                declaration
-            {
-                self.emit_fields(&mut output, declaration);
+            match declaration {
+                Declaration::Struct(declaration) | Declaration::IntrinsicType(declaration) => {
+                    self.emit_fields(
+                        &mut output,
+                        &declaration.name,
+                        &format!(
+                            "StdlibOwner::Type(StdlibTypeId::{})",
+                            ident(&declaration.name)
+                        ),
+                        &declaration.fields,
+                        &[],
+                        has_attribute(&declaration.attributes, "testOnly"),
+                    );
+                }
+                Declaration::TypeConstructor(declaration) => self.emit_fields(
+                    &mut output,
+                    &declaration.name,
+                    &format!(
+                        "StdlibOwner::TypeConstructor(StdlibTypeConstructorId::{})",
+                        ident(&declaration.name)
+                    ),
+                    &declaration.fields,
+                    &declaration.type_parameters,
+                    has_attribute(&declaration.attributes, "testOnly"),
+                ),
+                _ => {}
             }
         }
         output.push_str("];\n\npub(super) const VARIANTS: &[StdlibVariant] = &[\n");
@@ -246,18 +268,25 @@ impl<'a> CatalogGenerator<'a> {
         ));
     }
 
-    fn emit_fields(&self, output: &mut String, declaration: &StructDeclaration) {
-        let owner = ident(&declaration.name);
-        let test_only = has_attribute(&declaration.attributes, "testOnly");
-        for field in &declaration.fields {
+    fn emit_fields(
+        &self,
+        output: &mut String,
+        owner: &str,
+        owner_expression: &str,
+        fields: &[crate::FieldDeclaration],
+        type_parameters: &[TypeParameter],
+        test_only: bool,
+    ) {
+        let owner_id = ident(owner);
+        for field in fields {
             if test_only {
                 output.push_str("#[cfg(test)] ");
             }
             output.push_str(&format!(
-                "StdlibField {{ id: StdlibFieldId::{}{}, owner: StdlibTypeId::{owner}, name: {}, ty: {}, visibility: FieldVisibility::{}, documentation: {} }},\n",
-                owner, ident(&field.name),
+                "StdlibField {{ id: StdlibFieldId::{}{}, owner: {owner_expression}, name: {}, ty: {}, visibility: FieldVisibility::{}, documentation: {} }},\n",
+                owner_id, ident(&field.name),
                 quote(&field.name),
-                self.type_ref(&field.ty, &[]),
+                self.type_ref(&field.ty, type_parameters),
                 if field.private {
                     "RuntimePrivate"
                 } else {
@@ -336,6 +365,7 @@ impl<'a> CatalogGenerator<'a> {
                         type_parameters: Vec::new(),
                         documentation: declaration.documentation.clone(),
                         attributes: declaration.attributes.clone(),
+                        fields: Vec::new(),
                         functions: declaration.functions.clone(),
                     };
                     self.emit_functions(
@@ -871,6 +901,12 @@ pub fn generate_ids(library: &Library) -> Result<String, Vec<Error>> {
             Declaration::TypeConstructor(owner) => {
                 let owner_id = ident(&owner.name);
                 constructors.push(owner_id.clone());
+                fields.extend(
+                    owner
+                        .fields
+                        .iter()
+                        .map(|field| format!("{owner_id}{}", ident(&field.name))),
+                );
                 items.extend(unique_function_idents(&owner.functions, &owner_id));
             }
             Declaration::CoreExtension(owner) => {
@@ -1076,6 +1112,55 @@ struct Example {
         assert!(!generated.contains(
             "summary: \"A concise field summary.\", details: \"A concise field summary.\""
         ));
+    }
+
+    #[test]
+    fn generic_constructor_fields_keep_their_owner_and_parameter() {
+        let source = r#"
+/// Exclusive ranges.
+///
+/// # Example
+///
+/// Iterate over a range
+///
+/// ```splitscript
+/// for value in 1..<3 { print(value) }
+/// ```
+typeConstructor T..<T {
+    /// The lower endpoint.
+    ///
+    /// # Example
+    ///
+    /// Read the beginning
+    ///
+    /// ```splitscript
+    /// let beginning = (1..<3).start
+    /// ```
+    start: T,
+}
+
+/// Integer values.
+///
+/// # Example
+///
+/// Store an integer
+///
+/// ```splitscript
+/// let value = 1
+/// ```
+@behavior(declared)
+capability Integer<T> {}
+"#;
+        let library = parse(source).unwrap();
+        let generated = generate_catalog(&library).unwrap();
+        assert!(generated.contains("StdlibFieldId::ExclusiveRangeStart"));
+        assert!(generated.contains(
+            "owner: StdlibOwner::TypeConstructor(StdlibTypeConstructorId::ExclusiveRange)"
+        ));
+        assert!(generated.contains("ty: TypeRef::Parameter(\"T\")"));
+
+        let ids = generate_ids(&library).unwrap();
+        assert!(ids.contains("ExclusiveRangeStart"));
     }
 
     #[test]

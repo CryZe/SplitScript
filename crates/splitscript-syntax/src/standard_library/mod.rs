@@ -47,6 +47,9 @@ pub struct CallableOwnerDeclaration {
     pub type_parameters: Vec<TypeParameter>,
     pub documentation: Documentation,
     pub attributes: Vec<Attribute>,
+    /// Immutable instance fields declared by a structural type constructor.
+    /// Other callable-owner forms keep this empty.
+    pub fields: Vec<FieldDeclaration>,
     pub functions: Vec<FunctionDeclaration>,
 }
 

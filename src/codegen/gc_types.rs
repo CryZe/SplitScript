@@ -8,7 +8,10 @@ use wasm_encoder::{
 use crate::{
     ast::{EnumDecl, Program},
     semantic::SemanticModel,
-    stdlib::{DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibTypeId},
+    stdlib::{
+        DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibTypeConstructorId,
+        StdlibTypeId, TypeRef,
+    },
     types::{
         ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedRangeType,
         ResolvedResultType, ResolvedSetType,
@@ -349,20 +352,29 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                     unreachable!("range bounds are concrete integer types")
                 };
                 let bound = Type::from_core(bound);
+                let owner = match range.kind {
+                    crate::ast::RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
+                    crate::ast::RangeKind::Inclusive => StdlibTypeConstructorId::InclusiveRange,
+                };
+                let fields = standard_library
+                    .fields_of_constructor(owner)
+                    .map(|field| {
+                        let ty = match field.ty {
+                            TypeRef::Parameter(_) => bound,
+                            TypeRef::Core(core) => Type::from_core(core),
+                            TypeRef::Standard(standard) => Type::from_standard(standard),
+                            _ => unreachable!(
+                                "constructed GC fields currently use direct declared types"
+                            ),
+                        };
+                        FieldType {
+                            element_type: layout.storage_type(ty),
+                            mutable: false,
+                        }
+                    })
+                    .collect();
                 (
-                    CompositeInnerType::Struct(StructType {
-                        fields: vec![
-                            FieldType {
-                                element_type: layout.storage_type(bound),
-                                mutable: false,
-                            },
-                            FieldType {
-                                element_type: layout.storage_type(bound),
-                                mutable: false,
-                            },
-                        ]
-                        .into(),
-                    }),
+                    CompositeInnerType::Struct(StructType { fields }),
                     true,
                     None,
                 )

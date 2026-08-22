@@ -201,7 +201,7 @@ fn target_uri(label: &str, library: &StandardLibrary) -> Option<String> {
         .iter()
         .filter(|field| {
             field.visibility == FieldVisibility::Public
-                && format!("{}.{}", library.type_decl(field.owner).name, field.name) == label
+                && format!("{}.{}", library.render_field_owner(field.owner), field.name) == label
         })
         .map(|field| StdlibSymbolId::Field(field.id))
         .chain(library.variants().iter().filter_map(|variant| {
@@ -288,7 +288,7 @@ fn disambiguated_target_uri(
             .iter()
             .find(|field| {
                 field.visibility == FieldVisibility::Public
-                    && format!("{}.{}", library.type_decl(field.owner).name, field.name) == name
+                    && format!("{}.{}", library.render_field_owner(field.owner), field.name) == name
             })
             .map(|field| symbol_uri(StdlibSymbolId::Field(field.id), library)),
         "variant" => library

@@ -241,10 +241,10 @@ impl DocumentationReference {
                 .iter()
                 .filter(|field| field.visibility == FieldVisibility::Public)
                 .map(|field| {
-                    let owner = self.library.type_decl(field.owner);
+                    let owner = self.library.render_field_owner(field.owner);
                     DocumentationIndexEntry {
                         uri: symbol_uri(StdlibSymbolId::Field(field.id), &self.library),
-                        title: format!("{}.{}", owner.name, field.name),
+                        title: format!("{owner}.{}", field.name),
                         kind: "field",
                         summary: compact_prose(field.documentation.summary),
                         raw_summary: field.documentation.summary,
@@ -254,7 +254,7 @@ impl DocumentationReference {
                         ),
                         signature: Some(format!(
                             "{}.{}: {}",
-                            owner.name,
+                            owner,
                             field.name,
                             self.library.render_type(field.ty)
                         )),
@@ -621,14 +621,14 @@ impl DocumentationReference {
                     .filter(|value| value.visibility == FieldVisibility::Public)
                     .find(|value| symbol_uri(StdlibSymbolId::Field(value.id), &self.library) == uri)
                     .map(|value| {
-                        let owner = self.library.type_decl(value.owner);
+                        let owner = self.library.render_field_owner(value.owner);
                         self.declaration_page(
                             StdlibSymbolId::Field(value.id),
-                            format!("{}.{}", owner.name, value.name),
+                            format!("{owner}.{}", value.name),
                             "field",
                             Some(format!(
                                 "{}.{}: {}",
-                                owner.name,
+                                owner,
                                 value.name,
                                 self.library.render_type(value.ty)
                             )),
@@ -1219,12 +1219,12 @@ impl DocumentationReference {
             }
             StdlibSymbolId::Field(id) => {
                 let field = self.library.field(id);
-                let owner = self.library.type_decl(field.owner);
+                let owner = self.library.render_field_owner(field.owner);
                 breadcrumb(
                     uri,
                     vec![(
-                        owner.name.to_owned(),
-                        symbol_uri(StdlibSymbolId::Type(owner.id), &self.library),
+                        owner,
+                        symbol_uri(field_owner_symbol(field.owner), &self.library),
                     )],
                     field.name,
                 )
@@ -1786,7 +1786,7 @@ fn symbol_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> String {
         StdlibSymbolId::Type(id) => library.type_decl(id).name.to_owned(),
         StdlibSymbolId::Field(id) => {
             let field = library.field(id);
-            format!("{}.{}", library.type_decl(field.owner).name, field.name)
+            format!("{}.{}", library.render_field_owner(field.owner), field.name)
         }
         StdlibSymbolId::Variant(id) => {
             let variant = library.variant(id);
@@ -1817,6 +1817,14 @@ fn symbol_local_label(symbol: StdlibSymbolId, library: &StandardLibrary) -> Stri
             let item = library.item(id);
             operator_symbol(item).unwrap_or(item.name).to_owned()
         }
+    }
+}
+
+fn field_owner_symbol(owner: StdlibOwner) -> StdlibSymbolId {
+    match owner {
+        StdlibOwner::Type(owner) => StdlibSymbolId::Type(owner),
+        StdlibOwner::TypeConstructor(owner) => StdlibSymbolId::TypeConstructor(owner),
+        _ => unreachable!("fields have type or type-constructor owners"),
     }
 }
 
@@ -1960,11 +1968,19 @@ pub(crate) fn symbol_uri(symbol: StdlibSymbolId, library: &StandardLibrary) -> S
         }
         StdlibSymbolId::Field(id) => {
             let field = library.field(id);
-            format!(
-                "/stdlib/types/{}/fields/{}.md",
-                library.type_decl(field.owner).name,
-                field.name
-            )
+            match field.owner {
+                StdlibOwner::Type(owner) => format!(
+                    "/stdlib/types/{}/fields/{}.md",
+                    library.type_decl(owner).name,
+                    field.name
+                ),
+                StdlibOwner::TypeConstructor(owner) => format!(
+                    "/stdlib/type-forms/{}/fields/{}.md",
+                    type_constructor_slug(library.type_constructor(owner)),
+                    field.name
+                ),
+                _ => unreachable!("fields have type or type-constructor owners"),
+            }
         }
         StdlibSymbolId::Variant(id) => {
             let variant = library.variant(id);

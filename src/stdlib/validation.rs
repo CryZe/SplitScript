@@ -11,15 +11,17 @@ use crate::catalog::Documentation;
 use super::{
     declarations::{
         CORE_TYPES, CoreTypeId, FieldVisibility, RuntimeRepresentation, StdlibCapability,
-        StdlibField, StdlibNamespace, StdlibType, StdlibTypeKind, StdlibVariant,
+        StdlibField, StdlibNamespace, StdlibOwner, StdlibType, StdlibTypeConstructor,
+        StdlibTypeKind, StdlibVariant,
     },
     ids::{StdlibCapabilityId, StdlibTypeConstructorId, StdlibTypeId},
-    schema::TypeRef,
+    schema::{TypeParameter, TypeRef},
 };
 
 pub(super) fn validate(
     capabilities: &[StdlibCapability],
     namespaces: &[StdlibNamespace],
+    constructors: &[StdlibTypeConstructor],
     types: &[StdlibType],
     fields: &[StdlibField],
     variants: &[StdlibVariant],
@@ -138,7 +140,9 @@ pub(super) fn validate(
             }
         }
         validate_documentation(&mut errors, "type", ty.name, &ty.documentation, true);
-        let has_fields = fields.iter().any(|field| field.owner == ty.id);
+        let has_fields = fields
+            .iter()
+            .any(|field| field.owner == StdlibOwner::Type(ty.id));
         let has_variants = variants.iter().any(|variant| variant.owner == ty.id);
         match ty.kind {
             StdlibTypeKind::Enum if !has_variants => {
@@ -186,13 +190,34 @@ pub(super) fn validate(
             &field.documentation,
             field.visibility == FieldVisibility::Public,
         );
-        if !type_ids.contains(&field.owner) {
+        let owner_exists = match field.owner {
+            StdlibOwner::Type(owner) => type_ids.contains(&owner),
+            StdlibOwner::TypeConstructor(owner) => constructors
+                .iter()
+                .any(|constructor| constructor.id == owner),
+            _ => false,
+        };
+        if !owner_exists {
             errors.push(format!(
                 "field `{:?}` has missing owner `{:?}`",
                 field.id, field.owner
             ));
         }
-        validate_field_type(field.ty, field.id, &core_type_ids, &type_ids, &mut errors);
+        let parameters = match field.owner {
+            StdlibOwner::TypeConstructor(owner) => constructors
+                .iter()
+                .find(|constructor| constructor.id == owner)
+                .map_or(&[][..], |constructor| constructor.parameters),
+            _ => &[],
+        };
+        validate_field_type(
+            field.ty,
+            field.id,
+            parameters,
+            &core_type_ids,
+            &type_ids,
+            &mut errors,
+        );
     }
 
     for ty in types.iter().filter(|ty| {
@@ -290,7 +315,7 @@ fn validate_standard_memory_layout(
         RuntimeRepresentation::GcStruct { .. } => {
             let declared_fields = fields
                 .iter()
-                .filter(|field| field.owner == ty)
+                .filter(|field| field.owner == StdlibOwner::Type(ty))
                 .collect::<Vec<_>>();
             if declared_fields.is_empty() {
                 Err("it has no readable fields".to_owned())
@@ -349,7 +374,7 @@ fn validate_standard_equality(
             .ok_or_else(|| "its scalar storage is not Equatable".to_owned()),
         RuntimeRepresentation::GcStruct { .. } => fields
             .iter()
-            .filter(|field| field.owner == ty)
+            .filter(|field| field.owner == StdlibOwner::Type(ty))
             .try_for_each(|field| {
                 validate_equality_type(field.ty, visiting, capabilities, types, fields).map_err(
                     |reason| format!("field `{}` is not Equatable because {reason}", field.name),
@@ -372,6 +397,7 @@ fn validate_standard_equality(
 fn validate_field_type(
     ty: TypeRef,
     field: super::StdlibFieldId,
+    parameters: &[TypeParameter],
     core_types: &HashSet<CoreTypeId>,
     standard_types: &HashSet<StdlibTypeId>,
     errors: &mut Vec<String>,
@@ -385,15 +411,36 @@ fn validate_field_type(
         ),
         TypeRef::Application { arguments, .. } => {
             for argument in arguments {
-                validate_field_type(*argument, field, core_types, standard_types, errors);
+                validate_field_type(
+                    *argument,
+                    field,
+                    parameters,
+                    core_types,
+                    standard_types,
+                    errors,
+                );
             }
         }
         TypeRef::FixedArray { element, .. } => {
-            validate_field_type(*element, field, core_types, standard_types, errors);
+            validate_field_type(
+                *element,
+                field,
+                parameters,
+                core_types,
+                standard_types,
+                errors,
+            );
         }
-        TypeRef::Parameter(parameter) => errors.push(format!(
-            "field `{field:?}` references undeclared type parameter `{parameter}`"
-        )),
+        TypeRef::Parameter(parameter)
+            if !parameters
+                .iter()
+                .any(|candidate| candidate.name == parameter) =>
+        {
+            errors.push(format!(
+                "field `{field:?}` references undeclared type parameter `{parameter}`"
+            ));
+        }
+        TypeRef::Parameter(_) => {}
         TypeRef::Core(_) | TypeRef::Standard(_) => {}
     }
 }

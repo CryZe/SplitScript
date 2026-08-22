@@ -214,7 +214,7 @@ pub struct StdlibType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StdlibField {
     pub id: StdlibFieldId,
-    pub owner: StdlibTypeId,
+    pub owner: StdlibOwner,
     pub name: &'static str,
     pub ty: TypeRef,
     pub visibility: FieldVisibility,

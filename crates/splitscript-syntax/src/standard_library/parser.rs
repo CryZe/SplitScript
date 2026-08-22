@@ -54,6 +54,7 @@ impl Parser<'_> {
                     documentation,
                     attributes,
                     true,
+                    false,
                 )?));
             } else if self.eat_ident("namespace") {
                 let name = self.path("expected a namespace path")?;
@@ -62,6 +63,7 @@ impl Parser<'_> {
                     documentation,
                     attributes,
                     true,
+                    false,
                 )?));
             } else if self.eat_ident("capability") {
                 let name = self.ident("expected a capability name")?;
@@ -69,6 +71,7 @@ impl Parser<'_> {
                     name,
                     documentation,
                     attributes,
+                    false,
                     false,
                 )?));
             } else if self.eat_ident("typeConstructor") {
@@ -79,13 +82,14 @@ impl Parser<'_> {
                     documentation,
                     attributes,
                     false,
+                    true,
                 )?;
                 declaration.type_constructor_syntax = Some(syntax);
                 declarations.push(Declaration::TypeConstructor(declaration));
             } else if self.eat_ident("extend") {
                 let name = self.ident("expected a core type after `extend`")?;
                 declarations.push(Declaration::CoreExtension(
-                    self.callable_owner_declaration(name, documentation, attributes, false)?,
+                    self.callable_owner_declaration(name, documentation, attributes, false, false)?,
                 ));
             } else if self.eat_ident("stateProvider") {
                 declarations.push(Declaration::StateProvider(
@@ -139,6 +143,7 @@ impl Parser<'_> {
         documentation: Documentation,
         attributes: Vec<Attribute>,
         functions_are_static: bool,
+        fields_allowed: bool,
     ) -> Result<CallableOwnerDeclaration, Error> {
         let type_parameters = self.type_parameters()?;
         self.callable_owner_declaration_with_parameters(
@@ -147,6 +152,7 @@ impl Parser<'_> {
             documentation,
             attributes,
             functions_are_static,
+            fields_allowed,
         )
     }
 
@@ -157,8 +163,10 @@ impl Parser<'_> {
         documentation: Documentation,
         attributes: Vec<Attribute>,
         functions_are_static: bool,
+        fields_allowed: bool,
     ) -> Result<CallableOwnerDeclaration, Error> {
         self.expect(TokenKind::LBrace, "expected `{` after the declaration name")?;
+        let mut fields = Vec::new();
         let mut functions = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -166,19 +174,29 @@ impl Parser<'_> {
             }
             let documentation = self.documentation()?;
             let attributes = self.attributes()?;
+            let private = self.eat_ident("private");
             let explicitly_static = self.eat_ident("static");
-            if !self.eat_ident("fn") {
+            if self.eat_ident("fn") {
+                if private {
+                    return Err(self.error("standard-library functions cannot be `private`"));
+                }
+                functions.push(self.function_declaration(
+                    documentation,
+                    attributes,
+                    functions_are_static || explicitly_static,
+                )?);
+            } else if fields_allowed {
+                if explicitly_static {
+                    return Err(self.error("expected `fn` after `static`"));
+                }
+                fields.push(self.field_declaration(documentation, attributes, private)?);
+            } else {
                 return Err(self.error(if explicitly_static {
                     "expected `fn` after `static`"
                 } else {
                     "expected a function declaration"
                 }));
             }
-            functions.push(self.function_declaration(
-                documentation,
-                attributes,
-                functions_are_static || explicitly_static,
-            )?);
         }
         self.bump();
         Ok(CallableOwnerDeclaration {
@@ -187,6 +205,7 @@ impl Parser<'_> {
             type_parameters,
             documentation,
             attributes,
+            fields,
             functions,
         })
     }
@@ -1155,6 +1174,30 @@ typeConstructor T! {}
             assert_eq!(constructor.type_constructor_syntax, Some(syntax));
             assert_eq!(constructor.type_parameters[0].name, "T");
         }
+    }
+
+    #[test]
+    fn parses_fields_on_structural_type_constructors() {
+        let library = parse(
+            r#"
+/// Exclusive ranges.
+typeConstructor T..<T {
+    /// The lower endpoint.
+    start: T,
+    /// The upper endpoint.
+    end: T,
+}
+"#,
+        )
+        .expect("structural type constructors should own generic fields");
+        let Declaration::TypeConstructor(range) = &library.declarations[0] else {
+            panic!("expected a type constructor")
+        };
+        assert_eq!(range.fields.len(), 2);
+        assert_eq!(range.fields[0].name, "start");
+        assert_eq!(range.fields[0].ty.to_string(), "T");
+        assert_eq!(range.fields[1].name, "end");
+        assert_eq!(range.fields[1].ty.to_string(), "T");
     }
 
     #[test]

@@ -173,6 +173,9 @@ fn initialize_checker(
     let fields = checker.standard_library.fields().to_vec();
     let variables = std::collections::HashMap::new();
     for field in fields {
+        if !matches!(field.owner, crate::stdlib::StdlibOwner::Type(_)) {
+            continue;
+        }
         let ty = checker.catalog_type(field.ty, &variables);
         checker.standard_field_types.insert(field.id, ty);
         checker.semantics.resolve_standard_field_type(field.id, ty);

@@ -301,6 +301,14 @@ impl StandardLibrary {
         }
     }
 
+    pub fn render_field_owner(&self, owner: StdlibOwner) -> String {
+        match owner {
+            StdlibOwner::Type(owner) => self.type_decl(owner).name.to_owned(),
+            StdlibOwner::TypeConstructor(owner) => self.render_type_constructor(owner),
+            _ => unreachable!("standard-library fields belong to types or type constructors"),
+        }
+    }
+
     pub fn namespaces(&self) -> &'static [StdlibNamespace] {
         NAMESPACES
     }
@@ -396,6 +404,20 @@ impl StandardLibrary {
     }
 
     pub fn fields_of(&self, owner: StdlibTypeId) -> impl Iterator<Item = &'static StdlibField> {
+        self.fields_of_owner(StdlibOwner::Type(owner))
+    }
+
+    pub fn fields_of_constructor(
+        &self,
+        owner: StdlibTypeConstructorId,
+    ) -> impl Iterator<Item = &'static StdlibField> {
+        self.fields_of_owner(StdlibOwner::TypeConstructor(owner))
+    }
+
+    pub fn fields_of_owner(
+        &self,
+        owner: StdlibOwner,
+    ) -> impl Iterator<Item = &'static StdlibField> {
         self.graph
             .fields_by_owner
             .get(&owner)
@@ -404,11 +426,35 @@ impl StandardLibrary {
     }
 
     pub fn public_field(&self, owner: StdlibTypeId, name: &str) -> Option<&'static StdlibField> {
+        self.public_field_of_owner(StdlibOwner::Type(owner), name)
+    }
+
+    pub fn public_constructor_field(
+        &self,
+        owner: StdlibTypeConstructorId,
+        name: &str,
+    ) -> Option<&'static StdlibField> {
+        self.public_field_of_owner(StdlibOwner::TypeConstructor(owner), name)
+    }
+
+    fn public_field_of_owner(
+        &self,
+        owner: StdlibOwner,
+        name: &str,
+    ) -> Option<&'static StdlibField> {
         self.graph.public_fields.get(&(owner, name)).copied()
     }
 
     pub fn public_fields(&self, owner: StdlibTypeId) -> impl Iterator<Item = &'static StdlibField> {
         self.fields_of(owner)
+            .filter(|field| field.visibility == FieldVisibility::Public)
+    }
+
+    pub fn public_constructor_fields(
+        &self,
+        owner: StdlibTypeConstructorId,
+    ) -> impl Iterator<Item = &'static StdlibField> {
+        self.fields_of_constructor(owner)
             .filter(|field| field.visibility == FieldVisibility::Public)
     }
 
@@ -646,7 +692,14 @@ impl StandardLibrary {
     }
 
     pub fn validate(&self) -> Vec<String> {
-        let mut errors = validation::validate(CAPABILITIES, NAMESPACES, TYPES, FIELDS, VARIANTS);
+        let mut errors = validation::validate(
+            CAPABILITIES,
+            NAMESPACES,
+            TYPE_CONSTRUCTORS,
+            TYPES,
+            FIELDS,
+            VARIANTS,
+        );
         validate_named_declarations(
             "capability",
             CAPABILITIES,

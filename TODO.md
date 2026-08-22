@@ -240,11 +240,11 @@ semantic-review evidence, not as a conformance corpus.
   overflowing. Direct range loops keep scalar bounds in compiler-owned locals
   and allocate no GC range object; settings-family ranges remain a compile-time
   DSL.
-  - [ ] Choose the public endpoint/member surface before adding it. Prefer
-    immutable `.start` and `.end` fields with `.contains(value)` and
-    `.isEmpty()`, but do not special-case range fields in the compiler: either
-    extend source-defined generic standard-library types to declare fields
-    cleanly or deliberately choose method accessors instead.
+  - [x] Expose immutable `.start` and `.end` fields plus source-defined
+    `.contains(value)` and `.isEmpty()` methods. Generic type constructors can
+    now declare fields in standard-library source, and the shared catalog
+    drives inference, completion, hover, documentation, and member identity;
+    only physical Wasm GC layout remains a backend concern.
 
 ## P0 — unblock the next representative native ports
 

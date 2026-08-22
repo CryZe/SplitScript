@@ -177,6 +177,23 @@ GameCube reads use provider-owned big-endian decoding. The same recursive
 decoder handles primitive values, every field of a readable record, fixed
 arrays, and intermediate `u32` pointers in state-field pointer paths.
 
+## Nintendo Wii emulator support
+
+`state Wii { ... }` introduces `wii: WiiEmulator` and maps original MEM1
+addresses in `0x80000000..=0x817fffff` and MEM2 addresses in
+`0x90000000..=0x93ffffff`. Dolphin and 64-bit RetroArch with
+`dolphin_libretro.dll` are supported.
+
+```splitscript
+state Wii {
+    player: PlayerState at 0x80001000;
+    worldState: u32 at 0x90002000;
+}
+```
+
+Explicit reads and state pointer paths share the same bounds checks, address
+translation, and recursive big-endian decoder as the GameCube provider.
+
 ## Compiler and tooling model
 
 The library surface is described by a backend-independent catalog. Each entry

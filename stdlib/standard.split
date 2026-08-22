@@ -166,6 +166,29 @@ stateProvider GCN as gcn {
     "retroarch.exe",
 }
 
+/// Attaches to a supported Nintendo Wii emulator.
+///
+/// The provider discovers MEM1 and MEM2 and exposes original Wii addresses
+/// through the read-only `wii` value of type [`WiiEmulator`]. Multi-byte
+/// values use the console's big-endian byte order.
+///
+/// # Example
+///
+/// Read Wii memory
+///
+/// ```splitscript
+/// state Wii {
+///     room: u16 at 0x80001000
+/// }
+/// ```
+@processType(WiiEmulator)
+@attachment(WiiEmulatorDiscover)
+@directRead(WiiEmulatorRead)
+stateProvider Wii as wii {
+    "Dolphin.exe",
+    "retroarch.exe",
+}
+
 root {
     /// Prints a diagnostic message.
     ///
@@ -6542,6 +6565,108 @@ struct GCNEmulator {
     @intrinsic(GCNEmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original GameCube memory address.
+        address: u32,
+    ) -> T!;
+}
+
+/// Retains discovered Nintendo Wii MEM1 and MEM2 mappings.
+///
+/// Reads accept the original console addresses and decode every
+/// [`MemoryReadable`] scalar, record field, and fixed-array element as big
+/// endian. Dolphin and 64-bit RetroArch with `dolphin_libretro.dll` are
+/// supported.
+///
+/// # Example
+///
+/// Use the attached Wii memory provider
+///
+/// ```splitscript state Wii
+/// let emulator: WiiEmulator = wii
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct WiiEmulator {
+    /// Identifies whether the mapping belongs to a standalone or libretro host.
+    private backend: u32,
+
+    /// Stores the native start of the console's MEM1 mapping.
+    private mem1: address,
+
+    /// Stores the native start of the console's MEM2 mapping.
+    private mem2: address,
+
+    /// Stores the libretro core base used for lifetime validation.
+    private auxiliary: address,
+
+    /// Discovers the emulator's Wii MEM1 and MEM2 mappings.
+    ///
+    /// A [`state`] declaration using [`Wii`] invokes this automatically after
+    /// attaching to Dolphin or RetroArch.
+    ///
+    /// # Example
+    ///
+    /// Discover a Wii emulator mapping explicitly
+    ///
+    /// ```splitscript state Wii
+    /// let emulator = await WiiEmulator.discover()
+    /// ```
+    static fn discover() -> WiiEmulator {
+        let processName = process.name()
+        let coreBase: address = 0
+
+        if processName == "retroarch.exe" {
+            let executable = await process.mainModule()
+            if retry executable.pointerSize() != PointerSize.Bit64 {
+                await process.closed()
+            }
+            let core = await process.module("dolphin_libretro.dll")
+            coreBase = core.address
+        }
+
+        let mem1 = await process.findMemoryRange(
+            0x2000000,
+            MemoryRangeAccess.ReadWrite,
+        ) else await process.closed()
+        let marker1 = retry process.read<u32>(mem1.address.offset(0x3118))
+        let marker2 = retry process.read<u32>(mem1.address.offset(0x311c))
+        if marker1 != 4 || marker2 != 4 {
+            await process.closed()
+        }
+
+        let mem2 = await process.findMemoryRange(
+            0x4000000,
+            MemoryRangeAccess.ReadWrite,
+        ) else await process.closed()
+        let mem1Address = mem1.address as u64
+        let mem2Address = mem2.address as u64
+        if mem2Address <= mem1Address || mem2Address >= mem1Address + 0x10000000 {
+            await process.closed()
+        }
+
+        return WiiEmulator {
+            backend: if processName == "retroarch.exe" { 4 } else { 1 },
+            mem1: mem1.address,
+            mem2: mem2.address,
+            auxiliary: coreBase,
+        }
+    }
+
+    /// Reads a typed value from emulated Wii memory.
+    ///
+    /// Valid MEM1 addresses lie in `0x80000000..=0x817fffff`; valid MEM2
+    /// addresses lie in `0x90000000..=0x93ffffff`. Values and pointer paths use
+    /// the Wii's big-endian byte order.
+    ///
+    /// # Example
+    ///
+    /// Read an emulated value
+    ///
+    /// ```splitscript state Wii
+    /// let health: u16 = wii.read(0x90001234) else 0
+    /// ```
+    @intrinsic(WiiEmulatorRead)
+    fn read<T: MemoryReadable>(
+        /// The original Wii memory address.
         address: u32,
     ) -> T!;
 }

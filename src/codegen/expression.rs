@@ -3424,6 +3424,7 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::GBAEmulatorRead
             | IntrinsicId::GCNEmulatorRead
+            | IntrinsicId::WiiEmulatorRead
             | IntrinsicId::Ps2EmulatorRead
             | IntrinsicId::Ps1EmulatorRead
             | IntrinsicId::SmsEmulatorRead => {

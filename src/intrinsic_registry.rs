@@ -80,6 +80,7 @@ pub(crate) enum RuntimeHelperId {
     FollowAddress,
     GBATranslateAddress,
     GCNTranslateAddress,
+    WiiTranslateAddress,
     Ps2TranslateAddress,
     Ps1TranslateAddress,
     SmsTranslateAddress,
@@ -145,6 +146,12 @@ pub(crate) const fn provider_read_contract(intrinsic: IntrinsicId) -> Option<Pro
             byte_order: ProviderByteOrder::Big,
             invalid_address: "invalid or unavailable GameCube memory address",
             read_failure: "GameCube memory read failed",
+        }),
+        IntrinsicId::WiiEmulatorRead => Some(ProviderReadContract {
+            translator: RuntimeHelperId::WiiTranslateAddress,
+            byte_order: ProviderByteOrder::Big,
+            invalid_address: "invalid or unavailable Wii memory address",
+            read_failure: "Wii memory read failed",
         }),
         _ => None,
     }
@@ -399,6 +406,7 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
         IntrinsicId::GBAEmulatorRead
         | IntrinsicId::GCNEmulatorRead
+        | IntrinsicId::WiiEmulatorRead
         | IntrinsicId::Ps2EmulatorRead
         | IntrinsicId::Ps1EmulatorRead
         | IntrinsicId::SmsEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
@@ -473,6 +481,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::UnityClassStaticInstance => &[Helper(Runtime::UnityGetStaticInstance)],
         IntrinsicId::GBAEmulatorRead => &[Helper(Runtime::GBATranslateAddress)],
         IntrinsicId::GCNEmulatorRead => &[Helper(Runtime::GCNTranslateAddress)],
+        IntrinsicId::WiiEmulatorRead => &[Helper(Runtime::WiiTranslateAddress)],
         IntrinsicId::Ps2EmulatorRead => &[Helper(Runtime::Ps2TranslateAddress)],
         IntrinsicId::Ps1EmulatorRead => &[Helper(Runtime::Ps1TranslateAddress)],
         IntrinsicId::SmsEmulatorRead => &[Helper(Runtime::SmsTranslateAddress)],
@@ -594,6 +603,7 @@ const UNITY_CLASS: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Uni
 const UNITY_FIELD: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::UnityField);
 const GBA_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GBAEmulator);
 const GCN_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GCNEmulator);
+const WII_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::WiiEmulator);
 const PS2_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS2Emulator);
 const PS1_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS1Emulator);
 const SMS_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SMSEmulator);
@@ -1764,6 +1774,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             GCNEmulatorRead,
             Method,
             signature(MEMORY_T, Some(GCN_EMULATOR), params![value(U32)], T_RESULT,),
+            PROCESS,
+            Everywhere,
+            Retryable
+        ),
+        IntrinsicId::WiiEmulatorRead => contract!(
+            WiiEmulatorRead,
+            Method,
+            signature(MEMORY_T, Some(WII_EMULATOR), params![value(U32)], T_RESULT,),
             PROCESS,
             Everywhere,
             Retryable

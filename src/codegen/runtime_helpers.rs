@@ -28,6 +28,7 @@ mod ps2;
 mod sms;
 mod strings;
 mod unity;
+mod wii;
 
 pub(super) use equality::{compile_equality, emit_value_equality};
 
@@ -332,6 +333,10 @@ pub(super) fn build_gba_translate_address(inputs: &RuntimeHelperInputs<'_>) -> F
 
 pub(super) fn build_gcn_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
     gcn::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
+}
+
+pub(super) fn build_wii_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    wii::compile_translate_address(inputs.abi, inputs.gc, inputs.memory.scratch().abi_read)
 }
 
 pub(super) fn build_ps2_translate_address(inputs: &RuntimeHelperInputs<'_>) -> Function {

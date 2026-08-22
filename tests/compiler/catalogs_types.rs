@@ -46,6 +46,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::PS1EmulatorDiscover,
         StdlibItemId::SMSEmulatorDiscover,
         StdlibItemId::GCNEmulatorDiscover,
+        StdlibItemId::WiiEmulatorDiscover,
     ] {
         assert!(matches!(
             library.item(item).implementation,
@@ -1127,6 +1128,66 @@ fn gcn_provider_decodes_big_endian_records_arrays_and_guest_pointer_paths() {
         .expect("the GameCube provider should expose catalog documentation");
     assert!(hover.markdown.contains("state GCN { ... }"));
     assert!(hover.markdown.contains("gcn: GCNEmulator"));
+}
+
+#[test]
+fn wii_provider_covers_mem1_mem2_and_big_endian_guest_pointer_paths() {
+    let library = StandardLibrary::new();
+    let wii = library
+        .state_provider_by_name("Wii")
+        .expect("the bundled Wii provider should be discoverable by source name");
+    assert_eq!(wii.id, StdlibStateProviderId::Wii);
+    assert_eq!(wii.value_name, "wii");
+    assert_eq!(wii.process_type, StdlibTypeId::WiiEmulator);
+    assert_eq!(wii.direct_read, StdlibItemId::WiiEmulatorRead);
+    assert_eq!(
+        wii.attachment,
+        splitscript::compiler::stdlib::StateProviderAttachment::Callable(
+            StdlibItemId::WiiEmulatorDiscover,
+        )
+    );
+    assert!(matches!(
+        library
+            .item(StdlibItemId::WiiEmulatorDiscover)
+            .implementation,
+        Implementation::LibraryBody { .. }
+    ));
+
+    let source = r#"
+        record Player {
+            health: u16,
+            position: [f32; 3],
+        }
+
+        state Wii {
+            mem1: Player at 0x80001000;
+            mem2: u32 at 0x90002000;
+            pointer: u16 at 0x90003000, 0x20, -0x8;
+        }
+
+        whileAttached {
+            let value: i32 = wii.read(0x80004000) else 0
+            if value > 0 { print("positive") }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("Wii MEM1, MEM2, and guest pointer paths should type-check");
+    assert_eq!(
+        checked.semantics().state_provider(),
+        Some(StdlibStateProviderId::Wii)
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("Wii MEM1, MEM2, and guest pointer paths should emit valid Wasm");
+
+    let provider_source = "state Wii {}";
+    let mut database = splitscript::tooling::database::CompilerDatabase::new(provider_source);
+    let hover = database
+        .hover(provider_source.find("Wii").unwrap() + 1)
+        .unwrap()
+        .expect("the Wii provider should expose catalog documentation");
+    assert!(hover.markdown.contains("state Wii { ... }"));
+    assert!(hover.markdown.contains("wii: WiiEmulator"));
 }
 
 #[test]

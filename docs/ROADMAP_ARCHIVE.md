@@ -1,5 +1,13 @@
 # SplitScript roadmap
 
+## 2026-08-22: source-defined Wii emulator provider
+
+- Added `state Wii` and `wii: WiiEmulator` with source-defined Dolphin and
+  `dolphin_libretro.dll` discovery.
+- Added exact MEM1 and MEM2 guest bounds and native mapping translation.
+- Reused provider-selected big-endian decoding for explicit reads, records,
+  fixed arrays, and guest pointer paths.
+
 ## 2026-08-22: provider-owned byte order and GameCube support
 
 - Separated fixed `MemoryReadable` shape from the byte order supplied by an

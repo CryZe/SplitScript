@@ -390,6 +390,7 @@ mod tests {
             ("Unity helper", include_str!("runtime_helpers/unity.rs")),
             ("GBA helper", include_str!("runtime_helpers/gba.rs")),
             ("GameCube helper", include_str!("runtime_helpers/gcn.rs")),
+            ("Wii helper", include_str!("runtime_helpers/wii.rs")),
         ] {
             let lines = source.lines().collect::<Vec<_>>();
             for (index, line) in lines.iter().enumerate() {

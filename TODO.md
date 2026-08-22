@@ -392,11 +392,6 @@ semantic-review evidence, not as a conformance corpus.
   or silently guess offsets.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
-- [ ] Add a Sega Master System provider from a representative real port,
-  building on the shared intrinsic-owned provider-read contract established by
-  `state GBA`, `state PS2`, and `state PS1`. Keep attachment and discovery
-  source-defined and cover both explicit reads and guest-relative `at` pointer
-  paths.
 - [ ] Before implementing GameCube, Wii, or Genesis, agree on the public
   endianness model. Decide whether byte order belongs to a provider, a
   `MemoryReadable` implementation, a field annotation, or an explicit read;

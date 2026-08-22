@@ -131,6 +131,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(GBATranslateAddress, (I64, Standard(StdlibTypeId::GBAEmulator), I32, I32) -> (I64), deps [], imports [ProcessRead], build_gba_translate_address),
     helper!(Ps2TranslateAddress, (I64, Standard(StdlibTypeId::PS2Emulator), I32, I32) -> (I64), deps [], imports [ProcessRead], build_ps2_translate_address),
     helper!(Ps1TranslateAddress, (I64, Standard(StdlibTypeId::PS1Emulator), I32, I32) -> (I64), deps [], imports [ProcessRead], build_ps1_translate_address),
+    helper!(SmsTranslateAddress, (I64, Standard(StdlibTypeId::SMSEmulator), I32, I32) -> (I64), deps [], imports [ProcessRead], build_sms_translate_address),
     helper!(RefreshSettings, () -> (), deps [], imports [], build_refresh_settings),
     helper!(SettingsEnabled, (I32, StringValue) -> (I32), deps [], imports [], build_settings_enabled),
     helper!(SettingsContains, (I32, StringValue) -> (I32), deps [], imports [], build_settings_contains),

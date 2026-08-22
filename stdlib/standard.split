@@ -118,6 +118,30 @@ stateProvider PS1 as ps1 {
     "mednafen.exe",
 }
 
+/// Attaches to a supported Sega Master System or Game Gear emulator.
+///
+/// The provider exposes original 16-bit console addresses through the read-only
+/// `sms` value of type [`SMSEmulator`].
+///
+/// # Example
+///
+/// Read Master System work RAM
+///
+/// ```splitscript
+/// state SMS {
+///     lives: u8 at 0xc010
+/// }
+/// ```
+@processType(SMSEmulator)
+@attachment(SMSEmulatorDiscover)
+@directRead(SMSEmulatorRead)
+stateProvider SMS as sms {
+    "retroarch.exe",
+    "Fusion.exe",
+    "blastem.exe",
+    "mednafen.exe",
+}
+
 root {
     /// Prints a diagnostic message.
     ///
@@ -6237,6 +6261,176 @@ struct PS1Emulator {
     @intrinsic(Ps1EmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original PlayStation memory address.
+        address: u32,
+    ) -> T!;
+}
+
+/// Retains a discovered Sega Master System or Game Gear memory mapping.
+///
+/// The mapping covers the console's 8 KiB work RAM. Fusion retains the native
+/// pointer that can move while the emulator runs; other supported backends keep
+/// a stable base and validate libretro core lifetime where applicable.
+///
+/// # Example
+///
+/// Use the attached Master System memory provider
+///
+/// ```splitscript state SMS
+/// let emulator: SMSEmulator = sms
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct SMSEmulator {
+    /// Identifies how the selected emulator exposes work RAM.
+    private backend: u32,
+
+    /// Stores either the RAM base or a native pointer containing that base.
+    private base: address,
+
+    /// Stores a backend-specific offset or lifetime address.
+    private auxiliary: i64,
+
+    /// Discovers the emulator's Master System or Game Gear work RAM mapping.
+    ///
+    /// A [`state`] declaration using [`SMS`] invokes this automatically after
+    /// attaching to one of the provider's supported processes.
+    ///
+    /// # Example
+    ///
+    /// Discover a Master System emulator mapping explicitly
+    ///
+    /// ```splitscript state SMS
+    /// let emulator = await SMSEmulator.discover()
+    /// ```
+    static fn discover() -> SMSEmulator {
+        let processName = process.name()
+        let executable = await process.mainModule()
+
+        if processName == "Fusion.exe" {
+            let found = await executable.scan(sig"74 C8 83 3D")
+            let basePointer = retry process.read<u32>(found.offset(4))
+            return SMSEmulator {
+                backend: 2,
+                base: basePointer as address,
+                auxiliary: 0xc000,
+            }
+        }
+
+        if processName == "blastem.exe" {
+            let found = await process.scanMemory(
+                sig"66 81 E1 FF 1F 0F B7 C9 8A 89 ?? ?? ?? ?? C3",
+            )
+            let ramBase = retry process.read<u32>(found.offset(10))
+            return SMSEmulator {
+                backend: 1,
+                base: ramBase as address,
+                auxiliary: 0,
+            }
+        }
+
+        if processName == "mednafen.exe" {
+            let ramBase = if retry executable.pointerSize() == PointerSize.Bit64 {
+                let found = await executable.scan(sig"25 FF 1F 00 00 88 90")
+                retry process.read<u32>(found.offset(8))
+            } else {
+                let found = await executable.scan(sig"25 FF 1F 00 00 0F B6 80")
+                retry process.read<u32>(found.offset(7))
+            }
+            return SMSEmulator {
+                backend: 1,
+                base: ramBase as address,
+                auxiliary: 0,
+            }
+        }
+
+        if processName == "retroarch.exe" {
+            let pointerSize = retry executable.pointerSize()
+            let core = retry {
+                process.loadedModule("genesis_plus_gx_libretro.dll")
+                    else process.loadedModule("genesis_plus_gx_wide_libretro.dll")
+                    else process.loadedModule("picodrive_libretro.dll")
+                    else process.loadedModule("smsplus_libretro.dll")
+                    else process.loadedModule("gearsystem_libretro.dll")
+                    else throw "a supported Master System libretro core is not loaded"
+            }
+            let ramBase: address = 0
+
+            if core.name == "genesis_plus_gx_libretro.dll"
+                || core.name == "genesis_plus_gx_wide_libretro.dll" {
+                if pointerSize == PointerSize.Bit64 {
+                    let found = await core.scan(sig"48 8D 0D ?? ?? ?? ?? 4C 8B 2D")
+                    ramBase = retry process.readRelative32(found.offset(3))
+                } else {
+                    let found = await core.scan(sig"A3 ?? ?? ?? ?? 29 F9")
+                    ramBase = retry process.read<u32>(found.offset(1)) as address
+                }
+            } else if core.name == "picodrive_libretro.dll" {
+                if pointerSize == PointerSize.Bit64 {
+                    let found = await core.scan(sig"48 8D 0D ?? ?? ?? ?? 41 B8")
+                    ramBase = (retry process.readRelative32(found.offset(3))).offset(0x20000)
+                } else {
+                    let found = await core.scan(sig"B9 ?? ?? ?? ?? C1 EF 10")
+                    let base = retry process.read<u32>(found.offset(1))
+                    ramBase = (base as address).offset(0x20000)
+                }
+            } else if core.name == "smsplus_libretro.dll" {
+                if pointerSize == PointerSize.Bit64 {
+                    let found = await core.scan(sig"31 F6 48 C7 05")
+                    ramBase = (retry process.readRelative32(found.offset(5))).offset(4)
+                } else {
+                    let found = await core.scan(sig"83 FA 02 B8")
+                    ramBase = retry process.read<u32>(found.offset(4)) as address
+                }
+            } else if pointerSize == PointerSize.Bit64 {
+                let found = await core.scan(
+                    sig"83 ?? 02 75 ?? 48 8B 0D ?? ?? ?? ?? E8",
+                )
+                let root = retry process.readRelative32(found.offset(8))
+                let offsetTarget = retry process.readRelative32(found.offset(21))
+                let offset = retry process.read<u8>(offsetTarget.offset(3))
+                let first = retry process.read<address>(root)
+                let second = retry process.read<address>(first)
+                let base = retry process.read<address>(second.offset(offset as i64))
+                ramBase = base.offset(0xc000)
+            } else {
+                let found = await core.scan(
+                    sig"83 ?? 02 75 ?? 8B ?? ?? ?? ?? ?? E8",
+                )
+                let root = found.offset(7)
+                let offsetTarget = retry process.readRelative32(found.offset(19))
+                let offset = retry process.read<u8>(offsetTarget.offset(2))
+                let first = retry process.read<u32>(root)
+                let second = retry process.read<u32>(first as address)
+                let third = retry process.read<u32>(second as address)
+                let base = retry process.read<u32>((third as address).offset(offset as i64))
+                ramBase = (base as address).offset(0xc000)
+            }
+
+            return SMSEmulator {
+                backend: 4,
+                base: ramBase,
+                auxiliary: core.address as i64,
+            }
+        }
+
+        await process.closed()
+    }
+
+    /// Reads a typed value from emulated Master System work RAM.
+    ///
+    /// Valid reads lie entirely within `0xc000..=0xdfff`. The expected
+    /// [`MemoryReadable`] type determines the little-endian byte layout.
+    ///
+    /// # Example
+    ///
+    /// Read an emulated value
+    ///
+    /// ```splitscript state SMS
+    /// let lives: u8 = sms.read(0xc010) else 0
+    /// ```
+    @intrinsic(SmsEmulatorRead)
+    fn read<T: MemoryReadable>(
+        /// The original Master System work RAM address.
         address: u32,
     ) -> T!;
 }

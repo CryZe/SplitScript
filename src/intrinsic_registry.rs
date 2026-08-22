@@ -81,6 +81,7 @@ pub(crate) enum RuntimeHelperId {
     GBATranslateAddress,
     Ps2TranslateAddress,
     Ps1TranslateAddress,
+    SmsTranslateAddress,
     RefreshSettings,
     SettingsEnabled,
     SettingsContains,
@@ -114,6 +115,11 @@ pub(crate) const fn provider_read_contract(intrinsic: IntrinsicId) -> Option<Pro
             translator: RuntimeHelperId::Ps1TranslateAddress,
             invalid_address: "invalid or unavailable PS1 memory address",
             read_failure: "PS1 memory read failed",
+        }),
+        IntrinsicId::SmsEmulatorRead => Some(ProviderReadContract {
+            translator: RuntimeHelperId::SmsTranslateAddress,
+            invalid_address: "invalid or unavailable SMS memory address",
+            read_failure: "SMS memory read failed",
         }),
         _ => None,
     }
@@ -368,7 +374,8 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::StringSlice => scratch(ScratchType::ResultValue, 1),
         IntrinsicId::GBAEmulatorRead
         | IntrinsicId::Ps2EmulatorRead
-        | IntrinsicId::Ps1EmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
+        | IntrinsicId::Ps1EmulatorRead
+        | IntrinsicId::SmsEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
         _ => None,
     }
 }
@@ -441,6 +448,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::GBAEmulatorRead => &[Helper(Runtime::GBATranslateAddress)],
         IntrinsicId::Ps2EmulatorRead => &[Helper(Runtime::Ps2TranslateAddress)],
         IntrinsicId::Ps1EmulatorRead => &[Helper(Runtime::Ps1TranslateAddress)],
+        IntrinsicId::SmsEmulatorRead => &[Helper(Runtime::SmsTranslateAddress)],
         IntrinsicId::StringContains
         | IntrinsicId::StringStartsWith
         | IntrinsicId::StringEndsWith
@@ -560,6 +568,7 @@ const UNITY_FIELD: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Uni
 const GBA_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GBAEmulator);
 const PS2_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS2Emulator);
 const PS1_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS1Emulator);
+const SMS_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SMSEmulator);
 const T: ContractTypeRef = ContractTypeRef::Parameter(0);
 const T_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
@@ -1735,6 +1744,14 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Ps1EmulatorRead,
             Method,
             signature(MEMORY_T, Some(PS1_EMULATOR), params![value(U32)], T_RESULT,),
+            PROCESS,
+            Everywhere,
+            Retryable
+        ),
+        IntrinsicId::SmsEmulatorRead => contract!(
+            SmsEmulatorRead,
+            Method,
+            signature(MEMORY_T, Some(SMS_EMULATOR), params![value(U32)], T_RESULT,),
             PROCESS,
             Everywhere,
             Retryable

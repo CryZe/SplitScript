@@ -135,6 +135,27 @@ state PS1 {
 Explicit `ps1.read<T>(address)` calls and state-field pointer paths use the same
 provider contract and little-endian `MemoryReadable` layouts.
 
+## Sega Master System and Game Gear emulator support
+
+`state SMS { ... }` introduces `sms: SMSEmulator` and maps original work-RAM
+addresses in `0xc000..=0xdfff`. The source-defined provider covers Fusion,
+BlastEm, Mednafen, and RetroArch cores for Genesis Plus GX, PicoDrive, SMS Plus,
+and Gearsystem.
+
+Fusion's moving native pointer is resolved on every read. Stable standalone and
+libretro mappings retain their discovered base, while libretro reads first
+validate that the selected core remains mapped.
+
+```splitscript
+state SMS {
+    lives: u8 at 0xc010;
+    inventory: u16 at 0xc100, 0x20, 0x4;
+}
+```
+
+Both `sms.read<T>(address)` and state-field pointer paths use the shared
+provider-read contract and little-endian `MemoryReadable` layouts.
+
 ## Compiler and tooling model
 
 The library surface is described by a backend-independent catalog. Each entry

@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-22: source-defined Master System emulator provider
+
+- Added `state SMS` and `sms: SMSEmulator` with source-defined discovery for
+  Fusion, BlastEm, Mednafen, and five supported RetroArch cores from ASR.
+- Refreshed Fusion's moving pointer at the read boundary, retained the
+  core-specific libretro discovery paths, and validated core lifetime before
+  using stable mappings.
+- Routed explicit reads and guest pointer paths through the shared provider-read
+  contract with exact 8 KiB work-RAM bounds.
+
 ## 2026-08-22: source-defined PlayStation emulator provider
 
 - Added `state PS1` and a typed `ps1: PS1Emulator` root with source-defined

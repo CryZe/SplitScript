@@ -3423,7 +3423,8 @@ fn compile_expr_unconverted(
             }
             IntrinsicId::GBAEmulatorRead
             | IntrinsicId::Ps2EmulatorRead
-            | IntrinsicId::Ps1EmulatorRead => {
+            | IntrinsicId::Ps1EmulatorRead
+            | IntrinsicId::SmsEmulatorRead => {
                 unreachable!("provider reads are lowered before ordinary intrinsics")
             }
             IntrinsicId::NumericMin | IntrinsicId::NumericMax => {

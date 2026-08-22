@@ -44,6 +44,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::GBAEmulatorDiscover,
         StdlibItemId::PS2EmulatorDiscover,
         StdlibItemId::PS1EmulatorDiscover,
+        StdlibItemId::SMSEmulatorDiscover,
     ] {
         assert!(matches!(
             library.item(item).implementation,
@@ -976,6 +977,67 @@ fn ps1_provider_covers_asr_backends_and_guest_pointer_paths() {
         .expect("the PS1 provider should expose catalog documentation");
     assert!(hover.markdown.contains("state PS1 { ... }"));
     assert!(hover.markdown.contains("ps1: PS1Emulator"));
+}
+
+#[test]
+fn sms_provider_covers_asr_backends_and_guest_pointer_paths() {
+    let library = StandardLibrary::new();
+    let sms = library
+        .state_provider_by_name("SMS")
+        .expect("the bundled SMS provider should be discoverable by source name");
+    assert_eq!(sms.id, StdlibStateProviderId::Sms);
+    assert_eq!(sms.value_name, "sms");
+    assert_eq!(sms.process_type, StdlibTypeId::SMSEmulator);
+    assert_eq!(sms.direct_read, StdlibItemId::SMSEmulatorRead);
+    assert_eq!(
+        sms.attachment,
+        splitscript::compiler::stdlib::StateProviderAttachment::Callable(
+            StdlibItemId::SMSEmulatorDiscover,
+        )
+    );
+    assert!(matches!(
+        library
+            .item(StdlibItemId::SMSEmulatorDiscover)
+            .implementation,
+        Implementation::LibraryBody { .. }
+    ));
+    assert!(matches!(
+        sms.processes,
+        splitscript::compiler::stdlib::StateProviderProcesses::Declared(processes)
+            if processes.contains(&"Fusion.exe")
+                && processes.contains(&"blastem.exe")
+                && processes.contains(&"retroarch.exe")
+    ));
+
+    let source = r#"
+        state SMS {
+            direct: u8 at 0xc000;
+            pointer: u16 at 0xc100, 0x20, -0x8;
+        }
+
+        whileAttached {
+            let value: u16 = sms.read(0xc200) else 0
+            print(value)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("SMS direct reads and guest pointer paths should type-check");
+    assert_eq!(
+        checked.semantics().state_provider(),
+        Some(StdlibStateProviderId::Sms)
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("SMS direct reads and guest pointer paths should emit valid Wasm");
+
+    let provider_source = "state SMS {}";
+    let mut database = splitscript::tooling::database::CompilerDatabase::new(provider_source);
+    let hover = database
+        .hover(provider_source.find("SMS").unwrap() + 1)
+        .unwrap()
+        .expect("the SMS provider should expose catalog documentation");
+    assert!(hover.markdown.contains("state SMS { ... }"));
+    assert!(hover.markdown.contains("sms: SMSEmulator"));
 }
 
 #[test]

@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-22: normalized provider reads and Sega Genesis support
+
+- Replaced the native-address-only emulator boundary with a normalized
+  guest-byte read contract shared by explicit methods and state pointer paths.
+  Existing providers use a generic translation adapter while retaining their
+  original address and failure semantics.
+- Added `state Genesis` and `genesis: GenesisEmulator` with source-defined
+  discovery for Fusion, Gens, BlastEm, Sega Classics, and the four Genesis
+  libretro cores supported by ASR.
+- Normalized word-swapped emulator storage, including unaligned reads crossing
+  16-bit boundaries, before recursively decoding big-endian primitives,
+  records, fixed arrays, floating-point values, and guest pointer paths.
+
 ## 2026-08-22: source-defined Wii emulator provider
 
 - Added `state Wii` and `wii: WiiEmulator` with source-defined Dolphin and

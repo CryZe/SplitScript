@@ -142,6 +142,34 @@ stateProvider SMS as sms {
     "mednafen.exe",
 }
 
+/// Attaches to a supported Sega Genesis emulator.
+///
+/// The provider discovers the console's 64 KiB work RAM and exposes original
+/// Genesis offsets through the read-only `genesis` value of type
+/// [`GenesisEmulator`]. It normalizes the word-swapped storage used by several
+/// emulators before decoding values in the console's big-endian byte order.
+///
+/// # Example
+///
+/// Read Genesis work RAM
+///
+/// ```splitscript
+/// state Genesis {
+///     score: u32 at 0x1200
+/// }
+/// ```
+@processType(GenesisEmulator)
+@attachment(GenesisEmulatorDiscover)
+@directRead(GenesisEmulatorRead)
+stateProvider Genesis as genesis {
+    "retroarch.exe",
+    "SEGAGameRoom.exe",
+    "SEGAGenesisClassics.exe",
+    "Fusion.exe",
+    "gens.exe",
+    "blastem.exe",
+}
+
 /// Attaches to a supported Nintendo GameCube emulator.
 ///
 /// The provider discovers the console's 24 MiB MEM1 mapping and exposes
@@ -6478,6 +6506,177 @@ struct SMSEmulator {
     @intrinsic(SmsEmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original Master System work RAM address.
+        address: u32,
+    ) -> T!;
+}
+
+/// Retains a discovered Sega Genesis work-RAM mapping.
+///
+/// Fusion and Sega Classics retain a native pointer whose target may move.
+/// Gens, BlastEm, and the supported libretro cores retain a stable base. The
+/// provider also records whether the emulator stores each 16-bit word with its
+/// bytes reversed so reads can expose one consistent guest-memory view.
+///
+/// # Example
+///
+/// Use the attached Genesis memory provider
+///
+/// ```splitscript state Genesis
+/// let emulator: GenesisEmulator = genesis
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable)
+struct GenesisEmulator {
+    /// Identifies a stable, moving-pointer, or libretro mapping.
+    private backend: u32,
+
+    /// Stores either the RAM base or a native pointer containing that base.
+    private base: address,
+
+    /// Stores the libretro core base used for lifetime validation.
+    private auxiliary: address,
+
+    /// Indicates that every native 16-bit word needs its bytes reversed.
+    private wordSwapped: bool,
+
+    /// Discovers the emulator's Genesis work-RAM mapping.
+    ///
+    /// A [`state`] declaration using [`Genesis`] invokes this automatically
+    /// after attaching to one of the provider's supported processes.
+    ///
+    /// # Example
+    ///
+    /// Discover a Genesis emulator mapping explicitly
+    ///
+    /// ```splitscript state Genesis
+    /// let emulator = await GenesisEmulator.discover()
+    /// ```
+    static fn discover() -> GenesisEmulator {
+        let processName = process.name()
+        let executable = await process.mainModule()
+
+        if processName == "Fusion.exe" {
+            let found = await executable.scan(sig"75 2F 6A 01")
+            let displacement = retry process.read<u8>(found.offset(1))
+            let pointerAddress = found.offset(4 + displacement as i64)
+            let basePointer = retry process.read<u32>(pointerAddress)
+            return GenesisEmulator {
+                backend: 2,
+                base: basePointer as address,
+                auxiliary: 0,
+                wordSwapped: false,
+            }
+        }
+
+        if processName == "SEGAGameRoom.exe"
+            || processName == "SEGAGenesisClassics.exe" {
+            let wrapper = process.loadedModule("GenesisEmuWrapper.dll")
+            let basePointer = match wrapper {
+                Some(module) => {
+                    let found = await module.scan(
+                        sig"C7 05 ?? ?? ?? ?? ?? ?? ?? ?? A3 ?? ?? ?? ?? A3",
+                    )
+                    retry process.read<u32>(found.offset(2))
+                },
+                None => {
+                    let found = await executable.scan(sig"89 2D ?? ?? ?? ?? 89 0D")
+                    retry process.read<u32>(found.offset(8))
+                },
+            }
+            return GenesisEmulator {
+                backend: 2,
+                base: basePointer as address,
+                auxiliary: 0,
+                wordSwapped: true,
+            }
+        }
+
+        if processName == "gens.exe" {
+            let found = await executable.scan(sig"72 ?? 81 ?? FF FF 00 00 66 8B")
+            let pointerAddress = found.offset(11)
+            let ramBase = retry process.read<u32>(pointerAddress)
+            let wordSwapped = retry process.read<u8>(pointerAddress.offset(4)) != 0x86
+            return GenesisEmulator {
+                backend: 1,
+                base: ramBase as address,
+                auxiliary: 0,
+                wordSwapped: wordSwapped,
+            }
+        }
+
+        if processName == "blastem.exe" {
+            let found = await process.scanMemory(
+                sig"72 0E 81 E1 FF FF 00 00 66 8B 89 ?? ?? ?? ?? C3",
+            )
+            let ramBase = retry process.read<u32>(found.offset(11))
+            return GenesisEmulator {
+                backend: 1,
+                base: ramBase as address,
+                auxiliary: 0,
+                wordSwapped: true,
+            }
+        }
+
+        if processName == "retroarch.exe" {
+            let pointerSize = retry executable.pointerSize()
+            let core = retry {
+                process.loadedModule("blastem_libretro.dll")
+                    else process.loadedModule("genesis_plus_gx_libretro.dll")
+                    else process.loadedModule("genesis_plus_gx_wide_libretro.dll")
+                    else process.loadedModule("picodrive_libretro.dll")
+                    else throw "a supported Genesis libretro core is not loaded"
+            }
+            let ramBase: address = 0
+
+            if core.name == "blastem_libretro.dll" {
+                let found = await process.scanMemory(
+                    sig"72 0E 81 E1 FF FF 00 00 66 8B 89 ?? ?? ?? ?? C3",
+                )
+                ramBase = (retry process.read<u32>(found.offset(11))) as address
+            } else if core.name == "genesis_plus_gx_libretro.dll"
+                || core.name == "genesis_plus_gx_wide_libretro.dll" {
+                if pointerSize == PointerSize.Bit64 {
+                    let found = await core.scan(sig"48 8D 0D ?? ?? ?? ?? 4C 8B 2D")
+                    ramBase = retry process.readRelative32(found.offset(3))
+                } else {
+                    let found = await core.scan(sig"A3 ?? ?? ?? ?? 29 F9")
+                    ramBase = (retry process.read<u32>(found.offset(1))) as address
+                }
+            } else if pointerSize == PointerSize.Bit64 {
+                let found = await core.scan(sig"48 8D 0D ?? ?? ?? ?? 41 B8")
+                ramBase = retry process.readRelative32(found.offset(3))
+            } else {
+                let found = await core.scan(sig"B9 ?? ?? ?? ?? C1 EF 10")
+                ramBase = (retry process.read<u32>(found.offset(1))) as address
+            }
+
+            return GenesisEmulator {
+                backend: 4,
+                base: ramBase,
+                auxiliary: core.address,
+                wordSwapped: true,
+            }
+        }
+
+        await process.closed()
+    }
+
+    /// Reads a typed value from emulated Genesis work RAM.
+    ///
+    /// Valid reads lie entirely within `0x0000..=0xffff`. Unaligned reads work
+    /// across 16-bit word boundaries, and primitive values, record fields, and
+    /// fixed-array elements use the Genesis's big-endian byte order.
+    ///
+    /// # Example
+    ///
+    /// Read an unaligned emulated value
+    ///
+    /// ```splitscript state Genesis
+    /// let score: u32 = genesis.read(0x1201) else 0
+    /// ```
+    @intrinsic(GenesisEmulatorRead)
+    fn read<T: MemoryReadable>(
+        /// The original Genesis work-RAM offset.
         address: u32,
     ) -> T!;
 }

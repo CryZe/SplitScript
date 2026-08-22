@@ -1043,6 +1043,89 @@ fn sms_provider_covers_asr_backends_and_guest_pointer_paths() {
 }
 
 #[test]
+fn genesis_provider_normalizes_word_swapped_unaligned_reads_and_guest_pointer_paths() {
+    let library = StandardLibrary::new();
+    let genesis = library
+        .state_provider_by_name("Genesis")
+        .expect("the bundled Genesis provider should be discoverable by source name");
+    assert_eq!(genesis.id, StdlibStateProviderId::Genesis);
+    assert_eq!(genesis.value_name, "genesis");
+    assert_eq!(genesis.process_type, StdlibTypeId::GenesisEmulator);
+    assert_eq!(genesis.direct_read, StdlibItemId::GenesisEmulatorRead);
+    assert_eq!(
+        genesis.attachment,
+        splitscript::compiler::stdlib::StateProviderAttachment::Callable(
+            StdlibItemId::GenesisEmulatorDiscover,
+        )
+    );
+    assert!(matches!(
+        library
+            .item(StdlibItemId::GenesisEmulatorDiscover)
+            .implementation,
+        Implementation::LibraryBody { .. }
+    ));
+    assert!(matches!(
+        genesis.processes,
+        splitscript::compiler::stdlib::StateProviderProcesses::Declared(processes)
+            if processes.contains(&"Fusion.exe")
+                && processes.contains(&"gens.exe")
+                && processes.contains(&"retroarch.exe")
+    ));
+
+    let source = r#"
+        record Snapshot {
+            score: u32,
+            velocity: i16,
+            samples: [u16; 2],
+        }
+
+        state Genesis {
+            snapshot: Snapshot at 0x1201;
+            pointer: u32 at 0x2000, 0x20, -0x8;
+        }
+
+        whileAttached {
+            let value: f32 = genesis.read(0x3001) else 0.0
+            if value > 0.0 { print("positive") }
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("Genesis direct reads and guest pointer paths should type-check");
+    assert_eq!(
+        checked.semantics().state_provider(),
+        Some(StdlibStateProviderId::Genesis)
+    );
+    let wasm = splitscript::codegen(&checked);
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("Genesis normalized reads and guest pointer paths should emit valid Wasm");
+    let operators = wasmparser::Parser::new(0)
+        .parse_all(&wasm)
+        .filter_map(Result::ok)
+        .filter_map(|payload| match payload {
+            wasmparser::Payload::CodeSectionEntry(body) => Some(body),
+            _ => None,
+        })
+        .flat_map(|body| body.get_operators_reader().unwrap().into_iter())
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    assert!(
+        operators
+            .iter()
+            .any(|operator| matches!(operator, wasmparser::Operator::I32Store8 { .. }))
+    );
+
+    let provider_source = "state Genesis {}";
+    let mut database = splitscript::tooling::database::CompilerDatabase::new(provider_source);
+    let hover = database
+        .hover(provider_source.find("Genesis").unwrap() + 1)
+        .unwrap()
+        .expect("the Genesis provider should expose catalog documentation");
+    assert!(hover.markdown.contains("state Genesis { ... }"));
+    assert!(hover.markdown.contains("genesis: GenesisEmulator"));
+}
+
+#[test]
 fn gcn_provider_decodes_big_endian_records_arrays_and_guest_pointer_paths() {
     let library = StandardLibrary::new();
     let gcn = library

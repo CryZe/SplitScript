@@ -22,6 +22,7 @@ mod equality;
 mod float_parse;
 mod gba;
 mod gcn;
+mod genesis;
 mod process;
 mod provider;
 mod ps1;
@@ -392,6 +393,10 @@ pub(super) fn build_sms_read_memory(inputs: &RuntimeHelperInputs<'_>) -> Functio
         inputs.abi,
         inputs.plan.function(RuntimeHelperId::SmsTranslateAddress),
     )
+}
+
+pub(super) fn build_genesis_read_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    genesis::compile_read_memory(inputs.abi, inputs.gc)
 }
 
 pub(super) fn build_string_from_memory(inputs: &RuntimeHelperInputs<'_>) -> Function {

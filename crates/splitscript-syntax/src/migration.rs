@@ -2197,6 +2197,16 @@ pub const CONCEPTS: &[MigrationConcept] = &[
         cookbook_anchor: None,
         spellings: &[],
     },
+    MigrationConcept {
+        id: MigrationConceptId::new("asr.emulator.genesis"),
+        name: "Genesis emulator attachment",
+        sources: &[SourceLanguage::Rust],
+        support: MigrationSupport::Direct,
+        summary: "Use `state Genesis`; the `genesis` root normalizes emulator storage and reads original work-RAM offsets.",
+        targets: &[MigrationTarget::StateProvider("Genesis")],
+        cookbook_anchor: None,
+        spellings: &[],
+    },
 ];
 
 pub fn concept(id: MigrationConceptId) -> Option<&'static MigrationConcept> {

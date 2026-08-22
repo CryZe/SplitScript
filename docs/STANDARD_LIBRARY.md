@@ -156,6 +156,34 @@ state SMS {
 Both `sms.read<T>(address)` and state-field pointer paths use the shared
 provider-read contract and little-endian `MemoryReadable` layouts.
 
+## Sega Genesis emulator support
+
+`state Genesis { ... }` introduces `genesis: GenesisEmulator` and maps the
+console's 64 KiB work RAM at offsets `0x0000..=0xffff`. The source-defined
+provider covers Fusion, Gens, BlastEm, Sega Game Room, Sega Genesis Classics,
+and RetroArch cores for BlastEm, Genesis Plus GX, Genesis Plus GX Wide, and
+PicoDrive.
+
+```splitscript
+record PlayerState {
+    score: u32,
+    velocity: i16,
+}
+
+state Genesis {
+    player: PlayerState at 0x1201;
+    inventory: u16 at 0x2000, 0x20, 0x4;
+}
+```
+
+Fusion and Sega Classics refresh their moving native pointers at the read
+boundary. Libretro reads validate that the selected core remains mapped. The
+provider normalizes the reversed bytes within each native 16-bit word used by
+Gens, BlastEm, Sega Classics, and the supported libretro cores, including
+unaligned reads that cross word boundaries. Explicit `genesis.read<T>(offset)`
+calls and state pointer paths then share the ordinary recursive big-endian
+decoder for primitives, records, fixed arrays, and guest pointers.
+
 ## Nintendo GameCube emulator support
 
 `state GCN { ... }` introduces `gcn: GCNEmulator` and maps original MEM1

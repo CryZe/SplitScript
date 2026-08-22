@@ -392,11 +392,6 @@ semantic-review evidence, not as a conformance corpus.
   or silently guess offsets.
 - [ ] Assess an Unreal provider only after representative `GWorld`, object, and
   name traversal ports establish the required surface.
-- [ ] Add a Genesis provider after extending the provider read boundary to
-  normalize emulator-dependent word-swapped raw bytes before shared endian
-  decoding. Preserve source-level `MemoryReadable` records and arrays rather
-  than exposing backend byte shuffling to autosplitter authors.
-
 ## P1 — expand migration guidance and automated fixes
 
 - [ ] Expand the structured foreign-spelling entries beyond the existing

@@ -140,6 +140,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(Ps1ReadMemory, (I64, Standard(StdlibTypeId::PS1Emulator), I32, I32, I32) -> (I64), deps [Ps1TranslateAddress], imports [ProcessRead], build_ps1_read_memory),
     helper!(SmsTranslateAddress, (I64, Standard(StdlibTypeId::SMSEmulator), I32, I32) -> (I64), deps [], imports [ProcessRead], build_sms_translate_address),
     helper!(SmsReadMemory, (I64, Standard(StdlibTypeId::SMSEmulator), I32, I32, I32) -> (I64), deps [SmsTranslateAddress], imports [ProcessRead], build_sms_read_memory),
+    helper!(GenesisReadMemory, (I64, Standard(StdlibTypeId::GenesisEmulator), I32, I32, I32) -> (I64), deps [], imports [ProcessRead], build_genesis_read_memory),
     helper!(RefreshSettings, () -> (), deps [], imports [], build_refresh_settings),
     helper!(SettingsEnabled, (I32, StringValue) -> (I32), deps [], imports [], build_settings_enabled),
     helper!(SettingsContains, (I32, StringValue) -> (I32), deps [], imports [], build_settings_contains),

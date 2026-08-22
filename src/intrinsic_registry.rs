@@ -90,6 +90,7 @@ pub(crate) enum RuntimeHelperId {
     Ps1ReadMemory,
     SmsTranslateAddress,
     SmsReadMemory,
+    GenesisReadMemory,
     RefreshSettings,
     SettingsEnabled,
     SettingsContains,
@@ -146,6 +147,12 @@ pub(crate) const fn provider_read_contract(intrinsic: IntrinsicId) -> Option<Pro
             byte_order: ProviderByteOrder::Little,
             invalid_address: "invalid or unavailable SMS memory address",
             read_failure: "SMS memory read failed",
+        }),
+        IntrinsicId::GenesisEmulatorRead => Some(ProviderReadContract {
+            reader: RuntimeHelperId::GenesisReadMemory,
+            byte_order: ProviderByteOrder::Big,
+            invalid_address: "invalid or unavailable Genesis memory address",
+            read_failure: "Genesis memory read failed",
         }),
         IntrinsicId::GCNEmulatorRead => Some(ProviderReadContract {
             reader: RuntimeHelperId::GCNReadMemory,
@@ -415,7 +422,8 @@ const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
         | IntrinsicId::WiiEmulatorRead
         | IntrinsicId::Ps2EmulatorRead
         | IntrinsicId::Ps1EmulatorRead
-        | IntrinsicId::SmsEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
+        | IntrinsicId::SmsEmulatorRead
+        | IntrinsicId::GenesisEmulatorRead => scratch(ScratchType::Core(CoreTypeId::Address), 1),
         _ => None,
     }
 }
@@ -491,6 +499,7 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         IntrinsicId::Ps2EmulatorRead => &[Helper(Runtime::Ps2ReadMemory)],
         IntrinsicId::Ps1EmulatorRead => &[Helper(Runtime::Ps1ReadMemory)],
         IntrinsicId::SmsEmulatorRead => &[Helper(Runtime::SmsReadMemory)],
+        IntrinsicId::GenesisEmulatorRead => &[Helper(Runtime::GenesisReadMemory)],
         IntrinsicId::StringContains
         | IntrinsicId::StringStartsWith
         | IntrinsicId::StringEndsWith
@@ -613,6 +622,7 @@ const WII_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::Wi
 const PS2_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS2Emulator);
 const PS1_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::PS1Emulator);
 const SMS_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::SMSEmulator);
+const GENESIS_EMULATOR: ContractTypeRef = ContractTypeRef::Standard(StdlibTypeId::GenesisEmulator);
 const T: ContractTypeRef = ContractTypeRef::Parameter(0);
 const T_ARRAY: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Array,
@@ -1812,6 +1822,19 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             SmsEmulatorRead,
             Method,
             signature(MEMORY_T, Some(SMS_EMULATOR), params![value(U32)], T_RESULT,),
+            PROCESS,
+            Everywhere,
+            Retryable
+        ),
+        IntrinsicId::GenesisEmulatorRead => contract!(
+            GenesisEmulatorRead,
+            Method,
+            signature(
+                MEMORY_T,
+                Some(GENESIS_EMULATOR),
+                params![value(U32)],
+                T_RESULT,
+            ),
             PROCESS,
             Everywhere,
             Retryable

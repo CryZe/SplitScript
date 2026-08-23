@@ -264,6 +264,10 @@ result types; inspect semantic type shapes; resolve calls, paths, and
 assignment targets; and obtain a cached reference index without navigating the
 checked program's internal products. References are deterministically ordered,
 distinguish reads from writes, and include value paths and method receivers.
+The same source-identity index powers document highlights, while inferred
+expression types navigate either to their source declaration or to the
+canonical compiler-owned documentation page for catalog types. Neither LSP
+feature reconstructs semantic meaning in the protocol adapter.
 The recovering AST can also be lowered into declaration HIR when strict parsing
 fails, preserving valid globals, types, functions, and actions for outline and
 name queries. For checked source, `analysis_at` selects the smallest typed

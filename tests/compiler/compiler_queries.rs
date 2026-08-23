@@ -549,7 +549,8 @@ fn compiler_database_exposes_types_resolutions_and_references() {
         compiler::stdlib::StdlibItemId,
         compiler::types::{BuiltinType, TypeKind},
         tooling::database::{
-            CompilerDatabase, DefinitionTarget, SourceDefinitionId, ValueReferenceKind,
+            CompilerDatabase, DefinitionTarget, DocumentHighlightKind, SourceDefinitionId,
+            ValueReferenceKind,
         },
     };
 
@@ -751,6 +752,24 @@ fn compiler_database_exposes_types_resolutions_and_references() {
         "10"
     );
     assert!(database.analysis_at(source.len() + 1).unwrap().is_none());
+
+    assert_eq!(
+        database
+            .document_highlights_at(min_position)
+            .unwrap()
+            .into_iter()
+            .map(|highlight| highlight.kind)
+            .collect::<Vec<_>>(),
+        [
+            DocumentHighlightKind::Text,
+            DocumentHighlightKind::Read,
+            DocumentHighlightKind::Write,
+        ]
+    );
+    assert!(matches!(
+        database.type_definition_at(literal_position).unwrap(),
+        Some(DefinitionTarget::Language(_))
+    ));
 
     let global_token = database.token_at(min_position).unwrap().unwrap();
     assert_eq!(

@@ -3933,3 +3933,14 @@ language catalog document the refinement rule.
 - Replaced the Crazy Machines alternate-layout audit workaround with direct
   `match process.name()` dispatch and documented exact process-identity
   selection for ASL ports.
+
+# 2026-08-23: semantic document and type navigation
+
+- Added compiler-owned document highlights for source declarations and every
+  resolved occurrence, preserving read and write classification from the
+  existing value-reference analysis.
+- Added inferred type-definition navigation to source records, enums, state and
+  settings declarations, and canonical documentation pages for built-in and
+  standard-library types.
+- Kept the LSP as a conversion layer over the shared database products and
+  advertised both native protocol capabilities to editor clients.

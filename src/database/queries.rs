@@ -17,8 +17,8 @@ use crate::{
 };
 
 use super::{
-    DefinitionIndex, DefinitionTarget, PositionAnalysis, QueryResult, ReferenceIndex, ResolvedPath,
-    SemanticQueryResult, SemanticSnapshot,
+    DefinitionIndex, DefinitionTarget, DocumentHighlight, DocumentHighlightKind, PositionAnalysis,
+    QueryResult, ReferenceIndex, ResolvedPath, SemanticQueryResult, SemanticSnapshot,
     cache::QueryCache,
     definition_for_resolution,
     position::{
@@ -639,6 +639,104 @@ impl CompilerDatabase {
             .filter(|reference| include_declaration || reference.span != definition.span)
             .map(|reference| reference.span)
             .collect())
+    }
+
+    pub fn document_highlights_at(
+        &mut self,
+        offset: usize,
+    ) -> SemanticQueryResult<Vec<DocumentHighlight>> {
+        let offset = self.caret_query_offset(offset)?;
+        let Some(DefinitionTarget::Source(definition)) = self.definition_at_query_offset(offset)?
+        else {
+            return Ok(Vec::new());
+        };
+        let definitions = self.definition_index()?;
+        let value_references = match definition.id {
+            super::SourceDefinitionId::Value(value) => {
+                Some(self.reference_index()?.references_to(value).to_vec())
+            }
+            _ => None,
+        };
+        Ok(definitions
+            .references_to(definition.id)
+            .map(|reference| {
+                let kind = if reference.span == definition.span {
+                    DocumentHighlightKind::Text
+                } else {
+                    value_references
+                        .as_deref()
+                        .and_then(|references| {
+                            references.iter().find(|value_reference| {
+                                value_reference.span.start <= reference.span.start
+                                    && reference.span.end <= value_reference.span.end
+                            })
+                        })
+                        .map_or(DocumentHighlightKind::Text, |reference| {
+                            match reference.kind {
+                                super::ValueReferenceKind::Read => DocumentHighlightKind::Read,
+                                super::ValueReferenceKind::Write => DocumentHighlightKind::Write,
+                            }
+                        })
+                };
+                DocumentHighlight {
+                    span: reference.span,
+                    kind,
+                }
+            })
+            .collect())
+    }
+
+    pub fn type_definition_at(
+        &mut self,
+        offset: usize,
+    ) -> SemanticQueryResult<Option<DefinitionTarget>> {
+        let offset = self.caret_query_offset(offset)?;
+        let Some(analysis) = self.analysis_at(offset)? else {
+            return Ok(None);
+        };
+        let target = match analysis.type_kind {
+            TypeKind::Builtin(core) => Some(DefinitionTarget::Language(
+                LanguageItemId::BuiltinType(core),
+            )),
+            TypeKind::Standard(standard) => Some(DefinitionTarget::StandardLibrarySymbol(
+                StdlibSymbolId::Type(standard),
+            )),
+            TypeKind::StateSnapshot => self
+                .definition_index()?
+                .get(super::SourceDefinitionId::State)
+                .cloned()
+                .map(DefinitionTarget::Source),
+            TypeKind::SettingsView => self
+                .definition_index()?
+                .get(super::SourceDefinitionId::Settings)
+                .cloned()
+                .map(DefinitionTarget::Source),
+            TypeKind::Record(record) => self
+                .definition_index()?
+                .get(super::SourceDefinitionId::Record(record))
+                .cloned()
+                .map(DefinitionTarget::Source),
+            TypeKind::Enum(enumeration) => self
+                .definition_index()?
+                .get(super::SourceDefinitionId::Enum(enumeration))
+                .cloned()
+                .map(DefinitionTarget::Source),
+            TypeKind::Array { .. } => Some(DefinitionTarget::Language(LanguageItemId::ArrayType)),
+            TypeKind::Option { .. } => Some(DefinitionTarget::Language(LanguageItemId::OptionType)),
+            TypeKind::Result { .. } => Some(DefinitionTarget::Language(LanguageItemId::ResultType)),
+            TypeKind::Async { .. } => Some(DefinitionTarget::Language(LanguageItemId::Async)),
+            TypeKind::Range { kind, .. } => Some(DefinitionTarget::StandardLibrarySymbol(
+                StdlibSymbolId::TypeConstructor(match kind {
+                    crate::ast::RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
+                    crate::ast::RangeKind::Inclusive => StdlibTypeConstructorId::InclusiveRange,
+                }),
+            )),
+            TypeKind::Set { .. } => Some(DefinitionTarget::StandardLibrarySymbol(
+                StdlibSymbolId::TypeConstructor(StdlibTypeConstructorId::Set),
+            )),
+            TypeKind::Error | TypeKind::GenericParameter { .. } => None,
+        };
+        Ok(target)
     }
 
     fn language_definition_at(

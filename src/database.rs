@@ -88,6 +88,19 @@ pub struct SyntaxReference {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentHighlightKind {
+    Text,
+    Read,
+    Write,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DocumentHighlight {
+    pub span: Span,
+    pub kind: DocumentHighlightKind,
+}
+
 impl DefinitionIndex {
     fn build(checked: &CheckedProgram) -> Self {
         Self::build_from_parts(

@@ -636,8 +636,11 @@ remaining work is product hardening and distribution.
   graph and navigation model, add machine-readable export and rustdoc-like
   standalone HTML as additional renderers. Publishing HTML must not introduce
   a second hierarchy, link scheme, example store, or documentation source.
-- [ ] Add document highlights for all occurrences of the symbol under the
-  cursor and type-definition navigation for inferred expressions. Add folding
+- [x] Add document highlights for every source-owned occurrence of the symbol
+  under the cursor, with read/write classification, and type-definition
+  navigation for inferred source and catalog types.
+- [ ] Extend document highlights to compiler-owned standard-library and
+  language symbols without resolving every token independently. Add folding
   ranges for declarations, blocks, multiline expressions, comments, and
   settings trees once their recovered-syntax boundaries are stable.
 - [ ] Add call hierarchy after the compiler exposes one reusable call graph,

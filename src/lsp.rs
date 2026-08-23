@@ -11,9 +11,9 @@ mod documents;
 mod protocol;
 
 use conversion::{
-    completion_list_json, diagnostic_json, document_symbol_json, hover_json, inlay_hint_json,
-    location_json, offset_at_position, position, selection_range_json, semantic_token_data,
-    signature_help_json,
+    completion_list_json, diagnostic_json, document_highlight_json, document_symbol_json,
+    hover_json, inlay_hint_json, location_json, offset_at_position, position, selection_range_json,
+    semantic_token_data, signature_help_json,
 };
 use documents::{Document, DocumentStore};
 use protocol::{
@@ -91,7 +91,9 @@ impl LanguageServer {
                                 "inlayHintProvider": true,
                                 "selectionRangeProvider": true,
                                 "definitionProvider": true,
+                                "typeDefinitionProvider": true,
                                 "referencesProvider": true,
+                                "documentHighlightProvider": true,
                                 "renameProvider": {
                                     "prepareProvider": true
                                 },
@@ -157,9 +159,15 @@ impl LanguageServer {
             "textDocument/definition" => {
                 id.map_or_else(Vec::new, |id| vec![self.definition_response(id, params)])
             }
+            "textDocument/typeDefinition" => id.map_or_else(Vec::new, |id| {
+                vec![self.type_definition_response(id, params)]
+            }),
             "textDocument/references" => {
                 id.map_or_else(Vec::new, |id| vec![self.references_response(id, params)])
             }
+            "textDocument/documentHighlight" => id.map_or_else(Vec::new, |id| {
+                vec![self.document_highlight_response(id, params)]
+            }),
             "textDocument/prepareRename" => id.map_or_else(Vec::new, |id| {
                 vec![self.prepare_rename_response(id, params)]
             }),
@@ -592,24 +600,30 @@ impl LanguageServer {
         let Ok(definition) = document.database.definition_at(offset) else {
             return response(id, Value::Null);
         };
-        let location = match definition {
-            Some(DefinitionTarget::Source(definition)) => {
-                location_json(&uri, &source, definition.span)
-            }
-            Some(DefinitionTarget::StandardLibrary(item)) => documentation_location_json(
-                &self
-                    .documentation
-                    .standard_library_symbol_uri(crate::stdlib::StdlibSymbolId::Item(item)),
-            ),
-            Some(DefinitionTarget::StandardLibrarySymbol(symbol)) => {
-                documentation_location_json(&self.documentation.standard_library_symbol_uri(symbol))
-            }
-            Some(DefinitionTarget::Language(item)) => {
-                documentation_location_json(&self.documentation.language_item_uri(item))
-            }
-            None => Value::Null,
-        };
+        let location = definition.map_or(Value::Null, |definition| {
+            definition_target_location_json(definition, &uri, &source, &self.documentation)
+        });
         response(id, location)
+    }
+
+    fn type_definition_response(&mut self, id: Value, params: Value) -> Value {
+        let params = match decode_request::<TextDocumentPositionParams>(&id, params) {
+            Ok(params) => params,
+            Err(response) => return response,
+        };
+        let uri = params.text_document.uri.clone();
+        let Some((source, offset, document)) = self.document_at_position(&params) else {
+            return error_response(id, -32602, "invalid type-definition document or position");
+        };
+        let Ok(definition) = document.database.type_definition_at(offset) else {
+            return response(id, Value::Null);
+        };
+        response(
+            id,
+            definition.map_or(Value::Null, |definition| {
+                definition_target_location_json(definition, &uri, &source, &self.documentation)
+            }),
+        )
     }
 
     fn references_response(&mut self, id: Value, params: Value) -> Value {
@@ -633,6 +647,28 @@ impl LanguageServer {
                 references
                     .into_iter()
                     .map(|span| location_json(&uri, &source, span))
+                    .collect(),
+            ),
+        )
+    }
+
+    fn document_highlight_response(&mut self, id: Value, params: Value) -> Value {
+        let params = match decode_request::<TextDocumentPositionParams>(&id, params) {
+            Ok(params) => params,
+            Err(response) => return response,
+        };
+        let Some((source, offset, document)) = self.document_at_position(&params) else {
+            return error_response(id, -32602, "invalid highlight document or position");
+        };
+        let Ok(highlights) = document.database.document_highlights_at(offset) else {
+            return response(id, json!([]));
+        };
+        response(
+            id,
+            Value::Array(
+                highlights
+                    .into_iter()
+                    .map(|highlight| document_highlight_json(&source, highlight))
                     .collect(),
             ),
         )
@@ -729,6 +765,26 @@ fn documentation_location_json(path: &str) -> Value {
             "end": { "line": 0, "character": 0 }
         }
     })
+}
+
+fn definition_target_location_json(
+    target: DefinitionTarget,
+    uri: &str,
+    source: &str,
+    documentation: &DocumentationReference,
+) -> Value {
+    match target {
+        DefinitionTarget::Source(definition) => location_json(uri, source, definition.span),
+        DefinitionTarget::StandardLibrary(item) => documentation_location_json(
+            &documentation.standard_library_symbol_uri(crate::stdlib::StdlibSymbolId::Item(item)),
+        ),
+        DefinitionTarget::StandardLibrarySymbol(symbol) => {
+            documentation_location_json(&documentation.standard_library_symbol_uri(symbol))
+        }
+        DefinitionTarget::Language(item) => {
+            documentation_location_json(&documentation.language_item_uri(item))
+        }
+    }
 }
 
 fn decode_request<T: serde::de::DeserializeOwned>(id: &Value, params: Value) -> Result<T, Value> {

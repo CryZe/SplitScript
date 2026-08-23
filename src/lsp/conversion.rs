@@ -10,7 +10,22 @@ use crate::{
     inlay_hints::InlayHint,
     insight::{HoverInfo, SignatureHelp},
     symbols::{DocumentSymbol, DocumentSymbolKind},
+    tooling::database::{DocumentHighlight, DocumentHighlightKind},
 };
+
+pub(super) fn document_highlight_json(source: &str, highlight: DocumentHighlight) -> Value {
+    json!({
+        "range": {
+            "start": position(source, highlight.span.start),
+            "end": position(source, highlight.span.end)
+        },
+        "kind": match highlight.kind {
+            DocumentHighlightKind::Text => 1,
+            DocumentHighlightKind::Read => 2,
+            DocumentHighlightKind::Write => 3,
+        }
+    })
+}
 
 pub(super) fn inlay_hint_json(source: &str, hint: &InlayHint) -> Value {
     json!({

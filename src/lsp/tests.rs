@@ -167,7 +167,15 @@ fn advertises_full_sync_diagnostics_formatting_and_semantic_tokens() {
         true
     );
     assert_eq!(
+        response[0]["result"]["capabilities"]["typeDefinitionProvider"],
+        true
+    );
+    assert_eq!(
         response[0]["result"]["capabilities"]["referencesProvider"],
+        true
+    );
+    assert_eq!(
+        response[0]["result"]["capabilities"]["documentHighlightProvider"],
         true
     );
     assert_eq!(
@@ -1504,6 +1512,109 @@ fn definition_and_references_use_source_identities_and_utf16_ranges() {
         }
     }));
     assert_eq!(references[0]["result"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn document_highlights_classify_reads_and_writes() {
+    let source = concat!(
+        "let total = 0\n",
+        "state \"game.exe\" {}\n",
+        "whileAttached {\n",
+        "    total += 1\n",
+        "    print(total)\n",
+        "}\n"
+    );
+    let uri = "file:///highlights.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+
+    let use_offset = source.rfind("total").unwrap();
+    let (line, character) = position_parts(source, use_offset);
+    let highlights = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 18,
+        "method": "textDocument/documentHighlight",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    let highlights = highlights[0]["result"].as_array().unwrap();
+    assert_eq!(highlights.len(), 3);
+    assert_eq!(highlights[0]["kind"], 1, "the declaration is text");
+    assert_eq!(highlights[1]["kind"], 3, "the assignment is a write");
+    assert_eq!(highlights[2]["kind"], 2, "the print argument is a read");
+}
+
+#[test]
+fn type_definition_navigates_inferred_source_and_catalog_types() {
+    let source = concat!(
+        "record Point { x: i32, }\n",
+        "state \"game.exe\" {}\n",
+        "whileAttached {\n",
+        "    let point = Point { x: 1 }\n",
+        "    let copy = point\n",
+        "    let count = 2\n",
+        "    print(copy.x + count)\n",
+        "}\n"
+    );
+    let uri = "file:///type-definition.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+
+    let point_use = source.rfind("= point").unwrap() + 2;
+    let (line, character) = position_parts(source, point_use);
+    let record = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 19,
+        "method": "textDocument/typeDefinition",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    let declaration = source.find("Point").unwrap();
+    assert_eq!(record[0]["result"]["uri"], uri);
+    assert_eq!(
+        record[0]["result"]["range"]["start"],
+        position(source, declaration)
+    );
+
+    let literal = source.find("= 2").unwrap() + 2;
+    let (line, character) = position_parts(source, literal);
+    let builtin = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 20,
+        "method": "textDocument/typeDefinition",
+        "params": {
+            "textDocument": { "uri": uri },
+            "position": { "line": line, "character": character }
+        }
+    }));
+    assert_eq!(
+        builtin[0]["result"]["uri"],
+        "splitscript-docs:/stdlib/types/i32/index.md"
+    );
 }
 
 #[test]

@@ -29,7 +29,9 @@ impl CallCandidate {
 /// Compiler-specific queries layered over the backend-neutral catalog graph.
 pub trait StandardLibrarySemanticExt {
     fn function_candidates(&self, path: &[String]) -> Vec<CallCandidate>;
+    fn function_candidates_including_private(&self, path: &[String]) -> Vec<CallCandidate>;
     fn method_candidates(&self, name: &str) -> Vec<CallCandidate>;
+    fn method_candidates_including_private(&self, name: &str) -> Vec<CallCandidate>;
     fn binary_operator_candidates(&self, operator: StandardBinaryOperator) -> Vec<CallCandidate>;
     fn unary_operator_candidates(&self, operator: StandardUnaryOperator) -> Vec<CallCandidate>;
     fn methods_for_type(&self, receiver: &TypeKind) -> Vec<&'static StdlibItem>;
@@ -49,8 +51,25 @@ impl StandardLibrarySemanticExt for StandardLibrary {
         Vec::new()
     }
 
+    fn function_candidates_including_private(&self, path: &[String]) -> Vec<CallCandidate> {
+        let qualified_name = path.join(".");
+        if let Some(item) = self.item_by_name_including_private(&qualified_name) {
+            return match item.kind {
+                ItemKind::Function => vec![CallCandidate { item }],
+                ItemKind::Method { .. } => Vec::new(),
+            };
+        }
+        Vec::new()
+    }
+
     fn method_candidates(&self, name: &str) -> Vec<CallCandidate> {
         self.method_items_named(name)
+            .map(|item| CallCandidate { item })
+            .collect()
+    }
+
+    fn method_candidates_including_private(&self, name: &str) -> Vec<CallCandidate> {
+        self.method_items_named_including_private(name)
             .map(|item| CallCandidate { item })
             .collect()
     }

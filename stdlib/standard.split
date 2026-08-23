@@ -4796,36 +4796,9 @@ struct UnitySceneManager {
     /// Pointer width used by the attached Unity player.
     private pointerSize: PointerSize,
 
-    /// Reads the currently active scene as an immutable snapshot.
-    ///
-    /// The snapshot owns the scene's address, build index, asset path, and
-    /// derived name. A missing scene or failed component read returns an error,
-    /// allowing a state field to retain its preceding accepted value.
-    ///
-    /// # Example
-    ///
-    /// Poll the active scene
-    ///
-    /// ```splitscript
-    /// # let sceneManager
-    /// # state "game.exe" { activeScene = sceneManager.activeScene(); }
-    /// # onAttach { sceneManager = await Unity.sceneManager() }
-    /// split {
-    ///     return old.activeScene.name != current.activeScene.name
-    /// }
-    /// ```
-    @mustUse("The active scene snapshot is otherwise discarded.")
-    fn activeScene() -> UnityScene! {
-        let activeSceneOffset: u64 = match self.pointerSize {
-            PointerSize.Bit32 => 0x28,
-            PointerSize.Bit64 => 0x48,
-        }
-        let sceneAddress: address = match self.pointerSize {
-            PointerSize.Bit32 => process.read<u32>(self.address.add(activeSceneOffset))? as address,
-            PointerSize.Bit64 => process.read<u64>(self.address.add(activeSceneOffset))? as address,
-        }
+    private fn snapshot(sceneAddress: address) -> UnityScene! {
         if sceneAddress == 0 {
-            throw "Unity has no active scene"
+            throw "Unity scene address is unavailable"
         }
 
         let buildIndexOffset: u64 = match self.pointerSize {
@@ -4862,6 +4835,37 @@ struct UnitySceneManager {
             path: path,
             name: name,
         })
+    }
+
+    /// Reads the currently active scene as an immutable snapshot.
+    ///
+    /// The snapshot owns the scene's address, build index, asset path, and
+    /// derived name. A missing scene or failed component read returns an error,
+    /// allowing a state field to retain its preceding accepted value.
+    ///
+    /// # Example
+    ///
+    /// Poll the active scene
+    ///
+    /// ```splitscript
+    /// # let sceneManager
+    /// # state "game.exe" { activeScene = sceneManager.activeScene(); }
+    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// split {
+    ///     return old.activeScene.name != current.activeScene.name
+    /// }
+    /// ```
+    @mustUse("The active scene snapshot is otherwise discarded.")
+    fn activeScene() -> UnityScene! {
+        let activeSceneOffset: u64 = match self.pointerSize {
+            PointerSize.Bit32 => 0x28,
+            PointerSize.Bit64 => 0x48,
+        }
+        let sceneAddress: address = match self.pointerSize {
+            PointerSize.Bit32 => process.read<u32>(self.address.add(activeSceneOffset))? as address,
+            PointerSize.Bit64 => process.read<u64>(self.address.add(activeSceneOffset))? as address,
+        }
+        return self.snapshot(sceneAddress)
     }
 
     /// Reads every currently loaded scene as one immutable array.
@@ -4914,43 +4918,7 @@ struct UnitySceneManager {
                 PointerSize.Bit32 => process.read<u32>(tableAddress.add(entryOffset))? as address,
                 PointerSize.Bit64 => process.read<u64>(tableAddress.add(entryOffset))? as address,
             }
-            if sceneAddress == 0 {
-                throw "Unity loaded-scene table contains an empty entry"
-            }
-
-            let buildIndexOffset: u64 = match self.pointerSize {
-                PointerSize.Bit32 => 0x70,
-                PointerSize.Bit64 => 0x98,
-            }
-            let assetPathOffset: u64 = match self.pointerSize {
-                PointerSize.Bit32 => 0x0c,
-                PointerSize.Bit64 => 0x10,
-            }
-            let pathAddress: address = match self.pointerSize {
-                PointerSize.Bit32 => process.read<u32>(sceneAddress.add(assetPathOffset))? as address,
-                PointerSize.Bit64 => process.read<u64>(sceneAddress.add(assetPathOffset))? as address,
-            }
-            if pathAddress == 0 {
-                throw "Unity loaded scene has no asset path"
-            }
-
-            let path = process.readUtf8(pathAddress, 128)?
-            let nameStart = match path.lastIndexOf("/") {
-                Some(separator) => separator + 1,
-                None => 0,
-            }
-            let nameEnd = if path.endsWith(".unity") {
-                path.byteLength() - 6
-            } else {
-                path.byteLength()
-            }
-            let name = path.slice(nameStart, nameEnd)?
-            scenes.push(UnityScene {
-                address: sceneAddress,
-                index: process.read<i32>(sceneAddress.add(buildIndexOffset))?,
-                path: path,
-                name: name,
-            })
+            scenes.push(self.snapshot(sceneAddress)?)
         }
         return Ok(scenes)
     }

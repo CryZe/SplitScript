@@ -395,7 +395,7 @@ fn check_function_body(checker: &mut Checker, function: &crate::ast::FunctionDec
             };
             let callable = checker
                 .standard_library
-                .items()
+                .all_items()
                 .iter()
                 .find_map(|item| match item.implementation {
                     crate::stdlib::Implementation::LibraryBody { function_name, .. }

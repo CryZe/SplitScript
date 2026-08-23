@@ -251,7 +251,6 @@ fn is_reserved_source_identifier(standard_library: StandardLibrary, name: &str) 
         || standard_library.type_by_name(name).is_some()
         || standard_library
             .items()
-            .iter()
             .any(|item| item.owner == StdlibOwner::Root && item.name == name);
     language_reserved || standard_library_reserved
 }

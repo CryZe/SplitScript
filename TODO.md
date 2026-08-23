@@ -343,13 +343,6 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Standard-library and type-system boundaries
 
-- [ ] Let trusted standard-library source declare private helper functions and
-  methods that participate in ordinary type/effect checking but are omitted
-  from the public catalog, completion, hover, and generated documentation. The
-  Unity scene implementation currently repeats scene-address decoding in
-  `activeScene()` and `loadedScenes()` because standard-library functions
-  cannot yet be private; consolidate that code once the visibility model is
-  compiler-owned rather than exposing an implementation helper as public API.
 - [ ] Design the user-facing trait/type-class model around the existing
   source-defined capability graph. Begin with memory reading, `Display`,
   equality, numeric operations, and hashing; decide separately whether user

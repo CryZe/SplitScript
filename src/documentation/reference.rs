@@ -290,30 +290,25 @@ impl DocumentationReference {
                 signature: Some(format!("state {}", provider.name)),
             }
         }));
-        entries.extend(
-            self.library
-                .items()
-                .iter()
-                .map(|item| DocumentationIndexEntry {
-                    uri: symbol_uri(StdlibSymbolId::Item(item.id), &self.library),
-                    title: render_item_name(item, &self.library),
-                    kind: if is_operator(item) {
-                        "operator"
-                    } else {
-                        match item.kind {
-                            ItemKind::Function => "function",
-                            ItemKind::Method { .. } => "method",
-                        }
-                    },
-                    summary: compact_prose(item.documentation.summary),
-                    raw_summary: item.documentation.summary,
-                    search_text: format!(
-                        "{} {}",
-                        item.documentation.summary, item.documentation.details
-                    ),
-                    signature: Some(self.library.render_signature(item.id)),
-                }),
-        );
+        entries.extend(self.library.items().map(|item| DocumentationIndexEntry {
+            uri: symbol_uri(StdlibSymbolId::Item(item.id), &self.library),
+            title: render_item_name(item, &self.library),
+            kind: if is_operator(item) {
+                "operator"
+            } else {
+                match item.kind {
+                    ItemKind::Function => "function",
+                    ItemKind::Method { .. } => "method",
+                }
+            },
+            summary: compact_prose(item.documentation.summary),
+            raw_summary: item.documentation.summary,
+            search_text: format!(
+                "{} {}",
+                item.documentation.summary, item.documentation.details
+            ),
+            signature: Some(self.library.render_signature(item.id)),
+        }));
 
         entries.sort_by(|left, right| {
             left.title
@@ -680,7 +675,6 @@ impl DocumentationReference {
             .or_else(|| {
                 self.library
                     .items()
-                    .iter()
                     .find(|value| symbol_uri(StdlibSymbolId::Item(value.id), &self.library) == uri)
                     .map(|value| {
                         let title = render_item_name(value, &self.library);
@@ -732,7 +726,6 @@ impl DocumentationReference {
     fn owned_operators(&self, owner: StdlibOwner) -> Vec<StdlibSymbolId> {
         self.library
             .items()
-            .iter()
             .filter(|item| item.owner == owner && is_operator(item))
             .map(|item| StdlibSymbolId::Item(item.id))
             .collect()
@@ -741,7 +734,6 @@ impl DocumentationReference {
     fn owned_non_operators(&self, owner: StdlibOwner) -> Vec<StdlibSymbolId> {
         self.library
             .items()
-            .iter()
             .filter(|item| item.owner == owner && !is_operator(item))
             .map(|item| StdlibSymbolId::Item(item.id))
             .collect()
@@ -755,10 +747,9 @@ impl DocumentationReference {
     ) -> Vec<DocumentationMember> {
         self.library
             .items()
-            .iter()
             .filter(|item| item.owner == direct_owner && is_operator(item) == operators)
             .map(|item| DocumentationMember::Symbol(StdlibSymbolId::Item(item.id)))
-            .chain(self.library.items().iter().filter_map(|item| {
+            .chain(self.library.items().filter_map(|item| {
                 let StdlibOwner::Capability(capability) = item.owner else {
                     return None;
                 };

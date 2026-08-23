@@ -19,7 +19,7 @@ pub use ids::{
 };
 pub use schema::{
     Availability, CancellationKind, Deprecation, Effect, EffectSet, Implementation, ItemKind,
-    OperationMetadata, OperationSemantics, Parameter, ParameterRule, Signature,
+    ItemVisibility, OperationMetadata, OperationSemantics, Parameter, ParameterRule, Signature,
     StandardBinaryOperator, StandardUnaryOperator, StdlibItem, SuspensionKind, TypeParameter,
     TypeRef,
 };
@@ -478,7 +478,13 @@ impl StandardLibrary {
             .flat_map(|variants| variants.iter().copied())
     }
 
-    pub fn items(&self) -> &'static [StdlibItem] {
+    pub fn items(&self) -> impl Iterator<Item = &'static StdlibItem> {
+        ITEMS
+            .iter()
+            .filter(|item| item.visibility == ItemVisibility::Public)
+    }
+
+    pub(crate) fn all_items(&self) -> &'static [StdlibItem] {
         ITEMS
     }
 
@@ -556,6 +562,24 @@ impl StandardLibrary {
 
     pub fn item_by_name(&self, qualified_name: &str) -> Option<&'static StdlibItem> {
         self.graph.items_by_name.get(qualified_name).copied()
+    }
+
+    pub(crate) fn item_by_name_including_private(
+        &self,
+        qualified_name: &str,
+    ) -> Option<&'static StdlibItem> {
+        self.graph.all_items_by_name.get(qualified_name).copied()
+    }
+
+    pub(crate) fn method_items_named_including_private(
+        &self,
+        name: &str,
+    ) -> impl Iterator<Item = &'static StdlibItem> + '_ {
+        self.graph
+            .all_methods_by_name
+            .get(name)
+            .into_iter()
+            .flat_map(|items| items.iter().copied())
     }
 
     pub fn children_of(&self, owner: StdlibOwner) -> impl Iterator<Item = StdlibSymbolId> + '_ {
@@ -1140,19 +1164,20 @@ impl StandardLibrary {
                 item.qualified_name,
                 &mut errors,
             );
-            if item.documentation.summary.trim().is_empty() {
+            let public = item.visibility == ItemVisibility::Public;
+            if public && item.documentation.summary.trim().is_empty() {
                 errors.push(format!(
                     "`{}` has no documentation summary",
                     item.qualified_name
                 ));
             }
-            if item.documentation.details.trim().is_empty() {
+            if public && item.documentation.details.trim().is_empty() {
                 errors.push(format!(
                     "`{}` has no documentation details",
                     item.qualified_name
                 ));
             }
-            if item.documentation.examples.is_empty() {
+            if public && item.documentation.examples.is_empty() {
                 errors.push(format!("`{}` has no examples", item.qualified_name));
             }
             let example_call = match item.kind {
@@ -1256,6 +1281,9 @@ impl StandardLibrary {
                 ));
             }
             for parameter in item.signature.parameters {
+                if !public {
+                    continue;
+                }
                 if parameter.documentation.trim().is_empty() {
                     errors.push(format!(
                         "parameter `{}.{}` has no documentation",

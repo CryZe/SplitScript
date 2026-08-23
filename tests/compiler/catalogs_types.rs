@@ -42,6 +42,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::AddressOffset,
         StdlibItemId::UnityIl2Cpp,
         StdlibItemId::UnitySceneManager,
+        StdlibItemId::UnitySceneManagerSnapshot,
         StdlibItemId::UnitySceneManagerActiveScene,
         StdlibItemId::UnitySceneManagerLoadedScenes,
         StdlibItemId::GBAEmulatorDiscover,
@@ -117,6 +118,50 @@ fn unity_scene_manager_exposes_immutable_state_snapshots() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::compile(source).unwrap())
         .expect("source-defined Unity scene snapshots should produce valid Wasm GC");
+}
+
+#[test]
+fn private_standard_library_helpers_are_checked_but_not_user_visible() {
+    let library = StandardLibrary::new();
+    let helper = library.item(StdlibItemId::UnitySceneManagerSnapshot);
+    assert_eq!(helper.visibility, ItemVisibility::LibraryPrivate);
+    assert!(matches!(
+        helper.implementation,
+        Implementation::LibraryBody { .. }
+    ));
+    assert!(
+        library
+            .items()
+            .all(|item| item.id != StdlibItemId::UnitySceneManagerSnapshot)
+    );
+    assert!(library.item_by_name("UnitySceneManager.snapshot").is_none());
+    assert!(
+        library
+            .methods_for_type(&TypeKind::Standard(StdlibTypeId::UnitySceneManager))
+            .into_iter()
+            .all(|item| item.id != StdlibItemId::UnitySceneManagerSnapshot)
+    );
+
+    let diagnostics = splitscript::compile(
+        r#"
+            let sceneManager
+            state "game.exe" {}
+            onAttach {
+                sceneManager = await Unity.sceneManager()
+                let scene = sceneManager.snapshot(0x1000)
+            }
+        "#,
+    )
+    .expect_err("user code must not call private standard-library helpers");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("type `UnitySceneManager` has no method `snapshot`")
+                && !diagnostic.message.contains("private")
+        }),
+        "{diagnostics:#?}"
+    );
 }
 
 #[test]

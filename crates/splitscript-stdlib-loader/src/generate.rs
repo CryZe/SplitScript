@@ -515,9 +515,16 @@ impl<'a> CatalogGenerator<'a> {
         let must_use = optional_attribute_name(&public.attributes, "mustUse")
             .map(|reason| format!("Some({})", quote(reason)))
             .unwrap_or_else(|| "None".to_owned());
-        let example = example_expression(&public.documentation.examples[0]);
+        let examples = public
+            .documentation
+            .examples
+            .first()
+            .map(example_expression)
+            .map(|example| format!("&[{example}]"))
+            .unwrap_or_else(|| "&[]".to_owned());
         output.push_str(&format!(
-            "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: None, unary_operator: None, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[{example}], related: &[] }}, implementation: Implementation::LibraryOverloads {{ dispatch_parameter: 0, cases: &[{case_values}] }} }},\n",
+            "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, visibility: ItemVisibility::{}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: None, unary_operator: None, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: {examples}, related: &[] }}, implementation: Implementation::LibraryOverloads {{ dispatch_parameter: 0, cases: &[{case_values}] }} }},\n",
+            if public.private { "LibraryPrivate" } else { "Public" },
             quote(&public.name),
             quote(&qualified_name),
             self.type_parameters(&public_parameters, owner),
@@ -597,10 +604,16 @@ impl<'a> CatalogGenerator<'a> {
                 _ => unreachable!("validated operator binding"),
             })
             .unwrap_or("None");
-        let example = &function.documentation.examples[0];
-        let example = example_expression(example);
+        let examples = function
+            .documentation
+            .examples
+            .first()
+            .map(example_expression)
+            .map(|example| format!("&[{example}]"))
+            .unwrap_or_else(|| "&[]".to_owned());
         output.push_str(&format!(
-                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, unary_operator: {unary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: &[{example}], related: &[] }}, implementation: {implementation} }},\n",
+                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, visibility: ItemVisibility::{}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, unary_operator: {unary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: {examples}, related: &[] }}, implementation: {implementation} }},\n",
+                if function.private { "LibraryPrivate" } else { "Public" },
                 quote(&function.name),
                 quote(&qualified_name),
                 self.type_parameters(type_parameters, owner),

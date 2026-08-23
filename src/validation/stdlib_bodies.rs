@@ -26,7 +26,7 @@ pub(super) fn validate_signatures(
     semantics: &SemanticModel,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    for item in library.items() {
+    for item in library.all_items() {
         let bodies = match item.implementation {
             Implementation::Intrinsic(_) => continue,
             Implementation::LibraryBody { .. } => hir

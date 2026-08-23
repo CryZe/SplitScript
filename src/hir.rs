@@ -579,7 +579,7 @@ impl TypedProgram {
         }
 
         let library_functions = standard_library
-            .items()
+            .all_items()
             .iter()
             .filter_map(|item| {
                 let function_names = match item.implementation {

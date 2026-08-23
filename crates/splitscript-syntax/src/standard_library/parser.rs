@@ -177,12 +177,10 @@ impl Parser<'_> {
             let private = self.eat_ident("private");
             let explicitly_static = self.eat_ident("static");
             if self.eat_ident("fn") {
-                if private {
-                    return Err(self.error("standard-library functions cannot be `private`"));
-                }
                 functions.push(self.function_declaration(
                     documentation,
                     attributes,
+                    private,
                     functions_are_static || explicitly_static,
                 )?);
             } else if fields_allowed {
@@ -332,12 +330,10 @@ impl Parser<'_> {
             let private = self.eat_ident("private");
             let is_static = self.eat_ident("static");
             if self.eat_ident("fn") {
-                if private {
-                    return Err(self.error("standard-library functions cannot be `private`"));
-                }
                 functions.push(self.function_declaration(
                     member_documentation,
                     member_attributes,
+                    private,
                     is_static,
                 )?);
             } else {
@@ -384,6 +380,7 @@ impl Parser<'_> {
         &mut self,
         documentation: Documentation,
         attributes: Vec<Attribute>,
+        private: bool,
         is_static: bool,
     ) -> Result<FunctionDeclaration, Error> {
         let name = self.ident("expected a function name")?;
@@ -423,6 +420,7 @@ impl Parser<'_> {
         };
         Ok(FunctionDeclaration {
             name,
+            private,
             type_parameters,
             where_constraints,
             parameters,

@@ -287,6 +287,14 @@ impl<'a> Validator<'a> {
                 .iter()
                 .filter(|function| function.name == **name)
                 .collect::<Vec<_>>();
+            if cases
+                .iter()
+                .any(|function| function.private != cases[0].private)
+            {
+                self.error(format!(
+                    "`{owner}.{name}` implementation cases must have the same visibility"
+                ));
+            }
             self.validate_capability_overload(owner, name, &cases, inherited);
         }
         let mut operator_bindings = HashSet::new();
@@ -297,8 +305,19 @@ impl<'a> Validator<'a> {
                 format!("{owner}.{}", function.name)
             };
             let first_declaration = names.insert(function.name.as_str());
-            if first_declaration || !overload_names.contains(function.name.as_str()) {
-                self.validate_documentation(&qualified, &function.documentation, true, true);
+            if function.private {
+                if function.documentation != Documentation::default() {
+                    self.error(format!(
+                        "private standard-library helper `{qualified}` must use ordinary comments instead of public documentation comments"
+                    ));
+                }
+            } else if first_declaration || !overload_names.contains(function.name.as_str()) {
+                self.validate_documentation(
+                    &qualified,
+                    &function.documentation,
+                    true,
+                    !function.private,
+                );
             } else if function.documentation != Documentation::default() {
                 self.error(format!(
                     "`{qualified}` implementation cases must document the public operation only once"
@@ -311,6 +330,16 @@ impl<'a> Validator<'a> {
             );
             self.validate_must_use(&qualified, &function.attributes);
             self.validate_operator(owner, &qualified, function);
+            if function.private
+                && function
+                    .attributes
+                    .iter()
+                    .any(|attribute| matches!(attribute.name.as_str(), "display" | "operator"))
+            {
+                self.error(format!(
+                    "private standard-library helper `{qualified}` cannot define a public display or operator binding"
+                ));
+            }
             if let Some([AttributeArgument::Name(operator)]) = function
                 .attributes
                 .iter()
@@ -417,12 +446,18 @@ impl<'a> Validator<'a> {
                         parameter.name
                     ));
                 }
-                self.validate_documentation(
-                    &parameter_owner,
-                    &parameter.documentation,
-                    false,
-                    false,
-                );
+                if !function.private {
+                    self.validate_documentation(
+                        &parameter_owner,
+                        &parameter.documentation,
+                        false,
+                        false,
+                    );
+                } else if parameter.documentation != Documentation::default() {
+                    self.error(format!(
+                        "private standard-library parameter `{parameter_owner}` must use ordinary comments instead of public documentation comments"
+                    ));
+                }
                 self.validate_attributes(&parameter_owner, &parameter.attributes, &["literal"]);
                 if let Some(rule) =
                     self.optional_name_attribute(&parameter_owner, &parameter.attributes, "literal")

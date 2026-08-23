@@ -66,7 +66,7 @@ pub(crate) fn augment_program_with_library_bodies(
 ) -> Result<Option<Program>, Vec<Diagnostic>> {
     let mut combined = String::new();
     let mut body_ranges = Vec::new();
-    for item in library.items() {
+    for item in library.all_items() {
         let bodies = match item.implementation {
             Implementation::Intrinsic(_) => Vec::new(),
             Implementation::LibraryBody {

@@ -485,7 +485,11 @@ impl Checker {
         }
 
         let standard_library = self.standard_library.clone();
-        let mut function_candidates = standard_library.function_candidates(callee);
+        let mut function_candidates = if self.is_library_function() {
+            standard_library.function_candidates_including_private(callee)
+        } else {
+            standard_library.function_candidates(callee)
+        };
         if function_candidates.len() > 1 {
             self.ambiguous_catalog_call(callee, &function_candidates, span);
             return None;
@@ -580,8 +584,12 @@ impl Checker {
                 .members
                 .expect("method receiver types must be known while resolving a call");
             let receiver_type = self.shallow_type(receiver.ty);
-            let mut candidates = standard_library
-                .method_candidates(method)
+            let method_candidates = if self.is_library_function() {
+                standard_library.method_candidates_including_private(method)
+            } else {
+                standard_library.method_candidates(method)
+            };
+            let mut candidates = method_candidates
                 .into_iter()
                 .filter(|candidate| self.catalog_candidate_may_apply(candidate, receiver_type))
                 .collect::<Vec<_>>();
@@ -720,8 +728,12 @@ impl Checker {
                 members: receiver_members,
             },
         };
-        let mut candidates = standard_library
-            .method_candidates(method)
+        let method_candidates = if self.is_library_function() {
+            standard_library.method_candidates_including_private(method)
+        } else {
+            standard_library.method_candidates(method)
+        };
+        let mut candidates = method_candidates
             .into_iter()
             .filter(|candidate| self.catalog_candidate_may_apply(candidate, receiver_type))
             .collect::<Vec<_>>();
@@ -869,7 +881,6 @@ impl Checker {
         let standard_library = self.standard_library.clone();
         let mut candidates = standard_library
             .items()
-            .iter()
             .filter_map(|item| {
                 let path = standard_library.item_path(item)?;
                 (path.len() == callee.len()

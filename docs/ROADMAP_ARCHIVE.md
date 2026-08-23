@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-23: private source-defined standard-library helpers
+
+- Added `private fn` declarations to trusted standard-library source. Private
+  callables retain stable compiler identities and participate in ordinary
+  parsing, inference, effect analysis, specialization, and code generation,
+  while public name/member lookup, completion, hover, and generated
+  documentation omit them.
+- Consolidated active and loaded Unity scene decoding behind one private
+  `UnitySceneManager.snapshot` method without exposing an implementation helper
+  to scripts.
+
 ## 2026-08-23: source-defined Unity scene snapshots
 
 - Added cooperative `Unity.sceneManager()` discovery for ASR's Windows,

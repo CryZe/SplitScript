@@ -211,7 +211,6 @@ fn target_uri(label: &str, library: &StandardLibrary) -> Option<String> {
         .chain(
             library
                 .items()
-                .iter()
                 .filter(|item| item.name == label)
                 .map(|item| StdlibSymbolId::Item(item.id)),
         );

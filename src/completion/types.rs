@@ -70,7 +70,6 @@ pub(super) fn complete_explicit_type_argument(
     let name = &source[name_start..name_end];
     let is_generic_call = library
         .items()
-        .iter()
         .any(|item| item.name == name && item.signature.explicit_type_parameters != 0);
     if !is_generic_call || source[open + 1..replacement.start].contains(['>', '(', ')', '{', '}']) {
         return None;

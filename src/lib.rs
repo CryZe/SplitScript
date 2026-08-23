@@ -223,7 +223,7 @@ fn derive_standard_library_operation_metadata(
         "state \"__splitscript_standard_library__\" {}",
     )?))?;
     let mut operations = std::collections::HashMap::new();
-    for item in standard_library.items() {
+    for item in standard_library.all_items() {
         let mut functions = checked.hir.library_functions(item.id);
         let Some(first) = functions.next() else {
             continue;

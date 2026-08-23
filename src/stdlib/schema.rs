@@ -35,6 +35,15 @@ pub enum Implementation {
     },
 }
 
+/// Whether a callable belongs to the authored language surface or is an
+/// implementation detail available only while checking trusted standard-
+/// library source bodies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemVisibility {
+    Public,
+    LibraryPrivate,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LibraryOverloadCase {
     pub capability: StdlibCapabilityId,
@@ -356,6 +365,7 @@ impl StandardUnaryOperator {
 pub struct StdlibItem {
     pub id: StdlibItemId,
     pub owner: StdlibOwner,
+    pub visibility: ItemVisibility,
     pub name: &'static str,
     pub qualified_name: &'static str,
     pub kind: ItemKind,

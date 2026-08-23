@@ -99,6 +99,9 @@ pub struct FieldDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionDeclaration {
     pub name: String,
+    /// Whether this callable is available only to trusted standard-library
+    /// source bodies.
+    pub private: bool,
     pub type_parameters: Vec<TypeParameter>,
     /// Additional constraints on type parameters inherited from the callable
     /// owner or declared directly by this function.

@@ -85,7 +85,7 @@ pub(crate) fn validate(
     // and verifies that their complete typed call graph still agrees with the
     // cached, user-independent result.
     if standard_library.source_body_operations_are_initialized() {
-        for item in standard_library.items() {
+        for item in standard_library.all_items() {
             if !matches!(
                 item.implementation,
                 Implementation::LibraryBody { .. } | Implementation::LibraryOverloads { .. }
@@ -519,7 +519,7 @@ fn validate_async_function_results(
     effects: &OperationAnalysis,
 ) -> Vec<Diagnostic> {
     let library_functions = standard_library
-        .items()
+        .all_items()
         .iter()
         .flat_map(|item| hir.library_functions(item.id))
         .collect::<HashSet<_>>();

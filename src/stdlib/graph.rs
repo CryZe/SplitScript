@@ -6,11 +6,12 @@ use std::{
 };
 
 use super::{
-    CoreType, CoreTypeId, FieldVisibility, ItemKind, OperationMetadata, StandardBinaryOperator,
-    StandardUnaryOperator, StdlibCapability, StdlibCapabilityId, StdlibField, StdlibFieldId,
-    StdlibItem, StdlibItemId, StdlibNamespace, StdlibNamespaceId, StdlibOwner, StdlibStateProvider,
-    StdlibStateProviderId, StdlibSymbolId, StdlibType, StdlibTypeConstructor,
-    StdlibTypeConstructorId, StdlibTypeId, StdlibVariant, StdlibVariantId, TypeRef,
+    CoreType, CoreTypeId, FieldVisibility, ItemKind, ItemVisibility, OperationMetadata,
+    StandardBinaryOperator, StandardUnaryOperator, StdlibCapability, StdlibCapabilityId,
+    StdlibField, StdlibFieldId, StdlibItem, StdlibItemId, StdlibNamespace, StdlibNamespaceId,
+    StdlibOwner, StdlibStateProvider, StdlibStateProviderId, StdlibSymbolId, StdlibType,
+    StdlibTypeConstructor, StdlibTypeConstructorId, StdlibTypeId, StdlibVariant, StdlibVariantId,
+    TypeRef,
     catalog::{
         CAPABILITIES, FIELDS, ITEMS, NAMESPACES, STATE_PROVIDERS, TYPE_CONSTRUCTORS, TYPES,
         VARIANTS,
@@ -40,8 +41,10 @@ pub(super) struct StandardLibraryGraph {
     pub(super) variants_by_owner: HashMap<StdlibTypeId, Vec<&'static StdlibVariant>>,
     pub(super) items: HashMap<StdlibItemId, &'static StdlibItem>,
     pub(super) items_by_name: HashMap<&'static str, &'static StdlibItem>,
+    pub(super) all_items_by_name: HashMap<&'static str, &'static StdlibItem>,
     pub(super) methods: Vec<&'static StdlibItem>,
     pub(super) methods_by_name: HashMap<&'static str, Vec<&'static StdlibItem>>,
+    pub(super) all_methods_by_name: HashMap<&'static str, Vec<&'static StdlibItem>>,
     pub(super) binary_operators: HashMap<StandardBinaryOperator, Vec<&'static StdlibItem>>,
     pub(super) unary_operators: HashMap<StandardUnaryOperator, Vec<&'static StdlibItem>>,
     pub(super) children_by_owner: HashMap<StdlibOwner, Vec<StdlibSymbolId>>,
@@ -120,10 +123,18 @@ impl StandardLibraryGraph {
             &mut errors,
         );
         let items = index(ITEMS, |value| value.id, "standard item ID", &mut errors);
-        let items_by_name = index(
+        let all_items_by_name = index(
             ITEMS,
             |value| value.qualified_name,
             "standard item name",
+            &mut errors,
+        );
+        let items_by_name = index(
+            ITEMS
+                .iter()
+                .filter(|item| item.visibility == ItemVisibility::Public),
+            |value| value.qualified_name,
+            "public standard item name",
             &mut errors,
         );
 
@@ -131,9 +142,19 @@ impl StandardLibraryGraph {
         let variants_by_owner = group(VARIANTS, |variant| variant.owner);
         let methods = ITEMS
             .iter()
-            .filter(|item| matches!(item.kind, ItemKind::Method { .. }))
+            .filter(|item| {
+                item.visibility == ItemVisibility::Public
+                    && matches!(item.kind, ItemKind::Method { .. })
+            })
             .collect();
         let methods_by_name = group(
+            ITEMS.iter().filter(|item| {
+                item.visibility == ItemVisibility::Public
+                    && matches!(item.kind, ItemKind::Method { .. })
+            }),
+            |item| item.name,
+        );
+        let all_methods_by_name = group(
             ITEMS
                 .iter()
                 .filter(|item| matches!(item.kind, ItemKind::Method { .. })),
@@ -236,8 +257,10 @@ impl StandardLibraryGraph {
             variants_by_owner,
             items,
             items_by_name,
+            all_items_by_name,
             methods,
             methods_by_name,
+            all_methods_by_name,
             binary_operators,
             unary_operators,
             children_by_owner: HashMap::new(),
@@ -362,7 +385,9 @@ impl StandardLibraryGraph {
                     item.qualified_name, item.owner
                 ));
             }
-            self.push_child(item.owner, StdlibSymbolId::Item(item.id));
+            if item.visibility == ItemVisibility::Public {
+                self.push_child(item.owner, StdlibSymbolId::Item(item.id));
+            }
         }
     }
 

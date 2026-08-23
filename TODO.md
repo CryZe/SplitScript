@@ -641,11 +641,19 @@ remaining work is product hardening and distribution.
   tasks.
 - [ ] Broaden suspending control flow incrementally from real ports and add a
   host-executed conformance fixture for each new shape.
-- [ ] Port one callback-heavy splitter such as Axiom Verge before designing
-  first-class function values or closures. Determine whether a named-function
-  table plus `match` is clearer, or whether stored callbacks materially reduce
-  complexity; do not import C# delegates, reflection, or event subscription as
-  compatibility concepts by default.
+- [ ] Design first-class function values and lexical closures for iterator
+  adapters, separately from legacy delegate migration. The maintained Axiom
+  Verge port already established that its three callback-shaped C# delegates
+  are clearer as ordinary typed functions, so callbacks alone are not evidence
+  for a delegate/event model. Lazy `map` and `filter` do provide a distinct
+  reason to store callable behavior. Settle the callable type spelling,
+  arrow-expression syntax, inferred parameter/result types, by-reference
+  capture of mutable locals, invocation effects, async results, recursive
+  closures, and Wasm GC environment representation before implementation.
+  Preserve ordinary lexical control flow: `return` belongs to the closure,
+  while `break` and `continue` cannot target loops outside it. Add function
+  references and closures through one callable abstraction rather than a
+  closure-only invocation path.
 - [ ] Complete remaining ordinary library gaps when a port needs them:
   immutable String operations beyond the corpus-proven P0 slice, additional
   numeric operations, and typed time operations proven useful by maintained

@@ -1925,13 +1925,60 @@ capability Equatable<T> {
     ) -> bool;
 }
 
+/// Produces an unambiguous structural representation of a value.
+///
+/// [`String`] and [`char`] values are quoted and escaped. Source records and
+/// enums derive a multiline representation recursively when every contained
+/// value implements [`Debug`]. Standard-library containers opt into the same
+/// conditional derivation for their element or payload types.
+///
+/// Every [`Debug`] value also implements [`Display`]. A custom
+/// [`Display.toString`] remains the user-facing representation, while
+/// [`Debug.debugString`] controls how a value appears inside another derived
+/// value.
+///
+/// # Example
+///
+/// Preserve quotes around nested text
+///
+/// ```splitscript
+/// let checkpoints = ["forest", "castle"]
+/// print(checkpoints)
+/// ```
+@behavior(structuralMethods)
+capability Debug<T: Display> {
+    /// Converts the receiver to its unambiguous structural representation.
+    ///
+    /// User records and enums receive a recursive derived implementation when
+    /// this method is absent. Defining an exact method with this signature
+    /// overrides that representation without changing the user-facing
+    /// [`Display.toString`] method.
+    ///
+    /// # Example
+    ///
+    /// Customize nested diagnostics
+    ///
+    /// ```splitscript
+    /// state "example.exe" {}
+    ///
+    /// record Checkpoint {
+    ///     name: String,
+    /// }
+    ///
+    /// fn Checkpoint.debugString() -> String {
+    ///     return `Checkpoint({self.name})`
+    /// }
+    /// ```
+    fn debugString() -> String;
+}
+
 /// Supports conversion to a user-facing textual representation.
 ///
 /// An [`as`] [`String`] cast, string interpolation, [`print`], and
 /// [`setVariable`] all display values through this single capability.
-/// Source records and enums receive a stable multiline structural
-/// representation automatically. Defining the exact [`Display.toString`]
-/// implementation overrides that derived representation.
+/// Source records, enums, and opted-in standard-library containers fall back
+/// to their derived [`Debug`] representation when no exact
+/// [`Display.toString`] implementation exists.
 ///
 /// # Example
 ///
@@ -1944,10 +1991,10 @@ capability Equatable<T> {
 capability Display<T> {
     /// Converts the receiver to its user-facing string representation.
     ///
-    /// A user record or enum receives a derived implementation when this method
-    /// is absent. Defining a method with this signature overrides the derived
-    /// representation. The [`String`] result may be inferred from the body, and
-    /// no separate implementation declaration or annotation is needed.
+    /// A user record or enum falls back to its derived [`Debug`] representation
+    /// when this method is absent. Defining a method with this signature
+    /// overrides that fallback. The [`String`] result may be inferred from the
+    /// body, and no separate implementation declaration or annotation is needed.
     /// [`Display.toString`] powers [`as`] [`String`] casts, interpolation, [`print`],
     /// and [`setVariable`].
     ///
@@ -2081,6 +2128,7 @@ capability Iterable<T> {
 ///     End => "finished",
 /// }
 /// ```
+@capabilities(Debug)
 typeConstructor IteratorStep<T> {
     /// The value carried by an item step.
     type Item = T;
@@ -2276,7 +2324,7 @@ capability MemoryReadable<T> {}
 /// ```splitscript
 /// let inventory: [u8] = [1, 2, 3]
 /// ```
-@capabilities(Iterable)
+@capabilities(Debug, Iterable)
 typeConstructor [T] {
     /// The array element yielded during iteration.
     type Item = T;
@@ -2568,7 +2616,7 @@ typeConstructor [T] {
 ///     print(values[index])
 /// }
 /// ```
-@capabilities(Iterable)
+@capabilities(Debug, Iterable)
 typeConstructor T..<T {
     /// The integer yielded during iteration.
     type Item = T;
@@ -2670,7 +2718,7 @@ typeConstructor T..<T {
 ///     print(checkpoint)
 /// }
 /// ```
-@capabilities(Iterable)
+@capabilities(Debug, Iterable)
 typeConstructor T..=T {
     /// The integer yielded during iteration.
     type Item = T;
@@ -2771,7 +2819,7 @@ typeConstructor T..=T {
 /// let visited = Set.new<String>()
 /// visited.insert("Atrium")
 /// ```
-@capabilities(Iterable)
+@capabilities(Debug, Iterable)
 typeConstructor Set<T: Equatable> {
     /// The set element yielded during iteration.
     type Item = T;
@@ -2927,6 +2975,7 @@ typeConstructor Set<T: Equatable> {
 /// let possibleLevel: u32? = 4
 /// ```
 @mustUse("Optional values must be inspected or explicitly discarded.")
+@capabilities(Debug)
 typeConstructor T? {}
 
 /// Represents a value or an error.
@@ -2941,6 +2990,7 @@ typeConstructor T? {}
 /// let health: u32! = 100
 /// ```
 @mustUse("Fallible values must be handled so failures are not silently ignored.")
+@capabilities(Debug)
 typeConstructor T! {
     /// Converts a fallible value into an optional value.
     ///
@@ -3047,7 +3097,7 @@ extend address {
 /// ```
 @representation(gcArray, u8, mutable, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable)
-@capabilities(Equatable, Display)
+@capabilities(Debug, Equatable, Display)
 intrinsic type String {
     /// Returns a string's UTF-8 byte length.
     ///
@@ -4534,7 +4584,7 @@ struct MemoryPath {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
-@capabilities(Equatable, Display)
+@capabilities(Debug, Equatable, Display)
 struct FileVersion {
     /// Major version component.
     ///

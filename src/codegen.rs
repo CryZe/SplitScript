@@ -142,6 +142,26 @@ fn display_function(
     Some((source, semantics.function_instance(function, signature)))
 }
 
+fn debug_function(
+    source: TypeId,
+    semantics: &SemanticModel,
+    capabilities: &crate::capabilities::CapabilityAnalysis,
+) -> Option<(TypeId, FunctionInstance)> {
+    let function = capabilities.method_implementation(
+        source,
+        StdlibCapabilityId::Debug,
+        StdlibItemId::DebugDebugString,
+        semantics,
+    )?;
+    let signature = semantics
+        .function_parameter_types(function)
+        .iter()
+        .copied()
+        .chain(semantics.function_result(function))
+        .collect();
+    Some((source, semantics.function_instance(function, signature)))
+}
+
 fn provider_attachment_function(
     provider: &crate::stdlib::StdlibStateProvider,
     program: &Program,
@@ -527,6 +547,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         displays: &display_functions,
         users: &user_functions,
         helpers: &runtime_helpers,
+        debug_depth: runtime_globals.debug_depth,
         gc: &gc,
     });
     let array_bodies = array_functions::compile(array_types, &array_functions, semantics, &gc);

@@ -125,7 +125,7 @@ pub(crate) fn validate(
         }
     }
 
-    for violation in effects.attached_process_violations(hir) {
+    for violation in effects.attached_process_violations(hir, semantics, &capabilities) {
         let name = violation
             .standard_library_name
             .map(str::to_owned)
@@ -147,7 +147,7 @@ pub(crate) fn validate(
         ));
     }
 
-    for violation in effects.state_snapshot_violations(hir) {
+    for violation in effects.state_snapshot_violations(hir, semantics, &capabilities) {
         let name = violation
             .standard_library_name
             .map(str::to_owned)

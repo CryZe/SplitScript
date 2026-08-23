@@ -37,7 +37,8 @@ pub(super) struct Reachability {
     gc_sets: BTreeSet<TypeApplicationId>,
     gc_applications: BTreeSet<TypeApplicationId>,
     display_functions: BTreeMap<TypeId, FunctionInstance>,
-    derived_displays: BTreeSet<TypeId>,
+    debug_functions: BTreeMap<TypeId, FunctionInstance>,
+    derived_debugs: BTreeSet<TypeId>,
 }
 
 impl Reachability {
@@ -500,8 +501,14 @@ impl Reachability {
             .map(|(ty, function)| (*ty, function))
     }
 
-    pub fn derived_displays(&self) -> impl Iterator<Item = TypeId> + '_ {
-        self.derived_displays.iter().copied()
+    pub fn debug_functions(&self) -> impl Iterator<Item = (TypeId, &FunctionInstance)> {
+        self.debug_functions
+            .iter()
+            .map(|(ty, function)| (*ty, function))
+    }
+
+    pub fn derived_debugs(&self) -> impl Iterator<Item = TypeId> + '_ {
+        self.derived_debugs.iter().copied()
     }
 
     pub fn contains_expression(&self, expression: ExprId) -> bool {
@@ -770,21 +777,56 @@ impl Reachability {
         capabilities: &crate::capabilities::CapabilityAnalysis,
         pending_functions: &mut Vec<(Option<FunctionInstance>, FunctionInstance)>,
     ) {
+        if let Some((source, function)) =
+            super::display_function(root, program, semantics, standard_library, capabilities)
+        {
+            self.display_functions.insert(source, function.clone());
+            pending_functions.push((None, function));
+            return;
+        }
+        if capabilities.has_derived_display(root, semantics) {
+            self.require_debug(
+                root,
+                program,
+                semantics,
+                standard_library,
+                capabilities,
+                pending_functions,
+            );
+        }
+    }
+
+    fn require_debug(
+        &mut self,
+        root: TypeId,
+        program: &Program,
+        semantics: &SemanticModel,
+        standard_library: &StandardLibrary,
+        capabilities: &crate::capabilities::CapabilityAnalysis,
+        pending_functions: &mut Vec<(Option<FunctionInstance>, FunctionInstance)>,
+    ) {
         let mut pending = vec![root];
         let mut visited = BTreeSet::new();
         while let Some(ty) = pending.pop() {
             if !visited.insert(ty) {
                 continue;
             }
-            if let Some((source, function)) =
-                super::display_function(ty, program, semantics, standard_library, capabilities)
-            {
-                self.display_functions.insert(source, function.clone());
+            if let Some((source, function)) = super::debug_function(ty, semantics, capabilities) {
+                self.debug_functions.insert(source, function.clone());
                 pending_functions.push((None, function));
                 continue;
             }
-            if capabilities.has_derived_display(ty, semantics) && self.derived_displays.insert(ty) {
-                pending.extend(capabilities.structural_dependency_types(ty));
+            if capabilities.has_derived_debug(ty, semantics) && self.derived_debugs.insert(ty) {
+                pending.extend(capabilities.debug_dependency_types(ty, semantics));
+                continue;
+            }
+            // Opaque standard-library types may intentionally share their
+            // public display spelling with their nested debug spelling.
+            if let Some((source, function)) =
+                super::display_function(ty, program, semantics, standard_library, capabilities)
+            {
+                self.debug_functions.insert(source, function.clone());
+                pending_functions.push((None, function));
             }
         }
     }

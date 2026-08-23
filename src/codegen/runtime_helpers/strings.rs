@@ -428,6 +428,264 @@ pub(in crate::codegen::runtime_helpers) fn compile_format_char(gc: &GcLayout) ->
     function
 }
 
+/// Quotes and escapes a UTF-8 value for a structural `Debug` representation.
+/// `quote` is either `"` for strings or `'` for characters.
+pub(in crate::codegen::runtime_helpers) fn compile_quote_debug_string(gc: &GcLayout) -> Function {
+    let string_type = gc.standard_index(StdlibTypeId::String);
+    let string_value = gc.val_type(Type::Standard(StdlibTypeId::String));
+    let mut function = Function::new([(7, ValType::I32), (1, string_value)]);
+    let input = 0;
+    let quote = 1;
+    let length = 2;
+    let input_index = 3;
+    let output_length = 4;
+    let output_index = 5;
+    let byte = 6;
+    let escape = 7;
+    let nibble = 8;
+    let output = 9;
+
+    function
+        .instruction(&Instruction::LocalGet(input))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::ArrayLen)
+        .instruction(&Instruction::LocalSet(length))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::LocalSet(output_length))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty));
+    emit_loop_end_test(&mut function, input_index, length);
+    emit_input_byte(&mut function, input, input_index, byte, string_type);
+    emit_short_escape_condition(&mut function, byte, quote);
+    function
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(2))
+        .instruction(&Instruction::Else);
+    emit_control_condition(&mut function, byte);
+    function
+        .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+        .instruction(&Instruction::I32Const(4))
+        .instruction(&Instruction::Else)
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(output_length))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(output_length));
+    emit_increment(&mut function, input_index);
+    function
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(output_length))
+        .instruction(&Instruction::ArrayNewDefault(string_type))
+        .instruction(&Instruction::LocalSet(output));
+    emit_output_local(&mut function, output, 0, quote, string_type, true);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalSet(input_index))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::LocalSet(output_index))
+        .instruction(&Instruction::Block(BlockType::Empty))
+        .instruction(&Instruction::Loop(BlockType::Empty));
+    emit_loop_end_test(&mut function, input_index, length);
+    emit_input_byte(&mut function, input, input_index, byte, string_type);
+    function
+        .instruction(&Instruction::I32Const(0))
+        .instruction(&Instruction::LocalSet(escape))
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::LocalGet(quote))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::LocalGet(quote))
+        .instruction(&Instruction::LocalSet(escape))
+        .instruction(&Instruction::End);
+    for (source, escaped) in [
+        (b'\\', b'\\'),
+        (b'\n', b'n'),
+        (b'\r', b'r'),
+        (b'\t', b't'),
+        (0, b'0'),
+    ] {
+        function
+            .instruction(&Instruction::LocalGet(byte))
+            .instruction(&Instruction::I32Const(source as i32))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::If(BlockType::Empty))
+            .instruction(&Instruction::I32Const(escaped as i32))
+            .instruction(&Instruction::LocalSet(escape))
+            .instruction(&Instruction::End);
+    }
+    function
+        .instruction(&Instruction::LocalGet(escape))
+        .instruction(&Instruction::I32Eqz);
+    emit_control_condition(&mut function, byte);
+    function
+        .instruction(&Instruction::I32And)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::I32Const(0xff))
+        .instruction(&Instruction::LocalSet(escape))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::LocalGet(escape))
+        .instruction(&Instruction::I32Eqz)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_output_local(
+        &mut function,
+        output,
+        output_index,
+        byte,
+        string_type,
+        false,
+    );
+    emit_increment(&mut function, output_index);
+    function.instruction(&Instruction::Else);
+    emit_output_const(&mut function, output, output_index, b'\\', string_type);
+    emit_increment(&mut function, output_index);
+    function
+        .instruction(&Instruction::LocalGet(escape))
+        .instruction(&Instruction::I32Const(0xff))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::If(BlockType::Empty));
+    emit_output_const(&mut function, output, output_index, b'x', string_type);
+    emit_increment(&mut function, output_index);
+    for shift in [4, 0] {
+        function
+            .instruction(&Instruction::LocalGet(byte))
+            .instruction(&Instruction::I32Const(shift))
+            .instruction(&Instruction::I32ShrU)
+            .instruction(&Instruction::I32Const(0xf))
+            .instruction(&Instruction::I32And)
+            .instruction(&Instruction::LocalSet(nibble))
+            .instruction(&Instruction::LocalGet(output))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::LocalGet(output_index))
+            .instruction(&Instruction::LocalGet(nibble))
+            .instruction(&Instruction::I32Const(10))
+            .instruction(&Instruction::I32LtU)
+            .instruction(&Instruction::If(BlockType::Result(ValType::I32)))
+            .instruction(&Instruction::LocalGet(nibble))
+            .instruction(&Instruction::I32Const(b'0' as i32))
+            .instruction(&Instruction::I32Add)
+            .instruction(&Instruction::Else)
+            .instruction(&Instruction::LocalGet(nibble))
+            .instruction(&Instruction::I32Const((b'a' - 10) as i32))
+            .instruction(&Instruction::I32Add)
+            .instruction(&Instruction::End)
+            .instruction(&Instruction::ArraySet(string_type));
+        emit_increment(&mut function, output_index);
+    }
+    function.instruction(&Instruction::Else);
+    emit_output_local(
+        &mut function,
+        output,
+        output_index,
+        escape,
+        string_type,
+        false,
+    );
+    emit_increment(&mut function, output_index);
+    function
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+    emit_increment(&mut function, input_index);
+    function
+        .instruction(&Instruction::Br(0))
+        .instruction(&Instruction::End)
+        .instruction(&Instruction::End);
+    emit_output_local(
+        &mut function,
+        output,
+        output_index,
+        quote,
+        string_type,
+        false,
+    );
+    function
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::End);
+    function
+}
+
+fn emit_short_escape_condition(function: &mut Function, byte: u32, quote: u32) {
+    function
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::LocalGet(quote))
+        .instruction(&Instruction::I32Eq);
+    for escaped in [b'\\', b'\n', b'\r', b'\t', 0] {
+        function
+            .instruction(&Instruction::LocalGet(byte))
+            .instruction(&Instruction::I32Const(escaped as i32))
+            .instruction(&Instruction::I32Eq)
+            .instruction(&Instruction::I32Or);
+    }
+}
+
+fn emit_control_condition(function: &mut Function, byte: u32) {
+    function
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0x20))
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::I32Const(0x7f))
+        .instruction(&Instruction::I32Eq)
+        .instruction(&Instruction::I32Or);
+}
+
+fn emit_loop_end_test(function: &mut Function, index: u32, length: u32) {
+    function
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::LocalGet(length))
+        .instruction(&Instruction::I32GeU)
+        .instruction(&Instruction::BrIf(1));
+}
+
+fn emit_input_byte(function: &mut Function, input: u32, index: u32, byte: u32, string_type: u32) {
+    function
+        .instruction(&Instruction::LocalGet(input))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::ArrayGetU(string_type))
+        .instruction(&Instruction::LocalSet(byte));
+}
+
+fn emit_output_local(
+    function: &mut Function,
+    output: u32,
+    index: u32,
+    byte: u32,
+    string_type: u32,
+    constant_index: bool,
+) {
+    function
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull);
+    if constant_index {
+        function.instruction(&Instruction::I32Const(index as i32));
+    } else {
+        function.instruction(&Instruction::LocalGet(index));
+    }
+    function
+        .instruction(&Instruction::LocalGet(byte))
+        .instruction(&Instruction::ArraySet(string_type));
+}
+
+fn emit_output_const(function: &mut Function, output: u32, index: u32, byte: u8, string_type: u32) {
+    function
+        .instruction(&Instruction::LocalGet(output))
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::LocalGet(index))
+        .instruction(&Instruction::I32Const(byte as i32))
+        .instruction(&Instruction::ArraySet(string_type));
+}
+
+fn emit_increment(function: &mut Function, local: u32) {
+    function
+        .instruction(&Instruction::LocalGet(local))
+        .instruction(&Instruction::I32Const(1))
+        .instruction(&Instruction::I32Add)
+        .instruction(&Instruction::LocalSet(local));
+}
+
 /// Compares a UTF-8 byte sequence using contains (0), starts with (1), ends with
 /// (2), or equal while ignoring ASCII case (3) semantics. Exact byte matching
 /// is equivalent to Unicode scalar matching for the first three modes because
@@ -2254,9 +2512,69 @@ pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
     function
 }
 
+/// Turns one nested structural value into an indented, comma-terminated entry.
+pub(in crate::codegen::runtime_helpers) fn compile_wrap_debug_entry(
+    indent: u32,
+    join: u32,
+    string_array: u32,
+    string_storage: u32,
+    gc: &GcLayout,
+) -> Function {
+    let mut function = Function::new([]);
+    super::super::emit_string_literal(&mut function, "    ", gc);
+    function
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::Call(indent));
+    super::super::emit_string_literal(&mut function, ",\n", gc);
+    function
+        .instruction(&Instruction::ArrayNewFixed {
+            array_type_index: string_storage,
+            array_size: 3,
+        })
+        .instruction(&Instruction::I32Const(3));
+    super::super::array_value::emit_wrap_loaded(&mut function, string_array);
+    function
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.standard_index(StdlibTypeId::String),
+        )))
+        .instruction(&Instruction::Call(join))
+        .instruction(&Instruction::End);
+    function
+}
+
+pub(in crate::codegen::runtime_helpers) fn compile_wrap_debug_variant(
+    wrap_entry: u32,
+    join: u32,
+    string_array: u32,
+    string_storage: u32,
+    gc: &GcLayout,
+) -> Function {
+    let mut function = Function::new([]);
+    function.instruction(&Instruction::LocalGet(1));
+    super::super::emit_string_literal(&mut function, "(\n", gc);
+    function
+        .instruction(&Instruction::LocalGet(0))
+        .instruction(&Instruction::Call(wrap_entry));
+    super::super::emit_string_literal(&mut function, ")", gc);
+    function
+        .instruction(&Instruction::ArrayNewFixed {
+            array_type_index: string_storage,
+            array_size: 4,
+        })
+        .instruction(&Instruction::I32Const(4));
+    super::super::array_value::emit_wrap_loaded(&mut function, string_array);
+    function
+        .instruction(&Instruction::RefNull(HeapType::Concrete(
+            gc.standard_index(StdlibTypeId::String),
+        )))
+        .instruction(&Instruction::Call(join))
+        .instruction(&Instruction::End);
+    function
+}
+
 /// Indents every line after the first by four ASCII spaces. Derived structural
-/// display functions prefix the first line themselves, then use this helper so
-/// nested multiline values remain visually nested without flattening them.
+/// formatters prefix the first line themselves, then use this helper so nested
+/// multiline values remain visually nested without flattening them.
 pub(in crate::codegen::runtime_helpers) fn compile_indent_display(gc: &GcLayout) -> Function {
     let string_type = gc.standard_index(StdlibTypeId::String);
     let string_value = gc.val_type(Type::Standard(StdlibTypeId::String));

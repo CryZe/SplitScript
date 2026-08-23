@@ -176,8 +176,21 @@ impl CapabilityAnalysis {
                     }
                     _ => false,
                 };
-                if !declared {
-                    let requirements = self.structural_method_requirements(capability);
+                let requirements = self.structural_method_requirements(capability);
+                let has_candidate = requirements
+                    .iter()
+                    .any(|requirement| self.method_candidate(ty, *requirement).is_some());
+                let derives_debug = capability == StdlibCapabilityId::Debug
+                    && !has_candidate
+                    && self.debug_derivation_is_enabled(ty, semantics);
+                if derives_debug {
+                    self.require_derived_debug(ty, semantics, &mut HashSet::new())?;
+                } else if capability == StdlibCapabilityId::Display && !has_candidate {
+                    // `Debug` is a sub-capability of `Display`: ordinary values
+                    // use their structural representation whenever no exact
+                    // user-facing formatter was authored.
+                    self.require(ty, StdlibCapabilityId::Debug, semantics)?;
+                } else if !declared || has_candidate {
                     if !matches!(
                         semantics.types().kind(ty),
                         TypeKind::Record(_) | TypeKind::Enum(_)
@@ -188,38 +201,29 @@ impl CapabilityAnalysis {
                             declaration.name,
                         ));
                     }
-                    let derives_display = capability == StdlibCapabilityId::Display
-                        && self.structural.get(ty).is_some()
-                        && !requirements
-                            .iter()
-                            .any(|requirement| self.method_candidate(ty, *requirement).is_some());
-                    if derives_display {
-                        self.require_derived_display(ty, semantics, &mut HashSet::new())?;
-                    } else {
-                        for requirement in requirements {
-                            let requirement = self.standard_library.item(*requirement);
-                            let Some(function) = self
-                                .source_methods
-                                .get(&ty)
-                                .and_then(|methods| methods.get(requirement.name))
-                                .copied()
-                            else {
-                                return Err(format!(
-                                    "type `{}` is missing `{}` required by capability `{}`",
-                                    self.type_name(ty, semantics),
-                                    self.standard_library.render_signature(requirement.id),
-                                    declaration.name,
-                                ));
-                            };
-                            if !self.method_matches(ty, function, requirement, semantics) {
-                                return Err(format!(
-                                    "method `{}.{}` does not match `{}` required by capability `{}`",
-                                    self.type_name(ty, semantics),
-                                    requirement.name,
-                                    self.standard_library.render_signature(requirement.id),
-                                    declaration.name,
-                                ));
-                            }
+                    for requirement in requirements {
+                        let requirement = self.standard_library.item(*requirement);
+                        let Some(function) = self
+                            .source_methods
+                            .get(&ty)
+                            .and_then(|methods| methods.get(requirement.name))
+                            .copied()
+                        else {
+                            return Err(format!(
+                                "type `{}` is missing `{}` required by capability `{}`",
+                                self.type_name(ty, semantics),
+                                self.standard_library.render_signature(requirement.id),
+                                declaration.name,
+                            ));
+                        };
+                        if !self.method_matches(ty, function, requirement, semantics) {
+                            return Err(format!(
+                                "method `{}.{}` does not match `{}` required by capability `{}`",
+                                self.type_name(ty, semantics),
+                                requirement.name,
+                                self.standard_library.render_signature(requirement.id),
+                                declaration.name,
+                            ));
                         }
                     }
                 }
@@ -284,6 +288,15 @@ impl CapabilityAnalysis {
             },
         }?;
         for super_capability in declaration.super_capabilities {
+            // `Debug`'s declared `Display` super-capability is implemented by
+            // the same fallback that asked for `Debug` in the first place.
+            // The implication is therefore already proven here; recursing
+            // through `Display` would merely rediscover this exact obligation.
+            if capability == StdlibCapabilityId::Debug
+                && *super_capability == StdlibCapabilityId::Display
+            {
+                continue;
+            }
             self.require(ty, *super_capability, semantics)?;
         }
         Ok(())
@@ -346,8 +359,7 @@ impl CapabilityAnalysis {
             .copied()
     }
 
-    /// Direct fields or payloads recursively rendered by a compiler-derived
-    /// `Display` implementation.
+    /// Direct fields or payloads in one source-defined aggregate.
     pub fn structural_dependency_types(&self, ty: TypeId) -> impl Iterator<Item = TypeId> + '_ {
         self.structural
             .get(ty)
@@ -364,10 +376,45 @@ impl CapabilityAnalysis {
     pub fn has_derived_display(&self, ty: TypeId, semantics: &SemanticModel) -> bool {
         self.method_candidate(ty, StdlibItemId::DisplayToString)
             .is_none()
-            && self.structural.get(ty).is_some()
             && self
-                .require_derived_display(ty, semantics, &mut HashSet::new())
+                .require(ty, StdlibCapabilityId::Debug, semantics)
                 .is_ok()
+    }
+
+    pub fn has_derived_debug(&self, ty: TypeId, semantics: &SemanticModel) -> bool {
+        self.method_candidate(ty, StdlibItemId::DebugDebugString)
+            .is_none()
+            && self.debug_derivation_is_enabled(ty, semantics)
+            && self
+                .require_derived_debug(ty, semantics, &mut HashSet::new())
+                .is_ok()
+    }
+
+    /// Values recursively formatted by a compiler-derived `Debug` body.
+    pub fn debug_dependency_types(&self, ty: TypeId, semantics: &SemanticModel) -> Vec<TypeId> {
+        if let Some(aggregate) = self.structural.get(ty) {
+            return aggregate
+                .members
+                .iter()
+                .filter_map(|member| member.ty)
+                .collect();
+        }
+        match semantics.types().kind(ty) {
+            TypeKind::Array { element, .. } | TypeKind::Set { element, .. } => vec![*element],
+            TypeKind::Option { value, .. } | TypeKind::Result { value, .. } => vec![*value],
+            TypeKind::Range { bound, .. } => vec![*bound],
+            TypeKind::Application {
+                constructor,
+                arguments,
+                ..
+            } if self
+                .standard_library
+                .type_constructor_has_capability(*constructor, StdlibCapabilityId::Debug) =>
+            {
+                arguments.clone()
+            }
+            _ => Vec::new(),
+        }
     }
 
     /// Source functions invoked by displaying this value, including custom
@@ -377,28 +424,92 @@ impl CapabilityAnalysis {
         root: TypeId,
         semantics: &SemanticModel,
     ) -> Vec<FunctionId> {
-        let mut pending = vec![root];
+        #[derive(Clone, Copy)]
+        enum Mode {
+            Display,
+            Debug,
+        }
+        let mut pending = vec![(root, Mode::Display)];
         let mut visited = HashSet::new();
         let mut functions = Vec::new();
-        while let Some(ty) = pending.pop() {
-            if !visited.insert(ty) {
+        while let Some((ty, mode)) = pending.pop() {
+            if !visited.insert((ty, matches!(mode, Mode::Debug))) {
                 continue;
             }
-            if let Some(function) = self.method_implementation(
-                ty,
-                StdlibCapabilityId::Display,
-                StdlibItemId::DisplayToString,
-                semantics,
-            ) {
-                functions.push(function);
-            } else if self.has_derived_display(ty, semantics) {
-                pending.extend(self.structural_dependency_types(ty));
+            match mode {
+                Mode::Display => {
+                    if let Some(function) = self.method_implementation(
+                        ty,
+                        StdlibCapabilityId::Display,
+                        StdlibItemId::DisplayToString,
+                        semantics,
+                    ) {
+                        functions.push(function);
+                    } else if self.has_derived_display(ty, semantics) {
+                        pending.push((ty, Mode::Debug));
+                    }
+                }
+                Mode::Debug => {
+                    if let Some(function) = self.method_implementation(
+                        ty,
+                        StdlibCapabilityId::Debug,
+                        StdlibItemId::DebugDebugString,
+                        semantics,
+                    ) {
+                        functions.push(function);
+                    } else if self.has_derived_debug(ty, semantics) {
+                        pending.extend(
+                            self.debug_dependency_types(ty, semantics)
+                                .into_iter()
+                                .map(|dependency| (dependency, Mode::Debug)),
+                        );
+                    }
+                }
             }
         }
         functions
     }
 
-    fn require_derived_display(
+    fn debug_derivation_is_enabled(&self, ty: TypeId, semantics: &SemanticModel) -> bool {
+        self.structural.get(ty).is_some()
+            || match semantics.types().kind(ty) {
+                TypeKind::Array { .. } => self.standard_library.type_constructor_has_capability(
+                    StdlibTypeConstructorId::Array,
+                    StdlibCapabilityId::Debug,
+                ),
+                TypeKind::Set { .. } => self.standard_library.type_constructor_has_capability(
+                    StdlibTypeConstructorId::Set,
+                    StdlibCapabilityId::Debug,
+                ),
+                TypeKind::Option { .. } => self.standard_library.type_constructor_has_capability(
+                    StdlibTypeConstructorId::Option,
+                    StdlibCapabilityId::Debug,
+                ),
+                TypeKind::Result { .. } => self.standard_library.type_constructor_has_capability(
+                    StdlibTypeConstructorId::Result,
+                    StdlibCapabilityId::Debug,
+                ),
+                TypeKind::Range { kind, .. } => {
+                    self.standard_library.type_constructor_has_capability(
+                        match kind {
+                            crate::ast::RangeKind::Exclusive => {
+                                StdlibTypeConstructorId::ExclusiveRange
+                            }
+                            crate::ast::RangeKind::Inclusive => {
+                                StdlibTypeConstructorId::InclusiveRange
+                            }
+                        },
+                        StdlibCapabilityId::Debug,
+                    )
+                }
+                TypeKind::Application { constructor, .. } => self
+                    .standard_library
+                    .type_constructor_has_capability(*constructor, StdlibCapabilityId::Debug),
+                _ => false,
+            }
+    }
+
+    fn require_derived_debug(
         &self,
         ty: TypeId,
         semantics: &SemanticModel,
@@ -410,21 +521,21 @@ impl CapabilityAnalysis {
             // Treat the semantic contract coinductively here.
             return Ok(());
         }
-        for dependency in self.structural_dependency_types(ty) {
+        for dependency in self.debug_dependency_types(ty, semantics) {
             let result = if self
-                .method_candidate(dependency, StdlibItemId::DisplayToString)
+                .method_candidate(dependency, StdlibItemId::DebugDebugString)
                 .is_some()
             {
-                self.require(dependency, StdlibCapabilityId::Display, semantics)
-            } else if self.structural.get(dependency).is_some() {
-                self.require_derived_display(dependency, semantics, visiting)
+                self.require(dependency, StdlibCapabilityId::Debug, semantics)
+            } else if self.debug_derivation_is_enabled(dependency, semantics) {
+                self.require_derived_debug(dependency, semantics, visiting)
             } else {
-                self.require(dependency, StdlibCapabilityId::Display, semantics)
+                self.require(dependency, StdlibCapabilityId::Debug, semantics)
             };
             if let Err(reason) = result {
                 visiting.remove(&ty);
                 return Err(format!(
-                    "type `{}` cannot derive `Display` because one of its fields or payloads is not displayable: {reason}",
+                    "type `{}` cannot derive `Debug` because one of its contained values is not debug-printable: {reason}",
                     self.type_name(ty, semantics),
                 ));
             }

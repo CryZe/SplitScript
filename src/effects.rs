@@ -123,6 +123,62 @@ struct CallCollector<'a> {
     capabilities: &'a crate::capabilities::CapabilityAnalysis,
 }
 
+fn implicit_display_callees(
+    expression: &TypedExpression,
+    program: &TypedProgram,
+    semantics: &SemanticModel,
+    capabilities: &crate::capabilities::CapabilityAnalysis,
+) -> Vec<FunctionId> {
+    let mut functions = Vec::new();
+    match &expression.kind {
+        hir::TypedExpressionKind::InterpolatedString(parts) => {
+            for part in parts {
+                let hir::TypedInterpolatedPart::Expression {
+                    conversion: Some(hir::ImplicitConversion::ToString { source }),
+                    ..
+                } = part
+                else {
+                    continue;
+                };
+                functions.extend(capabilities.display_method_implementations(*source, semantics));
+            }
+        }
+        hir::TypedExpressionKind::Cast {
+            expression: value, ..
+        } if matches!(
+            semantics.types().kind(expression.ty),
+            TypeKind::Standard(crate::stdlib::StdlibTypeId::String)
+        ) =>
+        {
+            let source = program
+                .expression(*value)
+                .expect("cast operands belong to typed HIR")
+                .ty;
+            functions.extend(capabilities.display_method_implementations(source, semantics));
+        }
+        _ => {}
+    }
+    if let Some(ResolvedCall::StandardLibrary { item, .. }) = program.call(expression.id)
+        && let hir::TypedExpressionKind::Call { arguments, .. } = &expression.kind
+    {
+        let converted = match *item {
+            crate::stdlib::StdlibItemId::Print => arguments.first(),
+            crate::stdlib::StdlibItemId::SetVariable => arguments.get(1),
+            _ => None,
+        };
+        if let Some(argument) = converted {
+            let ty = program
+                .expression(*argument)
+                .expect("resolved call arguments belong to typed HIR")
+                .ty;
+            functions.extend(capabilities.display_method_implementations(ty, semantics));
+        }
+    }
+    functions.sort_by_key(|function| function.index());
+    functions.dedup();
+    functions
+}
+
 fn collect_call_facts(
     facts: &mut CallFacts,
     call: &ResolvedCall,
@@ -165,40 +221,12 @@ fn collect_call_facts(
 
 impl TypedVisitor for CallCollector<'_> {
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
-        match &expression.kind {
-            hir::TypedExpressionKind::InterpolatedString(parts) => {
-                for part in parts {
-                    let hir::TypedInterpolatedPart::Expression {
-                        conversion: Some(hir::ImplicitConversion::ToString { source }),
-                        ..
-                    } = part
-                    else {
-                        continue;
-                    };
-                    self.facts.callees.extend(
-                        self.capabilities
-                            .display_method_implementations(*source, self.semantics),
-                    );
-                }
-            }
-            hir::TypedExpressionKind::Cast {
-                expression: value, ..
-            } if matches!(
-                self.semantics.types().kind(expression.ty),
-                TypeKind::Standard(crate::stdlib::StdlibTypeId::String)
-            ) =>
-            {
-                let source = program
-                    .expression(*value)
-                    .expect("cast operands belong to typed HIR")
-                    .ty;
-                self.facts.callees.extend(
-                    self.capabilities
-                        .display_method_implementations(source, self.semantics),
-                );
-            }
-            _ => {}
-        }
+        self.facts.callees.extend(implicit_display_callees(
+            expression,
+            program,
+            self.semantics,
+            self.capabilities,
+        ));
         if let Some((
             Some(
                 crate::semantic::ResolvedValue::CurrentSnapshot
@@ -227,25 +255,6 @@ impl TypedVisitor for CallCollector<'_> {
             }
         }
         if let Some(call) = program.call(expression.id) {
-            if let crate::semantic::ResolvedCall::StandardLibrary { item, .. } = call
-                && let hir::TypedExpressionKind::Call { arguments, .. } = &expression.kind
-            {
-                let converted = match *item {
-                    crate::stdlib::StdlibItemId::Print => arguments.first(),
-                    crate::stdlib::StdlibItemId::SetVariable => arguments.get(1),
-                    _ => None,
-                };
-                if let Some(argument) = converted {
-                    let ty = program
-                        .expression(*argument)
-                        .expect("resolved call arguments belong to typed HIR")
-                        .ty;
-                    self.facts.callees.extend(
-                        self.capabilities
-                            .display_method_implementations(ty, self.semantics),
-                    );
-                }
-            }
             if call
                 .receiver()
                 .and_then(|receiver| receiver.path().map(|(root, _)| root))
@@ -360,9 +369,13 @@ impl OperationAnalysis {
     pub fn attached_process_violations(
         &self,
         program: &TypedProgram,
+        semantics: &SemanticModel,
+        capabilities: &crate::capabilities::CapabilityAnalysis,
     ) -> Vec<AttachedProcessViolation> {
         struct Validator<'a> {
             analysis: &'a OperationAnalysis,
+            semantics: &'a SemanticModel,
+            capabilities: &'a crate::capabilities::CapabilityAnalysis,
             action: ActionKind,
             violations: Vec<AttachedProcessViolation>,
         }
@@ -414,6 +427,18 @@ impl OperationAnalysis {
         }
         impl TypedVisitor for Validator<'_> {
             fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
+                for function in
+                    implicit_display_callees(expression, program, self.semantics, self.capabilities)
+                {
+                    if self.analysis.function(function).requires_attached_process {
+                        self.violations.push(AttachedProcessViolation {
+                            action: self.action,
+                            expression_span: expression.span,
+                            function: Some(function),
+                            standard_library_name: None,
+                        });
+                    }
+                }
                 let violation = program
                     .call(expression.id)
                     .and_then(|call| self.violation(call, expression.span, program));
@@ -447,6 +472,8 @@ impl OperationAnalysis {
         {
             let mut validator = Validator {
                 analysis: self,
+                semantics,
+                capabilities,
                 action: action.action,
                 violations: Vec::new(),
             };
@@ -456,9 +483,16 @@ impl OperationAnalysis {
         violations
     }
 
-    pub fn state_snapshot_violations(&self, program: &TypedProgram) -> Vec<StateSnapshotViolation> {
+    pub fn state_snapshot_violations(
+        &self,
+        program: &TypedProgram,
+        semantics: &SemanticModel,
+        capabilities: &crate::capabilities::CapabilityAnalysis,
+    ) -> Vec<StateSnapshotViolation> {
         struct Validator<'a> {
             analysis: &'a OperationAnalysis,
+            semantics: &'a SemanticModel,
+            capabilities: &'a crate::capabilities::CapabilityAnalysis,
             context: StateSnapshotContext,
             violations: Vec<StateSnapshotViolation>,
         }
@@ -498,6 +532,18 @@ impl OperationAnalysis {
         }
         impl TypedVisitor for Validator<'_> {
             fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
+                for function in
+                    implicit_display_callees(expression, program, self.semantics, self.capabilities)
+                {
+                    if self.analysis.function(function).requires_state_snapshots {
+                        self.violations.push(StateSnapshotViolation {
+                            context: self.context,
+                            expression_span: expression.span,
+                            function: Some(function),
+                            standard_library_name: None,
+                        });
+                    }
+                }
                 if let Some(violation) = program
                     .call(expression.id)
                     .and_then(|call| self.violation(call, expression.span, program))
@@ -531,6 +577,8 @@ impl OperationAnalysis {
         {
             let mut validator = Validator {
                 analysis: self,
+                semantics,
+                capabilities,
                 context: StateSnapshotContext::Action(action.action),
                 violations: Vec::new(),
             };
@@ -540,6 +588,8 @@ impl OperationAnalysis {
         for (_, expression) in program.state_sources() {
             let mut validator = Validator {
                 analysis: self,
+                semantics,
+                capabilities,
                 context: StateSnapshotContext::StateSource,
                 violations: Vec::new(),
             };
@@ -551,6 +601,8 @@ impl OperationAnalysis {
         for transform in program.state_transforms() {
             let mut validator = Validator {
                 analysis: self,
+                semantics,
+                capabilities,
                 context: StateSnapshotContext::StateTransform,
                 violations: Vec::new(),
             };

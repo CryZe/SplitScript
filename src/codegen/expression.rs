@@ -4455,6 +4455,10 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
         if source == target {
             return;
         }
+        if source == Type::None {
+            emit_string_literal(function, "None", context.gc);
+            return;
+        }
         if source == Type::Bool {
             function.instruction(&Instruction::If(BlockType::Result(
                 context.gc.val_type(Type::Standard(StdlibTypeId::String)),
@@ -4477,6 +4481,11 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
         if let Some(display) = context.display_functions.custom.get(&source_type) {
             let display = context.called_instance(display);
             function.instruction(&Instruction::Call(context.functions[&display].call));
+            return;
+        }
+        if let Some(debug) = context.display_functions.custom_debug.get(&source_type) {
+            let debug = context.called_instance(debug);
+            function.instruction(&Instruction::Call(context.functions[&debug].call));
             return;
         }
         if let Some(display) = context.display_functions.derived.get(&source_type) {

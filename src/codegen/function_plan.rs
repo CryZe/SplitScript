@@ -200,18 +200,21 @@ pub(super) fn encode<'a>(
             .display_functions()
             .map(|(ty, function)| (ty, function.clone()))
             .collect(),
+        custom_debug: reachability
+            .debug_functions()
+            .map(|(ty, function)| (ty, function.clone()))
+            .collect(),
         ..DisplayFunctions::default()
     };
-    for ty in reachability.derived_displays() {
+    for ty in reachability.derived_debugs() {
         let source_type = super::semantic_type(ty, semantics);
-        let name = &structural
+        let name = structural
             .get(ty)
-            .expect("derived Display implementations belong to source aggregates")
-            .name;
+            .map_or_else(|| format!("type#{}", ty.index()), |ty| ty.name.clone());
         displays.derived.insert(
             ty,
             declare(
-                format!("__splitscript::display::{name}"),
+                format!("__splitscript::debug::{name}"),
                 vec![gc.val_type(source_type)],
                 vec![gc.val_type(Type::Standard(crate::stdlib::StdlibTypeId::String))],
             ),

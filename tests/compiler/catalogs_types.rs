@@ -2908,6 +2908,54 @@ fn structural_display_derives_by_default_and_reports_mismatched_overrides() {
 }
 
 #[test]
+fn structural_debug_can_be_overridden_and_rejects_mismatched_methods() {
+    let source = r#"
+        state "game.exe" {}
+        record Position { x: i32, }
+        fn Position.debugString() -> String { return `point:{self.x}` }
+        whileAttached {
+            print(Position { x: 3 })
+            print([Position { x: 4 }])
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("an exact debugString method should override derived Debug");
+    let position = checked
+        .semantics()
+        .types()
+        .id_for_record(checked.syntax().records[0].id);
+    assert!(checked.capabilities().has(
+        position,
+        splitscript::compiler::stdlib::StdlibCapabilityId::Debug,
+        checked.semantics(),
+    ));
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile(source).unwrap())
+        .expect("custom Debug calls should lower to valid Wasm");
+
+    let diagnostics = splitscript::check(
+        splitscript::parse(
+            r#"
+                state "game.exe" {}
+                record Position { x: i32, }
+                fn Position.debugString() -> i32 { return self.x }
+                whileAttached { print(Position { x: 3 }) }
+            "#,
+        )
+        .unwrap(),
+    )
+    .expect_err("a malformed debugString override must not silently derive Debug");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("does not match")
+                && diagnostic.message.contains("Debug")
+                && diagnostic.message.contains("debugString")
+        }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn implicit_display_calls_propagate_source_method_effects() {
     let source = r#"
         state "game.exe" {}
@@ -2933,6 +2981,58 @@ fn implicit_display_calls_propagate_source_method_effects() {
         diagnostics.iter().any(|diagnostic| {
             diagnostic.message.contains("requires an attached process")
                 && diagnostic.message.contains("setup")
+        }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn implicit_debug_calls_propagate_source_method_effects() {
+    let source = r#"
+        state "game.exe" {}
+        record ProcessLabel { prefix: String, }
+
+        fn ProcessLabel.debugString() -> String {
+            return `{self.prefix}: {process.name()}`
+        }
+
+        setup {
+            let text = [ProcessLabel { prefix: "game" }] as String
+        }
+    "#;
+    let diagnostics = splitscript::check(splitscript::parse(source).unwrap())
+        .expect_err("nested Debug calls must preserve attached-process effects");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("requires an attached process")
+                && diagnostic.message.contains("setup")
+        }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn implicit_debug_calls_propagate_state_snapshot_effects() {
+    let source = r#"
+        state "game.exe" {
+            health: u32 at 0x100;
+        }
+        record SnapshotLabel { prefix: String, }
+
+        fn SnapshotLabel.debugString() -> String {
+            return `{self.prefix}: {current.health}`
+        }
+
+        onAttach {
+            let text = [SnapshotLabel { prefix: "health" }] as String
+        }
+    "#;
+    let diagnostics = splitscript::check(splitscript::parse(source).unwrap())
+        .expect_err("nested Debug calls must preserve state-snapshot effects");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("requires state snapshots")
+                && diagnostic.message.contains("onAttach")
         }),
         "{diagnostics:#?}"
     );

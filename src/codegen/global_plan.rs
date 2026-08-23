@@ -44,6 +44,9 @@ pub(super) struct RuntimeGlobals {
     pub attach_ready: u32,
     /// Whether this attachment has committed at least one complete snapshot.
     pub state_ready: u32,
+    /// Current compiler-derived structural formatting depth. This bounds
+    /// recursive container graphs without allocating traversal state.
+    pub debug_depth: u32,
     pub async_frame: u32,
 }
 
@@ -182,6 +185,15 @@ pub(super) fn encode(
         },
         &ConstExpr::i32_const(0),
     );
+    let debug_depth = section.len();
+    section.global(
+        GlobalType {
+            val_type: ValType::I32,
+            mutable: true,
+            shared: false,
+        },
+        &ConstExpr::i32_const(0),
+    );
     let async_frame = section.len();
     section.global(
         GlobalType {
@@ -286,6 +298,7 @@ pub(super) fn encode(
             old,
             attach_ready,
             state_ready,
+            debug_depth,
             async_frame,
         },
         variables,

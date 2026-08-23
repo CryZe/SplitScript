@@ -469,7 +469,22 @@ fn append_source_capabilities(description: &mut String, ty: TypeId, context: &Se
         })
         .map(|capability| capability.id)
         .collect::<Vec<_>>();
-    let capabilities = context.standard_library.minimal_capabilities(&capabilities);
+    let mut capabilities = context.standard_library.minimal_capabilities(&capabilities);
+    // A custom user-facing formatter remains meaningful even when a derived
+    // `Debug` implementation implies the bare `Display` capability.
+    if checked
+        .capabilities()
+        .method_implementation(
+            ty,
+            crate::stdlib::StdlibCapabilityId::Display,
+            crate::stdlib::StdlibItemId::DisplayToString,
+            context.semantics(),
+        )
+        .is_some()
+        && !capabilities.contains(&crate::stdlib::StdlibCapabilityId::Display)
+    {
+        capabilities.push(crate::stdlib::StdlibCapabilityId::Display);
+    }
     if capabilities.is_empty() {
         return;
     }
@@ -479,8 +494,8 @@ fn append_source_capabilities(description: &mut String, ty: TypeId, context: &Se
             .iter()
             .map(|capability| {
                 let name = context.standard_library.capability(*capability).name;
-                if *capability == crate::stdlib::StdlibCapabilityId::Display {
-                    let implementation = if checked
+                let implementation = match *capability {
+                    crate::stdlib::StdlibCapabilityId::Display => checked
                         .capabilities()
                         .method_implementation(
                             ty,
@@ -489,16 +504,32 @@ fn append_source_capabilities(description: &mut String, ty: TypeId, context: &Se
                             context.semantics(),
                         )
                         .is_some()
-                    {
-                        "custom"
-                    } else if checked
+                        .then_some("custom")
+                        .or_else(|| {
+                            checked
+                                .capabilities()
+                                .has_derived_display(ty, context.semantics())
+                                .then_some("derived")
+                        }),
+                    crate::stdlib::StdlibCapabilityId::Debug => checked
                         .capabilities()
-                        .has_derived_display(ty, context.semantics())
-                    {
-                        "derived"
-                    } else {
-                        "declared"
-                    };
+                        .method_implementation(
+                            ty,
+                            crate::stdlib::StdlibCapabilityId::Debug,
+                            crate::stdlib::StdlibItemId::DebugDebugString,
+                            context.semantics(),
+                        )
+                        .is_some()
+                        .then_some("custom")
+                        .or_else(|| {
+                            checked
+                                .capabilities()
+                                .has_derived_debug(ty, context.semantics())
+                                .then_some("derived")
+                        }),
+                    _ => None,
+                };
+                if let Some(implementation) = implementation {
                     format!("`{name}` ({implementation})")
                 } else {
                     format!("`{name}`")
@@ -2301,7 +2332,7 @@ whileAttached { print(Position { x: 3 }) }
             .unwrap()
             .expect("derived record hover");
         assert!(
-            hover.markdown.contains("`Display` (derived)"),
+            hover.markdown.contains("`Debug` (derived)"),
             "{}",
             hover.markdown
         );

@@ -157,9 +157,12 @@ impl BackendDependencies {
             dependencies.require(RuntimeHelperId::StringEquality);
         }
 
-        if reachability.derived_displays().next().is_some() {
+        if reachability.derived_debugs().next().is_some() {
             dependencies.require(RuntimeHelperId::JoinStrings);
             dependencies.require(RuntimeHelperId::IndentDisplay);
+            dependencies.require(RuntimeHelperId::WrapDebugEntry);
+            dependencies.require(RuntimeHelperId::WrapDebugVariant);
+            dependencies.require(RuntimeHelperId::QuoteDebugString);
             dependencies.require(RuntimeHelperId::FormatI64);
             dependencies.require(RuntimeHelperId::FormatChar);
         }

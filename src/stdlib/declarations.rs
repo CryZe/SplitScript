@@ -71,7 +71,7 @@ macro_rules! with_core_types {
     ($consumer:ident) => {
         $consumer! {
             Never => { name: "Never", capabilities: &[], memory_layout: None },
-            None => { name: "None", capabilities: &[StdlibCapabilityId::Equatable], memory_layout: None },
+            None => { name: "None", capabilities: &[StdlibCapabilityId::Debug, StdlibCapabilityId::Equatable], memory_layout: None },
             Bool => { name: "bool", capabilities: BOOL_CAPABILITIES, memory_layout: Some(ScalarMemoryLayout { size: 1, alignment: 1 }) },
             Char => { name: "char", capabilities: CHAR_CAPABILITIES, memory_layout: None },
             I8 => { name: "i8", capabilities: SIGNED_INTEGER_CAPABILITIES, memory_layout: Some(ScalarMemoryLayout { size: 1, alignment: 1 }) },
@@ -259,18 +259,24 @@ pub struct StdlibVariant {
 }
 
 const BOOL_CAPABILITIES: &[StdlibCapabilityId] = &[
+    StdlibCapabilityId::Debug,
     StdlibCapabilityId::Equatable,
     StdlibCapabilityId::Display,
     StdlibCapabilityId::MemoryReadable,
 ];
-const CHAR_CAPABILITIES: &[StdlibCapabilityId] =
-    &[StdlibCapabilityId::Equatable, StdlibCapabilityId::Display];
+const CHAR_CAPABILITIES: &[StdlibCapabilityId] = &[
+    StdlibCapabilityId::Debug,
+    StdlibCapabilityId::Equatable,
+    StdlibCapabilityId::Display,
+];
 const SIGNED_INTEGER_CAPABILITIES: &[StdlibCapabilityId] = &[
+    StdlibCapabilityId::Debug,
     StdlibCapabilityId::Integer,
     StdlibCapabilityId::Signed,
     StdlibCapabilityId::MemoryReadable,
 ];
 const UNSIGNED_INTEGER_CAPABILITIES: &[StdlibCapabilityId] = &[
+    StdlibCapabilityId::Debug,
     StdlibCapabilityId::Integer,
     StdlibCapabilityId::MemoryReadable,
 ];

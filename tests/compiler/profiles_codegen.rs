@@ -179,7 +179,7 @@ fn structural_display_helpers_are_materialized_only_when_reachable() {
     assert!(
         unused_names
             .iter()
-            .all(|(_, name)| name != "__splitscript::display::Point"),
+            .all(|(_, name)| name != "__splitscript::debug::Point"),
         "declaring a displayable record must not eagerly generate its formatter"
     );
 
@@ -191,7 +191,7 @@ fn structural_display_helpers_are_materialized_only_when_reachable() {
     assert!(
         displayed_names
             .iter()
-            .any(|(_, name)| name == "__splitscript::display::Point"),
+            .any(|(_, name)| name == "__splitscript::debug::Point"),
         "a reachable conversion should materialize the formatter"
     );
 }

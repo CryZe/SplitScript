@@ -86,6 +86,10 @@ pub(super) fn build_format_char(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_format_char(inputs.gc)
 }
 
+pub(super) fn build_quote_debug_string(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_quote_debug_string(inputs.gc)
+}
+
 pub(super) fn build_string_equality(inputs: &RuntimeHelperInputs<'_>) -> Function {
     equality::compile_string_eq(inputs.gc)
 }
@@ -171,6 +175,28 @@ pub(super) fn build_string_trim_ascii_whitespace(inputs: &RuntimeHelperInputs<'_
 
 pub(super) fn build_string_pad(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_string_pad(inputs.gc)
+}
+
+pub(super) fn build_wrap_debug_entry(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    let (array, storage) = array_layouts(inputs, Type::Standard(StdlibTypeId::String));
+    strings::compile_wrap_debug_entry(
+        inputs.plan.function(RuntimeHelperId::IndentDisplay),
+        inputs.plan.function(RuntimeHelperId::JoinStrings),
+        array,
+        storage,
+        inputs.gc,
+    )
+}
+
+pub(super) fn build_wrap_debug_variant(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    let (array, storage) = array_layouts(inputs, Type::Standard(StdlibTypeId::String));
+    strings::compile_wrap_debug_variant(
+        inputs.plan.function(RuntimeHelperId::WrapDebugEntry),
+        inputs.plan.function(RuntimeHelperId::JoinStrings),
+        array,
+        storage,
+        inputs.gc,
+    )
 }
 
 pub(super) fn build_scan_process_range(inputs: &RuntimeHelperInputs<'_>) -> Function {

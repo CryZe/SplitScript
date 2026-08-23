@@ -864,6 +864,128 @@ fn retry_restarts_the_complete_operand_once_per_attached_update() {
 }
 
 #[test]
+fn structural_debug_formats_nested_containers_and_text_unambiguously() {
+    let source = r#"
+        record Checkpoint {
+            name: String,
+            values: [u32],
+        }
+
+        enum Status {
+            Ready(String),
+            Idle,
+        }
+
+        record Label {
+            name: String,
+        }
+
+        fn Label.debugString() -> String {
+            return `debug:{self.name}`
+        }
+
+        record Custom {
+            name: String,
+        }
+
+        fn Custom.toString() -> String {
+            return `display:{self.name}`
+        }
+
+        state "game.exe" {}
+
+        whileAttached {
+            print(["forest", "castle\nkeep"])
+            let fixed: [u8; 2] = [1, 2]
+            print(fixed)
+            let present: String? = "gate"
+            print(present)
+            let absent: u32? = None
+            print(absent)
+            print(None)
+            let success: u32! = 7
+            print(success)
+            let failure: u32! = Err("bad\tvalue")
+            print(failure)
+            print(1u32..<3u32)
+            print(Checkpoint { name: "start", values: [1, 2] })
+            print(Status.Ready("go"))
+            let visited = Set.new<String>()
+            visited.insert("atrium")
+            visited.insert("vault")
+            print(visited)
+            print(Label { name: "label" })
+            print(Custom { name: "custom" })
+            print([Custom { name: "nested" }])
+            let item: IteratorStep<u32> = Item(4)
+            print(item)
+            let end: IteratorStep<u32> = End
+            print(end)
+            print([v"1.2.3.4"])
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+
+    assert_eq!(
+        store.data().messages,
+        [
+            "[\n    \"forest\",\n    \"castle\\nkeep\",\n]",
+            "[\n    1,\n    2,\n]",
+            "Some(\n    \"gate\",\n)",
+            "None",
+            "None",
+            "Ok(\n    7,\n)",
+            "Err(\n    \"bad\\tvalue\",\n)",
+            "1..<3",
+            "Checkpoint {\n    name: \"start\",\n    values: [\n        1,\n        2,\n    ],\n}",
+            "Status.Ready(\n    \"go\",\n)",
+            "Set {\n    \"atrium\",\n    \"vault\",\n}",
+            "debug:label",
+            "display:custom",
+            "[\n    Custom {\n        name: \"nested\",\n    },\n]",
+            "Item(\n    4,\n)",
+            "End",
+            "[\n    1.2.3.4,\n]",
+        ]
+    );
+}
+
+#[test]
+fn structural_debug_bounds_recursive_container_graphs() {
+    let source = r#"
+        record Node {
+            children: [Node],
+        }
+
+        state "game.exe" {}
+
+        whileAttached {
+            let children: [Node] = []
+            let node = Node { children: children }
+            children.push(node)
+            print(node)
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    update.call(&mut store, ()).unwrap();
+    update.call(&mut store, ()).unwrap();
+    assert_eq!(store.data().messages.len(), 1);
+    assert!(
+        store.data().messages[0].contains("<cycle>"),
+        "{}",
+        store.data().messages[0]
+    );
+}
+
+#[test]
 fn process_fallbacks_and_awaited_module_values_are_typed_and_persistent() {
     let source = r#"
         state ["full.exe", "demo.exe"] {}

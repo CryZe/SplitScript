@@ -343,22 +343,30 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Standard-library and type-system boundaries
 
-- [x] Derive `Display` lazily for ordinary values. Records and enums receive a
-  stable, multiline structural representation without requiring
-  boilerplate, while an exact user-defined `fn Type.toString() -> String`
-  overrides that representation. Capability checking and editor insight
-  describe the derivation eagerly, while code generation synthesizes a
-  formatter only when a reachable interpolation, `print`, `setVariable`, or
-  `as String` conversion needs that concrete type. Nested custom display
-  methods retain their reachability and effects, and malformed
-  overrides are diagnosed rather than silently ignored. Equality and Display
-  consume one canonical structural-type graph for fields, variants, payloads,
-  dependency traversal, and deterministic backend planning.
+- [x] Separate user-facing `Display` from structural `Debug` while retaining a
+  boilerplate-free default. An exact `fn Type.toString() -> String` controls
+  direct display; otherwise `Display` falls back to `Debug`. Records, enums,
+  arrays, fixed arrays, sets, options, results, ranges, and iterator steps
+  derive a stable multiline `Debug` representation conditionally on their
+  contained values. Nested strings and characters are quoted and escaped, and
+  `fn Type.debugString() -> String` overrides nested formatting without `impl`
+  ceremony. Capability checking and hover insight describe custom versus
+  derived implementations eagerly, while code generation materializes only
+  reachable concrete formatters and recursively reachable custom methods.
+  Generated traversal is depth-bounded so mutable recursive container graphs
+  render `<cycle>` instead of hanging an autosplitter. Equality, Display, and
+  Debug share canonical aggregate metadata and deterministic backend planning.
+- [ ] Complete default `Debug` / `Display` coverage for floating-point values
+  with a correctly rounded, round-trippable runtime formatter rather than an
+  approximate decimal conversion. Once that formatter exists, make `f32` and
+  `f64` participate in the same derived-container rules as the other scalar
+  types.
 - [x] Let catalog-defined structural method contracts be satisfied by ordinary
-  user methods without `impl` ceremony. `Display` is the first contract:
-  `fn Type.toString() -> String` makes a user record or enum displayable, and
-  implicit conversion calls retain the source method's reachability and
-  effects. Standard-library implementations remain explicit and privileged.
+  user methods without `impl` ceremony. `fn Type.toString() -> String` and
+  `fn Type.debugString() -> String` satisfy `Display` and `Debug`
+  respectively, and implicit conversion calls retain the source method's
+  reachability and effects. Standard-library implementations remain explicit
+  and privileged.
 - [ ] Continue designing the user-facing trait/type-class model around the
   existing source-defined capability graph. Evaluate memory reading, equality,
   numeric operations, and hashing individually; representation-sensitive

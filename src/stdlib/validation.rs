@@ -441,6 +441,7 @@ fn validate_field_type(
             ));
         }
         TypeRef::Parameter(_) => {}
+        TypeRef::Associated(_) => {}
         TypeRef::Core(_) | TypeRef::Standard(_) => {}
     }
 }
@@ -473,6 +474,9 @@ fn validate_memory_type(
         }
         TypeRef::Parameter(_) => {
             Err("generic fields have no fixed process-memory layout".to_owned())
+        }
+        TypeRef::Associated(_) => {
+            Err("associated fields have no fixed process-memory layout".to_owned())
         }
     }
 }
@@ -507,6 +511,7 @@ fn validate_equality_type(
         TypeRef::Application { .. } => Err("its constructed type is not Equatable".to_owned()),
         TypeRef::FixedArray { .. } => Err("its fixed array type is not Equatable".to_owned()),
         TypeRef::Parameter(_) => Err("its generic type is not Equatable".to_owned()),
+        TypeRef::Associated(_) => Err("its associated type is not Equatable".to_owned()),
     }
 }
 

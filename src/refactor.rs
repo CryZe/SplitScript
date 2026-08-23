@@ -817,6 +817,7 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
         let binding = match pattern {
             MatchPattern::Enum { binding, .. }
             | MatchPattern::OptionSome(binding)
+            | MatchPattern::IteratorItem(binding)
             | MatchPattern::ResultSuccess(binding)
             | MatchPattern::ResultError(binding) => binding.as_ref(),
             MatchPattern::Bool(_)
@@ -825,6 +826,7 @@ impl<'ast> Visitor<'ast> for ExpressionFacts<'_> {
             | MatchPattern::Int { .. }
             | MatchPattern::FileVersion(_)
             | MatchPattern::None
+            | MatchPattern::IteratorEnd
             | MatchPattern::Wildcard => None,
         };
         if let Some(binding) = binding {
@@ -844,6 +846,9 @@ fn contains_generic_parameter(ty: TypeId, snapshot: &SemanticSnapshot) -> bool {
         | TypeKind::Result { value: element, .. }
         | TypeKind::Async { value: element, .. }
         | TypeKind::Range { bound: element, .. } => contains_generic_parameter(*element, snapshot),
+        TypeKind::Application { arguments, .. } => arguments
+            .iter()
+            .any(|argument| contains_generic_parameter(*argument, snapshot)),
         TypeKind::Builtin(_)
         | TypeKind::Standard(_)
         | TypeKind::StateSnapshot
@@ -905,6 +910,7 @@ fn value_names(program: &Program) -> HashMap<ValueId, String> {
             let binding = match pattern {
                 MatchPattern::Enum { binding, .. }
                 | MatchPattern::OptionSome(binding)
+                | MatchPattern::IteratorItem(binding)
                 | MatchPattern::ResultSuccess(binding)
                 | MatchPattern::ResultError(binding) => binding.as_ref(),
                 _ => None,

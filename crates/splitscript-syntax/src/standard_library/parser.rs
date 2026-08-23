@@ -1,8 +1,8 @@
 use super::{
-    Attribute, AttributeArgument, CallableOwnerDeclaration, Declaration, Documentation,
-    EnumDeclaration, Error, Example, FieldDeclaration, FunctionDeclaration, Library, Parameter,
-    StateProviderDeclaration, StructDeclaration, Type, TypeConstructorSyntax, TypeParameter,
-    VariantDeclaration,
+    AssociatedTypeDeclaration, Attribute, AttributeArgument, CallableOwnerDeclaration, Declaration,
+    Documentation, EnumDeclaration, Error, Example, FieldDeclaration, FunctionDeclaration, Library,
+    Parameter, StateProviderDeclaration, StructDeclaration, Type, TypeConstructorSyntax,
+    TypeParameter, VariantDeclaration,
 };
 use crate::{SyntaxMode, Token, TokenCursor, TokenKind, lex, parser::parse_integer};
 
@@ -25,6 +25,13 @@ pub fn parse(source: &str) -> Result<Library, Vec<Error>> {
 struct Parser<'a> {
     source: &'a str,
     cursor: TokenCursor,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AssociatedTypesMode {
+    Forbidden,
+    Requirements,
+    Definitions,
 }
 
 impl Parser<'_> {
@@ -65,6 +72,7 @@ impl Parser<'_> {
                     attributes,
                     true,
                     false,
+                    AssociatedTypesMode::Forbidden,
                 )?));
             } else if self.eat_ident("namespace") {
                 if private {
@@ -77,6 +85,7 @@ impl Parser<'_> {
                     attributes,
                     true,
                     false,
+                    AssociatedTypesMode::Forbidden,
                 )?));
             } else if self.eat_ident("capability") {
                 if private {
@@ -89,6 +98,7 @@ impl Parser<'_> {
                     attributes,
                     false,
                     false,
+                    AssociatedTypesMode::Requirements,
                 )?));
             } else if self.eat_ident("typeConstructor") {
                 if private {
@@ -102,6 +112,7 @@ impl Parser<'_> {
                     attributes,
                     false,
                     true,
+                    AssociatedTypesMode::Definitions,
                 )?;
                 declaration.type_constructor_syntax = Some(syntax);
                 declarations.push(Declaration::TypeConstructor(declaration));
@@ -111,7 +122,14 @@ impl Parser<'_> {
                 }
                 let name = self.ident("expected a core type after `extend`")?;
                 declarations.push(Declaration::CoreExtension(
-                    self.callable_owner_declaration(name, documentation, attributes, false, false)?,
+                    self.callable_owner_declaration(
+                        name,
+                        documentation,
+                        attributes,
+                        false,
+                        false,
+                        AssociatedTypesMode::Forbidden,
+                    )?,
                 ));
             } else if self.eat_ident("stateProvider") {
                 if private {
@@ -169,6 +187,7 @@ impl Parser<'_> {
         attributes: Vec<Attribute>,
         functions_are_static: bool,
         fields_allowed: bool,
+        associated_types: AssociatedTypesMode,
     ) -> Result<CallableOwnerDeclaration, Error> {
         let type_parameters = self.type_parameters()?;
         self.callable_owner_declaration_with_parameters(
@@ -178,6 +197,7 @@ impl Parser<'_> {
             attributes,
             functions_are_static,
             fields_allowed,
+            associated_types,
         )
     }
 
@@ -189,9 +209,11 @@ impl Parser<'_> {
         attributes: Vec<Attribute>,
         functions_are_static: bool,
         fields_allowed: bool,
+        associated_types_mode: AssociatedTypesMode,
     ) -> Result<CallableOwnerDeclaration, Error> {
         self.expect(TokenKind::LBrace, "expected `{` after the declaration name")?;
         let mut fields = Vec::new();
+        let mut associated_types = Vec::new();
         let mut functions = Vec::new();
         while !self.at(&TokenKind::RBrace) {
             if self.at(&TokenKind::Eof) {
@@ -201,7 +223,52 @@ impl Parser<'_> {
             let attributes = self.attributes()?;
             let private = self.eat_ident("private");
             let explicitly_static = self.eat_ident("static");
-            if self.eat_ident("fn") {
+            if self.eat_ident("type") {
+                if associated_types_mode == AssociatedTypesMode::Forbidden {
+                    return Err(self.error(
+                        "associated types are only valid in capabilities and type constructors",
+                    ));
+                }
+                if private || explicitly_static {
+                    return Err(self.error("an associated type cannot be `private` or `static`"));
+                }
+                let name = self.ident("expected an associated type name")?;
+                let mut constraints = Vec::new();
+                if self.eat(&TokenKind::Colon) {
+                    loop {
+                        constraints.push(self.ident("expected a capability constraint")?);
+                        if !self.eat(&TokenKind::Plus) {
+                            break;
+                        }
+                    }
+                }
+                let value = if self.eat(&TokenKind::Assign) {
+                    Some(self.ty()?)
+                } else {
+                    None
+                };
+                match associated_types_mode {
+                    AssociatedTypesMode::Requirements if value.is_some() => {
+                        return Err(self.error("a capability associated type is a requirement and cannot define a value"));
+                    }
+                    AssociatedTypesMode::Definitions if value.is_none() => {
+                        return Err(self.error(
+                            "a type-constructor associated type must define a value after `=`",
+                        ));
+                    }
+                    _ => {}
+                }
+                self.expect(
+                    TokenKind::Semicolon,
+                    "expected `;` after the associated type",
+                )?;
+                associated_types.push(AssociatedTypeDeclaration {
+                    name,
+                    constraints,
+                    value,
+                    documentation,
+                });
+            } else if self.eat_ident("fn") {
                 functions.push(self.function_declaration(
                     documentation,
                     attributes,
@@ -229,6 +296,7 @@ impl Parser<'_> {
             documentation,
             attributes,
             fields,
+            associated_types,
             functions,
         })
     }

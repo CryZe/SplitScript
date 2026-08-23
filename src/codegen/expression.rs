@@ -15,7 +15,7 @@ use crate::{
     },
     stdlib::{
         IntrinsicId, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibOwner,
-        StdlibTypeId,
+        StdlibTypeConstructorId, StdlibTypeId,
     },
     types::{EnumTypeId, ResolvedArrayType, TypeId},
     wasm_ir::{self, TemporaryId},
@@ -23,7 +23,7 @@ use crate::{
 
 use super::{
     DisplayFunctions, EqualityFunctions, GcLayout, MemoryByteOrder, RuntimeHelperPlan, STATE_TYPE,
-    SetFunctions, SettingStorage, Type, array_element_type,
+    SetFunctions, SettingStorage, Type, application_type_argument, array_element_type,
     async_frame::{AsyncFrameRef, IntrinsicFutureInstance, IntrinsicFutureLayout},
     emit_array_get, emit_default, emit_failure_transfer, emit_int, emit_memory_value,
     emit_result_error, emit_result_success, emit_string_literal, emit_struct_get,
@@ -32,7 +32,7 @@ use super::{
     imports::Abi,
     memarg,
     memory_plan::AbiReadScratch,
-    record_field_type, resolved_intrinsic, result_value_type,
+    range_bound_type, record_field_type, resolved_intrinsic, result_value_type,
     runtime_helpers::emit_value_equality,
     script_functions::emit_action_default,
     semantic_type, standard_field_type, state_storage_index, try_array_element_type, value_type,
@@ -722,6 +722,12 @@ pub(super) fn compile_statement_pattern(
             };
             binding.map(|binding| (binding, context.gc.index(Type::Option(option)), 0))
         }
+        wasm_ir::LoweredPattern::IteratorItem { binding, .. } => {
+            let Type::Application(step) = value_type else {
+                unreachable!("Item patterns match IteratorStep values")
+            };
+            binding.map(|binding| (binding, context.gc.index(Type::Application(step)), 0))
+        }
         wasm_ir::LoweredPattern::ResultSuccess { binding, .. } => {
             let Type::Result(result) = value_type else {
                 unreachable!("Ok patterns match Result values")
@@ -788,6 +794,17 @@ pub(super) fn compile_statement_pattern(
                 .instruction(&Instruction::RefIsNull);
         }
         wasm_ir::LoweredPattern::OptionSome { .. } => {
+            function
+                .instruction(&Instruction::LocalGet(value_local))
+                .instruction(&Instruction::RefIsNull)
+                .instruction(&Instruction::I32Eqz);
+        }
+        wasm_ir::LoweredPattern::IteratorEnd(_) => {
+            function
+                .instruction(&Instruction::LocalGet(value_local))
+                .instruction(&Instruction::RefIsNull);
+        }
+        wasm_ir::LoweredPattern::IteratorItem { .. } => {
             function
                 .instruction(&Instruction::LocalGet(value_local))
                 .instruction(&Instruction::RefIsNull)
@@ -2013,6 +2030,14 @@ fn compile_expr_unconverted(
                 expression_ir.conversion
             ),
         },
+        wasm_ir::ExpressionKind::IteratorEnd => {
+            let Type::Application(step) = ty else {
+                unreachable!("End expressions have IteratorStep<T> type")
+            };
+            function.instruction(&Instruction::RefNull(HeapType::Concrete(
+                context.gc.index(Type::Application(step)),
+            )));
+        }
         wasm_ir::ExpressionKind::Bool(value) => {
             function.instruction(&Instruction::I32Const(*value as i32));
         }
@@ -2449,6 +2474,13 @@ fn compile_expr_unconverted(
                         };
                         binding.map(|binding| (binding, context.gc.index(Type::Option(option)), 0))
                     }
+                    wasm_ir::LoweredPattern::IteratorItem { binding, .. } => {
+                        let Type::Application(step) = value_type else {
+                            unreachable!("Item patterns match IteratorStep values")
+                        };
+                        binding
+                            .map(|binding| (binding, context.gc.index(Type::Application(step)), 0))
+                    }
                     wasm_ir::LoweredPattern::ResultSuccess { binding, .. } => {
                         let Type::Result(result) = value_type else {
                             unreachable!("Ok patterns match Result values")
@@ -2533,6 +2565,17 @@ fn compile_expr_unconverted(
                             .instruction(&Instruction::RefIsNull);
                     }
                     wasm_ir::LoweredPattern::OptionSome { .. } => {
+                        function
+                            .instruction(&Instruction::LocalGet(value_local))
+                            .instruction(&Instruction::RefIsNull)
+                            .instruction(&Instruction::I32Eqz);
+                    }
+                    wasm_ir::LoweredPattern::IteratorEnd(_) => {
+                        function
+                            .instruction(&Instruction::LocalGet(value_local))
+                            .instruction(&Instruction::RefIsNull);
+                    }
+                    wasm_ir::LoweredPattern::IteratorItem { .. } => {
                         function
                             .instruction(&Instruction::LocalGet(value_local))
                             .instruction(&Instruction::RefIsNull)
@@ -2724,6 +2767,15 @@ fn compile_expr_unconverted(
                 compile_expr(function, args[0], context);
                 function.instruction(&Instruction::StructNew(
                     context.gc.index(Type::Option(option)),
+                ));
+            }
+            wasm_ir::CallTarget::IteratorItem { .. } => {
+                let Type::Application(step) = ty else {
+                    unreachable!("Item constructors produce IteratorStep values")
+                };
+                compile_expr(function, args[0], context);
+                function.instruction(&Instruction::StructNew(
+                    context.gc.index(Type::Application(step)),
                 ));
             }
             wasm_ir::CallTarget::ResultSuccess { .. } => {
@@ -3650,6 +3702,18 @@ fn compile_expr_unconverted(
                     _ => unreachable!(),
                 }
             }
+            IntrinsicId::ArrayIterator
+            | IntrinsicId::SetIterator
+            | IntrinsicId::ExclusiveRangeIterator
+            | IntrinsicId::InclusiveRangeIterator => {
+                emit_iterator_constructor(function, expression, target, builtin, context);
+            }
+            IntrinsicId::ArrayIteratorNext
+            | IntrinsicId::SetIteratorNext
+            | IntrinsicId::ExclusiveRangeIteratorNext
+            | IntrinsicId::InclusiveRangeIteratorNext => {
+                emit_iterator_next(function, expression, target, builtin, context);
+            }
             IntrinsicId::ModuleScan
             | IntrinsicId::ModuleScanAny
             | IntrinsicId::UnityModuleImage
@@ -3676,6 +3740,353 @@ fn compile_user_argument(function: &mut Function, argument: ExprId, context: &Ex
     } else {
         compile_expr(function, argument, context);
     }
+}
+
+fn emit_iterator_constructor(
+    function: &mut Function,
+    expression: ExprId,
+    target: &wasm_ir::CallTarget,
+    intrinsic: IntrinsicId,
+    context: &ExprContext<'_>,
+) {
+    let Type::Application(cursor) = context.expression_type(expression) else {
+        unreachable!("iterator constructors return a concrete cursor application")
+    };
+    let source = context.matches.intrinsic_temps[&expression][0];
+    let receiver = compile_receiver(function, target, context);
+    function.instruction(&Instruction::LocalSet(source));
+
+    match intrinsic {
+        IntrinsicId::ArrayIterator => {
+            let Type::Array(array) = receiver else {
+                unreachable!("array.iterator has an array receiver")
+            };
+            function.instruction(&Instruction::LocalGet(source));
+            function.instruction(&Instruction::I32Const(0));
+            function.instruction(&Instruction::LocalGet(source));
+            super::array_value::emit_version(function, context.gc, array);
+        }
+        IntrinsicId::SetIterator => {
+            let Type::Set(set) = receiver else {
+                unreachable!("set.iterator has a set receiver")
+            };
+            function
+                .instruction(&Instruction::LocalGet(source))
+                .instruction(&Instruction::I32Const(0))
+                .instruction(&Instruction::LocalGet(source))
+                .instruction(&Instruction::RefAsNonNull)
+                .instruction(&Instruction::StructGet {
+                    struct_type_index: context.gc.index(Type::Set(set)),
+                    field_index: super::set_functions::VERSION_FIELD,
+                });
+        }
+        IntrinsicId::ExclusiveRangeIterator | IntrinsicId::InclusiveRangeIterator => {
+            let Type::Range(range) = receiver else {
+                unreachable!("range.iterator has a range receiver")
+            };
+            let bound = range_bound_type(range, context.semantics);
+            for field in [0, 1] {
+                function
+                    .instruction(&Instruction::LocalGet(source))
+                    .instruction(&Instruction::RefAsNonNull);
+                emit_typed_struct_get(function, context.gc.index(Type::Range(range)), field, bound);
+            }
+            if intrinsic == IntrinsicId::InclusiveRangeIterator {
+                function.instruction(&Instruction::I32Const(0));
+            }
+        }
+        _ => unreachable!("only iterable constructors reach iterator lowering"),
+    }
+    function.instruction(&Instruction::StructNew(
+        context.gc.index(Type::Application(cursor)),
+    ));
+}
+
+fn emit_iterator_next(
+    function: &mut Function,
+    expression: ExprId,
+    target: &wasm_ir::CallTarget,
+    intrinsic: IntrinsicId,
+    context: &ExprContext<'_>,
+) {
+    let Type::Application(step) = context.expression_type(expression) else {
+        unreachable!("iterator.next returns IteratorStep<T>")
+    };
+    let cursor = context.matches.intrinsic_temps[&expression][0];
+    let Type::Application(cursor_type) = compile_receiver(function, target, context) else {
+        unreachable!("iterator.next has a concrete cursor receiver")
+    };
+    function.instruction(&Instruction::LocalSet(cursor));
+
+    match intrinsic {
+        IntrinsicId::ArrayIteratorNext => {
+            emit_array_iterator_next(function, cursor, cursor_type, step, context);
+        }
+        IntrinsicId::SetIteratorNext => {
+            emit_set_iterator_next(function, cursor, cursor_type, step, context);
+        }
+        IntrinsicId::ExclusiveRangeIteratorNext => {
+            emit_range_iterator_next(function, cursor, cursor_type, step, false, context)
+        }
+        IntrinsicId::InclusiveRangeIteratorNext => {
+            emit_range_iterator_next(function, cursor, cursor_type, step, true, context)
+        }
+        _ => unreachable!("only iterator next intrinsics reach cursor lowering"),
+    }
+}
+
+fn emit_array_iterator_next(
+    function: &mut Function,
+    cursor: u32,
+    cursor_type: crate::ast::TypeApplicationId,
+    step: crate::ast::TypeApplicationId,
+    context: &ExprContext<'_>,
+) {
+    let element = application_type_argument(
+        cursor_type,
+        StdlibTypeConstructorId::ArrayIterator,
+        context.semantics,
+    );
+    let array = context
+        .arrays
+        .iter()
+        .find(|array| {
+            array.length.is_none()
+                && try_array_element_type(array.id, context.semantics) == Some(element)
+        })
+        .expect("ArrayIterator<T> has a materialized [T] source")
+        .id;
+    let cursor_index = context.gc.index(Type::Application(cursor_type));
+
+    emit_cursor_field(function, cursor, cursor_index, 0, Type::Array(array));
+    super::array_value::emit_version(function, context.gc, array);
+    emit_cursor_field(function, cursor, cursor_index, 2, Type::U32);
+    emit_iterator_mutation_check(function);
+
+    emit_cursor_field(function, cursor, cursor_index, 1, Type::U32);
+    emit_cursor_field(function, cursor, cursor_index, 0, Type::Array(array));
+    super::array_value::emit_length(function, context.gc, array);
+    function
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(
+            context.gc.val_type(Type::Application(step)),
+        )));
+
+    emit_cursor_field(function, cursor, cursor_index, 0, Type::Array(array));
+    super::array_value::emit_backing(function, context.gc, array);
+    emit_cursor_field(function, cursor, cursor_index, 1, Type::U32);
+    emit_array_get(
+        function,
+        context
+            .gc
+            .index(Type::ArrayStorage(super::array_value::storage_id(
+                array,
+                context.arrays,
+                context.semantics,
+            ))),
+        element,
+        context.gc,
+    );
+    emit_iterator_item(function, step, context);
+    emit_cursor_increment(function, cursor, cursor_index, 1, Type::U32);
+
+    function.instruction(&Instruction::Else);
+    emit_iterator_end(function, step, context);
+    function.instruction(&Instruction::End);
+}
+
+fn emit_set_iterator_next(
+    function: &mut Function,
+    cursor: u32,
+    cursor_type: crate::ast::TypeApplicationId,
+    step: crate::ast::TypeApplicationId,
+    context: &ExprContext<'_>,
+) {
+    let element = application_type_argument(
+        cursor_type,
+        StdlibTypeConstructorId::SetIterator,
+        context.semantics,
+    );
+    let (set, backing) = context
+        .semantics
+        .types()
+        .iter()
+        .find_map(|(_, kind)| match kind {
+            crate::types::TypeKind::Set {
+                layout,
+                element: candidate,
+                backing,
+            } if !matches!(
+                context.semantics.types().kind(*candidate),
+                crate::types::TypeKind::GenericParameter { .. }
+            ) && context.ty(*candidate) == element =>
+            {
+                Some((*layout, *backing))
+            }
+            _ => None,
+        })
+        .expect("SetIterator<T> has a materialized Set<T> source");
+    let cursor_index = context.gc.index(Type::Application(cursor_type));
+
+    emit_cursor_field(function, cursor, cursor_index, 0, Type::Set(set));
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: context.gc.index(Type::Set(set)),
+            field_index: super::set_functions::VERSION_FIELD,
+        });
+    emit_cursor_field(function, cursor, cursor_index, 2, Type::U32);
+    emit_iterator_mutation_check(function);
+
+    emit_cursor_field(function, cursor, cursor_index, 1, Type::U32);
+    emit_cursor_field(function, cursor, cursor_index, 0, Type::Set(set));
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: context.gc.index(Type::Set(set)),
+            field_index: super::set_functions::LENGTH_FIELD,
+        })
+        .instruction(&Instruction::I32LtU)
+        .instruction(&Instruction::If(BlockType::Result(
+            context.gc.val_type(Type::Application(step)),
+        )));
+
+    emit_cursor_field(function, cursor, cursor_index, 0, Type::Set(set));
+    function
+        .instruction(&Instruction::RefAsNonNull)
+        .instruction(&Instruction::StructGet {
+            struct_type_index: context.gc.index(Type::Set(set)),
+            field_index: super::set_functions::BACKING_FIELD,
+        })
+        .instruction(&Instruction::RefAsNonNull);
+    emit_cursor_field(function, cursor, cursor_index, 1, Type::U32);
+    emit_array_get(
+        function,
+        context.gc.index(Type::ArrayStorage(backing)),
+        element,
+        context.gc,
+    );
+    emit_iterator_item(function, step, context);
+    emit_cursor_increment(function, cursor, cursor_index, 1, Type::U32);
+
+    function.instruction(&Instruction::Else);
+    emit_iterator_end(function, step, context);
+    function.instruction(&Instruction::End);
+}
+
+fn emit_range_iterator_next(
+    function: &mut Function,
+    cursor: u32,
+    cursor_type: crate::ast::TypeApplicationId,
+    step: crate::ast::TypeApplicationId,
+    inclusive: bool,
+    context: &ExprContext<'_>,
+) {
+    let constructor = if inclusive {
+        StdlibTypeConstructorId::InclusiveRangeIterator
+    } else {
+        StdlibTypeConstructorId::ExclusiveRangeIterator
+    };
+    let bound = application_type_argument(cursor_type, constructor, context.semantics);
+    let cursor_index = context.gc.index(Type::Application(cursor_type));
+
+    if inclusive {
+        emit_cursor_field(function, cursor, cursor_index, 2, Type::Bool);
+        function.instruction(&Instruction::I32Eqz);
+        emit_cursor_field(function, cursor, cursor_index, 0, bound);
+        emit_cursor_field(function, cursor, cursor_index, 1, bound);
+        function
+            .instruction(&compare(bound, bound.is_signed(), Compare::Le))
+            .instruction(&Instruction::I32And);
+    } else {
+        emit_cursor_field(function, cursor, cursor_index, 0, bound);
+        emit_cursor_field(function, cursor, cursor_index, 1, bound);
+        function.instruction(&compare(bound, bound.is_signed(), Compare::Lt));
+    }
+    function.instruction(&Instruction::If(BlockType::Result(
+        context.gc.val_type(Type::Application(step)),
+    )));
+
+    emit_cursor_field(function, cursor, cursor_index, 0, bound);
+    emit_iterator_item(function, step, context);
+    if inclusive {
+        emit_cursor_field(function, cursor, cursor_index, 0, bound);
+        emit_cursor_field(function, cursor, cursor_index, 1, bound);
+        emit_binary_instruction(function, BinaryOp::Eq, bound);
+        function.instruction(&Instruction::If(BlockType::Empty));
+        function
+            .instruction(&Instruction::LocalGet(cursor))
+            .instruction(&Instruction::RefAsNonNull)
+            .instruction(&Instruction::I32Const(1))
+            .instruction(&Instruction::StructSet {
+                struct_type_index: cursor_index,
+                field_index: 2,
+            })
+            .instruction(&Instruction::Else);
+        emit_cursor_increment(function, cursor, cursor_index, 0, bound);
+        function.instruction(&Instruction::End);
+    } else {
+        emit_cursor_increment(function, cursor, cursor_index, 0, bound);
+    }
+
+    function.instruction(&Instruction::Else);
+    emit_iterator_end(function, step, context);
+    function.instruction(&Instruction::End);
+}
+
+fn emit_cursor_field(function: &mut Function, cursor: u32, cursor_type: u32, field: u32, ty: Type) {
+    function
+        .instruction(&Instruction::LocalGet(cursor))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_typed_struct_get(function, cursor_type, field, ty);
+}
+
+fn emit_cursor_increment(
+    function: &mut Function,
+    cursor: u32,
+    cursor_type: u32,
+    field: u32,
+    ty: Type,
+) {
+    function
+        .instruction(&Instruction::LocalGet(cursor))
+        .instruction(&Instruction::RefAsNonNull);
+    emit_cursor_field(function, cursor, cursor_type, field, ty);
+    emit_int(function, 1, ty);
+    emit_binary_instruction(function, BinaryOp::Add, ty);
+    emit_narrow_integer_result(function, ty);
+    function.instruction(&Instruction::StructSet {
+        struct_type_index: cursor_type,
+        field_index: field,
+    });
+}
+
+fn emit_iterator_mutation_check(function: &mut Function) {
+    function
+        .instruction(&Instruction::I32Ne)
+        .instruction(&Instruction::If(BlockType::Empty))
+        .instruction(&Instruction::Unreachable)
+        .instruction(&Instruction::End);
+}
+
+fn emit_iterator_item(
+    function: &mut Function,
+    step: crate::ast::TypeApplicationId,
+    context: &ExprContext<'_>,
+) {
+    function.instruction(&Instruction::StructNew(
+        context.gc.index(Type::Application(step)),
+    ));
+}
+
+fn emit_iterator_end(
+    function: &mut Function,
+    step: crate::ast::TypeApplicationId,
+    context: &ExprContext<'_>,
+) {
+    function.instruction(&Instruction::RefNull(HeapType::Concrete(
+        context.gc.index(Type::Application(step)),
+    )));
 }
 
 fn compile_return_expression(

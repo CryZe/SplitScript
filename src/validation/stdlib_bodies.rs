@@ -217,6 +217,9 @@ impl SchemeMatcher<'_> {
             TypeRef::Parameter(_) => {
                 Err("; the body narrowed a declared type parameter to a concrete type".to_owned())
             }
+            TypeRef::Associated(_) => {
+                Err("; source bodies cannot independently narrow an associated type".to_owned())
+            }
             TypeRef::Application {
                 constructor,
                 arguments,
@@ -258,6 +261,7 @@ impl SchemeMatcher<'_> {
 fn type_ref_contains(ty: TypeRef, parameter: &str) -> bool {
     match ty {
         TypeRef::Parameter(name) => name == parameter,
+        TypeRef::Associated(_) => false,
         TypeRef::Application { arguments, .. } => arguments
             .iter()
             .any(|argument| type_ref_contains(*argument, parameter)),
@@ -281,6 +285,14 @@ fn constructed_argument(
         (StdlibTypeConstructorId::Option, TypeKind::Option { value, .. })
         | (StdlibTypeConstructorId::Result, TypeKind::Result { value, .. }) => Some((*value, None)),
         (StdlibTypeConstructorId::Set, TypeKind::Set { element, .. }) => Some((*element, None)),
+        (
+            expected,
+            TypeKind::Application {
+                constructor,
+                arguments,
+                ..
+            },
+        ) if expected == *constructor && arguments.len() == 1 => Some((arguments[0], None)),
         (
             StdlibTypeConstructorId::ExclusiveRange,
             TypeKind::Range {
@@ -324,6 +336,7 @@ fn declared_type_has_capability(
             .is_some_and(|parameter| {
                 library.capabilities_satisfy(parameter.constraints, capability)
             }),
+        TypeRef::Associated(_) => false,
         TypeRef::Application {
             constructor,
             arguments: [element],
@@ -391,6 +404,21 @@ fn render_actual_type(
             "Set<{}>",
             render_actual_type(library, semantics, *element, parameter_bindings)
         ),
+        TypeKind::Application {
+            constructor,
+            arguments,
+            ..
+        } => {
+            let name = library.type_constructor(*constructor).name;
+            let arguments = arguments
+                .iter()
+                .map(|argument| {
+                    render_actual_type(library, semantics, *argument, parameter_bindings)
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{name}<{arguments}>")
+        }
         TypeKind::Range { bound, kind, .. } => {
             let bound = render_actual_type(library, semantics, *bound, parameter_bindings);
             format!("{bound}{}{bound}", kind.operator())

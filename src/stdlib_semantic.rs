@@ -128,6 +128,8 @@ fn catalog_method_accepts(
                     && matches!(receiver, TypeKind::Result { .. }))
                 || (constructor == StdlibTypeConstructorId::Set
                     && matches!(receiver, TypeKind::Set { .. }))
+                || matches!(receiver, TypeKind::Application { constructor: actual, .. }
+                    if *actual == constructor)
                 || (constructor == StdlibTypeConstructorId::ExclusiveRange
                     && matches!(
                         receiver,
@@ -165,6 +167,7 @@ fn catalog_method_accepts(
                     semantic_type_may_have_capability(library, receiver, *constraint)
                 })
             }),
+        TypeRef::Associated(_) => false,
     }
 }
 
@@ -201,6 +204,9 @@ fn semantic_type_may_have_capability(
         TypeKind::Async { .. } => false,
         TypeKind::Range { .. } => false,
         TypeKind::Set { .. } => false,
+        TypeKind::Application { constructor, .. } => {
+            library.type_constructor_has_capability(*constructor, capability)
+        }
     }
 }
 

@@ -1412,14 +1412,17 @@ fn for_loops_infer_elements_lower_and_validate() {
 }
 
 #[test]
-fn for_loops_require_arrays_and_keep_bindings_scoped_and_read_only() {
+fn for_loops_require_iterables_and_keep_bindings_scoped_and_read_only() {
     let not_array =
         splitscript::compile(r#"state "game.exe" {} whileAttached { for value in 42 {} }"#)
             .expect_err("non-arrays are not iterable");
     assert!(
-        not_array
-            .iter()
-            .any(|error| error.message.contains("expects an array"))
+        not_array.iter().any(|error| {
+            error
+                .message
+                .contains("`for ... in` requires an `Iterable` value")
+        }),
+        "{not_array:#?}"
     );
 
     let assignment = splitscript::compile(

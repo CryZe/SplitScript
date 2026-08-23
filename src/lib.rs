@@ -414,6 +414,7 @@ pub struct CheckedProgram {
     async_types: Vec<types::ResolvedAsyncType>,
     range_types: Vec<types::ResolvedRangeType>,
     set_types: Vec<types::ResolvedSetType>,
+    application_types: Vec<types::ResolvedApplicationType>,
 }
 
 /// Semantic facts retained for editor tooling even when type checking reports
@@ -753,6 +754,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         async_types: output.async_types,
         range_types: output.range_types,
         set_types: output.set_types,
+        application_types: output.application_types,
     })
 }
 

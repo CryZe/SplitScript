@@ -1261,6 +1261,8 @@ fn literal_matches_support_guards_wildcards_and_bidirectional_inference() {
                 | splitscript::compiler::wasm_ir::LoweredPattern::FileVersion(_)
                 | splitscript::compiler::wasm_ir::LoweredPattern::OptionNone(_)
                 | splitscript::compiler::wasm_ir::LoweredPattern::OptionSome { .. }
+                | splitscript::compiler::wasm_ir::LoweredPattern::IteratorEnd(_)
+                | splitscript::compiler::wasm_ir::LoweredPattern::IteratorItem { .. }
                 | splitscript::compiler::wasm_ir::LoweredPattern::ResultSuccess { .. }
                 | splitscript::compiler::wasm_ir::LoweredPattern::ResultError { .. } => {}
             }

@@ -455,6 +455,17 @@ onAttach {
     print(`marker {optionalMarker else 0 as address}, value {text}`)
 }"#;
 
+const ITERATOR_SOURCE: &str = r#"state "game.exe" {}
+
+whileAttached {
+    let iterator = [10, 20].iterator()
+    let label = match iterator.next() {
+        Item(value) => `item {value}`,
+        End => "finished",
+    }
+    print(label)
+}"#;
+
 const LIFECYCLE_SOURCE: &str = r#"state "game.exe" {}
 
 setup {}
@@ -784,6 +795,18 @@ focused_example!(
     "Construct an optional value",
     "let selected: i32? = Some(7)",
     TYPES_AND_LITERALS_SOURCE
+);
+focused_example!(
+    ITERATOR_ITEM_EXAMPLE,
+    "Construct an iterator item step",
+    "let step: IteratorStep<i32> = Item(7)",
+    ITERATOR_SOURCE
+);
+focused_example!(
+    ITERATOR_END_EXAMPLE,
+    "Construct an exhausted iterator step",
+    "let step: IteratorStep<i32> = End",
+    ITERATOR_SOURCE
 );
 focused_example!(
     OK_EXAMPLE,
@@ -1231,7 +1254,7 @@ define_language_catalog! {
         LanguageItemKind::Keyword,
         "match value { pattern => expression }",
         "Exhaustively matches a value.",
-        "[`match`] supports enum payloads, optional [`None`]/[`Some`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, string, character, integer, boolean, and file-version literals, guards, and a wildcard. String patterns compare contents, not WebAssembly GC identities. Enum and wrapper matches must cover every state; open-ended literal domains require `_`; guarded arms do not establish coverage.",
+        "[`match`] supports enum payloads, optional [`None`]/[`Some`]`(value)` patterns, iterator [`End`]/[`Item`]`(value)` patterns, fallible [`Err`]`(error)`/[`Ok`]`(value)` patterns, string, character, integer, boolean, and file-version literals, guards, and a wildcard. String patterns compare contents, not WebAssembly GC identities. Enum and wrapper matches must cover every state; open-ended literal domains require `_`; guarded arms do not establish coverage.",
         MATCH_EXAMPLES
     ),
     language_item!(
@@ -1305,6 +1328,24 @@ define_language_catalog! {
         "Explicitly constructs a present optional value.",
         "[`Some`] infers `T` from its value and constructs [`T?`]. Plain `T` values still lift automatically whenever [`T?`] is expected.",
         SOME_EXAMPLE
+    ),
+    language_item!(
+        IteratorItem,
+        "Item",
+        LanguageItemKind::Syntax,
+        "Item(value)",
+        "Constructs a yielded iterator step.",
+        "[`Item`] infers `T` from its value and constructs [`IteratorStep`]`<T>`. Unlike [`Some`], an item may itself contain [`None`] without ending iteration. Match it together with [`End`].",
+        ITERATOR_ITEM_EXAMPLE
+    ),
+    language_item!(
+        IteratorEnd,
+        "End",
+        LanguageItemKind::Syntax,
+        "End",
+        "Constructs an exhausted iterator step.",
+        "[`End`] obtains `T` from surrounding [`IteratorStep`]`<T>` context and marks that an [`Iterator`] has no more items. Match it together with [`Item`].",
+        ITERATOR_END_EXAMPLE
     ),
     language_item!(
         SuccessConstructor,

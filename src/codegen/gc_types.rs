@@ -13,8 +13,8 @@ use crate::{
         StdlibTypeId, TypeRef,
     },
     types::{
-        ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedRangeType,
-        ResolvedResultType, ResolvedSetType,
+        ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType,
+        ResolvedRangeType, ResolvedResultType, ResolvedSetType, TypeId, TypeKind,
     },
 };
 
@@ -22,7 +22,7 @@ use super::{
     GcLayout, Type, array_element_type,
     async_frame::{AsyncFrameLayout, AsyncFrameLayouts},
     enum_variant_payload, option_value_type, reachability, record_field_type, result_value_type,
-    standard_field_type, value_type,
+    semantic_type, standard_field_type, value_type,
 };
 
 pub(super) struct EncodedTypes {
@@ -43,6 +43,7 @@ pub(super) struct Inputs<'a> {
     pub result_types: &'a [ResolvedResultType],
     pub async_types: &'a [ResolvedAsyncType],
     pub set_types: &'a [ResolvedSetType],
+    pub application_types: &'a [ResolvedApplicationType],
     pub range_types: &'a [ResolvedRangeType],
     pub reachability: &'a reachability::Reachability,
 }
@@ -60,6 +61,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         result_types,
         async_types,
         set_types,
+        application_types,
         range_types,
         reachability,
     } = inputs;
@@ -73,6 +75,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         results: result_types,
         asyncs: async_types,
         sets: set_types,
+        applications: application_types,
         ranges: range_types,
         async_frames,
         reachability,
@@ -380,6 +383,49 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                     None,
                 )
             }
+            Type::Application(id) => {
+                let application = application_types
+                    .iter()
+                    .find(|application| application.id == id)
+                    .expect("reachable named applications have resolved declarations");
+                let declaration = standard_library.type_constructor(application.constructor);
+                let arguments = semantics
+                    .types()
+                    .iter()
+                    .find_map(|(_, kind)| match kind {
+                        TypeKind::Application {
+                            layout, arguments, ..
+                        } if *layout == id => Some(arguments.as_slice()),
+                        _ => None,
+                    })
+                    .expect("reachable named applications have semantic argument types");
+                let variables = declaration
+                    .parameters
+                    .iter()
+                    .zip(arguments)
+                    .map(|(parameter, argument)| (parameter.name, *argument))
+                    .collect::<std::collections::HashMap<_, _>>();
+                (
+                    CompositeInnerType::Struct(StructType {
+                        fields: standard_library
+                            .fields_of_constructor(application.constructor)
+                            .map(|field| FieldType {
+                                element_type: layout.storage_type(semantic_type(
+                                    instantiated_catalog_type(field.ty, &variables, semantics),
+                                    semantics,
+                                )),
+                                // These generic records currently back
+                                // compiler-owned iterator cursors. Their
+                                // storage is source-private, while `next()`
+                                // advances the cursor in place.
+                                mutable: true,
+                            })
+                            .collect(),
+                    }),
+                    true,
+                    None,
+                )
+            }
             _ => unreachable!("only dynamic GC types are ordered by GcLayout"),
         };
         recursive_types.push(SubType {
@@ -509,5 +555,83 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         section: types,
         next_type_index: layout.type_count,
         layout,
+    }
+}
+
+pub(super) fn instantiated_catalog_type(
+    ty: TypeRef,
+    variables: &std::collections::HashMap<&'static str, TypeId>,
+    semantics: &SemanticModel,
+) -> TypeId {
+    match ty {
+        TypeRef::Core(core) => semantics.types().id_for_core(core),
+        TypeRef::Standard(standard) => semantics.types().id_for_standard(standard),
+        TypeRef::Parameter(name) | TypeRef::Associated(name) => variables[name],
+        TypeRef::FixedArray { element, length } => {
+            let element = instantiated_catalog_type(*element, variables, semantics);
+            semantics
+                .types()
+                .iter()
+                .find_map(|(id, kind)| match kind {
+                    TypeKind::Array {
+                        element: candidate,
+                        length: candidate_length,
+                        ..
+                    } if *candidate == element && *candidate_length == Some(length) => Some(id),
+                    _ => None,
+                })
+                .expect("instantiated fixed-array fields have semantic layouts")
+        }
+        TypeRef::Application {
+            constructor,
+            arguments,
+        } => {
+            let arguments = arguments
+                .iter()
+                .map(|argument| instantiated_catalog_type(*argument, variables, semantics))
+                .collect::<Vec<_>>();
+            semantics
+                .types()
+                .iter()
+                .find_map(|(id, kind)| {
+                    let matches = match kind {
+                        TypeKind::Array { element, .. } => {
+                            constructor == StdlibTypeConstructorId::Array
+                                && arguments.as_slice() == [*element]
+                        }
+                        TypeKind::Option { value, .. } => {
+                            constructor == StdlibTypeConstructorId::Option
+                                && arguments.as_slice() == [*value]
+                        }
+                        TypeKind::Result { value, .. } => {
+                            constructor == StdlibTypeConstructorId::Result
+                                && arguments.as_slice() == [*value]
+                        }
+                        TypeKind::Set { element, .. } => {
+                            constructor == StdlibTypeConstructorId::Set
+                                && arguments.as_slice() == [*element]
+                        }
+                        TypeKind::Range { bound, kind, .. } => {
+                            let expected = match kind {
+                                crate::ast::RangeKind::Exclusive => {
+                                    StdlibTypeConstructorId::ExclusiveRange
+                                }
+                                crate::ast::RangeKind::Inclusive => {
+                                    StdlibTypeConstructorId::InclusiveRange
+                                }
+                            };
+                            constructor == expected && arguments.as_slice() == [*bound]
+                        }
+                        TypeKind::Application {
+                            constructor: candidate,
+                            arguments: candidate_arguments,
+                            ..
+                        } => *candidate == constructor && *candidate_arguments == arguments,
+                        _ => false,
+                    };
+                    matches.then_some(id)
+                })
+                .expect("instantiated generic fields have semantic layouts")
+        }
     }
 }

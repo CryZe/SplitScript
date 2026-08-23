@@ -59,7 +59,7 @@ fn render_parameter(name: &str, ty: TypeRef, library: &StandardLibrary) -> Strin
 
 fn contains_type_parameter(ty: TypeRef) -> bool {
     match ty {
-        TypeRef::Parameter(_) => true,
+        TypeRef::Parameter(_) | TypeRef::Associated(_) => true,
         TypeRef::Application { arguments, .. } => {
             arguments.iter().copied().any(contains_type_parameter)
         }

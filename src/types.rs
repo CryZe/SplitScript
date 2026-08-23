@@ -13,7 +13,7 @@ use crate::{
         RangeTypeId, RecordDecl, RecordId, ResultTypeId, TypeApplicationId,
     },
     inference::Type,
-    stdlib::{CoreTypeId, StandardLibrary, StdlibTypeId},
+    stdlib::{CoreTypeId, StandardLibrary, StdlibTypeConstructorId, StdlibTypeId},
 };
 
 /// An interned type in one checked program.
@@ -63,6 +63,7 @@ pub enum ResolvedTypeRef {
     Async(AsyncTypeId),
     Range(RangeTypeId),
     Set(TypeApplicationId),
+    Application(TypeApplicationId),
 }
 
 pub(crate) fn generic_parameter_name(index: u32) -> String {
@@ -112,6 +113,23 @@ pub struct ResolvedSetType {
     pub element: ResolvedTypeRef,
     /// General GC array used as the growable backing storage.
     pub backing: ArrayTypeId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedApplicationType {
+    pub id: TypeApplicationId,
+    pub constructor: StdlibTypeConstructorId,
+    pub arguments: Vec<ResolvedTypeRef>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedConstructedTypes<'a> {
+    pub arrays: &'a [ResolvedArrayType],
+    pub options: &'a [ResolvedOptionType],
+    pub results: &'a [ResolvedResultType],
+    pub asyncs: &'a [ResolvedAsyncType],
+    pub sets: &'a [ResolvedSetType],
+    pub applications: &'a [ResolvedApplicationType],
 }
 
 /// Semantic name for a core, non-constructed SplitScript type.
@@ -168,6 +186,11 @@ pub enum TypeKind {
         layout: TypeApplicationId,
         element: TypeId,
         backing: ArrayTypeId,
+    },
+    Application {
+        layout: TypeApplicationId,
+        constructor: StdlibTypeConstructorId,
+        arguments: Vec<TypeId>,
     },
 }
 
@@ -260,6 +283,9 @@ impl TypeStore {
             | TypeKind::Result { value, .. }
             | TypeKind::Async { value, .. } => self.contains_error(*value),
             TypeKind::Range { bound, .. } => self.contains_error(*bound),
+            TypeKind::Application { arguments, .. } => arguments
+                .iter()
+                .any(|argument| self.contains_error(*argument)),
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot
@@ -311,12 +337,16 @@ impl TypeStore {
     pub(crate) fn intern_inferred(
         &mut self,
         ty: Type,
-        arrays: &[ResolvedArrayType],
-        options: &[ResolvedOptionType],
-        results: &[ResolvedResultType],
-        asyncs: &[ResolvedAsyncType],
-        sets: &[ResolvedSetType],
+        constructed: ResolvedConstructedTypes<'_>,
     ) -> TypeId {
+        let ResolvedConstructedTypes {
+            arrays,
+            options,
+            results,
+            asyncs,
+            sets,
+            applications,
+        } = constructed;
         if let Type::Known(id) = ty {
             debug_assert!(
                 self.get(id).is_some(),
@@ -331,8 +361,7 @@ impl TypeStore {
                     .iter()
                     .find(|array| array.id == id)
                     .unwrap_or_else(|| panic!("missing checked array type {id}"));
-                let element =
-                    self.intern_type_ref(array.element, arrays, options, results, asyncs, sets);
+                let element = self.intern_type_ref(array.element, constructed);
                 TypeKind::Array {
                     layout: id,
                     element,
@@ -345,7 +374,7 @@ impl TypeStore {
                     .find(|option| option.id == id)
                     .unwrap_or_else(|| panic!("missing checked option type {id}"))
                     .value;
-                let value = self.intern_type_ref(value, arrays, options, results, asyncs, sets);
+                let value = self.intern_type_ref(value, constructed);
                 TypeKind::Option { layout: id, value }
             }
             Type::Result(id) => {
@@ -354,7 +383,7 @@ impl TypeStore {
                     .find(|result| result.id == id)
                     .unwrap_or_else(|| panic!("missing checked result type {id}"))
                     .value;
-                let value = self.intern_type_ref(value, arrays, options, results, asyncs, sets);
+                let value = self.intern_type_ref(value, constructed);
                 TypeKind::Result { layout: id, value }
             }
             Type::Async(id) => {
@@ -363,7 +392,7 @@ impl TypeStore {
                     .find(|future| future.id == id)
                     .unwrap_or_else(|| panic!("missing checked async type {id}"))
                     .value;
-                let value = self.intern_type_ref(value, arrays, options, results, asyncs, sets);
+                let value = self.intern_type_ref(value, constructed);
                 TypeKind::Async { layout: id, value }
             }
             Type::Range(id) => {
@@ -381,12 +410,27 @@ impl TypeStore {
                     .iter()
                     .find(|set| set.id == id)
                     .unwrap_or_else(|| panic!("missing checked set type {id}"));
-                let element =
-                    self.intern_type_ref(set.element, arrays, options, results, asyncs, sets);
+                let element = self.intern_type_ref(set.element, constructed);
                 TypeKind::Set {
                     layout: id,
                     element,
                     backing: set.backing,
+                }
+            }
+            Type::Application(id) => {
+                let application = applications
+                    .iter()
+                    .find(|application| application.id == id)
+                    .unwrap_or_else(|| panic!("missing checked named type application {id}"));
+                let arguments = application
+                    .arguments
+                    .iter()
+                    .map(|argument| self.intern_type_ref(*argument, constructed))
+                    .collect();
+                TypeKind::Application {
+                    layout: id,
+                    constructor: application.constructor,
+                    arguments,
                 }
             }
             Type::Variable(_) => {
@@ -399,11 +443,7 @@ impl TypeStore {
     fn intern_type_ref(
         &mut self,
         ty: ResolvedTypeRef,
-        arrays: &[ResolvedArrayType],
-        options: &[ResolvedOptionType],
-        results: &[ResolvedResultType],
-        asyncs: &[ResolvedAsyncType],
-        sets: &[ResolvedSetType],
+        constructed: ResolvedConstructedTypes<'_>,
     ) -> TypeId {
         match ty {
             ResolvedTypeRef::Error => self.id_for_error(),
@@ -414,26 +454,19 @@ impl TypeStore {
             ResolvedTypeRef::Record(record) => self.id_for_record(record),
             ResolvedTypeRef::Enum(enumeration) => self.id_for_enum(enumeration),
             ResolvedTypeRef::GenericParameter(parameter) => parameter,
-            ResolvedTypeRef::Array(id) => {
-                self.intern_inferred(Type::Array(id), arrays, options, results, asyncs, sets)
-            }
-            ResolvedTypeRef::Option(id) => {
-                self.intern_inferred(Type::Option(id), arrays, options, results, asyncs, sets)
-            }
-            ResolvedTypeRef::Result(id) => {
-                self.intern_inferred(Type::Result(id), arrays, options, results, asyncs, sets)
-            }
-            ResolvedTypeRef::Async(id) => {
-                self.intern_inferred(Type::Async(id), arrays, options, results, asyncs, sets)
-            }
+            ResolvedTypeRef::Array(id) => self.intern_inferred(Type::Array(id), constructed),
+            ResolvedTypeRef::Option(id) => self.intern_inferred(Type::Option(id), constructed),
+            ResolvedTypeRef::Result(id) => self.intern_inferred(Type::Result(id), constructed),
+            ResolvedTypeRef::Async(id) => self.intern_inferred(Type::Async(id), constructed),
             ResolvedTypeRef::Range(id) => self
                 .kinds
                 .iter()
                 .position(|kind| matches!(kind, TypeKind::Range { layout, .. } if *layout == id))
                 .map(|index| TypeId(index as u32))
                 .unwrap_or_else(|| panic!("missing checked range type {id}")),
-            ResolvedTypeRef::Set(id) => {
-                self.intern_inferred(Type::Set(id), arrays, options, results, asyncs, sets)
+            ResolvedTypeRef::Set(id) => self.intern_inferred(Type::Set(id), constructed),
+            ResolvedTypeRef::Application(id) => {
+                self.intern_inferred(Type::Application(id), constructed)
             }
         }
     }

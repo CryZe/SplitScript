@@ -10,7 +10,10 @@ use crate::{
         ArrayTypeId, AsyncTypeId, ConstructedTypeIdAllocator, OptionTypeId, RangeKind, RangeTypeId,
         ResultTypeId, TypeApplicationId,
     },
-    stdlib::{CapabilityBehavior, CoreTypeId, StandardLibrary, StdlibCapabilityId, StdlibTypeId},
+    stdlib::{
+        CapabilityBehavior, CoreTypeId, StandardLibrary, StdlibCapabilityId,
+        StdlibTypeConstructorId, StdlibTypeId,
+    },
     types::{BuiltinType, ResolvedTypeRef, TypeId, TypeKind, TypeStore},
 };
 
@@ -23,6 +26,7 @@ pub(crate) enum Type {
     Async(AsyncTypeId),
     Range(RangeTypeId),
     Set(TypeApplicationId),
+    Application(TypeApplicationId),
     Variable(u32),
 }
 
@@ -44,6 +48,7 @@ impl Type {
                 TypeKind::Async { layout, .. } => ResolvedTypeRef::Async(*layout),
                 TypeKind::Range { layout, .. } => ResolvedTypeRef::Range(*layout),
                 TypeKind::Set { layout, .. } => ResolvedTypeRef::Set(*layout),
+                TypeKind::Application { layout, .. } => ResolvedTypeRef::Application(*layout),
             },
             Self::Array(id) => ResolvedTypeRef::Array(id),
             Self::Option(id) => ResolvedTypeRef::Option(id),
@@ -51,6 +56,7 @@ impl Type {
             Self::Async(id) => ResolvedTypeRef::Async(id),
             Self::Range(id) => ResolvedTypeRef::Range(id),
             Self::Set(id) => ResolvedTypeRef::Set(id),
+            Self::Application(id) => ResolvedTypeRef::Application(id),
             Self::Variable(variable) => {
                 unreachable!("inference variable ?{variable} cannot become a source type reference")
             }
@@ -68,6 +74,7 @@ impl fmt::Display for Type {
             Self::Async(id) => write!(formatter, "Async#{id}"),
             Self::Range(id) => write!(formatter, "Range#{id}"),
             Self::Set(id) => write!(formatter, "Set#{id}"),
+            Self::Application(id) => write!(formatter, "Application#{id}"),
             Self::Variable(id) => write!(formatter, "?{id}"),
         }
     }
@@ -210,6 +217,13 @@ pub(crate) struct SetLayout {
     pub(crate) backing: Option<ArrayTypeId>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ApplicationLayout {
+    pub(crate) id: TypeApplicationId,
+    pub(crate) constructor: StdlibTypeConstructorId,
+    pub(crate) arguments: Vec<Type>,
+}
+
 #[derive(Default)]
 pub(crate) struct ConstructedLayouts {
     pub(crate) arrays: Vec<ArrayLayout>,
@@ -218,6 +232,7 @@ pub(crate) struct ConstructedLayouts {
     pub(crate) asyncs: Vec<AsyncLayout>,
     pub(crate) ranges: Vec<RangeLayout>,
     pub(crate) sets: Vec<SetLayout>,
+    pub(crate) applications: Vec<ApplicationLayout>,
 }
 
 pub(crate) struct InferenceContext {
@@ -230,12 +245,14 @@ pub(crate) struct InferenceContext {
     asyncs: Vec<AsyncLayout>,
     ranges: Vec<RangeLayout>,
     sets: Vec<SetLayout>,
+    applications: Vec<ApplicationLayout>,
     canonical_arrays: HashMap<ArrayTypeId, ArrayTypeId>,
     canonical_options: HashMap<OptionTypeId, OptionTypeId>,
     canonical_results: HashMap<ResultTypeId, ResultTypeId>,
     canonical_asyncs: HashMap<AsyncTypeId, AsyncTypeId>,
     canonical_ranges: HashMap<RangeTypeId, RangeTypeId>,
     canonical_sets: HashMap<TypeApplicationId, TypeApplicationId>,
+    canonical_applications: HashMap<TypeApplicationId, TypeApplicationId>,
     constructed_types: HashMap<Type, TypeId>,
     constructed_type_ids: ConstructedTypeIdAllocator,
 }
@@ -254,6 +271,7 @@ impl InferenceContext {
             asyncs,
             ranges,
             mut sets,
+            applications,
         } = layouts;
         let next_constructed_type_index = arrays
             .iter()
@@ -263,6 +281,11 @@ impl InferenceContext {
             .chain(asyncs.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(ranges.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(sets.iter().map(|layout| layout.id.index() as u32 + 1))
+            .chain(
+                applications
+                    .iter()
+                    .map(|layout| layout.id.index() as u32 + 1),
+            )
             .fold(first_constructed_type_index, u32::max);
         let mut constructed_type_ids =
             ConstructedTypeIdAllocator::starting_at(next_constructed_type_index);
@@ -292,12 +315,14 @@ impl InferenceContext {
             asyncs,
             ranges,
             sets,
+            applications,
             canonical_arrays: HashMap::new(),
             canonical_options: HashMap::new(),
             canonical_results: HashMap::new(),
             canonical_asyncs: HashMap::new(),
             canonical_ranges: HashMap::new(),
             canonical_sets: HashMap::new(),
+            canonical_applications: HashMap::new(),
             constructed_types: HashMap::new(),
             constructed_type_ids,
         }
@@ -395,6 +420,19 @@ impl InferenceContext {
             },
             TypeKind::Set { element, .. } => {
                 format!("Set<{}>", self.known_type_name(*element))
+            }
+            TypeKind::Application {
+                constructor,
+                arguments,
+                ..
+            } => {
+                let name = self.standard_library.type_constructor(*constructor).name;
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.known_type_name(*argument))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{name}<{arguments}>")
             }
             TypeKind::Option { value, .. } => format!("{}?", self.known_type_name(*value)),
             TypeKind::Result { value, .. } => format!("{}!", self.known_type_name(*value)),
@@ -501,6 +539,19 @@ impl InferenceContext {
                     Type::Set(self.set_type(instantiated))
                 }
             }
+            Type::Application(application) => {
+                let constructor = self.application_constructor(application);
+                let arguments = self.application_arguments(application).to_vec();
+                let instantiated = arguments
+                    .iter()
+                    .map(|argument| self.instantiate_type(*argument, generalized, substitutions))
+                    .collect::<Vec<_>>();
+                if instantiated == arguments {
+                    Type::Application(application)
+                } else {
+                    Type::Application(self.application_type(constructor, instantiated))
+                }
+            }
             Type::Option(option) => {
                 let value = self.option_value(option);
                 let instantiated = self.instantiate_type(value, generalized, substitutions);
@@ -561,6 +612,11 @@ impl InferenceContext {
             }
             Type::Array(array) => self.collect_unbound_variables(self.array_element(array), output),
             Type::Set(set) => self.collect_unbound_variables(self.set_element(set), output),
+            Type::Application(application) => {
+                for argument in self.application_arguments(application).to_vec() {
+                    self.collect_unbound_variables(argument, output);
+                }
+            }
             Type::Option(option) => {
                 self.collect_unbound_variables(self.option_value(option), output)
             }
@@ -646,6 +702,26 @@ impl InferenceContext {
                 let right_element = self.set_element(right);
                 self.unify(left_element, right_element)?;
                 Ok(Type::Set(left))
+            }
+            (Type::Application(left), Type::Application(right)) => {
+                if self.application_constructor(left) != self.application_constructor(right) {
+                    return Err(InferenceError::TypeMismatch {
+                        left: Type::Application(left),
+                        right: Type::Application(right),
+                    });
+                }
+                let left_arguments = self.application_arguments(left).to_vec();
+                let right_arguments = self.application_arguments(right).to_vec();
+                if left_arguments.len() != right_arguments.len() {
+                    return Err(InferenceError::TypeMismatch {
+                        left: Type::Application(left),
+                        right: Type::Application(right),
+                    });
+                }
+                for (left, right) in left_arguments.into_iter().zip(right_arguments) {
+                    self.unify(left, right)?;
+                }
+                Ok(Type::Application(left))
             }
             (Type::Option(left), Type::Option(right)) => {
                 let left_value = self.option_value(left);
@@ -827,6 +903,12 @@ impl InferenceContext {
                 Type::Range(self.canonical_ranges.get(&range).copied().unwrap_or(range))
             }
             Type::Set(set) => Type::Set(self.canonical_sets.get(&set).copied().unwrap_or(set)),
+            Type::Application(application) => Type::Application(
+                self.canonical_applications
+                    .get(&application)
+                    .copied()
+                    .unwrap_or(application),
+            ),
             ty => ty,
         };
         self.constructed_types
@@ -866,6 +948,11 @@ impl InferenceContext {
             .iter()
             .map(|layout| Type::Set(layout.id))
             .collect::<Vec<_>>();
+        let applications = self
+            .applications
+            .iter()
+            .map(|layout| Type::Application(layout.id))
+            .collect::<Vec<_>>();
         for ty in arrays
             .into_iter()
             .chain(options)
@@ -873,6 +960,7 @@ impl InferenceContext {
             .chain(asyncs)
             .chain(ranges)
             .chain(sets)
+            .chain(applications)
         {
             self.intern_resolved_type(ty);
         }
@@ -1033,6 +1121,42 @@ impl InferenceContext {
             .expect("checked set type has a layout")
             .backing
             .expect("set backing arrays are assigned during inference initialization")
+    }
+
+    pub(crate) fn application_type(
+        &mut self,
+        constructor: StdlibTypeConstructorId,
+        arguments: Vec<Type>,
+    ) -> TypeApplicationId {
+        if let Some(application) = self.applications.iter().find(|application| {
+            application.constructor == constructor && application.arguments == arguments
+        }) {
+            return application.id;
+        }
+        let id = self.constructed_type_ids.application();
+        self.applications.push(ApplicationLayout {
+            id,
+            constructor,
+            arguments,
+        });
+        id
+    }
+
+    pub(crate) fn application_constructor(&self, id: TypeApplicationId) -> StdlibTypeConstructorId {
+        self.applications
+            .iter()
+            .find(|application| application.id == id)
+            .expect("checked named type application has a layout")
+            .constructor
+    }
+
+    pub(crate) fn application_arguments(&self, id: TypeApplicationId) -> &[Type] {
+        &self
+            .applications
+            .iter()
+            .find(|application| application.id == id)
+            .expect("checked named type application has a layout")
+            .arguments
     }
 
     pub(crate) fn finalize_arrays(&mut self) {
@@ -1285,6 +1409,48 @@ impl InferenceContext {
         }
     }
 
+    pub(crate) fn finalize_applications(&mut self) {
+        let unresolved = self
+            .applications
+            .iter()
+            .map(|application| application.arguments.clone())
+            .collect::<Vec<_>>();
+        let resolved = unresolved
+            .into_iter()
+            .map(|arguments| {
+                arguments
+                    .into_iter()
+                    .map(|argument| self.resolve(argument))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        for (application, arguments) in self.applications.iter_mut().zip(resolved) {
+            application.arguments = arguments;
+        }
+
+        let mut representatives =
+            Vec::<(StdlibTypeConstructorId, Vec<Type>, TypeApplicationId)>::new();
+        self.canonical_applications.clear();
+        for application in &self.applications {
+            let canonical = representatives
+                .iter()
+                .find_map(|(constructor, arguments, id)| {
+                    (*constructor == application.constructor && *arguments == application.arguments)
+                        .then_some(*id)
+                })
+                .unwrap_or_else(|| {
+                    representatives.push((
+                        application.constructor,
+                        application.arguments.clone(),
+                        application.id,
+                    ));
+                    application.id
+                });
+            self.canonical_applications
+                .insert(application.id, canonical);
+        }
+    }
+
     pub(crate) fn finalize_ranges(&mut self) {
         let bounds = self
             .ranges
@@ -1340,6 +1506,10 @@ impl InferenceContext {
         &self.sets
     }
 
+    pub(crate) fn applications(&self) -> &[ApplicationLayout] {
+        &self.applications
+    }
+
     fn intern_resolved_type(&mut self, ty: Type) -> TypeId {
         let ty = self.resolve(ty);
         if let Type::Known(id) = ty {
@@ -1389,6 +1559,19 @@ impl InferenceContext {
                     layout,
                     element,
                     backing: self.set_backing(layout),
+                }
+            }
+            Type::Application(layout) => {
+                let constructor = self.application_constructor(layout);
+                let arguments = self.application_arguments(layout).to_vec();
+                let arguments = arguments
+                    .into_iter()
+                    .map(|argument| self.intern_resolved_type(argument))
+                    .collect();
+                TypeKind::Application {
+                    layout,
+                    constructor,
+                    arguments,
                 }
             }
             Type::Variable(variable) => {
@@ -1487,6 +1670,11 @@ impl InferenceContext {
             Type::Variable(candidate) => self.root(candidate) == variable,
             Type::Array(array) => self.occurs_in(variable, self.array_element(array), visited),
             Type::Set(set) => self.occurs_in(variable, self.set_element(set), visited),
+            Type::Application(application) => self
+                .application_arguments(application)
+                .to_vec()
+                .into_iter()
+                .any(|argument| self.occurs_in(variable, argument, visited)),
             Type::Option(option) => self.occurs_in(variable, self.option_value(option), visited),
             Type::Result(result) => self.occurs_in(variable, self.result_value(result), visited),
             Type::Async(future) => self.occurs_in(variable, self.async_value(future), visited),
@@ -1599,6 +1787,9 @@ pub(crate) fn type_may_have_capability(
                 behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
             }
             TypeKind::Set { .. } => false,
+            TypeKind::Application { constructor, .. } => {
+                library.type_constructor_has_capability(*constructor, capability)
+            }
             TypeKind::GenericParameter { .. } => false,
         },
         Type::Option(_) | Type::Result(_) => behavior == CapabilityBehavior::StructuralEquality,
@@ -1606,6 +1797,22 @@ pub(crate) fn type_may_have_capability(
         Type::Range(_) => false,
         Type::Array(_) => behavior == CapabilityBehavior::StructuralMemoryLayout,
         Type::Set(_) => false,
+        Type::Application(application) => library.type_constructor_has_capability(
+            // Inference owns the constructor mapping; unresolved applications
+            // are conservatively admitted and validated semantically later.
+            match types.iter().find_map(|(_, kind)| match kind {
+                TypeKind::Application {
+                    layout,
+                    constructor,
+                    ..
+                } if *layout == application => Some(*constructor),
+                _ => None,
+            }) {
+                Some(constructor) => constructor,
+                None => return true,
+            },
+            capability,
+        ),
         Type::Variable(_) => false,
     }
 }

@@ -244,66 +244,99 @@ impl Checker {
                         (Type::Array(self.array_type_id(element)), element)
                     });
                 let iterable_ty = self.expr(iterable, empty_array_hint.map(|(array, _)| array));
-                let (iterable_ty, element_ty) = match iterable_ty {
-                    None => empty_array_hint.unwrap_or_else(|| {
-                        let element = self.fresh_inference(Requirements::none(), None);
-                        (Type::Array(self.array_type_id(element)), element)
-                    }),
-                    Some(ty) => match self.shallow_type(ty) {
-                        Type::Array(array) => (ty, self.inference.array_element(array)),
-                        Type::Set(set) => (ty, self.inference.set_element(set)),
-                        Type::Range(range) => (ty, self.inference.range_bound(range)),
-                        Type::Known(id) => match self.inference.type_store().kind(id) {
-                            crate::types::TypeKind::Array { element, .. } => {
-                                (ty, Type::Known(*element))
-                            }
-                            crate::types::TypeKind::Set { element, .. } => {
-                                (ty, Type::Known(*element))
-                            }
-                            crate::types::TypeKind::Range { bound, .. } => {
-                                (ty, Type::Known(*bound))
-                            }
-                            _ => {
-                                let actual = self.type_name(ty);
-                                self.error(
-                                    format!(
-                                        "`for ... in` expects an array, set, or range, but this expression has type `{actual}`"
-                                    ),
-                                    iterable.span,
-                                );
+                let iterable_ty = iterable_ty.map_or_else(
+                    || {
+                        empty_array_hint.map_or_else(
+                            || {
                                 let element = self.fresh_inference(Requirements::none(), None);
-                                (Type::Array(self.array_type_id(element)), element)
-                            }
-                        },
-                        Type::Variable(variable) => {
-                            let element = self.fresh_inference(Requirements::none(), None);
-                            let array = Type::Array(self.array_type_id(element));
-                            if self.inference.variable_requirements(variable).is_empty() {
-                                self.unify(ty, array, iterable.span);
-                            } else {
-                                let actual = self.type_name(ty);
-                                self.error(
-                                    format!(
-                                        "`for ... in` expects an array, set, or range, but this expression has type `{actual}`"
-                                    ),
-                                    iterable.span,
-                                );
-                            }
-                            (array, element)
-                        }
-                        _ => {
-                            let actual = self.type_name(ty);
-                            self.error(
-                                format!(
-                                    "`for ... in` expects an array, set, or range, but this expression has type `{actual}`"
-                                ),
-                                iterable.span,
-                            );
-                            let element = self.fresh_inference(Requirements::none(), None);
-                            (Type::Array(self.array_type_id(element)), element)
-                        }
+                                Type::Array(self.array_type_id(element))
+                            },
+                            |(array, _)| array,
+                        )
                     },
-                };
+                    |ty| ty,
+                );
+                let mut iterable_ty = self.shallow_type(iterable_ty);
+                // Source-defined methods intentionally omit catalog-generic
+                // annotations at the parser boundary and let ordinary
+                // inference recover them. When the iterable is that method's
+                // still-unbound receiver, its catalog owner supplies the
+                // concrete `Iterable` constructor. This is the same
+                // contextual receiver constraint used by deferred member
+                // resolution, applied before projecting `Iterable.Item`.
+                if matches!(iterable_ty, Type::Variable(_))
+                    && let crate::typeck::CallableContext::LibraryFunction(item) = self.callable
+                    && let crate::stdlib::StdlibOwner::TypeConstructor(constructor) =
+                        self.standard_library.item(item).owner
+                    && self.standard_library.type_constructor_has_capability(
+                        constructor,
+                        crate::stdlib::StdlibCapabilityId::Iterable,
+                    )
+                {
+                    let declaration = self.standard_library.type_constructor(constructor);
+                    let variables = declaration
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            let requirements = parameter.constraints.iter().fold(
+                                Requirements::none(),
+                                |requirements, constraint| {
+                                    requirements | Requirements::capability(*constraint)
+                                },
+                            );
+                            (parameter.name, self.fresh_inference(requirements, None))
+                        })
+                        .collect::<std::collections::HashMap<_, _>>();
+                    let receiver = self.catalog_application_type(
+                        constructor,
+                        variables[declaration.parameters[0].name],
+                    );
+                    self.unify(iterable_ty, receiver, iterable.span);
+                    iterable_ty = self.shallow_type(receiver);
+                }
+                // An unannotated user parameter has no constructor from which
+                // an associated `Iterable.Item` can be projected. Preserve
+                // SplitScript's existing backwards inference by selecting the
+                // simplest built-in iterable shape, `[T]`, and allowing uses
+                // of the loop binding (and callers) to constrain `T`.
+                if matches!(iterable_ty, Type::Variable(_))
+                    && matches!(iterable.kind, crate::ast::ExprKind::Path(_))
+                {
+                    let element = self.fresh_inference(Requirements::none(), None);
+                    let array = Type::Array(self.array_type_id(element));
+                    self.unify(iterable_ty, array, iterable.span);
+                    iterable_ty = self.shallow_type(array);
+                }
+                let element_ty = self
+                    .constructed_field_receiver(iterable_ty)
+                    .and_then(|(constructor, argument)| {
+                        let declaration = self.standard_library.type_constructor(constructor);
+                        if !self.standard_library.type_constructor_has_capability(
+                            constructor,
+                            crate::stdlib::StdlibCapabilityId::Iterable,
+                        ) {
+                            return None;
+                        }
+                        let mut variables = std::collections::HashMap::new();
+                        if let Some(parameter) = declaration.parameters.first() {
+                            variables.insert(parameter.name, argument);
+                        }
+                        declaration
+                            .associated_types
+                            .iter()
+                            .find(|associated| associated.name == "Item")
+                            .map(|associated| self.catalog_type(associated.value, &variables))
+                    })
+                    .unwrap_or_else(|| {
+                        let actual = self.type_name(iterable_ty);
+                        self.error(
+                            format!(
+                                "`for ... in` requires an `Iterable` value, but this expression has type `{actual}`"
+                            ),
+                            iterable.span,
+                        );
+                        self.fresh_inference(Requirements::none(), None)
+                    });
                 // A literal range keeps its upper bound directly in the
                 // compiler-owned iterable slot. This lets the backend lower a
                 // direct range loop without allocating the first-class range

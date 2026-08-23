@@ -34,6 +34,7 @@ macro_rules! define_backend_type {
             Async(AsyncTypeId),
             Range(RangeTypeId),
             Set(TypeApplicationId),
+            Application(TypeApplicationId),
         }
     };
 }

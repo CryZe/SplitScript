@@ -54,6 +54,14 @@ impl Checker {
                     None => none,
                 }
             }
+            ExprKind::IteratorEnd => {
+                let item = self.fresh_inference(Requirements::none(), None);
+                let step = Type::Application(self.inference.application_type(
+                    crate::stdlib::StdlibTypeConstructorId::IteratorStep,
+                    vec![item],
+                ));
+                self.expect_expression(expr.id, step, expected, expr.span)?
+            }
             ExprKind::Bool(_) => self.expect_expression(
                 expr.id,
                 self.core_type(crate::stdlib::CoreTypeId::Bool),
@@ -599,6 +607,39 @@ impl Checker {
                                 format!("invalid:{}", arm.pattern_id.index())
                             }
                         }
+                        MatchPattern::IteratorEnd => {
+                            if let Some((step, _)) = self.infer_iterator_step_pattern(
+                                value_type,
+                                arm.span,
+                                "an `End` pattern requires an iterator step",
+                            ) {
+                                self.semantics.resolve_wrapper_pattern(
+                                    arm.pattern_id,
+                                    ResolvedWrapperPattern::IteratorEnd(step),
+                                );
+                                format!("iterator-step:{step}:end")
+                            } else {
+                                format!("invalid:{}", arm.pattern_id.index())
+                            }
+                        }
+                        MatchPattern::IteratorItem(binding) => {
+                            if let Some((step, item)) = self.infer_iterator_step_pattern(
+                                value_type,
+                                arm.span,
+                                "an `Item(value)` pattern requires an iterator step",
+                            ) {
+                                self.semantics.resolve_wrapper_pattern(
+                                    arm.pattern_id,
+                                    ResolvedWrapperPattern::IteratorItem(step),
+                                );
+                                if let Some(binding) = binding {
+                                    self.bind_pattern_value(binding, item, arm.span);
+                                }
+                                format!("iterator-step:{step}:item")
+                            } else {
+                                format!("invalid:{}", arm.pattern_id.index())
+                            }
+                        }
                         MatchPattern::ResultSuccess(binding) => {
                             if let Some(result) = self.infer_result_pattern(
                                 value_type,
@@ -705,6 +746,21 @@ impl Checker {
                                 [("success", "Ok(value)"), ("error", "Err(error)")]
                             {
                                 if !unguarded_patterns.contains(&format!("result:{result}:{state}"))
+                                {
+                                    self.error(
+                                        format!("non-exhaustive match: missing `{display}`"),
+                                        expr.span,
+                                    );
+                                }
+                            }
+                        }
+                        Type::Application(step)
+                            if self.inference.application_constructor(step)
+                                == crate::stdlib::StdlibTypeConstructorId::IteratorStep =>
+                        {
+                            for (state, display) in [("item", "Item(value)"), ("end", "End")] {
+                                if !unguarded_patterns
+                                    .contains(&format!("iterator-step:{step}:{state}"))
                                 {
                                     self.error(
                                         format!("non-exhaustive match: missing `{display}`"),
@@ -1270,6 +1326,36 @@ impl Checker {
                 let result = self.inference.result_type(value);
                 self.unify(value_type, Type::Result(result), span)?;
                 Some(result)
+            }
+            ty => {
+                let ty = self.type_name(ty);
+                self.error(format!("{requirement}, found `{ty}`"), span);
+                None
+            }
+        }
+    }
+
+    fn infer_iterator_step_pattern(
+        &mut self,
+        value_type: Type,
+        span: Span,
+        requirement: &str,
+    ) -> Option<(crate::ast::TypeApplicationId, Type)> {
+        match self.shallow_type(value_type) {
+            Type::Application(step)
+                if self.inference.application_constructor(step)
+                    == crate::stdlib::StdlibTypeConstructorId::IteratorStep =>
+            {
+                Some((step, self.inference.application_arguments(step)[0]))
+            }
+            Type::Variable(_) => {
+                let item = self.fresh_inference(Requirements::none(), None);
+                let step = self.inference.application_type(
+                    crate::stdlib::StdlibTypeConstructorId::IteratorStep,
+                    vec![item],
+                );
+                self.unify(value_type, Type::Application(step), span)?;
+                Some((step, item))
             }
             ty => {
                 let ty = self.type_name(ty);

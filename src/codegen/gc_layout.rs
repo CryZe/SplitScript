@@ -11,8 +11,9 @@ use crate::{
         DeclaredTypeRef, RuntimeRepresentation, StandardLibrary, StdlibFieldId, StdlibTypeId,
     },
     types::{
-        EnumTypeId, ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedRangeType,
-        ResolvedResultType, ResolvedSetType, ResolvedTypeRef,
+        EnumTypeId, ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType,
+        ResolvedOptionType, ResolvedRangeType, ResolvedResultType, ResolvedSetType,
+        ResolvedTypeRef,
     },
 };
 
@@ -47,6 +48,7 @@ pub(super) struct Inputs<'a> {
     pub results: &'a [ResolvedResultType],
     pub asyncs: &'a [ResolvedAsyncType],
     pub sets: &'a [ResolvedSetType],
+    pub applications: &'a [ResolvedApplicationType],
     pub ranges: &'a [ResolvedRangeType],
     pub async_frames: &'a AsyncFrameLayouts,
     pub reachability: &'a reachability::Reachability,
@@ -64,6 +66,7 @@ impl GcLayout {
             results,
             asyncs,
             sets,
+            applications,
             ranges,
             async_frames,
             reachability,
@@ -234,6 +237,16 @@ impl GcLayout {
             next += 1;
         }
 
+        for application in applications
+            .iter()
+            .filter(|application| reachability.contains_application_type(application.id))
+        {
+            let ty = Type::Application(application.id);
+            dynamic.insert(ty, next);
+            ordered.push(ty);
+            next += 1;
+        }
+
         // Generic source-defined methods can introduce template range shapes.
         // Only their materialized integer instantiations have a physical Wasm
         // representation; the generic template itself is erased.
@@ -396,7 +409,8 @@ impl GcLayout {
             | Type::Option(_)
             | Type::Result(_)
             | Type::Range(_)
-            | Type::Set(_) => *self
+            | Type::Set(_)
+            | Type::Application(_) => *self
                 .dynamic
                 .get(&ty)
                 .unwrap_or_else(|| panic!("dynamic GC type `{ty:?}` was not marked reachable")),
@@ -451,7 +465,8 @@ impl GcLayout {
             | Type::Result(_)
             | Type::Async(_)
             | Type::Range(_)
-            | Type::Set(_) => ValType::Ref(RefType {
+            | Type::Set(_)
+            | Type::Application(_) => ValType::Ref(RefType {
                 nullable: true,
                 heap_type: HeapType::Concrete(self.index(ty)),
             }),

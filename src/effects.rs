@@ -158,6 +158,7 @@ fn collect_call_facts(
         }
         ResolvedCall::ResultError { .. }
         | ResolvedCall::OptionSome { .. }
+        | ResolvedCall::IteratorItem { .. }
         | ResolvedCall::ResultSuccess { .. } => {}
     }
 }
@@ -406,6 +407,7 @@ impl OperationAnalysis {
                         }),
                     ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
+                    | ResolvedCall::IteratorItem { .. }
                     | ResolvedCall::ResultSuccess { .. } => None,
                 }
             }
@@ -483,6 +485,7 @@ impl OperationAnalysis {
                     ),
                     ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
+                    | ResolvedCall::IteratorItem { .. }
                     | ResolvedCall::ResultSuccess { .. } => (false, None, None),
                 };
                 requires_state_snapshots.then_some(StateSnapshotViolation {

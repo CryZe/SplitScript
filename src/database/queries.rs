@@ -734,6 +734,11 @@ impl CompilerDatabase {
             TypeKind::Set { .. } => Some(DefinitionTarget::StandardLibrarySymbol(
                 StdlibSymbolId::TypeConstructor(StdlibTypeConstructorId::Set),
             )),
+            TypeKind::Application { constructor, .. } => {
+                Some(DefinitionTarget::StandardLibrarySymbol(
+                    StdlibSymbolId::TypeConstructor(constructor),
+                ))
+            }
             TypeKind::Error | TypeKind::GenericParameter { .. } => None,
         };
         Ok(target)

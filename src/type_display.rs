@@ -42,6 +42,23 @@ pub(crate) fn display_type(ty: TypeId, snapshot: &SemanticSnapshot) -> String {
         TypeKind::Result { value, .. } => format!("{}!", display_type(*value, snapshot)),
         TypeKind::Async { value, .. } => format!("async {}", display_type(*value, snapshot)),
         TypeKind::Set { element, .. } => format!("Set<{}>", display_type(*element, snapshot)),
+        TypeKind::Application {
+            constructor,
+            arguments,
+            ..
+        } => {
+            let name = snapshot
+                .context()
+                .standard_library()
+                .type_constructor(*constructor)
+                .name;
+            let arguments = arguments
+                .iter()
+                .map(|argument| display_type(*argument, snapshot))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{name}<{arguments}>")
+        }
         TypeKind::Range { bound, kind, .. } => {
             let bound = display_type(*bound, snapshot);
             format!("{bound}{}{bound}", kind.operator())

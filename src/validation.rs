@@ -502,6 +502,7 @@ fn validate_async_recursion(
                     }
                     ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
+                    | ResolvedCall::IteratorItem { .. }
                     | ResolvedCall::ResultSuccess { .. } => {}
                 }
             }
@@ -602,6 +603,9 @@ fn validate_future_storage(
             | TypeKind::Range { bound: element, .. } => {
                 contains_future(*element, syntax, semantics, enum_types, visited)
             }
+            TypeKind::Application { arguments, .. } => arguments
+                .iter()
+                .any(|argument| contains_future(*argument, syntax, semantics, enum_types, visited)),
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot
@@ -768,6 +772,7 @@ fn validate_suspending_calls(
             }
             ResolvedCall::ResultError { .. }
             | ResolvedCall::OptionSome { .. }
+            | ResolvedCall::IteratorItem { .. }
             | ResolvedCall::ResultSuccess { .. } => None,
         }
     }
@@ -781,6 +786,7 @@ fn validate_suspending_calls(
             ResolvedCall::StandardLibrary { .. } => true,
             ResolvedCall::ResultError { .. }
             | ResolvedCall::OptionSome { .. }
+            | ResolvedCall::IteratorItem { .. }
             | ResolvedCall::ResultSuccess { .. } => false,
         }
     }
@@ -917,6 +923,7 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
                 ..
             }
             | ast::MatchPattern::OptionSome(Some(binding))
+            | ast::MatchPattern::IteratorItem(Some(binding))
             | ast::MatchPattern::ResultSuccess(Some(binding))
             | ast::MatchPattern::ResultError(Some(binding)) => Some(binding),
             ast::MatchPattern::Enum { binding: None, .. }
@@ -926,7 +933,9 @@ impl<'ast> SyntaxVisitor<'ast> for LocalBindingCollector {
             | ast::MatchPattern::Int { .. }
             | ast::MatchPattern::FileVersion(_)
             | ast::MatchPattern::None
+            | ast::MatchPattern::IteratorEnd
             | ast::MatchPattern::OptionSome(None)
+            | ast::MatchPattern::IteratorItem(None)
             | ast::MatchPattern::ResultSuccess(None)
             | ast::MatchPattern::ResultError(None)
             | ast::MatchPattern::Wildcard => None,
@@ -1594,6 +1603,9 @@ fn expand_fully_observed_types(
             | TypeKind::Result { value: element, .. }
             | TypeKind::Async { value: element, .. }
             | TypeKind::Range { bound: element, .. } => pending.push_back(*element),
+            TypeKind::Application { arguments, .. } => {
+                pending.extend(arguments.iter().copied());
+            }
             TypeKind::Builtin(_) | TypeKind::Standard(_) | TypeKind::GenericParameter { .. } => {}
         }
     }
@@ -1668,6 +1680,9 @@ fn expand_reachable_nominal_types(
             | TypeKind::Result { value: element, .. }
             | TypeKind::Async { value: element, .. }
             | TypeKind::Range { bound: element, .. } => pending.push_back(*element),
+            TypeKind::Application { arguments, .. } => {
+                pending.extend(arguments.iter().copied());
+            }
             TypeKind::Builtin(_) | TypeKind::Standard(_) | TypeKind::GenericParameter { .. } => {}
         }
     }
@@ -1832,6 +1847,7 @@ fn validate_function_instances(
         ResolvedCall::StandardLibrary { .. }
         | ResolvedCall::ResultError { .. }
         | ResolvedCall::OptionSome { .. }
+        | ResolvedCall::IteratorItem { .. }
         | ResolvedCall::ResultSuccess { .. } => None,
     };
 

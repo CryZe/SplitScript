@@ -178,6 +178,7 @@ struct ConstructedTypes {
     asyncs: Vec<crate::types::ResolvedAsyncType>,
     ranges: Vec<ResolvedRangeType>,
     sets: Vec<crate::types::ResolvedSetType>,
+    applications: Vec<crate::types::ResolvedApplicationType>,
 }
 
 /// Complete, immutable input to backend planning and Wasm encoding.
@@ -209,6 +210,7 @@ impl<'a> BackendProgram<'a> {
             asyncs: checked.async_types.clone(),
             ranges: checked.range_types.clone(),
             sets: checked.set_types.clone(),
+            applications: checked.application_types.clone(),
         };
         specialization::materialize(
             &wasm_ir,
@@ -219,6 +221,7 @@ impl<'a> BackendProgram<'a> {
             &mut constructed_types.asyncs,
             &mut constructed_types.ranges,
             &mut constructed_types.sets,
+            &mut constructed_types.applications,
         );
         Self {
             standard_library: checked.context.standard_library(),
@@ -280,6 +283,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         asyncs: async_types,
         ranges: range_types,
         sets: set_types,
+        applications: application_types,
     } = constructed_types;
     let semantics = &semantics;
     let enums = &enums;
@@ -287,6 +291,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let option_types = &option_types;
     let result_types = &result_types;
     let set_types = &set_types;
+    let application_types = &application_types;
     let wasm_ir = &wasm_ir;
     let state = program.state.as_ref().unwrap();
     let provider = semantics
@@ -348,6 +353,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         result_types,
         async_types: &async_types,
         set_types,
+        application_types,
         range_types: &range_types,
         reachability: &reachability,
     });
@@ -668,6 +674,7 @@ fn resolved_intrinsic(target: &wasm_ir::CallTarget) -> Option<IntrinsicId> {
         | wasm_ir::CallTarget::LibraryOverload { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }
+        | wasm_ir::CallTarget::IteratorItem { .. }
         | wasm_ir::CallTarget::ResultSuccess { .. } => None,
     }
 }
@@ -701,7 +708,42 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
         TypeKind::Async { layout, .. } => Type::Async(*layout),
         TypeKind::Set { layout, .. } => Type::Set(*layout),
         TypeKind::Range { layout, .. } => Type::Range(*layout),
+        TypeKind::Application { layout, .. } => Type::Application(*layout),
     }
+}
+
+fn application_type_argument(
+    application: crate::ast::TypeApplicationId,
+    expected_constructor: crate::stdlib::StdlibTypeConstructorId,
+    semantics: &SemanticModel,
+) -> Type {
+    semantics
+        .types()
+        .iter()
+        .find_map(|(_, kind)| match kind {
+            TypeKind::Application {
+                layout,
+                constructor,
+                arguments,
+            } if *layout == application && *constructor == expected_constructor => {
+                Some(semantic_type(arguments[0], semantics))
+            }
+            _ => None,
+        })
+        .expect("checked named application has its declared constructor and argument")
+}
+
+fn range_bound_type(range: crate::ast::RangeTypeId, semantics: &SemanticModel) -> Type {
+    semantics
+        .types()
+        .iter()
+        .find_map(|(_, kind)| match kind {
+            TypeKind::Range { layout, bound, .. } if *layout == range => {
+                Some(semantic_type(*bound, semantics))
+            }
+            _ => None,
+        })
+        .expect("checked range has a concrete bound type")
 }
 
 fn value_type(value: ValueId, semantics: &SemanticModel) -> Type {

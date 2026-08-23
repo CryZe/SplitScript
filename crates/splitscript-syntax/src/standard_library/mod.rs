@@ -50,7 +50,18 @@ pub struct CallableOwnerDeclaration {
     /// Immutable instance fields declared by a structural type constructor.
     /// Other callable-owner forms keep this empty.
     pub fields: Vec<FieldDeclaration>,
+    /// Associated type requirements (on capabilities) or their concrete
+    /// standard-library definitions (on type constructors).
+    pub associated_types: Vec<AssociatedTypeDeclaration>,
     pub functions: Vec<FunctionDeclaration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssociatedTypeDeclaration {
+    pub name: String,
+    pub constraints: Vec<String>,
+    pub value: Option<Type>,
+    pub documentation: Documentation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

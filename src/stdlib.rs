@@ -27,9 +27,10 @@ pub use schema::{
 pub use declarations::{
     CapabilityBehavior, CoreType, CoreTypeId, DeclaredTypeRef, FieldVisibility,
     RuntimeRepresentation, ScalarMemoryLayout, StateProviderAttachment, StateProviderProcesses,
-    StdlibCapability, StdlibField, StdlibNamespace, StdlibOwner, StdlibStateProvider,
-    StdlibSymbolId, StdlibType, StdlibTypeConstructor, StdlibTypeKind, StdlibVariant,
-    TypeConstructorSyntax, TypeVisibility, ValueUsage,
+    StdlibAssociatedType, StdlibAssociatedTypeDefinition, StdlibCapability, StdlibField,
+    StdlibNamespace, StdlibOwner, StdlibStateProvider, StdlibSymbolId, StdlibType,
+    StdlibTypeConstructor, StdlibTypeKind, StdlibVariant, TypeConstructorSyntax, TypeVisibility,
+    ValueUsage,
 };
 
 use catalog::{
@@ -58,6 +59,7 @@ impl TypeRef {
                 .iter()
                 .find_map(|(parameter, ty)| (*parameter == name).then(|| ty.clone()))
                 .unwrap_or_else(|| name.to_owned()),
+            Self::Associated(name) => name.to_owned(),
             Self::Application {
                 constructor,
                 arguments,
@@ -269,6 +271,14 @@ impl StandardLibrary {
             .get(&id)
             .copied()
             .expect("every standard-library type-constructor ID must have a declaration")
+    }
+
+    pub fn type_constructor_has_capability(
+        &self,
+        constructor: StdlibTypeConstructorId,
+        capability: StdlibCapabilityId,
+    ) -> bool {
+        self.capabilities_satisfy(self.type_constructor(constructor).capabilities, capability)
     }
 
     /// Looks up constructors that are actually written as source identifiers.
@@ -1465,6 +1475,7 @@ fn validate_catalog_type_ref(
                 ));
             }
         }
+        TypeRef::Associated(_) => {}
         TypeRef::Application {
             constructor,
             arguments,

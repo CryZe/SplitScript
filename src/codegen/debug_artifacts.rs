@@ -256,6 +256,19 @@ fn type_name(
         TypeKind::Result { value, .. } => format!("{}!", nested(*value)),
         TypeKind::Async { value, .. } => format!("async {}", nested(*value)),
         TypeKind::Set { element, .. } => format!("Set<{}>", nested(*element)),
+        TypeKind::Application {
+            constructor,
+            arguments,
+            ..
+        } => {
+            let name = standard_library.type_constructor(*constructor).name;
+            let arguments = arguments
+                .iter()
+                .map(|argument| nested(*argument))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{name}<{arguments}>")
+        }
         TypeKind::Range { bound, kind, .. } => {
             let bound = nested(*bound);
             format!("{bound}{}{bound}", kind.operator())
@@ -365,6 +378,7 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
             let binding = match &arm.pattern {
                 MatchPattern::Enum { binding, .. }
                 | MatchPattern::OptionSome(binding)
+                | MatchPattern::IteratorItem(binding)
                 | MatchPattern::ResultSuccess(binding)
                 | MatchPattern::ResultError(binding) => binding.as_ref(),
                 MatchPattern::Bool(_)
@@ -373,6 +387,7 @@ fn source_variables(program: &Program) -> HashMap<ValueId, SourceVariable> {
                 | MatchPattern::Int { .. }
                 | MatchPattern::FileVersion(_)
                 | MatchPattern::None
+                | MatchPattern::IteratorEnd
                 | MatchPattern::Wildcard => None,
             };
             if let Some(binding) = binding {
@@ -815,7 +830,8 @@ fn scalar_type_entry(
         | Type::Result(_)
         | Type::Async(_)
         | Type::Range(_)
-        | Type::Set(_) => return None,
+        | Type::Set(_)
+        | Type::Application(_) => return None,
     };
     let entry = dwarf.unit.add(root, gimli::DW_TAG_base_type);
     let base = dwarf.unit.get_mut(entry);

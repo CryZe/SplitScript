@@ -39,6 +39,8 @@ mod expressions_control;
 mod failure_semantics;
 #[path = "compiler/inference_language.rs"]
 mod inference_language;
+#[path = "compiler/iterators.rs"]
+mod iterators;
 #[path = "compiler/parser_recovery.rs"]
 mod parser_recovery;
 #[path = "compiler/profiles_codegen.rs"]

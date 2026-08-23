@@ -192,6 +192,7 @@ pub fn walk_expression(
 pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(ExprId)) {
     match kind {
         ExpressionKind::None
+        | ExpressionKind::IteratorEnd
         | ExpressionKind::ValueBlock
         | ExpressionKind::Loop
         | ExpressionKind::Bool(_)

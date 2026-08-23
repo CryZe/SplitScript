@@ -8,8 +8,8 @@ use crate::{
     inference::Type,
     stdlib::CoreTypeId,
     types::{
-        ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedRangeType,
-        ResolvedResultType, ResolvedSetType, TypeKind,
+        ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType, ResolvedConstructedTypes,
+        ResolvedOptionType, ResolvedRangeType, ResolvedResultType, ResolvedSetType, TypeKind,
     },
     visit::{Visitor, walk_expr},
 };
@@ -59,6 +59,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     checker.inference.finalize_ranges();
     checker.finalize_array_types();
     checker.inference.finalize_sets();
+    checker.inference.finalize_applications();
     checker.inference.intern_resolved_constructed_types();
     let array_types = checker
         .inference
@@ -119,6 +120,20 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
                 .expect("set backing arrays are assigned during inference initialization"),
         })
         .collect::<Vec<_>>();
+    let application_types = checker
+        .inference
+        .applications()
+        .iter()
+        .map(|application| ResolvedApplicationType {
+            id: application.id,
+            constructor: application.constructor,
+            arguments: application
+                .arguments
+                .iter()
+                .map(|argument| argument.to_ref(checker.inference.type_store()))
+                .collect(),
+        })
+        .collect::<Vec<_>>();
     for array in &array_types {
         let element = checker.resolved_type_ref(array.element);
         checker
@@ -131,12 +146,13 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     let mut diagnostics = std::mem::take(&mut checker.errors);
     let mut semantics = semantics.finish(
         semantic_types,
-        crate::semantic::ResolvedConstructedTypes {
+        ResolvedConstructedTypes {
             arrays: &array_types,
             options: &option_types,
             results: &result_types,
             asyncs: &async_types,
             sets: &set_types,
+            applications: &application_types,
         },
         |ty| checker.resolved_type(ty),
     );
@@ -172,6 +188,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             async_types,
             range_types,
             set_types,
+            application_types,
         },
         diagnostics,
     }

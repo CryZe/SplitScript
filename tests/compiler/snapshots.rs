@@ -393,6 +393,7 @@ fn snapshot_expression_kind(
 
     match kind {
         TypedExpressionKind::None => "None".to_owned(),
+        TypedExpressionKind::IteratorEnd => "End".to_owned(),
         TypedExpressionKind::Bool(value) => value.to_string(),
         TypedExpressionKind::Int { value, suffix } => format!("int {value} suffix={suffix:?}"),
         TypedExpressionKind::Float(literal) => format!("float {}", literal.value),
@@ -558,6 +559,21 @@ fn snapshot_type_name(
         }
         TypeKind::Set { element, .. } => {
             format!("Set<{}>", snapshot_type_name(checked, *element))
+        }
+        TypeKind::Application {
+            constructor,
+            arguments,
+            ..
+        } => {
+            let name = StandardLibrary::new().type_constructor(*constructor).name;
+            format!(
+                "{name}<{}>",
+                arguments
+                    .iter()
+                    .map(|argument| snapshot_type_name(checked, *argument))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
         }
         TypeKind::Option { value, .. } => format!("{}?", snapshot_type_name(checked, *value)),
         TypeKind::Result { value, .. } => format!("{}!", snapshot_type_name(checked, *value)),

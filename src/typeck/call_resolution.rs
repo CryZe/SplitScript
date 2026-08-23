@@ -344,7 +344,7 @@ impl Checker {
         } = call;
         if !type_arguments.is_empty()
             && postfix_receiver.is_none()
-            && matches!(callee, [name] if matches!(name.as_str(), "Some" | "Ok" | "Err"))
+            && matches!(callee, [name] if matches!(name.as_str(), "Some" | "Ok" | "Err" | "Item"))
         {
             self.error(
                 format!("`{}` does not accept explicit type arguments", callee[0]),
@@ -381,6 +381,47 @@ impl Checker {
             let ty = Type::Option(option);
             self.semantics
                 .resolve_call(expression, PendingResolvedCall::OptionSome { option });
+            return self.expect_expression(expression, ty, expected, span);
+        }
+
+        if postfix_receiver.is_none() && callee == ["Item"] {
+            if args.len() != 1 {
+                self.error("`Item` expects one value", span);
+                return None;
+            }
+            let expected_step = expected.and_then(|ty| match self.shallow_type(ty) {
+                Type::Application(application)
+                    if self.inference.application_constructor(application)
+                        == StdlibTypeConstructorId::IteratorStep =>
+                {
+                    Some(application)
+                }
+                _ => None,
+            });
+            if expected.is_some()
+                && expected_step.is_none()
+                && !matches!(
+                    expected.map(|ty| self.shallow_type(ty)),
+                    Some(Type::Variable(_))
+                )
+            {
+                let other = expected.map(|ty| self.shallow_type(ty)).unwrap();
+                self.error(
+                    format!("`Item` constructs an iterator step, but `{other}` was expected"),
+                    span,
+                );
+                return None;
+            }
+            let value_hint =
+                expected_step.map(|step| self.inference.application_arguments(step)[0]);
+            let value = self.expr(&args[0], value_hint)?;
+            let step = expected_step.unwrap_or_else(|| {
+                self.inference
+                    .application_type(StdlibTypeConstructorId::IteratorStep, vec![value])
+            });
+            let ty = Type::Application(step);
+            self.semantics
+                .resolve_call(expression, PendingResolvedCall::IteratorItem { step });
             return self.expect_expression(expression, ty, expected, span);
         }
 
@@ -1113,6 +1154,18 @@ impl Checker {
                 &variables,
             );
             self.unify(receiver.ty, declared_receiver, span)?;
+            let receiver_type = self.shallow_type(receiver.ty);
+            if let Some((constructor, _)) = self.constructed_field_receiver(receiver_type) {
+                let definitions = self
+                    .standard_library
+                    .type_constructor(constructor)
+                    .associated_types
+                    .to_vec();
+                for definition in definitions {
+                    let value = self.catalog_type(definition.value, &variables);
+                    variables.insert(definition.name, value);
+                }
+            }
             if matches!(
                 item.id,
                 StdlibItemId::ArrayPush
@@ -1244,6 +1297,8 @@ impl Checker {
                         && matches!(receiver, Type::Result(_)))
                     || (constructor == StdlibTypeConstructorId::Set
                         && matches!(receiver, Type::Set(_)))
+                    || matches!(receiver, Type::Application(application)
+                        if self.inference.application_constructor(application) == constructor)
                     || (constructor == StdlibTypeConstructorId::ExclusiveRange
                         && matches!(receiver, Type::Range(range) if self.inference.range_kind(range) == crate::ast::RangeKind::Exclusive))
                     || (constructor == StdlibTypeConstructorId::InclusiveRange
@@ -1270,6 +1325,7 @@ impl Checker {
                             )
                     })
                 }),
+            CatalogTypeRef::Associated(_) => false,
         }
     }
 
@@ -1329,7 +1385,7 @@ impl Checker {
         match ty {
             CatalogTypeRef::Core(core) => self.declared_type(DeclaredTypeRef::Core(core)),
             CatalogTypeRef::Standard(standard) => self.standard_type(standard),
-            CatalogTypeRef::Parameter(name) => variables[name],
+            CatalogTypeRef::Parameter(name) | CatalogTypeRef::Associated(name) => variables[name],
             CatalogTypeRef::FixedArray { element, length } => {
                 let element = self.catalog_type(*element, variables);
                 Type::Array(self.inference.array_type_with_length(element, Some(length)))
@@ -1342,28 +1398,36 @@ impl Checker {
                     unreachable!("validated built-in type constructors have one argument")
                 };
                 let value = self.catalog_type(*value, variables);
-                if constructor == StdlibTypeConstructorId::Array {
-                    Type::Array(self.array_type_id(value))
-                } else if constructor == StdlibTypeConstructorId::Option {
-                    Type::Option(self.inference.option_type(value))
-                } else if constructor == StdlibTypeConstructorId::Result {
-                    Type::Result(self.inference.result_type(value))
-                } else if constructor == StdlibTypeConstructorId::Set {
-                    Type::Set(self.inference.set_type(value))
-                } else if constructor == StdlibTypeConstructorId::ExclusiveRange {
-                    Type::Range(
-                        self.inference
-                            .range_type(value, crate::ast::RangeKind::Exclusive),
-                    )
-                } else if constructor == StdlibTypeConstructorId::InclusiveRange {
-                    Type::Range(
-                        self.inference
-                            .range_type(value, crate::ast::RangeKind::Inclusive),
-                    )
-                } else {
-                    unreachable!("validated catalog type constructor has semantic support")
-                }
+                self.catalog_application_type(constructor, value)
             }
+        }
+    }
+
+    pub(super) fn catalog_application_type(
+        &mut self,
+        constructor: StdlibTypeConstructorId,
+        value: Type,
+    ) -> Type {
+        if constructor == StdlibTypeConstructorId::Array {
+            Type::Array(self.array_type_id(value))
+        } else if constructor == StdlibTypeConstructorId::Option {
+            Type::Option(self.inference.option_type(value))
+        } else if constructor == StdlibTypeConstructorId::Result {
+            Type::Result(self.inference.result_type(value))
+        } else if constructor == StdlibTypeConstructorId::Set {
+            Type::Set(self.inference.set_type(value))
+        } else if constructor == StdlibTypeConstructorId::ExclusiveRange {
+            Type::Range(
+                self.inference
+                    .range_type(value, crate::ast::RangeKind::Exclusive),
+            )
+        } else if constructor == StdlibTypeConstructorId::InclusiveRange {
+            Type::Range(
+                self.inference
+                    .range_type(value, crate::ast::RangeKind::Inclusive),
+            )
+        } else {
+            Type::Application(self.inference.application_type(constructor, vec![value]))
         }
     }
 
@@ -1985,7 +2049,10 @@ impl Checker {
             })
     }
 
-    fn constructed_field_receiver(&self, ty: Type) -> Option<(StdlibTypeConstructorId, Type)> {
+    pub(super) fn constructed_field_receiver(
+        &self,
+        ty: Type,
+    ) -> Option<(StdlibTypeConstructorId, Type)> {
         match ty {
             Type::Array(array) => Some((
                 StdlibTypeConstructorId::Array,
@@ -2003,6 +2070,17 @@ impl Checker {
                 StdlibTypeConstructorId::Set,
                 self.inference.set_element(set),
             )),
+            Type::Application(application) => self
+                .inference
+                .application_arguments(application)
+                .first()
+                .copied()
+                .map(|argument| {
+                    (
+                        self.inference.application_constructor(application),
+                        argument,
+                    )
+                }),
             Type::Range(range) => Some((
                 match self.inference.range_kind(range) {
                     crate::ast::RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
@@ -2240,6 +2318,19 @@ impl Checker {
             Type::Set(set) => {
                 let element = self.inference.set_element(set);
                 format!("Set<{}>", self.type_name(element))
+            }
+            Type::Application(application) => {
+                let constructor = self.inference.application_constructor(application);
+                let name = self.standard_library.type_constructor(constructor).name;
+                let arguments = self
+                    .inference
+                    .application_arguments(application)
+                    .to_vec()
+                    .into_iter()
+                    .map(|argument| self.type_name(argument))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{name}<{arguments}>")
             }
             Type::Range(range) => {
                 let bound = self.type_name(self.inference.range_bound(range));

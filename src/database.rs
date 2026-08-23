@@ -199,6 +199,7 @@ fn definition_for_resolution(
                     }
                     ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
+                    | ResolvedCall::IteratorItem { .. }
                     | ResolvedCall::ResultSuccess { .. } => None,
                 };
             }
@@ -222,6 +223,7 @@ fn definition_for_resolution(
                 | ResolvedCall::StandardLibrary { receiver: None, .. }
                 | ResolvedCall::ResultError { .. }
                 | ResolvedCall::OptionSome { .. }
+                | ResolvedCall::IteratorItem { .. }
                 | ResolvedCall::ResultSuccess { .. } => None,
             }
         }
@@ -286,6 +288,7 @@ fn source_definition_for_resolution(
                     ResolvedCall::StandardLibrary { .. }
                     | ResolvedCall::ResultError { .. }
                     | ResolvedCall::OptionSome { .. }
+                    | ResolvedCall::IteratorItem { .. }
                     | ResolvedCall::ResultSuccess { .. } => None,
                 };
             }
@@ -309,6 +312,7 @@ fn source_definition_for_resolution(
                 | ResolvedCall::StandardLibrary { receiver: None, .. }
                 | ResolvedCall::ResultError { .. }
                 | ResolvedCall::OptionSome { .. }
+                | ResolvedCall::IteratorItem { .. }
                 | ResolvedCall::ResultSuccess { .. } => None,
             }
         }
@@ -879,6 +883,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
                 ..
             }
             | MatchPattern::OptionSome(Some(binding))
+            | MatchPattern::IteratorItem(Some(binding))
             | MatchPattern::ResultSuccess(Some(binding))
             | MatchPattern::ResultError(Some(binding)) => Some(binding),
             MatchPattern::Enum { binding: None, .. }
@@ -888,7 +893,9 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             | MatchPattern::Int { .. }
             | MatchPattern::FileVersion(_)
             | MatchPattern::None
+            | MatchPattern::IteratorEnd
             | MatchPattern::OptionSome(None)
+            | MatchPattern::IteratorItem(None)
             | MatchPattern::ResultSuccess(None)
             | MatchPattern::ResultError(None)
             | MatchPattern::Wildcard => None,
@@ -1040,6 +1047,7 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             }
             ExprKind::Error
             | ExprKind::None
+            | ExprKind::IteratorEnd
             | ExprKind::Bool(_)
             | ExprKind::Int { .. }
             | ExprKind::Float(_)

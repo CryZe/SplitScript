@@ -1205,6 +1205,7 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
         | ExprKind::None
         | ExprKind::Break(None)
         | ExprKind::Continue
+        | ExprKind::IteratorEnd
         | ExprKind::Return(None)
         | ExprKind::Bool(_)
         | ExprKind::Int { .. }
@@ -1230,6 +1231,7 @@ fn add_pattern_binding(builder: &mut CompletionBuilder, pattern: &MatchPattern) 
     let binding = match pattern {
         MatchPattern::Enum { binding, .. }
         | MatchPattern::OptionSome(binding)
+        | MatchPattern::IteratorItem(binding)
         | MatchPattern::ResultSuccess(binding)
         | MatchPattern::ResultError(binding) => binding.as_ref(),
         MatchPattern::Bool(_)
@@ -1238,6 +1240,7 @@ fn add_pattern_binding(builder: &mut CompletionBuilder, pattern: &MatchPattern) 
         | MatchPattern::Int { .. }
         | MatchPattern::FileVersion(_)
         | MatchPattern::None
+        | MatchPattern::IteratorEnd
         | MatchPattern::Wildcard => None,
     };
     if let Some(binding) = binding {
@@ -1350,6 +1353,9 @@ fn add_inferred_fields(
         ),
         TypeKind::Set { .. } => {
             add_constructor_fields(builder, standard_library, StdlibTypeConstructorId::Set)
+        }
+        TypeKind::Application { constructor, .. } => {
+            add_constructor_fields(builder, standard_library, *constructor)
         }
         TypeKind::Builtin(_)
         | TypeKind::Enum(_)

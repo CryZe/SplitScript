@@ -342,6 +342,7 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
         }
         ExprKind::Error
         | ExprKind::None
+        | ExprKind::IteratorEnd
         | ExprKind::Break(None)
         | ExprKind::Continue
         | ExprKind::Return(None)
@@ -699,6 +700,7 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
         }
         ExprKind::Error
         | ExprKind::None
+        | ExprKind::IteratorEnd
         | ExprKind::Break(None)
         | ExprKind::Continue
         | ExprKind::Return(None)

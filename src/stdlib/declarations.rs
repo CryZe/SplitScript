@@ -177,6 +177,7 @@ pub struct StdlibCapability {
     /// Capabilities guaranteed by this capability.
     pub super_capabilities: &'static [StdlibCapabilityId],
     pub behavior: CapabilityBehavior,
+    pub associated_types: &'static [StdlibAssociatedType],
     pub documentation: Documentation<StdlibSymbolId>,
 }
 
@@ -186,7 +187,23 @@ pub struct StdlibTypeConstructor {
     pub syntax: TypeConstructorSyntax,
     pub name: &'static str,
     pub parameters: &'static [TypeParameter],
+    pub capabilities: &'static [StdlibCapabilityId],
     pub must_use: Option<&'static str>,
+    pub associated_types: &'static [StdlibAssociatedTypeDefinition],
+    pub documentation: Documentation<StdlibSymbolId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StdlibAssociatedType {
+    pub name: &'static str,
+    pub constraints: &'static [StdlibCapabilityId],
+    pub documentation: Documentation<StdlibSymbolId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StdlibAssociatedTypeDefinition {
+    pub name: &'static str,
+    pub value: super::TypeRef,
     pub documentation: Documentation<StdlibSymbolId>,
 }
 

@@ -480,6 +480,10 @@ impl Parser<'_> {
                 self.bump();
                 Ok(self.new_expr(ExprKind::None, token.span))
             }
+            TokenKind::Ident(name) if name == "End" => {
+                self.bump();
+                Ok(self.new_expr(ExprKind::IteratorEnd, token.span))
+            }
             TokenKind::Ident(name) if name == "null" => {
                 self.record_foreign_spelling_diagnostic(
                     token.span,
@@ -988,6 +992,10 @@ impl Parser<'_> {
                 self.bump();
                 MatchPattern::None
             }
+            TokenKind::Ident(name) if name == "End" => {
+                self.bump();
+                MatchPattern::IteratorEnd
+            }
             TokenKind::Ident(name) if name == "v" => {
                 self.bump();
                 let version_span = self.current().span;
@@ -1007,7 +1015,7 @@ impl Parser<'_> {
                 MatchPattern::None
             }
             TokenKind::Ident(name)
-                if matches!(name.as_str(), "Some" | "Ok" | "Err")
+                if matches!(name.as_str(), "Some" | "Ok" | "Err" | "Item")
                     && matches!(self.peek(1).kind, TokenKind::LParen) =>
             {
                 self.bump();
@@ -1024,6 +1032,7 @@ impl Parser<'_> {
                     "Some" => MatchPattern::OptionSome(binding),
                     "Ok" => MatchPattern::ResultSuccess(binding),
                     "Err" => MatchPattern::ResultError(binding),
+                    "Item" => MatchPattern::IteratorItem(binding),
                     _ => unreachable!(),
                 }
             }

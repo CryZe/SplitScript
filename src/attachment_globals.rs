@@ -1170,6 +1170,7 @@ fn expression_children(kind: &TypedExpressionKind) -> Vec<crate::ast::ExprId> {
             .chain(arguments.iter().copied())
             .collect(),
         TypedExpressionKind::None
+        | TypedExpressionKind::IteratorEnd
         | TypedExpressionKind::Bool(_)
         | TypedExpressionKind::Int { .. }
         | TypedExpressionKind::Float(_)

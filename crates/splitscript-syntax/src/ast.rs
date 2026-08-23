@@ -1036,6 +1036,8 @@ pub enum ExprKind {
     /// A syntax-only placeholder inserted by the recovering parser.
     Error,
     None,
+    /// Exhausted iterator step. Its item type is inferred contextually.
+    IteratorEnd,
     Bool(bool),
     Char(char),
     Int {
@@ -1190,6 +1192,8 @@ pub enum MatchPattern {
     FileVersion([u16; 4]),
     None,
     OptionSome(Option<PatternBinding>),
+    IteratorEnd,
+    IteratorItem(Option<PatternBinding>),
     ResultSuccess(Option<PatternBinding>),
     ResultError(Option<PatternBinding>),
     Wildcard,

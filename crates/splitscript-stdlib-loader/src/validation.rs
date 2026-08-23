@@ -163,8 +163,13 @@ impl<'a> Validator<'a> {
                     self.validate_owner(value, &value.type_parameters, true);
                 }
                 Declaration::TypeConstructor(value) => {
-                    self.validate_attributes(&value.name, &value.attributes, &["mustUse"]);
+                    self.validate_attributes(
+                        &value.name,
+                        &value.attributes,
+                        &["mustUse", "capabilities"],
+                    );
                     self.validate_must_use(&value.name, &value.attributes);
+                    self.validate_capabilities(&value.name, &value.attributes);
                     self.validate_owner(value, &value.type_parameters, true);
                 }
                 Declaration::CoreExtension(value) => {
@@ -316,6 +321,7 @@ impl<'a> Validator<'a> {
             documentation: value.documentation.clone(),
             attributes: value.attributes.clone(),
             fields: Vec::new(),
+            associated_types: Vec::new(),
             functions: value.functions.clone(),
         };
         if owner
@@ -341,8 +347,52 @@ impl<'a> Validator<'a> {
     ) {
         self.validate_documentation(&owner.name, &owner.documentation, false, public);
         self.validate_type_parameters(&owner.name, &owner.type_parameters);
-        self.validate_fields(&owner.name, &owner.fields, inherited, public);
-        self.validate_functions(&owner.name, &owner.functions, inherited);
+        let mut available_types = inherited.to_vec();
+        let mut names = owner
+            .type_parameters
+            .iter()
+            .map(|parameter| parameter.name.as_str())
+            .collect::<HashSet<_>>();
+        for associated in &owner.associated_types {
+            let qualified = format!("{}.{}", owner.name, associated.name);
+            if !names.insert(associated.name.as_str()) {
+                self.error(format!(
+                    "`{}` repeats associated type `{}`",
+                    owner.name, associated.name
+                ));
+            }
+            if public && associated.documentation.summary.trim().is_empty() {
+                self.error(format!("`{qualified}` is missing documentation"));
+            }
+            let mut constraints = HashSet::new();
+            for constraint in &associated.constraints {
+                if !constraints.insert(constraint.as_str()) {
+                    self.error(format!(
+                        "`{qualified}` repeats capability constraint `{constraint}`"
+                    ));
+                }
+                if !self.capabilities.contains(constraint.as_str()) {
+                    self.error(format!(
+                        "`{qualified}` references unknown capability `{constraint}`"
+                    ));
+                }
+            }
+            available_types.push(TypeParameter {
+                name: associated.name.clone(),
+                constraints: associated.constraints.clone(),
+            });
+        }
+        for associated in &owner.associated_types {
+            if let Some(value) = &associated.value {
+                self.validate_type(
+                    &format!("{}.{}", owner.name, associated.name),
+                    value,
+                    &available_types,
+                );
+            }
+        }
+        self.validate_fields(&owner.name, &owner.fields, &available_types, public);
+        self.validate_functions(&owner.name, &owner.functions, &available_types);
     }
 
     fn validate_fields(
@@ -536,19 +586,15 @@ impl<'a> Validator<'a> {
                 .is_some();
             self.validate_intrinsic_context(&qualified, function, intrinsic);
             let capability_requirement = function.body.is_none()
+                && !function
+                    .attributes
+                    .iter()
+                    .any(|attribute| attribute.name == "intrinsic")
                 && self.library.declarations.iter().any(|declaration| {
                     let Declaration::Capability(capability) = declaration else {
                         return false;
                     };
                     capability.name == owner
-                        && capability.attributes.iter().any(|attribute| {
-                            attribute.name == "behavior"
-                                && matches!(
-                                    attribute.arguments.as_slice(),
-                                    [AttributeArgument::Name(behavior)]
-                                        if behavior == "structuralMethods"
-                                )
-                        })
                 });
             match (intrinsic, function.body.is_some(), capability_requirement) {
                 (true, true, _) => self.error(format!(

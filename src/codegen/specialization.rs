@@ -7,8 +7,8 @@ use crate::{
     ast::{ConstructedTypeIdAllocator, ExprId},
     semantic::{FunctionInstance, SemanticModel},
     types::{
-        ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedRangeType,
-        ResolvedResultType, ResolvedSetType, TypeId,
+        ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType,
+        ResolvedRangeType, ResolvedResultType, ResolvedSetType, TypeId,
     },
     wasm_ir::{self, BodyOwner, Visitor},
 };
@@ -22,6 +22,7 @@ pub(super) fn materialize(
     asyncs: &mut Vec<ResolvedAsyncType>,
     ranges: &mut Vec<ResolvedRangeType>,
     sets: &mut Vec<ResolvedSetType>,
+    applications: &mut Vec<ResolvedApplicationType>,
 ) {
     let next = arrays
         .iter()
@@ -31,6 +32,7 @@ pub(super) fn materialize(
         .chain(asyncs.iter().map(|ty| ty.id.index() as u32 + 1))
         .chain(ranges.iter().map(|ty| ty.id.index() as u32 + 1))
         .chain(sets.iter().map(|ty| ty.id.index() as u32 + 1))
+        .chain(applications.iter().map(|ty| ty.id.index() as u32 + 1))
         .max()
         .unwrap_or_default();
     let mut ids = ConstructedTypeIdAllocator::starting_at(next);
@@ -58,8 +60,17 @@ pub(super) fn materialize(
             .expect("reachable calls have function templates");
         for local in &body.locals {
             materialize_type(
-                semantics, &instance, local.ty, &mut ids, arrays, options, results, asyncs, ranges,
+                semantics,
+                &instance,
+                local.ty,
+                &mut ids,
+                arrays,
+                options,
+                results,
+                asyncs,
+                ranges,
                 sets,
+                applications,
             );
         }
         for (expression, owner) in &owners {
@@ -70,8 +81,17 @@ pub(super) fn materialize(
                 .expression(*expression)
                 .expect("owned expressions belong to Wasm IR");
             materialize_expression_types(
-                expression, &instance, semantics, &mut ids, arrays, options, results, asyncs,
-                ranges, sets,
+                expression,
+                &instance,
+                semantics,
+                &mut ids,
+                arrays,
+                options,
+                results,
+                asyncs,
+                ranges,
+                sets,
+                applications,
             );
             if let Some(called) = called_function(
                 &expression.kind,
@@ -155,6 +175,7 @@ fn called_function(
         wasm_ir::CallTarget::Intrinsic { .. }
         | wasm_ir::CallTarget::ResultError { .. }
         | wasm_ir::CallTarget::OptionSome { .. }
+        | wasm_ir::CallTarget::IteratorItem { .. }
         | wasm_ir::CallTarget::ResultSuccess { .. } => None,
     }
 }
@@ -171,6 +192,7 @@ fn materialize_expression_types(
     asyncs: &mut Vec<ResolvedAsyncType>,
     ranges: &mut Vec<ResolvedRangeType>,
     sets: &mut Vec<ResolvedSetType>,
+    applications: &mut Vec<ResolvedApplicationType>,
 ) {
     materialize_type(
         semantics,
@@ -183,11 +205,22 @@ fn materialize_expression_types(
         asyncs,
         ranges,
         sets,
+        applications,
     );
     if let Some(conversion) = expression.conversion {
         for ty in [conversion.source, conversion.target] {
             materialize_type(
-                semantics, instance, ty, ids, arrays, options, results, asyncs, ranges, sets,
+                semantics,
+                instance,
+                ty,
+                ids,
+                arrays,
+                options,
+                results,
+                asyncs,
+                ranges,
+                sets,
+                applications,
             );
         }
     }
@@ -201,8 +234,17 @@ fn materialize_expression_types(
                 wasm_ir::InterpolatedPart::Text(_) => None,
             }) {
                 materialize_type(
-                    semantics, instance, source, ids, arrays, options, results, asyncs, ranges,
+                    semantics,
+                    instance,
+                    source,
+                    ids,
+                    arrays,
+                    options,
+                    results,
+                    asyncs,
+                    ranges,
                     sets,
+                    applications,
                 );
             }
         }
@@ -219,6 +261,7 @@ fn materialize_expression_types(
                     asyncs,
                     ranges,
                     sets,
+                    applications,
                 );
             }
             wasm_ir::CallTarget::Intrinsic {
@@ -228,8 +271,17 @@ fn materialize_expression_types(
             } => {
                 for ty in type_arguments.iter().copied().chain(*receiver_type) {
                     materialize_type(
-                        semantics, instance, ty, ids, arrays, options, results, asyncs, ranges,
+                        semantics,
+                        instance,
+                        ty,
+                        ids,
+                        arrays,
+                        options,
+                        results,
+                        asyncs,
+                        ranges,
                         sets,
+                        applications,
                     );
                 }
             }
@@ -240,14 +292,24 @@ fn materialize_expression_types(
             } => {
                 for ty in std::iter::once(*dispatch_type).chain(*receiver_type) {
                     materialize_type(
-                        semantics, instance, ty, ids, arrays, options, results, asyncs, ranges,
+                        semantics,
+                        instance,
+                        ty,
+                        ids,
+                        arrays,
+                        options,
+                        results,
+                        asyncs,
+                        ranges,
                         sets,
+                        applications,
                     );
                 }
             }
             wasm_ir::CallTarget::UserFunction { .. }
             | wasm_ir::CallTarget::ResultError { .. }
             | wasm_ir::CallTarget::OptionSome { .. }
+            | wasm_ir::CallTarget::IteratorItem { .. }
             | wasm_ir::CallTarget::ResultSuccess { .. } => {}
         },
         wasm_ir::ExpressionKind::Propagate { target, .. } => {
@@ -262,6 +324,7 @@ fn materialize_expression_types(
                 asyncs,
                 ranges,
                 sets,
+                applications,
             );
         }
         _ => {}
@@ -280,8 +343,18 @@ fn materialize_type(
     asyncs: &mut Vec<ResolvedAsyncType>,
     ranges: &mut Vec<ResolvedRangeType>,
     sets: &mut Vec<ResolvedSetType>,
+    applications: &mut Vec<ResolvedApplicationType>,
 ) {
     semantics.materialize_specialized_type(
-        instance, ty, ids, arrays, options, results, asyncs, ranges, sets,
+        instance,
+        ty,
+        ids,
+        arrays,
+        options,
+        results,
+        asyncs,
+        ranges,
+        sets,
+        applications,
     );
 }

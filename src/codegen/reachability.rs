@@ -35,6 +35,7 @@ pub(super) struct Reachability {
     gc_results: BTreeSet<ResultTypeId>,
     gc_asyncs: BTreeSet<AsyncTypeId>,
     gc_sets: BTreeSet<TypeApplicationId>,
+    gc_applications: BTreeSet<TypeApplicationId>,
     display_functions: BTreeMap<TypeId, FunctionInstance>,
     derived_displays: BTreeSet<TypeId>,
 }
@@ -221,6 +222,7 @@ impl Reachability {
                     wasm_ir::CallTarget::Intrinsic { .. }
                     | wasm_ir::CallTarget::ResultError { .. }
                     | wasm_ir::CallTarget::OptionSome { .. }
+                    | wasm_ir::CallTarget::IteratorItem { .. }
                     | wasm_ir::CallTarget::ResultSuccess { .. } => None,
                 };
                 let function = function.map(|function| {
@@ -418,6 +420,7 @@ impl Reachability {
                     wasm_ir::CallTarget::UserFunction { .. }
                     | wasm_ir::CallTarget::ResultError { .. }
                     | wasm_ir::CallTarget::OptionSome { .. }
+                    | wasm_ir::CallTarget::IteratorItem { .. }
                     | wasm_ir::CallTarget::ResultSuccess { .. } => {}
                 },
                 wasm_ir::ExpressionKind::Propagate { target, .. } => {
@@ -573,6 +576,10 @@ impl Reachability {
         self.gc_sets.contains(&set)
     }
 
+    pub fn contains_application_type(&self, application: TypeApplicationId) -> bool {
+        self.gc_applications.contains(&application)
+    }
+
     fn require_types(
         &mut self,
         roots: impl IntoIterator<Item = TypeId>,
@@ -663,6 +670,28 @@ impl Reachability {
                     pending.push(*element);
                 }
                 TypeKind::Range { bound, .. } => pending.push(*bound),
+                TypeKind::Application {
+                    layout,
+                    constructor,
+                    arguments,
+                } => {
+                    self.gc_applications.insert(*layout);
+                    pending.extend(arguments.iter().copied());
+                    let declaration = standard_library.type_constructor(*constructor);
+                    let variables = declaration
+                        .parameters
+                        .iter()
+                        .zip(arguments)
+                        .map(|(parameter, argument)| (parameter.name, *argument))
+                        .collect::<std::collections::HashMap<_, _>>();
+                    pending.extend(standard_library.fields_of_constructor(*constructor).map(
+                        |field| {
+                            super::gc_types::instantiated_catalog_type(
+                                field.ty, &variables, semantics,
+                            )
+                        },
+                    ));
+                }
             }
         }
     }
@@ -727,6 +756,7 @@ impl Reachability {
                 | TypeKind::Async { .. }
                 | TypeKind::Range { .. }
                 | TypeKind::Set { .. } => {}
+                TypeKind::Application { .. } => {}
             }
         }
     }

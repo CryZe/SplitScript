@@ -117,6 +117,7 @@ pub struct Expression {
 #[derive(Debug, Clone)]
 pub enum ExpressionKind {
     None,
+    IteratorEnd,
     Bool(bool),
     Int(u64),
     Float(crate::ast::FloatLiteral),
@@ -238,6 +239,9 @@ pub enum CallTarget {
     OptionSome {
         option: OptionTypeId,
     },
+    IteratorItem {
+        step: crate::ast::TypeApplicationId,
+    },
     ResultSuccess {
         result: ResultTypeId,
     },
@@ -277,6 +281,11 @@ pub enum LoweredPattern {
         option: OptionTypeId,
         binding: Option<ValueId>,
     },
+    IteratorEnd(crate::ast::TypeApplicationId),
+    IteratorItem {
+        step: crate::ast::TypeApplicationId,
+        binding: Option<ValueId>,
+    },
     ResultSuccess {
         result: ResultTypeId,
         binding: Option<ValueId>,
@@ -293,6 +302,7 @@ impl LoweredPattern {
         match self {
             Self::Enum { binding, .. }
             | Self::OptionSome { binding, .. }
+            | Self::IteratorItem { binding, .. }
             | Self::ResultSuccess { binding, .. }
             | Self::ResultError { binding, .. } => *binding,
             Self::Bool(_)
@@ -301,6 +311,7 @@ impl LoweredPattern {
             | Self::Int(_)
             | Self::FileVersion(_)
             | Self::OptionNone(_)
+            | Self::IteratorEnd(_)
             | Self::Wildcard => None,
         }
     }
@@ -847,6 +858,7 @@ fn lower_expression(
 ) -> Expression {
     let kind = match &expression.kind {
         TypedExpressionKind::None => ExpressionKind::None,
+        TypedExpressionKind::IteratorEnd => ExpressionKind::IteratorEnd,
         TypedExpressionKind::Bool(value) => ExpressionKind::Bool(*value),
         TypedExpressionKind::Int { value, .. } => ExpressionKind::Int(*value),
         TypedExpressionKind::Float(value) => ExpressionKind::Float(value.clone()),
@@ -1055,6 +1067,25 @@ fn lower_expression(
                                 binding: binding.as_ref().map(|binding| binding.id),
                             }
                         }
+                        TypedPattern::IteratorEnd => {
+                            let Some(ResolvedWrapperPattern::IteratorEnd(step)) =
+                                arm.resolution.wrapper
+                            else {
+                                unreachable!("checked End patterns resolve to IteratorStep")
+                            };
+                            LoweredPattern::IteratorEnd(step)
+                        }
+                        TypedPattern::IteratorItem(binding) => {
+                            let Some(ResolvedWrapperPattern::IteratorItem(step)) =
+                                arm.resolution.wrapper
+                            else {
+                                unreachable!("checked Item patterns resolve to IteratorStep")
+                            };
+                            LoweredPattern::IteratorItem {
+                                step,
+                                binding: binding.as_ref().map(|binding| binding.id),
+                            }
+                        }
                         TypedPattern::ResultSuccess(binding) => {
                             let Some(ResolvedWrapperPattern::ResultSuccess(result)) =
                                 arm.resolution.wrapper
@@ -1188,6 +1219,7 @@ fn lower_call_target(
         },
         ResolvedCall::ResultError { result } => CallTarget::ResultError { result: *result },
         ResolvedCall::OptionSome { option } => CallTarget::OptionSome { option: *option },
+        ResolvedCall::IteratorItem { step } => CallTarget::IteratorItem { step: *step },
         ResolvedCall::ResultSuccess { result } => CallTarget::ResultSuccess { result: *result },
     }
 }
@@ -2238,6 +2270,7 @@ fn capture_await_value(
     if matches!(
         expression.kind,
         ExpressionKind::None
+            | ExpressionKind::IteratorEnd
             | ExpressionKind::Bool(_)
             | ExpressionKind::Int(_)
             | ExpressionKind::Float(_)
@@ -2447,6 +2480,7 @@ fn map_expression_children(
 ) -> ExpressionKind {
     match kind {
         ExpressionKind::None
+        | ExpressionKind::IteratorEnd
         | ExpressionKind::Bool(_)
         | ExpressionKind::Int(_)
         | ExpressionKind::Float(_)
@@ -3810,6 +3844,7 @@ impl<'a> LocalPlanner<'a> {
         &mut self,
         expression: ExprId,
         expression_ty: TypeId,
+        receiver_ty: Option<TypeId>,
         policy: ScratchPolicy,
     ) {
         let ty = match policy.ty {
@@ -3822,6 +3857,9 @@ impl<'a> LocalPlanner<'a> {
                     unreachable!("result-value scratch requires a Result expression")
                 };
                 *value
+            }
+            ScratchType::Receiver => {
+                receiver_ty.expect("receiver scratch requires a method-shaped intrinsic")
             }
         };
         for slot in 0..policy.slots {
@@ -3854,7 +3892,7 @@ pub(crate) fn intrinsic_future_locals(
     let mut planner = LocalPlanner::new(semantics);
     if let Some(policy) = intrinsic_registry::contract(intrinsic).async_scratch {
         let completion = planner.awaited_value_type(lowered.ty);
-        planner.push_intrinsic_scratch(expression, completion, policy);
+        planner.push_intrinsic_scratch(expression, completion, None, policy);
     }
     planner.locals
 }
@@ -3980,7 +4018,7 @@ impl Visitor for LocalPlanner<'_> {
                 && let Some(policy) = intrinsic_registry::contract(intrinsic).async_scratch
             {
                 let completion_type = self.awaited_value_type(operand_type);
-                self.push_intrinsic_scratch(*value, completion_type, policy);
+                self.push_intrinsic_scratch(*value, completion_type, None, policy);
             }
         } else if let Terminator::RetryComplete {
             destination, value, ..
@@ -4023,6 +4061,10 @@ impl Visitor for LocalPlanner<'_> {
                         ..
                     }
                     | LoweredPattern::OptionSome {
+                        binding: Some(binding),
+                        ..
+                    }
+                    | LoweredPattern::IteratorItem {
                         binding: Some(binding),
                         ..
                     }
@@ -4075,7 +4117,14 @@ impl Visitor for LocalPlanner<'_> {
         } = expression.kind
             && let Some(policy) = intrinsic_registry::contract(intrinsic).synchronous_scratch
         {
-            self.push_intrinsic_scratch(expression.id, expression.ty, policy);
+            let receiver_ty = match &expression.kind {
+                ExpressionKind::Call {
+                    target: CallTarget::Intrinsic { receiver_type, .. },
+                    ..
+                } => *receiver_type,
+                _ => None,
+            };
+            self.push_intrinsic_scratch(expression.id, expression.ty, receiver_ty, policy);
         }
     }
 }

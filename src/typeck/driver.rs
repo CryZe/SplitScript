@@ -3,8 +3,8 @@
 use crate::{
     ast::Program,
     inference::{
-        ArrayLayout, AsyncLayout, ConstructedLayouts, InferenceContext, OptionLayout, RangeLayout,
-        Requirements, ResultLayout, SetLayout, Type,
+        ApplicationLayout, ArrayLayout, AsyncLayout, ConstructedLayouts, InferenceContext,
+        OptionLayout, RangeLayout, Requirements, ResultLayout, SetLayout, Type,
     },
     resolution::ProgramResolutions,
     semantic::SemanticBuilder,
@@ -99,6 +99,28 @@ fn initialize_checker(
             backing: None,
         })
         .collect::<Vec<_>>();
+    let application_types = program
+        .type_applications
+        .iter()
+        .filter_map(|application| {
+            let Some(crate::types::ResolvedTypeRef::Application(_)) =
+                resolutions.type_ref(crate::ast::TypeRef::Application(application.id))
+            else {
+                return None;
+            };
+            let name = program.type_name(application.constructor);
+            let constructor = standard_library.named_type_constructor_by_name(name)?;
+            Some(ApplicationLayout {
+                id: application.id,
+                constructor: constructor.id,
+                arguments: application
+                    .arguments
+                    .iter()
+                    .map(|argument| syntax_type(*argument, &semantic_types, resolutions))
+                    .collect(),
+            })
+        })
+        .collect::<Vec<_>>();
     let none_type = Type::Known(semantic_types.id_for_core(crate::stdlib::CoreTypeId::None));
     let inference = InferenceContext::new(
         standard_library.clone(),
@@ -111,6 +133,7 @@ fn initialize_checker(
             asyncs: async_types,
             ranges: range_types,
             sets: set_types,
+            applications: application_types,
         },
     );
     let provider_value = resolutions.state_provider().map(|provider| {
@@ -192,7 +215,10 @@ fn initialize_checker(
             checker
                 .resolutions
                 .type_ref(crate::ast::TypeRef::Application(application.id)),
-            Some(crate::types::ResolvedTypeRef::Set(_))
+            Some(
+                crate::types::ResolvedTypeRef::Set(_)
+                    | crate::types::ResolvedTypeRef::Application(_)
+            )
         ) {
             continue;
         }

@@ -372,15 +372,18 @@ semantic-review evidence, not as a conformance corpus.
   cannot be expressed by declared membership, structural equality, structural
   memory layout, or a source-defined implementation.
 
-- [ ] Introduce source-defined iterable and iterator capabilities after the
-  `Display` capability boundary is complete, and make `for` consume those
-  contracts instead of recognizing arrays and ranges directly. `next` must
-  return a dedicated generic step value with distinct item and end variants,
-  not `T?`: an iterator over `T?` must preserve `Some(None)` as an item rather
-  than confusing it with exhaustion. Iterators should be first-class values
-  that can be stored and passed. Specify mutation invalidation, failure, and
-  asynchronous iteration separately; defer `map`, `filter`, and similar
-  adapters until closures have a settled design.
+- [x] Introduce source-defined `Iterable` and `Iterator` capabilities and make
+  `for` project its item type through those contracts. Built-in arrays, sets,
+  and integer ranges now create first-class cursor values. `next` returns
+  `IteratorStep<T>`, whose `Item(T)` and `End` cases keep an iterator over `T?`
+  from confusing `Item(None)` with exhaustion. Array and set cursors detect
+  structural mutation; direct `for` loops retain their allocation-free
+  specialized lowering.
+- [ ] Design user-defined mutable iterator state and lower `for` through a
+  general `Iterable.iterator` / `Iterator.next` call path once that ownership
+  model is settled. Specify failure and asynchronous iteration separately;
+  defer `map`, `filter`, and similar adapters until closures have a settled
+  design.
 
 ### Engine and emulator providers
 

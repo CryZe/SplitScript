@@ -198,6 +198,8 @@ pub enum TypedPattern {
     FileVersion([u16; 4]),
     None,
     OptionSome(Option<PatternBinding>),
+    IteratorEnd,
+    IteratorItem(Option<PatternBinding>),
     ResultSuccess(Option<PatternBinding>),
     ResultError(Option<PatternBinding>),
     Wildcard,
@@ -206,6 +208,7 @@ pub enum TypedPattern {
 #[derive(Debug, Clone)]
 pub enum TypedExpressionKind {
     None,
+    IteratorEnd,
     Bool(bool),
     Int {
         value: u64,
@@ -1129,6 +1132,7 @@ pub fn walk_typed_expression<V: TypedVisitor>(
             }
         }
         TypedExpressionKind::None
+        | TypedExpressionKind::IteratorEnd
         | TypedExpressionKind::Break(None)
         | TypedExpressionKind::Continue
         | TypedExpressionKind::Return(None)
@@ -1204,6 +1208,7 @@ fn lower_expression_kind(
     match &expression.kind {
         ExprKind::Error => unreachable!("recovery expressions cannot reach typed HIR"),
         ExprKind::None => TypedExpressionKind::None,
+        ExprKind::IteratorEnd => TypedExpressionKind::IteratorEnd,
         ExprKind::Bool(value) => TypedExpressionKind::Bool(*value),
         ExprKind::Int { value, suffix } => TypedExpressionKind::Int {
             value: *value,
@@ -1308,6 +1313,10 @@ fn lower_expression_kind(
                         MatchPattern::None => TypedPattern::None,
                         MatchPattern::OptionSome(binding) => {
                             TypedPattern::OptionSome(binding.clone())
+                        }
+                        MatchPattern::IteratorEnd => TypedPattern::IteratorEnd,
+                        MatchPattern::IteratorItem(binding) => {
+                            TypedPattern::IteratorItem(binding.clone())
                         }
                         MatchPattern::ResultSuccess(binding) => {
                             TypedPattern::ResultSuccess(binding.clone())

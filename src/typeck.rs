@@ -79,6 +79,7 @@ pub struct CheckOutput {
     pub async_types: Vec<ResolvedAsyncType>,
     pub range_types: Vec<crate::types::ResolvedRangeType>,
     pub set_types: Vec<ResolvedSetType>,
+    pub application_types: Vec<crate::types::ResolvedApplicationType>,
 }
 
 pub struct RecoveringCheckOutput {
@@ -723,6 +724,7 @@ fn resolved_type_ref(ty: ResolvedTypeRef, types: &TypeStore) -> Type {
         ResolvedTypeRef::Async(id) => Type::Async(id),
         ResolvedTypeRef::Range(id) => Type::Range(id),
         ResolvedTypeRef::Set(id) => Type::Set(id),
+        ResolvedTypeRef::Application(id) => Type::Application(id),
     }
 }
 

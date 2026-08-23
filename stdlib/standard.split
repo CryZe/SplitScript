@@ -1974,6 +1974,280 @@ capability Display<T> {
     fn toString() -> String;
 }
 
+/// Produces a sequence of values one step at a time.
+///
+/// Its associated item type is the value yielded by [`Iterator.next`].
+/// Exhaustion is represented by the [`End`] step, not
+/// by [`None`], so iterating a sequence of optional values preserves an actual
+/// [`None`] item.
+///
+/// # Example
+///
+/// Advance an iterator cursor
+///
+/// ```splitscript
+/// state "game.exe" {}
+///
+/// onAttach {
+///     let iterator = [1, 2].iterator()
+///     let step = iterator.next()
+/// }
+/// ```
+@behavior(structuralMethods)
+capability Iterator<T> {
+    /// The value produced by one successful iterator step.
+    type Item;
+
+    /// Advances this cursor and returns either its next [`Item`] or [`End`].
+    ///
+    /// Repeated calls continue from the cursor's current position.
+    ///
+    /// # Example
+    ///
+    /// Read one iterator step
+    ///
+    /// ```splitscript
+    /// state "game.exe" {}
+    ///
+    /// onAttach {
+    ///     let iterator = (10..<12).iterator()
+    ///     let first = iterator.next()
+    /// }
+    /// ```
+    @mustUse("The yielded item or exhausted state must be inspected.")
+    fn next() -> IteratorStep<Item>;
+}
+
+/// Creates an [`Iterator`] over a value without consuming that value.
+///
+/// Arrays, sets, and integer ranges provide this capability. The iterator is
+/// a first-class value with its own cursor, so it can be stored or passed to a
+/// helper independently of the source collection.
+///
+/// # Example
+///
+/// Iterate over a value
+///
+/// ```splitscript
+/// state "game.exe" {}
+///
+/// onAttach {
+///     for value in [1, 2] {
+///         print(value)
+///     }
+/// }
+/// ```
+@behavior(structuralMethods)
+capability Iterable<T> {
+    /// The value yielded by the iterator.
+    type Item;
+
+    /// The concrete cursor returned for this iterable value.
+    type Iterator: Iterator;
+
+    /// Creates an independent cursor over this value.
+    ///
+    /// Advancing the cursor does not consume the iterable value itself.
+    ///
+    /// # Example
+    ///
+    /// Create a cursor
+    ///
+    /// ```splitscript
+    /// state "game.exe" {}
+    ///
+    /// onAttach {
+    ///     let iterator = [1, 2].iterator()
+    /// }
+    /// ```
+    @mustUse("The newly created iterator cursor is otherwise discarded.")
+    fn iterator() -> Iterator;
+}
+
+/// Distinguishes one yielded item from iterator exhaustion.
+///
+/// This wrapper deliberately remains distinct from [`T?`]: an
+/// iterator whose item type is optional must be able to yield [`None`] before
+/// eventually reaching the [`End`] step.
+///
+/// # Example
+///
+/// Inspect an iterator step
+///
+/// ```splitscript
+/// let iterator = [10, 20].iterator()
+/// let text = match iterator.next() {
+///     Item(value) => `item {value}`,
+///     End => "finished",
+/// }
+/// ```
+typeConstructor IteratorStep<T> {
+    /// The value carried by an item step.
+    type Item = T;
+
+    /// Compiler-private payload used by the `Item(value)` variant.
+    private value: T,
+}
+
+/// Iterates over an array while detecting structural mutation.
+///
+/// # Example
+///
+/// Name an array cursor in an interface
+///
+/// ```splitscript
+/// state "game.exe" {}
+///
+/// fn inspect(iterator: ArrayIterator<u32>) {}
+/// ```
+@capabilities(Iterator)
+typeConstructor ArrayIterator<T> {
+    /// The array element yielded by this cursor.
+    type Item = T;
+
+    /// Array whose elements are visited by this cursor.
+    private source: [T],
+    /// Index of the next element.
+    private index: u32,
+    /// Structural version captured when the cursor was created.
+    private version: u32,
+
+    /// Advances to the next array element.
+    ///
+    /// Structural array mutation invalidates this cursor.
+    ///
+    /// # Example
+    ///
+    /// Advance an array cursor
+    ///
+    /// ```splitscript
+    /// let iterator = [10, 20].iterator()
+    /// let step = iterator.next()
+    /// ```
+    @intrinsic(ArrayIteratorNext)
+    @mustUse("The yielded item or exhausted state must be inspected.")
+    fn next() -> IteratorStep<T>;
+}
+
+/// Iterates over a set while detecting structural mutation.
+///
+/// # Example
+///
+/// Name a set cursor in an interface
+///
+/// ```splitscript
+/// state "game.exe" {}
+///
+/// fn inspect(iterator: SetIterator<String>) {}
+/// ```
+@capabilities(Iterator)
+typeConstructor SetIterator<T: Equatable> {
+    /// The set element yielded by this cursor.
+    type Item = T;
+
+    /// Set whose elements are visited by this cursor.
+    private source: Set<T>,
+    /// Backing-array index of the next element.
+    private index: u32,
+    /// Structural version captured when the cursor was created.
+    private version: u32,
+
+    /// Advances to the next set element.
+    ///
+    /// Structural set mutation invalidates this cursor.
+    ///
+    /// # Example
+    ///
+    /// Advance a set cursor
+    ///
+    /// ```splitscript
+    /// let values = Set.new<String>()
+    /// let iterator = values.iterator()
+    /// let step = iterator.next()
+    /// ```
+    @intrinsic(SetIteratorNext)
+    @mustUse("The yielded item or exhausted state must be inspected.")
+    fn next() -> IteratorStep<T>;
+}
+
+/// Iterates from an included integer start to an excluded end.
+///
+/// # Example
+///
+/// Name an exclusive-range cursor in an interface
+///
+/// ```splitscript
+/// state "game.exe" {}
+///
+/// fn inspect(iterator: ExclusiveRangeIterator<u16>) {}
+/// ```
+@capabilities(Iterator)
+typeConstructor ExclusiveRangeIterator<T: Integer> {
+    /// The integer yielded by this cursor.
+    type Item = T;
+
+    /// Next integer to yield.
+    private current: T,
+    /// Excluded upper endpoint.
+    private end: T,
+
+    /// Advances to the next integer before the excluded endpoint.
+    ///
+    /// The cursor returns [`End`] once its current value reaches the endpoint.
+    ///
+    /// # Example
+    ///
+    /// Advance an exclusive-range cursor
+    ///
+    /// ```splitscript
+    /// let iterator = (1..<3).iterator()
+    /// let step = iterator.next()
+    /// ```
+    @intrinsic(ExclusiveRangeIteratorNext)
+    @mustUse("The yielded item or exhausted state must be inspected.")
+    fn next() -> IteratorStep<T>;
+}
+
+/// Iterates from an included integer start through an included end.
+///
+/// # Example
+///
+/// Name an inclusive-range cursor in an interface
+///
+/// ```splitscript
+/// state "game.exe" {}
+///
+/// fn inspect(iterator: InclusiveRangeIterator<u16>) {}
+/// ```
+@capabilities(Iterator)
+typeConstructor InclusiveRangeIterator<T: Integer> {
+    /// The integer yielded by this cursor.
+    type Item = T;
+
+    /// Next integer to yield.
+    private current: T,
+    /// Included upper endpoint.
+    private end: T,
+    /// Whether the included endpoint has already been yielded.
+    private finished: bool,
+
+    /// Advances to the next integer through the included endpoint.
+    ///
+    /// The cursor returns the endpoint once before returning [`End`].
+    ///
+    /// # Example
+    ///
+    /// Advance an inclusive-range cursor
+    ///
+    /// ```splitscript
+    /// let iterator = (1..=3).iterator()
+    /// let step = iterator.next()
+    /// ```
+    @intrinsic(InclusiveRangeIteratorNext)
+    @mustUse("The yielded item or exhausted state must be inspected.")
+    fn next() -> IteratorStep<T>;
+}
+
 /// Supports deserialization from process memory.
 ///
 /// Primitive and record layouts with this capability can be selected by
@@ -2002,7 +2276,28 @@ capability MemoryReadable<T> {}
 /// ```splitscript
 /// let inventory: [u8] = [1, 2, 3]
 /// ```
+@capabilities(Iterable)
 typeConstructor [T] {
+    /// The array element yielded during iteration.
+    type Item = T;
+    /// The cursor created for this array.
+    type Iterator = ArrayIterator<T>;
+
+    /// Creates an independent cursor over this array.
+    ///
+    /// The cursor initially points at index zero and captures the array's structural version.
+    ///
+    /// # Example
+    ///
+    /// Iterate manually
+    ///
+    /// ```splitscript
+    /// let iterator = ["forest", "castle"].iterator()
+    /// ```
+    @intrinsic(ArrayIterator)
+    @mustUse("The newly created iterator cursor is otherwise discarded.")
+    fn iterator() -> ArrayIterator<T>;
+
     /// Returns the number of array elements.
     ///
     /// The result is the WebAssembly GC array length.
@@ -2273,7 +2568,28 @@ typeConstructor [T] {
 ///     print(values[index])
 /// }
 /// ```
+@capabilities(Iterable)
 typeConstructor T..<T {
+    /// The integer yielded during iteration.
+    type Item = T;
+    /// The cursor created for this exclusive range.
+    type Iterator = ExclusiveRangeIterator<T>;
+
+    /// Creates a cursor starting at this range's included lower endpoint.
+    ///
+    /// The range value remains available and unchanged.
+    ///
+    /// # Example
+    ///
+    /// Create an exclusive-range cursor
+    ///
+    /// ```splitscript
+    /// let iterator = (1..<4).iterator()
+    /// ```
+    @intrinsic(ExclusiveRangeIterator)
+    @mustUse("The newly created iterator cursor is otherwise discarded.")
+    fn iterator() -> ExclusiveRangeIterator<T>;
+
     /// Returns the included lower endpoint.
     ///
     /// Range endpoints are immutable and retain the range's exact integer type.
@@ -2354,7 +2670,28 @@ typeConstructor T..<T {
 ///     print(checkpoint)
 /// }
 /// ```
+@capabilities(Iterable)
 typeConstructor T..=T {
+    /// The integer yielded during iteration.
+    type Item = T;
+    /// The cursor created for this inclusive range.
+    type Iterator = InclusiveRangeIterator<T>;
+
+    /// Creates a cursor starting at this range's included lower endpoint.
+    ///
+    /// The range value remains available and unchanged.
+    ///
+    /// # Example
+    ///
+    /// Create an inclusive-range cursor
+    ///
+    /// ```splitscript
+    /// let iterator = (1..=4).iterator()
+    /// ```
+    @intrinsic(InclusiveRangeIterator)
+    @mustUse("The newly created iterator cursor is otherwise discarded.")
+    fn iterator() -> InclusiveRangeIterator<T>;
+
     /// Returns the included lower endpoint.
     ///
     /// Range endpoints are immutable and retain the range's exact integer type.
@@ -2434,7 +2771,29 @@ typeConstructor T..=T {
 /// let visited = Set.new<String>()
 /// visited.insert("Atrium")
 /// ```
+@capabilities(Iterable)
 typeConstructor Set<T: Equatable> {
+    /// The set element yielded during iteration.
+    type Item = T;
+    /// The cursor created for this set.
+    type Iterator = SetIterator<T>;
+
+    /// Creates an independent cursor over this set.
+    ///
+    /// The cursor initially points at the set's first occupied backing slot.
+    ///
+    /// # Example
+    ///
+    /// Iterate a set manually
+    ///
+    /// ```splitscript
+    /// let values = Set.new<String>()
+    /// let iterator = values.iterator()
+    /// ```
+    @intrinsic(SetIterator)
+    @mustUse("The newly created iterator cursor is otherwise discarded.")
+    fn iterator() -> SetIterator<T>;
+
     /// Creates an empty set.
     ///
     /// The returned value retains its contents until explicitly mutated or the

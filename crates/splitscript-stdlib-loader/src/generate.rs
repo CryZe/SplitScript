@@ -111,8 +111,9 @@ impl<'a> CatalogGenerator<'a> {
                     .collect::<Vec<_>>()
                     .join(",");
                 output.push_str(&format!(
-                    "StdlibCapability {{ id: StdlibCapabilityId::{}, name: {}, super_capabilities: &[{super_capabilities}], behavior: CapabilityBehavior::{behavior}, documentation: {} }},\n",
+                    "StdlibCapability {{ id: StdlibCapabilityId::{}, name: {}, super_capabilities: &[{super_capabilities}], behavior: CapabilityBehavior::{behavior}, associated_types: {}, documentation: {} }},\n",
                     ident(&owner.name), quote(&owner.name),
+                    self.associated_type_requirements(owner),
                     self.documentation(&owner.documentation)
                 ));
             }
@@ -137,9 +138,11 @@ impl<'a> CatalogGenerator<'a> {
                     .map(|reason| format!("Some({})", quote(reason)))
                     .unwrap_or_else(|| "None".to_owned());
                 output.push_str(&format!(
-                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, syntax: TypeConstructorSyntax::{syntax}, name: {}, parameters: {}, must_use: {must_use}, documentation: {} }},\n",
+                    "StdlibTypeConstructor {{ id: StdlibTypeConstructorId::{id}, syntax: TypeConstructorSyntax::{syntax}, name: {}, parameters: {}, capabilities: {}, must_use: {must_use}, associated_types: {}, documentation: {} }},\n",
                     quote(&owner.name),
                     self.type_parameters(&owner.type_parameters, owner),
+                    self.capabilities(&owner.attributes),
+                    self.associated_type_definitions(owner),
                     self.documentation(&owner.documentation)
                 ));
             }
@@ -290,7 +293,7 @@ impl<'a> CatalogGenerator<'a> {
                 "StdlibField {{ id: StdlibFieldId::{}{}, owner: {owner_expression}, name: {}, ty: {}, visibility: FieldVisibility::{}, documentation: {} }},\n",
                 owner_id, ident(&field.name),
                 quote(&field.name),
-                self.type_ref(&field.ty, type_parameters),
+                self.type_ref(&field.ty, type_parameters, &[]),
                 if owner_private || field.private {
                     "RuntimePrivate"
                 } else {
@@ -376,6 +379,7 @@ impl<'a> CatalogGenerator<'a> {
                         documentation: declaration.documentation.clone(),
                         attributes: declaration.attributes.clone(),
                         fields: Vec::new(),
+                        associated_types: Vec::new(),
                         functions,
                     };
                     self.emit_functions(
@@ -509,9 +513,9 @@ impl<'a> CatalogGenerator<'a> {
                     ident(capability),
                     self.type_parameters(&parameters, owner),
                     case.type_parameters.len(),
-                    case.parameters.iter().map(|parameter| self.parameter(parameter, &parameters)).collect::<Vec<_>>().join(","),
+                    case.parameters.iter().map(|parameter| self.parameter(parameter, &parameters, &owner.associated_types)).collect::<Vec<_>>().join(","),
                     case.result_is_async,
-                    self.type_ref(&case.result, &parameters),
+                    self.type_ref(&case.result, &parameters, &owner.associated_types),
                     quote(&function_name),
                     quote(case.body.as_deref().expect("validated overload cases have bodies")),
                 )
@@ -540,9 +544,9 @@ impl<'a> CatalogGenerator<'a> {
             quote(&qualified_name),
             self.type_parameters(&public_parameters, owner),
             public.type_parameters.len(),
-            public.parameters.iter().map(|parameter| self.parameter(parameter, &public_parameters)).collect::<Vec<_>>().join(","),
+            public.parameters.iter().map(|parameter| self.parameter(parameter, &public_parameters, &owner.associated_types)).collect::<Vec<_>>().join(","),
             public.result_is_async,
-            self.type_ref(&public.result, &public_parameters),
+            self.type_ref(&public.result, &public_parameters, &owner.associated_types),
             quote(&public.documentation.summary),
             quote(&public.documentation.details),
         ));
@@ -637,9 +641,9 @@ impl<'a> CatalogGenerator<'a> {
                 quote(&qualified_name),
                 self.type_parameters(type_parameters, owner),
                 function.type_parameters.len(),
-                function.parameters.iter().map(|parameter| self.parameter(parameter, type_parameters)).collect::<Vec<_>>().join(","),
+                function.parameters.iter().map(|parameter| self.parameter(parameter, type_parameters, &owner.associated_types)).collect::<Vec<_>>().join(","),
                 function.result_is_async,
-                self.type_ref(&function.result, type_parameters),
+                self.type_ref(&function.result, type_parameters, &owner.associated_types),
                 quote(&function.documentation.summary), quote(&function.documentation.details),
             ));
     }
@@ -666,7 +670,55 @@ impl<'a> CatalogGenerator<'a> {
         format!("&[{}]", values.join(","))
     }
 
-    fn parameter(&self, parameter: &crate::Parameter, type_parameters: &[TypeParameter]) -> String {
+    fn associated_type_requirements(&self, owner: &CallableOwnerDeclaration) -> String {
+        let values = owner
+            .associated_types
+            .iter()
+            .map(|associated| {
+                let constraints = associated
+                    .constraints
+                    .iter()
+                    .map(|constraint| format!("StdlibCapabilityId::{}", ident(constraint)))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!(
+                    "StdlibAssociatedType {{ name: {}, constraints: &[{constraints}], documentation: {} }}",
+                    quote(&associated.name),
+                    self.documentation(&associated.documentation),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("&[{values}]")
+    }
+
+    fn associated_type_definitions(&self, owner: &CallableOwnerDeclaration) -> String {
+        let values = owner
+            .associated_types
+            .iter()
+            .map(|associated| {
+                let value = associated
+                    .value
+                    .as_ref()
+                    .expect("validated type-constructor associated types define values");
+                format!(
+                    "StdlibAssociatedTypeDefinition {{ name: {}, value: {}, documentation: {} }}",
+                    quote(&associated.name),
+                    self.type_ref(value, &owner.type_parameters, &owner.associated_types),
+                    self.documentation(&associated.documentation),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("&[{values}]")
+    }
+
+    fn parameter(
+        &self,
+        parameter: &crate::Parameter,
+        type_parameters: &[TypeParameter],
+        associated_types: &[crate::AssociatedTypeDeclaration],
+    ) -> String {
         let rule = optional_attribute_name(&parameter.attributes, "literal");
         let constructor = if rule.is_some() {
             "literal_parameter"
@@ -683,7 +735,7 @@ impl<'a> CatalogGenerator<'a> {
         format!(
             "{constructor}({}, {}{rule}, {})",
             quote(&parameter.name),
-            self.type_ref(&parameter.ty, type_parameters),
+            self.type_ref(&parameter.ty, type_parameters, associated_types),
             quote(&parameter.documentation.summary)
         )
     }
@@ -700,31 +752,36 @@ impl<'a> CatalogGenerator<'a> {
         )
     }
 
-    fn type_ref(&self, ty: &Type, parameters: &[TypeParameter]) -> String {
+    fn type_ref(
+        &self,
+        ty: &Type,
+        parameters: &[TypeParameter],
+        associated_types: &[crate::AssociatedTypeDeclaration],
+    ) -> String {
         match ty {
             Type::Option(value) => format!(
                 "TypeRef::Application {{ constructor: StdlibTypeConstructorId::Option, arguments: &[{}] }}",
-                self.type_ref(value, parameters)
+                self.type_ref(value, parameters, associated_types)
             ),
             Type::Result(value) => format!(
                 "TypeRef::Application {{ constructor: StdlibTypeConstructorId::Result, arguments: &[{}] }}",
-                self.type_ref(value, parameters)
+                self.type_ref(value, parameters, associated_types)
             ),
             Type::ExclusiveRange(value) => format!(
                 "TypeRef::Application {{ constructor: StdlibTypeConstructorId::ExclusiveRange, arguments: &[{}] }}",
-                self.type_ref(value, parameters)
+                self.type_ref(value, parameters, associated_types)
             ),
             Type::InclusiveRange(value) => format!(
                 "TypeRef::Application {{ constructor: StdlibTypeConstructorId::InclusiveRange, arguments: &[{}] }}",
-                self.type_ref(value, parameters)
+                self.type_ref(value, parameters, associated_types)
             ),
             Type::Array(element) => format!(
                 "TypeRef::Application {{ constructor: StdlibTypeConstructorId::Array, arguments: &[{}] }}",
-                self.type_ref(element, parameters)
+                self.type_ref(element, parameters, associated_types)
             ),
             Type::FixedArray { element, length } => format!(
                 "TypeRef::FixedArray {{ element: &{}, length: {length} }}",
-                self.type_ref(element, parameters)
+                self.type_ref(element, parameters, associated_types)
             ),
             Type::Application {
                 constructor,
@@ -734,12 +791,19 @@ impl<'a> CatalogGenerator<'a> {
                 ident(constructor),
                 arguments
                     .iter()
-                    .map(|argument| self.type_ref(argument, parameters))
+                    .map(|argument| self.type_ref(argument, parameters, associated_types))
                     .collect::<Vec<_>>()
                     .join(",")
             ),
             Type::Name(name) if parameters.iter().any(|parameter| parameter.name == *name) => {
                 format!("TypeRef::Parameter({})", quote(name))
+            }
+            Type::Name(name)
+                if associated_types
+                    .iter()
+                    .any(|associated| associated.name == *name) =>
+            {
+                format!("TypeRef::Associated({})", quote(name))
             }
             Type::Name(name) if is_core_type(name) => {
                 format!("TypeRef::Core(CoreTypeId::{})", ident(name))

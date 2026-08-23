@@ -316,11 +316,7 @@ pub(crate) fn resolve_program(
         let resolved = if constructor.id == crate::stdlib::StdlibTypeConstructorId::Set {
             ResolvedTypeRef::Set(application.id)
         } else {
-            provider_diagnostics.push(Diagnostic::type_error(
-                format!("`{name}<...>` does not have source type syntax"),
-                program.type_name_span(application.constructor),
-            ));
-            continue;
+            ResolvedTypeRef::Application(application.id)
         };
         resolutions
             .type_applications

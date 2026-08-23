@@ -136,6 +136,44 @@ impl CapabilityAnalysis {
                     {
                         true
                     }
+                    TypeKind::Application { constructor, .. }
+                        if self
+                            .standard_library
+                            .type_constructor_has_capability(*constructor, capability) =>
+                    {
+                        true
+                    }
+                    TypeKind::Array { .. }
+                        if self.standard_library.type_constructor_has_capability(
+                            StdlibTypeConstructorId::Array,
+                            capability,
+                        ) =>
+                    {
+                        true
+                    }
+                    TypeKind::Set { .. }
+                        if self.standard_library.type_constructor_has_capability(
+                            StdlibTypeConstructorId::Set,
+                            capability,
+                        ) =>
+                    {
+                        true
+                    }
+                    TypeKind::Range { kind, .. }
+                        if self.standard_library.type_constructor_has_capability(
+                            match kind {
+                                crate::ast::RangeKind::Exclusive => {
+                                    StdlibTypeConstructorId::ExclusiveRange
+                                }
+                                crate::ast::RangeKind::Inclusive => {
+                                    StdlibTypeConstructorId::InclusiveRange
+                                }
+                            },
+                            capability,
+                        ) =>
+                    {
+                        true
+                    }
                     _ => false,
                 };
                 if !declared {
@@ -199,6 +237,44 @@ impl CapabilityAnalysis {
                     if self
                         .standard_library
                         .type_has_capability(*standard, capability) =>
+                {
+                    Ok(())
+                }
+                TypeKind::Application { constructor, .. }
+                    if self
+                        .standard_library
+                        .type_constructor_has_capability(*constructor, capability) =>
+                {
+                    Ok(())
+                }
+                TypeKind::Array { .. }
+                    if self.standard_library.type_constructor_has_capability(
+                        StdlibTypeConstructorId::Array,
+                        capability,
+                    ) =>
+                {
+                    Ok(())
+                }
+                TypeKind::Set { .. }
+                    if self.standard_library.type_constructor_has_capability(
+                        StdlibTypeConstructorId::Set,
+                        capability,
+                    ) =>
+                {
+                    Ok(())
+                }
+                TypeKind::Range { kind, .. }
+                    if self.standard_library.type_constructor_has_capability(
+                        match kind {
+                            crate::ast::RangeKind::Exclusive => {
+                                StdlibTypeConstructorId::ExclusiveRange
+                            }
+                            crate::ast::RangeKind::Inclusive => {
+                                StdlibTypeConstructorId::InclusiveRange
+                            }
+                        },
+                        capability,
+                    ) =>
                 {
                     Ok(())
                 }
@@ -418,6 +494,7 @@ impl CapabilityAnalysis {
                 matches!(semantics.types().kind(actual), TypeKind::Standard(found) if *found == required)
             }
             TypeRef::Parameter(_) => actual == receiver,
+            TypeRef::Associated(_) => false,
             TypeRef::Application {
                 constructor,
                 arguments: [element],
@@ -427,6 +504,14 @@ impl CapabilityAnalysis {
                     (StdlibTypeConstructorId::Option, TypeKind::Option { value, .. })
                     | (StdlibTypeConstructorId::Result, TypeKind::Result { value, .. }) => *value,
                     (StdlibTypeConstructorId::Set, TypeKind::Set { element, .. }) => *element,
+                    (
+                        required,
+                        TypeKind::Application {
+                            constructor,
+                            arguments,
+                            ..
+                        },
+                    ) if required == *constructor && arguments.len() == 1 => arguments[0],
                     (
                         StdlibTypeConstructorId::ExclusiveRange,
                         TypeKind::Range {

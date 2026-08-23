@@ -237,6 +237,7 @@ impl<'ast> Visitor<'ast> for ValueKindCollector {
                 ..
             }
             | MatchPattern::OptionSome(Some(binding))
+            | MatchPattern::IteratorItem(Some(binding))
             | MatchPattern::ResultSuccess(Some(binding))
             | MatchPattern::ResultError(Some(binding)) => Some(binding),
             _ => None,
@@ -298,7 +299,10 @@ impl HighlightCollector<'_> {
                             Some(SemanticTokenKind::Constant)
                         }
                         TokenKind::Ident(name)
-                            if matches!(name.as_str(), "Some" | "None" | "Ok" | "Err") =>
+                            if matches!(
+                                name.as_str(),
+                                "Some" | "None" | "Ok" | "Err" | "Item" | "End"
+                            ) =>
                         {
                             Some(SemanticTokenKind::EnumMember)
                         }
@@ -529,6 +533,7 @@ impl HighlightCollector<'_> {
                     }
                     ResolvedCall::UserFunction { .. }
                     | ResolvedCall::OptionSome { .. }
+                    | ResolvedCall::IteratorItem { .. }
                     | ResolvedCall::ResultSuccess { .. }
                     | ResolvedCall::ResultError { .. } => None,
                 })
@@ -666,6 +671,7 @@ impl HighlightCollector<'_> {
             let kind = match resolution {
                 Some(
                     ResolvedCall::OptionSome { .. }
+                    | ResolvedCall::IteratorItem { .. }
                     | ResolvedCall::ResultSuccess { .. }
                     | ResolvedCall::ResultError { .. },
                 ) => SemanticTokenKind::EnumMember,
@@ -1011,6 +1017,7 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                 }
             }
             MatchPattern::OptionSome(Some(binding))
+            | MatchPattern::IteratorItem(Some(binding))
             | MatchPattern::ResultSuccess(Some(binding))
             | MatchPattern::ResultError(Some(binding)) => self.mark_ident(
                 arm.span,
@@ -1162,15 +1169,21 @@ mod tests {
 
     #[test]
     fn loop_and_wrapper_variants_have_consistent_semantic_highlighting() {
-        let source = r#"fn wrappers(value: i32?) {
+        let source = r#"fn wrappers(value: i32?, step: IteratorStep<i32>) {
     let present = Some(5)
     let absent: i32? = None
     let success: i32! = Ok(5)
     let failure: i32! = Err("failed")
+    let item: IteratorStep<i32> = Item(5)
+    let end: IteratorStep<i32> = End
     loop {
         match value {
             Some(inner) => break,
             None => break,
+        }
+        match step {
+            Item(inner) => break,
+            End => break,
         }
     }
 }"#;
@@ -1183,7 +1196,7 @@ mod tests {
             SemanticTokenKind::Keyword,
             0
         ));
-        for spelling in ["Some", "None", "Ok", "Err"] {
+        for spelling in ["Some", "None", "Ok", "Err", "Item", "End"] {
             for (offset, _) in source.match_indices(spelling) {
                 assert_eq!(
                     kind_at(&highlights, offset),

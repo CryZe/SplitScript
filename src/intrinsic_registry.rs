@@ -191,6 +191,7 @@ pub(crate) enum ScratchType {
     Standard(StdlibTypeId),
     Expression,
     ResultValue,
+    Receiver,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -393,6 +394,14 @@ const fn async_state(id: IntrinsicId) -> Option<ScratchPolicy> {
 
 const fn synchronous_scratch(id: IntrinsicId) -> Option<ScratchPolicy> {
     match id {
+        IntrinsicId::ArrayIterator
+        | IntrinsicId::ArrayIteratorNext
+        | IntrinsicId::SetIterator
+        | IntrinsicId::SetIteratorNext
+        | IntrinsicId::ExclusiveRangeIterator
+        | IntrinsicId::ExclusiveRangeIteratorNext
+        | IntrinsicId::InclusiveRangeIterator
+        | IntrinsicId::InclusiveRangeIteratorNext => scratch(ScratchType::Receiver, 1),
         IntrinsicId::NumericSwapBytes => scratch(ScratchType::Expression, 1),
         IntrinsicId::ProcessLoadedModule => scratch(ScratchType::Standard(StdlibTypeId::Module), 1),
         IntrinsicId::ProcessMemoryRanges => scratch(ScratchType::Expression, 1),
@@ -556,6 +565,14 @@ const fn dependency_roots(id: IntrinsicId) -> &'static [DependencyRoot] {
         | IntrinsicId::ArrayPush
         | IntrinsicId::ArrayRemoveAt
         | IntrinsicId::ArrayClear
+        | IntrinsicId::ArrayIterator
+        | IntrinsicId::ArrayIteratorNext
+        | IntrinsicId::SetIterator
+        | IntrinsicId::SetIteratorNext
+        | IntrinsicId::ExclusiveRangeIterator
+        | IntrinsicId::ExclusiveRangeIteratorNext
+        | IntrinsicId::InclusiveRangeIterator
+        | IntrinsicId::InclusiveRangeIteratorNext
         | IntrinsicId::SetNew
         | IntrinsicId::SetLength
         | IntrinsicId::SetContains
@@ -633,6 +650,34 @@ const T_ARRAY: ContractTypeRef = ContractTypeRef::Application {
 };
 const T_SET: ContractTypeRef = ContractTypeRef::Application {
     constructor: StdlibTypeConstructorId::Set,
+    arguments: &[T],
+};
+const T_ARRAY_ITERATOR: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::ArrayIterator,
+    arguments: &[T],
+};
+const T_SET_ITERATOR: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::SetIterator,
+    arguments: &[T],
+};
+const T_EXCLUSIVE_RANGE: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::ExclusiveRange,
+    arguments: &[T],
+};
+const T_EXCLUSIVE_RANGE_ITERATOR: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::ExclusiveRangeIterator,
+    arguments: &[T],
+};
+const T_INCLUSIVE_RANGE: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::InclusiveRange,
+    arguments: &[T],
+};
+const T_INCLUSIVE_RANGE_ITERATOR: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::InclusiveRangeIterator,
+    arguments: &[T],
+};
+const T_ITERATOR_STEP: ContractTypeRef = ContractTypeRef::Application {
+    constructor: StdlibTypeConstructorId::IteratorStep,
     arguments: &[T],
 };
 const STRING_ARRAY: ContractTypeRef = ContractTypeRef::Application {
@@ -1095,6 +1140,27 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Everywhere,
             RepresentationPrimitive
         ),
+        IntrinsicId::ArrayIterator => contract!(
+            ArrayIterator,
+            Method,
+            signature(UNCONSTRAINED_T, Some(T_ARRAY), params![], T_ARRAY_ITERATOR),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::ArrayIteratorNext => contract!(
+            ArrayIteratorNext,
+            Method,
+            signature(
+                UNCONSTRAINED_T,
+                Some(T_ARRAY_ITERATOR),
+                params![],
+                T_ITERATOR_STEP,
+            ),
+            MUTATES_ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
         IntrinsicId::SetNew => contract!(
             SetNew,
             Function,
@@ -1140,6 +1206,79 @@ pub(crate) const fn contract(id: IntrinsicId) -> IntrinsicContract {
             Method,
             signature(EQUATABLE_T, Some(T_SET), params![], NONE),
             ALLOCATES.with(Effect::MutatesValue),
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::SetIterator => contract!(
+            SetIterator,
+            Method,
+            signature(EQUATABLE_T, Some(T_SET), params![], T_SET_ITERATOR),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::SetIteratorNext => contract!(
+            SetIteratorNext,
+            Method,
+            signature(
+                EQUATABLE_T,
+                Some(T_SET_ITERATOR),
+                params![],
+                T_ITERATOR_STEP,
+            ),
+            MUTATES_ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::ExclusiveRangeIterator => contract!(
+            ExclusiveRangeIterator,
+            Method,
+            signature(
+                INTEGER_T,
+                Some(T_EXCLUSIVE_RANGE),
+                params![],
+                T_EXCLUSIVE_RANGE_ITERATOR,
+            ),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::ExclusiveRangeIteratorNext => contract!(
+            ExclusiveRangeIteratorNext,
+            Method,
+            signature(
+                INTEGER_T,
+                Some(T_EXCLUSIVE_RANGE_ITERATOR),
+                params![],
+                T_ITERATOR_STEP,
+            ),
+            MUTATES_ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::InclusiveRangeIterator => contract!(
+            InclusiveRangeIterator,
+            Method,
+            signature(
+                INTEGER_T,
+                Some(T_INCLUSIVE_RANGE),
+                params![],
+                T_INCLUSIVE_RANGE_ITERATOR,
+            ),
+            ALLOCATES,
+            Everywhere,
+            RepresentationPrimitive
+        ),
+        IntrinsicId::InclusiveRangeIteratorNext => contract!(
+            InclusiveRangeIteratorNext,
+            Method,
+            signature(
+                INTEGER_T,
+                Some(T_INCLUSIVE_RANGE_ITERATOR),
+                params![],
+                T_ITERATOR_STEP,
+            ),
+            MUTATES_ALLOCATES,
             Everywhere,
             RepresentationPrimitive
         ),

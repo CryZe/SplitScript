@@ -438,6 +438,7 @@ impl Parser<'_> {
         self.bump();
         self.expect(TokenKind::Minus, "expected `->` and a return type")?;
         self.expect(TokenKind::Gt, "expected `>` in the return arrow `->`")?;
+        let result_is_async = self.eat_ident("async");
         let result = self.ty()?;
         let where_constraints = self.where_constraints()?;
         let body = if self.eat(&TokenKind::Semicolon) {
@@ -453,6 +454,7 @@ impl Parser<'_> {
             type_parameters,
             where_constraints,
             parameters,
+            result_is_async,
             result,
             is_static,
             documentation,
@@ -1199,6 +1201,23 @@ typeConstructor Box<T> {
         };
         assert_eq!(box_type.functions[0].parameters[0].ty.to_string(), "T!?");
         assert_eq!(box_type.functions[0].result.to_string(), "T?!");
+    }
+
+    #[test]
+    fn parses_async_callable_results_in_privileged_source() {
+        let source = r#"
+root {
+    @intrinsic(NextTick)
+    private fn nextTick() -> async None;
+}
+"#;
+        let library = parse(source).expect("async callable result should parse");
+        let Declaration::Root(root) = &library.declarations[0] else {
+            panic!("expected the root namespace")
+        };
+        let function = &root.functions[0];
+        assert!(function.result_is_async);
+        assert_eq!(function.result.to_string(), "None");
     }
 
     #[test]

@@ -18,10 +18,10 @@ pub use ids::{
     StdlibStateProviderId, StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
 };
 pub use schema::{
-    Availability, CancellationKind, Deprecation, Effect, EffectSet, Implementation, ItemKind,
-    ItemVisibility, OperationMetadata, OperationSemantics, Parameter, ParameterRule, Signature,
-    StandardBinaryOperator, StandardUnaryOperator, StdlibItem, SuspensionKind, TypeParameter,
-    TypeRef,
+    Availability, CancellationKind, Deprecation, Effect, EffectSet, Implementation,
+    IntrinsicContext, ItemKind, ItemVisibility, OperationMetadata, OperationSemantics, Parameter,
+    ParameterRule, Signature, StandardBinaryOperator, StandardUnaryOperator, StdlibItem,
+    SuspensionKind, TypeParameter, TypeRef,
 };
 
 pub use declarations::{
@@ -550,9 +550,28 @@ impl StandardLibrary {
         match item.implementation {
             Implementation::Intrinsic(intrinsic) => {
                 let contract = intrinsic_registry::contract(intrinsic);
+                let declared = item
+                    .intrinsic_context
+                    .expect("intrinsic items declare privileged context metadata");
+                let effects = [
+                    Effect::RequiresAttachedProcess,
+                    Effect::RequiresStateSnapshots,
+                    Effect::Suspends,
+                    Effect::CancelsOnProcessClose,
+                ]
+                .into_iter()
+                .fold(contract.effects, EffectSet::without);
+                let effects = if item.signature.result_is_async {
+                    effects.with(Effect::Suspends)
+                } else {
+                    effects
+                };
                 OperationMetadata {
-                    effects: contract.effects,
-                    availability: contract.availability,
+                    effects: declared
+                        .effects()
+                        .iter()
+                        .fold(effects, |effects, effect| effects.with(*effect)),
+                    availability: declared.availability,
                 }
             }
             Implementation::LibraryBody { .. } | Implementation::LibraryOverloads { .. } => self
@@ -673,7 +692,7 @@ impl StandardLibrary {
             rendered.push_str(&parameter.ty.render_with(self, substitutions));
         }
         rendered.push_str(") -> ");
-        if self.operation_semantics(id).suspension == SuspensionKind::Suspends {
+        if signature.result_is_async {
             rendered.push_str("async ");
         }
         rendered.push_str(&signature.result.render_with(self, substitutions));
@@ -720,7 +739,6 @@ impl StandardLibrary {
         }];
         facts.push(match semantics.suspension {
             SuspensionKind::None => "synchronous",
-            SuspensionKind::Retryable => "await retries until successful",
             SuspensionKind::Suspends => "suspends",
         });
         if semantics.requires_attached_process {
@@ -1025,6 +1043,35 @@ impl StandardLibrary {
                             item.qualified_name,
                         ));
                     }
+                    let Some(declared) = item.intrinsic_context else {
+                        errors.push(format!(
+                            "`{}` has no source-declared intrinsic context metadata",
+                            item.qualified_name
+                        ));
+                        continue;
+                    };
+                    let contract_is_async =
+                        contract.lowering == intrinsic_registry::LoweringClass::Suspension;
+                    if item.signature.result_is_async != contract_is_async {
+                        errors.push(format!(
+                            "`{}` declares result asyncness inconsistently with intrinsic `{intrinsic:?}`",
+                            item.qualified_name
+                        ));
+                    }
+                    let contract_operation = contract.effects;
+                    if declared.availability != contract.availability
+                        || declared.requires_attached_process
+                            != contract_operation.contains(&Effect::RequiresAttachedProcess)
+                        || declared.requires_state_snapshots
+                            != contract_operation.contains(&Effect::RequiresStateSnapshots)
+                        || (declared.cancellation == CancellationKind::ProcessClose)
+                            != contract_operation.contains(&Effect::CancelsOnProcessClose)
+                    {
+                        errors.push(format!(
+                            "`{}` source-declared context does not match intrinsic `{intrinsic:?}`",
+                            item.qualified_name
+                        ));
+                    }
                     if contract.lowering == intrinsic_registry::LoweringClass::Suspension
                         && !contract.effects.contains(&Effect::Suspends)
                     {
@@ -1267,12 +1314,6 @@ impl StandardLibrary {
             if effects.contains(&Effect::Pure) && effects.iter().count() != 1 {
                 errors.push(format!(
                     "`{}` declares `pure` together with observable effects",
-                    item.qualified_name
-                ));
-            }
-            if effects.contains(&Effect::Retryable) && effects.contains(&Effect::Suspends) {
-                errors.push(format!(
-                    "`{}` cannot be both retryable and intrinsically suspending",
                     item.qualified_name
                 ));
             }

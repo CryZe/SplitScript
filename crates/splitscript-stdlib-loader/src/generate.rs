@@ -504,11 +504,12 @@ impl<'a> CatalogGenerator<'a> {
                     ident(capability)
                 );
                 format!(
-                    "LibraryOverloadCase {{ capability: StdlibCapabilityId::{}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, function_name: {}, body: {} }}",
+                    "LibraryOverloadCase {{ capability: StdlibCapabilityId::{}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result_is_async: {}, result: {} }}, function_name: {}, body: {} }}",
                     ident(capability),
                     self.type_parameters(&parameters, owner),
                     case.type_parameters.len(),
                     case.parameters.iter().map(|parameter| self.parameter(parameter, &parameters)).collect::<Vec<_>>().join(","),
+                    case.result_is_async,
                     self.type_ref(&case.result, &parameters),
                     quote(&function_name),
                     quote(case.body.as_deref().expect("validated overload cases have bodies")),
@@ -532,13 +533,14 @@ impl<'a> CatalogGenerator<'a> {
             .map(|example| format!("&[{example}]"))
             .unwrap_or_else(|| "&[]".to_owned());
         output.push_str(&format!(
-            "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, visibility: ItemVisibility::{}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: None, unary_operator: None, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: {examples}, related: &[] }}, implementation: Implementation::LibraryOverloads {{ dispatch_parameter: 0, cases: &[{case_values}] }} }},\n",
+            "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, visibility: ItemVisibility::{}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: None, unary_operator: None, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result_is_async: {}, result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: {examples}, related: &[] }}, intrinsic_context: None, implementation: Implementation::LibraryOverloads {{ dispatch_parameter: 0, cases: &[{case_values}] }} }},\n",
             if public.private { "LibraryPrivate" } else { "Public" },
             quote(&public.name),
             quote(&qualified_name),
             self.type_parameters(&public_parameters, owner),
             public.type_parameters.len(),
             public.parameters.iter().map(|parameter| self.parameter(parameter, &public_parameters)).collect::<Vec<_>>().join(","),
+            public.result_is_async,
             self.type_ref(&public.result, &public_parameters),
             quote(&public.documentation.summary),
             quote(&public.documentation.details),
@@ -577,6 +579,11 @@ impl<'a> CatalogGenerator<'a> {
                         .expect("validated source-defined functions have bodies")
                 ),
             )
+        };
+        let intrinsic_context = if intrinsic.is_some() {
+            intrinsic_context_expression(&function.attributes)
+        } else {
+            "None".to_owned()
         };
         let must_use = optional_attribute_name(&function.attributes, "mustUse")
             .map(|reason| format!("Some({})", quote(reason)))
@@ -621,13 +628,14 @@ impl<'a> CatalogGenerator<'a> {
             .map(|example| format!("&[{example}]"))
             .unwrap_or_else(|| "&[]".to_owned());
         output.push_str(&format!(
-                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, visibility: ItemVisibility::{}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, unary_operator: {unary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: {examples}, related: &[] }}, implementation: {implementation} }},\n",
+                "StdlibItem {{ id: StdlibItemId::{id}, owner: {owner_expression}, visibility: ItemVisibility::{}, name: {}, qualified_name: {}, kind: {kind}, binary_operator: {binary_operator}, unary_operator: {unary_operator}, signature: Signature {{ type_parameters: {}, explicit_type_parameters: {}, parameters: &[{}], result_is_async: {}, result: {} }}, must_use: {must_use}, deprecation: None, documentation: Documentation {{ summary: {}, details: {}, examples: {examples}, related: &[] }}, intrinsic_context: {intrinsic_context}, implementation: {implementation} }},\n",
                 if function.private { "LibraryPrivate" } else { "Public" },
                 quote(&function.name),
                 quote(&qualified_name),
                 self.type_parameters(type_parameters, owner),
                 function.type_parameters.len(),
                 function.parameters.iter().map(|parameter| self.parameter(parameter, type_parameters)).collect::<Vec<_>>().join(","),
+                function.result_is_async,
                 self.type_ref(&function.result, type_parameters),
                 quote(&function.documentation.summary), quote(&function.documentation.details),
             ));
@@ -886,6 +894,27 @@ fn attribute_names(attributes: &[Attribute], name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn intrinsic_context_expression(attributes: &[Attribute]) -> String {
+    let requirements = attribute_names(attributes, "requires");
+    let requires = |name: &str| requirements.iter().any(|requirement| requirement == name);
+    let availability = if optional_attribute_name(attributes, "availability") == Some("onAttach") {
+        "Availability::OnAttach"
+    } else {
+        "Availability::Everywhere"
+    };
+    let cancellation =
+        if optional_attribute_name(attributes, "cancellation") == Some("processClose") {
+            "CancellationKind::ProcessClose"
+        } else {
+            "CancellationKind::None"
+        };
+    format!(
+        "Some(IntrinsicContext {{ availability: {availability}, requires_attached_process: {}, requires_state_snapshots: {}, cancellation: {cancellation} }})",
+        requires("attachedProcess"),
+        requires("stateSnapshots"),
+    )
+}
+
 fn quote(value: &str) -> String {
     format!("{value:?}")
 }
@@ -1061,6 +1090,24 @@ mod tests {
     use crate::parse;
 
     use super::*;
+
+    #[test]
+    fn intrinsic_asyncness_and_context_are_emitted_from_privileged_source() {
+        let source = r#"
+root {
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
+    @intrinsic(NextTick)
+    private fn nextTick() -> async None;
+}
+"#;
+        let generated = generate_catalog(&parse(source).unwrap()).unwrap();
+        assert!(generated.contains("result_is_async: true"));
+        assert!(generated.contains("availability: Availability::OnAttach"));
+        assert!(generated.contains("requires_attached_process: true"));
+        assert!(generated.contains("cancellation: CancellationKind::ProcessClose"));
+    }
 
     #[test]
     fn source_paths_and_member_names_produce_existing_style_identities() {

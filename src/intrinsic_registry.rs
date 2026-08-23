@@ -1897,6 +1897,7 @@ mod tests {
                 rule: ParameterRule::Value,
                 documentation: "",
             }],
+            result_is_async: false,
             result: result_of_value,
         };
         assert!(read.signature.matches(
@@ -1927,6 +1928,7 @@ mod tests {
                 rule: ParameterRule::Value,
                 documentation: "",
             }],
+            result_is_async: false,
             result: TypeRef::Standard(StdlibTypeId::Module),
         };
         assert!(!module.signature.matches(ItemKind::Function, wrong_rule));

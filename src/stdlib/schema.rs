@@ -63,7 +63,6 @@ pub enum Effect {
     RequiresAttachedProcess,
     RequiresStateSnapshots,
     WritesCurrentState,
-    Retryable,
     Suspends,
     CancelsOnProcessClose,
     WritesTimer,
@@ -71,7 +70,7 @@ pub enum Effect {
 }
 
 impl Effect {
-    const ALL: [Self; 14] = [
+    const ALL: [Self; 13] = [
         Self::Pure,
         Self::Allocates,
         Self::MutatesValue,
@@ -81,7 +80,6 @@ impl Effect {
         Self::RequiresAttachedProcess,
         Self::RequiresStateSnapshots,
         Self::WritesCurrentState,
-        Self::Retryable,
         Self::Suspends,
         Self::CancelsOnProcessClose,
         Self::WritesTimer,
@@ -103,7 +101,6 @@ impl Effect {
             Self::RequiresAttachedProcess => "requires an attached process",
             Self::RequiresStateSnapshots => "requires state snapshots",
             Self::WritesCurrentState => "writes current state",
-            Self::Retryable => "retryable",
             Self::Suspends => "suspends",
             Self::CancelsOnProcessClose => "cancels when the process closes",
             Self::WritesTimer => "writes timer state",
@@ -196,6 +193,9 @@ pub struct Signature {
     /// parameters are inherited from its receiver and are inferred from it.
     pub explicit_type_parameters: usize,
     pub parameters: &'static [Parameter],
+    /// Whether calling the operation constructs an `async T` value. `result`
+    /// stores the completed `T` so generic substitution remains uniform.
+    pub result_is_async: bool,
     pub result: TypeRef,
 }
 
@@ -208,7 +208,6 @@ pub enum Availability {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuspensionKind {
     None,
-    Retryable,
     Suspends,
 }
 
@@ -222,6 +221,35 @@ impl SuspensionKind {
 pub enum CancellationKind {
     None,
     ProcessClose,
+}
+
+/// Contextual requirements authored by a privileged intrinsic declaration.
+///
+/// Rust's closed intrinsic registry independently declares the same contract
+/// and validates it. Frontend consumers use this source-owned value, while the
+/// registry remains the trust boundary for backend lowering and host imports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IntrinsicContext {
+    pub availability: Availability,
+    pub requires_attached_process: bool,
+    pub requires_state_snapshots: bool,
+    pub cancellation: CancellationKind,
+}
+
+impl IntrinsicContext {
+    pub const fn effects(self) -> EffectSet {
+        let mut effects = EffectSet::none();
+        if self.requires_attached_process {
+            effects = effects.with(Effect::RequiresAttachedProcess);
+        }
+        if self.requires_state_snapshots {
+            effects = effects.with(Effect::RequiresStateSnapshots);
+        }
+        if matches!(self.cancellation, CancellationKind::ProcessClose) {
+            effects = effects.with(Effect::CancelsOnProcessClose);
+        }
+        effects
+    }
 }
 
 /// Normalized operational facts consumed by type checking, lowering,
@@ -270,8 +298,6 @@ impl OperationMetadata {
     pub fn semantics(self) -> OperationSemantics {
         let suspension = if self.effects.contains(&Effect::Suspends) {
             SuspensionKind::Suspends
-        } else if self.effects.contains(&Effect::Retryable) {
-            SuspensionKind::Retryable
         } else {
             SuspensionKind::None
         };
@@ -375,6 +401,9 @@ pub struct StdlibItem {
     pub must_use: Option<&'static str>,
     pub deprecation: Option<Deprecation>,
     pub documentation: Documentation<StdlibSymbolId>,
+    /// Present only for compiler-implemented intrinsic declarations. Ordinary
+    /// source bodies receive their operation metadata from semantic analysis.
+    pub intrinsic_context: Option<IntrinsicContext>,
     pub implementation: Implementation,
 }
 
@@ -415,5 +444,18 @@ mod tests {
             [Effect::ReadsProcess]
         );
         assert_eq!(union.availability, Availability::OnAttach);
+    }
+
+    #[test]
+    fn intrinsic_context_contains_only_contextual_requirements() {
+        let context = IntrinsicContext {
+            availability: Availability::Everywhere,
+            requires_attached_process: true,
+            requires_state_snapshots: false,
+            cancellation: CancellationKind::None,
+        };
+
+        assert!(!context.effects().contains(&Effect::Suspends));
+        assert!(context.effects().contains(&Effect::RequiresAttachedProcess));
     }
 }

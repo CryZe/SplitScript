@@ -19,9 +19,9 @@ use super::{
         StdlibStateProviderId, StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId,
     },
     schema::{
-        Implementation, ItemKind, ItemVisibility, LibraryOverloadCase, Parameter, ParameterRule,
-        Signature, StandardBinaryOperator, StandardUnaryOperator, StdlibItem, TypeParameter,
-        TypeRef,
+        Availability, CancellationKind, Implementation, IntrinsicContext, ItemKind, ItemVisibility,
+        LibraryOverloadCase, Parameter, ParameterRule, Signature, StandardBinaryOperator,
+        StandardUnaryOperator, StdlibItem, TypeParameter, TypeRef,
     },
 };
 

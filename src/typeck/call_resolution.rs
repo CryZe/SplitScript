@@ -1144,20 +1144,6 @@ impl Checker {
             concrete_signature.push(declared_receiver);
         }
         let operation = self.standard_library.operation_semantics(item.id);
-        let source_body_suspends = match item.implementation {
-            crate::stdlib::Implementation::LibraryBody { function_name, .. } => {
-                let result = self
-                    .declarations
-                    .functions
-                    .get(function_name)
-                    .map(|signature| signature.result);
-                result.is_some_and(|result| matches!(self.shallow_type(result), Type::Async(_)))
-            }
-            crate::stdlib::Implementation::LibraryOverloads { .. } => {
-                operation.suspension.is_awaitable()
-            }
-            crate::stdlib::Implementation::Intrinsic(_) => false,
-        };
         let expected_result = expected.map(|ty| self.shallow_type(ty));
         let expected_completion = expected_result.map(|expected| match expected {
             Type::Async(future) => self.inference.async_value(future),
@@ -1174,9 +1160,7 @@ impl Checker {
         } else {
             self.catalog_type(item.signature.result, &variables)
         };
-        let result_type = if operation.suspension == crate::stdlib::SuspensionKind::Suspends
-            || source_body_suspends
-        {
+        let result_type = if item.signature.result_is_async {
             Type::Async(self.inference.async_type(completion_type))
         } else {
             completion_type

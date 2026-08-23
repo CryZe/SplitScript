@@ -111,6 +111,8 @@ pub struct FunctionDeclaration {
     /// owner or declared directly by this function.
     pub where_constraints: Vec<TypeParameter>,
     pub parameters: Vec<Parameter>,
+    /// Whether the explicitly declared result is `async T` rather than `T`.
+    pub result_is_async: bool,
     pub result: Type,
     pub is_static: bool,
     pub documentation: Documentation,

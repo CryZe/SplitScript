@@ -218,7 +218,7 @@ stateProvider Wii as wii {
 }
 
 root {
-    private fn dolphinCoreBase() -> address {
+    private fn dolphinCoreBase() -> async address {
         if process.name() != "retroarch.exe" {
             return 0
         }
@@ -300,8 +300,11 @@ root {
     /// ```splitscript
     /// await nextTick()
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(NextTick)
-    fn nextTick() -> None;
+    fn nextTick() -> async None;
 }
 
 /// Reads metadata about the autosplitting runtime host.
@@ -454,6 +457,7 @@ intrinsic type Process {
     /// ```splitscript
     /// let executable = process.name()
     /// ```
+    @requires(attachedProcess)
     @intrinsic(ProcessName)
     fn name() -> String;
 
@@ -470,6 +474,7 @@ intrinsic type Process {
     /// ```splitscript
     /// let executablePath = process.path() else "Unavailable"
     /// ```
+    @requires(attachedProcess)
     @intrinsic(ProcessPath)
     fn path() -> String!;
 
@@ -486,8 +491,11 @@ intrinsic type Process {
     /// ```splitscript
     /// let executable = await process.mainModule()
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(ProcessMainModule)
-    fn mainModule() -> Module;
+    fn mainModule() -> async Module;
 
     /// Ignores the current attachment until the process closes.
     ///
@@ -508,8 +516,11 @@ intrinsic type Process {
     /// }
     /// # }
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(ProcessClosed)
-    fn closed() -> Never;
+    fn closed() -> async Never;
 
     /// Waits for a process module.
     ///
@@ -522,12 +533,15 @@ intrinsic type Process {
     /// ```splitscript
     /// let gameAssembly = await process.module("GameAssembly.dll")
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(ProcessModule)
     fn module(
         /// The exact module name.
         @literal(string)
         name: String,
-    ) -> Module;
+    ) -> async Module;
 
     /// Returns a module only when it is already loaded.
     ///
@@ -547,6 +561,7 @@ intrinsic type Process {
     /// # }
     /// ```
     @mustUse("the optional loaded module is otherwise discarded")
+    @requires(attachedProcess)
     @intrinsic(ProcessLoadedModule)
     fn loadedModule(
         /// The exact module name.
@@ -566,13 +581,16 @@ intrinsic type Process {
     /// ```splitscript
     /// let mapping = await process.findMemoryRange(0x48000, MemoryRangeAccess.ReadWrite)
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(ProcessFindMemoryRange)
     fn findMemoryRange(
         /// The exact mapped byte length.
         size: u64,
         /// Permissions that the range must provide.
         access: MemoryRangeAccess,
-    ) -> MemoryRange?;
+    ) -> async MemoryRange?;
 
     /// Collects a snapshot of the process's mapped memory ranges.
     ///
@@ -592,6 +610,7 @@ intrinsic type Process {
     /// }
     /// ```
     @mustUse("the collected memory-range snapshot is otherwise discarded")
+    @requires(attachedProcess)
     @intrinsic(ProcessMemoryRanges)
     fn memoryRanges() -> [MemoryRange];
 
@@ -627,6 +646,7 @@ intrinsic type Process {
     /// # print(level)
     /// # }
     /// ```
+    @requires(attachedProcess)
     @intrinsic(ProcessRead)
     fn read<T: MemoryReadable>(
         /// The target address to read.
@@ -651,6 +671,7 @@ intrinsic type Process {
     /// # print(player)
     /// # }
     /// ```
+    @requires(attachedProcess)
     @intrinsic(ProcessFollow)
     fn follow(
         /// The initial address.
@@ -677,6 +698,9 @@ intrinsic type Process {
     /// # print(marker)
     /// # }
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(ProcessScan)
     fn scan(
         /// The beginning of the range.
@@ -685,7 +709,7 @@ intrinsic type Process {
         size: u64,
         /// The compiled signature pattern.
         signature: Signature,
-    ) -> address;
+    ) -> async address;
 
     /// Scans every readable mapped memory range in the process.
     ///
@@ -703,11 +727,14 @@ intrinsic type Process {
     /// ```splitscript
     /// let timerData = await process.scanMemory(sig"54 49 4D 52 ?? ?? ?? ??")
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(ProcessScanMemory)
     fn scanMemory(
         /// The compiled signature pattern.
         signature: Signature,
-    ) -> address;
+    ) -> async address;
 
     /// Scans for the first of several signatures across process memory.
     ///
@@ -725,11 +752,14 @@ intrinsic type Process {
     ///     sig"48 8B 1D ?? ?? ?? ??",
     /// ])
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(ProcessScanMemoryAny)
     fn scanMemoryAny(
         /// Candidate patterns in priority order. The array must not be empty.
         signatures: [Signature],
-    ) -> SignatureMatch;
+    ) -> async SignatureMatch;
 
     /// Resolves a 32-bit relative address.
     ///
@@ -747,6 +777,7 @@ intrinsic type Process {
     /// # print(target)
     /// # }
     /// ```
+    @requires(attachedProcess)
     @intrinsic(ProcessReadRelative32)
     fn readRelative32(
         /// The address of a signed relative displacement.
@@ -772,6 +803,7 @@ intrinsic type Process {
     /// # print(map)
     /// # }
     /// ```
+    @requires(attachedProcess)
     @intrinsic(ProcessReadUtf8)
     fn readUtf8(
         /// The address of the first UTF-8 byte.
@@ -800,6 +832,7 @@ intrinsic type Process {
     /// # print(chapter)
     /// # }
     /// ```
+    @requires(attachedProcess)
     @intrinsic(ProcessReadUtf16Le)
     fn readUtf16Le(
         /// The address of the first little-endian UTF-16 code unit.
@@ -828,6 +861,7 @@ intrinsic type Process {
     /// # print(scene)
     /// # }
     /// ```
+    @requires(attachedProcess)
     @intrinsic(ProcessReadManagedString)
     fn readManagedString(
         /// The managed string object address.
@@ -1029,7 +1063,7 @@ namespace Unity {
     fn il2cpp(
         /// The Unity metadata layout version.
         version: u32,
-    ) -> UnityModule {
+    ) -> async UnityModule {
         if version != 0 && version != 2019 && version != 2020 && version != 2022 {
             await process.closed()
         }
@@ -1078,7 +1112,7 @@ namespace Unity {
     fn mono(
         /// Exact Mono metadata layout used by the target Unity release.
         version: MonoVersion,
-    ) -> MonoModule {
+    ) -> async MonoModule {
         return await MonoModule.discover(version)
     }
 
@@ -1101,7 +1135,7 @@ namespace Unity {
     /// }
     /// ```
     @mustUse("The discovered scene manager is otherwise discarded.")
-    fn sceneManager() -> UnitySceneManager {
+    fn sceneManager() -> async UnitySceneManager {
         let unityPlayer = retry {
             process.loadedModule("UnityPlayer.dll")
                 else process.loadedModule("UnityPlayer.so")
@@ -4322,6 +4356,7 @@ struct Module {
     /// let executable = await process.mainModule()
     /// let path = executable.path() else "Unknown"
     /// ```
+    @requires(attachedProcess)
     @intrinsic(ModulePath)
     fn path() -> String!;
 
@@ -4609,11 +4644,14 @@ struct Module {
     /// let gameAssembly = await process.module("GameAssembly.dll")
     /// let marker = await gameAssembly.scan(sig"48 8B ?? 89")
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(ModuleScan)
     fn scan(
         /// The compiled signature pattern.
         signature: Signature,
-    ) -> address;
+    ) -> async address;
 
     /// Scans for a signature whose signed relative 32-bit operand resolves to
     /// a particular address.
@@ -4636,6 +4674,9 @@ struct Module {
     /// )
     /// ```
     @mustUse("The matching instruction address is otherwise discarded.")
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(ModuleScanRelative32Target)
     fn scanRelative32Target(
         /// The instruction signature.
@@ -4644,7 +4685,7 @@ struct Module {
         displacementOffset: u64,
         /// Address to which the operand must resolve.
         target: address,
-    ) -> address;
+    ) -> async address;
 
     /// Scans the module for the first of several signatures.
     ///
@@ -4659,11 +4700,14 @@ struct Module {
     /// let module = await process.mainModule()
     /// let layout = await module.scanAny([sig"48 8B ??", sig"A1 ?? ??"])
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(ModuleScanAny)
     fn scanAny(
         /// Candidate patterns in priority order.
         signatures: [Signature],
-    ) -> SignatureMatch;
+    ) -> async SignatureMatch;
 
     /// Reads a 32-bit relative address at an offset from this module.
     ///
@@ -5092,11 +5136,14 @@ struct UnityModule {
     /// let unity = await Unity.il2cpp(2020)
     /// let image = await unity.image("Assembly-CSharp")
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(UnityModuleImage)
     fn image(
         /// The managed assembly name.
         name: String,
-    ) -> UnityImage;
+    ) -> async UnityImage;
 }
 
 /// Describes a Unity assembly image.
@@ -5143,11 +5190,14 @@ struct UnityImage {
     /// let image = await unity.image("Assembly-CSharp")
     /// let gameManager = await image.class("GameManager")
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(UnityImageClass)
     fn class(
         /// The managed class name.
         name: String,
-    ) -> UnityClass;
+    ) -> async UnityClass;
 }
 
 /// Describes a Unity runtime class.
@@ -5197,11 +5247,14 @@ struct UnityClass {
     /// let gameManager = await image.class("GameManager")
     /// let healthOffset = await gameManager.field("health")
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(UnityClassField)
     fn field(
         /// The managed field name.
         name: String,
-    ) -> u32;
+    ) -> async u32;
 
     /// Finds the first matching field.
     ///
@@ -5217,11 +5270,14 @@ struct UnityClass {
     /// let gameManager = await image.class("GameManager")
     /// let levelField = await gameManager.fieldAny(["currentLevel", "level"])
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(UnityClassFieldAny)
     fn fieldAny(
         /// Candidate field names in priority order.
         names: [String],
-    ) -> UnityField;
+    ) -> async UnityField;
 
     /// Finds a class's static-field table.
     ///
@@ -5237,8 +5293,11 @@ struct UnityClass {
     /// let gameManager = await image.class("GameManager")
     /// let staticTable = await gameManager.staticTable()
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(UnityClassStaticTable)
-    fn staticTable() -> address;
+    fn staticTable() -> async address;
 
     /// Finds a static singleton instance.
     ///
@@ -5254,11 +5313,14 @@ struct UnityClass {
     /// let gameManager = await image.class("GameManager")
     /// let instance = await gameManager.staticInstance(["Instance", "_instance"])
     /// ```
+    @requires(attachedProcess)
+    @cancellation(processClose)
+    @availability(onAttach)
     @intrinsic(UnityClassStaticInstance)
     fn staticInstance(
         /// Candidate singleton field names.
         names: [String],
-    ) -> address;
+    ) -> async address;
 }
 
 /// Describes a Unity runtime field.
@@ -5483,7 +5545,7 @@ struct MonoModule {
     private layout: MonoLayout,
 
     // Implements the attachment work exposed publicly by Unity.mono().
-    private static fn discover(version: MonoVersion) -> MonoModule {
+    private static fn discover(version: MonoVersion) -> async MonoModule {
         let runtime = await process.module("mono-2.0-bdwgc.dll")
         let pointerSize = retry runtime.pointerSize()
         if pointerSize != PointerSize.Bit64 {
@@ -5572,7 +5634,7 @@ struct MonoModule {
     fn image(
         /// Managed assembly name without a file extension.
         name: String,
-    ) -> MonoImage {
+    ) -> async MonoImage {
         while true {
             let link = match self.readPointer(self.assemblies) {
                 Ok(address) => address,
@@ -5608,7 +5670,7 @@ struct MonoModule {
     }
 
     // Owns the raw-address traversal exposed through MonoImage.class().
-    private fn classInImage(image: address, name: String) -> MonoClass {
+    private fn classInImage(image: address, name: String) -> async MonoClass {
         let separator = name.lastIndexOf(".")
         let expectedName = match separator {
             Some(index) => name.slice(index + 1, name.byteLength()) else name,
@@ -5675,7 +5737,7 @@ struct MonoModule {
     }
 
     // Owns the raw-address traversal exposed through MonoClass.field().
-    private fn fieldInClass(classAddress: address, name: String) -> u32 {
+    private fn fieldInClass(classAddress: address, name: String) -> async u32 {
         while true {
             let current = classAddress
             while current != 0 {
@@ -5715,7 +5777,7 @@ struct MonoModule {
     }
 
     // Owns the raw-address traversal exposed through MonoClass.staticTable().
-    private fn staticTableForClass(classAddress: address) -> address {
+    private fn staticTableForClass(classAddress: address) -> async address {
         while true {
             let runtimeInfo = retry self.readPointer(
                 classAddress.add(self.layout.classRuntimeInfo),
@@ -5801,7 +5863,7 @@ struct MonoImage {
     fn class(
         /// Simple class name or namespace-qualified managed class name.
         name: String,
-    ) -> MonoClass {
+    ) -> async MonoClass {
         return await self.module.classInImage(self.address, name)
     }
 }
@@ -5871,7 +5933,7 @@ struct MonoClass {
     fn field(
         /// Managed field name or C# auto-property name.
         name: String,
-    ) -> u32 {
+    ) -> async u32 {
         return await self.module.fieldInClass(self.address, name)
     }
 
@@ -5891,7 +5953,7 @@ struct MonoClass {
     /// let staticStorage = await storageClass.staticTable()
     /// ```
     @mustUse("Static-table discovery returns an address needed to read static fields.")
-    fn staticTable() -> address {
+    fn staticTable() -> async address {
         return await self.module.staticTableForClass(self.address)
     }
 
@@ -5914,7 +5976,7 @@ struct MonoClass {
     fn staticField(
         /// Managed static-field name or C# auto-property name.
         name: String,
-    ) -> address {
+    ) -> async address {
         let table = await self.staticTable()
         let offset = await self.field(name)
         return table.add(offset as u64)
@@ -5942,7 +6004,7 @@ struct MonoClass {
     fn staticFieldPath(
         /// Managed static-field name or C# auto-property name.
         name: String,
-    ) -> MemoryPath {
+    ) -> async MemoryPath {
         let table = await self.staticTable()
         let offset = await self.field(name)
         return table.memoryPath([], offset as i64, self.module.pointerSize)
@@ -5991,7 +6053,7 @@ struct GBAEmulator {
     }
 
     // Implements the attachment selected by state GBA.
-    private static fn discover() -> GBAEmulator {
+    private static fn discover() -> async GBAEmulator {
         let processName = process.name()
 
         if processName == "mGBA.exe" || processName == "mGBA" || processName == "EmuHawk.exe" {
@@ -6224,6 +6286,7 @@ struct GBAEmulator {
     /// ```splitscript state GBA
     /// let room: u8 = gba.read(0x03000010) else 0
     /// ```
+    @requires(attachedProcess)
     @intrinsic(GBAEmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original GBA hardware address.
@@ -6258,7 +6321,7 @@ struct PS2Emulator {
     private auxiliary: address,
 
     // Implements the attachment selected by state PS2.
-    private static fn discover() -> PS2Emulator {
+    private static fn discover() -> async PS2Emulator {
         let processName = process.name()
 
         if processName == "retroarch.exe" {
@@ -6321,6 +6384,7 @@ struct PS2Emulator {
     /// ```splitscript state PS2
     /// let health: u16 = ps2.read(0x00123456) else 0
     /// ```
+    @requires(attachedProcess)
     @intrinsic(Ps2EmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original PlayStation 2 memory address.
@@ -6357,7 +6421,7 @@ struct PS1Emulator {
     private auxiliary2: i64,
 
     // Implements the attachment selected by state PS1.
-    private static fn discover() -> PS1Emulator {
+    private static fn discover() -> async PS1Emulator {
         let processName = process.name()
         let executable = await process.mainModule()
 
@@ -6550,6 +6614,7 @@ struct PS1Emulator {
     /// ```splitscript state PS1
     /// let health: u16 = ps1.read(0x80012346) else 0
     /// ```
+    @requires(attachedProcess)
     @intrinsic(Ps1EmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original PlayStation memory address.
@@ -6583,7 +6648,7 @@ struct SMSEmulator {
     private auxiliary: i64,
 
     // Implements the attachment selected by state SMS.
-    private static fn discover() -> SMSEmulator {
+    private static fn discover() -> async SMSEmulator {
         let processName = process.name()
         let executable = await process.mainModule()
 
@@ -6709,6 +6774,7 @@ struct SMSEmulator {
     /// ```splitscript state SMS
     /// let lives: u8 = sms.read(0xc010) else 0
     /// ```
+    @requires(attachedProcess)
     @intrinsic(SmsEmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original Master System work RAM address.
@@ -6746,7 +6812,7 @@ struct GenesisEmulator {
     private wordSwapped: bool,
 
     // Implements the attachment selected by state Genesis.
-    private static fn discover() -> GenesisEmulator {
+    private static fn discover() -> async GenesisEmulator {
         let processName = process.name()
         let executable = await process.mainModule()
 
@@ -6869,6 +6935,7 @@ struct GenesisEmulator {
     /// ```splitscript state Genesis
     /// let score: u32 = genesis.read(0x1201) else 0
     /// ```
+    @requires(attachedProcess)
     @intrinsic(GenesisEmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original Genesis work-RAM offset.
@@ -6903,7 +6970,7 @@ struct GCNEmulator {
     private auxiliary: address,
 
     // Implements the attachment selected by state GCN.
-    private static fn discover() -> GCNEmulator {
+    private static fn discover() -> async GCNEmulator {
         let processName = process.name()
         let coreBase = await dolphinCoreBase()
 
@@ -6936,6 +7003,7 @@ struct GCNEmulator {
     /// ```splitscript state GCN
     /// let health: u16 = gcn.read(0x80001234) else 0
     /// ```
+    @requires(attachedProcess)
     @intrinsic(GCNEmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original GameCube memory address.
@@ -6973,7 +7041,7 @@ struct WiiEmulator {
     private auxiliary: address,
 
     // Implements the attachment selected by state Wii.
-    private static fn discover() -> WiiEmulator {
+    private static fn discover() -> async WiiEmulator {
         let processName = process.name()
         let coreBase = await dolphinCoreBase()
 
@@ -7018,6 +7086,7 @@ struct WiiEmulator {
     /// ```splitscript state Wii
     /// let health: u16 = wii.read(0x90001234) else 0
     /// ```
+    @requires(attachedProcess)
     @intrinsic(WiiEmulatorRead)
     fn read<T: MemoryReadable>(
         /// The original Wii memory address.
@@ -7194,7 +7263,7 @@ struct CatalogSuspensionProbe {
     /// ```splitscript
     /// await CatalogSuspensionProbe.waitOneTick()
     /// ```
-    static fn waitOneTick() -> None {
+    static fn waitOneTick() -> async None {
         await nextTick()
     }
 
@@ -7210,7 +7279,7 @@ struct CatalogSuspensionProbe {
     /// ```splitscript
     /// await CatalogSuspensionProbe.waitThroughHelper()
     /// ```
-    static fn waitThroughHelper() -> None {
+    static fn waitThroughHelper() -> async None {
         await CatalogSuspensionProbe.waitOneTick()
     }
 }

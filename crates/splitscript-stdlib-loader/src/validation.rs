@@ -424,7 +424,15 @@ impl<'a> Validator<'a> {
             self.validate_attributes(
                 &qualified,
                 &function.attributes,
-                &["intrinsic", "display", "mustUse", "operator"],
+                &[
+                    "availability",
+                    "cancellation",
+                    "intrinsic",
+                    "display",
+                    "mustUse",
+                    "operator",
+                    "requires",
+                ],
             );
             self.validate_must_use(&qualified, &function.attributes);
             self.validate_operator(owner, &qualified, function);
@@ -523,6 +531,7 @@ impl<'a> Validator<'a> {
             let intrinsic = self
                 .optional_name_attribute(&qualified, &function.attributes, "intrinsic")
                 .is_some();
+            self.validate_intrinsic_context(&qualified, function, intrinsic);
             match (intrinsic, function.body.is_some()) {
                 (true, true) => self.error(format!(
                     "`{qualified}` cannot have both an intrinsic binding and a source body"
@@ -575,6 +584,76 @@ impl<'a> Validator<'a> {
         }
     }
 
+    fn validate_intrinsic_context(
+        &mut self,
+        qualified: &str,
+        function: &FunctionDeclaration,
+        intrinsic: bool,
+    ) {
+        let context_attributes = function.attributes.iter().filter(|attribute| {
+            matches!(
+                attribute.name.as_str(),
+                "availability" | "cancellation" | "requires"
+            )
+        });
+        if !intrinsic && context_attributes.count() != 0 {
+            self.error(format!(
+                "`{qualified}` cannot declare intrinsic context metadata; source-defined behavior is inferred from its body"
+            ));
+        }
+
+        let requirements = function
+            .attributes
+            .iter()
+            .find(|attribute| attribute.name == "requires")
+            .map(|attribute| attribute.arguments.as_slice())
+            .unwrap_or_default();
+        let mut names = HashSet::new();
+        for argument in requirements {
+            let AttributeArgument::Name(requirement) = argument else {
+                self.error(format!("`{qualified}` requirements must be unquoted names"));
+                continue;
+            };
+            if !matches!(requirement.as_str(), "attachedProcess" | "stateSnapshots") {
+                self.error(format!(
+                    "`{qualified}` has unknown intrinsic requirement `{requirement}`"
+                ));
+            }
+            if !names.insert(requirement.as_str()) {
+                self.error(format!(
+                    "`{qualified}` repeats intrinsic requirement `{requirement}`"
+                ));
+            }
+        }
+
+        let availability =
+            self.optional_name_attribute(qualified, &function.attributes, "availability");
+        if availability.is_some_and(|availability| availability != "onAttach") {
+            self.error(format!(
+                "`{qualified}` has unknown intrinsic availability `{}`",
+                availability.unwrap()
+            ));
+        }
+        let cancellation =
+            self.optional_name_attribute(qualified, &function.attributes, "cancellation");
+        if cancellation.is_some_and(|cancellation| cancellation != "processClose") {
+            self.error(format!(
+                "`{qualified}` has unknown cancellation policy `{}`",
+                cancellation.unwrap()
+            ));
+        }
+        if cancellation == Some("processClose") && !function.result_is_async {
+            self.error(format!(
+                "`{qualified}` cancels on process close but does not return `async T`"
+            ));
+        }
+        if cancellation == Some("processClose") && !names.contains("attachedProcess") {
+            self.error(format!(
+                "`{qualified}` cancels on process close but does not require an attached process"
+            ));
+        }
+    }
+
     fn validate_capability_overload(
         &mut self,
         owner: &str,
@@ -607,6 +686,7 @@ impl<'a> Validator<'a> {
                             && left.attributes == right.attributes
                     })
                 && case.result == first.result
+                && case.result_is_async == first.result_is_async
                 && case.type_parameters.len() == first.type_parameters.len()
                 && case
                     .type_parameters
@@ -1182,6 +1262,45 @@ fn id(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use crate::{generate_catalog, parse};
+
+    #[test]
+    fn intrinsic_context_metadata_is_reserved_for_intrinsic_bindings() {
+        let source = r#"
+root {
+    @requires(attachedProcess)
+    private fn helper() -> None {}
+}
+"#;
+        let errors = generate_catalog(&parse(source).unwrap()).unwrap_err();
+        assert!(errors.iter().any(|error| {
+            error
+                .message
+                .contains("source-defined behavior is inferred from its body")
+        }));
+    }
+
+    #[test]
+    fn intrinsic_context_metadata_rejects_incoherent_facts() {
+        let source = r#"
+root {
+    @requires(attachedProcess, attachedProcess, unknown)
+    @cancellation(processClose)
+    @intrinsic(NextTick)
+    private fn wait() -> None;
+}
+"#;
+        let errors = generate_catalog(&parse(source).unwrap()).unwrap_err();
+        for expected in [
+            "unknown intrinsic requirement `unknown`",
+            "repeats intrinsic requirement `attachedProcess`",
+            "cancels on process close but does not return `async T`",
+        ] {
+            assert!(
+                errors.iter().any(|error| error.message.contains(expected)),
+                "missing `{expected}` in {errors:#?}"
+            );
+        }
+    }
 
     #[test]
     fn invalid_type_references_are_reported_before_generation() {

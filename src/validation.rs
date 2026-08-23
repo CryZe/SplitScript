@@ -629,8 +629,7 @@ fn validate_suspending_calls(
                     .map(|function| effects.function(function).suspension)
                     .max_by_key(|suspension| match suspension {
                         crate::stdlib::SuspensionKind::None => 0,
-                        crate::stdlib::SuspensionKind::Retryable => 1,
-                        crate::stdlib::SuspensionKind::Suspends => 2,
+                        crate::stdlib::SuspensionKind::Suspends => 1,
                     })
                     .unwrap_or_else(|| standard_library.operation_semantics(*item).suspension);
                 Some((suspension, declaration.qualified_name.to_owned()))

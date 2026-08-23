@@ -415,15 +415,26 @@ so adding a marker capability does not add a compiler switch. A future
 privileged custom behavior will be registered at the same trust boundary as
 intrinsics when a real standard-library use case requires one.
 
+Callable signatures record asynchronous completion directly as `async T` in
+privileged standard-library source. This is a type fact rather than an
+operation category: [`await`](LANGUAGE.md#await) accepts an `async T`
+expression, while [`retry`](LANGUAGE.md#retry) accepts synchronous
+fallible `T!` work. Privileged intrinsic declarations separately record only
+the runtime context that cannot be recovered from a body: attached-process and
+state-snapshot requirements, `onAttach` availability, and process-close
+cancellation. The loader validates those attributes and the closed Rust
+registry independently verifies that they match the trusted lowering contract.
+
 Callable effects are exposed as a canonical `EffectSet`, not declaration-order
 slices. Iteration is deterministic and duplicate effects are impossible.
-Intrinsic effects come only from the closed trust registry. Source-defined
-standard-library bodies contain no placeholder metadata: the compiler checks
-the library as a standalone synthetic unit once per catalog graph, derives
-transitive operation metadata through the ordinary typed call graph, and
-caches that immutable overlay. User compilations recheck injected bodies
-against the cached result, so metadata is user-independent without creating a
-second effect language in the loader.
+Intrinsic observable effects come from the closed trust registry, with
+signature asyncness and the narrow source-authored context merged into the
+frontend view. Source-defined standard-library bodies contain no placeholder
+effect metadata: the compiler checks the library as a standalone synthetic
+unit once per catalog graph, derives transitive operation metadata through the
+ordinary typed call graph, and caches that immutable overlay. User
+compilations recheck injected bodies against the cached result, so metadata is
+user-independent without creating a second effect language in the loader.
 Before operation analysis,
 [`validation/stdlib_bodies.rs`](../src/validation/stdlib_bodies.rs) proves every
 catalog call shape is a consistent instance of the hidden body's inferred type
@@ -435,8 +446,8 @@ guaranteed by the public declaration. A malformed privileged body is therefore
 a catalog-construction error; it cannot survive until demand-driven
 specialization or backend emission.
 Catalog validation rejects empty sets, purity mixed with observable behavior,
-retry/suspend contradictions, cancellation without suspension/attachment,
-process reads without attachment, and non-suspending onAttach-only calls.
+cancellation without an async result or attachment, process reads without
+attachment, and synchronous `onAttach`-only calls.
 `OperationSemantics` is the shared normalized view used by checking, hover,
 async planning, and documentation. The trusted intrinsic registry enforces the
 intrinsic implementation contract; source-body conformance is enforced against
@@ -446,12 +457,15 @@ Compiler-implemented calls also have an independent trusted registry in
 `intrinsic_registry.rs`. `IntrinsicId::ALL` is generated with the public IDs,
 while an exhaustive Rust match requires one contract for every implementation.
 Before user code is checked, catalog validation compares each public binding's
-callable kind, explicit and receiver-inherited generic parameters, method receiver,
-recursive parameter/result types, literal-only parameter rules, exact effects,
-and availability with that contract. Generic parameters are matched by ordinal,
-so cosmetic names do not become ABI. The contract also classifies host-boundary, representation,
-retryable, and suspending lowering. Direct generated-helper and host-import
-roots live in the same contract, and the
+callable kind, explicit and receiver-inherited generic parameters, method
+receiver, recursive parameter/completion types, literal-only parameter rules,
+async result shape, contextual requirements, cancellation, and availability
+with that contract. Generic parameters are matched by ordinal, so cosmetic
+names do not become ABI. The contract also classifies host-boundary,
+representation, retryable, and suspending lowering. `Retryable` here is only a
+backend implementation strategy for producing a `T!`; it does not make the
+call a distinct frontend operation kind. Direct generated-helper and
+host-import roots live in the same contract, and the
 backend dependency planner interprets those roots instead of dispatching on
 `IntrinsicId`. Synchronous and suspension scratch policies also live in the
 contract as typed core/expression/`T!`-payload slots, so Wasm-IR local

@@ -549,11 +549,10 @@ const fn effect_order(effect: Effect) -> u8 {
         Effect::RequiresAttachedProcess => 6,
         Effect::RequiresStateSnapshots => 7,
         Effect::WritesCurrentState => 8,
-        Effect::Retryable => 9,
-        Effect::Suspends => 10,
-        Effect::CancelsOnProcessClose => 11,
-        Effect::WritesTimer => 12,
-        Effect::WritesRuntime => 13,
+        Effect::Suspends => 9,
+        Effect::CancelsOnProcessClose => 10,
+        Effect::WritesTimer => 11,
+        Effect::WritesRuntime => 12,
     }
 }
 

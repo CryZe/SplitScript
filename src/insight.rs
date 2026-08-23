@@ -705,7 +705,6 @@ fn source_function_description(
         description.push_str("\n\n**Runtime behavior:** ");
         description.push_str(match operation.suspension {
             crate::stdlib::SuspensionKind::None => "synchronous",
-            crate::stdlib::SuspensionKind::Retryable => "await retries until successful",
             crate::stdlib::SuspensionKind::Suspends => "suspends",
         });
         if operation.availability == crate::stdlib::Availability::OnAttach {

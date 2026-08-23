@@ -350,10 +350,6 @@ semantic-review evidence, not as a conformance corpus.
 - [ ] Keep trait declarations, implementations, documentation, method lookup,
   and capability inheritance in the source-defined standard-library model,
   never in a parallel checker table.
-- [ ] Let privileged standard-library declarations state suspension, retry,
-  cancellation, and attachment requirements through metadata validated against
-  the trusted intrinsic contracts. High-level async composition should remain
-  source-defined.
 - [ ] Add a custom capability handler registry only when the first capability
   cannot be expressed by declared membership, structural equality, structural
   memory layout, or a source-defined implementation.

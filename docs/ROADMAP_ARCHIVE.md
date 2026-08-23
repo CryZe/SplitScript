@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-23: source-defined intrinsic signatures and context
+
+- Made asynchronous completion part of privileged standard-library signatures
+  through `-> async T`. `await` therefore depends on the expression's type just
+  as `retry` depends on `T!`; neither is declared as an operation category.
+- Added narrowly scoped intrinsic context attributes for attached-process and
+  state-snapshot requirements, process-close cancellation, and `onAttach`
+  availability. The closed Rust intrinsic registry remains an independent
+  trust boundary for lowering, helpers, host imports, and exact validation.
+- Kept high-level standard-library composition as ordinary source code. Its
+  transitive effects and suspension behavior are inferred from checked bodies,
+  while its public async result types remain explicit and visible to tooling.
+
 ## 2026-08-23: private source-defined standard-library helpers
 
 - Added `private fn` declarations to trusted standard-library source. Private
@@ -3211,7 +3224,7 @@ not another collection of `process.read` branches inside code generation.
   without every operation hard-coding `onAttach` checks. The lowered body owns
   the region, cancellable `Suspend` terminators reference it, and process exit
   resets readiness plus the complete continuation frame in one runtime action.
-- [ ] Let the standard-library catalog describe whether an operation suspends,
+- [x] Let the standard-library catalog describe whether an operation suspends,
   can be cancelled, or requires an attached process. The checker, async
   lowering, docs, and LSP signature/hover output should expose the same facts.
 

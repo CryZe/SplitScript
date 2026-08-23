@@ -30,7 +30,15 @@ fn body_source(
     let result = if contains_type_parameter(signature.result) {
         String::new()
     } else {
-        format!(" -> {}", signature.result.render(library))
+        format!(
+            " -> {}{}",
+            if signature.result_is_async {
+                "async "
+            } else {
+                ""
+            },
+            signature.result.render(library)
+        )
     };
     format!(
         "fn {}({}){} {}",

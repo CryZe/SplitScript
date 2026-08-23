@@ -14,6 +14,11 @@
   export, and pointer-width queries, repeated GBA 64-bit memory-pointer
   decoding, and the shared Dolphin/libretro provider preflight behind private
   source helpers.
+- Hid emulator attachment discovery behind the corresponding `state` providers
+  and Mono discovery behind `Unity.mono()`. Raw-address class, field, and static
+  table traversal now remains an implementation detail of the typed
+  `MonoImage` and `MonoClass` APIs, while pointer-width-aware reads stay public
+  for advanced metadata traversal.
 
 ## 2026-08-23: source-defined Unity scene snapshots
 

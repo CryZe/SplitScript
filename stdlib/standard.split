@@ -5497,23 +5497,8 @@ struct MonoModule {
     /// Centralized target-memory offsets for this runtime.
     private layout: MonoLayout,
 
-    /// Discovers the Mono assembly list from its exported iteration function.
-    ///
-    /// Discovery waits for the modern 64-bit Windows Mono module and derives
-    /// the assembly-list root from `mono_assembly_foreach`.
-    ///
-    /// # Example
-    ///
-    /// Discover modern Windows Mono
-    ///
-    /// ```splitscript
-    /// let mono = await MonoModule.discover(MonoVersion.V2)
-    /// ```
-    @mustUse("Mono discovery returns the runtime used for all later metadata lookups.")
-    static fn discover(
-        /// Exact Mono metadata layout used by the target Unity release.
-        version: MonoVersion,
-    ) -> MonoModule {
+    // Implements the attachment work exposed publicly by Unity.mono().
+    private static fn discover(version: MonoVersion) -> MonoModule {
         let runtime = await process.module("mono-2.0-bdwgc.dll")
         let pointerSize = retry runtime.pointerSize()
         if pointerSize != PointerSize.Bit64 {
@@ -5637,27 +5622,8 @@ struct MonoModule {
         }
     }
 
-    /// Finds a managed class inside an image address.
-    ///
-    /// Most scripts should call [`MonoImage.class`]; this lower-level operation
-    /// keeps the shared traversal with its owning runtime.
-    ///
-    /// # Example
-    ///
-    /// Find a class from a retained image
-    ///
-    /// ```splitscript
-    /// let classRuntime = await Unity.mono(MonoVersion.V2)
-    /// let classImage = await classRuntime.image("Assembly-CSharp")
-    /// let gameClass = await classRuntime.classInImage(classImage.address, "GameManager")
-    /// ```
-    @mustUse("Class lookup returns metadata needed for field discovery.")
-    fn classInImage(
-        /// Address of the Mono image metadata to search.
-        image: address,
-        /// Simple class name or namespace-qualified managed class name.
-        name: String,
-    ) -> MonoClass {
+    // Owns the raw-address traversal exposed through MonoImage.class().
+    private fn classInImage(image: address, name: String) -> MonoClass {
         let separator = name.lastIndexOf(".")
         let expectedName = match separator {
             Some(index) => name.slice(index + 1, name.byteLength()) else name,
@@ -5723,28 +5689,8 @@ struct MonoModule {
         }
     }
 
-    /// Finds a field offset in a class hierarchy.
-    ///
-    /// Most scripts should call [`MonoClass.field`]; this operation owns the
-    /// shared target-layout traversal.
-    ///
-    /// # Example
-    ///
-    /// Find a field from a retained class
-    ///
-    /// ```splitscript
-    /// let fieldRuntime = await Unity.mono(MonoVersion.V2)
-    /// let fieldImage = await fieldRuntime.image("Assembly-CSharp")
-    /// let fieldClass = await fieldImage.class("GameManager")
-    /// let runningField = await fieldRuntime.fieldInClass(fieldClass.address, "isRunning")
-    /// ```
-    @mustUse("Field lookup returns an offset and does not modify class metadata.")
-    fn fieldInClass(
-        /// Address of the Mono class metadata whose hierarchy should be searched.
-        classAddress: address,
-        /// Managed field name or C# auto-property name.
-        name: String,
-    ) -> u32 {
+    // Owns the raw-address traversal exposed through MonoClass.field().
+    private fn fieldInClass(classAddress: address, name: String) -> u32 {
         while true {
             let current = classAddress
             while current != 0 {
@@ -5783,26 +5729,8 @@ struct MonoModule {
         return 0
     }
 
-    /// Finds the static-field table for a class address.
-    ///
-    /// Most scripts should call [`MonoClass.staticTable`]; this operation keeps
-    /// version-specific vtable traversal in the owning runtime.
-    ///
-    /// # Example
-    ///
-    /// Find static storage from a retained class
-    ///
-    /// ```splitscript
-    /// let tableRuntime = await Unity.mono(MonoVersion.V2)
-    /// let tableImage = await tableRuntime.image("Assembly-CSharp")
-    /// let tableClass = await tableImage.class("GameManager")
-    /// let classTable = await tableRuntime.staticTableForClass(tableClass.address)
-    /// ```
-    @mustUse("Static-table discovery returns an address needed to read static fields.")
-    fn staticTableForClass(
-        /// Address of the Mono class metadata whose vtable should be traversed.
-        classAddress: address,
-    ) -> address {
+    // Owns the raw-address traversal exposed through MonoClass.staticTable().
+    private fn staticTableForClass(classAddress: address) -> address {
         while true {
             let runtimeInfo = retry self.readPointer(
                 classAddress.add(self.layout.classRuntimeInfo),
@@ -6077,19 +6005,8 @@ struct GBAEmulator {
         return Ok(pointer)
     }
 
-    /// Discovers the emulator's GBA memory mapping.
-    ///
-    /// A [`state`] declaration using [`GBA`] invokes this automatically after
-    /// attaching to one of the provider's supported processes.
-    ///
-    /// # Example
-    ///
-    /// Discover a GBA emulator mapping explicitly
-    ///
-    /// ```splitscript state GBA
-    /// let emulator = await GBAEmulator.discover()
-    /// ```
-    static fn discover() -> GBAEmulator {
+    // Implements the attachment selected by state GBA.
+    private static fn discover() -> GBAEmulator {
         let processName = process.name()
 
         if processName == "mGBA.exe" || processName == "mGBA" || processName == "EmuHawk.exe" {
@@ -6355,19 +6272,8 @@ struct PS2Emulator {
     /// Stores backend-specific lifetime state.
     private auxiliary: address,
 
-    /// Discovers the emulator's PlayStation 2 memory mapping.
-    ///
-    /// A [`state`] declaration using [`PS2`] invokes this automatically after
-    /// attaching to one of the provider's supported processes.
-    ///
-    /// # Example
-    ///
-    /// Discover a PS2 emulator mapping explicitly
-    ///
-    /// ```splitscript state PS2
-    /// let emulator = await PS2Emulator.discover()
-    /// ```
-    static fn discover() -> PS2Emulator {
+    // Implements the attachment selected by state PS2.
+    private static fn discover() -> PS2Emulator {
         let processName = process.name()
 
         if processName == "retroarch.exe" {
@@ -6465,19 +6371,8 @@ struct PS1Emulator {
     /// Stores a second backend-specific pointer-path offset.
     private auxiliary2: i64,
 
-    /// Discovers the emulator's PlayStation memory mapping.
-    ///
-    /// A [`state`] declaration using [`PS1`] invokes this automatically after
-    /// attaching to one of the provider's supported processes.
-    ///
-    /// # Example
-    ///
-    /// Discover a PlayStation emulator mapping explicitly
-    ///
-    /// ```splitscript state PS1
-    /// let emulator = await PS1Emulator.discover()
-    /// ```
-    static fn discover() -> PS1Emulator {
+    // Implements the attachment selected by state PS1.
+    private static fn discover() -> PS1Emulator {
         let processName = process.name()
         let executable = await process.mainModule()
 
@@ -6702,19 +6597,8 @@ struct SMSEmulator {
     /// Stores a backend-specific offset or lifetime address.
     private auxiliary: i64,
 
-    /// Discovers the emulator's Master System or Game Gear work RAM mapping.
-    ///
-    /// A [`state`] declaration using [`SMS`] invokes this automatically after
-    /// attaching to one of the provider's supported processes.
-    ///
-    /// # Example
-    ///
-    /// Discover a Master System emulator mapping explicitly
-    ///
-    /// ```splitscript state SMS
-    /// let emulator = await SMSEmulator.discover()
-    /// ```
-    static fn discover() -> SMSEmulator {
+    // Implements the attachment selected by state SMS.
+    private static fn discover() -> SMSEmulator {
         let processName = process.name()
         let executable = await process.mainModule()
 
@@ -6876,19 +6760,8 @@ struct GenesisEmulator {
     /// Indicates that every native 16-bit word needs its bytes reversed.
     private wordSwapped: bool,
 
-    /// Discovers the emulator's Genesis work-RAM mapping.
-    ///
-    /// A [`state`] declaration using [`Genesis`] invokes this automatically
-    /// after attaching to one of the provider's supported processes.
-    ///
-    /// # Example
-    ///
-    /// Discover a Genesis emulator mapping explicitly
-    ///
-    /// ```splitscript state Genesis
-    /// let emulator = await GenesisEmulator.discover()
-    /// ```
-    static fn discover() -> GenesisEmulator {
+    // Implements the attachment selected by state Genesis.
+    private static fn discover() -> GenesisEmulator {
         let processName = process.name()
         let executable = await process.mainModule()
 
@@ -7044,19 +6917,8 @@ struct GCNEmulator {
     /// Stores the libretro core base used for lifetime validation.
     private auxiliary: address,
 
-    /// Discovers the emulator's GameCube MEM1 mapping.
-    ///
-    /// A [`state`] declaration using [`GCN`] invokes this automatically after
-    /// attaching to Dolphin or RetroArch.
-    ///
-    /// # Example
-    ///
-    /// Discover a GameCube emulator mapping explicitly
-    ///
-    /// ```splitscript state GCN
-    /// let emulator = await GCNEmulator.discover()
-    /// ```
-    static fn discover() -> GCNEmulator {
+    // Implements the attachment selected by state GCN.
+    private static fn discover() -> GCNEmulator {
         let processName = process.name()
         let coreBase = await dolphinCoreBase()
 
@@ -7125,19 +6987,8 @@ struct WiiEmulator {
     /// Stores the libretro core base used for lifetime validation.
     private auxiliary: address,
 
-    /// Discovers the emulator's Wii MEM1 and MEM2 mappings.
-    ///
-    /// A [`state`] declaration using [`Wii`] invokes this automatically after
-    /// attaching to Dolphin or RetroArch.
-    ///
-    /// # Example
-    ///
-    /// Discover a Wii emulator mapping explicitly
-    ///
-    /// ```splitscript state Wii
-    /// let emulator = await WiiEmulator.discover()
-    /// ```
-    static fn discover() -> WiiEmulator {
+    // Implements the attachment selected by state Wii.
+    private static fn discover() -> WiiEmulator {
         let processName = process.name()
         let coreBase = await dolphinCoreBase()
 

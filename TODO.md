@@ -343,16 +343,12 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Standard-library and type-system boundaries
 
-- [ ] Decide which existing public provider/traversal callables are actually
-  implementation boundaries now that trusted source supports `private fn`.
-  The strongest candidates are the emulator `*.discover()` functions consumed
-  only by `stateProvider` attachment metadata, `MonoModule.discover()` behind
-  `Unity.mono()`, `MonoLayout.forVersion()`, and the raw-address
-  `classInImage`, `fieldInClass`, and `staticTableForClass` methods behind the
-  typed `MonoImage` / `MonoClass` wrappers. Discuss their intended advanced-use
-  value before removing them from completion and documentation; keep genuinely
-  useful low-level operations such as pointer-width-aware metadata reads
-  public rather than hiding everything merely because current source calls it.
+- [ ] Design private trusted standard-library type declarations before hiding
+  representation-only types such as `MonoLayout` and its `forVersion`
+  constructor. Private types must remain available to source checking,
+  specialization, and code generation without entering user type lookup,
+  completion, hover, or generated documentation. Keep pointer-width-aware Mono
+  reads public because they are useful for advanced custom metadata traversal.
 - [ ] Design the user-facing trait/type-class model around the existing
   source-defined capability graph. Begin with memory reading, `Display`,
   equality, numeric operations, and hashing; decide separately whether user

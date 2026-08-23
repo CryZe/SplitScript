@@ -52,6 +52,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::PS2EmulatorDiscover,
         StdlibItemId::PS1EmulatorDiscover,
         StdlibItemId::SMSEmulatorDiscover,
+        StdlibItemId::GenesisEmulatorDiscover,
         StdlibItemId::GCNEmulatorDiscover,
         StdlibItemId::WiiEmulatorDiscover,
     ] {
@@ -140,6 +141,29 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
             StdlibItemId::GBAEmulatorResolve64BitMemoryPointer,
             "GBAEmulator.resolve64BitMemoryPointer",
         ),
+        (StdlibItemId::GBAEmulatorDiscover, "GBAEmulator.discover"),
+        (StdlibItemId::PS2EmulatorDiscover, "PS2Emulator.discover"),
+        (StdlibItemId::PS1EmulatorDiscover, "PS1Emulator.discover"),
+        (StdlibItemId::SMSEmulatorDiscover, "SMSEmulator.discover"),
+        (
+            StdlibItemId::GenesisEmulatorDiscover,
+            "GenesisEmulator.discover",
+        ),
+        (StdlibItemId::GCNEmulatorDiscover, "GCNEmulator.discover"),
+        (StdlibItemId::WiiEmulatorDiscover, "WiiEmulator.discover"),
+        (StdlibItemId::MonoModuleDiscover, "MonoModule.discover"),
+        (
+            StdlibItemId::MonoModuleClassInImage,
+            "MonoModule.classInImage",
+        ),
+        (
+            StdlibItemId::MonoModuleFieldInClass,
+            "MonoModule.fieldInClass",
+        ),
+        (
+            StdlibItemId::MonoModuleStaticTableForClass,
+            "MonoModule.staticTableForClass",
+        ),
     ] {
         let helper = library.item(id);
         assert_eq!(helper.visibility, ItemVisibility::LibraryPrivate);
@@ -155,6 +179,17 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
             .methods_for_type(&TypeKind::Standard(StdlibTypeId::UnitySceneManager))
             .into_iter()
             .all(|item| item.id != StdlibItemId::UnitySceneManagerSnapshot)
+    );
+    assert!(
+        library
+            .methods_for_type(&TypeKind::Standard(StdlibTypeId::MonoModule))
+            .into_iter()
+            .all(|item| !matches!(
+                item.id,
+                StdlibItemId::MonoModuleClassInImage
+                    | StdlibItemId::MonoModuleFieldInClass
+                    | StdlibItemId::MonoModuleStaticTableForClass
+            ))
     );
 
     let diagnostics = splitscript::compile(
@@ -193,6 +228,45 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
             .contains("unknown function `dolphinCoreBase`")
             && !diagnostic.message.contains("private")
     }));
+
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            onAttach {
+                let emulator = await GBAEmulator.discover()
+            }
+        "#,
+    )
+    .expect_err("user code must not call state-provider attachment helpers");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("unknown variable `GBAEmulator`")
+                && !diagnostic.message.contains("private")
+        }),
+        "{diagnostics:#?}"
+    );
+
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            onAttach {
+                let mono = await Unity.mono(MonoVersion.V2)
+                let class = await mono.classInImage(0x1000, "GameManager")
+            }
+        "#,
+    )
+    .expect_err("user code must use typed Mono traversal wrappers");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("type `MonoModule` has no method `classInImage`")
+                && !diagnostic.message.contains("private")
+        }),
+        "{diagnostics:#?}"
+    );
 }
 
 #[test]
@@ -928,6 +1002,10 @@ fn state_providers_are_catalog_owned_and_resolved_after_parsing() {
             .implementation,
         Implementation::LibraryBody { .. }
     ));
+    assert_eq!(
+        library.item(StdlibItemId::GBAEmulatorDiscover).visibility,
+        ItemVisibility::LibraryPrivate
+    );
     assert!(matches!(
         gba.processes,
         splitscript::compiler::stdlib::StateProviderProcesses::Declared(processes)

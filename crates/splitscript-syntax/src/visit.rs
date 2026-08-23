@@ -48,6 +48,13 @@ pub trait Visitor<'ast>: Sized {
         self.visit_type_ref(&result.value);
     }
 
+    fn visit_callable_type(&mut self, callable: &'ast CallableTypeDecl) {
+        for parameter in &callable.parameters {
+            self.visit_type_ref(parameter);
+        }
+        self.visit_type_ref(&callable.result);
+    }
+
     fn visit_type_application(&mut self, application: &'ast TypeApplicationDecl) {
         for argument in &application.arguments {
             self.visit_type_ref(argument);
@@ -128,6 +135,9 @@ pub fn walk_program<'ast, V: Visitor<'ast>>(visitor: &mut V, program: &'ast Prog
     }
     for result in &program.result_types {
         visitor.visit_result_type(result);
+    }
+    for callable in &program.callable_types {
+        visitor.visit_callable_type(callable);
     }
     for application in &program.type_applications {
         visitor.visit_type_application(application);
@@ -339,6 +349,20 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
             for argument in args {
                 visitor.visit_expr(argument);
             }
+        }
+        ExprKind::Invoke { callee, args } => {
+            visitor.visit_expr(callee);
+            for argument in args {
+                visitor.visit_expr(argument);
+            }
+        }
+        ExprKind::Closure { params, body, .. } => {
+            for parameter in params {
+                if let Some(annotation) = &parameter.annotation {
+                    visitor.visit_type_ref(annotation);
+                }
+            }
+            visitor.visit_expr(body);
         }
         ExprKind::Error
         | ExprKind::None
@@ -697,6 +721,20 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
             for argument in args {
                 folder.fold_expr(argument);
             }
+        }
+        ExprKind::Invoke { callee, args } => {
+            folder.fold_expr(callee);
+            for argument in args {
+                folder.fold_expr(argument);
+            }
+        }
+        ExprKind::Closure { params, body, .. } => {
+            for parameter in params {
+                if let Some(annotation) = &mut parameter.annotation {
+                    folder.fold_type_ref(annotation);
+                }
+            }
+            folder.fold_expr(body);
         }
         ExprKind::Error
         | ExprKind::None

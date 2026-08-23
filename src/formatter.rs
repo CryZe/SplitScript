@@ -1490,7 +1490,8 @@ fn needs_space(
     }
 
     if matches!(current, TokenKind::LParen) {
-        return matches!(previous, TokenKind::Ident(name) if is_prefix_keyword(name))
+        return matches!(previous, TokenKind::Colon | TokenKind::Comma)
+            || matches!(previous, TokenKind::Ident(name) if is_prefix_keyword(name))
             || (!previous_was_generic_close && is_spaced_operator(previous));
     }
     if matches!(current, TokenKind::LBracket) {
@@ -1663,6 +1664,29 @@ onAttach {
         let formatted = format_source(source).unwrap();
         assert_eq!(formatted, expected);
         assert_eq!(format_source(&formatted).unwrap(), formatted);
+    }
+
+    #[test]
+    fn formats_callable_types_and_arrow_closures() {
+        let source = r#"state "game.exe"{}
+fn apply(value:u32,transform:(u32)->u32)->u32{return transform(value)}
+whileAttached{let add=(left:u32,right:u32)=>{left+right};let result=add(1,2);print(result)}"#;
+        let expected = r#"state "game.exe" {}
+fn apply(value: u32, transform: (u32) -> u32) -> u32 {
+    return transform(value)
+}
+whileAttached {
+    let add = (left: u32, right: u32) => {
+        left + right
+    };
+    let result = add(1, 2);
+    print(result)
+}
+"#;
+        let formatted = format_source(source).unwrap();
+        assert_eq!(formatted, expected);
+        assert_eq!(format_source(&formatted).unwrap(), formatted);
+        crate::check(crate::lower(crate::parse(&formatted).unwrap())).unwrap();
     }
 
     #[test]

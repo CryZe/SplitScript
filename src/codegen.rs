@@ -196,6 +196,7 @@ struct ConstructedTypes {
     options: Vec<ResolvedOptionType>,
     results: Vec<ResolvedResultType>,
     asyncs: Vec<crate::types::ResolvedAsyncType>,
+    callables: Vec<crate::types::ResolvedCallableType>,
     ranges: Vec<ResolvedRangeType>,
     sets: Vec<crate::types::ResolvedSetType>,
     applications: Vec<crate::types::ResolvedApplicationType>,
@@ -228,6 +229,7 @@ impl<'a> BackendProgram<'a> {
             options: checked.option_types.clone(),
             results: checked.result_types.clone(),
             asyncs: checked.async_types.clone(),
+            callables: checked.callable_types.clone(),
             ranges: checked.range_types.clone(),
             sets: checked.set_types.clone(),
             applications: checked.application_types.clone(),
@@ -301,6 +303,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         options: option_types,
         results: result_types,
         asyncs: async_types,
+        callables: callable_types,
         ranges: range_types,
         sets: set_types,
         applications: application_types,
@@ -310,6 +313,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let array_types = &array_types;
     let option_types = &option_types;
     let result_types = &result_types;
+    let callable_types = &callable_types;
     let set_types = &set_types;
     let application_types = &application_types;
     let wasm_ir = &wasm_ir;
@@ -372,6 +376,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         option_types,
         result_types,
         async_types: &async_types,
+        callable_types,
         set_types,
         application_types,
         range_types: &range_types,
@@ -727,6 +732,7 @@ fn semantic_type(id: TypeId, semantics: &SemanticModel) -> Type {
         TypeKind::Option { layout, .. } => Type::Option(*layout),
         TypeKind::Result { layout, .. } => Type::Result(*layout),
         TypeKind::Async { layout, .. } => Type::Async(*layout),
+        TypeKind::Callable { layout, .. } => Type::Callable(*layout),
         TypeKind::Set { layout, .. } => Type::Set(*layout),
         TypeKind::Range { layout, .. } => Type::Range(*layout),
         TypeKind::Application { layout, .. } => Type::Application(*layout),

@@ -1,9 +1,9 @@
 //! Source type-expression parsing and constructed syntax-type interning.
 
 use super::{
-    ArrayTypeDecl, AsyncTypeDecl, Diagnostic, OptionTypeDecl, Parser, RangeKind, RangeTypeDecl,
-    ResultTypeDecl, Span, TokenKind, TypeApplicationDecl, TypeApplicationOccurrence, TypeNameId,
-    TypeRef, ambiguous_range_diagnostic,
+    ArrayTypeDecl, AsyncTypeDecl, CallableTypeDecl, Diagnostic, OptionTypeDecl, Parser, RangeKind,
+    RangeTypeDecl, ResultTypeDecl, Span, TokenKind, TypeApplicationDecl, TypeApplicationOccurrence,
+    TypeNameId, TypeRef, ambiguous_range_diagnostic,
 };
 use crate::migration::ForeignSpellingContext;
 
@@ -148,7 +148,39 @@ impl Parser<'_> {
         &mut self,
         message: &'static str,
     ) -> Result<(TypeRef, Span, Span), Diagnostic> {
-        if let Some(start) = self.eat(&TokenKind::LBracket) {
+        if let Some(start) = self.eat(&TokenKind::LParen) {
+            let mut parameters = Vec::new();
+            while !self.at(&TokenKind::RParen) {
+                parameters.push(self.parse_type("expected a callable parameter type")?.0);
+                if self.eat(&TokenKind::Comma).is_none() {
+                    break;
+                }
+                if self.at(&TokenKind::RParen) {
+                    break;
+                }
+            }
+            self.expect(
+                TokenKind::RParen,
+                "expected `)` after callable parameter types",
+            )?;
+            self.expect(TokenKind::Minus, "expected `->` after callable parameters")?;
+            self.expect(TokenKind::Gt, "expected `>` in the callable arrow `->`")?;
+            let (result, end) = self.parse_type("expected a callable result type")?;
+            let key = (parameters.clone(), result);
+            let id = if let Some(&id) = self.callable_type_ids.get(&key) {
+                id
+            } else {
+                let id = self.constructed_type_ids.callable();
+                self.callable_types.push(CallableTypeDecl {
+                    id,
+                    parameters,
+                    result,
+                });
+                self.callable_type_ids.insert(key, id);
+                id
+            };
+            Ok((TypeRef::Callable(id), start, end))
+        } else if let Some(start) = self.eat(&TokenKind::LBracket) {
             let (element, _) = self.parse_type("expected an array element type")?;
             let length = if self.eat(&TokenKind::Semicolon).is_some() {
                 let value = self.expect_u64("expected a fixed array length after `;`")?;

@@ -29,6 +29,8 @@ mod async_runtime;
 mod catalogs_types;
 #[path = "compiler/cli.rs"]
 mod cli;
+#[path = "compiler/closures.rs"]
+mod closures;
 #[path = "compiler/compiler_queries.rs"]
 mod compiler_queries;
 #[path = "compiler/diagnostics_migration.rs"]

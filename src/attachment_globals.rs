@@ -1169,6 +1169,10 @@ fn expression_children(kind: &TypedExpressionKind) -> Vec<crate::ast::ExprId> {
             .copied()
             .chain(arguments.iter().copied())
             .collect(),
+        TypedExpressionKind::Invoke { callee, arguments } => std::iter::once(*callee)
+            .chain(arguments.iter().copied())
+            .collect(),
+        TypedExpressionKind::Closure { body, .. } => vec![*body],
         TypedExpressionKind::None
         | TypedExpressionKind::IteratorEnd
         | TypedExpressionKind::Bool(_)

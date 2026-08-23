@@ -10,17 +10,17 @@ use crate::{
     Token, TokenCursor, TokenKind,
     ast::{
         Action, ActionKind, ArrayTypeDecl, ArrayTypeId, AssignmentId, AsyncTypeDecl, AsyncTypeId,
-        BinaryOp, Block, ConstructedTypeIdAllocator, EnumDecl, EnumId, EnumReference, EnumVariant,
-        EnumVariantId, Expr, ExprId, ExprKind, ForBinding, FunctionDecl, FunctionId,
-        InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl, OptionTypeId, Parameter,
-        PatternBinding, PatternId, PointerPath, PointerPathBase, Program, RangeKind, RangeTypeDecl,
-        RangeTypeId, RecordDecl, RecordField, RecordFieldId, RecordId, ResultTypeDecl,
-        ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl, SettingExternalKey,
-        SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart, SettingTextPattern,
-        Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder, StateProviderRef,
-        StateSource, StateTransform, Stmt, SuspensionMode, TickRateDecl, TickRateValue,
-        TypeApplicationDecl, TypeApplicationId, TypeApplicationOccurrence, TypeNameId, TypeRef,
-        UnaryOp, ValueId, VariableDecl,
+        BinaryOp, Block, CallableTypeDecl, CallableTypeId, ConstructedTypeIdAllocator, EnumDecl,
+        EnumId, EnumReference, EnumVariant, EnumVariantId, Expr, ExprId, ExprKind, ForBinding,
+        FunctionDecl, FunctionId, InterpolatedPart, MatchArm, MatchPattern, OptionTypeDecl,
+        OptionTypeId, Parameter, PatternBinding, PatternId, PointerPath, PointerPathBase, Program,
+        RangeKind, RangeTypeDecl, RangeTypeId, RecordDecl, RecordField, RecordFieldId, RecordId,
+        ResultTypeDecl, ResultTypeId, SettingChoiceOption, SettingChoiceOptionId, SettingDecl,
+        SettingExternalKey, SettingFamilyDecl, SettingFileFilter, SettingKind, SettingTextPart,
+        SettingTextPattern, Span, StateDecl, StateField, StateLayoutDecl, StateMemoryDecoder,
+        StateProviderRef, StateSource, StateTransform, Stmt, SuspensionMode, TickRateDecl,
+        TickRateValue, TypeApplicationDecl, TypeApplicationId, TypeApplicationOccurrence,
+        TypeNameId, TypeRef, UnaryOp, ValueId, VariableDecl,
     },
     diagnostic::{Diagnostic, DiagnosticFix, FixApplicability, TextEdit},
     migration::{ASL_TIMER_CONTROL_DIAGNOSTIC, DUPLICATE_STATE_DIAGNOSTIC},
@@ -76,6 +76,8 @@ pub fn parse_recovering(source: &str, tokens: Vec<Token>) -> ParseOutput {
         result_type_ids: HashMap::new(),
         async_types: Vec::new(),
         async_type_ids: HashMap::new(),
+        callable_types: Vec::new(),
+        callable_type_ids: HashMap::new(),
         range_types: Vec::new(),
         range_type_ids: HashMap::new(),
         type_applications: Vec::new(),
@@ -112,6 +114,8 @@ struct Parser<'a> {
     result_type_ids: HashMap<TypeRef, ResultTypeId>,
     async_types: Vec<AsyncTypeDecl>,
     async_type_ids: HashMap<TypeRef, AsyncTypeId>,
+    callable_types: Vec<CallableTypeDecl>,
+    callable_type_ids: HashMap<(Vec<TypeRef>, TypeRef), CallableTypeId>,
     range_types: Vec<RangeTypeDecl>,
     range_type_ids: HashMap<(TypeRef, TypeRef, RangeKind), RangeTypeId>,
     type_applications: Vec<TypeApplicationDecl>,
@@ -382,6 +386,7 @@ impl Parser<'_> {
         program.option_types = self.option_types;
         program.result_types = self.result_types;
         program.async_types = self.async_types;
+        program.callable_types = self.callable_types;
         program.range_types = self.range_types;
         program.type_applications = self.type_applications;
         program.type_names = self.type_names;

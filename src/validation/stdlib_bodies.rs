@@ -400,6 +400,21 @@ fn render_actual_type(
             "async {}",
             render_actual_type(library, semantics, *value, parameter_bindings)
         ),
+        TypeKind::Callable {
+            parameters, result, ..
+        } => {
+            let parameters = parameters
+                .iter()
+                .map(|parameter| {
+                    render_actual_type(library, semantics, *parameter, parameter_bindings)
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "({parameters}) -> {}",
+                render_actual_type(library, semantics, *result, parameter_bindings)
+            )
+        }
         TypeKind::Set { element, .. } => format!(
             "Set<{}>",
             render_actual_type(library, semantics, *element, parameter_bindings)

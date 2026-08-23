@@ -31,8 +31,8 @@ use crate::{
         StdlibTypeId, TypeRef as CatalogTypeRef,
     },
     types::{
-        EnumTypeId, ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType, ResolvedResultType,
-        ResolvedSetType, ResolvedTypeRef, TypeKind, TypeStore,
+        EnumTypeId, ResolvedArrayType, ResolvedAsyncType, ResolvedCallableType, ResolvedOptionType,
+        ResolvedResultType, ResolvedSetType, ResolvedTypeRef, TypeKind, TypeStore,
     },
 };
 
@@ -77,6 +77,7 @@ pub struct CheckOutput {
     pub option_types: Vec<ResolvedOptionType>,
     pub result_types: Vec<ResolvedResultType>,
     pub async_types: Vec<ResolvedAsyncType>,
+    pub callable_types: Vec<ResolvedCallableType>,
     pub range_types: Vec<crate::types::ResolvedRangeType>,
     pub set_types: Vec<ResolvedSetType>,
     pub application_types: Vec<crate::types::ResolvedApplicationType>,
@@ -722,6 +723,7 @@ fn resolved_type_ref(ty: ResolvedTypeRef, types: &TypeStore) -> Type {
         ResolvedTypeRef::Option(id) => Type::Option(id),
         ResolvedTypeRef::Result(id) => Type::Result(id),
         ResolvedTypeRef::Async(id) => Type::Async(id),
+        ResolvedTypeRef::Callable(id) => Type::Callable(id),
         ResolvedTypeRef::Range(id) => Type::Range(id),
         ResolvedTypeRef::Set(id) => Type::Set(id),
         ResolvedTypeRef::Application(id) => Type::Application(id),

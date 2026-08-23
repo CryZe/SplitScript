@@ -12,8 +12,8 @@ use crate::{
     },
     types::{
         EnumTypeId, ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType,
-        ResolvedOptionType, ResolvedRangeType, ResolvedResultType, ResolvedSetType,
-        ResolvedTypeRef,
+        ResolvedCallableType, ResolvedOptionType, ResolvedRangeType, ResolvedResultType,
+        ResolvedSetType, ResolvedTypeRef,
     },
 };
 
@@ -29,6 +29,7 @@ pub(super) struct GcLayout {
     standard_fields: HashMap<StdlibFieldId, u32>,
     async_frame: u32,
     async_values: HashMap<AsyncTypeId, u32>,
+    callable_functions: HashMap<crate::ast::CallableTypeId, u32>,
     function_frames: HashMap<FunctionInstance, u32>,
     function_frame_tags: HashMap<FunctionInstance, u32>,
     intrinsic_frames: HashMap<IntrinsicFutureInstance, u32>,
@@ -47,6 +48,7 @@ pub(super) struct Inputs<'a> {
     pub options: &'a [ResolvedOptionType],
     pub results: &'a [ResolvedResultType],
     pub asyncs: &'a [ResolvedAsyncType],
+    pub callables: &'a [ResolvedCallableType],
     pub sets: &'a [ResolvedSetType],
     pub applications: &'a [ResolvedApplicationType],
     pub ranges: &'a [ResolvedRangeType],
@@ -65,6 +67,7 @@ impl GcLayout {
             options,
             results,
             asyncs,
+            callables,
             sets,
             applications,
             ranges,
@@ -104,6 +107,7 @@ impl GcLayout {
         let async_frame = STATE_TYPE + 1 + standard.len() as u32;
         let mut next = async_frame + 1;
         let mut dynamic = HashMap::new();
+        let mut callable_functions = HashMap::new();
         let mut ordered = Vec::new();
 
         for record in program
@@ -247,6 +251,18 @@ impl GcLayout {
             next += 1;
         }
 
+        for callable in callables
+            .iter()
+            .filter(|callable| reachability.contains_callable_type(callable.id))
+        {
+            let ty = Type::Callable(callable.id);
+            callable_functions.insert(callable.id, next);
+            next += 1;
+            dynamic.insert(ty, next);
+            ordered.push(ty);
+            next += 1;
+        }
+
         // Generic source-defined methods can introduce template range shapes.
         // Only their materialized integer instantiations have a physical Wasm
         // representation; the generic template itself is erased.
@@ -308,6 +324,7 @@ impl GcLayout {
             standard_fields,
             async_frame,
             async_values,
+            callable_functions,
             function_frames,
             function_frame_tags,
             intrinsic_frames,
@@ -366,6 +383,10 @@ impl GcLayout {
         self.async_frame
     }
 
+    pub(super) fn callable_function_index(&self, callable: crate::ast::CallableTypeId) -> u32 {
+        self.callable_functions[&callable]
+    }
+
     pub(super) fn function_frame_index(&self, instance: &FunctionInstance) -> u32 {
         self.function_frames
             .get(instance)
@@ -408,6 +429,7 @@ impl GcLayout {
             | Type::Array(_)
             | Type::Option(_)
             | Type::Result(_)
+            | Type::Callable(_)
             | Type::Range(_)
             | Type::Set(_)
             | Type::Application(_) => *self
@@ -464,6 +486,7 @@ impl GcLayout {
             | Type::Option(_)
             | Type::Result(_)
             | Type::Async(_)
+            | Type::Callable(_)
             | Type::Range(_)
             | Type::Set(_)
             | Type::Application(_) => ValType::Ref(RefType {

@@ -1201,6 +1201,16 @@ fn add_expression_bindings(builder: &mut CompletionBuilder, expression: &Expr, o
             add_expression_bindings(builder, right, offset);
         }
         ExprKind::Call { args, .. } => add_child_expression_bindings(builder, args, offset),
+        ExprKind::Invoke { callee, args } => {
+            add_expression_bindings(builder, callee, offset);
+            add_child_expression_bindings(builder, args, offset);
+        }
+        ExprKind::Closure { params, body, .. } => {
+            for parameter in params {
+                add_scoped_variable(builder, &parameter.name, "closure parameter");
+            }
+            add_expression_bindings(builder, body, offset);
+        }
         ExprKind::Error
         | ExprKind::None
         | ExprKind::Break(None)
@@ -1360,7 +1370,8 @@ fn add_inferred_fields(
         TypeKind::Builtin(_)
         | TypeKind::Enum(_)
         | TypeKind::GenericParameter { .. }
-        | TypeKind::Async { .. } => {}
+        | TypeKind::Async { .. }
+        | TypeKind::Callable { .. } => {}
     }
 }
 

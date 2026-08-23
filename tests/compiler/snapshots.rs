@@ -513,6 +513,12 @@ fn snapshot_expression_kind(
             arguments,
             ..
         } => format!("call {} args={arguments:?}", source_path.join(".")),
+        TypedExpressionKind::Invoke { callee, arguments } => {
+            format!("invoke e{} args={arguments:?}", callee.index())
+        }
+        TypedExpressionKind::Closure { parameters, body } => {
+            format!("closure params={parameters:?} body=e{}", body.index())
+        }
     }
 }
 
@@ -580,6 +586,17 @@ fn snapshot_type_name(
         TypeKind::Async { value, .. } => {
             format!("async {}", snapshot_type_name(checked, *value))
         }
+        TypeKind::Callable {
+            parameters, result, ..
+        } => format!(
+            "({}) -> {}",
+            parameters
+                .iter()
+                .map(|parameter| snapshot_type_name(checked, *parameter))
+                .collect::<Vec<_>>()
+                .join(", "),
+            snapshot_type_name(checked, *result)
+        ),
         TypeKind::Range { bound, kind, .. } => {
             let bound = snapshot_type_name(checked, *bound);
             format!("{bound}{}{bound}", kind.operator())

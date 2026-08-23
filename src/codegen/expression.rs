@@ -2647,6 +2647,9 @@ fn compile_expr_unconverted(
             }
         }
         wasm_ir::ExpressionKind::Call { .. } => {}
+        wasm_ir::ExpressionKind::Invoke { .. } | wasm_ir::ExpressionKind::Closure { .. } => {
+            unreachable!("closure expressions are lowered by the closure code-generation pass")
+        }
     }
     let wasm_ir::ExpressionKind::Call {
         target,

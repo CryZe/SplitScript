@@ -3,8 +3,8 @@
 use crate::{
     ast::Program,
     inference::{
-        ApplicationLayout, ArrayLayout, AsyncLayout, ConstructedLayouts, InferenceContext,
-        OptionLayout, RangeLayout, Requirements, ResultLayout, SetLayout, Type,
+        ApplicationLayout, ArrayLayout, AsyncLayout, CallableLayout, ConstructedLayouts,
+        InferenceContext, OptionLayout, RangeLayout, Requirements, ResultLayout, SetLayout, Type,
     },
     resolution::ProgramResolutions,
     semantic::SemanticBuilder,
@@ -74,6 +74,19 @@ fn initialize_checker(
             value: syntax_type(future.value, &semantic_types, resolutions),
         })
         .collect::<Vec<_>>();
+    let callable_types = program
+        .callable_types
+        .iter()
+        .map(|callable| CallableLayout {
+            id: callable.id,
+            parameters: callable
+                .parameters
+                .iter()
+                .map(|parameter| syntax_type(*parameter, &semantic_types, resolutions))
+                .collect(),
+            result: syntax_type(callable.result, &semantic_types, resolutions),
+        })
+        .collect::<Vec<_>>();
     let range_types = program
         .range_types
         .iter()
@@ -131,6 +144,7 @@ fn initialize_checker(
             options: option_types,
             results: result_types,
             asyncs: async_types,
+            callables: callable_types,
             ranges: range_types,
             sets: set_types,
             applications: application_types,

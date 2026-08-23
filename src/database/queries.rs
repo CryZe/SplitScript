@@ -725,6 +725,7 @@ impl CompilerDatabase {
             TypeKind::Option { .. } => Some(DefinitionTarget::Language(LanguageItemId::OptionType)),
             TypeKind::Result { .. } => Some(DefinitionTarget::Language(LanguageItemId::ResultType)),
             TypeKind::Async { .. } => Some(DefinitionTarget::Language(LanguageItemId::Async)),
+            TypeKind::Callable { .. } => None,
             TypeKind::Range { kind, .. } => Some(DefinitionTarget::StandardLibrarySymbol(
                 StdlibSymbolId::TypeConstructor(match kind {
                     crate::ast::RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,

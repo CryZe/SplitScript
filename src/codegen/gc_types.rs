@@ -1,8 +1,8 @@
 //! Deterministic WebAssembly GC type and layout planning.
 
 use wasm_encoder::{
-    ArrayType, CompositeInnerType, CompositeType, FieldType, StorageType, StructType, SubType,
-    TypeSection, ValType,
+    AbstractHeapType, ArrayType, CompositeInnerType, CompositeType, FieldType, FuncType, HeapType,
+    RefType, StorageType, StructType, SubType, TypeSection, ValType,
 };
 
 use crate::{
@@ -13,8 +13,9 @@ use crate::{
         StdlibTypeId, TypeRef,
     },
     types::{
-        ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType, ResolvedOptionType,
-        ResolvedRangeType, ResolvedResultType, ResolvedSetType, TypeId, TypeKind,
+        ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType, ResolvedCallableType,
+        ResolvedOptionType, ResolvedRangeType, ResolvedResultType, ResolvedSetType, TypeId,
+        TypeKind,
     },
 };
 
@@ -42,6 +43,7 @@ pub(super) struct Inputs<'a> {
     pub option_types: &'a [ResolvedOptionType],
     pub result_types: &'a [ResolvedResultType],
     pub async_types: &'a [ResolvedAsyncType],
+    pub callable_types: &'a [ResolvedCallableType],
     pub set_types: &'a [ResolvedSetType],
     pub application_types: &'a [ResolvedApplicationType],
     pub range_types: &'a [ResolvedRangeType],
@@ -60,6 +62,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         option_types,
         result_types,
         async_types,
+        callable_types,
         set_types,
         application_types,
         range_types,
@@ -74,6 +77,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
         options: option_types,
         results: result_types,
         asyncs: async_types,
+        callables: callable_types,
         sets: set_types,
         applications: application_types,
         ranges: range_types,
@@ -421,6 +425,81 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                                 mutable: true,
                             })
                             .collect(),
+                    }),
+                    true,
+                    None,
+                )
+            }
+            Type::Callable(id) => {
+                let TypeKind::Callable {
+                    parameters, result, ..
+                } = semantics
+                    .types()
+                    .iter()
+                    .find_map(|(_, kind)| {
+                        matches!(kind, TypeKind::Callable { layout: candidate, .. } if *candidate == id)
+                            .then_some(kind)
+                    })
+                    .expect("reachable callables have semantic signatures")
+                else {
+                    unreachable!()
+                };
+                debug_assert_eq!(
+                    layout.callable_function_index(id),
+                    recursive_types.len() as u32
+                );
+                let params = std::iter::once(ValType::Ref(RefType {
+                    nullable: true,
+                    heap_type: HeapType::Abstract {
+                        shared: false,
+                        ty: AbstractHeapType::Any,
+                    },
+                }))
+                .chain(parameters.iter().filter_map(|parameter| {
+                    let ty = semantic_type(*parameter, semantics);
+                    ty.has_runtime_value().then(|| layout.val_type(ty))
+                }))
+                .collect::<Vec<_>>();
+                let result_ty = semantic_type(*result, semantics);
+                let results = result_ty
+                    .has_runtime_value()
+                    .then(|| layout.val_type(result_ty))
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                recursive_types.push(SubType {
+                    is_final: true,
+                    supertype_idx: None,
+                    composite_type: CompositeType {
+                        inner: CompositeInnerType::Func(FuncType::new(params, results)),
+                        shared: false,
+                        descriptor: None,
+                        describes: None,
+                    },
+                });
+                (
+                    CompositeInnerType::Struct(StructType {
+                        fields: vec![
+                            FieldType {
+                                element_type: StorageType::Val(ValType::Ref(RefType {
+                                    nullable: false,
+                                    heap_type: HeapType::Concrete(
+                                        layout.callable_function_index(id),
+                                    ),
+                                })),
+                                mutable: false,
+                            },
+                            FieldType {
+                                element_type: StorageType::Val(ValType::Ref(RefType {
+                                    nullable: true,
+                                    heap_type: HeapType::Abstract {
+                                        shared: false,
+                                        ty: AbstractHeapType::Any,
+                                    },
+                                })),
+                                mutable: false,
+                            },
+                        ]
+                        .into(),
                     }),
                     true,
                     None,

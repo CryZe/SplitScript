@@ -429,6 +429,18 @@ impl HighlightCollector<'_> {
                 .iter()
                 .find(|future| future.id == id)
                 .is_some_and(|future| self.type_contains_none(future.value)),
+            TypeRef::Callable(id) => self
+                .syntax
+                .callable_types
+                .iter()
+                .find(|callable| callable.id == id)
+                .is_some_and(|callable| {
+                    callable
+                        .parameters
+                        .iter()
+                        .any(|parameter| self.type_contains_none(*parameter))
+                        || self.type_contains_none(callable.result)
+                }),
             TypeRef::Range(id) => self
                 .syntax
                 .range_types

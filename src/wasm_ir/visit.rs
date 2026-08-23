@@ -258,6 +258,13 @@ pub fn visit_expression_children(kind: &ExpressionKind, mut visit: impl FnMut(Ex
             }
             arguments.iter().copied().for_each(&mut visit);
         }
+        ExpressionKind::Invoke { callee, arguments } => {
+            if let crate::semantic::DynamicCallCallee::Expression(callee) = callee {
+                visit(*callee);
+            }
+            arguments.iter().copied().for_each(&mut visit);
+        }
+        ExpressionKind::Closure { body, .. } => visit(*body),
         ExpressionKind::If {
             condition,
             then_expr,

@@ -2315,6 +2315,18 @@ impl Checker {
                 let value = self.inference.async_value(future);
                 format!("async {}", self.type_name(value))
             }
+            Type::Callable(callable) => {
+                let parameters = self
+                    .inference
+                    .callable_parameters(callable)
+                    .to_vec()
+                    .into_iter()
+                    .map(|parameter| self.type_name(parameter))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let result = self.type_name(self.inference.callable_result(callable));
+                format!("({parameters}) -> {result}")
+            }
             Type::Set(set) => {
                 let element = self.inference.set_element(set);
                 format!("Set<{}>", self.type_name(element))

@@ -7,8 +7,8 @@ use std::{collections::HashMap, fmt, ops::BitOr};
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, ConstructedTypeIdAllocator, OptionTypeId, RangeKind, RangeTypeId,
-        ResultTypeId, TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, CallableTypeId, ConstructedTypeIdAllocator, OptionTypeId,
+        RangeKind, RangeTypeId, ResultTypeId, TypeApplicationId,
     },
     stdlib::{
         CapabilityBehavior, CoreTypeId, StandardLibrary, StdlibCapabilityId,
@@ -24,6 +24,7 @@ pub(crate) enum Type {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Callable(CallableTypeId),
     Range(RangeTypeId),
     Set(TypeApplicationId),
     Application(TypeApplicationId),
@@ -46,6 +47,7 @@ impl Type {
                 TypeKind::Option { layout, .. } => ResolvedTypeRef::Option(*layout),
                 TypeKind::Result { layout, .. } => ResolvedTypeRef::Result(*layout),
                 TypeKind::Async { layout, .. } => ResolvedTypeRef::Async(*layout),
+                TypeKind::Callable { layout, .. } => ResolvedTypeRef::Callable(*layout),
                 TypeKind::Range { layout, .. } => ResolvedTypeRef::Range(*layout),
                 TypeKind::Set { layout, .. } => ResolvedTypeRef::Set(*layout),
                 TypeKind::Application { layout, .. } => ResolvedTypeRef::Application(*layout),
@@ -54,6 +56,7 @@ impl Type {
             Self::Option(id) => ResolvedTypeRef::Option(id),
             Self::Result(id) => ResolvedTypeRef::Result(id),
             Self::Async(id) => ResolvedTypeRef::Async(id),
+            Self::Callable(id) => ResolvedTypeRef::Callable(id),
             Self::Range(id) => ResolvedTypeRef::Range(id),
             Self::Set(id) => ResolvedTypeRef::Set(id),
             Self::Application(id) => ResolvedTypeRef::Application(id),
@@ -72,6 +75,7 @@ impl fmt::Display for Type {
             Self::Option(id) => write!(formatter, "T?#{id}"),
             Self::Result(id) => write!(formatter, "T!#{id}"),
             Self::Async(id) => write!(formatter, "Async#{id}"),
+            Self::Callable(id) => write!(formatter, "Callable#{id}"),
             Self::Range(id) => write!(formatter, "Range#{id}"),
             Self::Set(id) => write!(formatter, "Set#{id}"),
             Self::Application(id) => write!(formatter, "Application#{id}"),
@@ -216,6 +220,13 @@ pub(crate) struct AsyncLayout {
     pub(crate) value: Type,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct CallableLayout {
+    pub(crate) id: CallableTypeId,
+    pub(crate) parameters: Vec<Type>,
+    pub(crate) result: Type,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RangeLayout {
     pub(crate) id: RangeTypeId,
@@ -244,6 +255,7 @@ pub(crate) struct ConstructedLayouts {
     pub(crate) options: Vec<OptionLayout>,
     pub(crate) results: Vec<ResultLayout>,
     pub(crate) asyncs: Vec<AsyncLayout>,
+    pub(crate) callables: Vec<CallableLayout>,
     pub(crate) ranges: Vec<RangeLayout>,
     pub(crate) sets: Vec<SetLayout>,
     pub(crate) applications: Vec<ApplicationLayout>,
@@ -258,6 +270,7 @@ pub(crate) struct InferenceContext {
     options: Vec<OptionLayout>,
     results: Vec<ResultLayout>,
     asyncs: Vec<AsyncLayout>,
+    callables: Vec<CallableLayout>,
     ranges: Vec<RangeLayout>,
     sets: Vec<SetLayout>,
     applications: Vec<ApplicationLayout>,
@@ -265,6 +278,7 @@ pub(crate) struct InferenceContext {
     canonical_options: HashMap<OptionTypeId, OptionTypeId>,
     canonical_results: HashMap<ResultTypeId, ResultTypeId>,
     canonical_asyncs: HashMap<AsyncTypeId, AsyncTypeId>,
+    canonical_callables: HashMap<CallableTypeId, CallableTypeId>,
     canonical_ranges: HashMap<RangeTypeId, RangeTypeId>,
     canonical_sets: HashMap<TypeApplicationId, TypeApplicationId>,
     canonical_applications: HashMap<TypeApplicationId, TypeApplicationId>,
@@ -284,6 +298,7 @@ impl InferenceContext {
             options,
             results,
             asyncs,
+            callables,
             ranges,
             mut sets,
             applications,
@@ -294,6 +309,7 @@ impl InferenceContext {
             .chain(options.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(results.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(asyncs.iter().map(|layout| layout.id.index() as u32 + 1))
+            .chain(callables.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(ranges.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(sets.iter().map(|layout| layout.id.index() as u32 + 1))
             .chain(
@@ -329,6 +345,7 @@ impl InferenceContext {
             options,
             results,
             asyncs,
+            callables,
             ranges,
             sets,
             applications,
@@ -336,6 +353,7 @@ impl InferenceContext {
             canonical_options: HashMap::new(),
             canonical_results: HashMap::new(),
             canonical_asyncs: HashMap::new(),
+            canonical_callables: HashMap::new(),
             canonical_ranges: HashMap::new(),
             canonical_sets: HashMap::new(),
             canonical_applications: HashMap::new(),
@@ -453,6 +471,16 @@ impl InferenceContext {
             TypeKind::Option { value, .. } => format!("{}?", self.known_type_name(*value)),
             TypeKind::Result { value, .. } => format!("{}!", self.known_type_name(*value)),
             TypeKind::Async { value, .. } => format!("async {}", self.known_type_name(*value)),
+            TypeKind::Callable {
+                parameters, result, ..
+            } => {
+                let parameters = parameters
+                    .iter()
+                    .map(|parameter| self.known_type_name(*parameter))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({parameters}) -> {}", self.known_type_name(*result))
+            }
             TypeKind::Range { bound, kind, .. } => {
                 let bound = self.known_type_name(*bound);
                 format!("{bound}{}{bound}", kind.operator())
@@ -635,7 +663,7 @@ impl InferenceContext {
                 self.application_constructor(application),
                 self.application_arguments(application).to_vec(),
             )),
-            Type::Known(_) | Type::Async(_) | Type::Variable(_) => None,
+            Type::Known(_) | Type::Async(_) | Type::Callable(_) | Type::Variable(_) => None,
         }
     }
 
@@ -774,6 +802,20 @@ impl InferenceContext {
                     Type::Async(self.async_type(instantiated))
                 }
             }
+            Type::Callable(callable) => {
+                let parameters = self.callable_parameters(callable).to_vec();
+                let result = self.callable_result(callable);
+                let instantiated_parameters = parameters
+                    .iter()
+                    .map(|parameter| self.instantiate_type(*parameter, generalized, substitutions))
+                    .collect::<Vec<_>>();
+                let instantiated_result = self.instantiate_type(result, generalized, substitutions);
+                if instantiated_parameters == parameters && instantiated_result == result {
+                    Type::Callable(callable)
+                } else {
+                    Type::Callable(self.callable_type(instantiated_parameters, instantiated_result))
+                }
+            }
             Type::Range(range) => {
                 let bound = self.range_bound(range);
                 let instantiated = self.instantiate_type(bound, generalized, substitutions);
@@ -819,6 +861,12 @@ impl InferenceContext {
                 self.collect_unbound_variables(self.result_value(result), output)
             }
             Type::Async(future) => self.collect_unbound_variables(self.async_value(future), output),
+            Type::Callable(callable) => {
+                for parameter in self.callable_parameters(callable).to_vec() {
+                    self.collect_unbound_variables(parameter, output);
+                }
+                self.collect_unbound_variables(self.callable_result(callable), output);
+            }
             Type::Range(range) => self.collect_unbound_variables(self.range_bound(range), output),
             Type::Known(_) => {}
         }
@@ -941,6 +989,21 @@ impl InferenceContext {
                 let right_value = self.async_value(right);
                 self.unify_inner(left_value, right_value)?;
                 Ok(Type::Async(left))
+            }
+            (Type::Callable(left), Type::Callable(right)) => {
+                let left_parameters = self.callable_parameters(left).to_vec();
+                let right_parameters = self.callable_parameters(right).to_vec();
+                if left_parameters.len() != right_parameters.len() {
+                    return Err(InferenceError::TypeMismatch {
+                        left: Type::Callable(left),
+                        right: Type::Callable(right),
+                    });
+                }
+                for (left, right) in left_parameters.into_iter().zip(right_parameters) {
+                    self.unify_inner(left, right)?;
+                }
+                self.unify_inner(self.callable_result(left), self.callable_result(right))?;
+                Ok(Type::Callable(left))
             }
             (Type::Range(left), Type::Range(right)) => {
                 if self.range_kind(left) != self.range_kind(right) {
@@ -1132,6 +1195,12 @@ impl InferenceContext {
                     .copied()
                     .unwrap_or(future),
             ),
+            Type::Callable(callable) => Type::Callable(
+                self.canonical_callables
+                    .get(&callable)
+                    .copied()
+                    .unwrap_or(callable),
+            ),
             Type::Range(range) => {
                 Type::Range(self.canonical_ranges.get(&range).copied().unwrap_or(range))
             }
@@ -1171,6 +1240,11 @@ impl InferenceContext {
             .iter()
             .map(|layout| Type::Async(layout.id))
             .collect::<Vec<_>>();
+        let callables = self
+            .callables
+            .iter()
+            .map(|layout| Type::Callable(layout.id))
+            .collect::<Vec<_>>();
         let ranges = self
             .ranges
             .iter()
@@ -1191,6 +1265,7 @@ impl InferenceContext {
             .chain(options)
             .chain(results)
             .chain(asyncs)
+            .chain(callables)
             .chain(ranges)
             .chain(sets)
             .chain(applications)
@@ -1264,6 +1339,23 @@ impl InferenceContext {
             .value
     }
 
+    pub(crate) fn callable_parameters(&self, id: CallableTypeId) -> &[Type] {
+        &self
+            .callables
+            .iter()
+            .find(|callable| callable.id == id)
+            .expect("checked callable type has a declaration")
+            .parameters
+    }
+
+    pub(crate) fn callable_result(&self, id: CallableTypeId) -> Type {
+        self.callables
+            .iter()
+            .find(|callable| callable.id == id)
+            .expect("checked callable type has a declaration")
+            .result
+    }
+
     pub(crate) fn option_type(&mut self, value: Type) -> OptionTypeId {
         if let Some(option) = self.options.iter().find(|option| option.value == value) {
             return option.id;
@@ -1288,6 +1380,23 @@ impl InferenceContext {
         }
         let id = self.constructed_type_ids.async_value();
         self.asyncs.push(AsyncLayout { id, value });
+        id
+    }
+
+    pub(crate) fn callable_type(&mut self, parameters: Vec<Type>, result: Type) -> CallableTypeId {
+        if let Some(callable) = self
+            .callables
+            .iter()
+            .find(|callable| callable.parameters == parameters && callable.result == result)
+        {
+            return callable.id;
+        }
+        let id = self.constructed_type_ids.callable();
+        self.callables.push(CallableLayout {
+            id,
+            parameters,
+            result,
+        });
         id
     }
 
@@ -1715,6 +1824,50 @@ impl InferenceContext {
         }
     }
 
+    pub(crate) fn finalize_callables(&mut self) {
+        let signatures = self
+            .callables
+            .iter()
+            .map(|callable| (callable.parameters.clone(), callable.result))
+            .collect::<Vec<_>>();
+        let signatures = signatures
+            .into_iter()
+            .map(|(parameters, result)| {
+                (
+                    parameters
+                        .into_iter()
+                        .map(|parameter| self.resolve(parameter))
+                        .collect::<Vec<_>>(),
+                    self.resolve(result),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (callable, (parameters, result)) in self.callables.iter_mut().zip(signatures) {
+            callable.parameters = parameters;
+            callable.result = result;
+        }
+
+        let mut representatives = Vec::<(Vec<Type>, Type, CallableTypeId)>::new();
+        self.canonical_callables.clear();
+        for callable in &self.callables {
+            let canonical = representatives
+                .iter()
+                .find_map(|(parameters, result, id)| {
+                    (*parameters == callable.parameters && *result == callable.result)
+                        .then_some(*id)
+                })
+                .unwrap_or_else(|| {
+                    representatives.push((
+                        callable.parameters.clone(),
+                        callable.result,
+                        callable.id,
+                    ));
+                    callable.id
+                });
+            self.canonical_callables.insert(callable.id, canonical);
+        }
+    }
+
     pub(crate) fn arrays(&self) -> &[ArrayLayout] {
         &self.arrays
     }
@@ -1729,6 +1882,10 @@ impl InferenceContext {
 
     pub(crate) fn asyncs(&self) -> &[AsyncLayout] {
         &self.asyncs
+    }
+
+    pub(crate) fn callables(&self) -> &[CallableLayout] {
+        &self.callables
     }
 
     pub(crate) fn ranges(&self) -> &[RangeLayout] {
@@ -1775,6 +1932,20 @@ impl InferenceContext {
                 let value = self.async_value(layout);
                 let value = self.intern_resolved_type(value);
                 TypeKind::Async { layout, value }
+            }
+            Type::Callable(layout) => {
+                let parameters = self.callable_parameters(layout).to_vec();
+                let result = self.callable_result(layout);
+                let parameters = parameters
+                    .into_iter()
+                    .map(|parameter| self.intern_resolved_type(parameter))
+                    .collect();
+                let result = self.intern_resolved_type(result);
+                TypeKind::Callable {
+                    layout,
+                    parameters,
+                    result,
+                }
             }
             Type::Range(layout) => {
                 let bound = self.range_bound(layout);
@@ -1911,6 +2082,13 @@ impl InferenceContext {
             Type::Option(option) => self.occurs_in(variable, self.option_value(option), visited),
             Type::Result(result) => self.occurs_in(variable, self.result_value(result), visited),
             Type::Async(future) => self.occurs_in(variable, self.async_value(future), visited),
+            Type::Callable(callable) => {
+                self.callable_parameters(callable)
+                    .to_vec()
+                    .into_iter()
+                    .any(|parameter| self.occurs_in(variable, parameter, visited))
+                    || self.occurs_in(variable, self.callable_result(callable), visited)
+            }
             Type::Range(range) => self.occurs_in(variable, self.range_bound(range), visited),
             Type::Known(_) => false,
         }
@@ -2025,7 +2203,7 @@ pub(crate) fn type_may_have_capability(
                         capability,
                     )
             }
-            TypeKind::Async { .. } => false,
+            TypeKind::Async { .. } | TypeKind::Callable { .. } => false,
             TypeKind::Range { kind, .. } => library.type_constructor_has_capability(
                 match kind {
                     RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
@@ -2056,7 +2234,7 @@ pub(crate) fn type_may_have_capability(
                 || library
                     .type_constructor_has_capability(StdlibTypeConstructorId::Result, capability)
         }
-        Type::Async(_) => false,
+        Type::Async(_) | Type::Callable(_) => false,
         Type::Range(_) => [
             StdlibTypeConstructorId::ExclusiveRange,
             StdlibTypeConstructorId::InclusiveRange,

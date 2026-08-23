@@ -270,12 +270,19 @@ pub enum ResolvedWrapperPattern {
     IteratorItem(TypeApplicationId),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DynamicCallCallee {
+    Expression(ExprId),
+    Value(ValueId),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SemanticModel {
     types: TypeStore,
     state_provider: Option<StdlibStateProviderId>,
     expression_types: HashMap<ExprId, TypeId>,
     calls: HashMap<ExprId, ResolvedCall>,
+    dynamic_calls: HashMap<ExprId, DynamicCallCallee>,
     values: HashMap<ExprId, ResolvedValue>,
     value_types: HashMap<ValueId, TypeId>,
     function_results: HashMap<FunctionId, TypeId>,
@@ -331,6 +338,10 @@ impl SemanticModel {
                     .is_none_or(|count| expression.index() < count)
             })
             .map(|(expression, ty)| (*expression, *ty))
+    }
+
+    pub fn dynamic_call_callee(&self, expression: ExprId) -> Option<DynamicCallCallee> {
+        self.dynamic_calls.get(&expression).copied()
     }
 
     pub fn call(&self, expression: ExprId) -> Option<&ResolvedCall> {
@@ -489,6 +500,9 @@ impl SemanticModel {
             TypeKind::Option { value, .. } => Some((1, self.specialize_type(instance, *value))),
             TypeKind::Result { value, .. } => Some((2, self.specialize_type(instance, *value))),
             TypeKind::Async { value, .. } => Some((3, self.specialize_type(instance, *value))),
+            // Callable signatures are specialized by the closure/callable
+            // monomorphization pass because they contain more than one child.
+            TypeKind::Callable { .. } => None,
             TypeKind::Set { element, .. } => Some((4, self.specialize_type(instance, *element))),
             TypeKind::Range { bound, .. } => Some((5, self.specialize_type(instance, *bound))),
             TypeKind::Application { .. } => None,
@@ -844,6 +858,7 @@ impl SemanticModel {
                     })
                 }
             }
+            TypeKind::Callable { .. } => ty,
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot
@@ -873,6 +888,7 @@ impl SemanticModel {
             TypeKind::Option { layout, .. } => crate::types::ResolvedTypeRef::Option(*layout),
             TypeKind::Result { layout, .. } => crate::types::ResolvedTypeRef::Result(*layout),
             TypeKind::Async { layout, .. } => crate::types::ResolvedTypeRef::Async(*layout),
+            TypeKind::Callable { layout, .. } => crate::types::ResolvedTypeRef::Callable(*layout),
             TypeKind::Set { layout, .. } => crate::types::ResolvedTypeRef::Set(*layout),
             TypeKind::Range { layout, .. } => crate::types::ResolvedTypeRef::Range(*layout),
             TypeKind::Application { layout, .. } => {
@@ -1166,6 +1182,7 @@ pub(crate) struct SemanticBuilder {
     state_provider: Option<StdlibStateProviderId>,
     expression_types: HashMap<ExprId, Type>,
     calls: HashMap<ExprId, PendingResolvedCall>,
+    dynamic_calls: HashMap<ExprId, DynamicCallCallee>,
     values: HashMap<ExprId, ResolvedValue>,
     value_types: HashMap<ValueId, Type>,
     function_results: HashMap<FunctionId, Type>,
@@ -1268,6 +1285,14 @@ impl SemanticBuilder {
     pub(crate) fn resolve_call(&mut self, expression: ExprId, call: PendingResolvedCall) {
         let previous = self.calls.insert(expression, call);
         debug_assert!(previous.is_none(), "call expression IDs must be unique");
+    }
+
+    pub(crate) fn resolve_dynamic_call(&mut self, expression: ExprId, callee: DynamicCallCallee) {
+        let previous = self.dynamic_calls.insert(expression, callee);
+        debug_assert!(
+            previous.is_none(),
+            "dynamic call expression IDs must be unique"
+        );
     }
 
     pub(crate) fn resolve_assignment_call(
@@ -1477,6 +1502,7 @@ impl SemanticBuilder {
             options,
             results,
             asyncs,
+            callables,
             sets,
             applications,
         } = constructed;
@@ -1485,6 +1511,7 @@ impl SemanticBuilder {
             options,
             results,
             asyncs,
+            callables,
             sets,
             applications,
         };
@@ -1492,6 +1519,7 @@ impl SemanticBuilder {
             state_provider,
             expression_types,
             calls,
+            dynamic_calls,
             values,
             value_types,
             function_results,
@@ -1532,6 +1560,9 @@ impl SemanticBuilder {
         }
         for future in asyncs {
             types.intern_inferred(Type::Async(future.id), constructed);
+        }
+        for callable in callables {
+            types.intern_inferred(Type::Callable(callable.id), constructed);
         }
         for set in sets {
             types.intern_inferred(Type::Set(set.id), constructed);
@@ -1725,6 +1756,7 @@ impl SemanticBuilder {
             state_provider,
             expression_types,
             calls,
+            dynamic_calls,
             values,
             value_types,
             function_results,

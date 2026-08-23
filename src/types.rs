@@ -9,8 +9,8 @@ use std::fmt;
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, EnumDecl, EnumId, FunctionId, OptionTypeId, RangeKind,
-        RangeTypeId, RecordDecl, RecordId, ResultTypeId, TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumDecl, EnumId, FunctionId, OptionTypeId,
+        RangeKind, RangeTypeId, RecordDecl, RecordId, ResultTypeId, TypeApplicationId,
     },
     inference::Type,
     stdlib::{CoreTypeId, StandardLibrary, StdlibTypeConstructorId, StdlibTypeId},
@@ -61,6 +61,7 @@ pub enum ResolvedTypeRef {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Callable(CallableTypeId),
     Range(RangeTypeId),
     Set(TypeApplicationId),
     Application(TypeApplicationId),
@@ -100,6 +101,13 @@ pub struct ResolvedAsyncType {
     pub value: ResolvedTypeRef,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedCallableType {
+    pub id: CallableTypeId,
+    pub parameters: Vec<ResolvedTypeRef>,
+    pub result: ResolvedTypeRef,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolvedRangeType {
     pub id: RangeTypeId,
@@ -128,6 +136,7 @@ pub struct ResolvedConstructedTypes<'a> {
     pub options: &'a [ResolvedOptionType],
     pub results: &'a [ResolvedResultType],
     pub asyncs: &'a [ResolvedAsyncType],
+    pub callables: &'a [ResolvedCallableType],
     pub sets: &'a [ResolvedSetType],
     pub applications: &'a [ResolvedApplicationType],
 }
@@ -176,6 +185,11 @@ pub enum TypeKind {
     Async {
         layout: AsyncTypeId,
         value: TypeId,
+    },
+    Callable {
+        layout: CallableTypeId,
+        parameters: Vec<TypeId>,
+        result: TypeId,
     },
     Range {
         layout: RangeTypeId,
@@ -282,6 +296,14 @@ impl TypeStore {
             TypeKind::Option { value, .. }
             | TypeKind::Result { value, .. }
             | TypeKind::Async { value, .. } => self.contains_error(*value),
+            TypeKind::Callable {
+                parameters, result, ..
+            } => {
+                parameters
+                    .iter()
+                    .any(|parameter| self.contains_error(*parameter))
+                    || self.contains_error(*result)
+            }
             TypeKind::Range { bound, .. } => self.contains_error(*bound),
             TypeKind::Application { arguments, .. } => arguments
                 .iter()
@@ -344,6 +366,7 @@ impl TypeStore {
             options,
             results,
             asyncs,
+            callables,
             sets,
             applications,
         } = constructed;
@@ -394,6 +417,23 @@ impl TypeStore {
                     .value;
                 let value = self.intern_type_ref(value, constructed);
                 TypeKind::Async { layout: id, value }
+            }
+            Type::Callable(id) => {
+                let callable = callables
+                    .iter()
+                    .find(|callable| callable.id == id)
+                    .unwrap_or_else(|| panic!("missing checked callable type {id}"));
+                let parameters = callable
+                    .parameters
+                    .iter()
+                    .map(|parameter| self.intern_type_ref(*parameter, constructed))
+                    .collect();
+                let result = self.intern_type_ref(callable.result, constructed);
+                TypeKind::Callable {
+                    layout: id,
+                    parameters,
+                    result,
+                }
             }
             Type::Range(id) => {
                 return self
@@ -458,6 +498,7 @@ impl TypeStore {
             ResolvedTypeRef::Option(id) => self.intern_inferred(Type::Option(id), constructed),
             ResolvedTypeRef::Result(id) => self.intern_inferred(Type::Result(id), constructed),
             ResolvedTypeRef::Async(id) => self.intern_inferred(Type::Async(id), constructed),
+            ResolvedTypeRef::Callable(id) => self.intern_inferred(Type::Callable(id), constructed),
             ResolvedTypeRef::Range(id) => self
                 .kinds
                 .iter()

@@ -14,7 +14,7 @@ use crate::{
         SuspensionMode, TypeRef, UnaryOp, ValueId,
     },
     semantic::{
-        FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember,
+        DynamicCallCallee, FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember,
         ResolvedRecordFieldId, ResolvedRecordId, ResolvedValue, ResolvedWrapperPattern,
         SemanticModel, ValueConversion,
     },
@@ -144,6 +144,7 @@ pub enum ExpressionResolution {
         members: Vec<ResolvedMember>,
     },
     Call(ResolvedCall),
+    DynamicCall(DynamicCallCallee),
     RecordLiteral {
         record: ResolvedRecordId,
         fields: Vec<ResolvedRecordFieldId>,
@@ -298,6 +299,14 @@ pub enum TypedExpressionKind {
         source_path: Vec<String>,
         receiver: Option<ExprId>,
         arguments: Vec<ExprId>,
+    },
+    Invoke {
+        callee: ExprId,
+        arguments: Vec<ExprId>,
+    },
+    Closure {
+        parameters: Vec<ValueId>,
+        body: ExprId,
     },
 }
 
@@ -850,6 +859,8 @@ impl<'ast> SyntaxVisitor<'ast> for TypedBodyBuilder<'_> {
             Some(ExpressionResolution::EnumConstructor { variant })
         } else if let Some(call) = self.semantics.call(expression.id) {
             Some(ExpressionResolution::Call(call.clone()))
+        } else if let Some(callee) = self.semantics.dynamic_call_callee(expression.id) {
+            Some(ExpressionResolution::DynamicCall(callee))
         } else {
             match &expression.kind {
                 ExprKind::Path(_) => Some(ExpressionResolution::ValuePath {
@@ -1131,6 +1142,13 @@ pub fn walk_typed_expression<V: TypedVisitor>(
                 visit_expression(*argument);
             }
         }
+        TypedExpressionKind::Invoke { callee, arguments } => {
+            visit_expression(*callee);
+            for argument in arguments {
+                visit_expression(*argument);
+            }
+        }
+        TypedExpressionKind::Closure { body, .. } => visit_expression(*body),
         TypedExpressionKind::None
         | TypedExpressionKind::IteratorEnd
         | TypedExpressionKind::Break(None)
@@ -1411,6 +1429,14 @@ fn lower_expression_kind(
             source_path: callee.clone(),
             receiver: receiver.as_ref().map(|receiver| receiver.id),
             arguments: args.iter().map(|argument| argument.id).collect(),
+        },
+        ExprKind::Invoke { callee, args } => TypedExpressionKind::Invoke {
+            callee: callee.id,
+            arguments: args.iter().map(|argument| argument.id).collect(),
+        },
+        ExprKind::Closure { params, body, .. } => TypedExpressionKind::Closure {
+            parameters: params.iter().map(|parameter| parameter.id).collect(),
+            body: body.id,
         },
     }
 }

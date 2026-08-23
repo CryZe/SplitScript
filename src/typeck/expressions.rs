@@ -1201,7 +1201,28 @@ impl Checker {
                 args,
                 ..
             } => {
-                if let Some(enumeration) = self.resolutions.expression_enum(expr.id) {
+                if receiver.is_none()
+                    && type_arguments.is_empty()
+                    && let [name] = callee.as_slice()
+                    && self.binding(name).is_some()
+                {
+                    let binding = self.binding_for_use(name, *name_span)?;
+                    let Type::Callable(callable) = self.shallow_type(binding.ty) else {
+                        let actual = self.type_name(binding.ty);
+                        self.error(
+                            format!("`{name}` is not callable; found `{actual}`"),
+                            *name_span,
+                        );
+                        return None;
+                    };
+                    self.semantics.resolve_dynamic_call(
+                        expr.id,
+                        crate::semantic::DynamicCallCallee::Value(
+                            binding.id.expect("local callable bindings have identities"),
+                        ),
+                    );
+                    self.invoke_callable_type(callable, args, expected, expr.id, expr.span)?
+                } else if let Some(enumeration) = self.resolutions.expression_enum(expr.id) {
                     debug_assert!(receiver.is_none());
                     if !type_arguments.is_empty() {
                         self.error("enum variants do not accept type arguments", expr.span);
@@ -1226,9 +1247,160 @@ impl Checker {
                     )?
                 }
             }
+            ExprKind::Invoke { callee, args } => {
+                self.invoke_expression(callee, args, expected, expr.id, expr.span)?
+            }
+            ExprKind::Closure { params, body, .. } => {
+                let hinted = expected
+                    .map(|ty| self.expected_value_type(ty))
+                    .map(|ty| self.shallow_type(ty))
+                    .and_then(|ty| match ty {
+                        Type::Callable(callable) => Some((
+                            self.inference.callable_parameters(callable).to_vec(),
+                            self.inference.callable_result(callable),
+                        )),
+                        _ => None,
+                    });
+                if let Some((parameters, _)) = &hinted
+                    && parameters.len() != params.len()
+                {
+                    self.error(
+                        format!(
+                            "closure expects {} parameters from context, but declares {}",
+                            parameters.len(),
+                            params.len()
+                        ),
+                        expr.span,
+                    );
+                    return None;
+                }
+                let parameter_types = params
+                    .iter()
+                    .enumerate()
+                    .map(|(index, parameter)| {
+                        let annotation = parameter.annotation.map(|ty| self.syntax_type(ty));
+                        let contextual = hinted.as_ref().map(|(parameters, _)| parameters[index]);
+                        match (annotation, contextual) {
+                            (Some(annotation), Some(contextual)) => self
+                                .unify(annotation, contextual, parameter.span)
+                                .unwrap_or(annotation),
+                            (Some(annotation), None) => annotation,
+                            (None, Some(contextual)) => contextual,
+                            (None, None) => self.fresh_inference(Requirements::none(), None),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let completion = hinted
+                    .as_ref()
+                    .map(|(_, result)| match self.shallow_type(*result) {
+                        Type::Async(future) => self.inference.async_value(future),
+                        result => result,
+                    })
+                    .unwrap_or_else(|| self.fresh_inference(Requirements::none(), None));
+                let is_async = crate::typeck::control_flow::expression_contains_suspension(body);
+                let result = if is_async {
+                    Type::Async(self.inference.async_type(completion))
+                } else {
+                    completion
+                };
+                if let Some((_, expected_result)) = hinted {
+                    self.unify(result, expected_result, expr.span);
+                }
+
+                self.scopes.push(HashMap::new());
+                for (parameter, ty) in params.iter().zip(parameter_types.iter().copied()) {
+                    self.semantics.resolve_value_type(parameter.id, ty);
+                    let duplicate = self.scopes.last_mut().unwrap().insert(
+                        parameter.name.clone(),
+                        Binding {
+                            id: Some(parameter.id),
+                            ty,
+                            mutable: true,
+                            debug_only: self.debug_context.is_debug(),
+                            declaration_span: Some(parameter.name_span),
+                        },
+                    );
+                    if duplicate.is_some() {
+                        self.error(
+                            format!("duplicate closure parameter `{}`", parameter.name),
+                            parameter.name_span,
+                        );
+                    }
+                }
+                let failure = match self.shallow_type(completion) {
+                    result @ Type::Result(_) => super::context::FailureContext::boundary(result),
+                    _ => super::context::FailureContext::None,
+                };
+                self.with_callable_context(
+                    super::context::CallableContext::Closure,
+                    completion,
+                    failure,
+                    |checker| {
+                        checker.expr(body, Some(completion));
+                    },
+                );
+                self.scopes.pop();
+                let callable =
+                    Type::Callable(self.inference.callable_type(parameter_types, result));
+                self.expect_expression(expr.id, callable, expected, expr.span)?
+            }
         };
         self.semantics.resolve_expression_type(expr.id, ty);
         Some(ty)
+    }
+
+    fn invoke_expression(
+        &mut self,
+        callee: &Expr,
+        arguments: &[Expr],
+        expected: Option<Type>,
+        expression: ExprId,
+        span: Span,
+    ) -> Option<Type> {
+        let parameters = (0..arguments.len())
+            .map(|_| self.fresh_inference(Requirements::none(), None))
+            .collect::<Vec<_>>();
+        let result = expected.unwrap_or_else(|| self.fresh_inference(Requirements::none(), None));
+        let callable = Type::Callable(self.inference.callable_type(parameters.clone(), result));
+        let callee_type = self.expr(callee, Some(callable))?;
+        self.unify(callee_type, callable, callee.span)?;
+        for (argument, parameter) in arguments.iter().zip(parameters) {
+            self.expr(argument, Some(parameter));
+        }
+        // The backend resolves this expression as a dynamic call after capture
+        // analysis has selected its closure representation.
+        self.semantics.resolve_dynamic_call(
+            expression,
+            crate::semantic::DynamicCallCallee::Expression(callee.id),
+        );
+        self.expect_expression(expression, result, expected, span)
+    }
+
+    fn invoke_callable_type(
+        &mut self,
+        callable: crate::ast::CallableTypeId,
+        arguments: &[Expr],
+        expected: Option<Type>,
+        expression: ExprId,
+        span: Span,
+    ) -> Option<Type> {
+        let parameters = self.inference.callable_parameters(callable).to_vec();
+        if parameters.len() != arguments.len() {
+            self.error(
+                format!(
+                    "callable expects {} arguments, found {}",
+                    parameters.len(),
+                    arguments.len()
+                ),
+                span,
+            );
+            return None;
+        }
+        for (argument, parameter) in arguments.iter().zip(parameters) {
+            self.expr(argument, Some(parameter));
+        }
+        let result = self.inference.callable_result(callable);
+        self.expect_expression(expression, result, expected, span)
     }
 
     fn enum_constructor(

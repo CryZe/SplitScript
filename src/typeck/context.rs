@@ -87,26 +87,33 @@ impl LoopContext {
 pub(super) enum CallableContext {
     TopLevel,
     Function,
+    Closure,
     LibraryFunction(StdlibItemId),
     Action(ActionKind),
 }
 
 impl CallableContext {
     pub(super) fn is_function(&self) -> bool {
-        matches!(self, Self::Function | Self::LibraryFunction(_))
+        matches!(
+            self,
+            Self::Function | Self::Closure | Self::LibraryFunction(_)
+        )
     }
 
     pub(super) fn can_suspend(&self) -> bool {
         matches!(
             self,
-            Self::Function | Self::LibraryFunction(_) | Self::Action(ActionKind::OnAttach)
+            Self::Function
+                | Self::Closure
+                | Self::LibraryFunction(_)
+                | Self::Action(ActionKind::OnAttach)
         )
     }
 
     pub(super) fn action(&self) -> Option<ActionKind> {
         match self {
             Self::Action(action) => Some(*action),
-            Self::TopLevel | Self::Function | Self::LibraryFunction(_) => None,
+            Self::TopLevel | Self::Function | Self::Closure | Self::LibraryFunction(_) => None,
         }
     }
 }

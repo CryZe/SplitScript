@@ -212,6 +212,7 @@ fn provider_value_for_resolution(
         ExpressionResolution::ValuePath { root, .. } => *root,
         ExpressionResolution::Call(call) => call.receiver()?.path().map(|(root, _)| root),
         ExpressionResolution::Member { .. }
+        | ExpressionResolution::DynamicCall(_)
         | ExpressionResolution::RecordLiteral { .. }
         | ExpressionResolution::EnumConstructor { .. } => None,
     }?;

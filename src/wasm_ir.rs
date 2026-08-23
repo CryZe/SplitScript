@@ -174,6 +174,14 @@ pub enum ExpressionKind {
         target: CallTarget,
         arguments: Vec<ExprId>,
     },
+    Invoke {
+        callee: crate::semantic::DynamicCallCallee,
+        arguments: Vec<ExprId>,
+    },
+    Closure {
+        parameters: Vec<ValueId>,
+        body: ExprId,
+    },
     If {
         condition: ExprId,
         then_expr: ExprId,
@@ -980,15 +988,30 @@ fn lower_expression(
                 }
             }
         }
-        TypedExpressionKind::Call { arguments, .. } => {
-            let Some(ExpressionResolution::Call(target)) = &expression.resolution else {
-                unreachable!("checked calls have a resolved target")
-            };
-            ExpressionKind::Call {
+        TypedExpressionKind::Call { arguments, .. } => match &expression.resolution {
+            Some(ExpressionResolution::Call(target)) => ExpressionKind::Call {
                 target: lower_call_target(target, typed_hir, semantics),
+                arguments: arguments.clone(),
+            },
+            Some(ExpressionResolution::DynamicCall(callee)) => ExpressionKind::Invoke {
+                callee: *callee,
+                arguments: arguments.clone(),
+            },
+            _ => unreachable!("checked calls have a resolved target"),
+        },
+        TypedExpressionKind::Invoke { arguments, .. } => {
+            let Some(ExpressionResolution::DynamicCall(callee)) = expression.resolution else {
+                unreachable!("checked callable invocations have a dynamic target")
+            };
+            ExpressionKind::Invoke {
+                callee,
                 arguments: arguments.clone(),
             }
         }
+        TypedExpressionKind::Closure { parameters, body } => ExpressionKind::Closure {
+            parameters: parameters.clone(),
+            body: *body,
+        },
         TypedExpressionKind::If {
             condition,
             then_expr,
@@ -2575,6 +2598,19 @@ fn map_expression_children(
                 arguments: arguments.into_iter().map(&mut map).collect(),
             }
         }
+        ExpressionKind::Invoke { callee, arguments } => ExpressionKind::Invoke {
+            callee: match callee {
+                crate::semantic::DynamicCallCallee::Expression(callee) => {
+                    crate::semantic::DynamicCallCallee::Expression(map(callee))
+                }
+                callee => callee,
+            },
+            arguments: arguments.into_iter().map(&mut map).collect(),
+        },
+        ExpressionKind::Closure { parameters, body } => ExpressionKind::Closure {
+            parameters,
+            body: map(body),
+        },
         ExpressionKind::If {
             condition,
             then_expr,

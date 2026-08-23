@@ -155,6 +155,20 @@ impl AsyncTypeId {
     }
 }
 
+/// Stable identity for a callable type expression in one parsed program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CallableTypeId(u32);
+
+impl CallableTypeId {
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    pub(crate) fn from_index(index: u32) -> Self {
+        Self(index)
+    }
+}
+
 /// Stable identity for a range type expression in one parsed program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RangeTypeId(u32);
@@ -230,6 +244,7 @@ display_stable_id!(
     OptionTypeId,
     ResultTypeId,
     AsyncTypeId,
+    CallableTypeId,
     RangeTypeId,
     TypeApplicationId,
     RecordFieldId,
@@ -307,6 +322,7 @@ pub struct Program {
     pub option_types: Vec<OptionTypeDecl>,
     pub result_types: Vec<ResultTypeDecl>,
     pub async_types: Vec<AsyncTypeDecl>,
+    pub callable_types: Vec<CallableTypeDecl>,
     pub range_types: Vec<RangeTypeDecl>,
     pub type_applications: Vec<TypeApplicationDecl>,
     pub functions: Vec<FunctionDecl>,
@@ -419,6 +435,10 @@ impl ConstructedTypeIdAllocator {
         AsyncTypeId::from_index(self.take())
     }
 
+    pub fn callable(&mut self) -> CallableTypeId {
+        CallableTypeId::from_index(self.take())
+    }
+
     pub fn range(&mut self) -> RangeTypeId {
         RangeTypeId::from_index(self.take())
     }
@@ -464,6 +484,13 @@ pub struct ResultTypeDecl {
     pub value: TypeRef,
     /// Every source-written `!` for this interned structural type.
     pub occurrences: Vec<Span>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CallableTypeDecl {
+    pub id: CallableTypeId,
+    pub parameters: Vec<TypeRef>,
+    pub result: TypeRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1130,6 +1157,20 @@ pub enum ExprKind {
         type_argument_span: Option<Span>,
         args: Vec<Expr>,
     },
+    /// Invokes a first-class callable expression. Direct source function and
+    /// method calls retain `Call` so their declarations remain directly
+    /// navigable without first materializing a function value.
+    Invoke {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+    },
+    /// A lexically scoped callable value. Parameter and result types are
+    /// inferred bidirectionally from the expected callable type and body.
+    Closure {
+        params: Vec<Parameter>,
+        arrow_span: Span,
+        body: Box<Expr>,
+    },
 }
 
 /// A decimal floating-point literal together with its finite `f64` parse.
@@ -1242,6 +1283,7 @@ pub enum TypeRef {
     Option(OptionTypeId),
     Result(ResultTypeId),
     Async(AsyncTypeId),
+    Callable(CallableTypeId),
     Range(RangeTypeId),
     Application(TypeApplicationId),
 }
@@ -1276,6 +1318,7 @@ impl fmt::Display for TypeRef {
             Self::Option(id) => write!(f, "Option#{id}"),
             Self::Result(id) => write!(f, "Result#{id}"),
             Self::Async(id) => write!(f, "Async#{id}"),
+            Self::Callable(id) => write!(f, "Callable#{id}"),
             Self::Range(id) => write!(f, "Range#{id}"),
             Self::Application(id) => write!(f, "Application#{id}"),
         }

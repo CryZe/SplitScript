@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, EnumId, ExprId, OptionTypeId, Program, RecordId, ResultTypeId,
-        TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, CallableTypeId, EnumId, ExprId, OptionTypeId, Program, RecordId,
+        ResultTypeId, TypeApplicationId,
     },
     semantic::{FunctionInstance, SemanticModel},
     stdlib::{
@@ -34,6 +34,7 @@ pub(super) struct Reachability {
     gc_options: BTreeSet<OptionTypeId>,
     gc_results: BTreeSet<ResultTypeId>,
     gc_asyncs: BTreeSet<AsyncTypeId>,
+    gc_callables: BTreeSet<CallableTypeId>,
     gc_sets: BTreeSet<TypeApplicationId>,
     gc_applications: BTreeSet<TypeApplicationId>,
     display_functions: BTreeMap<TypeId, FunctionInstance>,
@@ -579,6 +580,10 @@ impl Reachability {
         self.gc_asyncs.contains(&future)
     }
 
+    pub fn contains_callable_type(&self, callable: CallableTypeId) -> bool {
+        self.gc_callables.contains(&callable)
+    }
+
     pub fn contains_set_type(&self, set: TypeApplicationId) -> bool {
         self.gc_sets.contains(&set)
     }
@@ -666,6 +671,15 @@ impl Reachability {
                 TypeKind::Async { layout, value } => {
                     self.gc_asyncs.insert(*layout);
                     pending.push(*value);
+                }
+                TypeKind::Callable {
+                    layout,
+                    parameters,
+                    result,
+                } => {
+                    self.gc_callables.insert(*layout);
+                    pending.extend(parameters.iter().copied());
+                    pending.push(*result);
                 }
                 TypeKind::Set {
                     layout,
@@ -761,6 +775,7 @@ impl Reachability {
                 | TypeKind::Option { .. }
                 | TypeKind::Result { .. }
                 | TypeKind::Async { .. }
+                | TypeKind::Callable { .. }
                 | TypeKind::Range { .. }
                 | TypeKind::Set { .. } => {}
                 TypeKind::Application { .. } => {}

@@ -606,6 +606,7 @@ fn validate_future_storage(
             TypeKind::Application { arguments, .. } => arguments
                 .iter()
                 .any(|argument| contains_future(*argument, syntax, semantics, enum_types, visited)),
+            TypeKind::Callable { .. } => false,
             TypeKind::Builtin(_)
             | TypeKind::Standard(_)
             | TypeKind::StateSnapshot
@@ -1139,6 +1140,7 @@ impl TypedVisitor for DeclarationDependencyCollector {
                     observe_members(receiver.members());
                 }
             }
+            Some(ExpressionResolution::DynamicCall(_)) => {}
             Some(ExpressionResolution::EnumConstructor {
                 variant: ResolvedEnumVariantId::Source(variant),
             }) => {
@@ -1606,6 +1608,12 @@ fn expand_fully_observed_types(
             TypeKind::Application { arguments, .. } => {
                 pending.extend(arguments.iter().copied());
             }
+            TypeKind::Callable {
+                parameters, result, ..
+            } => {
+                pending.extend(parameters.iter().copied());
+                pending.push_back(*result);
+            }
             TypeKind::Builtin(_) | TypeKind::Standard(_) | TypeKind::GenericParameter { .. } => {}
         }
     }
@@ -1682,6 +1690,12 @@ fn expand_reachable_nominal_types(
             | TypeKind::Range { bound: element, .. } => pending.push_back(*element),
             TypeKind::Application { arguments, .. } => {
                 pending.extend(arguments.iter().copied());
+            }
+            TypeKind::Callable {
+                parameters, result, ..
+            } => {
+                pending.extend(parameters.iter().copied());
+                pending.push_back(*result);
             }
             TypeKind::Builtin(_) | TypeKind::Standard(_) | TypeKind::GenericParameter { .. } => {}
         }

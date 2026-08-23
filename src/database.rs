@@ -227,6 +227,13 @@ fn definition_for_resolution(
                 | ResolvedCall::ResultSuccess { .. } => None,
             }
         }
+        ExpressionResolution::DynamicCall(callee) => match callee {
+            crate::semantic::DynamicCallCallee::Value(value) => definitions
+                .get(SourceDefinitionId::Value(*value))
+                .cloned()
+                .map(DefinitionTarget::Source),
+            crate::semantic::DynamicCallCallee::Expression(_) => None,
+        },
         ExpressionResolution::EnumConstructor { variant } => {
             if segment + 1 == analysis.segments.len() {
                 match variant {
@@ -316,6 +323,12 @@ fn source_definition_for_resolution(
                 | ResolvedCall::ResultSuccess { .. } => None,
             }
         }
+        ExpressionResolution::DynamicCall(callee) => match callee {
+            crate::semantic::DynamicCallCallee::Value(value) => {
+                Some(SourceDefinitionId::Value(*value))
+            }
+            crate::semantic::DynamicCallCallee::Expression(_) => None,
+        },
         ExpressionResolution::EnumConstructor { variant } => (segment + 1 == segment_count)
             .then_some(match variant {
                 ResolvedEnumVariantId::Source(variant) => {
@@ -1070,7 +1083,9 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             | ExprKind::Propagate(_)
             | ExprKind::Index { .. }
             | ExprKind::Unary { .. }
-            | ExprKind::Binary { .. } => {}
+            | ExprKind::Binary { .. }
+            | ExprKind::Invoke { .. }
+            | ExprKind::Closure { .. } => {}
         }
         visit::walk_expr(self, expression);
     }
@@ -1136,6 +1151,6 @@ fn named_type(
                         })
                 })
         }
-        SyntaxTypeRef::Core(_) => None,
+        SyntaxTypeRef::Core(_) | SyntaxTypeRef::Callable(_) => None,
     }
 }

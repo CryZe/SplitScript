@@ -11,7 +11,7 @@ use crate::diagnostic::{DiagnosticCode, DiagnosticFix, FixApplicability, TextEdi
 
 impl Parser<'_> {
     pub(super) fn expression(&mut self, min_precedence: u8) -> Result<Expr, Diagnostic> {
-        let mut left = self.prefix()?;
+        let mut left = self.prefix(min_precedence)?;
         let mut saw_comparison = false;
         loop {
             if self.line_break_before_current()
@@ -51,6 +51,19 @@ impl Parser<'_> {
                         receiver: Some(Box::new(receiver)),
                         type_arguments,
                         type_argument_span,
+                        args,
+                    },
+                    start.join(end),
+                );
+                continue;
+            }
+            if self.eat(&TokenKind::LParen).is_some() {
+                let start = left.span;
+                let (args, end) =
+                    self.expression_list(TokenKind::RParen, "expected `)` after arguments", true);
+                left = self.new_expr(
+                    ExprKind::Invoke {
+                        callee: Box::new(left),
                         args,
                     },
                     start.join(end),
@@ -274,7 +287,73 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    pub(super) fn prefix(&mut self) -> Result<Expr, Diagnostic> {
+    pub(super) fn prefix(&mut self, min_precedence: u8) -> Result<Expr, Diagnostic> {
+        if min_precedence == 0
+            && let TokenKind::Ident(name) = self.current().kind.clone()
+            && name != "_"
+            && self.peek(1).kind == TokenKind::FatArrow
+        {
+            let name_span = self.bump().span;
+            let arrow_span = self.bump().span;
+            let parameter = super::Parameter {
+                id: self.new_value_id(),
+                name,
+                name_span,
+                annotation: None,
+                span: name_span,
+            };
+            let body = self.required_expression(0)?;
+            let span = name_span.join(body.span);
+            return Ok(self.new_expr(
+                ExprKind::Closure {
+                    params: vec![parameter],
+                    arrow_span,
+                    body: Box::new(body),
+                },
+                span,
+            ));
+        }
+        if min_precedence == 0 && self.begins_parenthesized_closure() {
+            let start = self.expect(TokenKind::LParen, "expected `(`")?;
+            let mut params = Vec::new();
+            while !self.at(&TokenKind::RParen) {
+                let (name, name_span) = self.expect_any_ident("expected a parameter name")?;
+                let (annotation, end) = if self.eat(&TokenKind::Colon).is_some() {
+                    let (ty, span) = self.parse_type("expected a closure parameter type")?;
+                    (Some(ty), span)
+                } else {
+                    (None, name_span)
+                };
+                params.push(super::Parameter {
+                    id: self.new_value_id(),
+                    name,
+                    name_span,
+                    annotation,
+                    span: name_span.join(end),
+                });
+                if self.eat(&TokenKind::Comma).is_none() {
+                    break;
+                }
+                if self.at(&TokenKind::RParen) {
+                    break;
+                }
+            }
+            self.expect(TokenKind::RParen, "expected `)` after closure parameters")?;
+            let arrow_span = self.expect(
+                TokenKind::FatArrow,
+                "expected `=>` after closure parameters",
+            )?;
+            let body = self.required_expression(0)?;
+            let span = start.join(body.span);
+            return Ok(self.new_expr(
+                ExprKind::Closure {
+                    params,
+                    arrow_span,
+                    body: Box::new(body),
+                },
+                span,
+            ));
+        }
         if self.eat_ident("return").is_some() {
             let start = self.previous().span;
             let value = self.optional_control_flow_value()?;
@@ -678,6 +757,27 @@ impl Parser<'_> {
             }
             _ => Err(Diagnostic::new("expected an expression", token.span)),
         }
+    }
+
+    fn begins_parenthesized_closure(&self) -> bool {
+        if !self.at(&TokenKind::LParen) {
+            return false;
+        }
+        let mut depth = 0u32;
+        for offset in 0.. {
+            match self.peek(offset).kind {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return self.peek(offset + 1).kind == TokenKind::FatArrow;
+                    }
+                }
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+        }
+        unreachable!()
     }
 
     fn optional_control_flow_value(&mut self) -> Result<Option<Expr>, Diagnostic> {
@@ -1091,7 +1191,9 @@ impl Parser<'_> {
             }
         };
         let guard = if self.eat_ident("if").is_some() {
-            Some(self.expression(0)?)
+            // `=>` terminates the guard rather than turning its final bare
+            // identifier into a closure parameter.
+            Some(self.expression(1)?)
         } else {
             None
         };

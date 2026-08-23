@@ -8,8 +8,9 @@ use crate::{
     inference::Type,
     stdlib::CoreTypeId,
     types::{
-        ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType, ResolvedConstructedTypes,
-        ResolvedOptionType, ResolvedRangeType, ResolvedResultType, ResolvedSetType, TypeKind,
+        ResolvedApplicationType, ResolvedArrayType, ResolvedAsyncType, ResolvedCallableType,
+        ResolvedConstructedTypes, ResolvedOptionType, ResolvedRangeType, ResolvedResultType,
+        ResolvedSetType, TypeKind,
     },
     visit::{Visitor, walk_expr},
 };
@@ -58,6 +59,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
     checker.finalize_array_types();
     checker.inference.finalize_wrappers();
     checker.inference.finalize_ranges();
+    checker.inference.finalize_callables();
     checker.finalize_array_types();
     checker.inference.finalize_sets();
     checker.inference.finalize_applications();
@@ -97,6 +99,20 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
         .map(|future| ResolvedAsyncType {
             id: future.id,
             value: future.value.to_ref(checker.inference.type_store()),
+        })
+        .collect::<Vec<_>>();
+    let callable_types = checker
+        .inference
+        .callables()
+        .iter()
+        .map(|callable| ResolvedCallableType {
+            id: callable.id,
+            parameters: callable
+                .parameters
+                .iter()
+                .map(|parameter| parameter.to_ref(checker.inference.type_store()))
+                .collect(),
+            result: callable.result.to_ref(checker.inference.type_store()),
         })
         .collect::<Vec<_>>();
     let range_types = checker
@@ -152,6 +168,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             options: &option_types,
             results: &result_types,
             asyncs: &async_types,
+            callables: &callable_types,
             sets: &set_types,
             applications: &application_types,
         },
@@ -191,6 +208,7 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             option_types,
             result_types,
             async_types,
+            callable_types,
             range_types,
             set_types,
             application_types,

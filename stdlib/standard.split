@@ -361,11 +361,12 @@ intrinsic type SettingsView {
     /// Returns a declared boolean setting selected by its stable host-map key.
     ///
     /// String literals are checked against the declared boolean keys and are
-    /// completed by editor tooling. Computed unknown keys, and computed keys
-    /// belonging to non-boolean settings, return false. The lookup reads the
-    /// already-refreshed settings snapshot and does not query the host or
-    /// allocate. Prefer direct `settings.name` access when the declaration has
-    /// a statically visible source name.
+    /// completed by editor tooling. When a declaration has a statically visible
+    /// source name, a literal lookup is warned and can be rewritten directly to
+    /// `settings.name` or `oldSettings.name`. Computed unknown keys, and computed
+    /// keys belonging to non-boolean settings, return false. The lookup reads
+    /// the already-refreshed settings snapshot and does not query the host or
+    /// allocate.
     ///
     /// # Example
     ///
@@ -386,8 +387,11 @@ intrinsic type SettingsView {
     ///
     /// This distinguishes a known disabled boolean from an unknown key.
     /// Literal keys are checked and completed against boolean, choice, and
-    /// file declarations. Computed strings may still be unknown at runtime.
-    /// Headings are visual structure rather than values and are not included.
+    /// file declarations. A literal naming a declared value is always true and
+    /// is warned with a semantics-preserving rewrite; use a typed member to read
+    /// that setting's value instead. Computed strings may still be unknown at
+    /// runtime. Headings are visual structure rather than values and are not
+    /// included.
     ///
     /// # Example
     ///

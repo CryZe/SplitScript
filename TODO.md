@@ -226,9 +226,14 @@ semantic-review evidence, not as a conformance corpus.
     keys count as reads; computed keys conservatively suppress the warning;
     headings and generated family members are excluded. The machine-applicable
     `_` suppression fix preserves the setting's host-visible key.
-  - [ ] Suggest rewriting a literal `settings.enabled("key")` or
-    `settings.contains("key")` lookup to the corresponding typed
-    `settings.name` member when its setting kind permits direct access.
+  - [x] Guide literal dynamic setting lookups toward their static meaning.
+    `settings.enabled("key")` and `oldSettings.enabled("key")` receive a
+    machine-applicable typed-member rewrite when the declared boolean has a
+    source-visible name. A known `contains("key")` is diagnosed as always true
+    with a semantics-preserving `true` rewrite; boolean declarations also offer
+    a maybe-incorrect typed-value rewrite, while choice and file declarations
+    identify their typed member without changing the surrounding boolean
+    expression. Computed keys and generated family entries remain dynamic.
   - [ ] Decide whether and how to diagnose state fields that never influence
     reachable behavior. Intentional display-only state and host observation
     need explicit semantics before enabling that warning by default.

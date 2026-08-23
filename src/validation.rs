@@ -20,7 +20,9 @@ use crate::{
         FunctionInstance, ResolvedCall, ResolvedEnumVariantId, ResolvedMember, ResolvedValue,
         SemanticModel,
     },
-    stdlib::{Implementation, StandardLibrary, StdlibCapabilityId, StdlibTypeConstructorId},
+    stdlib::{
+        Implementation, StandardLibrary, StdlibCapabilityId, StdlibItemId, StdlibTypeConstructorId,
+    },
     types::TypeKind,
     visit::{self, Visitor as SyntaxVisitor},
 };
@@ -63,6 +65,7 @@ pub(crate) fn validate(
     diagnostics.extend(validate_must_use(&standard_library, hir, semantics));
     diagnostics.extend(validate_unused_bindings(syntax, hir));
     diagnostics.extend(validate_unused_declarations(syntax, hir, semantics));
+    diagnostics.extend(validate_static_setting_lookups(syntax, hir));
     diagnostics.extend(validate_async_function_results(
         &standard_library,
         syntax,
@@ -237,6 +240,120 @@ pub(crate) fn validate(
         effects,
         diagnostics,
     }
+}
+
+fn validate_static_setting_lookups(syntax: &Program, hir: &TypedProgram) -> Vec<Diagnostic> {
+    let settings = syntax
+        .settings
+        .iter()
+        .map(|setting| (setting.runtime_key(), setting))
+        .collect::<HashMap<_, _>>();
+    let mut diagnostics = Vec::new();
+
+    for expression in hir.expressions() {
+        let Some(ResolvedCall::StandardLibrary { item, receiver, .. }) = hir.call(expression.id)
+        else {
+            continue;
+        };
+        if !matches!(
+            *item,
+            StdlibItemId::SettingsViewEnabled | StdlibItemId::SettingsViewContains
+        ) {
+            continue;
+        }
+        let TypedExpressionKind::Call { arguments, .. } = &expression.kind else {
+            continue;
+        };
+        let Some(argument) = arguments
+            .first()
+            .and_then(|argument| hir.expression(*argument))
+        else {
+            continue;
+        };
+        let TypedExpressionKind::String(key) = &argument.kind else {
+            continue;
+        };
+        let Some(setting) = settings.get(key.as_str()) else {
+            continue;
+        };
+        if matches!(setting.kind, ast::SettingKind::Title { .. }) {
+            continue;
+        }
+
+        let direct_root = receiver.as_ref().and_then(|receiver| match receiver {
+            crate::semantic::ResolvedReceiver::Path { root, members } if members.is_empty() => {
+                match root {
+                    ResolvedValue::SettingsView => Some("settings"),
+                    ResolvedValue::OldSettingsView => Some("oldSettings"),
+                    _ => None,
+                }
+            }
+            _ => None,
+        });
+
+        if *item == StdlibItemId::SettingsViewEnabled {
+            if !matches!(setting.kind, ast::SettingKind::Bool { .. }) || !setting.source_visible {
+                continue;
+            }
+            let Some(root) = direct_root else {
+                continue;
+            };
+            let replacement = format!("{root}.{}", setting.name);
+            diagnostics.push(
+                Diagnostic::warning(
+                    DiagnosticCode::StaticSettingLookup,
+                    format!("literal setting key `{key}` has a typed member"),
+                    expression.span,
+                )
+                .with_primary_label(format!("use `{replacement}` for this declared setting"))
+                .with_secondary_label(setting.name_span, "the setting is declared here")
+                .with_machine_applicable_fix(
+                    format!("replace the string lookup with `{replacement}`"),
+                    expression.span,
+                    replacement,
+                ),
+            );
+            continue;
+        }
+
+        let mut diagnostic = Diagnostic::warning(
+            DiagnosticCode::StaticSettingLookup,
+            format!("`contains({})` is always true", quote_string_literal(key)),
+            argument.span,
+        )
+        .with_primary_label("this exact value-setting key is declared statically")
+        .with_secondary_label(setting.name_span, "the setting is declared here")
+        .with_machine_applicable_fix(
+            "replace the known membership test with `true`",
+            expression.span,
+            "true",
+        )
+        .with_note(
+            "use `contains` with a computed key when declaration membership is genuinely data-driven",
+        );
+
+        if setting.source_visible
+            && let Some(root) = direct_root
+        {
+            let member = format!("{root}.{}", setting.name);
+            diagnostic = diagnostic.with_note(format!(
+                "read the declared setting's typed value as `{member}`"
+            ));
+            if matches!(setting.kind, ast::SettingKind::Bool { .. }) {
+                diagnostic = diagnostic.with_fix(DiagnosticFix {
+                    title: format!("read the enabled value with `{member}`"),
+                    applicability: FixApplicability::MaybeIncorrect,
+                    edits: vec![TextEdit {
+                        span: expression.span,
+                        replacement: member,
+                    }],
+                });
+            }
+        }
+        diagnostics.push(diagnostic);
+    }
+
+    diagnostics
 }
 
 fn validate_async_recursion(

@@ -1,5 +1,16 @@
 # SplitScript roadmap
 
+## 2026-08-23: typed guidance for literal setting lookups
+
+- Added warning `SS1007` for literal dynamic lookups whose meaning is already
+  known from the settings declaration.
+- Made `settings.enabled("key")` and `oldSettings.enabled("key")` offer
+  machine-applicable typed-member rewrites when a source-visible boolean member
+  exists, while preserving computed and generated-family lookup patterns.
+- Diagnosed `contains("key")` for a known value declaration as always true,
+  with a semantics-preserving replacement and separate intent guidance for
+  reading the typed setting value.
+
 ## 2026-08-22: normalized provider reads and Sega Genesis support
 
 - Replaced the native-address-only emulator boundary with a normalized

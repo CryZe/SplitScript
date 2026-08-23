@@ -122,6 +122,7 @@ fn diagnostics_expose_stable_stage_codes_and_severity() {
     assert_eq!(DiagnosticCode::UnusedMember.as_str(), "SS1004");
     assert_eq!(DiagnosticCode::ValueBlockSemicolon.as_str(), "SS1005");
     assert_eq!(DiagnosticCode::AmbiguousRetryFallback.as_str(), "SS1006");
+    assert_eq!(DiagnosticCode::StaticSettingLookup.as_str(), "SS1007");
 }
 
 #[test]

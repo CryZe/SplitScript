@@ -16,16 +16,18 @@ pub enum DiagnosticCode {
     UnusedMember,
     ValueBlockSemicolon,
     AmbiguousRetryFallback,
+    StaticSettingLookup,
 }
 
 impl DiagnosticCode {
-    pub const WARNINGS: [Self; 6] = [
+    pub const WARNINGS: [Self; 7] = [
         Self::MustUse,
         Self::UnusedBinding,
         Self::UnusedDeclaration,
         Self::UnusedMember,
         Self::ValueBlockSemicolon,
         Self::AmbiguousRetryFallback,
+        Self::StaticSettingLookup,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -40,6 +42,7 @@ impl DiagnosticCode {
             Self::UnusedMember => "SS1004",
             Self::ValueBlockSemicolon => "SS1005",
             Self::AmbiguousRetryFallback => "SS1006",
+            Self::StaticSettingLookup => "SS1007",
         }
     }
 
@@ -52,6 +55,7 @@ impl DiagnosticCode {
                 | Self::UnusedMember
                 | Self::ValueBlockSemicolon
                 | Self::AmbiguousRetryFallback
+                | Self::StaticSettingLookup
         )
     }
 }
@@ -71,6 +75,7 @@ impl FromStr for DiagnosticCode {
             "SS1004" => Ok(Self::UnusedMember),
             "SS1005" => Ok(Self::ValueBlockSemicolon),
             "SS1006" => Ok(Self::AmbiguousRetryFallback),
+            "SS1007" => Ok(Self::StaticSettingLookup),
             _ => Err(()),
         }
     }

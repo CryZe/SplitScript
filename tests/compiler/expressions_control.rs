@@ -289,6 +289,119 @@ fn dynamic_and_compatible_setting_key_lookups_remain_valid() {
 }
 
 #[test]
+fn literal_setting_lookups_guide_towards_typed_members() {
+    let source = r#"
+        enum Mode { Fast, Slow }
+        state "game.exe" {}
+        settings {
+            "Boss" => boss key "split-boss": true,
+            "Mode" => mode key "run-mode": choice {
+                "Fast" => Mode.Fast default,
+                "Slow" => Mode.Slow,
+            },
+            for stage in 1..=2 {
+                `Stage {stage}` key `stage-{stage}`: true,
+            },
+        }
+
+        whileAttached {
+            print(settings.enabled("split-boss"))
+            print(oldSettings.enabled("split-boss"))
+            print(settings.contains("split-boss"))
+            print(settings.contains("run-mode"))
+            print(settings.enabled("stage-1"))
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("static setting guidance should remain a warning");
+    let diagnostics = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code == splitscript::DiagnosticCode::StaticSettingLookup)
+        .collect::<Vec<_>>();
+    assert_eq!(diagnostics.len(), 4, "{diagnostics:#?}");
+
+    let enabled = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.message.contains("typed member")
+                && diagnostic.fixes[0].edits[0].replacement == "settings.boss"
+        })
+        .expect("the current typed boolean member should be suggested");
+    assert_eq!(
+        enabled.fixes[0].applicability,
+        splitscript::FixApplicability::MachineApplicable
+    );
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("typed member")
+            && diagnostic.fixes[0].edits[0].replacement == "oldSettings.boss"
+    }));
+
+    let bool_membership = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.message.contains("contains")
+                && diagnostic
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("settings.boss"))
+        })
+        .expect("known boolean membership should explain typed value access");
+    assert_eq!(bool_membership.fixes.len(), 2);
+    assert_eq!(bool_membership.fixes[0].edits[0].replacement, "true");
+    assert_eq!(
+        bool_membership.fixes[0].applicability,
+        splitscript::FixApplicability::MachineApplicable
+    );
+    assert_eq!(
+        bool_membership.fixes[1].edits[0].replacement,
+        "settings.boss"
+    );
+    assert_eq!(
+        bool_membership.fixes[1].applicability,
+        splitscript::FixApplicability::MaybeIncorrect
+    );
+
+    let choice_membership = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.message.contains("contains")
+                && diagnostic
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("settings.mode"))
+        })
+        .expect("known choice membership should explain typed value access");
+    assert_eq!(choice_membership.fixes.len(), 1);
+    assert_eq!(choice_membership.fixes[0].edits[0].replacement, "true");
+}
+
+#[test]
+fn computed_and_generated_setting_lookups_do_not_suggest_typed_members() {
+    let source = r#"
+        state "game.exe" {}
+        settings {
+            "Boss" => boss key "split-boss": true,
+            for stage in 1..=2 {
+                `Stage {stage}` key `stage-{stage}`: true,
+            },
+        }
+
+        fn selectedKey() { return "split-boss" }
+        whileAttached {
+            print(settings.enabled(selectedKey()))
+            print(settings.enabled("stage-1"))
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap()).unwrap();
+    assert!(
+        checked.diagnostics().iter().all(|diagnostic| {
+            diagnostic.code != splitscript::DiagnosticCode::StaticSettingLookup
+        })
+    );
+}
+
+#[test]
 fn unused_settings_warn_without_guessing_through_dynamic_keys() {
     let source = r#"
         state "game.exe" {}

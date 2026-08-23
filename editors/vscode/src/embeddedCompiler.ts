@@ -10,6 +10,9 @@ export interface EmbeddedWarningPolicy {
     unusedBinding?: EmbeddedWarningLevel;
     unusedDeclaration?: EmbeddedWarningLevel;
     unusedMember?: EmbeddedWarningLevel;
+    valueBlockSemicolon?: EmbeddedWarningLevel;
+    ambiguousRetryFallback?: EmbeddedWarningLevel;
+    staticSettingLookup?: EmbeddedWarningLevel;
 }
 
 export interface EmbeddedCompileRequest {

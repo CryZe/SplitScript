@@ -10,6 +10,10 @@
 - Consolidated active and loaded Unity scene decoding behind one private
   `UnitySceneManager.snapshot` method without exposing an implementation helper
   to scripts.
+- Centralized repeated PE optional-header validation for module version,
+  export, and pointer-width queries, repeated GBA 64-bit memory-pointer
+  decoding, and the shared Dolphin/libretro provider preflight behind private
+  source helpers.
 
 ## 2026-08-23: source-defined Unity scene snapshots
 

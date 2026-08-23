@@ -6,6 +6,7 @@ use super::*;
 fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
     let library = StandardLibrary::new();
     for item in [
+        StdlibItemId::DolphinCoreBase,
         StdlibItemId::DurationFromFrames,
         StdlibItemId::DurationFromMilliseconds,
         StdlibItemId::DurationFromParts,
@@ -40,11 +41,13 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::ArrayPop,
         StdlibItemId::ResultDiscardError,
         StdlibItemId::AddressOffset,
+        StdlibItemId::ModulePeOptionalHeader,
         StdlibItemId::UnityIl2Cpp,
         StdlibItemId::UnitySceneManager,
         StdlibItemId::UnitySceneManagerSnapshot,
         StdlibItemId::UnitySceneManagerActiveScene,
         StdlibItemId::UnitySceneManagerLoadedScenes,
+        StdlibItemId::GBAEmulatorResolve64BitMemoryPointer,
         StdlibItemId::GBAEmulatorDiscover,
         StdlibItemId::PS2EmulatorDiscover,
         StdlibItemId::PS1EmulatorDiscover,
@@ -123,18 +126,30 @@ fn unity_scene_manager_exposes_immutable_state_snapshots() {
 #[test]
 fn private_standard_library_helpers_are_checked_but_not_user_visible() {
     let library = StandardLibrary::new();
-    let helper = library.item(StdlibItemId::UnitySceneManagerSnapshot);
-    assert_eq!(helper.visibility, ItemVisibility::LibraryPrivate);
-    assert!(matches!(
-        helper.implementation,
-        Implementation::LibraryBody { .. }
-    ));
-    assert!(
-        library
-            .items()
-            .all(|item| item.id != StdlibItemId::UnitySceneManagerSnapshot)
-    );
-    assert!(library.item_by_name("UnitySceneManager.snapshot").is_none());
+    for (id, qualified_name) in [
+        (StdlibItemId::DolphinCoreBase, "dolphinCoreBase"),
+        (
+            StdlibItemId::ModulePeOptionalHeader,
+            "Module.peOptionalHeader",
+        ),
+        (
+            StdlibItemId::UnitySceneManagerSnapshot,
+            "UnitySceneManager.snapshot",
+        ),
+        (
+            StdlibItemId::GBAEmulatorResolve64BitMemoryPointer,
+            "GBAEmulator.resolve64BitMemoryPointer",
+        ),
+    ] {
+        let helper = library.item(id);
+        assert_eq!(helper.visibility, ItemVisibility::LibraryPrivate);
+        assert!(matches!(
+            helper.implementation,
+            Implementation::LibraryBody { .. }
+        ));
+        assert!(library.items().all(|item| item.id != id));
+        assert!(library.item_by_name(qualified_name).is_none());
+    }
     assert!(
         library
             .methods_for_type(&TypeKind::Standard(StdlibTypeId::UnitySceneManager))
@@ -162,6 +177,22 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
         }),
         "{diagnostics:#?}"
     );
+
+    let diagnostics = splitscript::compile(
+        r#"
+            state "game.exe" {}
+            onAttach {
+                let core = await dolphinCoreBase()
+            }
+        "#,
+    )
+    .expect_err("user code must not call private root helpers");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic
+            .message
+            .contains("unknown function `dolphinCoreBase`")
+            && !diagnostic.message.contains("private")
+    }));
 }
 
 #[test]

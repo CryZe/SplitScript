@@ -218,6 +218,19 @@ stateProvider Wii as wii {
 }
 
 root {
+    private fn dolphinCoreBase() -> address {
+        if process.name() != "retroarch.exe" {
+            return 0
+        }
+
+        let executable = await process.mainModule()
+        if retry executable.pointerSize() != PointerSize.Bit64 {
+            await process.closed()
+        }
+        let core = await process.module("dolphin_libretro.dll")
+        return core.address
+    }
+
     /// Prints a diagnostic message.
     ///
     /// The message is forwarded to the autosplitting runtime.
@@ -4282,6 +4295,19 @@ struct Module {
     /// The host module identity used for metadata queries.
     private name: String,
 
+    private fn peOptionalHeader() -> address! {
+        if process.read<u16>(self.address)? != 0x5a4d {
+            throw "module does not have a DOS header"
+        }
+
+        let peOffset = process.read<u32>(self.address.add(0x3c))?
+        let peHeader = self.address.add(peOffset as u64)
+        if process.read<u32>(peHeader)? != 0x00004550 {
+            throw "module does not have a PE header"
+        }
+        return Ok(peHeader.add(0x18))
+    }
+
     /// Returns the module's host-provided filesystem path.
     ///
     /// The path uses the runtime's portable filesystem spelling. It is
@@ -4318,17 +4344,7 @@ struct Module {
     /// ```
     @mustUse("use the returned version information")
     fn versionInfo() -> ModuleVersionInfo! {
-        if process.read<u16>(self.address)? != 0x5a4d {
-            throw "module does not have a DOS header"
-        }
-
-        let peOffset = process.read<u32>(self.address.add(0x3c))?
-        let peHeader = self.address.add(peOffset as u64)
-        if process.read<u32>(peHeader)? != 0x00004550 {
-            throw "module does not have a PE header"
-        }
-
-        let optionalHeader = peHeader.add(0x18)
+        let optionalHeader = self.peOptionalHeader()?
         let optionalMagic = process.read<u16>(optionalHeader)?
         if optionalMagic != 0x010b && optionalMagic != 0x020b {
             throw "module has an unsupported PE optional header"
@@ -4484,17 +4500,7 @@ struct Module {
         /// Exact case-sensitive export name.
         name: String,
     ) -> address! {
-        if process.read<u16>(self.address)? != 0x5a4d {
-            throw "module does not have a DOS header"
-        }
-
-        let peOffset = process.read<u32>(self.address.add(0x3c))?
-        let peHeader = self.address.add(peOffset as u64)
-        if process.read<u32>(peHeader)? != 0x00004550 {
-            throw "module does not have a PE header"
-        }
-
-        let optionalHeader = peHeader.add(0x18)
+        let optionalHeader = self.peOptionalHeader()?
         let optionalMagic = process.read<u16>(optionalHeader)?
         let exportDirectoryOffset: u64 = 0
         if optionalMagic == 0x010b {
@@ -4578,19 +4584,8 @@ struct Module {
     /// let pointerSize = retry executable.pointerSize()
     /// ```
     fn pointerSize() -> PointerSize! {
-        let dosMagic = process.read<u16>(self.address)?
-        if dosMagic != 0x5a4d {
-            throw "module does not have a DOS header"
-        }
-
-        let peOffset = process.read<u32>(self.address.add(0x3c))?
-        let peHeader = self.address.add(peOffset as u64)
-        let peMagic = process.read<u32>(peHeader)?
-        if peMagic != 0x00004550 {
-            throw "module does not have a PE header"
-        }
-
-        let optionalMagic = process.read<u16>(peHeader.add(0x18))?
+        let optionalHeader = self.peOptionalHeader()?
+        let optionalMagic = process.read<u16>(optionalHeader)?
         if optionalMagic == 0x010b {
             return Ok(PointerSize.Bit32)
         }
@@ -6073,6 +6068,15 @@ struct GBAEmulator {
     /// Stores backend-specific discovery state.
     private aux3: address,
 
+    private static fn resolve64BitMemoryPointer(instruction: address) -> address! {
+        let pointer = process.readRelative32(instruction)?
+        let opcode = process.read<u8>(instruction.offset(10))?
+        if opcode == 0x48 {
+            pointer = process.read<address>(pointer)?
+        }
+        return Ok(pointer)
+    }
+
     /// Discovers the emulator's GBA memory mapping.
     ///
     /// A [`state`] declaration using [`GBA`] invokes this automatically after
@@ -6130,22 +6134,16 @@ struct GBAEmulator {
                 sig"81 E6 FF FF 03 00 8B 15 ?? ?? ?? ??",
             ])
             if found.index == 0 {
-                let ewramInstruction = found.address.offset(3)
-                let ewramPointer = retry process.readRelative32(ewramInstruction)
-                let ewramOpcode = retry process.read<u8>(ewramInstruction.offset(10))
-                if ewramOpcode == 0x48 {
-                    ewramPointer = retry process.read<address>(ewramPointer)
-                }
+                let ewramPointer = retry GBAEmulator.resolve64BitMemoryPointer(
+                    found.address.offset(3),
+                )
 
                 let iwramMatch = await emulatorModule.scan(
                     sig"48 8B 05 ?? ?? ?? ?? 81 E3 FF 7F 00 00",
                 )
-                let iwramInstruction = iwramMatch.offset(3)
-                let iwramPointer = retry process.readRelative32(iwramInstruction)
-                let iwramOpcode = retry process.read<u8>(iwramInstruction.offset(10))
-                if iwramOpcode == 0x48 {
-                    iwramPointer = retry process.read<address>(iwramPointer)
-                }
+                let iwramPointer = retry GBAEmulator.resolve64BitMemoryPointer(
+                    iwramMatch.offset(3),
+                )
                 return GBAEmulator {
                     backend: 3,
                     ewram: 0,
@@ -6232,13 +6230,9 @@ struct GBAEmulator {
 
             let ewramPointer: address = 0
             if found.index == 0 {
-                let instruction = found.address.offset(3)
-                let pointer = retry process.readRelative32(instruction)
-                let opcode = retry process.read<u8>(instruction.offset(10))
-                if opcode == 0x48 {
-                    pointer = retry process.read<address>(pointer)
-                }
-                ewramPointer = pointer
+                ewramPointer = retry GBAEmulator.resolve64BitMemoryPointer(
+                    found.address.offset(3),
+                )
             } else {
                 ewramPointer = retry process.read<u32>(found.address.offset(1)) as address
             }
@@ -6251,13 +6245,9 @@ struct GBAEmulator {
             }
             let iwramPointer: address = 0
             if found.index == 0 {
-                let instruction = iwramMatch.offset(3)
-                let pointer = retry process.readRelative32(instruction)
-                let opcode = retry process.read<u8>(instruction.offset(10))
-                if opcode == 0x48 {
-                    pointer = retry process.read<address>(pointer)
-                }
-                iwramPointer = pointer
+                iwramPointer = retry GBAEmulator.resolve64BitMemoryPointer(
+                    iwramMatch.offset(3),
+                )
             } else {
                 iwramPointer = retry process.read<u32>(iwramMatch.offset(1)) as address
             }
@@ -6279,13 +6269,9 @@ struct GBAEmulator {
             ])
             let ewramPointer: address = 0
             if found.index == 0 {
-                let instruction = found.address.offset(3)
-                let pointer = retry process.readRelative32(instruction)
-                let opcode = retry process.read<u8>(instruction.offset(10))
-                if opcode == 0x48 {
-                    pointer = retry process.read<address>(pointer)
-                }
-                ewramPointer = pointer
+                ewramPointer = retry GBAEmulator.resolve64BitMemoryPointer(
+                    found.address.offset(3),
+                )
             } else {
                 ewramPointer = retry process.read<u32>(found.address.offset(1)) as address
             }
@@ -6298,13 +6284,9 @@ struct GBAEmulator {
             }
             let iwramPointer: address = 0
             if found.index == 0 {
-                let instruction = iwramMatch.offset(3)
-                let pointer = retry process.readRelative32(instruction)
-                let opcode = retry process.read<u8>(instruction.offset(10))
-                if opcode == 0x48 {
-                    pointer = retry process.read<address>(pointer)
-                }
-                iwramPointer = pointer
+                iwramPointer = retry GBAEmulator.resolve64BitMemoryPointer(
+                    iwramMatch.offset(3),
+                )
             } else {
                 iwramPointer = retry process.read<u32>(iwramMatch.offset(1)) as address
             }
@@ -7076,16 +7058,7 @@ struct GCNEmulator {
     /// ```
     static fn discover() -> GCNEmulator {
         let processName = process.name()
-        let coreBase: address = 0
-
-        if processName == "retroarch.exe" {
-            let executable = await process.mainModule()
-            if retry executable.pointerSize() != PointerSize.Bit64 {
-                await process.closed()
-            }
-            let core = await process.module("dolphin_libretro.dll")
-            coreBase = core.address
-        }
+        let coreBase = await dolphinCoreBase()
 
         let mapping = await process.findMemoryRange(
             0x2000000,
@@ -7166,16 +7139,7 @@ struct WiiEmulator {
     /// ```
     static fn discover() -> WiiEmulator {
         let processName = process.name()
-        let coreBase: address = 0
-
-        if processName == "retroarch.exe" {
-            let executable = await process.mainModule()
-            if retry executable.pointerSize() != PointerSize.Bit64 {
-                await process.closed()
-            }
-            let core = await process.module("dolphin_libretro.dll")
-            coreBase = core.address
-        }
+        let coreBase = await dolphinCoreBase()
 
         let mem1 = await process.findMemoryRange(
             0x2000000,

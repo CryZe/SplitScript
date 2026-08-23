@@ -1,5 +1,15 @@
 # SplitScript roadmap
 
+## 2026-08-23: Structural user implementations for catalog capabilities
+
+- Added catalog-authored structural method requirements and used them for
+  `Display.toString`.
+- User records and enums now satisfy `Display` by defining the exact ordinary
+  source method, without an `impl` block or annotation.
+- Routed casts, interpolation, `print`, and custom-variable values through the
+  same source method in validation, reachability, effect analysis, and Wasm
+  code generation.
+
 ## 2026-08-23: source-defined intrinsic signatures and context
 
 - Made asynchronous completion part of privileged standard-library signatures

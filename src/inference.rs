@@ -1582,9 +1582,15 @@ pub(crate) fn type_may_have_capability(
             TypeKind::StateSnapshot | TypeKind::SettingsView => false,
             TypeKind::Record(_) => matches!(
                 behavior,
-                CapabilityBehavior::StructuralEquality | CapabilityBehavior::StructuralMemoryLayout
+                CapabilityBehavior::StructuralEquality
+                    | CapabilityBehavior::StructuralMemoryLayout
+                    | CapabilityBehavior::StructuralMethods
             ),
-            TypeKind::Enum(_) | TypeKind::Option { .. } | TypeKind::Result { .. } => {
+            TypeKind::Enum(_) => matches!(
+                behavior,
+                CapabilityBehavior::StructuralEquality | CapabilityBehavior::StructuralMethods
+            ),
+            TypeKind::Option { .. } | TypeKind::Result { .. } => {
                 behavior == CapabilityBehavior::StructuralEquality
             }
             TypeKind::Async { .. } => false,

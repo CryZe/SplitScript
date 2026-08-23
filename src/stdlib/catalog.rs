@@ -196,6 +196,14 @@ mod tests {
                         item.qualified_name
                     );
                 }
+                Implementation::CapabilityRequirement => {
+                    let declaration = format!("fn {}", item.name);
+                    assert!(
+                        source.contains(&declaration),
+                        "capability requirement `{}` must have a source declaration",
+                        item.qualified_name
+                    );
+                }
             }
         }
     }
@@ -266,6 +274,14 @@ mod tests {
                 .capability(StdlibCapabilityId::MemoryReadable)
                 .behavior,
             CapabilityBehavior::StructuralMemoryLayout
+        );
+        assert_eq!(
+            library.capability(StdlibCapabilityId::Display).behavior,
+            CapabilityBehavior::StructuralMethods
+        );
+        assert_eq!(
+            library.item(StdlibItemId::DisplayToString).implementation,
+            Implementation::CapabilityRequirement
         );
         assert_eq!(
             library.capability(StdlibCapabilityId::Numeric).behavior,

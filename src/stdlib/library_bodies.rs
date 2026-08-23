@@ -76,7 +76,7 @@ pub(crate) fn augment_program_with_library_bodies(
     let mut body_ranges = Vec::new();
     for item in library.all_items() {
         let bodies = match item.implementation {
-            Implementation::Intrinsic(_) => Vec::new(),
+            Implementation::Intrinsic(_) | Implementation::CapabilityRequirement => Vec::new(),
             Implementation::LibraryBody {
                 function_name,
                 body,

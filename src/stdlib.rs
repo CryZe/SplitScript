@@ -548,6 +548,10 @@ impl StandardLibrary {
     pub fn operation_metadata(&self, id: StdlibItemId) -> OperationMetadata {
         let item = self.item(id);
         match item.implementation {
+            Implementation::CapabilityRequirement => OperationMetadata {
+                effects: EffectSet::one(Effect::Pure),
+                availability: Availability::Everywhere,
+            },
             Implementation::Intrinsic(intrinsic) => {
                 let contract = intrinsic_registry::contract(intrinsic);
                 let declared = item
@@ -1023,6 +1027,32 @@ impl StandardLibrary {
                 errors.push(format!("duplicate standard-library ID `{:?}`", item.id));
             }
             match item.implementation {
+                Implementation::CapabilityRequirement => {
+                    let valid_owner = matches!(
+                        item.owner,
+                        StdlibOwner::Capability(capability)
+                            if self.capability(capability).behavior
+                                == CapabilityBehavior::StructuralMethods
+                    );
+                    if !valid_owner || !matches!(item.kind, ItemKind::Method { .. }) {
+                        errors.push(format!(
+                            "`{}` is a capability requirement outside a structural-method capability",
+                            item.qualified_name
+                        ));
+                    }
+                    if item.intrinsic_context.is_some() {
+                        errors.push(format!(
+                            "`{}` capability requirement declares intrinsic context",
+                            item.qualified_name
+                        ));
+                    }
+                    if item.signature.explicit_type_parameters != 0 {
+                        errors.push(format!(
+                            "`{}` capability requirement declares callable-specific type parameters",
+                            item.qualified_name
+                        ));
+                    }
+                }
                 Implementation::Intrinsic(intrinsic) => {
                     if !intrinsics.insert(intrinsic) {
                         errors.push(format!(
@@ -1170,17 +1200,20 @@ impl StandardLibrary {
                 ));
             }
             let path = self.item_path(item);
-            let call_shape = match item.kind {
-                ItemKind::Function => format!(
-                    "function {}",
-                    path.as_ref()
-                        .expect("functions have source paths")
-                        .join(".")
-                ),
-                ItemKind::Method { receiver } => {
-                    format!("method {}.{}", receiver.render(self), item.name)
-                }
-            };
+            let call_shape =
+                (item.implementation != Implementation::CapabilityRequirement).then(|| match item
+                    .kind
+                {
+                    ItemKind::Function => format!(
+                        "function {}",
+                        path.as_ref()
+                            .expect("functions have source paths")
+                            .join(".")
+                    ),
+                    ItemKind::Method { receiver } => {
+                        format!("method {}.{}", receiver.render(self), item.name)
+                    }
+                });
             if let Some(path) = &path
                 && path.join(".") != item.qualified_name
             {
@@ -1190,7 +1223,9 @@ impl StandardLibrary {
                     path.join(".")
                 ));
             }
-            if !call_shapes.insert(call_shape.clone()) {
+            if let Some(call_shape) = call_shape
+                && !call_shapes.insert(call_shape.clone())
+            {
                 errors.push(format!(
                     "duplicate standard-library call shape `{call_shape}`"
                 ));

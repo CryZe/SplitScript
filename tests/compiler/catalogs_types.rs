@@ -2775,6 +2775,143 @@ fn semantic_capabilities_query_declared_and_derived_types_by_type_id() {
 }
 
 #[test]
+fn source_methods_structurally_satisfy_display() {
+    let source = r#"
+        state "game.exe" {}
+
+        record Position {
+            x: i32,
+            y: i32,
+        }
+
+        enum Mode {
+            Running,
+            Paused,
+        }
+
+        fn Position.toString() -> String {
+            return `({self.x}, {self.y})`
+        }
+
+        fn Mode.toString() {
+            return match self {
+                Mode.Running => "running",
+                Mode.Paused => "paused",
+            }
+        }
+
+        whileAttached {
+            let position = Position { x: 3, y: 5 }
+            print(position)
+            print(position as String)
+            print(`position = {position}`)
+            setVariable("Position", position)
+            print(Mode.Running)
+        }
+    "#;
+
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("matching source methods should satisfy Display structurally");
+    let position = checked
+        .semantics()
+        .types()
+        .id_for_record(checked.syntax().records[0].id);
+    let mode = checked
+        .semantics()
+        .types()
+        .id_for_enum(checked.syntax().enums[0].id);
+    for ty in [position, mode] {
+        assert!(checked.capabilities().has(
+            ty,
+            splitscript::compiler::stdlib::StdlibCapabilityId::Display,
+            checked.semantics(),
+        ));
+    }
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile(source).unwrap())
+        .expect("source-defined Display methods should lower to valid Wasm");
+}
+
+#[test]
+fn structural_display_reports_missing_and_mismatched_methods() {
+    for (method, expected) in [
+        ("", "is missing"),
+        (
+            "fn Position.toString() -> i32 { return self.x }",
+            "does not match",
+        ),
+    ] {
+        for consumer in [
+            "print(Position { x: 3 })",
+            "let text = Position { x: 3 } as String",
+            "let text = `position {Position { x: 3 }}`",
+        ] {
+            let source = format!(
+                r#"
+                    state "game.exe" {{}}
+                    record Position {{ x: i32, }}
+                    {method}
+                    whileAttached {{ {consumer} }}
+                "#
+            );
+            let diagnostics = splitscript::check(splitscript::parse(&source).unwrap())
+                .expect_err("an invalid structural Display implementation must fail");
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| {
+                    diagnostic.message.contains(expected)
+                        && diagnostic.message.contains("Display")
+                        && diagnostic.message.contains("toString")
+                })
+                .unwrap_or_else(|| panic!("{diagnostics:#?}"));
+            assert!(
+                diagnostic.labels.iter().any(|label| {
+                    label.style == splitscript::DiagnosticLabelStyle::Secondary
+                        && label.message.as_deref().is_some_and(|message| {
+                            message.contains(if method.is_empty() {
+                                "define the required method"
+                            } else {
+                                "this method was considered"
+                            })
+                        })
+                }),
+                "{diagnostic:#?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn implicit_display_calls_propagate_source_method_effects() {
+    let source = r#"
+        state "game.exe" {}
+        record ProcessLabel { prefix: String, }
+
+        fn ProcessLabel.toString() -> String {
+            return `{self.prefix}: {process.name()}`
+        }
+
+        fn label(value: ProcessLabel) -> String {
+            return value as String
+        }
+
+        setup {
+            print(label(ProcessLabel { prefix: "game" }))
+        }
+    "#;
+    let diagnostics = splitscript::check(splitscript::parse(source).unwrap())
+        .expect_err("implicit Display calls must preserve attached-process effects");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("requires an attached process")
+                && diagnostic.message.contains("setup")
+        }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
 fn semantic_type_ids_intern_constructed_generic_arguments() {
     let source = r#"
         state "game.exe" {}

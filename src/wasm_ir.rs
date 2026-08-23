@@ -1134,6 +1134,9 @@ fn lower_call_target(
             receiver,
             receiver_type,
         } => match typed_hir.standard_library().item(*item).implementation {
+            Implementation::CapabilityRequirement => {
+                unreachable!("capability requirements resolve to source methods before lowering")
+            }
             Implementation::Intrinsic(intrinsic) => CallTarget::Intrinsic {
                 item: *item,
                 intrinsic,

@@ -36,6 +36,23 @@ Backtick strings interpolate with `{expression}` without C#'s leading `$`.
 Use arrays as [`[T]`], fixed memory arrays as [`[T; N]`], records for named product
 types, and enums with exhaustive [`match`].
 
+There is no class override or interface declaration for textual display. A
+record or enum implements [`Display`] by defining `fn Type.toString() ->
+String`; the compiler can infer the result. Use lower-camel `toString`, not
+C#'s `ToString`.
+
+```splitscript
+# state "game.exe" {}
+record Position {
+    x: i32,
+    y: i32,
+}
+fn Position.toString() { return `({self.x}, {self.y})` }
+# onAttach {
+print(Position { x: 3, y: 5 })
+# }
+```
+
 ## Value-producing blocks
 
 A block used in an expression can declare local values and then yield its final

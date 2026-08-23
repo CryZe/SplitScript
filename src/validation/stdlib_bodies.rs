@@ -28,7 +28,7 @@ pub(super) fn validate_signatures(
     let mut diagnostics = Vec::new();
     for item in library.all_items() {
         let bodies = match item.implementation {
-            Implementation::Intrinsic(_) => continue,
+            Implementation::Intrinsic(_) | Implementation::CapabilityRequirement => continue,
             Implementation::LibraryBody { .. } => hir
                 .library_function(item.id)
                 .map(|function| vec![(function, item.signature)])

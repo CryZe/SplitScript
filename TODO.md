@@ -343,10 +343,17 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Standard-library and type-system boundaries
 
-- [ ] Design the user-facing trait/type-class model around the existing
-  source-defined capability graph. Begin with memory reading, `Display`,
-  equality, numeric operations, and hashing; decide separately whether user
-  programs can declare traits and implement them for their own types.
+- [x] Let catalog-defined structural method contracts be satisfied by ordinary
+  user methods without `impl` ceremony. `Display` is the first contract:
+  `fn Type.toString() -> String` makes a user record or enum displayable, and
+  implicit conversion calls retain the source method's reachability and
+  effects. Standard-library implementations remain explicit and privileged.
+- [ ] Continue designing the user-facing trait/type-class model around the
+  existing source-defined capability graph. Evaluate memory reading, equality,
+  numeric operations, and hashing individually; representation-sensitive
+  capabilities must remain sealed unless their contracts can be implemented
+  safely in ordinary source. Decide separately whether user programs ever need
+  to declare their own capabilities.
 - [ ] Keep trait declarations, implementations, documentation, method lookup,
   and capability inheritance in the source-defined standard-library model,
   never in a parallel checker table.

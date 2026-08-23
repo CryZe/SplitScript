@@ -1937,8 +1937,38 @@ capability Equatable<T> {
 /// ```splitscript
 /// let scoreText = `Score: {42}`
 /// ```
-@behavior(declared)
-capability Display<T> {}
+@behavior(structuralMethods)
+capability Display<T> {
+    /// Converts the receiver to its user-facing string representation.
+    ///
+    /// A user record or enum satisfies [`Display`] simply by defining a method
+    /// with this signature. The [`String`] result may be inferred from the body,
+    /// and no separate implementation declaration or annotation is needed.
+    /// The same method powers [`as`] [`String`] casts, interpolation, [`print`],
+    /// and [`setVariable`].
+    ///
+    /// # Example
+    ///
+    /// Display a user-defined position
+    ///
+    /// ```splitscript
+    /// record Position {
+    ///     x: i32,
+    ///     y: i32,
+    /// }
+    ///
+    /// fn Position.toString() -> String {
+    ///     return `({self.x}, {self.y})`
+    /// }
+    ///
+    /// state "game.exe" {}
+    /// onAttach {
+    ///     let positionText = Position { x: 3, y: 5 } as String
+    ///     print(positionText)
+    /// }
+    /// ```
+    fn toString() -> String;
+}
 
 /// Supports deserialization from process memory.
 ///

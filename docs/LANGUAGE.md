@@ -1892,7 +1892,7 @@ JavaScript-inspired template strings use backticks and `{expression}`, without
 JavaScript's `$` marker. Existing strings are inserted directly. Every other
 interpolated value is converted by the same rules as `value as String`; integer
 widths, `address`, and standard-library types with source-defined formatting
-such as `FileVersion` are supported, while values without the `Display`
+such as `FileVersion` are supported, while values without the [`Display`]
 capability produce compile-time errors. Template strings may contain multiple interpolations,
 nested expressions, and newlines. Literal braces are written as `\{` and `\}`.
 `$` is ordinary template text, so `${value}` intentionally emits a literal
@@ -1909,15 +1909,44 @@ Transformations such as `toAsciiLowerCase`, `toAsciiUpperCase`,
 `trimAsciiWhitespace`, `replaceAll`, and `split` do not mutate their receiver.
 They return new values and are marked must-use, so a discarded result receives
 a focused warning explaining the immutable behavior.
-`print(value)` and `setVariable(key, value)` accept any `Display` value
+The [`print`] and [`setVariable`] functions accept any [`Display`] value
 and apply these same conversions at the runtime boundary, so numeric values and
-addresses do not need an explicit `as String` cast. A standard-library type can
-tag an ordinary source-defined method with `@display`; that one implementation
-then powers all four conversion entry points without a type-specific backend
-branch. `FileVersion` uses this mechanism to render
+addresses do not need an explicit `as String` cast. Standard-library types can
+provide one checked implementation for all four conversion entry points
+without a type-specific backend branch. `FileVersion` uses this mechanism to
+render
 `major.minor.build.private`. `timer.state()` and
 `setTickRate<T: Numeric>(T)` expose the corresponding ASR facilities without
 linear-memory pointers in source code.
+
+User records and enums satisfy [`Display`] structurally. Defining the exact
+method `fn TypeName.toString() -> String` is sufficient, and the `String`
+result may be inferred from the body. User code does not write an `impl` block,
+capability declaration, or annotation. The compiler
+checks the receiver, parameters, result, and inferred effects as an ordinary
+source method, and all implicit uses preserve those effects through their call
+graphs.
+
+```splitscript
+record Position {
+    x: i32,
+    y: i32,
+}
+
+fn Position.toString() -> String {
+    return `({self.x}, {self.y})`
+}
+
+state "game.exe" {}
+whileAttached {
+    let position = Position { x: 3, y: 5 }
+    print(position)
+}
+```
+
+Standard-library implementations remain explicit and privileged so built-in
+and representation-sensitive behavior stays auditable without imposing that
+ceremony on short autosplitter scripts.
 `timer.state()` returns `TimerState`, a
 compiler-provided enum with `NotRunning`, `Running`, `Paused`, `Ended`, and
 `Unknown`. Match it like any other enum; the raw host integer is not visible to

@@ -583,7 +583,9 @@ impl TypedProgram {
             .iter()
             .filter_map(|item| {
                 let function_names = match item.implementation {
-                    Implementation::Intrinsic(_) => return None,
+                    Implementation::Intrinsic(_) | Implementation::CapabilityRequirement => {
+                        return None;
+                    }
                     Implementation::LibraryBody { function_name, .. } => vec![function_name],
                     Implementation::LibraryOverloads { cases, .. } => {
                         cases.iter().map(|case| case.function_name).collect()

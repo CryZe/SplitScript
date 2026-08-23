@@ -454,6 +454,40 @@ fn append_attachment_layouts(
     }
 }
 
+fn append_source_capabilities(description: &mut String, ty: TypeId, context: &SemanticContext) {
+    let Some(checked) = context.snapshot.checked() else {
+        return;
+    };
+    let capabilities = context
+        .standard_library
+        .capabilities()
+        .iter()
+        .filter(|capability| {
+            checked
+                .capabilities()
+                .has(ty, capability.id, context.semantics())
+        })
+        .map(|capability| capability.id)
+        .collect::<Vec<_>>();
+    let capabilities = context.standard_library.minimal_capabilities(&capabilities);
+    if capabilities.is_empty() {
+        return;
+    }
+    description.push_str("\n\n**Capabilities:** ");
+    description.push_str(
+        &capabilities
+            .iter()
+            .map(|capability| {
+                format!(
+                    "`{}`",
+                    context.standard_library.capability(*capability).name
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+}
+
 fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext) -> Option<String> {
     let syntax = context.syntax();
     let semantics = context.semantics();
@@ -639,18 +673,32 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 .records
                 .iter()
                 .find(|candidate| candidate.id == record)?;
+            let mut description =
+                documented_description("Record type", record.documentation.as_deref());
+            append_source_capabilities(
+                &mut description,
+                semantics.types().id_for_record(record.id),
+                context,
+            );
             Some(source_markdown(
                 &format!("record {}", record.name),
-                &documented_description("Record type", record.documentation.as_deref()),
+                &description,
             ))
         }
         SourceDefinitionId::Enum(enumeration) => {
             let enumeration = syntax
                 .enum_declarations()
                 .find(|candidate| candidate.id == enumeration)?;
+            let mut description =
+                documented_description("Enum type", enumeration.documentation.as_deref());
+            append_source_capabilities(
+                &mut description,
+                semantics.types().id_for_enum(enumeration.id),
+                context,
+            );
             Some(source_markdown(
                 &format!("enum {}", enumeration.name),
-                &documented_description("Enum type", enumeration.documentation.as_deref()),
+                &description,
             ))
         }
         SourceDefinitionId::EnumVariant(variant) => {
@@ -2187,6 +2235,26 @@ whileAttached {
         assert_eq!(
             hover.markdown.lines().nth(1),
             Some("fn twoDigits(value: T) -> String where T: Numeric + Display"),
+            "{}",
+            hover.markdown
+        );
+    }
+
+    #[test]
+    fn source_type_hover_shows_structurally_satisfied_capabilities() {
+        let source = r#"
+record Position { x: i32, }
+fn Position.toString() -> String { return `{self.x}` }
+state "game.exe" {}
+whileAttached { print(Position { x: 3 }) }
+"#;
+        let mut database = CompilerDatabase::new(source);
+        let hover = database
+            .hover(source.find("Position").unwrap() + 1)
+            .unwrap()
+            .expect("record hover");
+        assert!(
+            hover.markdown.contains("**Capabilities:**") && hover.markdown.contains("`Display`"),
             "{}",
             hover.markdown
         );

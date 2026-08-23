@@ -14,6 +14,10 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Implementation {
     Intrinsic(IntrinsicId),
+    /// A signature contract owned by a structurally implemented capability.
+    /// It is never a callable catalog implementation; user-defined methods
+    /// satisfying the contract are resolved and lowered directly.
+    CapabilityRequirement,
     /// An ordinary SplitScript function injected into the compilation unit.
     /// The generated name is reserved and cannot be authored by user code.
     LibraryBody {

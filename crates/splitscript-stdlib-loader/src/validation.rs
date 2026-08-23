@@ -147,7 +147,10 @@ impl<'a> Validator<'a> {
                         |name| {
                             matches!(
                                 name,
-                                "declared" | "structuralEquality" | "structuralMemoryLayout"
+                                "declared"
+                                    | "structuralEquality"
+                                    | "structuralMemoryLayout"
+                                    | "structuralMethods"
                             )
                         },
                     );
@@ -532,14 +535,42 @@ impl<'a> Validator<'a> {
                 .optional_name_attribute(&qualified, &function.attributes, "intrinsic")
                 .is_some();
             self.validate_intrinsic_context(&qualified, function, intrinsic);
-            match (intrinsic, function.body.is_some()) {
-                (true, true) => self.error(format!(
+            let capability_requirement = function.body.is_none()
+                && self.library.declarations.iter().any(|declaration| {
+                    let Declaration::Capability(capability) = declaration else {
+                        return false;
+                    };
+                    capability.name == owner
+                        && capability.attributes.iter().any(|attribute| {
+                            attribute.name == "behavior"
+                                && matches!(
+                                    attribute.arguments.as_slice(),
+                                    [AttributeArgument::Name(behavior)]
+                                        if behavior == "structuralMethods"
+                                )
+                        })
+                });
+            match (intrinsic, function.body.is_some(), capability_requirement) {
+                (true, true, _) => self.error(format!(
                     "`{qualified}` cannot have both an intrinsic binding and a source body"
                 )),
-                (false, false) => self.error(format!(
+                (false, false, false) => self.error(format!(
                     "`{qualified}` must have either an intrinsic binding or a source body"
                 )),
+                (true, false, true) => self.error(format!(
+                    "`{qualified}` capability requirements cannot bind an intrinsic"
+                )),
                 _ => {}
+            }
+            if capability_requirement && function.is_static {
+                self.error(format!(
+                    "`{qualified}` capability requirement must be a receiver method"
+                ));
+            }
+            if capability_requirement && !function.type_parameters.is_empty() {
+                self.error(format!(
+                    "`{qualified}` capability requirement cannot declare callable-specific type parameters"
+                ));
             }
             self.validate_type_parameters(&qualified, &function.type_parameters);
             let parameters =
@@ -1525,6 +1556,39 @@ root {
             .replace(" {}", ";");
         let errors = generate_catalog(&parse(&neither).unwrap()).unwrap_err();
         assert!(errors.iter().any(|error| error.message.contains("either")));
+    }
+
+    #[test]
+    fn structural_method_capabilities_generate_declarative_requirements() {
+        let source = r#"
+/// Displayable values.
+///
+/// # Example
+///
+/// Display a value
+///
+/// ```splitscript
+/// print(5)
+/// ```
+@behavior(structuralMethods)
+capability Display<T> {
+    /// Converts this value to text.
+    ///
+    /// User types provide the matching method.
+    ///
+    /// # Example
+    ///
+    /// Convert a value
+    ///
+    /// ```splitscript
+    /// value.display()
+    /// ```
+    fn display() -> None;
+}
+"#;
+        let generated = generate_catalog(&parse(source).unwrap()).unwrap();
+        assert!(generated.contains("CapabilityBehavior::StructuralMethods"));
+        assert!(generated.contains("Implementation::CapabilityRequirement"));
     }
 
     #[test]

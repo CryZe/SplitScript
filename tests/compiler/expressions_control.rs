@@ -1698,9 +1698,11 @@ fn runtime_text_outputs_accept_display_values() {
         let diagnostics = splitscript::compile(&source)
             .expect_err("values that cannot be displayed should be rejected");
         assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic
-                .message
-                .contains("does not satisfy the required `Display` capability")),
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains("Display")
+                    && diagnostic.message.contains("toString")
+                    && diagnostic.message.contains("missing")
+            }),
             "{diagnostics:#?}"
         );
     }
@@ -1780,9 +1782,9 @@ fn template_strings_reject_values_without_string_casts() {
     "#;
     let diagnostics = splitscript::compile(source).expect_err("Value does not implement Display");
     assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("does not satisfy the required `Display` capability")
+        diagnostic.message.contains("Display")
+            && diagnostic.message.contains("toString")
+            && diagnostic.message.contains("missing")
     }));
 }
 

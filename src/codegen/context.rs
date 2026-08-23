@@ -6,8 +6,8 @@ use crate::{
     ast::{EnumDecl, RecordDecl, ValueId},
     memory::MemoryLayouts,
     semantic::{FunctionInstance, SemanticModel},
-    stdlib::{StandardLibrary, StdlibTypeId},
-    types::ResolvedArrayType,
+    stdlib::StandardLibrary,
+    types::{ResolvedArrayType, TypeId},
     wasm_ir,
 };
 
@@ -37,7 +37,7 @@ pub(super) struct EmissionContext<'a> {
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
     pub intrinsic_futures: &'a HashMap<super::async_frame::IntrinsicFutureInstance, u32>,
-    pub display_functions: &'a HashMap<StdlibTypeId, FunctionInstance>,
+    pub display_functions: &'a HashMap<TypeId, FunctionInstance>,
     pub equality_functions: &'a EqualityFunctions,
     pub array_functions: &'a ArrayFunctions,
     pub set_functions: &'a SetFunctions,

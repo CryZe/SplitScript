@@ -98,6 +98,7 @@ impl<'a> CatalogGenerator<'a> {
                     "declared" => "Declared",
                     "structuralEquality" => "StructuralEquality",
                     "structuralMemoryLayout" => "StructuralMemoryLayout",
+                    "structuralMethods" => "StructuralMethods",
                     other => other,
                 };
                 let super_capabilities = owner
@@ -567,6 +568,8 @@ impl<'a> CatalogGenerator<'a> {
         };
         let implementation = if let Some(intrinsic) = intrinsic {
             format!("Implementation::Intrinsic(IntrinsicId::{intrinsic})")
+        } else if function.body.is_none() {
+            "Implementation::CapabilityRequirement".to_owned()
         } else {
             let function_name = format!("__splitscript_stdlib_{id}");
             format!(

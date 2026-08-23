@@ -45,13 +45,14 @@ pub(crate) fn validate(
 ) -> ValidationOutput {
     let (attachment_globals, attachment_diagnostics) =
         crate::attachment_globals::analyze(syntax, hir, semantics);
-    let effects = OperationAnalysis::infer(hir, semantics);
-    let capabilities = CapabilityAnalysis::build_with_library(
+    let capabilities = CapabilityAnalysis::build(
         &syntax.records,
         enum_types,
+        &syntax.functions,
         semantics,
         standard_library.clone(),
     );
+    let effects = OperationAnalysis::infer(hir, semantics, &capabilities);
     let mut diagnostics = Vec::new();
     diagnostics.extend(attachment_diagnostics);
     diagnostics.extend(stdlib_bodies::validate_signatures(
@@ -197,18 +198,78 @@ pub(crate) fn validate(
                 for constraint in parameter.constraints {
                     if let Err(error) = capabilities.require(*argument, *constraint, semantics) {
                         let capability = standard_library.capability(*constraint);
-                        diagnostics.push(Diagnostic::semantic(
+                        diagnostics.push(capability_diagnostic(
                             format!(
-                                "`{:?}` does not satisfy {} for `{}`: {error}",
-                                semantics.types().kind(*argument),
-                                capability.name,
-                                item.qualified_name,
+                                "`{}` requires capability `{}`: {error}",
+                                item.qualified_name, capability.name,
                             ),
                             expression.span,
+                            *argument,
+                            *constraint,
+                            syntax,
+                            semantics,
+                            &standard_library,
+                            &capabilities,
                         ));
                     }
                 }
             }
+        }
+        let display_source = match &expression.kind {
+            TypedExpressionKind::InterpolatedString(parts) => {
+                for part in parts {
+                    let hir::TypedInterpolatedPart::Expression {
+                        expression: value,
+                        conversion: Some(hir::ImplicitConversion::ToString { source }),
+                    } = part
+                    else {
+                        continue;
+                    };
+                    if let Err(error) =
+                        capabilities.require(*source, StdlibCapabilityId::Display, semantics)
+                    {
+                        let span = hir
+                            .expression(*value)
+                            .expect("interpolation operands belong to typed HIR")
+                            .span;
+                        diagnostics.push(capability_diagnostic(
+                            error,
+                            span,
+                            *source,
+                            StdlibCapabilityId::Display,
+                            syntax,
+                            semantics,
+                            &standard_library,
+                            &capabilities,
+                        ));
+                    }
+                }
+                None
+            }
+            TypedExpressionKind::Cast {
+                expression: value, ..
+            } if matches!(
+                semantics.types().kind(expression.ty),
+                TypeKind::Standard(crate::stdlib::StdlibTypeId::String)
+            ) =>
+            {
+                hir.expression(*value).map(|value| (value.ty, value.span))
+            }
+            _ => None,
+        };
+        if let Some((source, span)) = display_source
+            && let Err(error) = capabilities.require(source, StdlibCapabilityId::Display, semantics)
+        {
+            diagnostics.push(capability_diagnostic(
+                error,
+                span,
+                source,
+                StdlibCapabilityId::Display,
+                syntax,
+                semantics,
+                &standard_library,
+                &capabilities,
+            ));
         }
     }
 
@@ -240,6 +301,64 @@ pub(crate) fn validate(
         effects,
         diagnostics,
     }
+}
+
+fn capability_diagnostic(
+    message: String,
+    span: ast::Span,
+    ty: crate::types::TypeId,
+    capability: StdlibCapabilityId,
+    syntax: &Program,
+    semantics: &SemanticModel,
+    standard_library: &StandardLibrary,
+    capabilities: &CapabilityAnalysis,
+) -> Diagnostic {
+    let mut diagnostic = Diagnostic::semantic(message, span);
+    if standard_library.capability(capability).behavior
+        != crate::stdlib::CapabilityBehavior::StructuralMethods
+    {
+        return diagnostic;
+    }
+
+    for &requirement in capabilities.structural_method_requirements(capability) {
+        if let Some(function) = capabilities.method_candidate(ty, requirement)
+            && let Some(declaration) = syntax
+                .functions
+                .iter()
+                .find(|declaration| declaration.id == function)
+        {
+            return diagnostic.with_secondary_label(
+                declaration.name_span,
+                format!(
+                    "this method was considered for `{}`",
+                    standard_library.render_signature(requirement)
+                ),
+            );
+        }
+    }
+
+    let declaration = match semantics.types().kind(ty) {
+        TypeKind::Record(id) => syntax
+            .records
+            .iter()
+            .find(|declaration| declaration.id == *id)
+            .map(|declaration| declaration.name_span),
+        TypeKind::Enum(id) => syntax
+            .enum_declarations()
+            .find(|declaration| declaration.id == *id)
+            .map(|declaration| declaration.name_span),
+        _ => None,
+    };
+    if let Some(declaration) = declaration {
+        diagnostic = diagnostic.with_secondary_label(
+            declaration,
+            format!(
+                "define the required method on this type to satisfy `{}`",
+                standard_library.capability(capability).name
+            ),
+        );
+    }
+    diagnostic
 }
 
 fn validate_static_setting_lookups(syntax: &Program, hir: &TypedProgram) -> Vec<Diagnostic> {

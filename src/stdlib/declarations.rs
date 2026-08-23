@@ -165,6 +165,9 @@ pub enum CapabilityBehavior {
     Declared,
     StructuralEquality,
     StructuralMemoryLayout,
+    /// User-defined nominal types satisfy the capability by declaring every
+    /// method contract owned by it with the required signature.
+    StructuralMethods,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

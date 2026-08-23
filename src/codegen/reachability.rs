@@ -35,7 +35,7 @@ pub(super) struct Reachability {
     gc_results: BTreeSet<ResultTypeId>,
     gc_asyncs: BTreeSet<AsyncTypeId>,
     gc_sets: BTreeSet<TypeApplicationId>,
-    display_functions: BTreeMap<StdlibTypeId, FunctionInstance>,
+    display_functions: BTreeMap<TypeId, FunctionInstance>,
 }
 
 impl Reachability {
@@ -45,6 +45,7 @@ impl Reachability {
         enums: &[EnumDecl],
         wasm_ir: &wasm_ir::Program,
         standard_library: &StandardLibrary,
+        capabilities: &crate::capabilities::CapabilityAnalysis,
         provider_attachment: Option<FunctionInstance>,
     ) -> Self {
         let mut pending = Vec::new();
@@ -300,9 +301,13 @@ impl Reachability {
                 _ => {}
             }
             for source in display_sources.into_iter().map(specialize) {
-                let Some((standard, function)) =
-                    super::standard_display_function(source, program, semantics, standard_library)
-                else {
+                let Some((standard, function)) = super::display_function(
+                    source,
+                    program,
+                    semantics,
+                    standard_library,
+                    capabilities,
+                ) else {
                     continue;
                 };
                 reachable
@@ -497,7 +502,7 @@ impl Reachability {
         self.expression_instances.iter().cloned()
     }
 
-    pub fn display_functions(&self) -> impl Iterator<Item = (StdlibTypeId, &FunctionInstance)> {
+    pub fn display_functions(&self) -> impl Iterator<Item = (TypeId, &FunctionInstance)> {
         self.display_functions
             .iter()
             .map(|(ty, function)| (*ty, function))

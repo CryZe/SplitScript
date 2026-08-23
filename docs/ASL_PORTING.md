@@ -601,7 +601,7 @@ whitespace and current-culture formatting. A numeric `Convert.ToBoolean(value)`
 becomes `value != 0`. For text, trim and compare `true` and `false` explicitly
 with [`equalsIgnoreAsciiCase`], choosing a [`T!`] value or fallback for malformed text.
 
-The ordinary one-value `Convert.ToString(value)` maps to Display:
+The ordinary one-value `Convert.ToString(value)` maps to [`Display`]:
 
 ```splitscript
 # state "game.exe" {}
@@ -614,9 +614,26 @@ setVariable("Value", value)
 # }
 ```
 
-Interpolation, [`print`], and [`setVariable`] already accept Display values, so
-they do not need an intermediate string cast. The integer-radix overload maps
-to the fallible [`Integer.toString`] method:
+Interpolation, [`print`], and [`setVariable`] already accept [`Display`] values, so
+they do not need an intermediate string cast.
+
+A port-defined record or enum becomes a [`Display`] value by defining
+`fn Type.toString() -> String`; the result may be inferred. No `impl` block or
+annotation is necessary.
+
+```splitscript
+# state "game.exe" {}
+record Position {
+    x: i32,
+    y: i32,
+}
+fn Position.toString() { return `({self.x}, {self.y})` }
+# onAttach {
+setVariable("Position", Position { x: 3, y: 5 })
+# }
+```
+
+The integer-radix overload maps to the fallible [`Integer.toString`] method:
 
 ```splitscript
 # state "game.exe" {}
@@ -633,7 +650,7 @@ Negative values retain a leading minus sign, including signed minima. This
 differs from C#'s two's-complement rendering of negative values in base 2, 8,
 or 16, so review any negative-source call rather than translating it blindly.
 An out-of-range radix returns an error. Culture/provider, null, and object
-overloads remain separate policies and are not ordinary Display conversions.
+overloads remain separate policies and are not ordinary [`Display`] conversions.
 
 ## Version-labelled ASL states
 

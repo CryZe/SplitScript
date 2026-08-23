@@ -102,7 +102,7 @@ pub(super) struct ExprContext<'a> {
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
     pub intrinsic_futures: &'a HashMap<IntrinsicFutureInstance, u32>,
-    pub display_functions: &'a HashMap<StdlibTypeId, FunctionInstance>,
+    pub display_functions: &'a HashMap<TypeId, FunctionInstance>,
     pub equality_functions: &'a EqualityFunctions,
     pub array_functions: &'a super::ArrayFunctions,
     pub set_functions: &'a SetFunctions,
@@ -156,6 +156,15 @@ impl ExprContext<'_> {
             .expression(expression)
             .expect("typed expressions belong to Wasm IR")
             .ty)
+    }
+
+    pub(super) fn expression_type_id(&self, expression: ExprId) -> TypeId {
+        self.type_id(
+            self.wasm_ir
+                .expression(expression)
+                .expect("typed expressions belong to Wasm IR")
+                .ty,
+        )
     }
 
     fn called_instance(&self, function: &FunctionInstance) -> FunctionInstance {
@@ -4053,8 +4062,9 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
             ));
             return;
         }
-        if let Type::Standard(standard) = source
-            && let Some(display) = context.display_functions.get(&standard)
+        if let Some(display) = context
+            .display_functions
+            .get(&context.expression_type_id(expression))
         {
             let display = context.called_instance(display);
             function.instruction(&Instruction::Call(context.functions[&display].call));

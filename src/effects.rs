@@ -120,6 +120,7 @@ impl Default for CallFacts {
 struct CallCollector<'a> {
     facts: &'a mut CallFacts,
     semantics: &'a SemanticModel,
+    capabilities: &'a crate::capabilities::CapabilityAnalysis,
 }
 
 fn collect_call_facts(
@@ -163,6 +164,48 @@ fn collect_call_facts(
 
 impl TypedVisitor for CallCollector<'_> {
     fn visit_expression(&mut self, expression: &TypedExpression, program: &TypedProgram) {
+        match &expression.kind {
+            hir::TypedExpressionKind::InterpolatedString(parts) => {
+                for part in parts {
+                    let hir::TypedInterpolatedPart::Expression {
+                        conversion: Some(hir::ImplicitConversion::ToString { source }),
+                        ..
+                    } = part
+                    else {
+                        continue;
+                    };
+                    if let Some(function) = self.capabilities.method_implementation(
+                        *source,
+                        crate::stdlib::StdlibCapabilityId::Display,
+                        crate::stdlib::StdlibItemId::DisplayToString,
+                        self.semantics,
+                    ) {
+                        self.facts.callees.push(function);
+                    }
+                }
+            }
+            hir::TypedExpressionKind::Cast {
+                expression: value, ..
+            } if matches!(
+                self.semantics.types().kind(expression.ty),
+                TypeKind::Standard(crate::stdlib::StdlibTypeId::String)
+            ) =>
+            {
+                let source = program
+                    .expression(*value)
+                    .expect("cast operands belong to typed HIR")
+                    .ty;
+                if let Some(function) = self.capabilities.method_implementation(
+                    source,
+                    crate::stdlib::StdlibCapabilityId::Display,
+                    crate::stdlib::StdlibItemId::DisplayToString,
+                    self.semantics,
+                ) {
+                    self.facts.callees.push(function);
+                }
+            }
+            _ => {}
+        }
         if let Some((
             Some(
                 crate::semantic::ResolvedValue::CurrentSnapshot
@@ -240,7 +283,11 @@ impl TypedVisitor for CallCollector<'_> {
 }
 
 impl OperationAnalysis {
-    pub fn infer(program: &TypedProgram, semantics: &SemanticModel) -> Self {
+    pub fn infer(
+        program: &TypedProgram,
+        semantics: &SemanticModel,
+        capabilities: &crate::capabilities::CapabilityAnalysis,
+    ) -> Self {
         let function_count = program
             .all_function_bodies()
             .map(|body| body.function.function.index() + 1)
@@ -253,6 +300,7 @@ impl OperationAnalysis {
             CallCollector {
                 facts: &mut direct[function.function.function.index()],
                 semantics,
+                capabilities,
             }
             .visit_block(&function.body, program);
         }

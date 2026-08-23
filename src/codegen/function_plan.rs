@@ -6,8 +6,8 @@ use crate::{
     ast::{ActionKind, EnumDecl, Program},
     equality::EqualityCapabilities,
     semantic::{FunctionInstance, SemanticModel},
-    stdlib::{RuntimeRepresentation, StandardLibrary, StdlibTypeId},
-    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, ResolvedSetType},
+    stdlib::{RuntimeRepresentation, StandardLibrary},
+    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, ResolvedSetType, TypeId},
 };
 
 use super::{
@@ -30,7 +30,7 @@ pub(super) struct FunctionPlan<'a> {
     pub sets: SetFunctions,
     pub users: HashMap<FunctionInstance, UserFunctionPlan>,
     pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
-    pub displays: HashMap<StdlibTypeId, FunctionInstance>,
+    pub displays: HashMap<TypeId, FunctionInstance>,
     pub reads: Vec<u32>,
     pub transforms: Vec<Option<u32>>,
     pub actions: HashMap<ActionKind, u32>,

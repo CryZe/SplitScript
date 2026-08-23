@@ -64,12 +64,18 @@ impl StandardLibrarySemanticExt for StandardLibrary {
 
     fn method_candidates(&self, name: &str) -> Vec<CallCandidate> {
         self.method_items_named(name)
+            .filter(|item| {
+                item.implementation != crate::stdlib::Implementation::CapabilityRequirement
+            })
             .map(|item| CallCandidate { item })
             .collect()
     }
 
     fn method_candidates_including_private(&self, name: &str) -> Vec<CallCandidate> {
         self.method_items_named_including_private(name)
+            .filter(|item| {
+                item.implementation != crate::stdlib::Implementation::CapabilityRequirement
+            })
             .map(|item| CallCandidate { item })
             .collect()
     }
@@ -88,6 +94,9 @@ impl StandardLibrarySemanticExt for StandardLibrary {
 
     fn methods_for_type(&self, receiver: &TypeKind) -> Vec<&'static StdlibItem> {
         self.methods()
+            .filter(|item| {
+                item.implementation != crate::stdlib::Implementation::CapabilityRequirement
+            })
             .filter(|item| catalog_method_accepts(self, item, receiver))
             .collect()
     }
@@ -174,9 +183,15 @@ fn semantic_type_may_have_capability(
         TypeKind::StateSnapshot | TypeKind::SettingsView => false,
         TypeKind::Record(_) => matches!(
             behavior,
-            CapabilityBehavior::StructuralEquality | CapabilityBehavior::StructuralMemoryLayout
+            CapabilityBehavior::StructuralEquality
+                | CapabilityBehavior::StructuralMemoryLayout
+                | CapabilityBehavior::StructuralMethods
         ),
-        TypeKind::Enum(_) | TypeKind::Option { .. } | TypeKind::Result { .. } => {
+        TypeKind::Enum(_) => matches!(
+            behavior,
+            CapabilityBehavior::StructuralEquality | CapabilityBehavior::StructuralMethods
+        ),
+        TypeKind::Option { .. } | TypeKind::Result { .. } => {
             behavior == CapabilityBehavior::StructuralEquality
         }
         TypeKind::Array { length, .. } => {

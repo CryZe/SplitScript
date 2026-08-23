@@ -11,7 +11,7 @@ use crate::memory::{MemoryLayouts, MemoryTypeLayout};
 use crate::semantic::{FunctionInstance, ResolvedReceiver, SemanticModel};
 use crate::stdlib::{
     Implementation, IntrinsicId, StandardLibrary, StateProviderAttachment, StateProviderProcesses,
-    StdlibTypeId,
+    StdlibCapabilityId, StdlibItemId, StdlibTypeId,
 };
 use crate::types::{
     ResolvedArrayType, ResolvedOptionType, ResolvedRangeType, ResolvedResultType, TypeId, TypeKind,
@@ -112,6 +112,33 @@ fn standard_display_function(
     ))
 }
 
+fn display_function(
+    source: TypeId,
+    program: &Program,
+    semantics: &SemanticModel,
+    standard_library: &StandardLibrary,
+    capabilities: &crate::capabilities::CapabilityAnalysis,
+) -> Option<(TypeId, FunctionInstance)> {
+    if let Some((_, function)) =
+        standard_display_function(source, program, semantics, standard_library)
+    {
+        return Some((source, function));
+    }
+    let function = capabilities.method_implementation(
+        source,
+        StdlibCapabilityId::Display,
+        StdlibItemId::DisplayToString,
+        semantics,
+    )?;
+    let signature = semantics
+        .function_parameter_types(function)
+        .iter()
+        .copied()
+        .chain(semantics.function_result(function))
+        .collect();
+    Some((source, semantics.function_instance(function, signature)))
+}
+
 fn provider_attachment_function(
     provider: &crate::stdlib::StdlibStateProvider,
     program: &Program,
@@ -163,6 +190,7 @@ pub struct BackendProgram<'a> {
     constructed_types: ConstructedTypes,
     memory_layouts: &'a MemoryLayouts,
     equality: &'a EqualityCapabilities,
+    capabilities: &'a crate::capabilities::CapabilityAnalysis,
     source_name: &'a str,
     source: &'a str,
 }
@@ -197,6 +225,7 @@ impl<'a> BackendProgram<'a> {
             constructed_types,
             memory_layouts: checked.capabilities.memory(),
             equality: checked.capabilities.equality(),
+            capabilities: &checked.capabilities,
             source_name: checked.source_name(),
             source: checked.document.source(),
         }
@@ -236,6 +265,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         constructed_types,
         memory_layouts,
         equality,
+        capabilities,
         source_name,
         source,
     } = inputs;
@@ -282,6 +312,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
         enums,
         wasm_ir,
         &standard_library,
+        capabilities,
         provider_attachment.clone(),
     );
     let async_frames =

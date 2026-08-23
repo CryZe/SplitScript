@@ -366,11 +366,20 @@ compiler follows this hierarchy transitively for type checking and method
 completion, while inferred constraints and rendered signatures retain only the
 strongest non-redundant capabilities. Concrete integer types consequently
 declare `Integer` once instead of separately repeating those memberships.
-Nominal standard-library types can connect a parameterless `String`-returning
-source method to `Display` with `@display`. The generated type declaration owns
-that implementation identity, catalog validation checks its receiver and
-signature, and reachability treats conversions as calls to the ordinary hidden
-library body. `FileVersion.toString()` is the first implementation: casts,
+Capabilities may also declare structural method requirements in privileged
+source. `Display` requires `fn toString() -> String`; a user record or enum
+satisfies it merely by defining the corresponding `fn Type.toString()` method.
+The checker matches the semantic receiver, parameters, and result against the
+catalog requirement, and implicit conversions enter the ordinary source call
+graph so effects and reachability remain accurate. This intentionally avoids
+requiring `impl` blocks in short user scripts.
+
+Nominal standard-library types remain explicit. They connect a parameterless
+`String`-returning source method to `Display` with the private `@display`
+annotation. The generated type declaration owns that implementation identity,
+catalog validation checks its receiver and signature, and reachability treats
+conversions as calls to the ordinary hidden library body.
+`FileVersion.toString()` is the first such implementation: casts,
 interpolation, `print`, and `setVariable` all dispatch to it, while codegen has
 no `FileVersion` formatting case.
 `MemoryReadable` GC records derive their naturally aligned field layout from

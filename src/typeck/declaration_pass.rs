@@ -592,6 +592,7 @@ fn collect_function_signatures(checker: &mut Checker, program: &Program) {
             result,
             completion,
             generalized: Vec::new(),
+            associated_projections: Vec::new(),
         };
         checker
             .declarations

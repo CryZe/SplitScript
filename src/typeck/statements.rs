@@ -294,26 +294,28 @@ impl Checker {
                     self.unify(iterable_ty, receiver, iterable.span);
                     iterable_ty = self.shallow_type(receiver);
                 }
-                // An unannotated user parameter has no constructor from which
-                // an associated `Iterable.Item` can be projected. Preserve
-                // SplitScript's existing backwards inference by selecting the
-                // simplest built-in iterable shape, `[T]`, and allowing uses
-                // of the loop binding (and callers) to constrain `T`.
-                if matches!(iterable_ty, Type::Variable(_))
-                    && matches!(iterable.kind, crate::ast::ExprKind::Path(_))
-                {
-                    let element = self.fresh_inference(Requirements::none(), None);
-                    let array = Type::Array(self.array_type_id(element));
-                    self.unify(iterable_ty, array, iterable.span);
-                    iterable_ty = self.shallow_type(array);
-                }
-                let element_ty = self
-                    .constructed_field_receiver(iterable_ty)
-                    .and_then(|(constructor, argument)| {
+                let iterable_capability = crate::stdlib::StdlibCapabilityId::Iterable;
+                let element_ty = if matches!(iterable_ty, Type::Variable(_)) {
+                    self.inference
+                        .require(
+                            iterable_ty,
+                            Requirements::capability(iterable_capability),
+                        )
+                        .ok()
+                        .map(|()| {
+                            self.inference.associated_type(
+                                iterable_ty,
+                                iterable_capability,
+                                "Item",
+                            )
+                        })
+                } else {
+                    self.constructed_field_receiver(iterable_ty)
+                        .and_then(|(constructor, argument)| {
                         let declaration = self.standard_library.type_constructor(constructor);
                         if !self.standard_library.type_constructor_has_capability(
                             constructor,
-                            crate::stdlib::StdlibCapabilityId::Iterable,
+                            iterable_capability,
                         ) {
                             return None;
                         }
@@ -327,7 +329,8 @@ impl Checker {
                             .find(|associated| associated.name == "Item")
                             .map(|associated| self.catalog_type(associated.value, &variables))
                     })
-                    .unwrap_or_else(|| {
+                }
+                .unwrap_or_else(|| {
                         let actual = self.type_name(iterable_ty);
                         self.error(
                             format!(

@@ -47,6 +47,9 @@ pub(super) struct FunctionSignature {
     /// Unbound inference roots generalized after this function's dependency
     /// component has been solved. Monomorphic functions leave this empty.
     pub(super) generalized: Vec<u32>,
+    /// Associated outputs inferred from generic parameters used in the body,
+    /// such as the item yielded by an `Iterable` parameter.
+    pub(super) associated_projections: Vec<crate::inference::AssociatedProjection>,
 }
 
 #[derive(Clone)]
@@ -85,6 +88,32 @@ impl FunctionSignature {
             .map(|ty| inference.instantiate_type(*ty, &self.generalized, &mut substitutions))
             .collect();
         let result = inference.instantiate_type(self.result, &self.generalized, &mut substitutions);
+        for projection in &self.associated_projections {
+            let receiver = substitutions
+                .get(&projection.receiver)
+                .copied()
+                .unwrap_or_else(|| {
+                    inference.instantiate_type(
+                        Type::Variable(projection.receiver),
+                        &self.generalized,
+                        &mut substitutions,
+                    )
+                });
+            let projected =
+                inference.associated_type(receiver, projection.capability, projection.name);
+            // `T.Item` need not itself remain generic. A body can constrain it
+            // to a concrete type while leaving `T` generic over all matching
+            // iterable shapes. Instantiate the original output either way,
+            // then preserve the associated-type equality at this call site.
+            let expected = inference.instantiate_type(
+                Type::Variable(projection.output),
+                &self.generalized,
+                &mut substitutions,
+            );
+            inference
+                .unify(expected, projected)
+                .expect("validated generic associated projections remain compatible");
+        }
         let type_arguments = self
             .generalized
             .iter()
@@ -106,7 +135,12 @@ impl FunctionSignature {
 }
 
 impl DeclarationEnvironment {
-    pub(super) fn set_function_generics(&mut self, function: FunctionId, generalized: Vec<u32>) {
+    pub(super) fn set_function_generics(
+        &mut self,
+        function: FunctionId,
+        generalized: Vec<u32>,
+        associated_projections: Vec<crate::inference::AssociatedProjection>,
+    ) {
         self.function_signatures
             .get_mut(&function)
             .expect("collected functions have canonical signatures")
@@ -114,8 +148,13 @@ impl DeclarationEnvironment {
         for signature in self.functions.values_mut().chain(self.methods.values_mut()) {
             if signature.id == function {
                 signature.generalized = generalized.clone();
+                signature.associated_projections = associated_projections.clone();
             }
         }
+        self.function_signatures
+            .get_mut(&function)
+            .expect("collected functions have canonical signatures")
+            .associated_projections = associated_projections;
     }
 }
 

@@ -19,11 +19,12 @@ use super::{CheckOutput, Checker, RecoveringCheckOutput};
 pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheckOutput {
     checker.resolve_deferred_member_paths();
     checker.diagnose_ambiguous_process_reads();
-    let (function_type_parameters, generic_parameter_constraints) = if checker.errors.is_empty() {
-        bind_function_generics(&mut checker, program)
-    } else {
-        (HashMap::new(), HashMap::new())
-    };
+    let (function_type_parameters, generic_parameter_constraints, function_associated_projections) =
+        if checker.errors.is_empty() {
+            bind_function_generics(&mut checker, program)
+        } else {
+            (HashMap::new(), HashMap::new(), HashMap::new())
+        };
     if checker.errors.is_empty() {
         checker.diagnose_ambiguous_empty_collections();
     }
@@ -176,7 +177,11 @@ pub(super) fn finish(mut checker: Checker, program: &Program) -> RecoveringCheck
             })
             .collect(),
     );
-    semantics.set_function_type_parameters(function_type_parameters, generic_parameter_constraints);
+    semantics.set_function_type_parameters(
+        function_type_parameters,
+        generic_parameter_constraints,
+        function_associated_projections,
+    );
     diagnose_float_literal_ranges(program, &semantics, &mut diagnostics);
     RecoveringCheckOutput {
         output: CheckOutput {
@@ -250,10 +255,12 @@ fn bind_function_generics(
 ) -> (
     HashMap<FunctionId, Vec<crate::types::TypeId>>,
     HashMap<crate::types::TypeId, Vec<crate::stdlib::StdlibCapabilityId>>,
+    HashMap<FunctionId, Vec<crate::semantic::FunctionAssociatedProjection>>,
 ) {
     let mut roots = HashMap::new();
     let mut parameters = HashMap::new();
     let mut constraints = HashMap::new();
+    let mut associated_projections = HashMap::new();
     for function in &program.functions {
         let generalized = checker.declarations.function_signatures[&function.id]
             .generalized
@@ -282,13 +289,28 @@ fn bind_function_generics(
         if !function_parameters.is_empty() {
             parameters.insert(function.id, function_parameters);
         }
+        let resolved_projections = checker.declarations.function_signatures[&function.id]
+            .associated_projections
+            .iter()
+            .filter_map(|projection| {
+                Some(crate::semantic::FunctionAssociatedProjection {
+                    receiver: *roots.get(&projection.receiver)?,
+                    output: *roots.get(&projection.output)?,
+                    capability: projection.capability,
+                    name: projection.name,
+                })
+            })
+            .collect::<Vec<_>>();
+        if !resolved_projections.is_empty() {
+            associated_projections.insert(function.id, resolved_projections);
+        }
     }
     for (variable, parameter) in roots {
         checker
             .inference
             .bind_generic_parameter(variable, parameter);
     }
-    (parameters, constraints)
+    (parameters, constraints, associated_projections)
 }
 
 impl Checker {

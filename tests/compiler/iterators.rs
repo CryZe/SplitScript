@@ -156,3 +156,107 @@ fn iterator_methods_and_steps_are_available_to_editor_queries() {
         assert!(database.hover(offset).unwrap().is_some());
     }
 }
+
+#[test]
+fn for_loop_parameters_infer_the_iterable_contract_and_associated_item() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn inspect(values) {
+            for value in values {
+                print(value)
+            }
+        }
+
+        whileAttached {
+            let exclusive: u32..<u32 = 0..<10
+            let inclusive: u32..=u32 = 0..=10
+            inspect(exclusive)
+            inspect(inclusive)
+            inspect([1u32, 2])
+            inspect(["forest", "castle"])
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("one inferred Iterable function should accept each built-in iterable shape");
+    let function = checked.syntax().functions[0].id;
+    let type_parameters = checked.semantics().function_type_parameters(function);
+    assert_eq!(type_parameters.len(), 2);
+    assert_eq!(
+        checked
+            .semantics()
+            .generic_parameter_constraints(type_parameters[0]),
+        [splitscript::compiler::stdlib::StdlibCapabilityId::Iterable]
+    );
+    assert!(
+        checked
+            .semantics()
+            .generic_parameter_constraints(type_parameters[1])
+            .contains(&splitscript::compiler::stdlib::StdlibCapabilityId::Display)
+    );
+    let mut database = CompilerDatabase::new(source);
+    let function_hover = database
+        .hover(source.find("inspect(values)").unwrap())
+        .unwrap()
+        .expect("inferred iterator function hover");
+    assert!(
+        function_hover
+            .markdown
+            .contains("fn inspect(values: T) -> None where T: Iterable, T.Item: Display"),
+        "{}",
+        function_hover.markdown
+    );
+    let binding = source.find("value in values").unwrap();
+    let binding_hover = database
+        .hover(binding)
+        .unwrap()
+        .expect("projected iterator binding hover");
+    assert!(binding_hover.markdown.contains("value: T.Item"));
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("each projected iterator item should specialize to valid Wasm GC");
+}
+
+#[test]
+fn inferred_iterable_items_participate_in_parameter_and_result_inference() {
+    let source = r#"
+        state "game.exe" {}
+
+        fn firstOr(values, fallback) {
+            for value in values {
+                return value
+            }
+            return fallback
+        }
+
+        whileAttached {
+            let number: u16 = firstOr(1u16..<2, 0u16)
+            let text: String = firstOr(["forest"], "fallback")
+            print(number)
+            print(text)
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(source).unwrap())
+        .expect("the associated item should unify with ordinary parameters and the result");
+    let function = checked.syntax().functions[0].id;
+    let mut database = CompilerDatabase::new(source);
+    let function_hover = database
+        .hover(source.find("firstOr(values").unwrap())
+        .unwrap()
+        .expect("projected result function hover");
+    assert!(
+        function_hover
+            .markdown
+            .contains("fn firstOr(values: T, fallback: T.Item) -> T.Item where T: Iterable"),
+        "{}",
+        function_hover.markdown
+    );
+    assert_eq!(
+        checked.semantics().function_type_parameters(function).len(),
+        2,
+        "the iterable and its projected item are the only generalized semantic types"
+    );
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("projected parameter and result types should specialize to valid Wasm GC");
+}

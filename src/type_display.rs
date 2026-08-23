@@ -31,7 +31,17 @@ pub(crate) fn display_type(ty: TypeId, snapshot: &SemanticSnapshot) -> String {
             .find(|enumeration| enumeration.id == *id)
             .map(|enumeration| enumeration.name.clone())
             .unwrap_or_else(|| format!("enum#{}", id.index())),
-        TypeKind::GenericParameter { index, .. } => crate::types::generic_parameter_name(*index),
+        TypeKind::GenericParameter { index, .. } => snapshot
+            .semantics()
+            .associated_projection_for_output(ty)
+            .map(|projection| {
+                format!(
+                    "{}.{}",
+                    display_type(projection.receiver, snapshot),
+                    projection.name
+                )
+            })
+            .unwrap_or_else(|| crate::types::generic_parameter_name(*index)),
         TypeKind::Array {
             element, length, ..
         } => match length {

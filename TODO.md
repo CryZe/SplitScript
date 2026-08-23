@@ -378,7 +378,9 @@ semantic-review evidence, not as a conformance corpus.
   `IteratorStep<T>`, whose `Item(T)` and `End` cases keep an iterator over `T?`
   from confusing `Item(None)` with exhaustion. Array and set cursors detect
   structural mutation; direct `for` loops retain their allocation-free
-  specialized lowering.
+  specialized lowering. Untyped helper parameters infer the minimal
+  `T: Iterable` constraint, and the projected `T.Item` participates in ordinary
+  bidirectional parameter, result, and capability inference.
 - [ ] Design user-defined mutable iterator state and lower `for` through a
   general `Iterable.iterator` / `Iterator.next` call path once that ownership
   model is settled. Specify failure and asynchronous iteration separately;
@@ -655,9 +657,9 @@ remaining work is product hardening and distribution.
   import. Keep `squared()` as the simple exact-intent API for exponent two.
 - [ ] Generalize first-class indexing beyond arrays only when another real type
   needs it. Design an operator protocol with inferred index and output types
-  (the current single-receiver capability graph has no associated types), then
-  make its declarations, documentation, completion, and lowering catalog
-  driven rather than disguising the operation as a callable method.
+  using the capability graph's associated-type projection machinery, then make
+  its declarations, documentation, completion, and lowering catalog driven
+  rather than disguising the operation as a callable method.
 - [ ] Add structural anonymous records only after named records prove materially
   noisy. Decide explicitly whether anonymous records are memory-readable.
 

@@ -526,19 +526,41 @@ fn generalize_component(checker: &mut Checker, functions: &[FunctionId]) {
 
     for function in functions {
         let signature = checker.declarations.function_signatures[function].clone();
-        let generalized = checker
+        let mut generalized = checker
             .inference
             .unbound_variables_in(signature.params.iter().copied().chain([signature.result]))
             .into_iter()
             .filter(|variable| !environment.contains(variable))
             .collect::<Vec<_>>();
+        let mut associated_projections = Vec::new();
+        loop {
+            let projections = checker.inference.associated_projections_for(&generalized);
+            let mut changed = false;
+            for projection in projections {
+                if !associated_projections.contains(&projection) {
+                    associated_projections.push(projection);
+                }
+                for output in checker
+                    .inference
+                    .unbound_variables_in([Type::Variable(projection.output)])
+                {
+                    if !generalized.contains(&output) && !environment.contains(&output) {
+                        generalized.push(output);
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
         recursive_arguments.insert(
             *function,
             generalized.iter().copied().map(Type::Variable).collect(),
         );
         checker
             .declarations
-            .set_function_generics(*function, generalized);
+            .set_function_generics(*function, generalized, associated_projections);
     }
     checker
         .semantics

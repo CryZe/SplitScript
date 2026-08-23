@@ -631,6 +631,7 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                 })
                 .collect::<Option<Vec<_>>>()?;
             let result = semantics.function_result(function.id)?;
+            let associated_projections = semantics.function_associated_projections(function.id);
             let bounds = semantics
                 .function_type_parameters(function.id)
                 .iter()
@@ -641,7 +642,15 @@ fn render_source_hover(definition: &SourceDefinition, context: &SemanticContext)
                     (!constraints.is_empty()).then(|| {
                         format!(
                             "{}: {}",
-                            render_type(*parameter, context),
+                            associated_projections
+                                .iter()
+                                .find(|projection| projection.output == *parameter)
+                                .map(|projection| format!(
+                                    "{}.{}",
+                                    render_type(projection.receiver, context),
+                                    projection.name
+                                ))
+                                .unwrap_or_else(|| render_type(*parameter, context)),
                             constraints
                                 .iter()
                                 .map(|constraint| {

@@ -29,6 +29,14 @@ pub struct FunctionInstance {
     pub signature: Vec<TypeId>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FunctionAssociatedProjection {
+    pub receiver: TypeId,
+    pub output: TypeId,
+    pub capability: crate::stdlib::StdlibCapabilityId,
+    pub name: &'static str,
+}
+
 impl FunctionInstance {
     pub fn monomorphic(function: FunctionId) -> Self {
         Self {
@@ -274,6 +282,7 @@ pub struct SemanticModel {
     function_completions: HashMap<FunctionId, TypeId>,
     function_parameter_types: HashMap<FunctionId, Vec<TypeId>>,
     function_type_parameters: HashMap<FunctionId, Vec<TypeId>>,
+    function_associated_projections: HashMap<FunctionId, Vec<FunctionAssociatedProjection>>,
     generic_parameter_constraints: HashMap<TypeId, Vec<crate::stdlib::StdlibCapabilityId>>,
     specialized_types: HashMap<(FunctionInstance, TypeId), TypeId>,
     record_field_types: HashMap<RecordFieldId, TypeId>,
@@ -392,6 +401,27 @@ impl SemanticModel {
             .get(&function)
             .map(Vec::as_slice)
             .unwrap_or_default()
+    }
+
+    pub fn function_associated_projections(
+        &self,
+        function: FunctionId,
+    ) -> &[FunctionAssociatedProjection] {
+        self.function_associated_projections
+            .get(&function)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    pub fn associated_projection_for_output(
+        &self,
+        output: TypeId,
+    ) -> Option<FunctionAssociatedProjection> {
+        self.function_associated_projections
+            .values()
+            .flatten()
+            .find(|projection| projection.output == output)
+            .copied()
     }
 
     /// Constructs the canonical concrete identity for an inferred function
@@ -957,9 +987,11 @@ impl SemanticModel {
         &mut self,
         parameters: HashMap<FunctionId, Vec<TypeId>>,
         constraints: HashMap<TypeId, Vec<crate::stdlib::StdlibCapabilityId>>,
+        associated_projections: HashMap<FunctionId, Vec<FunctionAssociatedProjection>>,
     ) {
         self.function_type_parameters = parameters;
         self.generic_parameter_constraints = constraints;
+        self.function_associated_projections = associated_projections;
     }
 
     pub(crate) fn set_function_parameter_types(
@@ -1699,6 +1731,7 @@ impl SemanticBuilder {
             function_completions,
             function_parameter_types: HashMap::new(),
             function_type_parameters: HashMap::new(),
+            function_associated_projections: HashMap::new(),
             generic_parameter_constraints: HashMap::new(),
             specialized_types: HashMap::new(),
             record_field_types,

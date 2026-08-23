@@ -12,7 +12,7 @@ use crate::{
     },
     stdlib::{
         CapabilityBehavior, CoreTypeId, StandardLibrary, StdlibCapabilityId,
-        StdlibTypeConstructorId, StdlibTypeId,
+        StdlibTypeConstructorId, StdlibTypeId, TypeRef as CatalogTypeRef,
     },
     types::{BuiltinType, ResolvedTypeRef, TypeId, TypeKind, TypeStore},
 };
@@ -155,6 +155,20 @@ struct Variable {
     literal_default: Option<LiteralDefault>,
 }
 
+/// Equality between an associated type and a normal inference variable.
+///
+/// Keeping the projected value as an ordinary variable lets all existing
+/// bidirectional inference continue to constrain it. The receiver relation is
+/// retained separately so generic functions can instantiate `T.Item` from a
+/// concrete `T` at each call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AssociatedProjection {
+    pub(crate) receiver: u32,
+    pub(crate) output: u32,
+    pub(crate) capability: StdlibCapabilityId,
+    pub(crate) name: &'static str,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LiteralDefault {
     Integer,
@@ -239,6 +253,7 @@ pub(crate) struct InferenceContext {
     standard_library: StandardLibrary,
     types: TypeStore,
     variables: Vec<Variable>,
+    associated_projections: Vec<AssociatedProjection>,
     arrays: Vec<ArrayLayout>,
     options: Vec<OptionLayout>,
     results: Vec<ResultLayout>,
@@ -309,6 +324,7 @@ impl InferenceContext {
             standard_library,
             types,
             variables: Vec::new(),
+            associated_projections: Vec::new(),
             arrays,
             options,
             results,
@@ -494,6 +510,185 @@ impl InferenceContext {
         }
     }
 
+    /// Projects one associated type from a value constrained by `capability`.
+    /// Concrete built-in constructors resolve immediately. An unresolved
+    /// generic receiver retains an equality relation that is solved when a
+    /// call site supplies its concrete iterable type.
+    pub(crate) fn associated_type(
+        &mut self,
+        receiver: Type,
+        capability: StdlibCapabilityId,
+        name: &'static str,
+    ) -> Type {
+        let receiver = self.shallow(receiver);
+        if let Some(value) = self.concrete_associated_type(receiver, capability, name) {
+            return value;
+        }
+        let Type::Variable(receiver) = receiver else {
+            panic!("validated associated type `{name}` has no implementation for {receiver}");
+        };
+        let receiver = self.root(receiver);
+        if let Some(projection) = self.associated_projections.iter().find(|projection| {
+            projection.receiver == receiver
+                && projection.capability == capability
+                && projection.name == name
+        }) {
+            return Type::Variable(self.root_without_compression(projection.output));
+        }
+        let Type::Variable(output) = self.fresh(Requirements::none(), None) else {
+            unreachable!("fresh inference values are variables")
+        };
+        self.associated_projections.push(AssociatedProjection {
+            receiver,
+            output,
+            capability,
+            name,
+        });
+        Type::Variable(output)
+    }
+
+    pub(crate) fn associated_projections_for(
+        &mut self,
+        receivers: &[u32],
+    ) -> Vec<AssociatedProjection> {
+        let receiver_roots = receivers
+            .iter()
+            .map(|receiver| self.root(*receiver))
+            .collect::<Vec<_>>();
+        self.associated_projections
+            .clone()
+            .into_iter()
+            .filter_map(|mut projection| {
+                projection.receiver = self.root(projection.receiver);
+                projection.output = self.root(projection.output);
+                receiver_roots
+                    .contains(&projection.receiver)
+                    .then_some(projection)
+            })
+            .collect()
+    }
+
+    fn root_without_compression(&self, mut id: u32) -> u32 {
+        loop {
+            let parent = self.variables[id as usize].parent;
+            if parent == id {
+                return id;
+            }
+            id = parent;
+        }
+    }
+
+    fn concrete_associated_type(
+        &mut self,
+        receiver: Type,
+        capability: StdlibCapabilityId,
+        name: &'static str,
+    ) -> Option<Type> {
+        let (constructor, arguments) = self.type_constructor_arguments(receiver)?;
+        if !self
+            .standard_library
+            .type_constructor_has_capability(constructor, capability)
+        {
+            return None;
+        }
+        let declaration = self.standard_library.type_constructor(constructor);
+        let value = declaration
+            .associated_types
+            .iter()
+            .find(|associated| associated.name == name)?
+            .value;
+        let variables = declaration
+            .parameters
+            .iter()
+            .zip(arguments)
+            .map(|(parameter, argument)| (parameter.name, argument))
+            .collect::<HashMap<_, _>>();
+        Some(self.catalog_type(value, &variables))
+    }
+
+    fn type_constructor_arguments(
+        &mut self,
+        receiver: Type,
+    ) -> Option<(StdlibTypeConstructorId, Vec<Type>)> {
+        match self.shallow(receiver) {
+            Type::Array(array) => Some((
+                StdlibTypeConstructorId::Array,
+                vec![self.array_element(array)],
+            )),
+            Type::Option(option) => Some((
+                StdlibTypeConstructorId::Option,
+                vec![self.option_value(option)],
+            )),
+            Type::Result(result) => Some((
+                StdlibTypeConstructorId::Result,
+                vec![self.result_value(result)],
+            )),
+            Type::Set(set) => Some((StdlibTypeConstructorId::Set, vec![self.set_element(set)])),
+            Type::Range(range) => Some((
+                match self.range_kind(range) {
+                    RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
+                    RangeKind::Inclusive => StdlibTypeConstructorId::InclusiveRange,
+                },
+                vec![self.range_bound(range)],
+            )),
+            Type::Application(application) => Some((
+                self.application_constructor(application),
+                self.application_arguments(application).to_vec(),
+            )),
+            Type::Known(_) | Type::Async(_) | Type::Variable(_) => None,
+        }
+    }
+
+    fn catalog_type(
+        &mut self,
+        ty: CatalogTypeRef,
+        variables: &HashMap<&'static str, Type>,
+    ) -> Type {
+        match ty {
+            CatalogTypeRef::Core(core) => self.known_core(core),
+            CatalogTypeRef::Standard(standard) => self.known_standard(standard),
+            CatalogTypeRef::Parameter(name) | CatalogTypeRef::Associated(name) => variables[name],
+            CatalogTypeRef::FixedArray { element, length } => {
+                let element = self.catalog_type(*element, variables);
+                Type::Array(self.array_type_with_length(element, Some(length)))
+            }
+            CatalogTypeRef::Application {
+                constructor,
+                arguments,
+            } => {
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.catalog_type(*argument, variables))
+                    .collect::<Vec<_>>();
+                self.catalog_application_type(constructor, arguments)
+            }
+        }
+    }
+
+    fn catalog_application_type(
+        &mut self,
+        constructor: StdlibTypeConstructorId,
+        arguments: Vec<Type>,
+    ) -> Type {
+        let [value] = arguments.as_slice() else {
+            return Type::Application(self.application_type(constructor, arguments));
+        };
+        let value = *value;
+        match constructor {
+            StdlibTypeConstructorId::Array => Type::Array(self.array_type(value)),
+            StdlibTypeConstructorId::Option => Type::Option(self.option_type(value)),
+            StdlibTypeConstructorId::Result => Type::Result(self.result_type(value)),
+            StdlibTypeConstructorId::Set => Type::Set(self.set_type(value)),
+            StdlibTypeConstructorId::ExclusiveRange => {
+                Type::Range(self.range_type(value, RangeKind::Exclusive))
+            }
+            StdlibTypeConstructorId::InclusiveRange => {
+                Type::Range(self.range_type(value, RangeKind::Inclusive))
+            }
+            _ => Type::Application(self.application_type(constructor, arguments)),
+        }
+    }
+
     /// Instantiates one type from a generalized function signature.
     ///
     /// Every generalized root receives one fresh variable per call. Reusing
@@ -672,6 +867,12 @@ impl InferenceContext {
     }
 
     pub(crate) fn unify(&mut self, left: Type, right: Type) -> Result<Type, InferenceError> {
+        let unified = self.unify_inner(left, right)?;
+        self.solve_associated_projections()?;
+        Ok(self.shallow(unified))
+    }
+
+    fn unify_inner(&mut self, left: Type, right: Type) -> Result<Type, InferenceError> {
         let left = self.shallow(left);
         let right = self.shallow(right);
         if self.is_error_type(left) || self.is_error_type(right) {
@@ -694,13 +895,13 @@ impl InferenceContext {
                 }
                 let left_element = self.array_element(left);
                 let right_element = self.array_element(right);
-                self.unify(left_element, right_element)?;
+                self.unify_inner(left_element, right_element)?;
                 Ok(Type::Array(left))
             }
             (Type::Set(left), Type::Set(right)) => {
                 let left_element = self.set_element(left);
                 let right_element = self.set_element(right);
-                self.unify(left_element, right_element)?;
+                self.unify_inner(left_element, right_element)?;
                 Ok(Type::Set(left))
             }
             (Type::Application(left), Type::Application(right)) => {
@@ -719,26 +920,26 @@ impl InferenceContext {
                     });
                 }
                 for (left, right) in left_arguments.into_iter().zip(right_arguments) {
-                    self.unify(left, right)?;
+                    self.unify_inner(left, right)?;
                 }
                 Ok(Type::Application(left))
             }
             (Type::Option(left), Type::Option(right)) => {
                 let left_value = self.option_value(left);
                 let right_value = self.option_value(right);
-                self.unify(left_value, right_value)?;
+                self.unify_inner(left_value, right_value)?;
                 Ok(Type::Option(left))
             }
             (Type::Result(left), Type::Result(right)) => {
                 let left_value = self.result_value(left);
                 let right_value = self.result_value(right);
-                self.unify(left_value, right_value)?;
+                self.unify_inner(left_value, right_value)?;
                 Ok(Type::Result(left))
             }
             (Type::Async(left), Type::Async(right)) => {
                 let left_value = self.async_value(left);
                 let right_value = self.async_value(right);
-                self.unify(left_value, right_value)?;
+                self.unify_inner(left_value, right_value)?;
                 Ok(Type::Async(left))
             }
             (Type::Range(left), Type::Range(right)) => {
@@ -750,12 +951,44 @@ impl InferenceContext {
                 }
                 let left_bound = self.range_bound(left);
                 let right_bound = self.range_bound(right);
-                self.unify(left_bound, right_bound)?;
+                self.unify_inner(left_bound, right_bound)?;
                 Ok(Type::Range(left))
             }
             (left, right) if left == right => Ok(left),
             (left, right) => Err(InferenceError::TypeMismatch { left, right }),
         }
+    }
+
+    fn solve_associated_projections(&mut self) -> Result<(), InferenceError> {
+        let projections = self.associated_projections.clone();
+        for (index, projection) in projections.iter().enumerate() {
+            let receiver = self.root(projection.receiver);
+            for previous in &projections[..index] {
+                if self.root(previous.receiver) == receiver
+                    && previous.capability == projection.capability
+                    && previous.name == projection.name
+                {
+                    self.unify_inner(
+                        Type::Variable(previous.output),
+                        Type::Variable(projection.output),
+                    )?;
+                }
+            }
+            let receiver = self.shallow(Type::Variable(receiver));
+            if matches!(receiver, Type::Variable(_)) {
+                continue;
+            }
+            let Some(value) =
+                self.concrete_associated_type(receiver, projection.capability, projection.name)
+            else {
+                return Err(InferenceError::UnsupportedOperation {
+                    ty: receiver,
+                    requirements: Requirements::capability(projection.capability),
+                });
+            };
+            self.unify_inner(Type::Variable(projection.output), value)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn require(
@@ -1620,7 +1853,7 @@ impl InferenceContext {
         self.variables[left as usize].binding = None;
 
         let binding = match (left_variable.binding, right_variable.binding) {
-            (Some(left), Some(right)) => Some(self.unify(left, right)?),
+            (Some(left), Some(right)) => Some(self.unify_inner(left, right)?),
             (Some(binding), None) | (None, Some(binding)) => Some(binding),
             (None, None) => None,
         };
@@ -1646,7 +1879,7 @@ impl InferenceContext {
             return Ok(ty);
         }
         if let Some(binding) = self.variables[variable as usize].binding {
-            return self.unify(binding, ty);
+            return self.unify_inner(binding, ty);
         }
         if self.occurs_in(variable, ty, &mut Vec::new()) {
             return Err(InferenceError::Message(
@@ -1778,25 +2011,66 @@ pub(crate) fn type_may_have_capability(
                 behavior,
                 CapabilityBehavior::StructuralEquality | CapabilityBehavior::StructuralMethods
             ),
-            TypeKind::Option { .. } | TypeKind::Result { .. } => {
+            TypeKind::Option { .. } => {
                 behavior == CapabilityBehavior::StructuralEquality
+                    || library.type_constructor_has_capability(
+                        StdlibTypeConstructorId::Option,
+                        capability,
+                    )
+            }
+            TypeKind::Result { .. } => {
+                behavior == CapabilityBehavior::StructuralEquality
+                    || library.type_constructor_has_capability(
+                        StdlibTypeConstructorId::Result,
+                        capability,
+                    )
             }
             TypeKind::Async { .. } => false,
-            TypeKind::Range { .. } => false,
+            TypeKind::Range { kind, .. } => library.type_constructor_has_capability(
+                match kind {
+                    RangeKind::Exclusive => StdlibTypeConstructorId::ExclusiveRange,
+                    RangeKind::Inclusive => StdlibTypeConstructorId::InclusiveRange,
+                },
+                capability,
+            ),
             TypeKind::Array { length, .. } => {
                 behavior == CapabilityBehavior::StructuralMemoryLayout && length.is_some()
+                    || library
+                        .type_constructor_has_capability(StdlibTypeConstructorId::Array, capability)
             }
-            TypeKind::Set { .. } => false,
+            TypeKind::Set { .. } => {
+                library.type_constructor_has_capability(StdlibTypeConstructorId::Set, capability)
+            }
             TypeKind::Application { constructor, .. } => {
                 library.type_constructor_has_capability(*constructor, capability)
             }
             TypeKind::GenericParameter { .. } => false,
         },
-        Type::Option(_) | Type::Result(_) => behavior == CapabilityBehavior::StructuralEquality,
+        Type::Option(_) => {
+            behavior == CapabilityBehavior::StructuralEquality
+                || library
+                    .type_constructor_has_capability(StdlibTypeConstructorId::Option, capability)
+        }
+        Type::Result(_) => {
+            behavior == CapabilityBehavior::StructuralEquality
+                || library
+                    .type_constructor_has_capability(StdlibTypeConstructorId::Result, capability)
+        }
         Type::Async(_) => false,
-        Type::Range(_) => false,
-        Type::Array(_) => behavior == CapabilityBehavior::StructuralMemoryLayout,
-        Type::Set(_) => false,
+        Type::Range(_) => [
+            StdlibTypeConstructorId::ExclusiveRange,
+            StdlibTypeConstructorId::InclusiveRange,
+        ]
+        .into_iter()
+        .any(|constructor| library.type_constructor_has_capability(constructor, capability)),
+        Type::Array(_) => {
+            behavior == CapabilityBehavior::StructuralMemoryLayout
+                || library
+                    .type_constructor_has_capability(StdlibTypeConstructorId::Array, capability)
+        }
+        Type::Set(_) => {
+            library.type_constructor_has_capability(StdlibTypeConstructorId::Set, capability)
+        }
         Type::Application(application) => library.type_constructor_has_capability(
             // Inference owns the constructor mapping; unresolved applications
             // are conservatively admitted and validated semantically later.
@@ -1851,6 +2125,11 @@ fn requirements_are_possible(
                 .map(|ty| Type::Known(types.id_for_standard(ty.id))),
         )
         .any(|ty| type_meets_requirements(library, types, ty, requirements))
+        || library.type_constructors().iter().any(|constructor| {
+            requirements.as_slice().iter().all(|requirement| {
+                library.type_constructor_has_capability(constructor.id, *requirement)
+            })
+        })
 }
 
 fn error(message: impl Into<String>) -> InferenceError {

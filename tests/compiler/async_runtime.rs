@@ -121,6 +121,7 @@ fn never_can_appear_as_an_uninhabited_aggregate_payload() {
 struct AsyncTestHost {
     process_open: bool,
     messages: Vec<String>,
+    memory_regions: Vec<(u64, Vec<u8>)>,
     raw_scene: i32,
     raw_entities: i32,
     fail_scene_read: bool,
@@ -177,17 +178,42 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
                             let pointer = parameters[2].unwrap_i32() as usize;
                             let length = parameters[3].unwrap_i32() as usize;
                             let value = match address {
-                                0x7fff_0000 => caller.data().raw_scene,
-                                0x7fff_0004 => caller.data().raw_entities,
-                                _ => return Ok(()),
+                                0x7fff_0000 => Some(caller.data().raw_scene),
+                                0x7fff_0004 => Some(caller.data().raw_entities),
+                                _ => None,
                             };
+                            let mapped = value
+                                .is_none()
+                                .then(|| {
+                                    caller
+                                        .data()
+                                        .memory_regions
+                                        .iter()
+                                        .find_map(|(base, bytes)| {
+                                            let offset =
+                                                u64::try_from(address).ok()?.checked_sub(*base)?
+                                                    as usize;
+                                            let end = offset.checked_add(length)?;
+                                            (end <= bytes.len())
+                                                .then(|| bytes[offset..end].to_vec())
+                                        })
+                                })
+                                .flatten();
                             let memory = caller
                                 .get_export("memory")
                                 .and_then(wasmtime::Extern::into_memory)
                                 .expect("generated modules export memory");
-                            memory
-                                .write(&mut caller, pointer, &value.to_le_bytes()[..length])
-                                .expect("process-read output should belong to guest memory");
+                            if let Some(value) = value {
+                                memory
+                                    .write(&mut caller, pointer, &value.to_le_bytes()[..length])
+                                    .expect("process-read output should belong to guest memory");
+                            } else if let Some(mapped) = mapped {
+                                memory
+                                    .write(&mut caller, pointer, &mapped)
+                                    .expect("process-read output should belong to guest memory");
+                            } else {
+                                return Ok(());
+                            }
                             results[0] = Val::I32(1);
                         }
                         "runtime_print_message" => {
@@ -218,6 +244,7 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
         AsyncTestHost {
             process_open: true,
             messages: Vec::new(),
+            memory_regions: Vec::new(),
             raw_scene: 1,
             raw_entities: 7,
             fail_scene_read: false,
@@ -233,6 +260,83 @@ fn execute_with_mock_host(source: &str) -> (wasmtime::Store<AsyncTestHost>, wasm
         .call(&mut store, ())
         .unwrap();
     (store, instance)
+}
+
+#[test]
+fn source_defined_unity_scene_manager_discovers_and_snapshots_scenes() {
+    let source = r#"
+        let sceneManager
+
+        state "game.exe" {
+            activeScene = sceneManager.activeScene();
+            loadedScenes = sceneManager.loadedScenes();
+        }
+
+        onAttach {
+            sceneManager = await Unity.sceneManager()
+        }
+
+        whileAttached {
+            if !current.loadedScenes.isEmpty() {
+                print(`{current.activeScene.index}:{current.activeScene.name}:{current.loadedScenes[0].name}`)
+            }
+        }
+    "#;
+    let (mut store, instance) = execute_with_mock_host(source);
+
+    let mut unity_player = vec![0; 0x200];
+    unity_player[0..2].copy_from_slice(&0x5a4du16.to_le_bytes());
+    unity_player[0x3c..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+    unity_player[0x80..0x84].copy_from_slice(&0x0000_4550u32.to_le_bytes());
+    unity_player[0x98..0x9a].copy_from_slice(&0x020bu16.to_le_bytes());
+    let signature = [
+        0x48, 0x83, 0xec, 0x20, 0x4c, 0x8b, 0x15, 0, 0, 0, 0, 0x33, 0xf6,
+    ];
+    unity_player[0x100..0x10d].copy_from_slice(&signature);
+    let manager_pointer = 0x1800u64;
+    let displacement = (manager_pointer as i64 - 0x110bu64 as i64) as i32;
+    unity_player[0x107..0x10b].copy_from_slice(&displacement.to_le_bytes());
+
+    let manager_address = 0x2000u64;
+    let active_scene = 0x3000u64;
+    let loaded_scene_table = 0x4000u64;
+    let scene_path = 0x5000u64;
+    let mut manager = vec![0; 0x80];
+    manager[0x18..0x1c].copy_from_slice(&1u32.to_le_bytes());
+    manager[0x28..0x30].copy_from_slice(&loaded_scene_table.to_le_bytes());
+    manager[0x48..0x50].copy_from_slice(&active_scene.to_le_bytes());
+    let mut scene = vec![0; 0xa0];
+    scene[0x10..0x18].copy_from_slice(&scene_path.to_le_bytes());
+    scene[0x98..0x9c].copy_from_slice(&(-1i32).to_le_bytes());
+    let mut path = vec![0; 128];
+    let path_text = b"Assets/Scenes/Forest.unity";
+    path[..path_text.len()].copy_from_slice(path_text);
+
+    store.data_mut().memory_regions = vec![
+        (0x1000, unity_player),
+        (manager_pointer, manager_address.to_le_bytes().to_vec()),
+        (manager_address, manager),
+        (active_scene, scene),
+        (loaded_scene_table, active_scene.to_le_bytes().to_vec()),
+        (scene_path, path),
+    ];
+
+    let update = instance
+        .get_typed_func::<(), ()>(&mut store, "update")
+        .unwrap();
+    for _ in 0..12 {
+        update.call(&mut store, ()).unwrap();
+    }
+
+    assert!(
+        store
+            .data()
+            .messages
+            .iter()
+            .any(|message| message == "-1:Forest:Forest"),
+        "scene snapshots should preserve signed indices and derived names: {:?}",
+        store.data().messages,
+    );
 }
 
 #[test]

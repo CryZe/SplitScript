@@ -1068,6 +1068,81 @@ namespace Unity {
     ) -> MonoModule {
         return await MonoModule.discover(version)
     }
+
+    /// Discovers Unity's native scene manager.
+    ///
+    /// The discovery supports 32-bit and 64-bit Windows players and the
+    /// 64-bit Linux and macOS players supported by ASR. Signature scanning is
+    /// cooperative, so large UnityPlayer modules continue yielding to the
+    /// runtime while attachment is in progress.
+    ///
+    /// # Example
+    ///
+    /// Discover scene snapshots during attachment
+    ///
+    /// ```splitscript
+    /// # let sceneManager
+    /// # state "game.exe" { scene = sceneManager.activeScene(); }
+    /// onAttach {
+    ///     sceneManager = await Unity.sceneManager()
+    /// }
+    /// ```
+    @mustUse("The discovered scene manager is otherwise discarded.")
+    fn sceneManager() -> UnitySceneManager {
+        let unityPlayer = retry {
+            process.loadedModule("UnityPlayer.dll")
+                else process.loadedModule("UnityPlayer.so")
+                else process.loadedModule("UnityPlayer.dylib")
+                else throw "UnityPlayer is not loaded yet"
+        }
+
+        let isPortableExecutable = retry process.read<u16>(unityPlayer.address) == 0x5a4d
+        let pointerSize = if isPortableExecutable {
+            retry unityPlayer.pointerSize()
+        } else {
+            PointerSize.Bit64
+        }
+
+        let managerPointer = match pointerSize {
+            PointerSize.Bit64 => {
+                let signature = if isPortableExecutable {
+                    sig"48 83 EC 20 4C 8B ?5 ?? ?? ?? ?? 33 F6"
+                } else {
+                    sig"41 54 53 50 4C 8B ?5 ?? ?? ?? ?? 41 83"
+                }
+                let instruction = await unityPlayer.scan(signature)
+                retry process.readRelative32(instruction.add(7))
+            },
+            PointerSize.Bit32 => {
+                let found = await unityPlayer.scanAny([
+                    sig"55 8B EC 51 A1 ?? ?? ?? ?? 53 33 DB",
+                    sig"53 8D 41 ?? 33 DB",
+                    sig"55 8B EC 83 EC 18 A1 ?? ?? ?? ?? 33 C9 53",
+                ])
+                match found.index {
+                    0 => retry process.read<u32>(found.address.add(5)) as address,
+                    1 => retry process.read<u32>(found.address.offset(-4)) as address,
+                    _ => retry process.read<u32>(found.address.add(7)) as address,
+                }
+            },
+        }
+
+        let managerAddress: address = retry {
+            let address: address = match pointerSize {
+                PointerSize.Bit32 => process.read<u32>(managerPointer)? as address,
+                PointerSize.Bit64 => process.read<u64>(managerPointer)? as address,
+            }
+            if address == 0 {
+                throw "Unity scene manager is not initialized yet"
+            }
+            address
+        }
+
+        return UnitySceneManager {
+            address: managerAddress,
+            pointerSize: pointerSize,
+        }
+    }
 }
 
 /// Supports ordered numeric operations.
@@ -4691,6 +4766,293 @@ enum TimerState {
     /// let unrecognized = timer.state() == TimerState.Unknown
     /// ```
     Unknown,
+}
+
+/// Reads immutable snapshots from Unity's native scene manager.
+///
+/// A manager is discovered once in [`onAttach`] and can then populate ordinary
+/// [`state`] fields. Scene reads return errors rather than partial values, so a
+/// transient process-memory failure participates in the state's normal
+/// transactional update behavior.
+///
+/// # Example
+///
+/// Track active and loaded Unity scenes
+///
+/// ```splitscript
+/// # let sceneManager
+/// # state "game.exe" { scene = sceneManager.activeScene(); }
+/// # onAttach { sceneManager = await Unity.sceneManager() }
+/// whileAttached {
+///     print(current.scene.name)
+/// }
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+struct UnitySceneManager {
+    /// Address of Unity's native scene-manager state.
+    private address: address,
+
+    /// Pointer width used by the attached Unity player.
+    private pointerSize: PointerSize,
+
+    /// Reads the currently active scene as an immutable snapshot.
+    ///
+    /// The snapshot owns the scene's address, build index, asset path, and
+    /// derived name. A missing scene or failed component read returns an error,
+    /// allowing a state field to retain its preceding accepted value.
+    ///
+    /// # Example
+    ///
+    /// Poll the active scene
+    ///
+    /// ```splitscript
+    /// # let sceneManager
+    /// # state "game.exe" { activeScene = sceneManager.activeScene(); }
+    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// split {
+    ///     return old.activeScene.name != current.activeScene.name
+    /// }
+    /// ```
+    @mustUse("The active scene snapshot is otherwise discarded.")
+    fn activeScene() -> UnityScene! {
+        let activeSceneOffset: u64 = match self.pointerSize {
+            PointerSize.Bit32 => 0x28,
+            PointerSize.Bit64 => 0x48,
+        }
+        let sceneAddress: address = match self.pointerSize {
+            PointerSize.Bit32 => process.read<u32>(self.address.add(activeSceneOffset))? as address,
+            PointerSize.Bit64 => process.read<u64>(self.address.add(activeSceneOffset))? as address,
+        }
+        if sceneAddress == 0 {
+            throw "Unity has no active scene"
+        }
+
+        let buildIndexOffset: u64 = match self.pointerSize {
+            PointerSize.Bit32 => 0x70,
+            PointerSize.Bit64 => 0x98,
+        }
+        let assetPathOffset: u64 = match self.pointerSize {
+            PointerSize.Bit32 => 0x0c,
+            PointerSize.Bit64 => 0x10,
+        }
+        let pathAddress: address = match self.pointerSize {
+            PointerSize.Bit32 => process.read<u32>(sceneAddress.add(assetPathOffset))? as address,
+            PointerSize.Bit64 => process.read<u64>(sceneAddress.add(assetPathOffset))? as address,
+        }
+        if pathAddress == 0 {
+            throw "Unity scene has no asset path"
+        }
+
+        let path = process.readUtf8(pathAddress, 128)?
+        let nameStart = match path.lastIndexOf("/") {
+            Some(separator) => separator + 1,
+            None => 0,
+        }
+        let nameEnd = if path.endsWith(".unity") {
+            path.byteLength() - 6
+        } else {
+            path.byteLength()
+        }
+        let name = path.slice(nameStart, nameEnd)?
+
+        return Ok(UnityScene {
+            address: sceneAddress,
+            index: process.read<i32>(sceneAddress.add(buildIndexOffset))?,
+            path: path,
+            name: name,
+        })
+    }
+
+    /// Reads every currently loaded scene as one immutable array.
+    ///
+    /// Scene order matches Unity's native loaded-scene table. The operation is
+    /// all-or-nothing: an invalid table entry or failed scene component read
+    /// returns an error instead of exposing a misleading partial collection.
+    ///
+    /// # Example
+    ///
+    /// Compare the active scene with Unity's first loaded scene
+    ///
+    /// ```splitscript
+    /// # let sceneManager
+    /// # state "game.exe" {
+    /// #     activeScene = sceneManager.activeScene();
+    /// #     loadedScenes = sceneManager.loadedScenes();
+    /// # }
+    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// isLoading {
+    ///     if current.loadedScenes.isEmpty() {
+    ///         return None
+    ///     }
+    ///     let first = current.loadedScenes[0]
+    ///     return current.activeScene.name != first.name
+    /// }
+    /// ```
+    @mustUse("The loaded scene snapshots are otherwise discarded.")
+    fn loadedScenes() -> [UnityScene]! {
+        let sceneCountOffset: u64 = match self.pointerSize {
+            PointerSize.Bit32 => 0x10,
+            PointerSize.Bit64 => 0x18,
+        }
+        let sceneCount = process.read<u32>(self.address.add(sceneCountOffset))?
+        let tableAddress: address = match self.pointerSize {
+            PointerSize.Bit32 => process.read<u32>(self.address.add(sceneCountOffset + 8))? as address,
+            PointerSize.Bit64 => process.read<u64>(self.address.add(sceneCountOffset + 16))? as address,
+        }
+        if sceneCount != 0 && tableAddress == 0 {
+            throw "Unity loaded-scene table is unavailable"
+        }
+
+        let scenes: [UnityScene] = []
+        for index in 0..<sceneCount {
+            let entryOffset: u64 = match self.pointerSize {
+                PointerSize.Bit32 => (index as u64) * 4,
+                PointerSize.Bit64 => (index as u64) * 8,
+            }
+            let sceneAddress: address = match self.pointerSize {
+                PointerSize.Bit32 => process.read<u32>(tableAddress.add(entryOffset))? as address,
+                PointerSize.Bit64 => process.read<u64>(tableAddress.add(entryOffset))? as address,
+            }
+            if sceneAddress == 0 {
+                throw "Unity loaded-scene table contains an empty entry"
+            }
+
+            let buildIndexOffset: u64 = match self.pointerSize {
+                PointerSize.Bit32 => 0x70,
+                PointerSize.Bit64 => 0x98,
+            }
+            let assetPathOffset: u64 = match self.pointerSize {
+                PointerSize.Bit32 => 0x0c,
+                PointerSize.Bit64 => 0x10,
+            }
+            let pathAddress: address = match self.pointerSize {
+                PointerSize.Bit32 => process.read<u32>(sceneAddress.add(assetPathOffset))? as address,
+                PointerSize.Bit64 => process.read<u64>(sceneAddress.add(assetPathOffset))? as address,
+            }
+            if pathAddress == 0 {
+                throw "Unity loaded scene has no asset path"
+            }
+
+            let path = process.readUtf8(pathAddress, 128)?
+            let nameStart = match path.lastIndexOf("/") {
+                Some(separator) => separator + 1,
+                None => 0,
+            }
+            let nameEnd = if path.endsWith(".unity") {
+                path.byteLength() - 6
+            } else {
+                path.byteLength()
+            }
+            let name = path.slice(nameStart, nameEnd)?
+            scenes.push(UnityScene {
+                address: sceneAddress,
+                index: process.read<i32>(sceneAddress.add(buildIndexOffset))?,
+                path: path,
+                name: name,
+            })
+        }
+        return Ok(scenes)
+    }
+}
+
+/// Captures one Unity scene at a particular polling update.
+///
+/// Every public field is copied from process memory before the value is
+/// committed to state. Consequently, [`old`] scene values remain stable after
+/// Unity unloads or reuses their original native addresses.
+///
+/// # Example
+///
+/// Inspect a scene transition
+///
+/// ```splitscript
+/// # let sceneManager
+/// # state "game.exe" { scene = sceneManager.activeScene(); }
+/// # onAttach { sceneManager = await Unity.sceneManager() }
+/// split {
+///     return old.scene.index != current.scene.index
+/// }
+/// ```
+@representation(gcStruct, nullable)
+@valueUsage(recordField, enumPayload, stateField, localVariable, globalVariable)
+struct UnityScene {
+    /// Native address from which this scene snapshot was read.
+    ///
+    /// The address is retained for advanced native Unity reads. The other
+    /// fields remain valid even if this address becomes unreadable later.
+    ///
+    /// # Example
+    ///
+    /// Inspect a scene's native identity
+    ///
+    /// ```splitscript
+    /// # let sceneManager
+    /// # state "game.exe" { scene = sceneManager.activeScene(); }
+    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// whileAttached {
+    ///     debug print(current.scene.address)
+    /// }
+    /// ```
+    address: address,
+
+    /// Unity build index captured for this scene.
+    ///
+    /// Unity may report `-1` while a scene is still initializing, so the value
+    /// intentionally remains signed.
+    ///
+    /// # Example
+    ///
+    /// Start on the first configured scene
+    ///
+    /// ```splitscript
+    /// # let sceneManager
+    /// # state "game.exe" { scene = sceneManager.activeScene(); }
+    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// start {
+    ///     return current.scene.index == 0
+    /// }
+    /// ```
+    index: i32,
+
+    /// Full asset path captured from Unity.
+    ///
+    /// A typical value resembles `Assets/Scenes/Forest.unity`. Use [`name`]
+    /// when only the final scene identifier is needed.
+    ///
+    /// # Example
+    ///
+    /// Detect a scene stored under the menu directory
+    ///
+    /// ```splitscript
+    /// # let sceneManager
+    /// # state "game.exe" { scene = sceneManager.activeScene(); }
+    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// split {
+    ///     return current.scene.path.startsWith("Assets/Scenes/Menu/")
+    /// }
+    /// ```
+    path: String,
+
+    /// Final filename component without the `.unity` extension.
+    ///
+    /// This is derived from [`path`](field@UnityScene.path) when the snapshot is
+    /// read, matching the common scene-name representation used by Unity
+    /// autosplitters.
+    ///
+    /// # Example
+    ///
+    /// Split when the credits scene becomes active
+    ///
+    /// ```splitscript
+    /// # let sceneManager
+    /// # state "game.exe" { scene = sceneManager.activeScene(); }
+    /// # onAttach { sceneManager = await Unity.sceneManager() }
+    /// split {
+    ///     return old.scene.name != "Credits" && current.scene.name == "Credits"
+    /// }
+    /// ```
+    name: String,
 }
 
 /// Describes an attached Unity IL2CPP runtime.

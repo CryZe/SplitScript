@@ -41,6 +41,9 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::ResultDiscardError,
         StdlibItemId::AddressOffset,
         StdlibItemId::UnityIl2Cpp,
+        StdlibItemId::UnitySceneManager,
+        StdlibItemId::UnitySceneManagerActiveScene,
+        StdlibItemId::UnitySceneManagerLoadedScenes,
         StdlibItemId::GBAEmulatorDiscover,
         StdlibItemId::PS2EmulatorDiscover,
         StdlibItemId::PS1EmulatorDiscover,
@@ -69,6 +72,51 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
     Validator::new_with_features(WasmFeatures::all())
         .validate_all(&splitscript::compile(source).unwrap())
         .expect("a call through a source-defined library body should produce valid Wasm");
+}
+
+#[test]
+fn growable_arrays_store_non_null_standard_library_gc_values() {
+    let source = r#"
+        state "game.exe" {}
+
+        whileAttached {
+            let durations: [Duration] = []
+            durations.push(Duration.fromSeconds(1))
+            let first: Duration = durations[0]
+            print(first.wholeSeconds())
+        }
+    "#;
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile(source).unwrap())
+        .expect("array backing slots should preserve non-null source values");
+}
+
+#[test]
+fn unity_scene_manager_exposes_immutable_state_snapshots() {
+    let source = r#"
+        let sceneManager
+
+        state ["game.exe", "game-demo.exe"] {
+            activeScene = sceneManager.activeScene();
+            loadedScenes = sceneManager.loadedScenes();
+        }
+
+        onAttach {
+            sceneManager = await Unity.sceneManager()
+        }
+
+        whileAttached {
+            print(current.activeScene.name)
+            print(current.activeScene.index)
+            print(current.activeScene.address)
+            print(current.loadedScenes.length())
+        }
+    "#;
+
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile(source).unwrap())
+        .expect("source-defined Unity scene snapshots should produce valid Wasm GC");
 }
 
 #[test]

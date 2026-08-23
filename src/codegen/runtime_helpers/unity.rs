@@ -888,6 +888,7 @@ pub(super) fn compile_unity_get_field_any(
         &mut function,
         names_storage,
         Type::Standard(StdlibTypeId::String),
+        gc,
     );
     function
         .instruction(&Instruction::Call(unity_get_field_offset))

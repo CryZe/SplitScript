@@ -2133,6 +2133,7 @@ pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
         &mut function,
         strings_storage,
         Type::Standard(StdlibTypeId::String),
+        gc,
     );
     function
         .instruction(&Instruction::RefAsNonNull)
@@ -2204,6 +2205,7 @@ pub(in crate::codegen::runtime_helpers) fn compile_join_strings(
         &mut function,
         strings_storage,
         Type::Standard(StdlibTypeId::String),
+        gc,
     );
     function
         .instruction(&Instruction::LocalSet(current))

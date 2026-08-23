@@ -163,9 +163,10 @@ semantic-review evidence, not as a conformance corpus.
   semantic distinction visible: settings lookup is a direct migration,
   `Task.Run` requires intent-specific cooperative control flow, and
   `MemoryWatcherList` depends on how it is populated. Do not publish
-  placeholder migration pages whose only useful answer is that Unity scenes or
-  ergonomic Mono value/string paths are unavailable; prioritize implementing
-  those provider features instead, then document their real API.
+  placeholder migration pages whose only useful answer is that ergonomic Mono
+  value/string paths are unavailable; prioritize implementing those provider
+  features instead, then document their real API. Unity scene migration now
+  points to the implemented typed snapshot API.
 
 ### Close feedback loops without papering over language design
 
@@ -342,6 +343,13 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Standard-library and type-system boundaries
 
+- [ ] Let trusted standard-library source declare private helper functions and
+  methods that participate in ordinary type/effect checking but are omitted
+  from the public catalog, completion, hover, and generated documentation. The
+  Unity scene implementation currently repeats scene-address decoding in
+  `activeScene()` and `loadedScenes()` because standard-library functions
+  cannot yet be private; consolidate that code once the visibility model is
+  compiler-owned rather than exposing an implementation helper as public API.
 - [ ] Design the user-facing trait/type-class model around the existing
   source-defined capability graph. Begin with memory reading, `Display`,
   equality, numeric operations, and hashing; decide separately whether user
@@ -382,14 +390,16 @@ semantic-review evidence, not as a conformance corpus.
   `staticFieldPath`, `field`, and `readManagedString` primitives can explain
   what is possible, but a porter should not be told that manually rebuilding
   every helper chain is the finished API.
-- [ ] Treat Unity scene snapshots as a now-proven provider gap. TUNIC,
+- [x] Treat Unity scene snapshots as a now-proven provider gap. TUNIC,
   Anemoiapolis, Building 71, Cannibal Abduction, Chop Goblins, Assemble with
   Care, and Beeny need active/loaded scene names or indices and well-defined
-  previous/current/loading semantics. First document and exercise the existing
-  ARTIFICIAL static-field, Himno static-singleton/`MemoryPath`, and
-  `readManagedString` surface so those are not mistaken for missing instance or
-  string support; then design one typed scene API rather than reproducing
-  `asl-help` callbacks.
+  previous/current/loading semantics. `Unity.sceneManager()` now discovers the
+  ASR-supported UnityPlayer layouts cooperatively in source-defined standard
+  library code. `activeScene()` and `loadedScenes()` return immutable
+  `UnityScene` snapshots with address, signed index, path, and name; failed
+  reads retain accepted state values instead of exposing live handles or a
+  partial collection. The ASL porting guide documents the direct helper
+  translation rather than reproducing `asl-help` callbacks.
 - [ ] Extend Unity Mono managed collections after the typed value-path design,
   using corpus-proven residual needs: add managed list/dictionary traversal for
   Alba and A Short Hike, and
@@ -746,7 +756,8 @@ remaining work is product hardening and distribution.
    runtime-tested subset instead of treating all compiler-clean outputs as a
    corpus.
 4. Reclassify blocked ports after subtracting existing features, then design
-   the proven Unity scene/managed-collection and remaining timer host surfaces.
+   the proven Unity managed-collection and remaining timer host surfaces; use
+   the implemented scene snapshots when reevaluating Unity ports.
 5. Harden and publish the bundled VSIX and native releases, then evaluate the
    hosted Code OSS workbench.
 6. Resume source-debugging work only after the JavaScript debugger, native

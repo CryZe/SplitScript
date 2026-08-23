@@ -139,6 +139,7 @@ fn compile_contains(
         &mut function,
         gc.index(Type::ArrayStorage(set.backing)),
         element,
+        gc,
     );
     function.instruction(&Instruction::LocalGet(1));
     emit_value_equality(&mut function, element, equality, string_equality);
@@ -282,6 +283,7 @@ fn compile_remove(
         &mut function,
         gc.index(Type::ArrayStorage(set.backing)),
         element,
+        gc,
     );
     function.instruction(&Instruction::LocalGet(1));
     emit_value_equality(&mut function, element, equality, string_equality);

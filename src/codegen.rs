@@ -786,12 +786,21 @@ fn emit_typed_struct_get(
     function.instruction(&instruction);
 }
 
-fn emit_array_get(function: &mut Function, array_type_index: u32, element: Type) {
+fn emit_array_get(function: &mut Function, array_type_index: u32, element: Type, gc: &GcLayout) {
     function.instruction(&match element {
         Type::Bool | Type::U8 | Type::U16 => Instruction::ArrayGetU(array_type_index),
         Type::I8 | Type::I16 => Instruction::ArrayGetS(array_type_index),
         _ => Instruction::ArrayGet(array_type_index),
     });
+    if matches!(
+        gc.val_type(element),
+        ValType::Ref(RefType {
+            nullable: false,
+            ..
+        })
+    ) {
+        function.instruction(&Instruction::RefAsNonNull);
+    }
 }
 
 fn emit_memory_value(

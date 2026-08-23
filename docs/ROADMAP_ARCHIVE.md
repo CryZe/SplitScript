@@ -1,5 +1,18 @@
 # SplitScript roadmap
 
+## 2026-08-23: source-defined Unity scene snapshots
+
+- Added cooperative `Unity.sceneManager()` discovery for ASR's Windows,
+  Linux, and macOS UnityPlayer scene-manager layouts without a new compiler
+  intrinsic.
+- Added immutable active and loaded `UnityScene` snapshots carrying native
+  address, signed build index, asset path, and derived scene name, with
+  transactional failure instead of partial state updates.
+- Made growable array backing storage support non-null standard-library GC
+  elements while retaining non-null source reads.
+- Documented the direct `LoadSceneManager`, `Scenes.Active`, and
+  `Scenes.Loaded` migration path.
+
 ## 2026-08-23: typed guidance for literal setting lookups
 
 - Added warning `SS1007` for literal dynamic lookups whose meaning is already

@@ -476,4 +476,20 @@ impl GcLayout {
             _ => StorageType::Val(self.val_type(ty)),
         }
     }
+
+    /// Returns defaultable storage for an array element.
+    ///
+    /// Growable arrays allocate spare capacity with `array.new_default`.
+    /// Standard-library GC values may be non-null at the source level, so their
+    /// physical backing slots must be nullable until the logical length reaches
+    /// them. Array reads restore the source-level non-null guarantee.
+    pub(super) fn array_element_storage_type(&self, ty: Type) -> StorageType {
+        match self.storage_type(ty) {
+            StorageType::Val(ValType::Ref(mut reference)) => {
+                reference.nullable = true;
+                StorageType::Val(ValType::Ref(reference))
+            }
+            storage => storage,
+        }
+    }
 }

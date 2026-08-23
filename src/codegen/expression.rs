@@ -1747,7 +1747,12 @@ pub(super) fn compile_for_bind_and_advance(
             ForCollection::Set { .. } => Type::ArrayStorage(array),
             ForCollection::Range { .. } | ForCollection::DirectRange { .. } => unreachable!(),
         };
-        emit_array_get(function, context.gc.index(backing_type), element);
+        emit_array_get(
+            function,
+            context.gc.index(backing_type),
+            element,
+            context.gc,
+        );
     });
     compile_value_set(function, index_value, context, |function| {
         compile_value_get(function, index_value, context);
@@ -2198,6 +2203,7 @@ fn compile_expr_unconverted(
                         context.semantics,
                     ))),
                 element,
+                context.gc,
             );
         }
         wasm_ir::ExpressionKind::Unary { .. } => {

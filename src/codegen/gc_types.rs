@@ -275,7 +275,8 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
                 });
                 (
                     CompositeInnerType::Array(ArrayType(FieldType {
-                        element_type: layout.storage_type(array_element_type(id, semantics)),
+                        element_type: layout
+                            .array_element_storage_type(array_element_type(id, semantics)),
                         mutable: true,
                     })),
                     declaration.length.is_some(),

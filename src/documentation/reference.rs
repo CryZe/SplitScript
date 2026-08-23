@@ -214,27 +214,19 @@ impl DocumentationReference {
                 signature: Some(signature),
             }
         }));
-        entries.extend(
-            self.library
-                .types()
-                .iter()
-                .map(|ty| DocumentationIndexEntry {
-                    uri: symbol_uri(StdlibSymbolId::Type(ty.id), &self.library),
-                    title: ty.name.to_owned(),
-                    kind: match ty.kind {
-                        StdlibTypeKind::Intrinsic => "type",
-                        StdlibTypeKind::Struct => "record",
-                        StdlibTypeKind::Enum => "enum",
-                    },
-                    summary: compact_prose(ty.documentation.summary),
-                    raw_summary: ty.documentation.summary,
-                    search_text: format!(
-                        "{} {}",
-                        ty.documentation.summary, ty.documentation.details
-                    ),
-                    signature: Some(render_type_declaration(ty)),
-                }),
-        );
+        entries.extend(self.library.types().map(|ty| DocumentationIndexEntry {
+            uri: symbol_uri(StdlibSymbolId::Type(ty.id), &self.library),
+            title: ty.name.to_owned(),
+            kind: match ty.kind {
+                StdlibTypeKind::Intrinsic => "type",
+                StdlibTypeKind::Struct => "record",
+                StdlibTypeKind::Enum => "enum",
+            },
+            summary: compact_prose(ty.documentation.summary),
+            raw_summary: ty.documentation.summary,
+            search_text: format!("{} {}", ty.documentation.summary, ty.documentation.details),
+            signature: Some(render_type_declaration(ty)),
+        }));
         entries.extend(
             self.library
                 .fields()
@@ -261,7 +253,7 @@ impl DocumentationReference {
                     }
                 }),
         );
-        entries.extend(self.library.variants().iter().map(|variant| {
+        entries.extend(self.library.public_variants().map(|variant| {
             let owner = self.library.type_decl(variant.owner);
             DocumentationIndexEntry {
                 uri: symbol_uri(StdlibSymbolId::Variant(variant.id), &self.library),
@@ -556,7 +548,6 @@ impl DocumentationReference {
             .or_else(|| {
                 self.library
                     .types()
-                    .iter()
                     .find(|value| symbol_uri(StdlibSymbolId::Type(value.id), &self.library) == uri)
                     .map(|value| {
                         self.declaration_page(
@@ -634,8 +625,7 @@ impl DocumentationReference {
             })
             .or_else(|| {
                 self.library
-                    .variants()
-                    .iter()
+                    .public_variants()
                     .find(|value| {
                         symbol_uri(StdlibSymbolId::Variant(value.id), &self.library) == uri
                     })
@@ -775,7 +765,7 @@ impl DocumentationReference {
                     .capabilities_satisfy(ty.capabilities, capability)
             })
             .map(|ty| DocumentationMember::CoreType(ty.id))
-            .chain(self.library.types().iter().filter_map(|ty| {
+            .chain(self.library.types().filter_map(|ty| {
                 self.library
                     .capabilities_satisfy(ty.capabilities, capability)
                     .then_some(DocumentationMember::Symbol(StdlibSymbolId::Type(ty.id)))
@@ -1114,7 +1104,6 @@ impl DocumentationReference {
                     .chain(
                         self.library
                             .types()
-                            .iter()
                             .map(|ty| symbol_uri(StdlibSymbolId::Type(ty.id), &self.library)),
                     )
                     .chain(self.library.type_constructors().iter().map(|constructor| {
@@ -2071,6 +2060,17 @@ mod tests {
             .iter()
             .find(|entry| entry.title == "Duration")
             .expect("Duration is indexed");
+        assert!(
+            index
+                .iter()
+                .all(|entry| !entry.title.contains("MonoLayout")),
+            "private standard-library types and their members must not be indexed"
+        );
+        assert!(
+            reference
+                .page("/stdlib/types/MonoLayout/index.md")
+                .is_none()
+        );
         assert_eq!(duration.uri, "/stdlib/types/Duration/index.md");
         let page = reference.page(&duration.uri).expect("Duration has a page");
         assert!(page.markdown.contains("\n\n# Duration\n"));

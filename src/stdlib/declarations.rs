@@ -187,6 +187,14 @@ pub struct StdlibTypeConstructor {
     pub documentation: Documentation<StdlibSymbolId>,
 }
 
+/// Whether a nominal type belongs to the authored language surface or only to
+/// trusted standard-library implementation source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypeVisibility {
+    Public,
+    LibraryPrivate,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TypeConstructorSyntax {
     Named,
@@ -201,6 +209,7 @@ pub enum TypeConstructorSyntax {
 pub struct StdlibType {
     pub id: StdlibTypeId,
     pub name: &'static str,
+    pub visibility: TypeVisibility,
     pub kind: StdlibTypeKind,
     pub capabilities: &'static [StdlibCapabilityId],
     /// Catalog method used for user-facing string conversion, when this type

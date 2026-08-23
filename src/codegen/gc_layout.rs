@@ -69,7 +69,7 @@ impl GcLayout {
             reachability,
         } = inputs;
         let standard = standard_library
-            .types()
+            .all_types()
             .iter()
             .filter(|declaration| {
                 matches!(
@@ -83,7 +83,7 @@ impl GcLayout {
             .map(|(position, declaration)| (declaration.id, STATE_TYPE + 1 + position as u32))
             .collect::<HashMap<_, _>>();
         let standard_fields = standard_library
-            .types()
+            .all_types()
             .iter()
             .filter(|declaration| {
                 matches!(

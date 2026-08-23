@@ -11,7 +11,7 @@ use super::{
     StdlibField, StdlibFieldId, StdlibItem, StdlibItemId, StdlibNamespace, StdlibNamespaceId,
     StdlibOwner, StdlibStateProvider, StdlibStateProviderId, StdlibSymbolId, StdlibType,
     StdlibTypeConstructor, StdlibTypeConstructorId, StdlibTypeId, StdlibVariant, StdlibVariantId,
-    TypeRef,
+    TypeRef, TypeVisibility,
     catalog::{
         CAPABILITIES, FIELDS, ITEMS, NAMESPACES, STATE_PROVIDERS, TYPE_CONSTRUCTORS, TYPES,
         VARIANTS,
@@ -34,6 +34,7 @@ pub(super) struct StandardLibraryGraph {
     pub(super) namespaces_by_path: HashMap<Vec<&'static str>, &'static StdlibNamespace>,
     pub(super) types: HashMap<StdlibTypeId, &'static StdlibType>,
     pub(super) types_by_name: HashMap<&'static str, &'static StdlibType>,
+    pub(super) all_types_by_name: HashMap<&'static str, &'static StdlibType>,
     pub(super) fields: HashMap<StdlibFieldId, &'static StdlibField>,
     pub(super) fields_by_owner: HashMap<StdlibOwner, Vec<&'static StdlibField>>,
     pub(super) public_fields: HashMap<(StdlibOwner, &'static str), &'static StdlibField>,
@@ -106,12 +107,27 @@ impl StandardLibraryGraph {
         }
 
         let types = index(TYPES, |value| value.id, "standard type ID", &mut errors);
-        let types_by_name = index(TYPES, |value| value.name, "standard type name", &mut errors);
+        let all_types_by_name = index(TYPES, |value| value.name, "standard type name", &mut errors);
+        let types_by_name = index(
+            TYPES
+                .iter()
+                .filter(|ty| ty.visibility == TypeVisibility::Public),
+            |value| value.name,
+            "public standard type name",
+            &mut errors,
+        );
         let fields = index(FIELDS, |value| value.id, "standard field ID", &mut errors);
         let public_fields = index(
-            FIELDS
-                .iter()
-                .filter(|field| field.visibility == FieldVisibility::Public),
+            FIELDS.iter().filter(|field| {
+                field.visibility == FieldVisibility::Public
+                    && match field.owner {
+                        StdlibOwner::Type(owner) => types
+                            .get(&owner)
+                            .is_some_and(|ty| ty.visibility == TypeVisibility::Public),
+                        StdlibOwner::TypeConstructor(_) => true,
+                        _ => false,
+                    }
+            }),
             |value| (value.owner, value.name),
             "public field owner/name",
             &mut errors,
@@ -250,6 +266,7 @@ impl StandardLibraryGraph {
             namespaces_by_path,
             types,
             types_by_name,
+            all_types_by_name,
             fields,
             fields_by_owner,
             public_fields,
@@ -350,7 +367,9 @@ impl StandardLibraryGraph {
                     )),
                 }
             }
-            self.push_child(StdlibOwner::Root, StdlibSymbolId::Type(ty.id));
+            if ty.visibility == TypeVisibility::Public {
+                self.push_child(StdlibOwner::Root, StdlibSymbolId::Type(ty.id));
+            }
         }
         for field in FIELDS {
             if !self.owner_exists(field.owner)
@@ -364,7 +383,17 @@ impl StandardLibraryGraph {
                     field.id, field.owner
                 ));
             }
-            self.push_child(field.owner, StdlibSymbolId::Field(field.id));
+            let owner_is_public = match field.owner {
+                StdlibOwner::Type(owner) => self
+                    .types
+                    .get(&owner)
+                    .is_some_and(|ty| ty.visibility == TypeVisibility::Public),
+                StdlibOwner::TypeConstructor(_) => true,
+                _ => false,
+            };
+            if field.visibility == FieldVisibility::Public && owner_is_public {
+                self.push_child(field.owner, StdlibSymbolId::Field(field.id));
+            }
         }
         for variant in VARIANTS {
             if !self.types.contains_key(&variant.owner) {
@@ -373,10 +402,16 @@ impl StandardLibraryGraph {
                     variant.id, variant.owner
                 ));
             }
-            self.push_child(
-                StdlibOwner::Type(variant.owner),
-                StdlibSymbolId::Variant(variant.id),
-            );
+            if self
+                .types
+                .get(&variant.owner)
+                .is_some_and(|ty| ty.visibility == TypeVisibility::Public)
+            {
+                self.push_child(
+                    StdlibOwner::Type(variant.owner),
+                    StdlibSymbolId::Variant(variant.id),
+                );
+            }
         }
         for item in ITEMS {
             if !self.owner_exists(item.owner) {

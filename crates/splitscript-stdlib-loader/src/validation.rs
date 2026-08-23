@@ -23,6 +23,7 @@ pub(crate) fn validate(library: &Library) -> Vec<Error> {
 struct Validator<'a> {
     library: &'a Library,
     types: HashSet<&'a str>,
+    private_types: HashSet<&'a str>,
     capabilities: HashSet<&'a str>,
     constructors: HashMap<&'a str, usize>,
     generated_items: HashSet<String>,
@@ -51,6 +52,17 @@ impl<'a> Validator<'a> {
                 _ => None,
             })
             .collect();
+        let private_types = library
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                Declaration::Struct(value) | Declaration::IntrinsicType(value) if value.private => {
+                    Some(value.name.as_str())
+                }
+                Declaration::Enum(value) if value.private => Some(value.name.as_str()),
+                _ => None,
+            })
+            .collect();
         let constructors = library
             .declarations
             .iter()
@@ -69,6 +81,7 @@ impl<'a> Validator<'a> {
         Self {
             library,
             types,
+            private_types,
             capabilities,
             constructors,
             generated_items,
@@ -89,7 +102,7 @@ impl<'a> Validator<'a> {
                     self.validate_struct(value)
                 }
                 Declaration::Enum(value) => {
-                    let public = !has_attribute(&value.attributes, "testOnly");
+                    let public = !value.private && !has_attribute(&value.attributes, "testOnly");
                     self.validate_documentation(&value.name, &value.documentation, false, public);
                     self.validate_attributes(
                         &value.name,
@@ -165,6 +178,91 @@ impl<'a> Validator<'a> {
             }
         }
         self.validate_capability_hierarchy();
+        self.validate_private_type_boundaries();
+    }
+
+    fn validate_private_type_boundaries(&mut self) {
+        for declaration in &self.library.declarations {
+            match declaration {
+                Declaration::Struct(value) | Declaration::IntrinsicType(value) => {
+                    if value.private {
+                        continue;
+                    }
+                    for field in value.fields.iter().filter(|field| !field.private) {
+                        self.validate_public_type_ref(
+                            &format!("{}.{}", value.name, field.name),
+                            &field.ty,
+                        );
+                    }
+                    self.validate_public_function_types(&value.name, &value.functions);
+                }
+                Declaration::Root(value)
+                | Declaration::Namespace(value)
+                | Declaration::Capability(value)
+                | Declaration::TypeConstructor(value)
+                | Declaration::CoreExtension(value) => {
+                    self.validate_public_function_types(&value.name, &value.functions);
+                    for field in value.fields.iter().filter(|field| !field.private) {
+                        self.validate_public_type_ref(
+                            &format!("{}.{}", value.name, field.name),
+                            &field.ty,
+                        );
+                    }
+                }
+                Declaration::StateProvider(value) => {
+                    if value.attributes.iter().any(|attribute| {
+                        attribute.name == "processType"
+                            && matches!(attribute.arguments.as_slice(), [AttributeArgument::Name(name)] if self.private_types.contains(name.as_str()))
+                    }) {
+                        self.error(format!(
+                            "state provider `{}` cannot expose a private process type",
+                            value.name
+                        ));
+                    }
+                }
+                Declaration::Enum(_) => {}
+            }
+        }
+    }
+
+    fn validate_public_function_types(&mut self, owner: &str, functions: &[FunctionDeclaration]) {
+        for function in functions.iter().filter(|function| !function.private) {
+            let qualified = if owner == "root" {
+                function.name.clone()
+            } else {
+                format!("{owner}.{}", function.name)
+            };
+            for parameter in &function.parameters {
+                self.validate_public_type_ref(
+                    &format!("{qualified} parameter `{}`", parameter.name),
+                    &parameter.ty,
+                );
+            }
+            self.validate_public_type_ref(&format!("{qualified} result"), &function.result);
+        }
+    }
+
+    fn validate_public_type_ref(&mut self, owner: &str, ty: &Type) {
+        match ty {
+            Type::Name(name) => {
+                if self.private_types.contains(name.as_str()) {
+                    self.error(format!(
+                        "public standard-library surface `{owner}` exposes private type `{name}`"
+                    ));
+                }
+            }
+            Type::Array(value)
+            | Type::Option(value)
+            | Type::Result(value)
+            | Type::ExclusiveRange(value)
+            | Type::InclusiveRange(value) => self.validate_public_type_ref(owner, value),
+            Type::FixedArray { element, .. } => self.validate_public_type_ref(owner, element),
+            Type::Application { arguments, .. } => {
+                for argument in arguments {
+                    self.validate_public_type_ref(owner, argument);
+                }
+            }
+        }
     }
 
     fn validate_capability_hierarchy(&mut self) {
@@ -197,7 +295,7 @@ impl<'a> Validator<'a> {
     }
 
     fn validate_struct(&mut self, value: &StructDeclaration) {
-        let public = !has_attribute(&value.attributes, "testOnly");
+        let public = !value.private && !has_attribute(&value.attributes, "testOnly");
         self.validate_documentation(&value.name, &value.documentation, false, public);
         self.validate_attributes(
             &value.name,
@@ -1405,6 +1503,34 @@ capability Second<T: First> {}
             errors
                 .iter()
                 .any(|error| error.message.contains("hierarchy contains a cycle")),
+            "{errors:#?}"
+        );
+    }
+
+    #[test]
+    fn private_types_cannot_escape_through_public_signatures() {
+        let source = r#"
+/// Internal layout.
+@representation(gcStruct)
+@valueUsage(localVariable)
+private struct InternalLayout {
+    /// Internal offset.
+    offset: u64,
+}
+
+/// Public wrapper.
+@representation(gcStruct)
+@valueUsage(localVariable)
+struct PublicWrapper {
+    /// Leaked implementation detail.
+    layout: InternalLayout,
+}
+"#;
+        let errors = generate_catalog(&parse(source).unwrap()).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error.message.contains(
+                "public standard-library surface `PublicWrapper.layout` exposes private type `InternalLayout`"
+            )),
             "{errors:#?}"
         );
     }

@@ -181,6 +181,7 @@ impl<'a> CatalogGenerator<'a> {
                         ),
                         &declaration.fields,
                         &[],
+                        declaration.private,
                         has_attribute(&declaration.attributes, "testOnly"),
                     );
                 }
@@ -193,6 +194,7 @@ impl<'a> CatalogGenerator<'a> {
                     ),
                     &declaration.fields,
                     &declaration.type_parameters,
+                    false,
                     has_attribute(&declaration.attributes, "testOnly"),
                 ),
                 _ => {}
@@ -251,8 +253,8 @@ impl<'a> CatalogGenerator<'a> {
             output.push_str("#[cfg(test)] ");
         }
         output.push_str(&format!(
-            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, kind: StdlibTypeKind::{kind}, capabilities: {}, display: {display}, representation: {}, value_usage: {}, documentation: {} }},\n",
-            quote(&declaration.name), self.capabilities(&declaration.attributes),
+            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, visibility: TypeVisibility::{}, kind: StdlibTypeKind::{kind}, capabilities: {}, display: {display}, representation: {}, value_usage: {}, documentation: {} }},\n",
+            quote(&declaration.name), if declaration.private { "LibraryPrivate" } else { "Public" }, self.capabilities(&declaration.attributes),
             self.representation(&declaration.attributes), self.value_usage(&declaration.attributes),
             self.documentation(&declaration.documentation)
         ));
@@ -261,8 +263,8 @@ impl<'a> CatalogGenerator<'a> {
     fn emit_enum_type(&self, output: &mut String, declaration: &crate::EnumDeclaration) {
         let id = ident(&declaration.name);
         output.push_str(&format!(
-            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, kind: StdlibTypeKind::Enum, capabilities: {}, display: None, representation: {}, value_usage: {}, documentation: {} }},\n",
-            quote(&declaration.name), self.capabilities(&declaration.attributes),
+            "StdlibType {{ id: StdlibTypeId::{id}, name: {}, visibility: TypeVisibility::{}, kind: StdlibTypeKind::Enum, capabilities: {}, display: None, representation: {}, value_usage: {}, documentation: {} }},\n",
+            quote(&declaration.name), if declaration.private { "LibraryPrivate" } else { "Public" }, self.capabilities(&declaration.attributes),
             self.representation(&declaration.attributes), self.value_usage(&declaration.attributes),
             self.documentation(&declaration.documentation)
         ));
@@ -275,6 +277,7 @@ impl<'a> CatalogGenerator<'a> {
         owner_expression: &str,
         fields: &[crate::FieldDeclaration],
         type_parameters: &[TypeParameter],
+        owner_private: bool,
         test_only: bool,
     ) {
         let owner_id = ident(owner);
@@ -287,7 +290,7 @@ impl<'a> CatalogGenerator<'a> {
                 owner_id, ident(&field.name),
                 quote(&field.name),
                 self.type_ref(&field.ty, type_parameters),
-                if field.private {
+                if owner_private || field.private {
                     "RuntimePrivate"
                 } else {
                     "Public"
@@ -359,6 +362,12 @@ impl<'a> CatalogGenerator<'a> {
                     None,
                 ),
                 Declaration::Struct(declaration) | Declaration::IntrinsicType(declaration) => {
+                    let mut functions = declaration.functions.clone();
+                    if declaration.private {
+                        for function in &mut functions {
+                            function.private = true;
+                        }
+                    }
                     let owner = CallableOwnerDeclaration {
                         name: declaration.name.clone(),
                         type_constructor_syntax: None,
@@ -366,7 +375,7 @@ impl<'a> CatalogGenerator<'a> {
                         documentation: declaration.documentation.clone(),
                         attributes: declaration.attributes.clone(),
                         fields: Vec::new(),
-                        functions: declaration.functions.clone(),
+                        functions,
                     };
                     self.emit_functions(
                         output,

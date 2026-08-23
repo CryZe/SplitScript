@@ -96,7 +96,7 @@ pub(super) fn encode(inputs: Inputs<'_>) -> EncodedTypes {
             describes: None,
         },
     }];
-    for declaration in standard_library.types() {
+    for declaration in standard_library.all_types() {
         let inner = match declaration.representation {
             RuntimeRepresentation::Scalar { .. } => continue,
             RuntimeRepresentation::GcArray {

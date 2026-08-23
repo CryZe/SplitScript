@@ -19,6 +19,13 @@
   table traversal now remains an implementation detail of the typed
   `MonoImage` and `MonoClass` APIs, while pointer-width-aware reads stay public
   for advanced metadata traversal.
+- Added private nominal types to trusted standard-library source. Their stable
+  identities, fields, layouts, and source bodies remain available to checking,
+  specialization, and code generation, while user type lookup, completion,
+  navigation, and generated documentation see only public types.
+- Made `MonoLayout` and `MonoLayout.forVersion` implementation details, and
+  added loader validation that rejects a private type escaping through a public
+  field, callable signature, or state-provider process type.
 
 ## 2026-08-23: source-defined Unity scene snapshots
 

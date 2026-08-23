@@ -12,7 +12,7 @@ use super::{
         CapabilityBehavior, CoreTypeId, FieldVisibility, RuntimeRepresentation,
         StateProviderAttachment, StateProviderProcesses, StdlibCapability, StdlibField,
         StdlibNamespace, StdlibOwner, StdlibStateProvider, StdlibType, StdlibTypeConstructor,
-        StdlibTypeKind, StdlibVariant, TypeConstructorSyntax, ValueUsage,
+        StdlibTypeKind, StdlibVariant, TypeConstructorSyntax, TypeVisibility, ValueUsage,
     },
     ids::{
         IntrinsicId, StdlibCapabilityId, StdlibFieldId, StdlibItemId, StdlibNamespaceId,

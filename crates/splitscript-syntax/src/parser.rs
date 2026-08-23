@@ -1069,7 +1069,7 @@ mod tests {
             panic!("expected comparison variable")
         };
         assert!(matches!(
-            compared.value.kind,
+            compared.value.as_ref().expect("variable has a value").kind,
             ExprKind::Binary {
                 op: BinaryOp::Ge,
                 ..
@@ -1079,7 +1079,7 @@ mod tests {
             panic!("expected less-than variable")
         };
         assert!(matches!(
-            less.value.kind,
+            less.value.as_ref().expect("variable has a value").kind,
             ExprKind::Binary {
                 op: BinaryOp::Lt,
                 ..
@@ -1089,7 +1089,7 @@ mod tests {
             panic!("expected shift variable")
         };
         assert!(matches!(
-            shifted.value.kind,
+            shifted.value.as_ref().expect("variable has a value").kind,
             ExprKind::Binary {
                 op: BinaryOp::Shr,
                 ..
@@ -1145,7 +1145,7 @@ mod tests {
             panic!("expected an ordinary comparison")
         };
         assert!(matches!(
-            ordinary.value.kind,
+            ordinary.value.as_ref().expect("variable has a value").kind,
             ExprKind::Binary {
                 op: BinaryOp::Ne,
                 ref left,
@@ -1157,7 +1157,7 @@ mod tests {
             panic!("expected a fallible cast comparison")
         };
         assert!(matches!(
-            fallible.value.kind,
+            fallible.value.as_ref().expect("variable has a value").kind,
             ExprKind::Binary {
                 op: BinaryOp::Eq,
                 ref left,
@@ -1430,7 +1430,11 @@ mod tests {
         let Stmt::Variable(VariableDecl { value, .. }) = &block.statements[0] else {
             panic!("expected the module fallback binding")
         };
-        let ExprKind::Fallback { fallback, .. } = &value.kind else {
+        let ExprKind::Fallback { fallback, .. } = &value
+            .as_ref()
+            .expect("module binding has a fallback value")
+            .kind
+        else {
             panic!("expected the first fallback")
         };
         let ExprKind::Fallback { fallback, .. } = &fallback.kind else {

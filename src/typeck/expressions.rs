@@ -14,7 +14,7 @@ use crate::{
         ResolvedEnumVariantId, ResolvedRecordFieldId, ResolvedRecordId, ResolvedWrapperPattern,
     },
     signature::parse_signature,
-    stdlib::{Implementation, RuntimeRepresentation, StdlibCapabilityId, StdlibTypeId},
+    stdlib::{RuntimeRepresentation, StdlibCapabilityId, StdlibTypeId},
     types::{EnumTypeId, TypeKind},
 };
 
@@ -342,17 +342,14 @@ impl Checker {
                         expected,
                         expr.span,
                     )?
-                } else if let Some(declaration) = self.standard_library.type_by_name(name).copied()
+                } else if let Some(declaration) = (if self.is_library_function() {
+                    self.standard_library.type_by_name_including_private(name)
+                } else {
+                    self.standard_library.type_by_name(name)
+                })
+                .copied()
                 {
-                    let privileged_library_body = matches!(
-                        &self.callable,
-                        super::context::CallableContext::LibraryFunction(item)
-                            if matches!(
-                                self.standard_library.item(*item).implementation,
-                                Implementation::LibraryBody { .. }
-                                    | Implementation::LibraryOverloads { .. }
-                            )
-                    );
+                    let privileged_library_body = self.is_library_function();
                     if !privileged_library_body
                         || !matches!(
                             declaration.representation,

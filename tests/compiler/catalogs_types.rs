@@ -48,6 +48,7 @@ fn source_defined_library_bodies_compile_without_leaking_hidden_declarations() {
         StdlibItemId::UnitySceneManagerActiveScene,
         StdlibItemId::UnitySceneManagerLoadedScenes,
         StdlibItemId::GBAEmulatorResolve64BitMemoryPointer,
+        StdlibItemId::MonoLayoutForVersion,
         StdlibItemId::GBAEmulatorDiscover,
         StdlibItemId::PS2EmulatorDiscover,
         StdlibItemId::PS1EmulatorDiscover,
@@ -127,6 +128,10 @@ fn unity_scene_manager_exposes_immutable_state_snapshots() {
 #[test]
 fn private_standard_library_helpers_are_checked_but_not_user_visible() {
     let library = StandardLibrary::new();
+    let layout = library.type_decl(StdlibTypeId::MonoLayout);
+    assert_eq!(layout.visibility, TypeVisibility::LibraryPrivate);
+    assert!(library.type_by_name("MonoLayout").is_none());
+    assert!(library.types().all(|ty| ty.id != StdlibTypeId::MonoLayout));
     for (id, qualified_name) in [
         (StdlibItemId::DolphinCoreBase, "dolphinCoreBase"),
         (
@@ -141,6 +146,7 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
             StdlibItemId::GBAEmulatorResolve64BitMemoryPointer,
             "GBAEmulator.resolve64BitMemoryPointer",
         ),
+        (StdlibItemId::MonoLayoutForVersion, "MonoLayout.forVersion"),
         (StdlibItemId::GBAEmulatorDiscover, "GBAEmulator.discover"),
         (StdlibItemId::PS2EmulatorDiscover, "PS2Emulator.discover"),
         (StdlibItemId::PS1EmulatorDiscover, "PS1Emulator.discover"),
@@ -191,6 +197,18 @@ fn private_standard_library_helpers_are_checked_but_not_user_visible() {
                     | StdlibItemId::MonoModuleStaticTableForClass
             ))
     );
+
+    let diagnostics = splitscript::compile(
+        r#"
+            let layout: MonoLayout
+            state "game.exe" {}
+        "#,
+    )
+    .expect_err("user code must not name private standard-library types");
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.message.contains("unknown type `MonoLayout`")
+            && !diagnostic.message.contains("private")
+    }));
 
     let diagnostics = splitscript::compile(
         r#"
@@ -1906,7 +1924,6 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         .chain(
             library
                 .types()
-                .iter()
                 .map(|value| (value.name, value.documentation)),
         )
         .chain(
@@ -1917,8 +1934,7 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         )
         .chain(
             library
-                .variants()
-                .iter()
+                .public_variants()
                 .map(|value| (value.name, value.documentation)),
         );
     let mut checked_declaration_examples = 0;
@@ -1962,7 +1978,6 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         .chain(
             library
                 .types()
-                .iter()
                 .map(|value| ("type", value.name, value.documentation)),
         )
         .chain(
@@ -1974,8 +1989,7 @@ fn standard_library_catalog_is_valid_documented_and_compilable() {
         )
         .chain(
             library
-                .variants()
-                .iter()
+                .public_variants()
                 .map(|value| ("variant", value.name, value.documentation)),
         )
         .filter(|(_, _, documentation)| documentation.examples.is_empty())

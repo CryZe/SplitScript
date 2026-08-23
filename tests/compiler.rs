@@ -12,7 +12,7 @@ use splitscript::{
             Availability, CancellationKind, CoreTypeId, Effect, FieldVisibility, Implementation,
             IntrinsicId, ItemVisibility, StandardBinaryOperator, StandardLibrary,
             StandardUnaryOperator, StdlibFieldId, StdlibItemId, StdlibStateProviderId,
-            StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId, SuspensionKind,
+            StdlibTypeConstructorId, StdlibTypeId, StdlibVariantId, SuspensionKind, TypeVisibility,
         },
         types::{BuiltinType, TypeKind},
     },

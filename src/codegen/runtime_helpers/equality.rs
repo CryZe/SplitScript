@@ -34,7 +34,7 @@ pub(in crate::codegen) fn compile_equality(
     let string_equality = plan
         .optional_function(RuntimeHelperId::StringEquality)
         .unwrap_or(0);
-    for record in gc.standard_library.types() {
+    for record in gc.standard_library.all_types() {
         if equality_functions.standard_records.contains_key(&record.id) {
             equality.push(compile_standard_record_equality(
                 record.id,

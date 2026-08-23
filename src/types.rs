@@ -193,7 +193,7 @@ impl TypeStore {
         for core in library.core_types() {
             store.intern(TypeKind::Builtin(core.id));
         }
-        for standard in library.types() {
+        for standard in library.all_types() {
             // SettingsView's callable surface and documentation are authored
             // in the standard library, but its fields are generated from this
             // program's settings declaration. Keep one semantic identity for

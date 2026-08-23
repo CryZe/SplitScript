@@ -1633,7 +1633,7 @@ fn requirements_are_possible(
         .map(|ty| Type::Known(types.id_for_core(ty.id)))
         .chain(
             library
-                .types()
+                .all_types()
                 .iter()
                 .map(|ty| Type::Known(types.id_for_standard(ty.id))),
         )

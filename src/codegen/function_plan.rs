@@ -122,7 +122,7 @@ pub(super) fn encode<'a>(
         standard_library: standard_library.clone(),
         ..EqualityFunctions::default()
     };
-    for record in standard_library.types().iter().filter(|record| {
+    for record in standard_library.all_types().iter().filter(|record| {
         reachability.requires_standard_record_equality(record.id)
             && matches!(
                 record.representation,

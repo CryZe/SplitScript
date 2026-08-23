@@ -5362,7 +5362,7 @@ enum MonoVersion {
 /// ```
 @representation(gcStruct, nullable)
 @valueUsage(recordField, localVariable)
-struct MonoLayout {
+private struct MonoLayout {
     /// Offset of the assembly-name pointer.
     private assemblyName: u64,
     /// Offset of the assembly-image pointer.
@@ -5398,23 +5398,8 @@ struct MonoLayout {
     /// Offset of the static-data pointer within a Mono vtable.
     private vtable: u64,
 
-    /// Selects the centralized PE64 layout for a Mono version.
-    ///
-    /// The selected descriptor is retained by [`MonoModule`]; scripts normally
-    /// choose it indirectly through [`Unity.mono`].
-    ///
-    /// # Example
-    ///
-    /// Select the layout indirectly through discovery
-    ///
-    /// ```splitscript
-    /// let selectedLayout = MonoLayout.forVersion(MonoVersion.V3)
-    /// ```
-    @mustUse("A selected Mono layout has no effect unless it is retained.")
-    static fn forVersion(
-        /// Mono metadata generation whose target offsets should be selected.
-        version: MonoVersion,
-    ) -> MonoLayout {
+    // Selects the centralized PE64 layout retained by MonoModule.
+    private static fn forVersion(version: MonoVersion) -> MonoLayout {
         return MonoLayout {
             assemblyName: 0x10,
             assemblyImage: 0x60,

@@ -33,22 +33,32 @@ impl Parser<'_> {
         while !self.at(&TokenKind::Eof) {
             let documentation = self.documentation()?;
             let attributes = self.attributes()?;
+            let private = self.eat_ident("private");
             if self.eat_ident("struct") {
-                declarations.push(Declaration::Struct(
-                    self.struct_declaration(documentation, attributes)?,
-                ));
+                declarations.push(Declaration::Struct(self.struct_declaration(
+                    documentation,
+                    attributes,
+                    private,
+                )?));
             } else if self.eat_ident("enum") {
-                declarations.push(Declaration::Enum(
-                    self.enum_declaration(documentation, attributes)?,
-                ));
+                declarations.push(Declaration::Enum(self.enum_declaration(
+                    documentation,
+                    attributes,
+                    private,
+                )?));
             } else if self.eat_ident("intrinsic") {
                 if !self.eat_ident("type") {
                     return Err(self.error("expected `type` after `intrinsic`"));
                 }
-                declarations.push(Declaration::IntrinsicType(
-                    self.struct_declaration(documentation, attributes)?,
-                ));
+                declarations.push(Declaration::IntrinsicType(self.struct_declaration(
+                    documentation,
+                    attributes,
+                    private,
+                )?));
             } else if self.eat_ident("root") {
+                if private {
+                    return Err(self.error("`private` can only modify a type declaration"));
+                }
                 declarations.push(Declaration::Root(self.callable_owner_declaration(
                     "root".to_owned(),
                     documentation,
@@ -57,6 +67,9 @@ impl Parser<'_> {
                     false,
                 )?));
             } else if self.eat_ident("namespace") {
+                if private {
+                    return Err(self.error("`private` can only modify a type declaration"));
+                }
                 let name = self.path("expected a namespace path")?;
                 declarations.push(Declaration::Namespace(self.callable_owner_declaration(
                     name,
@@ -66,6 +79,9 @@ impl Parser<'_> {
                     false,
                 )?));
             } else if self.eat_ident("capability") {
+                if private {
+                    return Err(self.error("`private` can only modify a type declaration"));
+                }
                 let name = self.ident("expected a capability name")?;
                 declarations.push(Declaration::Capability(self.callable_owner_declaration(
                     name,
@@ -75,6 +91,9 @@ impl Parser<'_> {
                     false,
                 )?));
             } else if self.eat_ident("typeConstructor") {
+                if private {
+                    return Err(self.error("`private` can only modify a type declaration"));
+                }
                 let (name, syntax, type_parameters) = self.type_constructor_head()?;
                 let mut declaration = self.callable_owner_declaration_with_parameters(
                     name,
@@ -87,11 +106,17 @@ impl Parser<'_> {
                 declaration.type_constructor_syntax = Some(syntax);
                 declarations.push(Declaration::TypeConstructor(declaration));
             } else if self.eat_ident("extend") {
+                if private {
+                    return Err(self.error("`private` can only modify a type declaration"));
+                }
                 let name = self.ident("expected a core type after `extend`")?;
                 declarations.push(Declaration::CoreExtension(
                     self.callable_owner_declaration(name, documentation, attributes, false, false)?,
                 ));
             } else if self.eat_ident("stateProvider") {
+                if private {
+                    return Err(self.error("`private` can only modify a type declaration"));
+                }
                 declarations.push(Declaration::StateProvider(
                     self.state_provider_declaration(documentation, attributes)?,
                 ));
@@ -283,6 +308,7 @@ impl Parser<'_> {
         &mut self,
         documentation: Documentation,
         attributes: Vec<Attribute>,
+        private: bool,
     ) -> Result<EnumDeclaration, Error> {
         let name = self.ident("expected an enum name")?;
         self.expect(TokenKind::LBrace, "expected `{` after the enum name")?;
@@ -306,6 +332,7 @@ impl Parser<'_> {
         self.bump();
         Ok(EnumDeclaration {
             name,
+            private,
             documentation,
             attributes,
             variants,
@@ -316,6 +343,7 @@ impl Parser<'_> {
         &mut self,
         documentation: Documentation,
         attributes: Vec<Attribute>,
+        private: bool,
     ) -> Result<StructDeclaration, Error> {
         let name = self.ident("expected a struct name")?;
         self.expect(TokenKind::LBrace, "expected `{` after the struct name")?;
@@ -350,6 +378,7 @@ impl Parser<'_> {
         self.bump();
         Ok(StructDeclaration {
             name,
+            private,
             documentation,
             attributes,
             fields,
@@ -852,6 +881,7 @@ struct Duration {
             panic!("expected a struct")
         };
         assert_eq!(duration.name, "Duration");
+        assert!(!duration.private);
         assert_eq!(duration.documentation.details, "Used for game time.");
         assert_eq!(duration.fields[0].documentation.summary, "Whole seconds.");
         assert_eq!(duration.functions[0].parameters[0].ty.to_string(), "f32");
@@ -859,6 +889,31 @@ struct Duration {
             duration.functions[0].documentation.examples[0].source,
             "return Duration.fromSeconds(seconds)"
         );
+    }
+
+    #[test]
+    fn parses_library_private_nominal_types() {
+        let library = parse(
+            r#"
+private struct Layout {
+    private offset: u64,
+}
+
+private enum Backend {
+    Native,
+}
+"#,
+        )
+        .expect("private type declarations should parse in privileged source");
+
+        let Declaration::Struct(layout) = &library.declarations[0] else {
+            panic!("expected a private struct")
+        };
+        assert!(layout.private);
+        let Declaration::Enum(backend) = &library.declarations[1] else {
+            panic!("expected a private enum")
+        };
+        assert!(backend.private);
     }
 
     #[test]

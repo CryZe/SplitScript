@@ -29,7 +29,7 @@ pub use declarations::{
     RuntimeRepresentation, ScalarMemoryLayout, StateProviderAttachment, StateProviderProcesses,
     StdlibCapability, StdlibField, StdlibNamespace, StdlibOwner, StdlibStateProvider,
     StdlibSymbolId, StdlibType, StdlibTypeConstructor, StdlibTypeKind, StdlibVariant,
-    TypeConstructorSyntax, ValueUsage,
+    TypeConstructorSyntax, TypeVisibility, ValueUsage,
 };
 
 use catalog::{
@@ -329,7 +329,13 @@ impl StandardLibrary {
         self.graph.namespaces_by_path.get(path).copied()
     }
 
-    pub fn types(&self) -> &'static [StdlibType] {
+    pub fn types(&self) -> impl Iterator<Item = &'static StdlibType> {
+        TYPES
+            .iter()
+            .filter(|ty| ty.visibility == TypeVisibility::Public)
+    }
+
+    pub(crate) fn all_types(&self) -> &'static [StdlibType] {
         TYPES
     }
 
@@ -343,6 +349,10 @@ impl StandardLibrary {
 
     pub fn type_by_name(&self, name: &str) -> Option<&'static StdlibType> {
         self.graph.types_by_name.get(name).copied()
+    }
+
+    pub(crate) fn type_by_name_including_private(&self, name: &str) -> Option<&'static StdlibType> {
+        self.graph.all_types_by_name.get(name).copied()
     }
 
     pub fn type_has_capability(&self, ty: StdlibTypeId, capability: StdlibCapabilityId) -> bool {
@@ -446,8 +456,9 @@ impl StandardLibrary {
     }
 
     pub fn public_fields(&self, owner: StdlibTypeId) -> impl Iterator<Item = &'static StdlibField> {
+        let owner_is_public = self.type_decl(owner).visibility == TypeVisibility::Public;
         self.fields_of(owner)
-            .filter(|field| field.visibility == FieldVisibility::Public)
+            .filter(move |field| owner_is_public && field.visibility == FieldVisibility::Public)
     }
 
     pub fn public_constructor_fields(
@@ -460,6 +471,12 @@ impl StandardLibrary {
 
     pub fn variants(&self) -> &'static [StdlibVariant] {
         VARIANTS
+    }
+
+    pub fn public_variants(&self) -> impl Iterator<Item = &'static StdlibVariant> {
+        VARIANTS
+            .iter()
+            .filter(|variant| self.type_decl(variant.owner).visibility == TypeVisibility::Public)
     }
 
     pub fn variant(&self, id: StdlibVariantId) -> &'static StdlibVariant {
@@ -785,7 +802,10 @@ impl StandardLibrary {
                 &mut errors,
             );
         }
-        for ty in TYPES {
+        for ty in TYPES
+            .iter()
+            .filter(|ty| ty.visibility == TypeVisibility::Public)
+        {
             record_example_sources(
                 "type",
                 ty.name,
@@ -794,10 +814,16 @@ impl StandardLibrary {
                 &mut errors,
             );
         }
-        for field in FIELDS
-            .iter()
-            .filter(|field| field.visibility == FieldVisibility::Public)
-        {
+        for field in FIELDS.iter().filter(|field| {
+            field.visibility == FieldVisibility::Public
+                && match field.owner {
+                    StdlibOwner::Type(owner) => {
+                        self.type_decl(owner).visibility == TypeVisibility::Public
+                    }
+                    StdlibOwner::TypeConstructor(_) => true,
+                    _ => false,
+                }
+        }) {
             record_example_sources(
                 "field",
                 field.name,
@@ -806,7 +832,7 @@ impl StandardLibrary {
                 &mut errors,
             );
         }
-        for variant in VARIANTS {
+        for variant in self.public_variants() {
             record_example_sources(
                 "variant",
                 variant.name,

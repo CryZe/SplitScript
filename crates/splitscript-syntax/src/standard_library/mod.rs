@@ -66,6 +66,8 @@ pub enum TypeConstructorSyntax {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructDeclaration {
     pub name: String,
+    /// Whether this type is available only to trusted standard-library source.
+    pub private: bool,
     pub documentation: Documentation,
     pub attributes: Vec<Attribute>,
     pub fields: Vec<FieldDeclaration>,
@@ -75,6 +77,8 @@ pub struct StructDeclaration {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDeclaration {
     pub name: String,
+    /// Whether this type is available only to trusted standard-library source.
+    pub private: bool,
     pub documentation: Documentation,
     pub attributes: Vec<Attribute>,
     pub variants: Vec<VariantDeclaration>,

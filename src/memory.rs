@@ -105,7 +105,7 @@ impl MemoryLayouts {
             let _ = layouts.build_record(ty, records, semantics, &mut visiting);
         }
         let library = layouts.standard_library.clone();
-        for standard in library.types().iter().filter(|standard| {
+        for standard in library.all_types().iter().filter(|standard| {
             library.type_has_capability(standard.id, StdlibCapabilityId::MemoryReadable)
                 && matches!(
                     standard.representation,

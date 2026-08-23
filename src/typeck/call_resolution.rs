@@ -2174,7 +2174,6 @@ impl Checker {
         let mut receivers = self
             .standard_library
             .types()
-            .iter()
             .filter(|ty| self.standard_library.public_fields(ty.id).next().is_some())
             .map(|ty| self.standard_type(ty.id))
             .chain([Type::Known(
@@ -2339,7 +2338,6 @@ impl Checker {
                 .chain(
                     self.standard_library
                         .types()
-                        .iter()
                         .filter(|candidate| {
                             let ty = Type::Known(store.id_for_standard(candidate.id));
                             requirements.iter().all(|capability| {

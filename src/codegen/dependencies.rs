@@ -157,6 +157,13 @@ impl BackendDependencies {
             dependencies.require(RuntimeHelperId::StringEquality);
         }
 
+        if reachability.derived_displays().next().is_some() {
+            dependencies.require(RuntimeHelperId::JoinStrings);
+            dependencies.require(RuntimeHelperId::IndentDisplay);
+            dependencies.require(RuntimeHelperId::FormatI64);
+            dependencies.require(RuntimeHelperId::FormatChar);
+        }
+
         if !program.settings.is_empty() {
             let has_values = program
                 .settings

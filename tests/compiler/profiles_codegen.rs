@@ -146,6 +146,57 @@ fn compiler_profiles_flow_through_staged_and_one_shot_compilation() {
 }
 
 #[test]
+fn structural_display_helpers_are_materialized_only_when_reachable() {
+    use splitscript::{BuildProfile, CompilerOptions};
+
+    let compile_debug = |body: &str| {
+        let source = format!(
+            r#"
+                state "game.exe" {{}}
+
+                record Point {{
+                    x: u32,
+                    y: u32,
+                }}
+
+                whileAttached {{
+                    {body}
+                }}
+            "#,
+        );
+        splitscript::compile_with_options(
+            &source,
+            CompilerOptions {
+                profile: BuildProfile::Debug,
+                ..CompilerOptions::default()
+            },
+        )
+        .expect("the Display reachability probe should compile")
+    };
+
+    let unused = compile_debug("print(\"tick\")");
+    let (_, unused_names) = debug_function_names(&unused).expect("debug names should exist");
+    assert!(
+        unused_names
+            .iter()
+            .all(|(_, name)| name != "__splitscript::display::Point"),
+        "declaring a displayable record must not eagerly generate its formatter"
+    );
+
+    let displayed = compile_debug("print(Point { x: 1, y: 2 })");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&displayed)
+        .expect("the lazily generated formatter should be valid WebAssembly GC");
+    let (_, displayed_names) = debug_function_names(&displayed).expect("debug names should exist");
+    assert!(
+        displayed_names
+            .iter()
+            .any(|(_, name)| name == "__splitscript::display::Point"),
+        "a reachable conversion should materialize the formatter"
+    );
+}
+
+#[test]
 fn debug_profiles_name_every_function_while_release_profiles_are_stripped() {
     use splitscript::{BuildProfile, CompilerOptions};
 

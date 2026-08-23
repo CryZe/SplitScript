@@ -7,13 +7,13 @@ use crate::{
     memory::MemoryLayouts,
     semantic::{FunctionInstance, SemanticModel},
     stdlib::StandardLibrary,
-    types::{ResolvedArrayType, TypeId},
+    types::ResolvedArrayType,
     wasm_ir,
 };
 
 use super::{
-    ArrayFunctions, EqualityFunctions, GcLayout, RuntimeHelperPlan, SetFunctions, SettingStorage,
-    Type,
+    ArrayFunctions, DisplayFunctions, EqualityFunctions, GcLayout, RuntimeHelperPlan, SetFunctions,
+    SettingStorage, Type,
     data_plan::{SignaturePool, StringPool},
     debug_artifacts::DebugRecorder,
     global_plan::RuntimeGlobals,
@@ -37,7 +37,7 @@ pub(super) struct EmissionContext<'a> {
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
     pub intrinsic_futures: &'a HashMap<super::async_frame::IntrinsicFutureInstance, u32>,
-    pub display_functions: &'a HashMap<TypeId, FunctionInstance>,
+    pub display_functions: &'a DisplayFunctions,
     pub equality_functions: &'a EqualityFunctions,
     pub array_functions: &'a ArrayFunctions,
     pub set_functions: &'a SetFunctions,

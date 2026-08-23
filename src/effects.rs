@@ -174,14 +174,10 @@ impl TypedVisitor for CallCollector<'_> {
                     else {
                         continue;
                     };
-                    if let Some(function) = self.capabilities.method_implementation(
-                        *source,
-                        crate::stdlib::StdlibCapabilityId::Display,
-                        crate::stdlib::StdlibItemId::DisplayToString,
-                        self.semantics,
-                    ) {
-                        self.facts.callees.push(function);
-                    }
+                    self.facts.callees.extend(
+                        self.capabilities
+                            .display_method_implementations(*source, self.semantics),
+                    );
                 }
             }
             hir::TypedExpressionKind::Cast {
@@ -195,14 +191,10 @@ impl TypedVisitor for CallCollector<'_> {
                     .expression(*value)
                     .expect("cast operands belong to typed HIR")
                     .ty;
-                if let Some(function) = self.capabilities.method_implementation(
-                    source,
-                    crate::stdlib::StdlibCapabilityId::Display,
-                    crate::stdlib::StdlibItemId::DisplayToString,
-                    self.semantics,
-                ) {
-                    self.facts.callees.push(function);
-                }
+                self.facts.callees.extend(
+                    self.capabilities
+                        .display_method_implementations(source, self.semantics),
+                );
             }
             _ => {}
         }
@@ -234,6 +226,25 @@ impl TypedVisitor for CallCollector<'_> {
             }
         }
         if let Some(call) = program.call(expression.id) {
+            if let crate::semantic::ResolvedCall::StandardLibrary { item, .. } = call
+                && let hir::TypedExpressionKind::Call { arguments, .. } = &expression.kind
+            {
+                let converted = match *item {
+                    crate::stdlib::StdlibItemId::Print => arguments.first(),
+                    crate::stdlib::StdlibItemId::SetVariable => arguments.get(1),
+                    _ => None,
+                };
+                if let Some(argument) = converted {
+                    let ty = program
+                        .expression(*argument)
+                        .expect("resolved call arguments belong to typed HIR")
+                        .ty;
+                    self.facts.callees.extend(
+                        self.capabilities
+                            .display_method_implementations(ty, self.semantics),
+                    );
+                }
+            }
             if call
                 .receiver()
                 .and_then(|receiver| receiver.path().map(|(root, _)| root))

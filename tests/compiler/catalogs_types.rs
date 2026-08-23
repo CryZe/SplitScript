@@ -2834,14 +2834,42 @@ fn source_methods_structurally_satisfy_display() {
 }
 
 #[test]
-fn structural_display_reports_missing_and_mismatched_methods() {
-    for (method, expected) in [
-        ("", "is missing"),
-        (
-            "fn Position.toString() -> i32 { return self.x }",
-            "does not match",
-        ),
+fn structural_display_derives_by_default_and_reports_mismatched_overrides() {
+    let derived = r#"
+        state "game.exe" {}
+        record Position { x: i32, }
+        enum Location { Unknown, Known(Position), }
+        whileAttached {
+            let position = Position { x: 3 }
+            print(position)
+            print(position as String)
+            print(`position {position}`)
+            print(Location.Known(position))
+        }
+    "#;
+    let checked = splitscript::check(splitscript::parse(derived).unwrap())
+        .expect("source aggregates should derive Display without boilerplate");
+    for ty in [
+        checked
+            .semantics()
+            .types()
+            .id_for_record(checked.syntax().records[0].id),
+        checked
+            .semantics()
+            .types()
+            .id_for_enum(checked.syntax().enums[0].id),
     ] {
+        assert!(checked.capabilities().has(
+            ty,
+            splitscript::compiler::stdlib::StdlibCapabilityId::Display,
+            checked.semantics(),
+        ));
+    }
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&splitscript::compile(derived).unwrap())
+        .expect("lazily derived Display helpers should form valid Wasm");
+
+    for method in ["fn Position.toString() -> i32 { return self.x }"] {
         for consumer in [
             "print(Position { x: 3 })",
             "let text = Position { x: 3 } as String",
@@ -2860,7 +2888,7 @@ fn structural_display_reports_missing_and_mismatched_methods() {
             let diagnostic = diagnostics
                 .iter()
                 .find(|diagnostic| {
-                    diagnostic.message.contains(expected)
+                    diagnostic.message.contains("does not match")
                         && diagnostic.message.contains("Display")
                         && diagnostic.message.contains("toString")
                 })
@@ -2868,13 +2896,10 @@ fn structural_display_reports_missing_and_mismatched_methods() {
             assert!(
                 diagnostic.labels.iter().any(|label| {
                     label.style == splitscript::DiagnosticLabelStyle::Secondary
-                        && label.message.as_deref().is_some_and(|message| {
-                            message.contains(if method.is_empty() {
-                                "define the required method"
-                            } else {
-                                "this method was considered"
-                            })
-                        })
+                        && label
+                            .message
+                            .as_deref()
+                            .is_some_and(|message| message.contains("this method was considered"))
                 }),
                 "{diagnostic:#?}"
             );
@@ -2887,6 +2912,7 @@ fn implicit_display_calls_propagate_source_method_effects() {
     let source = r#"
         state "game.exe" {}
         record ProcessLabel { prefix: String, }
+        record WrappedLabel { label: ProcessLabel, }
 
         fn ProcessLabel.toString() -> String {
             return `{self.prefix}: {process.name()}`
@@ -2898,6 +2924,7 @@ fn implicit_display_calls_propagate_source_method_effects() {
 
         setup {
             print(label(ProcessLabel { prefix: "game" }))
+            print(WrappedLabel { label: ProcessLabel { prefix: "game" } })
         }
     "#;
     let diagnostics = splitscript::check(splitscript::parse(source).unwrap())

@@ -367,12 +367,15 @@ completion, while inferred constraints and rendered signatures retain only the
 strongest non-redundant capabilities. Concrete integer types consequently
 declare `Integer` once instead of separately repeating those memberships.
 Capabilities may also declare structural method requirements in privileged
-source. `Display` requires `fn toString() -> String`; a user record or enum
-satisfies it merely by defining the corresponding `fn Type.toString()` method.
-The checker matches the semantic receiver, parameters, and result against the
-catalog requirement, and implicit conversions enter the ordinary source call
-graph so effects and reachability remain accurate. This intentionally avoids
-requiring `impl` blocks in short user scripts.
+source. `Display` requires `fn toString() -> String`; user records and enums
+derive a structural implementation by default, while a corresponding
+`fn Type.toString()` method overrides it. The checker matches the semantic
+receiver, parameters, and result against the catalog requirement, and implicit
+conversions enter the ordinary source call graph so effects and reachability
+remain accurate. Structural shape is shared with equality analysis, and the
+backend plans both kinds of generated helper from reachable uses rather than
+emitting one for every declaration. This intentionally avoids requiring
+`impl` blocks in short user scripts.
 
 Nominal standard-library types remain explicit. They connect a parameterless
 `String`-returning source method to `Display` with the private `@display`

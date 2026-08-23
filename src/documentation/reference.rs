@@ -1,5 +1,7 @@
 //! Navigable standard-library reference pages over compiler-owned catalogs.
 
+use std::sync::{Arc, Mutex, OnceLock};
+
 use crate::{
     catalog::Documentation,
     language::{LanguageCatalog, LanguageItem, LanguageItemId, LanguageItemKind},
@@ -67,12 +69,39 @@ enum DocumentationMember {
 /// The reference deliberately returns Markdown rather than VS Code-specific
 /// HTML. Editors can render it with their native Markdown UI, expose it as
 /// plain read-only text, or transform the same pages for another frontend.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct DocumentationReference {
     library: StandardLibrary,
+    semantic_examples: bool,
 }
 
+type CachedPage = Arc<OnceLock<Option<DocumentationPage>>>;
+
+impl Default for DocumentationReference {
+    fn default() -> Self {
+        Self {
+            library: StandardLibrary::default(),
+            semantic_examples: true,
+        }
+    }
+}
+
+/// Documentation examples are semantically checked while their pages are
+/// rendered. The catalogs are immutable for the lifetime of the compiler, so
+/// every `DocumentationReference` describes the same canonical page for a URI.
+/// Sharing one lazily initialized cell per URI prevents full-reference tests,
+/// LSP requests, and parallel clients from compiling the same examples again.
+/// Distinct pages retain independent cells and can still render concurrently.
+static PAGE_CACHE: OnceLock<Mutex<std::collections::HashMap<(bool, String), CachedPage>>> =
+    OnceLock::new();
+
 impl DocumentationReference {
+    pub(super) fn with_lexical_examples(&self) -> Self {
+        Self {
+            library: self.library.clone(),
+            semantic_examples: false,
+        }
+    }
     /// Validates catalogs and every rendered page in the documentation graph.
     ///
     /// This checks the same graph consumed by native tools and editor clients,
@@ -412,6 +441,20 @@ impl DocumentationReference {
     }
 
     pub fn page(&self, uri: &str) -> Option<DocumentationPage> {
+        let page = {
+            let mut cache = PAGE_CACHE
+                .get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+                .lock()
+                .expect("documentation page cache should not be poisoned");
+            cache
+                .entry((self.semantic_examples, uri.to_owned()))
+                .or_insert_with(|| Arc::new(OnceLock::new()))
+                .clone()
+        };
+        page.get_or_init(|| self.render_page(uri)).clone()
+    }
+
+    fn render_page(&self, uri: &str) -> Option<DocumentationPage> {
         if uri == "/index.md" {
             return Some(self.index_page());
         }
@@ -697,7 +740,13 @@ impl DocumentationReference {
                             ),
                             details,
                         );
-                        append_examples(&mut markdown, uri, &self.library, documentation.examples);
+                        append_examples(
+                            &mut markdown,
+                            uri,
+                            &self.library,
+                            documentation.examples,
+                            self.semantic_examples,
+                        );
                         append_related(
                             &mut markdown,
                             uri,
@@ -799,7 +848,13 @@ impl DocumentationReference {
             ty.name,
             self.render_signature(ty.name, &uri, None),
         );
-        append_documentation(&mut markdown, &uri, &self.library, documentation);
+        append_documentation(
+            &mut markdown,
+            &uri,
+            &self.library,
+            documentation,
+            self.semantic_examples,
+        );
         self.append_member_groups(
             &mut markdown,
             &uri,
@@ -853,7 +908,13 @@ impl DocumentationReference {
             markdown.push_str("\n\n");
             markdown.push_str(&self.render_signature(&signature, &uri, Some(symbol)));
         }
-        append_documentation(&mut markdown, &uri, &self.library, documentation);
+        append_documentation(
+            &mut markdown,
+            &uri,
+            &self.library,
+            documentation,
+            self.semantic_examples,
+        );
         self.append_member_groups(&mut markdown, &uri, member_groups);
         append_related(&mut markdown, &uri, &self.library, documentation.related);
         DocumentationPage {
@@ -945,6 +1006,7 @@ impl DocumentationReference {
             &uri,
             &self.library,
             item.documentation.examples,
+            self.semantic_examples,
         );
         if !item.documentation.related.is_empty() {
             markdown.push_str("\n\n## Related\n");
@@ -1355,12 +1417,19 @@ fn append_documentation<Id>(
     current_uri: &str,
     library: &StandardLibrary,
     documentation: &Documentation<Id>,
+    semantic_examples: bool,
 ) {
     let summary = intra_doc::render_links(documentation.summary, current_uri, library);
     let details = intra_doc::render_links(documentation.details, current_uri, library);
     markdown.push_str("\n\n");
     markdown.push_str(&super::prose_markdown(&summary, &details));
-    append_examples(markdown, current_uri, library, documentation.examples);
+    append_examples(
+        markdown,
+        current_uri,
+        library,
+        documentation.examples,
+        semantic_examples,
+    );
 }
 
 fn append_examples(
@@ -1368,6 +1437,7 @@ fn append_examples(
     current_uri: &str,
     library: &StandardLibrary,
     examples: &[crate::catalog::Example],
+    semantic_examples: bool,
 ) {
     if examples.is_empty() {
         return;
@@ -1375,7 +1445,11 @@ fn append_examples(
     markdown.push_str("\n\n## Examples");
     for example in examples {
         markdown.push_str(&format!("\n\n_{}_\n\n", example.title));
-        markdown.push_str(&code::example(*example, current_uri, library));
+        markdown.push_str(&if semantic_examples {
+            code::example(*example, current_uri, library)
+        } else {
+            code::lexical_example(*example, current_uri, library)
+        });
     }
 }
 
@@ -2377,7 +2451,7 @@ mod tests {
 
     #[test]
     fn every_searchable_documentation_identity_has_one_page() {
-        let reference = DocumentationReference::default();
+        let reference = DocumentationReference::default().with_lexical_examples();
         let index = reference.index();
         let mut uris = std::collections::HashSet::new();
         for entry in index {

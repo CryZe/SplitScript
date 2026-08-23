@@ -7,12 +7,13 @@ use crate::{
     equality::EqualityCapabilities,
     semantic::{FunctionInstance, SemanticModel},
     stdlib::{RuntimeRepresentation, StandardLibrary},
-    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, ResolvedSetType, TypeId},
+    structural::{StructuralTypeId, StructuralTypes},
+    types::{ResolvedArrayType, ResolvedOptionType, ResolvedResultType, ResolvedSetType},
 };
 
 use super::{
-    ArrayFunctions, EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE, Type,
-    action_result_val_type,
+    ArrayFunctions, DisplayFunctions, EqualityFunctions, GcLayout, RuntimeHelperPlan, STATE_TYPE,
+    Type, action_result_val_type,
     async_frame::IntrinsicFutureInstance,
     dependencies::BackendDependencies,
     reachability, runtime_helper_registry, semantic_type, set_element_type,
@@ -30,7 +31,7 @@ pub(super) struct FunctionPlan<'a> {
     pub sets: SetFunctions,
     pub users: HashMap<FunctionInstance, UserFunctionPlan>,
     pub intrinsic_futures: HashMap<IntrinsicFutureInstance, u32>,
-    pub displays: HashMap<TypeId, FunctionInstance>,
+    pub displays: DisplayFunctions,
     pub reads: Vec<u32>,
     pub transforms: Vec<Option<u32>>,
     pub actions: HashMap<ActionKind, u32>,
@@ -58,6 +59,7 @@ pub(super) struct Inputs<'a> {
     pub results: &'a [ResolvedResultType],
     pub sets: &'a [ResolvedSetType],
     pub equality: &'a EqualityCapabilities,
+    pub structural: &'a StructuralTypes,
     pub dependencies: &'a BackendDependencies,
     pub reachability: &'a reachability::Reachability,
     pub gc: &'a GcLayout,
@@ -81,6 +83,7 @@ pub(super) fn encode<'a>(
         results,
         sets,
         equality: equality_capabilities,
+        structural,
         dependencies,
         reachability,
         gc,
@@ -137,30 +140,36 @@ pub(super) fn encode<'a>(
         );
         equality.standard_records.insert(record.id, function);
     }
-    for record in &program.records {
-        if reachability.requires_record_equality(record.id)
-            && equality_capabilities.record(record.id).is_ok()
+    for (_, record) in structural.records() {
+        let StructuralTypeId::Record(record_id) = record.id else {
+            unreachable!()
+        };
+        if reachability.requires_record_equality(record_id)
+            && equality_capabilities.record(record_id).is_ok()
         {
-            let record_type = gc.val_type(Type::Record(record.id));
+            let record_type = gc.val_type(Type::Record(record_id));
             let function = declare(
                 format!("__splitscript::equals::{}", record.name),
                 vec![record_type, record_type],
                 vec![ValType::I32],
             );
-            equality.records.insert(record.id, function);
+            equality.records.insert(record_id, function);
         }
     }
-    for enumeration in enums {
-        if reachability.requires_enum_equality(enumeration.id)
-            && equality_capabilities.enumeration(enumeration.id).is_ok()
+    for (_, enumeration) in structural.enums() {
+        let StructuralTypeId::Enum(enum_id) = enumeration.id else {
+            unreachable!()
+        };
+        if reachability.requires_enum_equality(enum_id)
+            && equality_capabilities.enumeration(enum_id).is_ok()
         {
-            let enum_type = gc.val_type(Type::Enum(enumeration.id));
+            let enum_type = gc.val_type(Type::Enum(enum_id));
             let function = declare(
                 format!("__splitscript::equals::{}", enumeration.name),
                 vec![enum_type, enum_type],
                 vec![ValType::I32],
             );
-            equality.enums.insert(enumeration.id, function);
+            equality.enums.insert(enum_id, function);
         }
     }
     for option in options {
@@ -184,6 +193,29 @@ pub(super) fn encode<'a>(
             );
             equality.results.insert(result.id, function);
         }
+    }
+
+    let mut displays = DisplayFunctions {
+        custom: reachability
+            .display_functions()
+            .map(|(ty, function)| (ty, function.clone()))
+            .collect(),
+        ..DisplayFunctions::default()
+    };
+    for ty in reachability.derived_displays() {
+        let source_type = super::semantic_type(ty, semantics);
+        let name = &structural
+            .get(ty)
+            .expect("derived Display implementations belong to source aggregates")
+            .name;
+        displays.derived.insert(
+            ty,
+            declare(
+                format!("__splitscript::display::{name}"),
+                vec![gc.val_type(source_type)],
+                vec![gc.val_type(Type::Standard(crate::stdlib::StdlibTypeId::String))],
+            ),
+        );
     }
 
     let runtime_helpers = RuntimeHelperPlan {
@@ -442,10 +474,7 @@ pub(super) fn encode<'a>(
         sets: set_functions,
         users,
         intrinsic_futures,
-        displays: reachability
-            .display_functions()
-            .map(|(ty, function)| (ty, function.clone()))
-            .collect(),
+        displays,
         reads,
         transforms,
         actions,

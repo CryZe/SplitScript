@@ -3,10 +3,11 @@
 use wasm_encoder::{BlockType, Function, Instruction, ValType};
 
 use crate::{
-    ast::{EnumDecl, OptionTypeId, RecordDecl, ResultTypeId},
+    ast::{OptionTypeId, ResultTypeId},
     intrinsic_registry::RuntimeHelperId,
     semantic::SemanticModel,
     stdlib::{DeclaredTypeRef, RuntimeRepresentation, StdlibTypeId},
+    structural::{StructuralMemberId, StructuralType, StructuralTypeId, StructuralTypes},
     types::{ResolvedOptionType, ResolvedResultType},
 };
 
@@ -18,8 +19,7 @@ use super::super::{
 #[allow(clippy::too_many_arguments)]
 pub(in crate::codegen) fn compile_equality(
     plan: &RuntimeHelperPlan,
-    records: &[RecordDecl],
-    enums: &[EnumDecl],
+    structural: &StructuralTypes,
     options: &[ResolvedOptionType],
     results: &[ResolvedResultType],
     semantics: &SemanticModel,
@@ -45,8 +45,11 @@ pub(in crate::codegen) fn compile_equality(
             ));
         }
     }
-    for record in records {
-        if equality_functions.records.contains_key(&record.id) {
+    for (_, record) in structural.records() {
+        let StructuralTypeId::Record(record_id) = record.id else {
+            unreachable!()
+        };
+        if equality_functions.records.contains_key(&record_id) {
             equality.push(compile_record_equality(
                 record,
                 semantics,
@@ -56,8 +59,11 @@ pub(in crate::codegen) fn compile_equality(
             ));
         }
     }
-    for enumeration in enums {
-        if equality_functions.enums.contains_key(&enumeration.id) {
+    for (_, enumeration) in structural.enums() {
+        let StructuralTypeId::Enum(enum_id) = enumeration.id else {
+            unreachable!()
+        };
+        if equality_functions.enums.contains_key(&enum_id) {
             equality.push(compile_enum_equality(
                 enumeration,
                 semantics,
@@ -149,18 +155,24 @@ pub(in crate::codegen::runtime_helpers) fn compile_string_eq(gc: &GcLayout) -> F
 }
 
 fn compile_record_equality(
-    record: &RecordDecl,
+    record: &StructuralType,
     semantics: &SemanticModel,
     equality_functions: &EqualityFunctions,
     string_eq: u32,
     gc: &GcLayout,
 ) -> Function {
     let mut function = Function::new([]);
-    let type_index = gc.index(Type::Record(record.id));
+    let StructuralTypeId::Record(record_id) = record.id else {
+        unreachable!()
+    };
+    let type_index = gc.index(Type::Record(record_id));
 
     function.instruction(&Instruction::I32Const(1));
-    for (field_index, field) in record.fields.iter().enumerate() {
-        let ty = record_field_type(field.id, semantics);
+    for (field_index, field) in record.members.iter().enumerate() {
+        let StructuralMemberId::RecordField(field_id) = field.source else {
+            unreachable!()
+        };
+        let ty = record_field_type(field_id, semantics);
         function
             .instruction(&Instruction::LocalGet(0))
             .instruction(&Instruction::RefAsNonNull);
@@ -206,7 +218,7 @@ fn compile_standard_record_equality(
 }
 
 fn compile_enum_equality(
-    enumeration: &EnumDecl,
+    enumeration: &StructuralType,
     semantics: &SemanticModel,
     equality_functions: &EqualityFunctions,
     string_eq: u32,
@@ -214,7 +226,10 @@ fn compile_enum_equality(
 ) -> Function {
     let mut function = Function::new([(1, ValType::I32)]);
     let tag = 2;
-    let type_index = gc.index(Type::Enum(enumeration.id));
+    let StructuralTypeId::Enum(enum_id) = enumeration.id else {
+        unreachable!()
+    };
+    let type_index = gc.index(Type::Enum(enum_id));
 
     function
         .instruction(&Instruction::LocalGet(0))
@@ -232,13 +247,18 @@ fn compile_enum_equality(
         .instruction(&Instruction::Return)
         .instruction(&Instruction::End);
 
-    for (variant_index, variant) in enumeration.variants.iter().enumerate() {
+    for (variant_index, variant) in enumeration.members.iter().enumerate() {
         function
             .instruction(&Instruction::LocalGet(tag))
             .instruction(&Instruction::I32Const(variant_index as i32))
             .instruction(&Instruction::I32Eq)
             .instruction(&Instruction::If(BlockType::Empty));
-        if let Some(ty) = enum_variant_payload(variant.id, semantics) {
+        if variant.ty.is_some() {
+            let StructuralMemberId::EnumVariant(variant_id) = variant.source else {
+                unreachable!()
+            };
+            let ty = enum_variant_payload(variant_id, semantics)
+                .expect("payload variants have backend types");
             function
                 .instruction(&Instruction::LocalGet(0))
                 .instruction(&Instruction::RefAsNonNull);

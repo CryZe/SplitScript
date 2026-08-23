@@ -1695,16 +1695,11 @@ fn runtime_text_outputs_accept_display_values() {
         let source = format!(
             "record Value {{ number: i32 }} state \"game.exe\" {{}} whileAttached {{ let value = Value {{ number: 1 }}; {call} }}"
         );
-        let diagnostics = splitscript::compile(&source)
-            .expect_err("values that cannot be displayed should be rejected");
-        assert!(
-            diagnostics.iter().any(|diagnostic| {
-                diagnostic.message.contains("Display")
-                    && diagnostic.message.contains("toString")
-                    && diagnostic.message.contains("missing")
-            }),
-            "{diagnostics:#?}"
-        );
+        let wasm = splitscript::compile(&source)
+            .expect("records should receive a derived Display implementation");
+        Validator::new_with_features(WasmFeatures::all())
+            .validate_all(&wasm)
+            .expect("derived runtime text output should produce valid Wasm");
     }
 }
 
@@ -1772,7 +1767,7 @@ fn template_strings_interpolate_strings_castable_values_and_nested_templates() {
 }
 
 #[test]
-fn template_strings_reject_values_without_string_casts() {
+fn template_strings_use_derived_structural_display() {
     let source = r#"
         record Value { number: i32 }
         state "game.exe" {}
@@ -1780,12 +1775,11 @@ fn template_strings_reject_values_without_string_casts() {
             return `value={value}`
         }
     "#;
-    let diagnostics = splitscript::compile(source).expect_err("Value does not implement Display");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("Display")
-            && diagnostic.message.contains("toString")
-            && diagnostic.message.contains("missing")
-    }));
+    let wasm = splitscript::compile(source)
+        .expect("template strings should derive Display for source records");
+    Validator::new_with_features(WasmFeatures::all())
+        .validate_all(&wasm)
+        .expect("derived template conversion should produce valid Wasm");
 }
 
 #[test]

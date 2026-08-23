@@ -5,7 +5,7 @@
 //! authoritative query boundary for declared core/standard capabilities and
 //! capabilities derived from source records, enums, and wrappers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     ast::{EnumDecl, FunctionDecl, FunctionId, RecordDecl},
@@ -16,6 +16,7 @@ use crate::{
         CapabilityBehavior, Implementation, ItemKind, StandardLibrary, StdlibCapabilityId,
         StdlibItem, StdlibItemId, StdlibOwner, StdlibTypeConstructorId, TypeRef,
     },
+    structural::StructuralTypes,
     types::{TypeId, TypeKind},
 };
 
@@ -25,7 +26,7 @@ pub struct CapabilityAnalysis {
     equality: EqualityCapabilities,
     memory: MemoryLayouts,
     source_methods: HashMap<TypeId, HashMap<String, FunctionId>>,
-    type_names: HashMap<TypeId, String>,
+    structural: StructuralTypes,
     structural_requirements: HashMap<StdlibCapabilityId, Vec<StdlibItemId>>,
 }
 
@@ -59,21 +60,7 @@ impl CapabilityAnalysis {
                     .insert(function.name.clone(), function.id);
             }
         }
-        let type_names = semantics
-            .types()
-            .iter()
-            .filter_map(|(ty, kind)| match kind {
-                TypeKind::Record(id) => records
-                    .iter()
-                    .find(|record| record.id == *id)
-                    .map(|record| (ty, record.name.clone())),
-                TypeKind::Enum(id) => enums
-                    .iter()
-                    .find(|enumeration| enumeration.id == *id)
-                    .map(|enumeration| (ty, enumeration.name.clone())),
-                _ => None,
-            })
-            .collect();
+        let structural = StructuralTypes::build(records, enums, semantics);
         let structural_requirements = standard_library
             .capabilities()
             .iter()
@@ -96,15 +83,14 @@ impl CapabilityAnalysis {
             .collect();
         Self {
             standard_library: standard_library.clone(),
-            equality: EqualityCapabilities::build_with_library(
-                records,
-                enums,
+            equality: EqualityCapabilities::build_with_structural(
+                structural.clone(),
                 semantics,
                 standard_library.clone(),
             ),
             memory: MemoryLayouts::build_with_library(records, semantics, standard_library),
             source_methods,
-            type_names,
+            structural,
             structural_requirements,
         }
     }
@@ -164,29 +150,38 @@ impl CapabilityAnalysis {
                             declaration.name,
                         ));
                     }
-                    for requirement in requirements {
-                        let requirement = self.standard_library.item(*requirement);
-                        let Some(function) = self
-                            .source_methods
-                            .get(&ty)
-                            .and_then(|methods| methods.get(requirement.name))
-                            .copied()
-                        else {
-                            return Err(format!(
-                                "type `{}` is missing `{}` required by capability `{}`",
-                                self.type_name(ty, semantics),
-                                self.standard_library.render_signature(requirement.id),
-                                declaration.name,
-                            ));
-                        };
-                        if !self.method_matches(ty, function, requirement, semantics) {
-                            return Err(format!(
-                                "method `{}.{}` does not match `{}` required by capability `{}`",
-                                self.type_name(ty, semantics),
-                                requirement.name,
-                                self.standard_library.render_signature(requirement.id),
-                                declaration.name,
-                            ));
+                    let derives_display = capability == StdlibCapabilityId::Display
+                        && self.structural.get(ty).is_some()
+                        && !requirements
+                            .iter()
+                            .any(|requirement| self.method_candidate(ty, *requirement).is_some());
+                    if derives_display {
+                        self.require_derived_display(ty, semantics, &mut HashSet::new())?;
+                    } else {
+                        for requirement in requirements {
+                            let requirement = self.standard_library.item(*requirement);
+                            let Some(function) = self
+                                .source_methods
+                                .get(&ty)
+                                .and_then(|methods| methods.get(requirement.name))
+                                .copied()
+                            else {
+                                return Err(format!(
+                                    "type `{}` is missing `{}` required by capability `{}`",
+                                    self.type_name(ty, semantics),
+                                    self.standard_library.render_signature(requirement.id),
+                                    declaration.name,
+                                ));
+                            };
+                            if !self.method_matches(ty, function, requirement, semantics) {
+                                return Err(format!(
+                                    "method `{}.{}` does not match `{}` required by capability `{}`",
+                                    self.type_name(ty, semantics),
+                                    requirement.name,
+                                    self.standard_library.render_signature(requirement.id),
+                                    declaration.name,
+                                ));
+                            }
                         }
                     }
                 }
@@ -273,6 +268,93 @@ impl CapabilityAnalysis {
             .get(&ty)
             .and_then(|methods| methods.get(requirement.name))
             .copied()
+    }
+
+    /// Direct fields or payloads recursively rendered by a compiler-derived
+    /// `Display` implementation.
+    pub fn structural_dependency_types(&self, ty: TypeId) -> impl Iterator<Item = TypeId> + '_ {
+        self.structural
+            .get(ty)
+            .into_iter()
+            .flat_map(|aggregate| aggregate.members.iter().filter_map(|member| member.ty))
+    }
+
+    /// Canonical source-aggregate shape shared by semantic derivation and the
+    /// backend implementations it decides to materialize.
+    pub(crate) fn structural_types(&self) -> &StructuralTypes {
+        &self.structural
+    }
+
+    pub fn has_derived_display(&self, ty: TypeId, semantics: &SemanticModel) -> bool {
+        self.method_candidate(ty, StdlibItemId::DisplayToString)
+            .is_none()
+            && self.structural.get(ty).is_some()
+            && self
+                .require_derived_display(ty, semantics, &mut HashSet::new())
+                .is_ok()
+    }
+
+    /// Source functions invoked by displaying this value, including custom
+    /// overrides nested inside a compiler-derived aggregate formatter.
+    pub fn display_method_implementations(
+        &self,
+        root: TypeId,
+        semantics: &SemanticModel,
+    ) -> Vec<FunctionId> {
+        let mut pending = vec![root];
+        let mut visited = HashSet::new();
+        let mut functions = Vec::new();
+        while let Some(ty) = pending.pop() {
+            if !visited.insert(ty) {
+                continue;
+            }
+            if let Some(function) = self.method_implementation(
+                ty,
+                StdlibCapabilityId::Display,
+                StdlibItemId::DisplayToString,
+                semantics,
+            ) {
+                functions.push(function);
+            } else if self.has_derived_display(ty, semantics) {
+                pending.extend(self.structural_dependency_types(ty));
+            }
+        }
+        functions
+    }
+
+    fn require_derived_display(
+        &self,
+        ty: TypeId,
+        semantics: &SemanticModel,
+        visiting: &mut HashSet<TypeId>,
+    ) -> Result<(), String> {
+        if !visiting.insert(ty) {
+            // Source aggregates are immutable, so recursively named types
+            // cannot construct a runtime cycle without a mutable container.
+            // Treat the semantic contract coinductively here.
+            return Ok(());
+        }
+        for dependency in self.structural_dependency_types(ty) {
+            let result = if self
+                .method_candidate(dependency, StdlibItemId::DisplayToString)
+                .is_some()
+            {
+                self.require(dependency, StdlibCapabilityId::Display, semantics)
+            } else if self.structural.get(dependency).is_some() {
+                self.require_derived_display(dependency, semantics, visiting)
+            } else {
+                self.require(dependency, StdlibCapabilityId::Display, semantics)
+            };
+            if let Err(reason) = result {
+                visiting.remove(&ty);
+                return Err(format!(
+                    "type `{}` cannot derive `Display` because one of its fields or payloads is not displayable: {reason}",
+                    self.type_name(ty, semantics),
+                ));
+            }
+        }
+        visiting.remove(&ty);
+        Ok(())
     }
 
     fn method_matches(
@@ -382,9 +464,9 @@ impl CapabilityAnalysis {
     }
 
     fn type_name(&self, ty: TypeId, semantics: &SemanticModel) -> String {
-        self.type_names
-            .get(&ty)
-            .cloned()
+        self.structural
+            .get(ty)
+            .map(|aggregate| aggregate.name.clone())
             .unwrap_or_else(|| format!("{:?}", semantics.types().kind(ty)))
     }
 }

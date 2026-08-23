@@ -11,12 +11,14 @@ use crate::{
     ast::{EnumDecl, EnumId, RecordDecl, RecordId},
     semantic::SemanticModel,
     stdlib::{StandardLibrary, StdlibCapabilityId},
+    structural::{StructuralTypeId, StructuralTypes},
     types::{TypeId, TypeKind},
 };
 
 #[derive(Debug, Clone, Default)]
 pub struct EqualityCapabilities {
     standard_library: StandardLibrary,
+    structural: StructuralTypes,
     records: HashMap<RecordId, Result<(), String>>,
     enums: HashMap<EnumId, Result<(), String>>,
 }
@@ -32,30 +34,32 @@ impl EqualityCapabilities {
         semantics: &SemanticModel,
         standard_library: StandardLibrary,
     ) -> Self {
+        let structural = StructuralTypes::build(records, enums, semantics);
+        Self::build_with_structural(structural, semantics, standard_library)
+    }
+
+    pub(crate) fn build_with_structural(
+        structural: StructuralTypes,
+        semantics: &SemanticModel,
+        standard_library: StandardLibrary,
+    ) -> Self {
         let mut capabilities = Self {
             standard_library,
+            structural,
             records: HashMap::new(),
             enums: HashMap::new(),
         };
-        for record in records {
-            let result = capabilities.check_record(
-                record.id,
-                records,
-                enums,
-                semantics,
-                &mut HashSet::new(),
-            );
-            capabilities.records.entry(record.id).or_insert(result);
-        }
-        for enumeration in enums {
-            let result = capabilities.check_enum(
-                enumeration.id,
-                records,
-                enums,
-                semantics,
-                &mut HashSet::new(),
-            );
-            capabilities.enums.entry(enumeration.id).or_insert(result);
+        let aggregates = capabilities.structural.iter().collect::<Vec<_>>();
+        for (id, ty) in aggregates {
+            let result = capabilities.check_aggregate(ty, semantics, &mut HashSet::new());
+            match id {
+                StructuralTypeId::Record(record) => {
+                    capabilities.records.entry(record).or_insert(result);
+                }
+                StructuralTypeId::Enum(enumeration) => {
+                    capabilities.enums.entry(enumeration).or_insert(result);
+                }
+            }
         }
         capabilities
     }
@@ -109,8 +113,6 @@ impl EqualityCapabilities {
     fn check_type(
         &mut self,
         ty: TypeId,
-        records: &[RecordDecl],
-        enums: &[EnumDecl],
         semantics: &SemanticModel,
         visiting: &mut HashSet<TypeId>,
     ) -> Result<(), String> {
@@ -132,82 +134,53 @@ impl EqualityCapabilities {
             {
                 Ok(())
             }
-            TypeKind::Record(record) => {
-                self.check_record(*record, records, enums, semantics, visiting)
-            }
-            TypeKind::Enum(enumeration) => {
-                self.check_enum(*enumeration, records, enums, semantics, visiting)
-            }
-            TypeKind::Option { value, .. } => {
-                self.check_type(*value, records, enums, semantics, visiting)
-            }
-            TypeKind::Result { value, .. } => {
-                self.check_type(*value, records, enums, semantics, visiting)
-            }
+            TypeKind::Record(record) => self.check_aggregate(
+                self.structural
+                    .semantic_type(StructuralTypeId::Record(*record)),
+                semantics,
+                visiting,
+            ),
+            TypeKind::Enum(enumeration) => self.check_aggregate(
+                self.structural
+                    .semantic_type(StructuralTypeId::Enum(*enumeration)),
+                semantics,
+                visiting,
+            ),
+            TypeKind::Option { value, .. } => self.check_type(*value, semantics, visiting),
+            TypeKind::Result { value, .. } => self.check_type(*value, semantics, visiting),
             _ => Err("the contained type does not support equality".to_owned()),
         };
         visiting.remove(&ty);
         result
     }
 
-    fn check_record(
+    fn check_aggregate(
         &mut self,
-        record: RecordId,
-        records: &[RecordDecl],
-        enums: &[EnumDecl],
+        ty: TypeId,
         semantics: &SemanticModel,
         visiting: &mut HashSet<TypeId>,
     ) -> Result<(), String> {
-        if let Some(result) = self.records.get(&record) {
-            return result.clone();
-        }
-        let declaration = records
-            .iter()
-            .find(|declaration| declaration.id == record)
-            .expect("record IDs refer to declarations");
-        for field in &declaration.fields {
-            let ty = semantics
-                .record_field_type(field.id)
-                .expect("checked record fields have types");
-            self.check_type(ty, records, enums, semantics, visiting)
-                .map_err(|error| {
-                    format!(
+        let aggregate = self
+            .structural
+            .get(ty)
+            .expect("source aggregate types have shared structural metadata")
+            .clone();
+        for member in aggregate.members {
+            let Some(member_ty) = member.ty else {
+                continue;
+            };
+            self.check_type(member_ty, semantics, visiting)
+                .map_err(|error| match aggregate.id {
+                    StructuralTypeId::Record(_) => format!(
                         "record `{}.{}` does not support equality: {error}",
-                        declaration.name, field.name
-                    )
+                        aggregate.name, member.name
+                    ),
+                    StructuralTypeId::Enum(_) => format!(
+                        "enum `{}.{}` does not support equality: {error}",
+                        aggregate.name, member.name
+                    ),
                 })?;
         }
-        self.records.insert(record, Ok(()));
-        Ok(())
-    }
-
-    fn check_enum(
-        &mut self,
-        enumeration: EnumId,
-        records: &[RecordDecl],
-        enums: &[EnumDecl],
-        semantics: &SemanticModel,
-        visiting: &mut HashSet<TypeId>,
-    ) -> Result<(), String> {
-        if let Some(result) = self.enums.get(&enumeration) {
-            return result.clone();
-        }
-        let declaration = enums
-            .iter()
-            .find(|declaration| declaration.id == enumeration)
-            .expect("enum IDs refer to declarations");
-        for variant in &declaration.variants {
-            if let Some(ty) = semantics.enum_variant_payload(variant.id) {
-                self.check_type(ty, records, enums, semantics, visiting)
-                    .map_err(|error| {
-                        format!(
-                            "enum `{}.{}` does not support equality: {error}",
-                            declaration.name, variant.name
-                        )
-                    })?;
-            }
-        }
-        self.enums.insert(enumeration, Ok(()));
         Ok(())
     }
 }

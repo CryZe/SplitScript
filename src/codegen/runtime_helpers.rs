@@ -324,6 +324,10 @@ pub(super) fn build_join_strings(inputs: &RuntimeHelperInputs<'_>) -> Function {
     strings::compile_join_strings(array, storage, inputs.gc)
 }
 
+pub(super) fn build_indent_display(inputs: &RuntimeHelperInputs<'_>) -> Function {
+    strings::compile_indent_display(inputs.gc)
+}
+
 pub(super) fn build_follow_address(inputs: &RuntimeHelperInputs<'_>) -> Function {
     let (array, storage) = array_layouts(inputs, Type::I64);
     process::compile_follow_address(inputs.abi, array, storage, inputs.memory.scratch().abi_read)

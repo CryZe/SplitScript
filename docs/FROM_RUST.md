@@ -14,10 +14,11 @@ reported as capability bounds such as [`Numeric`], [`Display`], or
 [`MemoryReadable`], which play a trait-like role but are currently declared by
 the standard library rather than user programs.
 
-User code does not need an `impl Display for Type` block. A record or enum
-satisfies [`Display`] structurally when it defines `fn Type.toString() ->
-String`; the result type may be inferred. The method then powers interpolation,
-[`as`] [`String`], [`print`], and [`setVariable`].
+User code does not need an `impl Display for Type` block. Records and enums
+derive a multiline [`Display`] representation automatically. Define
+`fn Type.toString() -> String` only to override it; the result type may be
+inferred. The derived or custom implementation powers interpolation, [`as`]
+[`String`], [`print`], and [`setVariable`].
 
 ```splitscript
 # state "game.exe" {}

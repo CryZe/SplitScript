@@ -28,6 +28,8 @@ mod context;
 mod data_plan;
 mod debug_artifacts;
 mod dependencies;
+mod display;
+mod display_plan;
 mod equality_plan;
 mod expression;
 mod function_plan;
@@ -57,6 +59,7 @@ use self::backend_type::Type;
 use self::context::{AttachContext, EmissionContext};
 use self::data_plan::StaticData;
 use self::dependencies::BackendDependencies;
+use self::display_plan::DisplayFunctions;
 use self::equality_plan::EqualityFunctions;
 use self::gc_layout::GcLayout;
 use self::global_plan::SettingStorage;
@@ -309,7 +312,6 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let mut reachability = reachability::Reachability::analyze(
         program,
         semantics,
-        enums,
         wasm_ir,
         &standard_library,
         capabilities,
@@ -400,6 +402,7 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
             results: result_types,
             sets: set_types,
             equality,
+            structural: capabilities.structural_types(),
             dependencies: &dependencies,
             reachability: &reachability,
             gc: &gc,
@@ -504,14 +507,22 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     let helper_bodies = runtime_helpers::compile_runtime(&runtime_helpers, &helper_inputs);
     let equality_bodies = runtime_helpers::compile_equality(
         &runtime_helpers,
-        &program.records,
-        enums,
+        capabilities.structural_types(),
         option_types,
         result_types,
         semantics,
         &equality_functions,
         &gc,
     );
+    let display_bodies = display::compile(&display::DisplayInputs {
+        structural: capabilities.structural_types(),
+        arrays: array_types,
+        semantics,
+        displays: &display_functions,
+        users: &user_functions,
+        helpers: &runtime_helpers,
+        gc: &gc,
+    });
     let array_bodies = array_functions::compile(array_types, &array_functions, semantics, &gc);
     let set_bodies = set_functions::compile(
         set_types,
@@ -528,6 +539,9 @@ pub fn compile(inputs: BackendProgram<'_>) -> Vec<u8> {
     }
     let refresh_settings = runtime_helpers.optional_function(RuntimeHelperId::RefreshSettings);
     for body in equality_bodies {
+        codes.push(&body);
+    }
+    for body in display_bodies {
         codes.push(&body);
     }
     for body in array_bodies {

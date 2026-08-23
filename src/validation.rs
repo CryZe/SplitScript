@@ -95,9 +95,12 @@ pub(crate) fn validate(
             }
             let cataloged = standard_library.operation_metadata(item.id);
             let mut functions = hir.library_functions(item.id);
-            let function = functions
-                .next()
-                .expect("validated source bodies have function identities");
+            // Signature-only tooling contexts deliberately omit catalog body
+            // declarations. Their operation metadata was already derived by
+            // the standalone bootstrap, so there is no local body to compare.
+            let Some(function) = functions.next() else {
+                continue;
+            };
             let inferred = functions.fold(
                 effects.function(function).metadata(),
                 |combined, function| {

@@ -41,6 +41,7 @@ mod service;
 mod signature;
 mod stdlib;
 mod stdlib_semantic;
+mod structural;
 mod symbols;
 pub use splitscript_syntax::source as syntax;
 pub use splitscript_syntax::visit;
@@ -188,9 +189,19 @@ pub struct CompilerOptions {
 /// this context is the runtime injection boundary for that validated graph.
 /// Individual passes consume the context instead of reconstructing global
 /// catalog state.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CompilerContext {
     standard_library: stdlib::StandardLibrary,
+    include_standard_library_bodies: bool,
+}
+
+impl Default for CompilerContext {
+    fn default() -> Self {
+        Self {
+            standard_library: stdlib::StandardLibrary::default(),
+            include_standard_library_bodies: true,
+        }
+    }
 }
 
 impl CompilerContext {
@@ -199,11 +210,23 @@ impl CompilerContext {
     }
 
     pub fn with_standard_library(standard_library: stdlib::StandardLibrary) -> Self {
-        Self { standard_library }
+        Self {
+            standard_library,
+            include_standard_library_bodies: true,
+        }
     }
 
     pub fn standard_library(&self) -> stdlib::StandardLibrary {
         self.standard_library.clone()
+    }
+
+    /// Documentation snippets need catalog signatures, capabilities, and
+    /// precomputed effects, but never compile standard-library implementation
+    /// bodies. Skipping their source injection avoids reparsing the entire
+    /// library once for every independently highlighted example.
+    pub(crate) fn without_standard_library_bodies(mut self) -> Self {
+        self.include_standard_library_bodies = false;
+        self
     }
 }
 
@@ -619,11 +642,13 @@ pub(crate) fn lower_for_tooling(parsed: ParsedProgram) -> Result<LoweredProgram,
     let syntax_diagnostics = parsed.syntax_diagnostics;
     let mut compilation_syntax = syntax.clone();
     let mut resolution_diagnostics = parsed.resolution_diagnostics;
-    if let Some(augmented) = stdlib::augment_program_with_library_bodies(
-        parsed.document.source(),
-        &parsed.context.standard_library(),
-    )? {
-        compilation_syntax = augmented;
+    if parsed.context.include_standard_library_bodies {
+        if let Some(augmented) = stdlib::augment_program_with_library_bodies(
+            parsed.document.source(),
+            &parsed.context.standard_library(),
+        )? {
+            compilation_syntax = augmented;
+        }
     }
     let mut resolutions = resolution::ProgramResolutions::default();
     resolution_diagnostics.extend(resolution::resolve_program(
@@ -684,6 +709,7 @@ pub fn check(lowered: impl Into<LoweredProgram>) -> Result<CheckedProgram, Vec<D
         &compilation_syntax,
         &output.semantics,
         context.standard_library(),
+        context.include_standard_library_bodies,
         hir::visible_expression_count(&syntax),
         syntax.functions.len(),
     );
@@ -760,6 +786,7 @@ pub fn check_recovering(lowered: impl Into<LoweredProgram>) -> RecoveredCheck {
             &compilation_syntax,
             &recovered.output.semantics,
             context.standard_library(),
+            context.include_standard_library_bodies,
             hir::visible_expression_count(&syntax),
             syntax.functions.len(),
         );

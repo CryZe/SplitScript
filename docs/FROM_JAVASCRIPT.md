@@ -27,10 +27,12 @@ Interpolation is `{expression}`, not `${expression}`. A literal dollar sign
 before an interpolation stays literal, so `${score}` produces a dollar sign
 followed by the formatted score.
 
-Records and enums have no mutable prototype chain. To make one displayable,
-define `fn Type.toString() -> String`; the result may be inferred and no
-separate implementation declaration is needed. The method is used by
-interpolation, [`as`] [`String`], [`print`], and [`setVariable`].
+Records and enums have no mutable prototype chain. They receive a readable
+multiline display representation automatically. Define
+`fn Type.toString() -> String` only to override it; the result may be inferred
+and no separate implementation declaration is needed. The derived or custom
+representation is used by interpolation, [`as`] [`String`], [`print`], and
+[`setVariable`].
 
 ```splitscript
 # state "game.exe" {}

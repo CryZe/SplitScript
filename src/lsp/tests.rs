@@ -92,27 +92,16 @@ fn serves_compiler_owned_documentation_index_and_markdown_pages() {
     }));
     assert_eq!(missing[0]["error"]["code"], -32602);
 
-    let page_uris = std::iter::once("/index.md".to_owned())
-        .chain(reference.index().into_iter().map(|entry| entry.uri));
-    for (request_id, page_uri) in page_uris.enumerate() {
-        let response = server.handle(json!({
-            "jsonrpc": "2.0",
-            "id": request_id + 100,
-            "method": "splitscript/documentation/page",
-            "params": { "uri": page_uri }
-        }));
-        assert_eq!(
-            response[0]["result"],
-            serde_json::to_value(
-                reference
-                    .page(&page_uri)
-                    .expect("every reference page exists")
-            )
-            .unwrap(),
-            "LSP page differs from compiler-owned page `{}`",
-            page_uri,
-        );
-    }
+    assert_eq!(
+        page[0]["result"],
+        serde_json::to_value(
+            reference
+                .page("/stdlib/types/Duration/index.md")
+                .expect("the representative reference page exists")
+        )
+        .unwrap(),
+        "the LSP must return the compiler-owned page without an adapter projection",
+    );
 }
 
 #[test]

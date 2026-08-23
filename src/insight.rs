@@ -478,10 +478,31 @@ fn append_source_capabilities(description: &mut String, ty: TypeId, context: &Se
         &capabilities
             .iter()
             .map(|capability| {
-                format!(
-                    "`{}`",
-                    context.standard_library.capability(*capability).name
-                )
+                let name = context.standard_library.capability(*capability).name;
+                if *capability == crate::stdlib::StdlibCapabilityId::Display {
+                    let implementation = if checked
+                        .capabilities()
+                        .method_implementation(
+                            ty,
+                            crate::stdlib::StdlibCapabilityId::Display,
+                            crate::stdlib::StdlibItemId::DisplayToString,
+                            context.semantics(),
+                        )
+                        .is_some()
+                    {
+                        "custom"
+                    } else if checked
+                        .capabilities()
+                        .has_derived_display(ty, context.semantics())
+                    {
+                        "derived"
+                    } else {
+                        "declared"
+                    };
+                    format!("`{name}` ({implementation})")
+                } else {
+                    format!("`{name}`")
+                }
             })
             .collect::<Vec<_>>()
             .join(", "),
@@ -2254,7 +2275,24 @@ whileAttached { print(Position { x: 3 }) }
             .unwrap()
             .expect("record hover");
         assert!(
-            hover.markdown.contains("**Capabilities:**") && hover.markdown.contains("`Display`"),
+            hover.markdown.contains("**Capabilities:**")
+                && hover.markdown.contains("`Display` (custom)"),
+            "{}",
+            hover.markdown
+        );
+
+        let derived_source = r#"
+record Position { x: i32, }
+state "game.exe" {}
+whileAttached { print(Position { x: 3 }) }
+"#;
+        let mut database = CompilerDatabase::new(derived_source);
+        let hover = database
+            .hover(derived_source.find("Position").unwrap() + 1)
+            .unwrap()
+            .expect("derived record hover");
+        assert!(
+            hover.markdown.contains("`Display` (derived)"),
             "{}",
             hover.markdown
         );

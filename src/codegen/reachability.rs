@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     ast::{
-        ArrayTypeId, AsyncTypeId, EnumDecl, EnumId, ExprId, OptionTypeId, Program, RecordId,
-        ResultTypeId, TypeApplicationId,
+        ArrayTypeId, AsyncTypeId, EnumId, ExprId, OptionTypeId, Program, RecordId, ResultTypeId,
+        TypeApplicationId,
     },
     semantic::{FunctionInstance, SemanticModel},
     stdlib::{
@@ -36,13 +36,13 @@ pub(super) struct Reachability {
     gc_asyncs: BTreeSet<AsyncTypeId>,
     gc_sets: BTreeSet<TypeApplicationId>,
     display_functions: BTreeMap<TypeId, FunctionInstance>,
+    derived_displays: BTreeSet<TypeId>,
 }
 
 impl Reachability {
     pub fn analyze(
         program: &Program,
         semantics: &SemanticModel,
-        enums: &[EnumDecl],
         wasm_ir: &wasm_ir::Program,
         standard_library: &StandardLibrary,
         capabilities: &crate::capabilities::CapabilityAnalysis,
@@ -142,13 +142,7 @@ impl Reachability {
                     let receiver = owner.as_ref().map_or(*receiver, |owner| {
                         semantics.specialize_type(owner, *receiver)
                     });
-                    reachable.require_equality(
-                        receiver,
-                        program,
-                        enums,
-                        semantics,
-                        standard_library,
-                    );
+                    reachable.require_equality(receiver, semantics, standard_library, capabilities);
                 }
                 if let wasm_ir::CallTarget::Intrinsic {
                     intrinsic: IntrinsicId::ArrayPush,
@@ -211,13 +205,7 @@ impl Reachability {
                     let TypeKind::Set { element, .. } = semantics.types().kind(receiver) else {
                         unreachable!("checked set methods have Set receivers")
                     };
-                    reachable.require_equality(
-                        *element,
-                        program,
-                        enums,
-                        semantics,
-                        standard_library,
-                    );
+                    reachable.require_equality(*element, semantics, standard_library, capabilities);
                 }
                 let function = match target {
                     wasm_ir::CallTarget::UserFunction { function }
@@ -301,19 +289,14 @@ impl Reachability {
                 _ => {}
             }
             for source in display_sources.into_iter().map(specialize) {
-                let Some((standard, function)) = super::display_function(
+                reachable.require_display(
                     source,
                     program,
                     semantics,
                     standard_library,
                     capabilities,
-                ) else {
-                    continue;
-                };
-                reachable
-                    .display_functions
-                    .insert(standard, function.clone());
-                pending_functions.push((None, function));
+                    &mut pending_functions,
+                );
             }
         }
 
@@ -470,7 +453,13 @@ impl Reachability {
                         .expect("checked nominal standard fields have semantic types")
                 }),
         );
-        reachable.require_types(type_roots, program, enums, semantics, standard_library);
+        reachable.require_types(
+            type_roots,
+            program,
+            semantics,
+            standard_library,
+            capabilities,
+        );
         reachable
     }
 
@@ -506,6 +495,10 @@ impl Reachability {
         self.display_functions
             .iter()
             .map(|(ty, function)| (*ty, function))
+    }
+
+    pub fn derived_displays(&self) -> impl Iterator<Item = TypeId> + '_ {
+        self.derived_displays.iter().copied()
     }
 
     pub fn contains_expression(&self, expression: ExprId) -> bool {
@@ -584,9 +577,9 @@ impl Reachability {
         &mut self,
         roots: impl IntoIterator<Item = TypeId>,
         program: &Program,
-        enums: &[EnumDecl],
         semantics: &SemanticModel,
         standard_library: &StandardLibrary,
+        capabilities: &crate::capabilities::CapabilityAnalysis,
     ) {
         let mut pending = roots.into_iter().collect::<Vec<_>>();
         let mut visited = BTreeSet::new();
@@ -635,29 +628,11 @@ impl Reachability {
                 }
                 TypeKind::Record(record) => {
                     self.gc_records.insert(*record);
-                    let declaration = program
-                        .records
-                        .iter()
-                        .find(|declaration| declaration.id == *record)
-                        .expect("record IDs refer to declarations");
-                    pending.extend(declaration.fields.iter().map(|field| {
-                        semantics
-                            .record_field_type(field.id)
-                            .expect("checked record fields have types")
-                    }));
+                    pending.extend(capabilities.structural_dependency_types(ty));
                 }
                 TypeKind::Enum(enumeration) => {
                     self.gc_enums.insert(*enumeration);
-                    let declaration = enums
-                        .iter()
-                        .find(|declaration| declaration.id == *enumeration)
-                        .expect("enum IDs refer to declarations");
-                    pending.extend(
-                        declaration
-                            .variants
-                            .iter()
-                            .filter_map(|variant| semantics.enum_variant_payload(variant.id)),
-                    );
+                    pending.extend(capabilities.structural_dependency_types(ty));
                 }
                 TypeKind::Array {
                     layout, element, ..
@@ -695,10 +670,9 @@ impl Reachability {
     fn require_equality(
         &mut self,
         root: TypeId,
-        program: &Program,
-        enums: &[EnumDecl],
         semantics: &SemanticModel,
         standard_library: &StandardLibrary,
+        capabilities: &crate::capabilities::CapabilityAnalysis,
     ) {
         let mut pending = vec![root];
         let mut visited = BTreeSet::new();
@@ -733,28 +707,10 @@ impl Reachability {
                 | TypeKind::SettingsView
                 | TypeKind::GenericParameter { .. } => {}
                 TypeKind::Record(record) if self.equality_records.insert(*record) => {
-                    let declaration = program
-                        .records
-                        .iter()
-                        .find(|declaration| declaration.id == *record)
-                        .expect("record IDs refer to declarations");
-                    pending.extend(declaration.fields.iter().map(|field| {
-                        semantics
-                            .record_field_type(field.id)
-                            .expect("checked record fields have types")
-                    }));
+                    pending.extend(capabilities.structural_dependency_types(ty));
                 }
                 TypeKind::Enum(enumeration) if self.equality_enums.insert(*enumeration) => {
-                    let declaration = enums
-                        .iter()
-                        .find(|declaration| declaration.id == *enumeration)
-                        .expect("enum IDs refer to declarations");
-                    pending.extend(
-                        declaration
-                            .variants
-                            .iter()
-                            .filter_map(|variant| semantics.enum_variant_payload(variant.id)),
-                    );
+                    pending.extend(capabilities.structural_dependency_types(ty));
                 }
                 TypeKind::Option { layout, value } if self.equality_options.insert(*layout) => {
                     pending.push(*value);
@@ -771,6 +727,34 @@ impl Reachability {
                 | TypeKind::Async { .. }
                 | TypeKind::Range { .. }
                 | TypeKind::Set { .. } => {}
+            }
+        }
+    }
+
+    fn require_display(
+        &mut self,
+        root: TypeId,
+        program: &Program,
+        semantics: &SemanticModel,
+        standard_library: &StandardLibrary,
+        capabilities: &crate::capabilities::CapabilityAnalysis,
+        pending_functions: &mut Vec<(Option<FunctionInstance>, FunctionInstance)>,
+    ) {
+        let mut pending = vec![root];
+        let mut visited = BTreeSet::new();
+        while let Some(ty) = pending.pop() {
+            if !visited.insert(ty) {
+                continue;
+            }
+            if let Some((source, function)) =
+                super::display_function(ty, program, semantics, standard_library, capabilities)
+            {
+                self.display_functions.insert(source, function.clone());
+                pending_functions.push((None, function));
+                continue;
+            }
+            if capabilities.has_derived_display(ty, semantics) && self.derived_displays.insert(ty) {
+                pending.extend(capabilities.structural_dependency_types(ty));
             }
         }
     }

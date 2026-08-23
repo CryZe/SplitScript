@@ -617,9 +617,11 @@ setVariable("Value", value)
 Interpolation, [`print`], and [`setVariable`] already accept [`Display`] values, so
 they do not need an intermediate string cast.
 
-A port-defined record or enum becomes a [`Display`] value by defining
-`fn Type.toString() -> String`; the result may be inferred. No `impl` block or
-annotation is necessary.
+A port-defined record or enum is a [`Display`] value automatically and receives
+a stable multiline structural representation. Define
+`fn Type.toString() -> String` only when the timer-facing text should use a
+custom format; the result may be inferred. No `impl` block or annotation is
+necessary.
 
 ```splitscript
 # state "game.exe" {}

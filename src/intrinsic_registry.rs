@@ -77,6 +77,7 @@ pub(crate) enum RuntimeHelperId {
     UnityGetFieldAny,
     UnityGetStaticInstance,
     JoinStrings,
+    IndentDisplay,
     FollowAddress,
     GBATranslateAddress,
     GBAReadMemory,

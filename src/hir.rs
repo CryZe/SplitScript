@@ -483,6 +483,7 @@ impl TypedProgram {
         syntax: &SyntaxProgram,
         semantics: &SemanticModel,
         standard_library: StandardLibrary,
+        library_bodies_expected: bool,
         visible_expression_count: usize,
         visible_function_count: usize,
     ) -> Self {
@@ -594,14 +595,21 @@ impl TypedProgram {
                 let functions = function_names
                     .into_iter()
                     .map(|function_name| {
-                        syntax
+                        let declaration = syntax
                             .functions
                             .iter()
-                            .find(|function| function.name == function_name)
-                            .expect("injected library bodies have parsed declarations")
-                            .id
+                            .find(|function| function.name == function_name);
+                        if library_bodies_expected {
+                            Some(
+                                declaration
+                                    .expect("injected library bodies have parsed declarations")
+                                    .id,
+                            )
+                        } else {
+                            declaration.map(|function| function.id)
+                        }
                     })
-                    .collect();
+                    .collect::<Option<Vec<_>>>()?;
                 Some((item.id, functions))
             })
             .collect();

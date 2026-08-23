@@ -36,10 +36,10 @@ Backtick strings interpolate with `{expression}` without C#'s leading `$`.
 Use arrays as [`[T]`], fixed memory arrays as [`[T; N]`], records for named product
 types, and enums with exhaustive [`match`].
 
-There is no class override or interface declaration for textual display. A
-record or enum implements [`Display`] by defining `fn Type.toString() ->
-String`; the compiler can infer the result. Use lower-camel `toString`, not
-C#'s `ToString`.
+There is no class override or interface declaration for textual display.
+Records and enums receive a readable multiline [`Display`] representation by
+default. Define `fn Type.toString() -> String` only to override it; the compiler
+can infer the result. Use lower-camel `toString`, not C#'s `ToString`.
 
 ```splitscript
 # state "game.exe" {}

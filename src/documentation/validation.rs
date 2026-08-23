@@ -10,6 +10,11 @@ pub(super) fn validate(
     reference: &DocumentationReference,
     library: &StandardLibrary,
 ) -> Vec<String> {
+    // Exhaustive graph validation covers page identity, prose links, and
+    // lexical code links. Focused tests exercise semantic example links
+    // without recompiling every example in the catalog.
+    let reference = reference.with_lexical_examples();
+    let reference = &reference;
     let mut errors = Vec::new();
     errors.extend(
         LanguageCatalog::new()

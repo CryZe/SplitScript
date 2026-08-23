@@ -343,6 +343,17 @@ semantic-review evidence, not as a conformance corpus.
 
 ### Standard-library and type-system boundaries
 
+- [x] Derive `Display` lazily for ordinary values. Records and enums receive a
+  stable, multiline structural representation without requiring
+  boilerplate, while an exact user-defined `fn Type.toString() -> String`
+  overrides that representation. Capability checking and editor insight
+  describe the derivation eagerly, while code generation synthesizes a
+  formatter only when a reachable interpolation, `print`, `setVariable`, or
+  `as String` conversion needs that concrete type. Nested custom display
+  methods retain their reachability and effects, and malformed
+  overrides are diagnosed rather than silently ignored. Equality and Display
+  consume one canonical structural-type graph for fields, variants, payloads,
+  dependency traversal, and deterministic backend planning.
 - [x] Let catalog-defined structural method contracts be satisfied by ordinary
   user methods without `impl` ceremony. `Display` is the first contract:
   `fn Type.toString() -> String` makes a user record or enum displayable, and
@@ -360,6 +371,16 @@ semantic-review evidence, not as a conformance corpus.
 - [ ] Add a custom capability handler registry only when the first capability
   cannot be expressed by declared membership, structural equality, structural
   memory layout, or a source-defined implementation.
+
+- [ ] Introduce source-defined iterable and iterator capabilities after the
+  `Display` capability boundary is complete, and make `for` consume those
+  contracts instead of recognizing arrays and ranges directly. `next` must
+  return a dedicated generic step value with distinct item and end variants,
+  not `T?`: an iterator over `T?` must preserve `Some(None)` as an item rather
+  than confusing it with exhaustion. Iterators should be first-class values
+  that can be stored and passed. Specify mutation invalidation, failure, and
+  asynchronous iteration separately; defer `map`, `filter`, and similar
+  adapters until closures have a settled design.
 
 ### Engine and emulator providers
 

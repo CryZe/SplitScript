@@ -127,6 +127,7 @@ pub(super) const DESCRIPTORS: &[RuntimeHelperDescriptor] = &[
     helper!(UnityGetFieldAny, (I64, Standard(StdlibTypeId::UnityClass), StringArray) -> (Standard(StdlibTypeId::UnityField)), deps [UnityGetFieldOffset], imports [], build_unity_get_field_any),
     helper!(UnityGetStaticInstance, (I64, Standard(StdlibTypeId::UnityClass), StringArray) -> (I64), deps [UnityGetFieldAny], imports [ProcessRead], build_unity_get_static_instance),
     helper!(JoinStrings, (StringArray, StringValue) -> (StringValue), deps [], imports [], build_join_strings),
+    helper!(IndentDisplay, (StringValue) -> (StringValue), deps [], imports [], build_indent_display),
     helper!(FollowAddress, (I64, I64, I64Array) -> (I64), deps [], imports [ProcessRead], build_follow_address),
     helper!(GBATranslateAddress, (I64, Standard(StdlibTypeId::GBAEmulator), I32, I32) -> (I64), deps [], imports [ProcessRead], build_gba_translate_address),
     helper!(GBAReadMemory, (I64, Standard(StdlibTypeId::GBAEmulator), I32, I32, I32) -> (I64), deps [GBATranslateAddress], imports [ProcessRead], build_gba_read_memory),

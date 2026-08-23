@@ -1919,12 +1919,15 @@ render
 `setTickRate<T: Numeric>(T)` expose the corresponding ASR facilities without
 linear-memory pointers in source code.
 
-User records and enums satisfy [`Display`] structurally. Defining the exact
-method `fn TypeName.toString() -> String` is sufficient, and the `String`
-result may be inferred from the body. User code does not write an `impl` block,
-capability declaration, or annotation. The compiler
-checks the receiver, parameters, result, and inferred effects as an ordinary
-source method, and all implicit uses preserve those effects through their call
+User records and enums derive [`Display`] automatically. The default is a
+stable multiline structural representation containing the type, variant,
+field, and payload names. The backend generates that formatter lazily only
+when a reachable conversion needs the concrete type. Defining the exact method
+`fn TypeName.toString() -> String` overrides the derived representation, and
+the `String` result may be inferred from the body. User code does not write an
+`impl` block, capability declaration, or annotation. The compiler checks an
+override's receiver, parameters, result, and inferred effects as an ordinary
+source method, and implicit uses preserve those effects through their call
 graphs.
 
 ```splitscript

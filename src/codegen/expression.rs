@@ -22,8 +22,8 @@ use crate::{
 };
 
 use super::{
-    EqualityFunctions, GcLayout, MemoryByteOrder, RuntimeHelperPlan, STATE_TYPE, SetFunctions,
-    SettingStorage, Type, array_element_type,
+    DisplayFunctions, EqualityFunctions, GcLayout, MemoryByteOrder, RuntimeHelperPlan, STATE_TYPE,
+    SetFunctions, SettingStorage, Type, array_element_type,
     async_frame::{AsyncFrameRef, IntrinsicFutureInstance, IntrinsicFutureLayout},
     emit_array_get, emit_default, emit_failure_transfer, emit_int, emit_memory_value,
     emit_result_error, emit_result_success, emit_string_literal, emit_struct_get,
@@ -102,7 +102,7 @@ pub(super) struct ExprContext<'a> {
     pub runtime_helpers: &'a RuntimeHelperPlan,
     pub functions: &'a HashMap<FunctionInstance, super::function_plan::UserFunctionPlan>,
     pub intrinsic_futures: &'a HashMap<IntrinsicFutureInstance, u32>,
-    pub display_functions: &'a HashMap<TypeId, FunctionInstance>,
+    pub display_functions: &'a DisplayFunctions,
     pub equality_functions: &'a EqualityFunctions,
     pub array_functions: &'a super::ArrayFunctions,
     pub set_functions: &'a SetFunctions,
@@ -4062,12 +4062,14 @@ fn emit_cast(function: &mut Function, expression: ExprId, target: Type, context:
             ));
             return;
         }
-        if let Some(display) = context
-            .display_functions
-            .get(&context.expression_type_id(expression))
-        {
+        let source_type = context.expression_type_id(expression);
+        if let Some(display) = context.display_functions.custom.get(&source_type) {
             let display = context.called_instance(display);
             function.instruction(&Instruction::Call(context.functions[&display].call));
+            return;
+        }
+        if let Some(display) = context.display_functions.derived.get(&source_type) {
+            function.instruction(&Instruction::Call(*display));
             return;
         }
         emit_integer_to_i64(function, source);

@@ -35,6 +35,20 @@ pub(super) fn example(example: Example, current_uri: &str, library: &StandardLib
     render(example.source, &annotations)
 }
 
+/// Fast graph-validation rendering. Focused tests cover semantic example
+/// links; exhaustive page validation need not type-check every example merely
+/// to establish page identities and prose-link correctness.
+pub(super) fn lexical_example(
+    example: Example,
+    current_uri: &str,
+    library: &StandardLibrary,
+) -> String {
+    render(
+        example.source,
+        &lexical_annotations(example.source, current_uri, None, library),
+    )
+}
+
 fn semantic_example_annotations(
     example: Example,
     current_uri: &str,
@@ -43,7 +57,9 @@ fn semantic_example_annotations(
     let program = example.validation_program();
     let visible_start = program.find(example.source)?;
     let visible_end = visible_start.checked_add(example.source.len())?;
-    let mut database = CompilerDatabase::with_source_name("stdlib-example.split", program);
+    let context = crate::CompilerContext::default().without_standard_library_bodies();
+    let mut database =
+        CompilerDatabase::with_context_and_source_name(context, "stdlib-example.split", program);
     let highlights = database.semantic_highlights().ok()?;
     let mut annotations = Vec::new();
     for highlight in highlights.highlights() {

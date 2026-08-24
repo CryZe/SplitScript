@@ -673,9 +673,10 @@ remaining work is product hardening and distribution.
   constrain closure bodies, and omitted parameter and result types are shown as
   one complete virtual signature through inlay hints. Finish latent effect
   inference at invocation sites and named function-to-callable conversion.
-  Preserve ordinary lexical control flow: `return` belongs to the closure, while
-  `break` and `continue` cannot target loops outside it. Keep named functions
-  and closures on one callable abstraction rather than a closure-only path.
+  Ordinary lexical control flow is enforced: `return` belongs to the closure,
+  while `break` and `continue` cannot target loops outside it. Keep named
+  functions and closures on one callable abstraction rather than a
+  closure-only path.
 - [ ] Complete remaining ordinary library gaps when a port needs them:
   immutable String operations beyond the corpus-proven P0 slice, additional
   numeric operations, and typed time operations proven useful by maintained

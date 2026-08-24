@@ -288,3 +288,51 @@ onAttach {
     splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
         .expect("explicit async closure results should type-check");
 }
+
+#[test]
+fn closure_returns_target_the_closure_instead_of_the_enclosing_function() {
+    let source = r#"state "game.exe" {}
+
+fn makeAnswer() -> () -> u32 {
+    return () => {
+        return 42
+    }
+}
+
+onAttach {
+    print(makeAnswer()())
+}"#;
+    let checked = splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("return inside a closure should complete that closure");
+    wasmparser::Validator::new_with_features(wasmparser::WasmFeatures::all())
+        .validate_all(&splitscript::codegen(&checked))
+        .expect("closure-local returns should lower to valid WebAssembly");
+}
+
+#[test]
+fn closures_cannot_break_or_continue_enclosing_loops() {
+    for (control_flow, expected) in [
+        ("break", "`break` is only available inside a loop"),
+        ("continue", "`continue` is only available inside a loop"),
+    ] {
+        let source = format!(
+            r#"state "game.exe" {{}}
+
+onAttach {{
+    while true {{
+        let callback = () => {control_flow}
+        callback()
+    }}
+}}"#
+        );
+        let diagnostics =
+            splitscript::check(splitscript::lower(splitscript::parse(&source).unwrap()))
+                .expect_err("a closure must not escape into its enclosing loop");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message == expected),
+            "{diagnostics:#?}"
+        );
+    }
+}

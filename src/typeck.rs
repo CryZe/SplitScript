@@ -293,10 +293,17 @@ impl Checker {
         let previous_callable = std::mem::replace(&mut self.callable, callable);
         let previous_return = std::mem::replace(&mut self.return_ty, return_ty);
         let previous_failure = std::mem::replace(&mut self.failure, failure);
+        // A callable body is a lexical control-flow boundary. In particular,
+        // a closure written inside a loop cannot target that loop with
+        // `break` or `continue` when it is invoked later. Give the nested body
+        // its own loop stack, just as it already receives independent return
+        // and failure boundaries.
+        let previous_loops = std::mem::take(&mut self.loops);
         let output = operation(self);
         self.callable = previous_callable;
         self.return_ty = previous_return;
         self.failure = previous_failure;
+        self.loops = previous_loops;
         output
     }
 

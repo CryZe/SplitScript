@@ -177,6 +177,12 @@ whileAttached {
             .iter()
             .any(|hint| hint.position == declaration_y + 1 && hint.label == ": u16")
     );
+    let closing_parenthesis = source.find(") => x + y").unwrap() + 1;
+    assert!(
+        hints
+            .iter()
+            .any(|hint| hint.position == closing_parenthesis && hint.label == " -> u16")
+    );
 
     let highlights = database.semantic_highlights().unwrap();
     for offset in [declaration_x, declaration_y, use_x, use_y] {
@@ -193,4 +199,92 @@ whileAttached {
     assert_eq!(renamed.len(), 2);
     assert!(renamed.iter().any(|span| span.start == declaration_x));
     assert!(renamed.iter().any(|span| span.start == use_x));
+}
+
+#[test]
+fn closure_hints_render_complete_inferred_signatures() {
+    let source = r#"state "game.exe" {}
+whileAttached {
+    let increment: (u16) -> u32 = value => value as u32 + 1
+    print(increment(4))
+}"#;
+    let mut database = CompilerDatabase::new(source);
+    let parameter = source.find("value =>").unwrap();
+    let hints = database
+        .inlay_hints(Span {
+            start: 0,
+            end: source.len(),
+        })
+        .unwrap();
+
+    assert!(
+        hints
+            .iter()
+            .any(|hint| hint.position == parameter && hint.label == "(")
+    );
+    assert_eq!(
+        hints
+            .iter()
+            .filter(|hint| hint.position == parameter + "value".len())
+            .map(|hint| hint.label.as_str())
+            .collect::<Vec<_>>(),
+        [": u16", ") -> u32"]
+    );
+}
+
+#[test]
+fn explicit_closure_results_constrain_the_body_and_suppress_result_hints() {
+    let source = r#"state "game.exe" {}
+whileAttached {
+    let widen = (value: u16) -> u32 => value as u32
+    print(widen(4))
+}"#;
+    let mut database = CompilerDatabase::new(source);
+    database
+        .check()
+        .expect("explicit closure result annotations should type-check");
+    let result = source.find("u32 =>").unwrap();
+    assert!(database.definition_at(result).unwrap().is_some());
+    let hints = database
+        .inlay_hints(Span {
+            start: 0,
+            end: source.len(),
+        })
+        .unwrap();
+    let closing_parenthesis = source.find(") -> u32").unwrap() + 1;
+    assert!(
+        hints
+            .iter()
+            .all(|hint| hint.position != closing_parenthesis || !hint.label.starts_with(" ->"))
+    );
+
+    let invalid = source.replace("value as u32", "false");
+    let diagnostics = CompilerDatabase::new(invalid)
+        .check()
+        .expect_err("the explicit result must constrain the closure body");
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("expected `u32`, found `bool`")
+                && diagnostic.labels.iter().any(|label| {
+                    label.message.as_deref().is_some_and(|message| {
+                        message.contains("closure is declared to return `u32`")
+                    })
+                })
+        }),
+        "{diagnostics:#?}"
+    );
+}
+
+#[test]
+fn explicit_async_closure_results_describe_the_future_value() {
+    let source = r#"state "game.exe" {}
+onAttach {
+    let delayed: (u16) -> async u16 = (value: u16) -> async u16 => {
+        await nextTick()
+        value
+    }
+    print(await delayed(4))
+}"#;
+    splitscript::check(splitscript::lower(splitscript::parse(source).unwrap()))
+        .expect("explicit async closure results should type-check");
 }

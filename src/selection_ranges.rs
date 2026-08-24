@@ -6,8 +6,9 @@
 
 use crate::{
     ast::{
-        Action, Block, EnumDecl, Expr, FunctionDecl, MatchArm, Program, RecordDecl, SettingDecl,
-        SettingFamilyDecl, SettingKind, Span, StateDecl, StateField, Stmt, VariableDecl,
+        Action, Block, EnumDecl, Expr, ExprKind, FunctionDecl, MatchArm, Program, RecordDecl,
+        SettingDecl, SettingFamilyDecl, SettingKind, Span, StateDecl, StateField, Stmt,
+        VariableDecl,
     },
     lexer::{Lexeme, TokenKind, TriviaKind},
     syntax::SourceDocument,
@@ -213,6 +214,13 @@ impl<'ast> Visitor<'ast> for SpanCollector {
 
     fn visit_expr(&mut self, expression: &'ast Expr) {
         self.push(expression.span);
+        if let ExprKind::Closure {
+            return_annotation_span: Some(span),
+            ..
+        } = &expression.kind
+        {
+            self.push(*span);
+        }
         visit::walk_expr(self, expression);
     }
 

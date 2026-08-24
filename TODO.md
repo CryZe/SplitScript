@@ -662,7 +662,9 @@ remaining work is product hardening and distribution.
   those signatures independently at each concrete call site. Async closure
   bodies now use the same typed continuation-frame and runtime-tag dispatch as
   source async functions, including captured values and mutable parameters
-  that survive suspension. Finish latent effect inference at invocation sites,
+  that survive suspension. Explicit `(parameters) -> Result => body` signatures
+  constrain closure bodies, and omitted parameter and result types are shown as
+  one complete virtual signature through inlay hints. Finish latent effect inference at invocation sites,
   generic closure bodies and captures, and named function-to-callable
   conversion. Preserve ordinary lexical control flow: `return` belongs to the closure, while
   `break` and `continue` cannot target loops outside it. Keep named functions

@@ -1087,6 +1087,19 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             ExprKind::Cast { target, .. } => {
                 self.add_type_after_ident(*target, expression.span, "as");
             }
+            ExprKind::Closure {
+                return_annotation: Some(result),
+                arrow_span,
+                ..
+            } => {
+                self.add_type_after_arrow(
+                    *result,
+                    Span {
+                        start: expression.span.start,
+                        end: arrow_span.start,
+                    },
+                );
+            }
             ExprKind::Path(_) | ExprKind::Call { .. } => {
                 let segments = syntax_expression_segments(self.document, expression);
                 if let Some(resolution) = syntax_expression_resolution(self.semantics, expression) {
@@ -1153,7 +1166,10 @@ impl<'ast> Visitor<'ast> for DefinitionCollector<'_> {
             | ExprKind::Unary { .. }
             | ExprKind::Binary { .. }
             | ExprKind::Invoke { .. }
-            | ExprKind::Closure { .. } => {}
+            | ExprKind::Closure {
+                return_annotation: None,
+                ..
+            } => {}
         }
         visit::walk_expr(self, expression);
     }

@@ -1177,6 +1177,9 @@ pub enum ExprKind {
     /// inferred bidirectionally from the expected callable type and body.
     Closure {
         params: Vec<Parameter>,
+        /// An explicitly written result in `(parameters) -> Result => body`.
+        return_annotation: Option<TypeRef>,
+        return_annotation_span: Option<Span>,
         arrow_span: Span,
         body: Box<Expr>,
     },

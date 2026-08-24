@@ -1079,6 +1079,11 @@ impl<'ast> Visitor<'ast> for HighlightCollector<'_> {
                     );
                 }
             }
+            ExprKind::Closure {
+                return_annotation: Some(result),
+                return_annotation_span: Some(span),
+                ..
+            } => self.mark_none_type(*span, *result),
             _ => {}
         }
         visit::walk_expr(self, expression);

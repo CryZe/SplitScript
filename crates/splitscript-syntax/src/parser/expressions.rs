@@ -307,6 +307,8 @@ impl Parser<'_> {
             return Ok(self.new_expr(
                 ExprKind::Closure {
                     params: vec![parameter],
+                    return_annotation: None,
+                    return_annotation_span: None,
                     arrow_span,
                     body: Box::new(body),
                 },
@@ -339,15 +341,28 @@ impl Parser<'_> {
                 }
             }
             self.expect(TokenKind::RParen, "expected `)` after closure parameters")?;
+            let (return_annotation, return_annotation_span) =
+                if self.eat(&TokenKind::Minus).is_some() {
+                    self.expect(
+                        TokenKind::Gt,
+                        "expected `>` in the closure return arrow `->`",
+                    )?;
+                    let (ty, span) = self.parse_type("expected a closure return type")?;
+                    (Some(ty), Some(span))
+                } else {
+                    (None, None)
+                };
             let arrow_span = self.expect(
                 TokenKind::FatArrow,
-                "expected `=>` after closure parameters",
+                "expected `=>` after the closure signature",
             )?;
             let body = self.required_expression(0)?;
             let span = start.join(body.span);
             return Ok(self.new_expr(
                 ExprKind::Closure {
                     params,
+                    return_annotation,
+                    return_annotation_span,
                     arrow_span,
                     body: Box::new(body),
                 },
@@ -770,7 +785,23 @@ impl Parser<'_> {
                 TokenKind::RParen => {
                     depth = depth.saturating_sub(1);
                     if depth == 0 {
-                        return self.peek(offset + 1).kind == TokenKind::FatArrow;
+                        return match self.peek(offset + 1).kind {
+                            TokenKind::FatArrow => true,
+                            TokenKind::Minus if self.peek(offset + 2).kind == TokenKind::Gt => {
+                                let mut next = offset + 3;
+                                loop {
+                                    match self.peek(next).kind {
+                                        TokenKind::FatArrow => return true,
+                                        TokenKind::Eof
+                                        | TokenKind::Semicolon
+                                        | TokenKind::LBrace
+                                        | TokenKind::RBrace => return false,
+                                        _ => next += 1,
+                                    }
+                                }
+                            }
+                            _ => false,
+                        };
                     }
                 }
                 TokenKind::Eof => return false,

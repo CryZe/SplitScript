@@ -1340,7 +1340,13 @@ impl Checker {
             ExprKind::Invoke { callee, args } => {
                 self.invoke_expression(callee, args, expected, expr.id, expr.span)?
             }
-            ExprKind::Closure { params, body, .. } => {
+            ExprKind::Closure {
+                params,
+                return_annotation,
+                return_annotation_span,
+                body,
+                ..
+            } => {
                 let hinted = expected
                     .map(|ty| self.expected_value_type(ty))
                     .map(|ty| self.shallow_type(ty))
@@ -1380,19 +1386,40 @@ impl Checker {
                         }
                     })
                     .collect::<Vec<_>>();
-                let completion = hinted
-                    .as_ref()
-                    .map(|(_, result)| match self.shallow_type(*result) {
+                let annotated_result = return_annotation.map(|ty| self.syntax_type(ty));
+                let annotated_completion =
+                    annotated_result.map(|result| match self.shallow_type(result) {
                         Type::Async(future) => self.inference.async_value(future),
                         result => result,
+                    });
+                let completion = annotated_completion
+                    .or_else(|| {
+                        hinted
+                            .as_ref()
+                            .map(|(_, result)| match self.shallow_type(*result) {
+                                Type::Async(future) => self.inference.async_value(future),
+                                result => result,
+                            })
                     })
                     .unwrap_or_else(|| self.fresh_inference(Requirements::none(), None));
-                let is_async = crate::typeck::control_flow::expression_contains_suspension(body);
+                let is_async = annotated_result
+                    .is_some_and(|result| matches!(self.shallow_type(result), Type::Async(_)))
+                    || crate::typeck::control_flow::expression_contains_suspension(body);
                 let result = if is_async {
-                    Type::Async(self.inference.async_type(completion))
+                    match annotated_result {
+                        Some(result @ Type::Async(_)) => result,
+                        _ => Type::Async(self.inference.async_type(completion)),
+                    }
                 } else {
                     completion
                 };
+                if let Some(annotation) = annotated_result {
+                    self.unify(
+                        result,
+                        annotation,
+                        return_annotation_span.unwrap_or(expr.span),
+                    );
+                }
                 if let Some((_, expected_result)) = hinted {
                     self.unify(result, expected_result, expr.span);
                 }
@@ -1421,14 +1448,29 @@ impl Checker {
                     result @ Type::Result(_) => super::context::FailureContext::boundary(result),
                     _ => super::context::FailureContext::None,
                 };
-                self.with_callable_context(
-                    super::context::CallableContext::Closure,
-                    completion,
-                    failure,
-                    |checker| {
-                        checker.expr(body, Some(completion));
-                    },
-                );
+                let return_type_source = return_annotation_span.map(|span| {
+                    let result = self.type_name(completion);
+                    super::ExpectedTypeSource {
+                        span,
+                        label: format!("closure is declared to return `{result}`"),
+                    }
+                });
+                self.with_return_type_source(return_type_source.clone(), |checker| {
+                    checker.with_callable_context(
+                        super::context::CallableContext::Closure,
+                        completion,
+                        failure,
+                        |checker| {
+                            if let Some(source) = return_type_source {
+                                checker.with_expected_type_source(source, |checker| {
+                                    checker.expr(body, Some(completion));
+                                });
+                            } else {
+                                checker.expr(body, Some(completion));
+                            }
+                        },
+                    );
+                });
                 self.scopes.pop();
                 let callable =
                     Type::Callable(self.inference.callable_type(parameter_types, result));

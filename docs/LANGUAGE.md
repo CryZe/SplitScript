@@ -929,6 +929,13 @@ print(apply(4, value => value * 2))
 print(addOffset(increment()))
 ```
 
+An explicit result type goes between the parameter list and `=>`. Explicit
+results require the parenthesized parameter form:
+
+```text
+let widen = (value: u16) -> u32 => value as u32
+```
+
 A closure body may suspend. Its callable result is inferred as `async T`, and
 calling it creates a typed future just like calling a named async function:
 
@@ -941,7 +948,8 @@ print(await afterTick(4))
 ```
 
 Parameter and result types are inferred from the body, invocation sites, and
-an expected callable type in either direction. Creating a closure retains its
+an expected callable type in either direction. Write `-> async T` when an
+asynchronous closure result is explicit. Creating a closure retains its
 lexical captures but does not execute the body. Immutable captures are stored
 as values. Mutable locals use one shared GC cell, so the declaring scope,
 returned closures, nested closures, and continuations across [`await`] all see

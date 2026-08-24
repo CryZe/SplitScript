@@ -1670,13 +1670,13 @@ onAttach {
     fn formats_callable_types_and_arrow_closures() {
         let source = r#"state "game.exe"{}
 fn apply(value:u32,transform:(u32)->u32)->u32{return transform(value)}
-whileAttached{let add=(left:u32,right:u32)=>{left+right};let result=add(1,2);print(result)}"#;
+whileAttached{let add=(left:u32,right:u32)->u32=>{left+right};let result=add(1,2);print(result)}"#;
         let expected = r#"state "game.exe" {}
 fn apply(value: u32, transform: (u32) -> u32) -> u32 {
     return transform(value)
 }
 whileAttached {
-    let add = (left: u32, right: u32) => {
+    let add = (left: u32, right: u32) -> u32 => {
         left + right
     };
     let result = add(1, 2);

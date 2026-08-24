@@ -971,6 +971,52 @@ fn inlay_hints_show_inferred_types_and_respect_explicit_annotations() {
 }
 
 #[test]
+fn inlay_hints_render_complete_closure_signatures() {
+    let source = concat!(
+        "state \"game.exe\" {}\n",
+        "whileAttached {\n",
+        "    let unary: (u16) -> u32 = value => value as u32\n",
+        "    let binary: (u16, u16) -> u16 = (x, y) => x + y\n",
+        "}\n"
+    );
+    let uri = "file:///closure-inlays.split";
+    let mut server = LanguageServer::default();
+    initialize(&mut server);
+    server.handle(notification(
+        "textDocument/didOpen",
+        json!({
+            "textDocument": {
+                "uri": uri,
+                "version": 1,
+                "text": source
+            }
+        }),
+    ));
+    let response = server.handle(json!({
+        "jsonrpc": "2.0",
+        "id": 81,
+        "method": "textDocument/inlayHint",
+        "params": {
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": position(source, source.len())
+            }
+        }
+    }));
+    let labels = response[0]["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hint| hint["label"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        ["(", ": u16", ") -> u32", ": u16", ": u16", " -> u16"]
+    );
+}
+
+#[test]
 fn completion_uses_inferred_members_catalog_docs_and_utf16_text_edits() {
     let source = concat!(
         "// 🦊\n",

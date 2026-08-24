@@ -437,12 +437,14 @@ fn apply(value: u32, transform: (u32) -> u32) -> u32 {
 whileAttached {
     let offset = 2u32
     let addOffset = value => value + offset
+    let widen = (value: u16) -> u32 => value as u32
     let counter = 0u32
     let increment = () => {
         counter += 1
         return counter
     }
     print(addOffset(3))
+    print(widen(3))
     print(apply(4, value => value * 2))
     print(increment())
 }
@@ -541,6 +543,11 @@ focused_example!(
     DECLARATIONS_SOURCE
 );
 const CLOSURE_EXAMPLES: &[Example] = &[
+    Example::checked(
+        "Write an explicit result type",
+        "let widen = (value: u16) -> u32 => value as u32",
+        CLOSURE_SOURCE,
+    ),
     Example::checked(
         "Pass behavior to a function",
         "let doubled = apply(4, value => value * 2)",
@@ -1091,9 +1098,9 @@ define_language_catalog! {
         Closure,
         "closure",
         LanguageItemKind::Syntax,
-        "value => expression | (left, right) => { ... }",
+        "value => expression | (left: T, right: U) -> Result => { ... }",
         "Creates a callable value with lexical captures.",
-        "Parameter and result types are inferred bidirectionally from the body, invocation sites, and any expected [`callable type`]. A single parameter may omit parentheses; zero or multiple parameters use parentheses. The body is any expression, including a [`value block`], and may use [`await`] or [`retry`] to infer an [`async`] result. Calling such a closure creates a typed future; creating the closure itself does not execute or poll its body. Captured immutable values are retained in the closure environment. A mutable local is captured by reference through one shared cell, so assignments in the closure and its declaring scope observe each other even after the closure is returned or stored across [`await`]. [`return`] exits the closure itself; [`break`] and [`continue`] cannot escape into an outer loop.",
+        "Parameter and result types are inferred bidirectionally from the body, invocation sites, and any expected [`callable type`]. A single inferred parameter may omit parentheses; zero or multiple parameters use parentheses. An explicit result uses `(parameters) -> Result => body`; write [`async`] `T` as the result when the closure itself is explicitly asynchronous. The body is any expression, including a [`value block`], and may use [`await`] or [`retry`] to infer an [`async`] result. Calling such a closure creates a typed future; creating the closure itself does not execute or poll its body. Captured immutable values are retained in the closure environment. A mutable local is captured by reference through one shared cell, so assignments in the closure and its declaring scope observe each other even after the closure is returned or stored across [`await`]. [`return`] exits the closure itself; [`break`] and [`continue`] cannot escape into an outer loop.",
         CLOSURE_EXAMPLES
     ),
     language_item!(

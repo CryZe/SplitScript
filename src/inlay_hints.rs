@@ -1,7 +1,9 @@
 //! Compiler-owned inferred-type hints shared by LSP clients.
 
 use crate::{
-    ast::{ForBinding, FunctionDecl, Span, StateField, SuspensionBinding, VariableDecl},
+    ast::{
+        Expr, ExprKind, ForBinding, FunctionDecl, Span, StateField, SuspensionBinding, VariableDecl,
+    },
     database::SemanticSnapshot,
     lexer::{Token, TokenKind},
     type_display::display_type,
@@ -10,7 +12,7 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlayHint {
-    /// Byte position immediately after the declaration's identifier.
+    /// Byte position at which the editor renders the virtual annotation.
     pub position: usize,
     /// Source-shaped inferred type, including the declaration separator.
     pub label: String,
@@ -93,6 +95,45 @@ impl InlayHintCollector<'_> {
             format!(" -> {}", display_type(ty, self.snapshot)),
         );
     }
+
+    fn add_inferred_closure_result(&mut self, expression: &Expr, arrow_span: Span) {
+        let Some(ty) = self.snapshot.semantics().expression_type(expression.id) else {
+            return;
+        };
+        let crate::types::TypeKind::Callable { result, .. } =
+            self.snapshot.semantics().types().kind(ty)
+        else {
+            return;
+        };
+        if self.snapshot.semantics().types().contains_error(*result) {
+            return;
+        }
+        let result = display_type(*result, self.snapshot);
+        let ExprKind::Closure { params, .. } = &expression.kind else {
+            unreachable!("closure result hints are requested only for closures")
+        };
+
+        // The bare one-parameter shorthand has no closing delimiter at which
+        // a result annotation can be displayed unambiguously. Virtual grouping
+        // keeps the source unchanged while presenting `(value: T) -> U =>`.
+        if params.len() == 1 && expression.span.start == params[0].name_span.start {
+            self.add_hint(params[0].name_span.start, "(".to_owned());
+            self.add_hint(params[0].name_span.end, format!(") -> {result}"));
+            return;
+        }
+
+        let first_candidate = self
+            .tokens
+            .partition_point(|token| token.span.start < expression.span.start);
+        if let Some(closing_parenthesis) = self.tokens[first_candidate..]
+            .iter()
+            .take_while(|token| token.span.end <= arrow_span.start)
+            .filter(|token| token.kind == TokenKind::RParen)
+            .last()
+        {
+            self.add_hint(closing_parenthesis.span.end, format!(" -> {result}"));
+        }
+    }
 }
 
 impl<'ast> Visitor<'ast> for InlayHintCollector<'_> {
@@ -135,6 +176,23 @@ impl<'ast> Visitor<'ast> for InlayHintCollector<'_> {
 
     fn visit_for_binding(&mut self, binding: &'ast ForBinding) {
         self.add_inferred_value(binding.id, &binding.name, binding.span);
+    }
+
+    fn visit_expr(&mut self, expression: &'ast Expr) {
+        if let ExprKind::Closure {
+            return_annotation,
+            arrow_span,
+            ..
+        } = &expression.kind
+            && return_annotation.is_none()
+        {
+            // Parameter hints must be emitted first when the bare shorthand's
+            // parameter and result annotations share one editor position.
+            visit::walk_expr(self, expression);
+            self.add_inferred_closure_result(expression, *arrow_span);
+        } else {
+            visit::walk_expr(self, expression);
+        }
     }
 }
 

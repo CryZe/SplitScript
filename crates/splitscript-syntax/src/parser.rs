@@ -495,6 +495,49 @@ mod tests {
     }
 
     #[test]
+    fn parses_explicit_closure_result_types() {
+        let source = r#"
+            state "game.exe" {}
+            onAttach {
+                let widen = (value: u16) -> u32 => value as u32
+                let delayed = (value: u16) -> async u16 => {
+                    await nextTick()
+                    value
+                }
+            }
+        "#;
+        let program = parse(source, lex(source, SyntaxMode::Program).unwrap()).unwrap();
+        let action = program
+            .actions
+            .iter()
+            .find(|action| action.kind == ActionKind::OnAttach)
+            .unwrap();
+        let closures = action
+            .body
+            .statements
+            .iter()
+            .map(|statement| {
+                let Stmt::Variable(variable) = statement else {
+                    panic!("expected a closure binding")
+                };
+                let ExprKind::Closure {
+                    return_annotation,
+                    return_annotation_span,
+                    ..
+                } = &variable.value.as_ref().unwrap().kind
+                else {
+                    panic!("expected a closure initializer")
+                };
+                (return_annotation.unwrap(), return_annotation_span.unwrap())
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(closures[0].0, TypeRef::core(PrimitiveType::U32));
+        assert!(matches!(closures[1].0, TypeRef::Async(_)));
+        assert_eq!(&source[closures[0].1.start..closures[0].1.end], "u32");
+        assert_eq!(&source[closures[1].1.start..closures[1].1.end], "async u16");
+    }
+
+    #[test]
     fn diagnoses_invalid_and_overflowing_integer_literals_accurately() {
         assert_eq!(
             parse_integer("0b102"),

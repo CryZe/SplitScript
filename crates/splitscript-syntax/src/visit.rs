@@ -366,9 +366,17 @@ pub fn walk_expr<'ast, V: Visitor<'ast>>(visitor: &mut V, expression: &'ast Expr
                 visitor.visit_expr(argument);
             }
         }
-        ExprKind::Closure { params, body, .. } => {
+        ExprKind::Closure {
+            params,
+            return_annotation,
+            body,
+            ..
+        } => {
             for parameter in params {
                 visitor.visit_parameter(parameter);
+            }
+            if let Some(result) = return_annotation {
+                visitor.visit_type_ref(result);
             }
             visitor.visit_expr(body);
         }
@@ -746,9 +754,17 @@ pub fn walk_expr_mut<F: Folder>(folder: &mut F, expression: &mut Expr) {
                 folder.fold_expr(argument);
             }
         }
-        ExprKind::Closure { params, body, .. } => {
+        ExprKind::Closure {
+            params,
+            return_annotation,
+            body,
+            ..
+        } => {
             for parameter in params {
                 folder.fold_parameter(parameter);
+            }
+            if let Some(result) = return_annotation {
+                folder.fold_type_ref(result);
             }
             folder.fold_expr(body);
         }
